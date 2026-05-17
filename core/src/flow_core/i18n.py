@@ -23,6 +23,11 @@ class MessageCode(enum.StrEnum):
     RBAC_ROLE_INSUFFICIENT = "rbac.role_insufficient"
     ORG_NOT_FOUND = "org.not_found"
     CONFLICT_STALE_VERSION = "concurrency.stale_version"
+    TASK_NOT_FOUND = "task.not_found"
+    TAG_NOT_FOUND = "tag.not_found"
+    TAG_DUPLICATE = "tag.duplicate"
+    TAG_AMBIGUOUS = "tag.ambiguous"
+    TAG_KIND_MISMATCH = "tag.kind_mismatch"
     DOMAIN_ERROR = "domain.error"
 
 
@@ -39,6 +44,11 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
         ),
         MessageCode.ORG_NOT_FOUND: "Organization not found",
         MessageCode.CONFLICT_STALE_VERSION: "Stale version write",
+        MessageCode.TASK_NOT_FOUND: "Task not found",
+        MessageCode.TAG_NOT_FOUND: "Tag not found",
+        MessageCode.TAG_DUPLICATE: "A tag with this name already exists",
+        MessageCode.TAG_AMBIGUOUS: "Ambiguous tag name: {name}",
+        MessageCode.TAG_KIND_MISMATCH: "Tag is not of the expected kind",
         MessageCode.DOMAIN_ERROR: "Domain error",
     },
 }
