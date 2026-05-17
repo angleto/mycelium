@@ -22,9 +22,11 @@ Niente RCPSP generico. Motore = **CPM logico deterministico** su
 calendari lavorativi (ES/EF/LS/LF, slack, percorso critico logico,
 onesti perche senza contesa) + **piazzamento seriale deterministico
 per-persona** dei task `executor=human` non delegati, attorno agli
-appuntamenti fissi, con regola a priorita stabile. I task
-`executor=llm_agent` sono fuori dalla timeline umana (paralleli, solo
-precedenza). Necessari: piano vs consuntivo (`remaining_effort_h`,
+appuntamenti fissi, con regola a priorita stabile e deterministica
+(priorita P1..P4 in stile Todoist, P1 = piu alta e schedulata per
+prima; poi due-date crescente, creazione crescente, id come tie-break
+finale). I task `executor=llm_agent` sono fuori dalla timeline umana
+(paralleli, solo precedenza). Necessari: piano vs consuntivo (`remaining_effort_h`,
 `actual_start`, stato terminale), `schedule_mode`/constraint con drag
 write-back che sopravvive al ricalcolo, determinismo verificabile,
 rollup sommario. Le 4 disuguaglianze di dipendenza sono in tempo

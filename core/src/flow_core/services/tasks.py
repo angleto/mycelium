@@ -186,6 +186,55 @@ async def update_task(
     return new_version
 
 
+_SCHEDULE_FIELDS = frozenset(
+    {
+        "schedule_mode",
+        "constraint_kind",
+        "constraint_date",
+        "remaining_effort_h",
+        "actual_start",
+        "is_milestone",
+    }
+)
+
+
+async def set_schedule_fields(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    task_id: uuid.UUID,
+    expected_version: int,
+    values: dict[str, Any],
+) -> int:
+    """Write-back of scheduler pins/constraints (FR-4, docs/adr/0004).
+    The next recompute reads these; manual/constraint survive it."""
+    if not values:
+        raise DomainError(MessageCode.DOMAIN_ERROR)
+    unknown = set(values) - _SCHEDULE_FIELDS
+    if unknown:
+        raise DomainError(MessageCode.DOMAIN_ERROR)
+    await require_role(session, org_id, actor_id, Role.member)
+    await get_task(session, org_id=org_id, task_id=task_id)
+    new_version = await optimistic_update(
+        session,
+        Task,
+        pk=task_id,
+        expected_version=expected_version,
+        values=values,
+    )
+    await audit.log(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        entity="task",
+        entity_id=task_id,
+        action="set_schedule",
+        diff={k: str(v) for k, v in values.items()},
+    )
+    return new_version
+
+
 async def set_state(
     session: AsyncSession,
     *,

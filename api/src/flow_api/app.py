@@ -11,8 +11,11 @@ from starlette.responses import JSONResponse, Response
 
 from flow_api.routers import (
     auth,
+    calendars,
     dependencies,
+    events,
     org,
+    schedule,
     tags,
     tasks,
     workflows,
@@ -70,4 +73,7 @@ def create_app() -> FastAPI:
     app.include_router(tasks.router)
     app.include_router(workflows.router)
     app.include_router(dependencies.router)
+    app.include_router(calendars.router)
+    app.include_router(events.router)
+    app.include_router(schedule.router)
     return app

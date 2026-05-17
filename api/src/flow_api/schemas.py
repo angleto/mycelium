@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 
 from flow_core.models.dependency import DependencyType
 from flow_core.models.tag import TagKind
-from flow_core.models.task import ExecKind
+from flow_core.models.task import ConstraintKind, ExecKind, ScheduleMode
 
 
 class SignupIn(BaseModel):
@@ -241,3 +241,98 @@ class GraphEdge(BaseModel):
 class GraphOut(BaseModel):
     nodes: list[GraphNode]
     edges: list[GraphEdge]
+
+
+# --- F3: calendars, events, schedule (FR-4, docs/adr/0004, 0008) ---
+
+
+class CalendarCreateIn(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    timezone: str = Field(default="Europe/Rome", max_length=64)
+    # weekday -> ordered [start, end] local "HH:MM" windows
+    weekly_hours: dict[str, list[list[str]]]
+
+
+class CalendarOut(BaseModel):
+    id: uuid.UUID
+    name: str
+    is_default: bool
+    timezone: str
+    version: int
+
+
+class HolidayIn(BaseModel):
+    day: datetime.date
+
+
+class HolidayOut(BaseModel):
+    day: datetime.date
+
+
+class UserCalendarIn(BaseModel):
+    user_id: uuid.UUID
+    calendar_id: uuid.UUID
+    daily_capacity_h: Decimal = Field(gt=0, le=24)
+
+
+class EventCreateIn(BaseModel):
+    title: str = Field(min_length=1, max_length=300)
+    start_at: datetime.datetime
+    end_at: datetime.datetime
+    participant_ids: list[uuid.UUID] = Field(default_factory=list)
+    project_tag_id: uuid.UUID | None = None
+    client_tag_id: uuid.UUID | None = None
+    location: str | None = Field(default=None, max_length=200)
+
+
+class EventRescheduleIn(BaseModel):
+    expected_version: int = Field(ge=1)
+    start_at: datetime.datetime
+    end_at: datetime.datetime
+
+
+class EventOut(BaseModel):
+    id: uuid.UUID
+    title: str
+    start_at: datetime.datetime
+    end_at: datetime.datetime
+    location: str | None
+    project_tag_id: uuid.UUID | None
+    client_tag_id: uuid.UUID | None
+    version: int
+
+
+class TaskScheduleIn(BaseModel):
+    """Drag/write-back of scheduler fields (FR-4). Only provided fields
+    are changed; recompute then respects manual/constraint pins."""
+
+    expected_version: int = Field(ge=1)
+    schedule_mode: ScheduleMode | None = None
+    constraint_kind: ConstraintKind | None = None
+    constraint_date: datetime.datetime | None = None
+    remaining_effort_h: Decimal | None = None
+    actual_start: datetime.datetime | None = None
+    is_milestone: bool | None = None
+
+
+class RecomputeIn(BaseModel):
+    project_tag_id: uuid.UUID | None = None
+    as_of: datetime.datetime | None = None
+
+
+class RecomputeOut(BaseModel):
+    count: int
+
+
+class ScheduleOut(BaseModel):
+    task_id: uuid.UUID
+    es: datetime.datetime | None
+    ef: datetime.datetime | None
+    ls: datetime.datetime | None
+    lf: datetime.datetime | None
+    slack_minutes: int | None
+    on_logical_critical_path: bool
+    scheduled_start: datetime.datetime | None
+    scheduled_end: datetime.datetime | None
+    computed_at: datetime.datetime
+    input_fingerprint: str | None

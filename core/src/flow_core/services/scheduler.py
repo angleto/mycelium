@@ -267,9 +267,13 @@ class Scheduler:
                 .all()
             ]
             busy.sort()
+            # Deterministic priority rule (docs/adr/0004): most important
+            # first. Priority is Todoist-like P1..P4 where P1 (= 1) is the
+            # highest, so order by priority ascending; then earliest due,
+            # earliest created, and id as the final stable tie-break.
             plist.sort(
                 key=lambda x: (
-                    -x.task.priority,
+                    x.task.priority,
                     x.task.due_date or dt.date.max,
                     x.task.created_at,
                     str(x.task.id),
@@ -281,7 +285,7 @@ class Scheduler:
                 if pin is not None:
                     sched[n.task.id] = (pin, cal.add_capped(pin, n.duration_min, cap))
                     continue
-                start = max(n.es, cursor)
+                start = cal.snap_forward(max(n.es, cursor))
                 for _ in range(0, 1000):
                     end = cal.add_capped(start, n.duration_min, cap)
                     clash = next(

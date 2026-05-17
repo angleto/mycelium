@@ -8,6 +8,7 @@ session (RLS GUCs set) and verifies membership, exactly like the REST
 
 from __future__ import annotations
 
+import datetime as dt
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -22,10 +23,14 @@ from flow_core.db import tenant_session
 from flow_core.errors import AuthError
 from flow_core.i18n import MessageCode
 from flow_core.models.dependency import DependencyType
+from flow_core.models.event import Event
+from flow_core.models.schedule import Schedule
 from flow_core.models.tag import Tag, TagKind
-from flow_core.models.task import Task
+from flow_core.models.task import ConstraintKind, ScheduleMode, Task
 from flow_core.security import decode_token
-from flow_core.services import dependencies, tasks, taxonomy
+from flow_core.services import calendar as calendars
+from flow_core.services import dependencies, scheduler, tasks, taxonomy
+from flow_core.services import events as events_svc
 from flow_core.services.rbac import get_role
 from flow_core.services.taxonomy import ClientInput
 
@@ -247,3 +252,254 @@ async def set_task_state(
             state_id=uuid.UUID(state_id),
         )
         return {"task_id": task_id, "version": version}
+
+
+# --- F3: calendars, events, deterministic schedule (FR-4) ---
+
+
+def _event(e: Event) -> dict[str, Any]:
+    return {
+        "id": str(e.id),
+        "title": e.title,
+        "start_at": e.start_at.isoformat(),
+        "end_at": e.end_at.isoformat(),
+        "version": e.version,
+    }
+
+
+def _schedule(s: Schedule) -> dict[str, Any]:
+    return {
+        "task_id": str(s.task_id),
+        "es": s.es.isoformat() if s.es else None,
+        "ef": s.ef.isoformat() if s.ef else None,
+        "ls": s.ls.isoformat() if s.ls else None,
+        "lf": s.lf.isoformat() if s.lf else None,
+        "slack_minutes": s.slack_minutes,
+        "on_logical_critical_path": s.on_logical_critical_path,
+        "scheduled_start": (s.scheduled_start.isoformat() if s.scheduled_start else None),
+        "scheduled_end": (s.scheduled_end.isoformat() if s.scheduled_end else None),
+        "input_fingerprint": s.input_fingerprint,
+    }
+
+
+@mcp.tool()
+async def create_calendar(
+    token: str,
+    org_id: str,
+    name: str,
+    weekly_hours: dict[str, list[list[str]]],
+    timezone: str = "Europe/Rome",
+) -> dict[str, Any]:
+    """Create a working calendar (weekday -> [start, end] HH:MM windows)."""
+    async with _tenant(token, org_id) as (s, org, user):
+        cal = await calendars.create_calendar(
+            s,
+            org_id=org,
+            actor_id=user,
+            name=name,
+            timezone=timezone,
+            weekly_hours=weekly_hours,
+        )
+        return {"id": str(cal.id), "name": cal.name, "version": cal.version}
+
+
+@mcp.tool()
+async def list_calendars(token: str, org_id: str) -> list[dict[str, Any]]:
+    """List the org working calendars."""
+    async with _tenant(token, org_id) as (s, org, _user):
+        rows = await calendars.list_calendars(s, org_id=org)
+        return [
+            {
+                "id": str(c.id),
+                "name": c.name,
+                "is_default": c.is_default,
+                "timezone": c.timezone,
+            }
+            for c in rows
+        ]
+
+
+@mcp.tool()
+async def add_holiday(token: str, org_id: str, calendar_id: str, day: str) -> dict[str, Any]:
+    """Add a holiday (ISO date) to a calendar; idempotent."""
+    async with _tenant(token, org_id) as (s, org, user):
+        await calendars.add_holiday(
+            s,
+            org_id=org,
+            actor_id=user,
+            calendar_id=uuid.UUID(calendar_id),
+            day=dt.date.fromisoformat(day),
+        )
+        return {"calendar_id": calendar_id, "day": day}
+
+
+@mcp.tool()
+async def set_user_calendar(
+    token: str,
+    org_id: str,
+    user_id: str,
+    calendar_id: str,
+    daily_capacity_h: float,
+) -> dict[str, Any]:
+    """Assign a calendar + daily capacity (hours) to a user."""
+    async with _tenant(token, org_id) as (s, org, user):
+        await calendars.set_user_calendar(
+            s,
+            org_id=org,
+            actor_id=user,
+            user_id=uuid.UUID(user_id),
+            calendar_id=uuid.UUID(calendar_id),
+            daily_capacity_h=Decimal(str(daily_capacity_h)),
+        )
+        return {"user_id": user_id, "calendar_id": calendar_id}
+
+
+@mcp.tool()
+async def create_event(
+    token: str,
+    org_id: str,
+    title: str,
+    start_at: str,
+    end_at: str,
+    participant_ids: list[str] | None = None,
+    project_tag_id: str | None = None,
+    location: str | None = None,
+) -> dict[str, Any]:
+    """Create an appointment. Overlap for any participant is rejected
+    (no-ubiquity)."""
+    async with _tenant(token, org_id) as (s, org, user):
+        e = await events_svc.create_event(
+            s,
+            org_id=org,
+            actor_id=user,
+            title=title,
+            start_at=dt.datetime.fromisoformat(start_at),
+            end_at=dt.datetime.fromisoformat(end_at),
+            participant_ids=[uuid.UUID(p) for p in (participant_ids or [])],
+            project_tag_id=(uuid.UUID(project_tag_id) if project_tag_id else None),
+            location=location,
+        )
+        return _event(e)
+
+
+@mcp.tool()
+async def list_events(token: str, org_id: str, user_id: str | None = None) -> list[dict[str, Any]]:
+    """List appointments, optionally filtered by participant."""
+    async with _tenant(token, org_id) as (s, org, _user):
+        rows = await events_svc.list_events(
+            s,
+            org_id=org,
+            user_id=uuid.UUID(user_id) if user_id else None,
+        )
+        return [_event(e) for e in rows]
+
+
+@mcp.tool()
+async def reschedule_event(
+    token: str,
+    org_id: str,
+    event_id: str,
+    start_at: str,
+    end_at: str,
+    expected_version: int,
+) -> dict[str, Any]:
+    """Move an appointment; overlap for any participant is rejected."""
+    async with _tenant(token, org_id) as (s, org, user):
+        version = await events_svc.reschedule_event(
+            s,
+            org_id=org,
+            actor_id=user,
+            event_id=uuid.UUID(event_id),
+            start_at=dt.datetime.fromisoformat(start_at),
+            end_at=dt.datetime.fromisoformat(end_at),
+            expected_version=expected_version,
+        )
+        return {"event_id": event_id, "version": version}
+
+
+@mcp.tool()
+async def delete_event(token: str, org_id: str, event_id: str) -> dict[str, Any]:
+    """Delete an appointment."""
+    async with _tenant(token, org_id) as (s, org, user):
+        await events_svc.delete_event(s, org_id=org, actor_id=user, event_id=uuid.UUID(event_id))
+        return {"event_id": event_id, "deleted": True}
+
+
+@mcp.tool()
+async def set_task_schedule(
+    token: str,
+    org_id: str,
+    task_id: str,
+    expected_version: int,
+    schedule_mode: str | None = None,
+    constraint_kind: str | None = None,
+    constraint_date: str | None = None,
+    remaining_effort_h: float | None = None,
+    actual_start: str | None = None,
+    is_milestone: bool | None = None,
+) -> dict[str, Any]:
+    """Write-back scheduler pins/constraints; survives recompute (FR-4)."""
+    values: dict[str, Any] = {}
+    if schedule_mode is not None:
+        values["schedule_mode"] = ScheduleMode(schedule_mode)
+    if constraint_kind is not None:
+        values["constraint_kind"] = ConstraintKind(constraint_kind)
+    if constraint_date is not None:
+        values["constraint_date"] = dt.datetime.fromisoformat(constraint_date)
+    if remaining_effort_h is not None:
+        values["remaining_effort_h"] = Decimal(str(remaining_effort_h))
+    if actual_start is not None:
+        values["actual_start"] = dt.datetime.fromisoformat(actual_start)
+    if is_milestone is not None:
+        values["is_milestone"] = is_milestone
+    async with _tenant(token, org_id) as (s, org, user):
+        version = await tasks.set_schedule_fields(
+            s,
+            org_id=org,
+            actor_id=user,
+            task_id=uuid.UUID(task_id),
+            expected_version=expected_version,
+            values=values,
+        )
+        return {"task_id": task_id, "version": version}
+
+
+@mcp.tool()
+async def recompute_schedule(
+    token: str,
+    org_id: str,
+    project_tag_id: str | None = None,
+    as_of: str | None = None,
+) -> dict[str, Any]:
+    """Deterministically recompute the schedule for a scope."""
+    async with _tenant(token, org_id) as (s, org, user):
+        count = await scheduler.recompute(
+            s,
+            org_id=org,
+            actor_id=user,
+            project_tag_id=(uuid.UUID(project_tag_id) if project_tag_id else None),
+            as_of=dt.datetime.fromisoformat(as_of) if as_of else None,
+        )
+        return {"count": count}
+
+
+@mcp.tool()
+async def get_schedule(token: str, org_id: str, task_id: str) -> dict[str, Any] | None:
+    """Read one task's derived schedule row."""
+    async with _tenant(token, org_id) as (s, org, _user):
+        row = await scheduler.get_schedule(s, org_id=org, task_id=uuid.UUID(task_id))
+        return _schedule(row) if row is not None else None
+
+
+@mcp.tool()
+async def list_schedule(
+    token: str, org_id: str, project_tag_id: str | None = None
+) -> list[dict[str, Any]]:
+    """List derived schedule rows for a scope."""
+    async with _tenant(token, org_id) as (s, org, _user):
+        rows = await scheduler.list_schedule(
+            s,
+            org_id=org,
+            project_tag_id=(uuid.UUID(project_tag_id) if project_tag_id else None),
+        )
+        return [_schedule(r) for r in rows]
