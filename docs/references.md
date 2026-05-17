@@ -58,6 +58,10 @@ a DB con `is_active`.
 - `backend/src/bvphoenix/db/models/embeddings.py` +
   `workers/src/bvworkers/tasks/embed_series.py` (versioning `model_id`,
   load lazy)
+- `backend/src/bvphoenix/services/billing.py`, `services/llm_cost.py`,
+  `services/embedding_cost.py`, `services/ai_tiers.py`,
+  `db/models/llm_rate_cards.py` (wallet/debiti idempotenti, rate card,
+  tier; riuso per ADR-0019)
 
 Nota: bitvision NON ha un'astrazione di embedding (chiamate dirette).
 Flow aggiunge `EmbedderProvider` speculare a `LLMProvider`. Da non

@@ -28,6 +28,11 @@ fase.
   REST + MCP; nucleo deterministico, LLM/MCP frontend.
 - **F5 Email**: connector Gmail OAuth2 + IMAP generico, sync, triage,
   email-to-task, invio SMTP (Proton Bridge a seguire).
+- **F5b Billing & metering core**: wallet + credit_ledger
+  (append-only, idempotente, check-and-debit atomico) + rate card
+  modelli + storage rates (DB vs S3) + enforcement nel service layer +
+  admin grant/rate (ADR-0019). Precede le fasi a costo (F6); hook di
+  metering aggiunti con ogni subsistema misurato.
 - **F6 Memoria**: tiering per frequenza/recency/importanza (ADR-0016,
   invariante: il cold resta sempre recuperabile), summarization,
   `Embedder` pluggable + pgvector, retrieval ibrido RRF entro
@@ -47,9 +52,13 @@ fase.
 - **Post-v1**: PA/B2G (firma CAdES/XAdES + certificato qualificato,
   NE/DT/EC/SE), ciclo passivo, reverse charge/autofattura TD16-TD19,
   clienti esteri, liquidazione trimestrale del bollo, leveling
-  ottimizzante CP-SAT.
+  ottimizzante CP-SAT, Proton Drive `ArchiveBackupTarget` (sidecar
+  rclone, poi SDK ufficiale Proton; ADR-0018).
 - **F8 Notifiche + ricorrenze + rifiniture**: Telegram + email,
-  reminder, task ricorrenti, hardening sicurezza/privacy, audit.
+  reminder, task ricorrenti, hardening sicurezza/privacy, audit,
+  `ArchiveBackupTarget` con backend object storage S3 EU (doppia copia
+  DB + esterno, async/idempotente; ADR-0018; distinto dalla
+  conservazione legale AdE, ADR-0010).
 
 ## Criteri di verifica end-to-end
 
@@ -77,6 +86,10 @@ fase.
   spiegabile (must-have prima); stesso input -> stesso risultato.
 - **F5**: account Gmail (OAuth2) configurato; email-to-task con
   tag/client/project e link sorgente; reply SMTP recapitata.
+- **F5b**: a crediti zero un'operazione LLM/embedding e rifiutata con
+  codice i18n; lettura/export/dati fiscali restano accessibili; debiti
+  idempotenti (retry non raddoppia); nessuno scoperto sotto
+  concorrenza; grant admin accreditato.
 - **F6**: ricerca ibrida (RRF) entro (org, progetto) recupera un thread
   vecchio demosso a cold; query con token raro trovata dal ramo
   lessicale; ricerca senza filtro non perde dati cross-progetto/org;

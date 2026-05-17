@@ -25,3 +25,5 @@ Formato: Status, Contesto, Decisione, Conseguenze, Alternative scartate.
 - [0015 RLS: due ruoli Postgres e provisioning SECURITY DEFINER](0015-rls-two-role-and-provisioning.md)
 - [0016 Memoria: tiering tipo memoria umana e allineamento ai pattern RAG](0016-memory-human-tiering-and-rag-alignment.md)
 - [0017 English-only project language; i18n-ready message catalog](0017-english-only-i18n-message-catalog.md)
+- [0018 Archive backup target (dual copy), distinct from legal conservation](0018-archive-backup-target.md)
+- [0019 Metering, credits wallet, rate cards, enforcement](0019-metering-credits-billing.md)

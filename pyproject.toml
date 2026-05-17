@@ -36,7 +36,8 @@ src = [
 select = ["E", "F", "I", "UP", "B", "ASYNC", "S", "RUF"]
 
 [tool.ruff.lint.per-file-ignores]
-"**/tests/**" = ["S101"]
+# Tests legitimately use assert and dummy credentials.
+"**/tests/**" = ["S101", "S105", "S106", "S107"]
 
 [tool.mypy]
 python_version = "3.12"

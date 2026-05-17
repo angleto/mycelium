@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync --all-packages
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run mypy -p flow_core -p flow_api -p flow_mcp -p flow_worker -p flow_sdi_inbound
+      - name: Validate compose
+        run: docker compose -f deploy/docker-compose.yml config -q
+
+  tests:
+    runs-on: ubuntu-latest
+    services:
+      db:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: flow
+          POSTGRES_PASSWORD: flow
+          POSTGRES_DB: flow
+        ports:
+          - "5432:5432"
+        options: >-
+          --health-cmd "pg_isready -U flow -d flow"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      FLOW_JWT_SECRET: ci-only-secret-minimum-32-bytes-xxxxxxxx
+      FLOW_DATABASE_URL_SYNC: postgresql+psycopg://flow:flow@localhost:5432/flow
+      FLOW_DATABASE_URL: postgresql+asyncpg://flow_app:flow_app@localhost:5432/flow
+      FLOW_DB_APP_PASSWORD: flow_app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync --all-packages
+      - name: Bootstrap runtime role (flow_app)
+        run: |
+          PGPASSWORD=flow psql -h localhost -U flow -d flow \
+            -v ON_ERROR_STOP=1 -v app_pw="$FLOW_DB_APP_PASSWORD" \
+            -f deploy/bootstrap_roles.sql
+      - name: Apply migrations
+        run: uv run alembic -c core/alembic.ini upgrade head
+      - name: Tests
+        run: uv run pytest -q

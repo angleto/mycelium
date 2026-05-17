@@ -76,6 +76,23 @@ entita org-scoped. La memoria e partizionata per `org_id`.
   query deterministiche su `tasks`/`schedule`/`events`/`budgets`
   accessibili all'utente entro una org.
 
+## Metering e crediti
+
+- `wallets(org_id PK, balance_credits, version)`
+- `credit_ledger(id, org_id, kind[grant|debit], credits, operation_id,
+  ref, created_at)` append-only (trigger); idempotente su
+  (org_id, operation_id)
+- `model_rate_cards(model_id PK, provider, credits_in_per_ktok,
+  credits_out_per_ktok, provider_cost_basis?, markup_pct, tier,
+  is_active)`
+- `storage_rates(scope[db|s3] PK, credits_per_gb_month)`
+- `usage_records(id, org_id, op, model_id?, tokens_in?, tokens_out?,
+  bytes?, period?, credits, created_at)`
+- `byok_accounts(id, org_id, user_id, provider, secret_ref,
+  platform_fee_factor)` (chiave cifrata, ADR-0006)
+- Enforcement nel service layer (choke point, come RBAC); grant admin
+  via percorso privilegiato auditato. Vedi ADR-0019.
+
 ## Email
 
 - `email_accounts(id, org_id, user_id, connector[gmail_oauth|

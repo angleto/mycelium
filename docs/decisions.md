@@ -29,6 +29,8 @@ Decisioni di prodotto e architettura, consolidate e bloccate. Il
 | I | Assistente pianificazione | Layer advisory core v1 sopra lo scheduler: nucleo deterministico (fattibilita + ranking + selezione vincolata), LLM/MCP come frontend in linguaggio naturale |
 | J | Dominio personale + budget | Modellati in v1: task con costo/luogo/contesto/necessita; budget envelope per periodo/categoria; selezione deterministica entro budget (knapsack a priorita) |
 | K | Memoria avanzata | Tiering per frequenza/recency/importanza (cold sempre recuperabile, raro != non importante); grader correttivo senza ramo web; retrieval come tool MCP agentico; grafo strutturale non testuale; multimodale differito (ADR-0016) |
+| L | Archive backup target | Doppia copia DB + store esterno via `ArchiveBackupTarget` pluggable, async/idempotente, separato dalla conservazione legale (ADR-0010). v1 = object storage S3 EU; Proton Drive backend sperimentale via sidecar rclone, poi SDK ufficiale Proton (ADR-0018) |
+| M | Metering e crediti | Billing a crediti: wallet per org + ledger append-only idempotente + check-and-debit atomico; rate card per modello (riuso pattern bitvision); locale/nostra-chiave/BYOK con basi di costo distinte (BYOK = fee piattaforma configurabile); storage DB e S3 a rate distinti; admin aggiunge crediti; a crediti zero stop alle operazioni a costo, accesso/export/dati legali preservati (ADR-0019) |
 
 ## Decisioni di scope risolte
 

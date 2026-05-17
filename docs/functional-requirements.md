@@ -283,3 +283,23 @@ multi-progetto); non e una violazione dell'isolamento memoria
   non un giudizio opaco dell'LLM; l'LLM traduce la richiesta in query
   strutturata e narra il risultato. Vedi
   [ADR-0014](adr/0014-personal-domain-budgets.md).
+
+## FR-15 Metering, crediti, billing (ADR-0019)
+
+Billing a crediti (riuso pattern bitvision). Wallet per org + ledger
+append-only idempotente + check-and-debit atomico (niente scoperto in
+concorrenza). Rate card per modello (credits/token in-out, provider,
+markup, is_active, tier). Basi di costo: locale = rate card; nostra
+chiave = costo provider x markup; BYOK = nessun costo token, fee di
+piattaforma configurabile (es. 0.0001 x unita), chiave utente cifrata
+(ADR-0006). Metering: `usage_record` per operazione + debito sul
+ledger. Storage misurato: DB e S3 a rate distinti configurabili
+(GB-mese); allegati/documenti pesanti su S3, il DB tiene solo metadati
++ testo indicizzabile. Enforcement nel service layer (choke point come
+RBAC): a crediti insufficienti le operazioni a costo (LLM, embedding,
+advisory con LLM, scritture storage pesanti) sono rifiutate con codice
+i18n; lettura, export GDPR e recupero documenti fiscali/conservati
+restano disponibili. Admin (ruolo) aggiunge crediti, edita rate
+card/percentuali/rate storage; azioni auditate. Gateway di pagamento
+fuori v1 (v1 = grant manuale admin). Vedi
+[ADR-0019](adr/0019-metering-credits-billing.md).
