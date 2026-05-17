@@ -11,6 +11,8 @@ from __future__ import annotations
 import os
 
 os.environ.setdefault("FLOW_JWT_SECRET", "test-only-secret-min-32-bytes-aaaaaaaaaa")
+# Valid Fernet key (urlsafe-b64 of 32 zero bytes); test-only.
+os.environ.setdefault("FLOW_SECRET_KEY", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
 
 from collections.abc import AsyncIterator
 

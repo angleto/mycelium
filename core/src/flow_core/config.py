@@ -40,6 +40,14 @@ class Settings(BaseSettings):
     jwt_alg: str = "HS256"
     jwt_ttl_seconds: int = 3600
 
+    # App-level envelope for opaque secrets (OAuth tokens, IMAP
+    # passwords; ADR-0006). Fernet key = urlsafe-b64 of 32 bytes (44
+    # chars). No default: fail-closed, provided via FLOW_SECRET_KEY.
+    secret_key: str = Field(
+        min_length=44,
+        description="Fernet key for the opaque-secret envelope.",
+    )
+
     # App
     env: str = "dev"
     log_level: str = "INFO"

@@ -37,6 +37,7 @@ jobs:
           --health-retries 20
     env:
       FLOW_JWT_SECRET: ci-only-secret-minimum-32-bytes-xxxxxxxx
+      FLOW_SECRET_KEY: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
       FLOW_DATABASE_URL_SYNC: postgresql+psycopg://flow:flow@localhost:5432/flow
       FLOW_DATABASE_URL: postgresql+asyncpg://flow_app:flow_app@localhost:5432/flow
       FLOW_DB_APP_PASSWORD: flow_app

@@ -40,6 +40,10 @@ class MessageCode(enum.StrEnum):
     TIME_ENTRY_NOT_FOUND = "time_entry.not_found"
     TIME_ENTRY_INVALID = "time_entry.invalid"
     BUDGET_NOT_FOUND = "budget.not_found"
+    EMAIL_ACCOUNT_NOT_FOUND = "email.account_not_found"
+    EMAIL_ACCOUNT_DUPLICATE = "email.account_duplicate"
+    EMAIL_MESSAGE_NOT_FOUND = "email.message_not_found"
+    EMAIL_SYNC_FAILED = "email.sync_failed"
     DOMAIN_ERROR = "domain.error"
 
 
@@ -73,6 +77,10 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
         MessageCode.TIME_ENTRY_NOT_FOUND: "Time entry not found",
         MessageCode.TIME_ENTRY_INVALID: ("Invalid time entry: provide a positive interval"),
         MessageCode.BUDGET_NOT_FOUND: "Budget not found",
+        MessageCode.EMAIL_ACCOUNT_NOT_FOUND: "Email account not found",
+        MessageCode.EMAIL_ACCOUNT_DUPLICATE: ("An email account with this address already exists"),
+        MessageCode.EMAIL_MESSAGE_NOT_FOUND: "Email message not found",
+        MessageCode.EMAIL_SYNC_FAILED: "Email sync failed: {detail}",
         MessageCode.DOMAIN_ERROR: "Domain error",
     },
 }

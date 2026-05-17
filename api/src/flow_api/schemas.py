@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 
 from flow_core.models.budget import BudgetPeriod
 from flow_core.models.dependency import DependencyType
+from flow_core.models.email import EmailAccountStatus, EmailProvider
 from flow_core.models.tag import TagKind
 from flow_core.models.task import ConstraintKind, ExecKind, Necessity, ScheduleMode
 from flow_core.models.time_entry import TimeSource
@@ -495,3 +496,101 @@ class BudgetPlanOut(BaseModel):
     residual: Decimal
     selected: list[BudgetPickOut]
     excluded: list[dict[str, str]]
+
+
+# --- F5: email (FR-7, docs/adr/0023) ---
+
+
+class EmailAccountCreateIn(BaseModel):
+    provider: EmailProvider
+    email_address: str = Field(min_length=3, max_length=320)
+    secret: str = Field(min_length=1)
+    display_name: str | None = Field(default=None, max_length=200)
+    imap_host: str | None = Field(default=None, max_length=255)
+    imap_port: int | None = None
+    smtp_host: str | None = Field(default=None, max_length=255)
+    smtp_port: int | None = None
+
+
+class EmailAccountPatchIn(BaseModel):
+    expected_version: int = Field(ge=1)
+    display_name: str | None = Field(default=None, max_length=200)
+    imap_host: str | None = Field(default=None, max_length=255)
+    imap_port: int | None = None
+    smtp_host: str | None = Field(default=None, max_length=255)
+    smtp_port: int | None = None
+    status: EmailAccountStatus | None = None
+
+
+class EmailSecretIn(BaseModel):
+    expected_version: int = Field(ge=1)
+    secret: str = Field(min_length=1)
+
+
+class EmailAccountOut(BaseModel):
+    """No secret is ever returned (ADR-0023)."""
+
+    id: uuid.UUID
+    provider: EmailProvider
+    email_address: str
+    display_name: str | None
+    imap_host: str | None
+    imap_port: int | None
+    smtp_host: str | None
+    smtp_port: int | None
+    status: EmailAccountStatus
+    last_sync_at: datetime.datetime | None
+    last_error: str | None
+    version: int
+
+
+class EmailMessageOut(BaseModel):
+    id: uuid.UUID
+    account_id: uuid.UUID
+    provider_message_id: str
+    thread_id: str | None
+    message_id: str | None
+    in_reply_to: str | None
+    from_addr: str
+    to_addrs: str
+    subject: str | None
+    body_text: str | None
+    snippet: str | None
+    received_at: datetime.datetime
+    is_read: bool
+    linked_task_id: uuid.UUID | None
+    version: int
+
+
+class SyncResultOut(BaseModel):
+    account_id: uuid.UUID
+    fetched: int
+    created: int
+    ok: bool
+    error: str | None
+
+
+class EmailToTaskIn(BaseModel):
+    project_tag_id: uuid.UUID | None = None
+    tag_ids: list[uuid.UUID] = Field(default_factory=list)
+    assignee_ids: list[uuid.UUID] = Field(default_factory=list)
+
+
+class EmailSendIn(BaseModel):
+    to_addrs: list[str] = Field(min_length=1)
+    subject: str
+    body_text: str
+    in_reply_to: str | None = None
+    references: str | None = None
+
+
+class EmailReplyIn(BaseModel):
+    body_text: str = Field(min_length=1)
+
+
+class TaskIdOut(BaseModel):
+    task_id: uuid.UUID
+
+
+class SentOut(BaseModel):
+    sent_id: str

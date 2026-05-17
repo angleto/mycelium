@@ -24,6 +24,7 @@ from flow_core.errors import AuthError
 from flow_core.i18n import MessageCode
 from flow_core.models.budget import Budget, BudgetPeriod
 from flow_core.models.dependency import DependencyType
+from flow_core.models.email import EmailAccount, EmailMessage, EmailProvider
 from flow_core.models.event import Event
 from flow_core.models.schedule import Schedule
 from flow_core.models.tag import Tag, TagKind
@@ -34,6 +35,7 @@ from flow_core.services import advisory as advisory_svc
 from flow_core.services import budgets as budgets_svc
 from flow_core.services import calendar as calendars
 from flow_core.services import dependencies, scheduler, tasks, taxonomy
+from flow_core.services import email as email_svc
 from flow_core.services import events as events_svc
 from flow_core.services import time_tracking as time_svc
 from flow_core.services.rbac import get_role
@@ -808,3 +810,160 @@ async def prioritize_within_budget(token: str, org_id: str, budget_id: str) -> d
             ],
             "excluded": plan.excluded,
         }
+
+
+# --- F5: email (FR-7) ---
+
+
+def _email_account(a: EmailAccount) -> dict[str, Any]:
+    return {
+        "id": str(a.id),
+        "provider": a.provider.value,
+        "email_address": a.email_address,
+        "status": a.status.value,
+        "last_sync_at": a.last_sync_at.isoformat() if a.last_sync_at else None,
+        "last_error": a.last_error,
+        "version": a.version,
+    }
+
+
+def _email_message(m: EmailMessage) -> dict[str, Any]:
+    return {
+        "id": str(m.id),
+        "account_id": str(m.account_id),
+        "from_addr": m.from_addr,
+        "subject": m.subject,
+        "snippet": m.snippet,
+        "received_at": m.received_at.isoformat(),
+        "linked_task_id": (str(m.linked_task_id) if m.linked_task_id else None),
+        "version": m.version,
+    }
+
+
+@mcp.tool()
+async def create_email_account(
+    token: str,
+    org_id: str,
+    provider: str,
+    email_address: str,
+    secret: str,
+    imap_host: str | None = None,
+    imap_port: int | None = None,
+    smtp_host: str | None = None,
+    smtp_port: int | None = None,
+) -> dict[str, Any]:
+    """Register an email account. The secret is stored encrypted and
+    never returned."""
+    async with _tenant(token, org_id) as (s, org, user):
+        a = await email_svc.create_account(
+            s,
+            org_id=org,
+            actor_id=user,
+            provider=EmailProvider(provider),
+            email_address=email_address,
+            secret=secret,
+            imap_host=imap_host,
+            imap_port=imap_port,
+            smtp_host=smtp_host,
+            smtp_port=smtp_port,
+        )
+        return _email_account(a)
+
+
+@mcp.tool()
+async def list_email_accounts(token: str, org_id: str) -> list[dict[str, Any]]:
+    """List email accounts (no secrets)."""
+    async with _tenant(token, org_id) as (s, org, _user):
+        return [_email_account(a) for a in await email_svc.list_accounts(s, org_id=org)]
+
+
+@mcp.tool()
+async def sync_email_account(
+    token: str, org_id: str, account_id: str, limit: int = 50
+) -> dict[str, Any]:
+    """Idempotently sync one account (known messages are skipped)."""
+    async with _tenant(token, org_id) as (s, org, user):
+        r = await email_svc.sync_account(
+            s,
+            org_id=org,
+            actor_id=user,
+            account_id=uuid.UUID(account_id),
+            limit=limit,
+        )
+        return {
+            "account_id": str(r.account_id),
+            "fetched": r.fetched,
+            "created": r.created,
+            "ok": r.ok,
+            "error": r.error,
+        }
+
+
+@mcp.tool()
+async def list_email_messages(
+    token: str, org_id: str, account_id: str | None = None
+) -> list[dict[str, Any]]:
+    """List ingested messages, optionally filtered by account."""
+    async with _tenant(token, org_id) as (s, org, _user):
+        rows = await email_svc.list_messages(
+            s,
+            org_id=org,
+            account_id=uuid.UUID(account_id) if account_id else None,
+        )
+        return [_email_message(m) for m in rows]
+
+
+@mcp.tool()
+async def email_to_task(
+    token: str,
+    org_id: str,
+    message_id: str,
+    project_tag_id: str | None = None,
+) -> dict[str, Any]:
+    """Create a task from a message, with a source link."""
+    async with _tenant(token, org_id) as (s, org, user):
+        task_id = await email_svc.email_to_task(
+            s,
+            org_id=org,
+            actor_id=user,
+            message_id=uuid.UUID(message_id),
+            project_tag_id=(uuid.UUID(project_tag_id) if project_tag_id else None),
+        )
+        return {"task_id": str(task_id)}
+
+
+@mcp.tool()
+async def send_email(
+    token: str,
+    org_id: str,
+    account_id: str,
+    to_addrs: list[str],
+    subject: str,
+    body_text: str,
+) -> dict[str, Any]:
+    """Send a message from an account."""
+    async with _tenant(token, org_id) as (s, org, user):
+        sent = await email_svc.send_message(
+            s,
+            org_id=org,
+            actor_id=user,
+            account_id=uuid.UUID(account_id),
+            to_addrs=to_addrs,
+            subject=subject,
+            body_text=body_text,
+        )
+        return {"sent_id": sent}
+
+
+@mcp.tool()
+async def reply_email(token: str, org_id: str, message_id: str, body_text: str) -> dict[str, Any]:
+    """Reply in-thread to an ingested message."""
+    async with _tenant(token, org_id) as (s, org, user):
+        sent = await email_svc.reply_to_message(
+            s,
+            org_id=org,
+            actor_id=user,
+            message_id=uuid.UUID(message_id),
+            body_text=body_text,
+        )
+        return {"sent_id": sent}

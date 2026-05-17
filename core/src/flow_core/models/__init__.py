@@ -13,6 +13,12 @@ from flow_core.models.calendar import (
 from flow_core.models.client_profile import ClientProfile
 from flow_core.models.comment import Comment
 from flow_core.models.dependency import DependencyType, TaskDependency
+from flow_core.models.email import (
+    EmailAccount,
+    EmailAccountStatus,
+    EmailMessage,
+    EmailProvider,
+)
 from flow_core.models.event import Event, EventParticipant
 from flow_core.models.membership import Membership, Role
 from flow_core.models.memory_blob import MemoryBlob
@@ -47,6 +53,10 @@ __all__ = [
     "Comment",
     "ConstraintKind",
     "DependencyType",
+    "EmailAccount",
+    "EmailAccountStatus",
+    "EmailMessage",
+    "EmailProvider",
     "Event",
     "EventParticipant",
     "ExecKind",
