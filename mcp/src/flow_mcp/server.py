@@ -22,13 +22,16 @@ from flow_core import __version__
 from flow_core.db import tenant_session
 from flow_core.errors import AuthError
 from flow_core.i18n import MessageCode
+from flow_core.models.budget import Budget, BudgetPeriod
 from flow_core.models.dependency import DependencyType
 from flow_core.models.event import Event
 from flow_core.models.schedule import Schedule
 from flow_core.models.tag import Tag, TagKind
-from flow_core.models.task import ConstraintKind, ScheduleMode, Task
+from flow_core.models.task import ConstraintKind, Necessity, ScheduleMode, Task
 from flow_core.models.time_entry import TimeEntry
 from flow_core.security import decode_token
+from flow_core.services import advisory as advisory_svc
+from flow_core.services import budgets as budgets_svc
 from flow_core.services import calendar as calendars
 from flow_core.services import dependencies, scheduler, tasks, taxonomy
 from flow_core.services import events as events_svc
@@ -161,8 +164,15 @@ async def create_task(
     description: str | None = None,
     priority: int = 3,
     tag_ids: list[str] | None = None,
+    estimate_effort_h: float | None = None,
+    monetary_cost: float | None = None,
+    location: str | None = None,
+    necessity: str | None = None,
+    budget_id: str | None = None,
+    assignee_ids: list[str] | None = None,
 ) -> dict[str, Any]:
-    """Create a task, optionally tagged."""
+    """Create a task, optionally tagged. Supports personal-domain
+    attributes (cost/location/necessity/budget) for the advisory layer."""
     async with _tenant(token, org_id) as (s, org, user):
         task = await tasks.create_task(
             s,
@@ -171,7 +181,15 @@ async def create_task(
             title=title,
             description=description,
             priority=priority,
+            estimate_effort_h=(
+                Decimal(str(estimate_effort_h)) if estimate_effort_h is not None else None
+            ),
+            monetary_cost=(Decimal(str(monetary_cost)) if monetary_cost is not None else None),
+            location=location,
+            necessity=Necessity(necessity) if necessity is not None else Necessity.should,
+            budget_id=uuid.UUID(budget_id) if budget_id else None,
             tag_ids=[uuid.UUID(t) for t in (tag_ids or [])],
+            assignee_ids=[uuid.UUID(u) for u in (assignee_ids or [])],
         )
         return _task(task)
 
@@ -630,3 +648,163 @@ async def time_report(
             }
             for r in rows
         ]
+
+
+# --- F4b: budgets + deterministic advisory (FR-13/FR-14) ---
+
+
+def _budget(b: Budget) -> dict[str, Any]:
+    return {
+        "id": str(b.id),
+        "name": b.name,
+        "category": b.category,
+        "period_kind": b.period_kind.value,
+        "period_start": b.period_start.isoformat(),
+        "period_end": b.period_end.isoformat(),
+        "amount": str(b.amount),
+        "currency": b.currency,
+        "version": b.version,
+    }
+
+
+@mcp.tool()
+async def create_budget(
+    token: str,
+    org_id: str,
+    name: str,
+    period_kind: str,
+    period_start: str,
+    period_end: str,
+    amount: float,
+    currency: str = "EUR",
+    category: str | None = None,
+) -> dict[str, Any]:
+    """Create a budget envelope (period_kind: month|quarter|year|custom)."""
+    async with _tenant(token, org_id) as (s, org, user):
+        b = await budgets_svc.create_budget(
+            s,
+            org_id=org,
+            actor_id=user,
+            name=name,
+            category=category,
+            period_kind=BudgetPeriod(period_kind),
+            period_start=dt.date.fromisoformat(period_start),
+            period_end=dt.date.fromisoformat(period_end),
+            amount=Decimal(str(amount)),
+            currency=currency,
+        )
+        return _budget(b)
+
+
+@mcp.tool()
+async def list_budgets(token: str, org_id: str) -> list[dict[str, Any]]:
+    """List budget envelopes."""
+    async with _tenant(token, org_id) as (s, org, _user):
+        return [_budget(b) for b in await budgets_svc.list_budgets(s, org_id=org)]
+
+
+@mcp.tool()
+async def budget_consumption(token: str, org_id: str, budget_id: str) -> dict[str, Any]:
+    """Deterministic consumption vs residual for a budget."""
+    async with _tenant(token, org_id) as (s, org, _user):
+        c = await budgets_svc.consumption(s, org_id=org, budget_id=uuid.UUID(budget_id))
+        return {
+            "budget_id": str(c.budget_id),
+            "amount": str(c.amount),
+            "currency": c.currency,
+            "consumed": str(c.consumed),
+            "residual": str(c.residual),
+            "task_count": c.task_count,
+        }
+
+
+@mcp.tool()
+async def what_can_i_do_now(
+    token: str,
+    org_id: str,
+    window_start: str,
+    duration_minutes: int,
+    location: str | None = None,
+    context_tags: list[str] | None = None,
+) -> list[dict[str, Any]]:
+    """Deterministic: feasible tasks for a free window, ranked."""
+    async with _tenant(token, org_id) as (s, org, user):
+        rows = await advisory_svc.what_can_i_do_now(
+            s,
+            org_id=org,
+            actor_id=user,
+            window_start=dt.datetime.fromisoformat(window_start),
+            duration_minutes=duration_minutes,
+            location=location,
+            context_tags=context_tags,
+        )
+        return [
+            {
+                "task_id": str(r.task_id),
+                "title": r.title,
+                "necessity": r.necessity.value,
+                "priority": r.priority,
+                "due_date": r.due_date.isoformat() if r.due_date else None,
+                "remaining_minutes": r.remaining_minutes,
+            }
+            for r in rows
+        ]
+
+
+@mcp.tool()
+async def errands(
+    token: str,
+    org_id: str,
+    location: str | None = None,
+    context: str | None = None,
+) -> list[dict[str, Any]]:
+    """Deterministic: tasks relevant to a place/context across the org."""
+    async with _tenant(token, org_id) as (s, org, user):
+        rows = await advisory_svc.errands(
+            s,
+            org_id=org,
+            actor_id=user,
+            location=location,
+            context=context,
+        )
+        return [
+            {
+                "task_id": str(r.task_id),
+                "title": r.title,
+                "location": r.location,
+                "necessity": r.necessity.value,
+                "priority": r.priority,
+            }
+            for r in rows
+        ]
+
+
+@mcp.tool()
+async def prioritize_within_budget(token: str, org_id: str, budget_id: str) -> dict[str, Any]:
+    """Deterministic priority/value-density selection within a budget."""
+    async with _tenant(token, org_id) as (s, org, user):
+        plan = await advisory_svc.prioritize_within_budget(
+            s,
+            org_id=org,
+            actor_id=user,
+            budget_id=uuid.UUID(budget_id),
+        )
+        return {
+            "budget_id": str(plan.budget_id),
+            "amount": str(plan.amount),
+            "currency": plan.currency,
+            "allocated": str(plan.allocated),
+            "residual": str(plan.residual),
+            "selected": [
+                {
+                    "task_id": str(p.task_id),
+                    "title": p.title,
+                    "cost": str(p.cost),
+                    "necessity": p.necessity.value,
+                    "priority": p.priority,
+                    "value": p.value,
+                }
+                for p in plan.selected
+            ],
+            "excluded": plan.excluded,
+        }

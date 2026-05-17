@@ -48,6 +48,12 @@ class ConstraintKind(enum.StrEnum):
     MFO = "MFO"  # must finish on
 
 
+class Necessity(enum.StrEnum):
+    must = "must"
+    should = "should"
+    nice = "nice"
+
+
 class Task(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, Base):
     __tablename__ = "tasks"
 
@@ -117,3 +123,17 @@ class Task(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, Base):
         DateTime(timezone=True), nullable=True
     )
     is_milestone: Mapped[bool] = mapped_column(nullable=False, server_default="false")
+    # Personal-domain attributes (F4b, docs/adr/0014).
+    monetary_cost: Mapped[Decimal | None] = mapped_column(Numeric(14, 2), nullable=True)
+    location: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    necessity: Mapped[Necessity] = mapped_column(
+        SAEnum(Necessity, name="necessity", native_enum=True, create_type=False),
+        nullable=False,
+        server_default="should",
+    )
+    budget_id: Mapped[uuid.UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("budgets.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )

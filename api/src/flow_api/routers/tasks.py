@@ -43,6 +43,10 @@ def _out(t: Task, state_name: str) -> TaskOut:
         due_date=t.due_date,
         parent_task_id=t.parent_task_id,
         executor_kind=t.executor_kind,
+        monetary_cost=t.monetary_cost,
+        location=t.location,
+        necessity=t.necessity,
+        budget_id=t.budget_id,
         is_archived=t.is_archived,
         version=t.version,
     )
@@ -86,6 +90,10 @@ async def create_task(
         executor_kind=body.executor_kind,
         executor_user_id=body.executor_user_id,
         estimate_effort_h=body.estimate_effort_h,
+        monetary_cost=body.monetary_cost,
+        location=body.location,
+        necessity=body.necessity,
+        budget_id=body.budget_id,
         tag_ids=body.tag_ids,
         assignee_ids=body.assignee_ids,
     )

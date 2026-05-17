@@ -20,7 +20,7 @@ from flow_core.i18n import MessageCode
 from flow_core.models.comment import Comment
 from flow_core.models.membership import Role
 from flow_core.models.tag import Tag, TagKind
-from flow_core.models.task import ExecKind, Task
+from flow_core.models.task import ExecKind, Necessity, Task
 from flow_core.models.task_assignee import TaskAssignee
 from flow_core.models.task_tag import TaskTag
 from flow_core.services import audit
@@ -38,6 +38,10 @@ _UPDATABLE = frozenset(
         "executor_kind",
         "executor_user_id",
         "parent_task_id",
+        "monetary_cost",
+        "location",
+        "necessity",
+        "budget_id",
     }
 )
 
@@ -75,6 +79,10 @@ async def create_task(
     executor_kind: ExecKind = ExecKind.human,
     executor_user_id: uuid.UUID | None = None,
     estimate_effort_h: Decimal | None = None,
+    monetary_cost: Decimal | None = None,
+    location: str | None = None,
+    necessity: Necessity = Necessity.should,
+    budget_id: uuid.UUID | None = None,
     tag_ids: Sequence[uuid.UUID] = (),
     assignee_ids: Sequence[uuid.UUID] = (),
 ) -> Task:
@@ -102,6 +110,10 @@ async def create_task(
         executor_kind=executor_kind,
         executor_user_id=executor_user_id,
         estimate_effort_h=estimate_effort_h,
+        monetary_cost=monetary_cost,
+        location=location,
+        necessity=necessity,
+        budget_id=budget_id,
         created_by=actor_id,
     )
     session.add(task)

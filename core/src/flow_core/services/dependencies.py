@@ -166,6 +166,14 @@ async def _blocked_ids(session: AsyncSession, node_ids: set[uuid.UUID]) -> set[u
     return set(rows)
 
 
+async def blocked_task_ids(
+    session: AsyncSession, *, org_id: uuid.UUID, node_ids: set[uuid.UUID]
+) -> set[uuid.UUID]:
+    """Public view of the derived blocked overlay (consumed by the
+    advisory layer, F4b): tasks with a non-terminal predecessor."""
+    return await _blocked_ids(session, node_ids)
+
+
 async def graph(
     session: AsyncSession,
     *,

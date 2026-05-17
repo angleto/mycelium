@@ -8,9 +8,10 @@ from decimal import Decimal
 
 from pydantic import BaseModel, Field
 
+from flow_core.models.budget import BudgetPeriod
 from flow_core.models.dependency import DependencyType
 from flow_core.models.tag import TagKind
-from flow_core.models.task import ConstraintKind, ExecKind, ScheduleMode
+from flow_core.models.task import ConstraintKind, ExecKind, Necessity, ScheduleMode
 from flow_core.models.time_entry import TimeSource
 
 
@@ -110,6 +111,10 @@ class TaskCreateIn(BaseModel):
     executor_kind: ExecKind = ExecKind.human
     executor_user_id: uuid.UUID | None = None
     estimate_effort_h: Decimal | None = None
+    monetary_cost: Decimal | None = None
+    location: str | None = Field(default=None, max_length=200)
+    necessity: Necessity = Necessity.should
+    budget_id: uuid.UUID | None = None
     tag_ids: list[uuid.UUID] = Field(default_factory=list)
     assignee_ids: list[uuid.UUID] = Field(default_factory=list)
 
@@ -125,6 +130,10 @@ class TaskPatchIn(BaseModel):
     executor_kind: ExecKind | None = None
     executor_user_id: uuid.UUID | None = None
     parent_task_id: uuid.UUID | None = None
+    monetary_cost: Decimal | None = None
+    location: str | None = Field(default=None, max_length=200)
+    necessity: Necessity | None = None
+    budget_id: uuid.UUID | None = None
 
 
 class TaskStateIn(BaseModel):
@@ -155,6 +164,10 @@ class TaskOut(BaseModel):
     due_date: datetime.date | None
     parent_task_id: uuid.UUID | None
     executor_kind: ExecKind
+    monetary_cost: Decimal | None
+    location: str | None
+    necessity: Necessity
+    budget_id: uuid.UUID | None
     is_archived: bool
     version: int
 
@@ -389,3 +402,96 @@ class ReportRowOut(BaseModel):
     billable_seconds: int
     amount: Decimal
     currency: str
+
+
+# --- F4b: budgets + advisory (FR-13/FR-14, docs/adr/0013, 0014) ---
+
+
+class BudgetCreateIn(BaseModel):
+    name: str = Field(min_length=1, max_length=160)
+    category: str | None = Field(default=None, max_length=120)
+    period_kind: BudgetPeriod
+    period_start: datetime.date
+    period_end: datetime.date
+    amount: Decimal = Field(ge=0)
+    currency: str = Field(default="EUR", max_length=3)
+
+
+class BudgetPatchIn(BaseModel):
+    expected_version: int = Field(ge=1)
+    name: str | None = Field(default=None, min_length=1, max_length=160)
+    category: str | None = Field(default=None, max_length=120)
+    period_kind: BudgetPeriod | None = None
+    period_start: datetime.date | None = None
+    period_end: datetime.date | None = None
+    amount: Decimal | None = Field(default=None, ge=0)
+    currency: str | None = Field(default=None, max_length=3)
+
+
+class BudgetOut(BaseModel):
+    id: uuid.UUID
+    name: str
+    category: str | None
+    period_kind: BudgetPeriod
+    period_start: datetime.date
+    period_end: datetime.date
+    amount: Decimal
+    currency: str
+    version: int
+
+
+class ConsumptionOut(BaseModel):
+    budget_id: uuid.UUID
+    amount: Decimal
+    currency: str
+    consumed: Decimal
+    residual: Decimal
+    task_count: int
+
+
+class WhatNowIn(BaseModel):
+    window_start: datetime.datetime
+    duration_minutes: int = Field(gt=0)
+    location: str | None = None
+    context_tags: list[str] = Field(default_factory=list)
+
+
+class ErrandsIn(BaseModel):
+    location: str | None = None
+    context: str | None = None
+
+
+class FeasibleTaskOut(BaseModel):
+    task_id: uuid.UUID
+    title: str
+    necessity: Necessity
+    priority: int
+    due_date: datetime.date | None
+    remaining_minutes: int
+
+
+class ErrandItemOut(BaseModel):
+    task_id: uuid.UUID
+    title: str
+    location: str | None
+    necessity: Necessity
+    priority: int
+
+
+class BudgetPickOut(BaseModel):
+    task_id: uuid.UUID
+    title: str
+    cost: Decimal
+    necessity: Necessity
+    priority: int
+    value: int
+
+
+class BudgetPlanOut(BaseModel):
+    budget_id: uuid.UUID
+    amount: Decimal
+    currency: str
+    allocated: Decimal
+    residual: Decimal
+    selected: list[BudgetPickOut]
+    excluded: list[dict[str, str]]

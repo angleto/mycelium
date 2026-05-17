@@ -39,6 +39,7 @@ class MessageCode(enum.StrEnum):
     NO_RUNNING_TIMER = "time.no_running_timer"
     TIME_ENTRY_NOT_FOUND = "time_entry.not_found"
     TIME_ENTRY_INVALID = "time_entry.invalid"
+    BUDGET_NOT_FOUND = "budget.not_found"
     DOMAIN_ERROR = "domain.error"
 
 
@@ -71,6 +72,7 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
         MessageCode.NO_RUNNING_TIMER: "No running timer for this user",
         MessageCode.TIME_ENTRY_NOT_FOUND: "Time entry not found",
         MessageCode.TIME_ENTRY_INVALID: ("Invalid time entry: provide a positive interval"),
+        MessageCode.BUDGET_NOT_FOUND: "Budget not found",
         MessageCode.DOMAIN_ERROR: "Domain error",
     },
 }

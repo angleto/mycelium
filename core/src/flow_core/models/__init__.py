@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from flow_core.models.activity_log import ActivityLog
 from flow_core.models.base import Base
+from flow_core.models.budget import Budget, BudgetPeriod
 from flow_core.models.calendar import (
     CalendarHoliday,
     UserCalendar,
@@ -22,6 +23,7 @@ from flow_core.models.tag import Tag, TagKind
 from flow_core.models.task import (
     ConstraintKind,
     ExecKind,
+    Necessity,
     ScheduleMode,
     Task,
 )
@@ -38,6 +40,8 @@ from flow_core.models.workflow import (
 __all__ = [
     "ActivityLog",
     "Base",
+    "Budget",
+    "BudgetPeriod",
     "CalendarHoliday",
     "ClientProfile",
     "Comment",
@@ -48,6 +52,7 @@ __all__ = [
     "ExecKind",
     "Membership",
     "MemoryBlob",
+    "Necessity",
     "Organization",
     "ProjectProfile",
     "Role",

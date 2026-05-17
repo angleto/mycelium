@@ -1,0 +1,68 @@
+"""F4b MCP co-equality (DB-backed): budgets + deterministic advisory
+reuse the same service layer as REST (docs/adr/0001)."""
+
+from __future__ import annotations
+
+import uuid
+
+from flow_core.db import admin_session
+from flow_core.services.auth import signup
+from flow_mcp.server import (
+    create_budget,
+    create_task,
+    prioritize_within_budget,
+    what_can_i_do_now,
+)
+
+
+async def test_mcp_budget_and_advisory() -> None:
+    async with admin_session() as s:
+        r = await signup(
+            s,
+            email=f"{uuid.uuid4().hex[:10]}@example.test",
+            password="pw-strong-123",
+            org_name="MCP4B",
+        )
+    token, org, me = r.token, str(r.org_id), str(r.user_id)
+
+    bud = await create_budget(
+        token=token,
+        org_id=org,
+        name="Home",
+        period_kind="month",
+        period_start="2026-01-01",
+        period_end="2026-01-31",
+        amount=80.0,
+    )
+    must = await create_task(
+        token=token,
+        org_id=org,
+        title="must-buy",
+        priority=1,
+        monetary_cost=50.0,
+        necessity="must",
+        budget_id=bud["id"],
+        estimate_effort_h=0.5,
+        assignee_ids=[me],
+    )
+    await create_task(
+        token=token,
+        org_id=org,
+        title="too-expensive",
+        priority=2,
+        monetary_cost=60.0,
+        necessity="should",
+        budget_id=bud["id"],
+    )
+    plan = await prioritize_within_budget(token=token, org_id=org, budget_id=bud["id"])
+    assert [p["task_id"] for p in plan["selected"]] == [must["id"]]
+    assert plan["allocated"] == "50.00"
+    assert plan["excluded"][0]["reason"] == "budget_exhausted"
+
+    feasible = await what_can_i_do_now(
+        token=token,
+        org_id=org,
+        window_start="2026-01-12T09:00:00+00:00",
+        duration_minutes=60,
+    )
+    assert must["id"] in {x["task_id"] for x in feasible}
