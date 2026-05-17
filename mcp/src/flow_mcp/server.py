@@ -22,6 +22,7 @@ from flow_core import __version__
 from flow_core.db import tenant_session
 from flow_core.errors import AuthError
 from flow_core.i18n import MessageCode
+from flow_core.models.billing import CostBasis, RateCard, UsageRecord
 from flow_core.models.budget import Budget, BudgetPeriod
 from flow_core.models.dependency import DependencyType
 from flow_core.models.email import EmailAccount, EmailMessage, EmailProvider
@@ -32,6 +33,7 @@ from flow_core.models.task import ConstraintKind, Necessity, ScheduleMode, Task
 from flow_core.models.time_entry import TimeEntry
 from flow_core.security import decode_token
 from flow_core.services import advisory as advisory_svc
+from flow_core.services import billing as billing_svc
 from flow_core.services import budgets as budgets_svc
 from flow_core.services import calendar as calendars
 from flow_core.services import dependencies, scheduler, tasks, taxonomy
@@ -967,3 +969,122 @@ async def reply_email(token: str, org_id: str, message_id: str, body_text: str) 
             body_text=body_text,
         )
         return {"sent_id": sent}
+
+
+# --- F5b: billing / metering (FR-15) ---
+
+
+def _usage(r: UsageRecord) -> dict[str, Any]:
+    return {
+        "id": str(r.id),
+        "operation_id": r.operation_id,
+        "model_id": r.model_id,
+        "op": r.op,
+        "basis": r.basis.value,
+        "units_in": str(r.units_in),
+        "units_out": str(r.units_out),
+        "credits": str(r.credits),
+    }
+
+
+def _rate_card(c: RateCard) -> dict[str, Any]:
+    return {
+        "id": str(c.id),
+        "model_id": c.model_id,
+        "provider": c.provider,
+        "unit": c.unit.value,
+        "credits_per_input": str(c.credits_per_input),
+        "credits_per_output": str(c.credits_per_output),
+        "is_active": c.is_active,
+        "version": c.version,
+    }
+
+
+@mcp.tool()
+async def billing_balance(token: str, org_id: str) -> dict[str, Any]:
+    """Current credit balance for the org."""
+    async with _tenant(token, org_id) as (s, org, _user):
+        return {"balance": str(await billing_svc.balance(s, org_id=org))}
+
+
+@mcp.tool()
+async def grant_credits(
+    token: str, org_id: str, amount: float, reason: str | None = None
+) -> dict[str, Any]:
+    """Admin: top up credits (manual grant; v1 has no payment gateway)."""
+    async with _tenant(token, org_id) as (s, org, user):
+        new_balance = await billing_svc.grant_credits(
+            s,
+            org_id=org,
+            actor_id=user,
+            amount=Decimal(str(amount)),
+            reason=reason,
+        )
+        return {"balance": str(new_balance)}
+
+
+@mcp.tool()
+async def meter_usage(
+    token: str,
+    org_id: str,
+    operation_id: str,
+    op: str,
+    model_id: str | None = None,
+    units_in: float = 0.0,
+    units_out: float = 0.0,
+    basis: str = "local",
+) -> dict[str, Any]:
+    """Idempotent metered debit (re-running the same operation_id does
+    not charge twice)."""
+    async with _tenant(token, org_id) as (s, org, user):
+        record = await billing_svc.meter(
+            s,
+            org_id=org,
+            actor_id=user,
+            operation_id=operation_id,
+            op=op,
+            model_id=model_id,
+            units_in=Decimal(str(units_in)),
+            units_out=Decimal(str(units_out)),
+            basis=CostBasis(basis),
+        )
+        return _usage(record)
+
+
+@mcp.tool()
+async def upsert_rate_card(
+    token: str,
+    org_id: str,
+    model_id: str,
+    provider: str,
+    credits_per_input: float = 0.0,
+    credits_per_output: float = 0.0,
+) -> dict[str, Any]:
+    """Admin: create or update a model rate card."""
+    async with _tenant(token, org_id) as (s, org, user):
+        card = await billing_svc.upsert_rate_card(
+            s,
+            org_id=org,
+            actor_id=user,
+            model_id=model_id,
+            provider=provider,
+            values={
+                "credits_per_input": Decimal(str(credits_per_input)),
+                "credits_per_output": Decimal(str(credits_per_output)),
+            },
+        )
+        return _rate_card(card)
+
+
+@mcp.tool()
+async def list_rate_cards(token: str, org_id: str) -> list[dict[str, Any]]:
+    """List the org rate cards."""
+    async with _tenant(token, org_id) as (s, org, _user):
+        return [_rate_card(c) for c in await billing_svc.list_rate_cards(s, org_id=org)]
+
+
+@mcp.tool()
+async def list_usage(token: str, org_id: str, limit: int = 100) -> list[dict[str, Any]]:
+    """List recent metered usage records."""
+    async with _tenant(token, org_id) as (s, org, _user):
+        return [_usage(r) for r in await billing_svc.list_usage(s, org_id=org, limit=limit)]

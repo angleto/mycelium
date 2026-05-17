@@ -12,6 +12,7 @@ from starlette.responses import JSONResponse, Response
 from flow_api.routers import (
     advisory,
     auth,
+    billing,
     budgets,
     calendars,
     dependencies,
@@ -84,4 +85,5 @@ def create_app() -> FastAPI:
     app.include_router(budgets.router)
     app.include_router(advisory.router)
     app.include_router(email.router)
+    app.include_router(billing.router)
     return app

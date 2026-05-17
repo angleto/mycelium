@@ -8,6 +8,7 @@ from decimal import Decimal
 
 from pydantic import BaseModel, Field
 
+from flow_core.models.billing import CostBasis, RateUnit, StorageKind
 from flow_core.models.budget import BudgetPeriod
 from flow_core.models.dependency import DependencyType
 from flow_core.models.email import EmailAccountStatus, EmailProvider
@@ -594,3 +595,79 @@ class TaskIdOut(BaseModel):
 
 class SentOut(BaseModel):
     sent_id: str
+
+
+# --- F5b: billing / metering (FR-15, docs/adr/0019) ---
+
+
+class BalanceOut(BaseModel):
+    balance: Decimal
+
+
+class GrantIn(BaseModel):
+    amount: Decimal = Field(gt=0)
+    reason: str | None = None
+
+
+class MeterIn(BaseModel):
+    operation_id: str = Field(min_length=1, max_length=128)
+    op: str = Field(min_length=1, max_length=80)
+    model_id: str | None = None
+    units_in: Decimal = Decimal(0)
+    units_out: Decimal = Decimal(0)
+    basis: CostBasis = CostBasis.local
+
+
+class UsageOut(BaseModel):
+    id: uuid.UUID
+    operation_id: str
+    model_id: str | None
+    op: str
+    basis: CostBasis
+    units_in: Decimal
+    units_out: Decimal
+    credits: Decimal
+
+
+class LedgerOut(BaseModel):
+    id: uuid.UUID
+    kind: str
+    amount: Decimal
+    operation_id: str | None
+    reason: str | None
+    balance_after: Decimal
+
+
+class RateCardUpsertIn(BaseModel):
+    model_id: str = Field(min_length=1, max_length=160)
+    provider: str = Field(min_length=1, max_length=80)
+    unit: RateUnit = RateUnit.token
+    credits_per_input: Decimal = Decimal(0)
+    credits_per_output: Decimal = Decimal(0)
+    provider_cost_per_input: Decimal | None = None
+    provider_cost_per_output: Decimal | None = None
+    markup: Decimal = Decimal(1)
+    is_active: bool = True
+    tier: str | None = None
+
+
+class RateCardOut(BaseModel):
+    id: uuid.UUID
+    model_id: str
+    provider: str
+    unit: RateUnit
+    credits_per_input: Decimal
+    credits_per_output: Decimal
+    markup: Decimal
+    is_active: bool
+    tier: str | None
+    version: int
+
+
+class StorageRateIn(BaseModel):
+    kind: StorageKind
+    credits_per_gb_month: Decimal = Field(ge=0)
+
+
+class ByokFactorIn(BaseModel):
+    factor: Decimal = Field(ge=0)
