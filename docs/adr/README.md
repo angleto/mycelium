@@ -27,3 +27,6 @@ Formato: Status, Contesto, Decisione, Conseguenze, Alternative scartate.
 - [0017 English-only project language; i18n-ready message catalog](0017-english-only-i18n-message-catalog.md)
 - [0018 Archive backup target (dual copy), distinct from legal conservation](0018-archive-backup-target.md)
 - [0019 Metering, credits wallet, rate cards, enforcement](0019-metering-credits-billing.md)
+- [0020 Voice notes and conversational capture](0020-voice-notes-conversational-capture.md)
+- [0021 Command/intent layer (natural language to deterministic actions)](0021-command-intent-layer.md)
+- [0022 Hands-free activation (headphone button): native/OS-assistant](0022-handsfree-activation-native.md)

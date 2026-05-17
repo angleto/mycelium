@@ -40,6 +40,14 @@ fase.
   esposto come tool MCP agentico, consolidamento con provenienza, job
   di re-embedding, erasure GDPR. Multimodale e GraphRAG testuale
   esplicitamente fuori (differiti).
+- **F6b Note vocali e cattura conversazionale**: entita `Note`,
+  cattura PWA offline-first + upload S3 (non metered), pipeline worker
+  STT (`TranscriptionProvider` locale, ADR-0012/0019) -> transcript,
+  LLM opzionale (titolo/summary/action item -> Task), embedding in
+  memoria (ADR-0016); conversazione testo/voce con risposta LLM
+  (online dal vivo, offline differita + notifica FR-12); ADR-0020;
+  comandi NL canonici deterministici + fallback LLM (ADR-0021); TTS
+  voce-out in v1 (`TtsProvider`, metered). Dopo F5b/F6.
 - **F7a Fatture B2B/B2C**: XML FatturaPA + validazione,
   `ManualExportChannel`, immutabilita, numerazione concorrenza-safe,
   ricerca, marca pagata, nota di credito TD04; tracciamento adesione
@@ -53,7 +61,9 @@ fase.
   NE/DT/EC/SE), ciclo passivo, reverse charge/autofattura TD16-TD19,
   clienti esteri, liquidazione trimestrale del bollo, leveling
   ottimizzante CP-SAT, Proton Drive `ArchiveBackupTarget` (sidecar
-  rclone, poi SDK ufficiale Proton; ADR-0018).
+  rclone, poi SDK ufficiale Proton; ADR-0018), app companion nativa
+  per hands-free (pulsante cuffie / assistente OS) e cattura
+  always-on (ADR-0022).
 - **F8 Notifiche + ricorrenze + rifiniture**: Telegram + email,
   reminder, task ricorrenti, hardening sicurezza/privacy, audit,
   `ArchiveBackupTarget` con backend object storage S3 EU (doppia copia
@@ -96,6 +106,12 @@ fase.
   cancellazione di un messaggio propaga a embedding/summary/
   object-storage/blob consolidati; cambio modello -> re-embedding senza
   write-downtime.
+- **F6b**: nota vocale registrata offline e in coda a crediti zero
+  (cattura non bloccata); alla sync STT locale produce il transcript
+  che entra in memoria entro (org, progetto); domanda posta offline ->
+  risposta LLM differita accodata alla Note + notifica; erasure di una
+  nota a cascata su audio S3 + transcript + blob memoria + task;
+  online la risposta LLM e anche vocale (TTS).
 - **F7a**: fattura B2B/B2C da time entry billable, XML valido a schema,
   export manuale scaricabile; immutabile dopo emissione; numerazione
   concorrente senza duplicati/buchi; TD04 collegata; stato adesione

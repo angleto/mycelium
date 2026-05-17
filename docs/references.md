@@ -39,6 +39,12 @@
   (vedi ADR-0016 per le nostre adozioni e deviazioni: niente ramo web
   nel grader perche la memoria e privata; GraphRAG strutturale non
   testuale; multimodale differito)
+- STT locale per note vocali (ADR-0020): famiglia Whisper /
+  faster-whisper / whisper.cpp (multilingue IT+EN, CPU/ARM
+  small/distil -> GPU/large o API); scelta concreta in implementazione
+- TTS locale per risposte vocali (ADR-0020, in v1): es. Piper /
+  Coqui-XTTS o altri open multilingue IT+EN, locale default -> API;
+  scelta concreta in implementazione
 
 ## Interni: pattern di astrazione LLM/Embedding da riusare
 

@@ -303,3 +303,45 @@ restano disponibili. Admin (ruolo) aggiunge crediti, edita rate
 card/percentuali/rate storage; azioni auditate. Gateway di pagamento
 fuori v1 (v1 = grant manuale admin). Vedi
 [ADR-0019](adr/0019-metering-credits-billing.md).
+
+## FR-16 Note vocali e cattura conversazionale (ADR-0020)
+
+Cattura separata dall'elaborazione. Cattura offline-first (PWA:
+MediaRecorder, coda IndexedDB, Service Worker background sync, upload
+ripreso multipart presigned su S3); audio grezzo su S3, mai DB; la
+cattura NON e operazione a costo (funziona offline e a crediti zero,
+cosi non perdi l'idea mentre corri). Entita `Note` (kind
+voice|text|conversation): transcript, audio_ref S3, output LLM
+opzionali (titolo/summary/action item -> Task riusando il flusso
+email->task), tag, scope (org, progetto), provenienza per erasure
+GDPR. `TranscriptionProvider` pluggable (pattern ADR-0012): default
+STT locale multilingue (Whisper/faster-whisper, CPU/ARM, sostituibile
+GPU/large/API); STT esterno solo con opt-in per Org + audit (l'audio e
+dato personale). Modalita conversazione/brainstorming (testo o voce):
+turni utente/LLM (provider ADR-0012, metered ADR-0019), salvati come
+Note e riassunti in memoria (ADR-0016) entro l'isolamento
+(org, progetto). Metering: STT per minuti audio, TTS per
+caratteri/secondi; l'unita del rate card e di prima classe
+(token|audio-min|tts-char|GB-mese), refina ADR-0019. Retention audio
+configurabile, default cancella dopo trascrizione confermata
+(minimizzazione GDPR); erasure a cascata (audio S3 + transcript + blob
+memoria + task generati). Vincolo onesto: cattura in background sul
+web limitata (v1 foreground + coda; always-on = app nativa, mobile
+dopo). Modello di interazione: l'LLM risponde. Online: loop dal vivo
+(parli -> STT -> LLM -> risposta testo; a voce solo se TTS abilitato).
+Offline (tipico mentre corri senza segnale): STT/LLM sono server-side,
+metered, online; la domanda e catturata offline (non metered, mai
+persa) e risposta appena torna la connettivita (il worker esegue
+l'LLM, accoda il turno di risposta nella Note e notifica via FR-12).
+LLM on-device per risposte offline vere = fuori scope.
+TTS/voce in uscita: in v1 via `TtsProvider` pluggable (locale
+default, esterno opt-in), metered per caratteri/secondi (ADR-0019);
+online, offline la risposta e testo notificato e parlata al rientro.
+Vedi
+[ADR-0020](adr/0020-voice-notes-conversational-capture.md).
+Comandi in linguaggio naturale ("crea una nota", "nuova conversazione
+[nel progetto X]"): intent layer deterministico per i comandi canonici
++ fallback LLM, risoluzione progetto con conferma (mai mis-scoping),
+voce/testo/MCP (ADR-0021). Attivazione hands-free dal pulsante cuffie
+o assistente OS: richiede app companion nativa, post web-v1
+(ADR-0022).

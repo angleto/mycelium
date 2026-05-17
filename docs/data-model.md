@@ -93,6 +93,23 @@ entita org-scoped. La memoria e partizionata per `org_id`.
 - Enforcement nel service layer (choke point, come RBAC); grant admin
   via percorso privilegiato auditato. Vedi ADR-0019.
 
+## Note e cattura vocale
+
+- `notes(id, org_id, project_tag_id?, kind[voice|text|conversation],
+  title?, transcript?, summary?, audio_ref?, status, created_by,
+  version)`
+- `note_turns(note_id, ord, role[user|llm], content)` (kind
+  conversation)
+- `note_tasks(note_id, task_id)` (action item -> Task, flusso
+  email->task)
+- audio grezzo su S3 (`audio_ref`), mai in DB; retention configurabile
+  (default: cancella dopo trascrizione confermata)
+- rate card / `usage_records`: unita di prima classe
+  (token|audio_minutes|tts_chars|gb_month), refina ADR-0019
+- isolamento (org, progetto) + provenienza per erasure GDPR a cascata
+  (audio S3 + transcript + blob memoria + task generati). Vedi
+  ADR-0020.
+
 ## Email
 
 - `email_accounts(id, org_id, user_id, connector[gmail_oauth|
