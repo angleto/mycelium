@@ -9,7 +9,14 @@ from collections.abc import Awaitable, Callable
 from fastapi import FastAPI, Request
 from starlette.responses import JSONResponse, Response
 
-from flow_api.routers import auth, org, tags, tasks
+from flow_api.routers import (
+    auth,
+    dependencies,
+    org,
+    tags,
+    tasks,
+    workflows,
+)
 from flow_core.errors import (
     AuthError,
     ConflictError,
@@ -61,4 +68,6 @@ def create_app() -> FastAPI:
     app.include_router(org.router)
     app.include_router(tags.router)
     app.include_router(tasks.router)
+    app.include_router(workflows.router)
+    app.include_router(dependencies.router)
     return app

@@ -21,10 +21,11 @@ from flow_core import __version__
 from flow_core.db import tenant_session
 from flow_core.errors import AuthError
 from flow_core.i18n import MessageCode
+from flow_core.models.dependency import DependencyType
 from flow_core.models.tag import Tag, TagKind
 from flow_core.models.task import Task
 from flow_core.security import decode_token
-from flow_core.services import tasks, taxonomy
+from flow_core.services import dependencies, tasks, taxonomy
 from flow_core.services.rbac import get_role
 from flow_core.services.taxonomy import ClientInput
 
@@ -191,3 +192,58 @@ async def add_comment(token: str, org_id: str, task_id: str, body: str) -> dict[
             body=body,
         )
         return {"id": str(c.id), "task_id": str(c.task_id)}
+
+
+@mcp.tool()
+async def add_dependency(
+    token: str,
+    org_id: str,
+    predecessor_id: str,
+    successor_id: str,
+    type: str,
+    lag_working_minutes: int = 0,
+) -> dict[str, Any]:
+    """Add a typed task dependency (FS/SS/FF/SF). Cycles are rejected."""
+    async with _tenant(token, org_id) as (s, org, user):
+        d = await dependencies.add_dependency(
+            s,
+            org_id=org,
+            actor_id=user,
+            predecessor_id=uuid.UUID(predecessor_id),
+            successor_id=uuid.UUID(successor_id),
+            type=DependencyType(type),
+            lag_working_minutes=lag_working_minutes,
+        )
+        return {"id": str(d.id), "type": d.type.value}
+
+
+@mcp.tool()
+async def graph(token: str, org_id: str, project_tag_id: str | None = None) -> dict[str, Any]:
+    """Return the dependency DAG (nodes + edges) for a scope."""
+    async with _tenant(token, org_id) as (s, org, _user):
+        return await dependencies.graph(
+            s,
+            org_id=org,
+            project_tag_id=(uuid.UUID(project_tag_id) if project_tag_id else None),
+        )
+
+
+@mcp.tool()
+async def set_task_state(
+    token: str,
+    org_id: str,
+    task_id: str,
+    expected_version: int,
+    state_id: str,
+) -> dict[str, Any]:
+    """Transition a task to a workflow state (validated)."""
+    async with _tenant(token, org_id) as (s, org, user):
+        version = await tasks.set_state(
+            s,
+            org_id=org,
+            actor_id=user,
+            task_id=uuid.UUID(task_id),
+            expected_version=expected_version,
+            state_id=uuid.UUID(state_id),
+        )
+        return {"task_id": task_id, "version": version}

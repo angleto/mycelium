@@ -8,6 +8,7 @@ from decimal import Decimal
 
 from pydantic import BaseModel, Field
 
+from flow_core.models.dependency import DependencyType
 from flow_core.models.tag import TagKind
 from flow_core.models.task import ExecKind
 
@@ -175,3 +176,68 @@ class TagRefIn(BaseModel):
 
 class AssigneeIn(BaseModel):
     user_id: uuid.UUID
+
+
+class WorkflowStateSpecIn(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+    ord: int = 0
+    is_initial: bool = False
+    is_terminal: bool = False
+
+
+class TransitionIn(BaseModel):
+    from_state: str
+    to_state: str
+
+
+class WorkflowCreateIn(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    states: list[WorkflowStateSpecIn]
+    transitions: list[TransitionIn] = Field(default_factory=list)
+
+
+class WorkflowOut(BaseModel):
+    id: uuid.UUID
+    name: str
+    is_default: bool
+    version: int
+
+
+class ProjectWorkflowIn(BaseModel):
+    expected_version: int = Field(ge=1)
+    workflow_id: uuid.UUID | None = None
+
+
+class DependencyCreateIn(BaseModel):
+    predecessor_id: uuid.UUID
+    successor_id: uuid.UUID
+    type: DependencyType
+    lag_working_minutes: int = 0
+
+
+class DependencyOut(BaseModel):
+    id: uuid.UUID
+    predecessor_id: uuid.UUID
+    successor_id: uuid.UUID
+    type: DependencyType
+    lag_working_minutes: int
+    version: int
+
+
+class GraphNode(BaseModel):
+    id: str
+    title: str
+    state: str
+    blocked: bool
+
+
+class GraphEdge(BaseModel):
+    predecessor: str
+    successor: str
+    type: str
+    lag_working_minutes: int
+
+
+class GraphOut(BaseModel):
+    nodes: list[GraphNode]
+    edges: list[GraphEdge]
