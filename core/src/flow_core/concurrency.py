@@ -1,8 +1,8 @@
-"""Optimistic concurrency esplicita (docs/adr/0002).
+"""Explicit optimistic concurrency (docs/adr/0002).
 
-UPDATE ... WHERE id AND org_id AND version = atteso; 0 righe ->
-ConflictError (l'adapter lo mappa a 409). Niente magia ORM implicita.
-Il service layer e l'unico punto che muta lo stato versionato.
+UPDATE ... WHERE id AND version = expected; 0 rows -> ConflictError
+(adapters map it to HTTP 409). No implicit ORM magic. The service
+layer is the only place that mutates versioned state.
 """
 
 from __future__ import annotations
@@ -10,29 +10,32 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
-from sqlalchemy import Table, update
+from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import DeclarativeBase
 
 from flow_core.errors import ConflictError
+from flow_core.i18n import MessageCode
 
 
 async def optimistic_update(
     session: AsyncSession,
-    table: Table,
+    model: type[DeclarativeBase],
     *,
     pk: uuid.UUID,
     expected_version: int,
     values: dict[str, Any],
 ) -> int:
-    """Applica l'update solo se la versione combacia; ritorna la nuova
-    versione. Solleva ConflictError se la riga e stale o assente.
+    """Apply the update only if the version matches; return the new
+    version. Raise ConflictError if the row is stale or missing.
 
-    L'isolamento tenant e garantito dalla RLS (difesa primaria,
-    docs/adr/0002): l'UPDATE puo toccare solo righe visibili nel
-    contesto tenant corrente, quindi qui basta pk + version.
+    Tenant isolation is guaranteed by RLS (primary defense,
+    docs/adr/0002): the UPDATE can only touch rows visible in the
+    current tenant context, so pk + version is sufficient here.
     """
+    table = model.__table__
     stmt = (
-        update(table)
+        update(model)
         .where(
             table.c.id == pk,
             table.c.version == expected_version,
@@ -43,5 +46,5 @@ async def optimistic_update(
     result = await session.execute(stmt)
     row = result.first()
     if row is None:
-        raise ConflictError("scrittura su versione stale")
+        raise ConflictError(MessageCode.CONFLICT_STALE_VERSION)
     return int(row[0])

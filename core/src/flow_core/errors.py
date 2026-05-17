@@ -1,28 +1,38 @@
-"""Eccezioni di dominio.
+"""Domain exceptions.
 
-Sollevate dal service layer e mappate dagli adapter (api/mcp) a codici
-di errore. ``ConflictError`` corrisponde al 409 dell'optimistic
-concurrency (docs/adr/0002).
+Raised by the service layer and mapped by adapters (api/mcp) to error
+codes. Each error carries a stable ``MessageCode`` plus parameters; no
+hardcoded user-facing text here (docs/adr/0017). ``ConflictError`` maps
+to HTTP 409 (optimistic concurrency, docs/adr/0002).
 """
 
 from __future__ import annotations
 
+from typing import Any
+
+from flow_core.i18n import DEFAULT_LOCALE, MessageCode, render
+
 
 class DomainError(Exception):
-    """Base di tutti gli errori di dominio."""
+    """Base of all domain errors. Holds a machine code + params."""
+
+    def __init__(self, code: MessageCode, /, **params: Any) -> None:
+        self.code = code
+        self.params = params
+        super().__init__(render(code, DEFAULT_LOCALE, **params))
 
 
 class NotFoundError(DomainError):
-    """Entita inesistente o non visibile nel contesto tenant corrente."""
+    """Entity missing or not visible in the current tenant context."""
 
 
 class ConflictError(DomainError):
-    """Scrittura su versione stale: optimistic concurrency (409)."""
+    """Write on a stale version: optimistic concurrency (409)."""
 
 
 class AuthError(DomainError):
-    """Credenziali non valide o token assente/scaduto (401)."""
+    """Invalid credentials or missing/expired token (401)."""
 
 
 class ForbiddenError(DomainError):
-    """Ruolo insufficiente nel contesto org corrente (403)."""
+    """Insufficient role in the current org context (403)."""

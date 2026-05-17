@@ -1,9 +1,9 @@
-"""Signup e login.
+"""Signup and login.
 
-signup gira senza contesto tenant (admin_session): `users` non e
-org-scoped e la creazione org+membership passa dalla funzione
-SECURITY DEFINER `provision_organization` (docs/adr/0015), unico punto
-che crea un tenant.
+signup runs without a tenant context (admin_session): ``users`` is not
+org-scoped and org+membership creation goes through the SECURITY
+DEFINER function ``provision_organization`` (docs/adr/0015), the single
+place that creates a tenant.
 """
 
 from __future__ import annotations
@@ -15,6 +15,7 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from flow_core.errors import AuthError
+from flow_core.i18n import MessageCode
 from flow_core.models.user import User
 from flow_core.security import create_access_token, hash_password, verify_password
 
@@ -31,7 +32,7 @@ async def signup(
 ) -> SignupResult:
     user = User(email=email, password_hash=hash_password(password))
     session.add(user)
-    await session.flush()  # popola user.id
+    await session.flush()  # populate user.id
     result = await session.execute(
         text("SELECT provision_organization(:n, :u)"),
         {"n": org_name, "u": str(user.id)},
@@ -47,10 +48,6 @@ async def signup(
 async def login(session: AsyncSession, *, email: str, password: str) -> str:
     result = await session.execute(select(User).where(User.email == email))
     user = result.scalar_one_or_none()
-    if (
-        user is None
-        or not user.is_active
-        or not verify_password(password, user.password_hash)
-    ):
-        raise AuthError("credenziali non valide")
+    if user is None or not user.is_active or not verify_password(password, user.password_hash):
+        raise AuthError(MessageCode.AUTH_INVALID_CREDENTIALS)
     return create_access_token(user_id=str(user.id))

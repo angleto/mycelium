@@ -1,6 +1,6 @@
-"""Hashing password (argon2) e token JWT.
+"""Password hashing (argon2) and JWT tokens.
 
-Nessun fallback insicuro: il segreto JWT e obbligatorio (config.py).
+No insecure fallback: the JWT secret is mandatory (config.py).
 """
 
 from __future__ import annotations
@@ -14,6 +14,7 @@ from argon2.exceptions import InvalidHashError, VerifyMismatchError
 
 from flow_core.config import get_settings
 from flow_core.errors import AuthError
+from flow_core.i18n import MessageCode
 
 _ph = PasswordHasher()
 
@@ -46,9 +47,7 @@ def create_access_token(*, user_id: str, extra: dict[str, Any] | None = None) ->
 def decode_token(token: str) -> dict[str, Any]:
     s = get_settings()
     try:
-        decoded: dict[str, Any] = jwt.decode(
-            token, s.jwt_secret, algorithms=[s.jwt_alg]
-        )
+        decoded: dict[str, Any] = jwt.decode(token, s.jwt_secret, algorithms=[s.jwt_alg])
     except jwt.PyJWTError as exc:
-        raise AuthError("token non valido o scaduto") from exc
+        raise AuthError(MessageCode.AUTH_TOKEN_INVALID) from exc
     return decoded

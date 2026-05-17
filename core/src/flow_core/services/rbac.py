@@ -1,7 +1,7 @@
-"""RBAC nel service layer (unico choke point per GUI/REST/MCP).
+"""RBAC in the service layer (single choke point for GUI/REST/MCP).
 
-Le query girano sotto RLS (tenant_session): la membership e gia
-filtrata sull'org corrente; il filtro esplicito e ridondanza difensiva.
+Queries run under RLS (tenant_session): membership is already filtered
+to the current org; the explicit filter is defensive redundancy.
 """
 
 from __future__ import annotations
@@ -12,6 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from flow_core.errors import ForbiddenError, NotFoundError
+from flow_core.i18n import MessageCode
 from flow_core.models.membership import Membership, Role
 
 _RANK: dict[Role, int] = {
@@ -22,9 +23,7 @@ _RANK: dict[Role, int] = {
 }
 
 
-async def get_role(
-    session: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID
-) -> Role:
+async def get_role(session: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID) -> Role:
     result = await session.execute(
         select(Membership.role).where(
             Membership.org_id == org_id,
@@ -33,8 +32,19 @@ async def get_role(
     )
     role = result.scalar_one_or_none()
     if role is None:
-        raise NotFoundError("nessuna membership nell'organizzazione")
+        raise NotFoundError(MessageCode.RBAC_NO_MEMBERSHIP)
     return role
+
+
+def ensure_role(current: Role, minimum: Role) -> None:
+    """Pure RBAC check (no DB): raise ForbiddenError if the current
+    role is below the minimum."""
+    if _RANK[current] < _RANK[minimum]:
+        raise ForbiddenError(
+            MessageCode.RBAC_ROLE_INSUFFICIENT,
+            current=current.value,
+            minimum=minimum.value,
+        )
 
 
 async def require_role(
@@ -44,8 +54,5 @@ async def require_role(
     minimum: Role,
 ) -> Role:
     role = await get_role(session, org_id, user_id)
-    if _RANK[role] < _RANK[minimum]:
-        raise ForbiddenError(
-            f"ruolo {role.value} insufficiente, richiesto >= {minimum.value}"
-        )
+    ensure_role(role, minimum)
     return role
