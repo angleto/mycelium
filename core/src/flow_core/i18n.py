@@ -28,6 +28,10 @@ class MessageCode(enum.StrEnum):
     TAG_DUPLICATE = "tag.duplicate"
     TAG_AMBIGUOUS = "tag.ambiguous"
     TAG_KIND_MISMATCH = "tag.kind_mismatch"
+    WORKFLOW_NOT_FOUND = "workflow.not_found"
+    WORKFLOW_INVALID = "workflow.invalid"
+    TRANSITION_NOT_ALLOWED = "workflow.transition_not_allowed"
+    DEPENDENCY_CYCLE = "dependency.cycle"
     DOMAIN_ERROR = "domain.error"
 
 
@@ -49,6 +53,10 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
         MessageCode.TAG_DUPLICATE: "A tag with this name already exists",
         MessageCode.TAG_AMBIGUOUS: "Ambiguous tag name: {name}",
         MessageCode.TAG_KIND_MISMATCH: "Tag is not of the expected kind",
+        MessageCode.WORKFLOW_NOT_FOUND: "Workflow not found",
+        MessageCode.WORKFLOW_INVALID: ("Invalid workflow: exactly one initial state is required"),
+        MessageCode.TRANSITION_NOT_ALLOWED: ("Transition not allowed by the workflow"),
+        MessageCode.DEPENDENCY_CYCLE: ("This dependency would create a cycle"),
         MessageCode.DOMAIN_ERROR: "Domain error",
     },
 }
