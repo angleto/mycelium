@@ -1,6 +1,6 @@
 """Dependency service (docs/adr/0004, FR-3): typed edges, cycle
 detection before insert, DAG graph query, derived blocked overlay.
-Additive in F2.3. CPM scheduling consumes these in F3.
+CPM scheduling consumes these in F3.
 """
 
 from __future__ import annotations
@@ -11,13 +11,15 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from flow_core.errors import DomainError, NotFoundError
 from flow_core.i18n import MessageCode
 from flow_core.models.dependency import DependencyType, TaskDependency
 from flow_core.models.membership import Role
-from flow_core.models.task import Task, TaskStatus
+from flow_core.models.task import Task
 from flow_core.models.task_tag import TaskTag
+from flow_core.models.workflow import WorkflowState
 from flow_core.services import audit
 from flow_core.services.rbac import require_role
 from flow_core.services.tasks import get_task
@@ -141,20 +143,20 @@ async def list_dependencies(
 
 async def _blocked_ids(session: AsyncSession, node_ids: set[uuid.UUID]) -> set[uuid.UUID]:
     """Derived overlay (FR-3): a task is blocked if it has an incoming
-    dependency whose predecessor is not in a terminal state. F2 uses
-    the F1 status enum; refined with the state machine (F2.4) and the
-    scheduler (F3)."""
+    dependency whose predecessor is not in a terminal workflow state.
+    Non-persistent; refined by the scheduler (F3)."""
     if not node_ids:
         return set()
-    pred = Task.__table__.alias("pred")
+    pred = aliased(Task)
     rows = (
         (
             await session.execute(
                 select(TaskDependency.successor_id)
-                .join(pred, pred.c.id == TaskDependency.predecessor_id)
+                .join(pred, pred.id == TaskDependency.predecessor_id)
+                .join(WorkflowState, WorkflowState.id == pred.state_id)
                 .where(
                     TaskDependency.successor_id.in_(node_ids),
-                    pred.c.status != TaskStatus.done,
+                    WorkflowState.is_terminal.is_(False),
                 )
             )
         )
@@ -177,6 +179,15 @@ async def graph(
         )
     tasks = list((await session.execute(stmt)).scalars().unique().all())
     node_ids = {t.id for t in tasks}
+    state_ids = {t.state_id for t in tasks}
+    state_names: dict[uuid.UUID, str] = {}
+    if state_ids:
+        for sid, name in (
+            await session.execute(
+                select(WorkflowState.id, WorkflowState.name).where(WorkflowState.id.in_(state_ids))
+            )
+        ).all():
+            state_names[sid] = name
     blocked = await _blocked_ids(session, node_ids)
     deps = await list_dependencies(session, org_id=org_id)
     edges = [
@@ -193,7 +204,7 @@ async def graph(
         {
             "id": str(t.id),
             "title": t.title,
-            "status": t.status.value,
+            "state": state_names.get(t.state_id, ""),
             "blocked": t.id in blocked,
         }
         for t in tasks

@@ -1,5 +1,5 @@
-"""Task service: CRUD, tags/assignees, comments. RBAC, optimistic
-concurrency, i18n, audit. Workflow rules arrive in F2.
+"""Task service: CRUD, tags/assignees, comments, workflow state
+transitions. RBAC, optimistic concurrency, i18n, audit (docs/adr/0004).
 """
 
 from __future__ import annotations
@@ -19,11 +19,12 @@ from flow_core.errors import DomainError, NotFoundError
 from flow_core.i18n import MessageCode
 from flow_core.models.comment import Comment
 from flow_core.models.membership import Role
-from flow_core.models.tag import Tag
-from flow_core.models.task import ExecKind, Task, TaskStatus
+from flow_core.models.tag import Tag, TagKind
+from flow_core.models.task import ExecKind, Task
 from flow_core.models.task_assignee import TaskAssignee
 from flow_core.models.task_tag import TaskTag
 from flow_core.services import audit
+from flow_core.services import workflow as wf
 from flow_core.services.rbac import require_role
 
 _UPDATABLE = frozenset(
@@ -80,6 +81,15 @@ async def create_task(
     await require_role(session, org_id, actor_id, Role.member)
     if parent_task_id is not None:
         await get_task(session, org_id=org_id, task_id=parent_task_id)
+    project_tag_id: uuid.UUID | None = None
+    if tag_ids:
+        project_tag_id = (
+            await session.execute(
+                select(Tag.id).where(Tag.id.in_(tag_ids), Tag.kind == TagKind.project).limit(1)
+            )
+        ).scalar_one_or_none()
+    workflow = await wf.resolve_effective_workflow(session, org_id, project_tag_id)
+    initial = await wf.get_initial_state(session, workflow.id)
     task = Task(
         org_id=org_id,
         title=title,
@@ -87,6 +97,7 @@ async def create_task(
         priority=priority,
         start_date=start_date,
         due_date=due_date,
+        state_id=initial.id,
         parent_task_id=parent_task_id,
         executor_kind=executor_kind,
         executor_user_id=executor_user_id,
@@ -116,7 +127,7 @@ async def list_tasks(
     session: AsyncSession,
     *,
     org_id: uuid.UUID,
-    status: TaskStatus | None = None,
+    state_id: uuid.UUID | None = None,
     tag_id: uuid.UUID | None = None,
     assignee_id: uuid.UUID | None = None,
     parent_task_id: uuid.UUID | None = None,
@@ -128,8 +139,8 @@ async def list_tasks(
         stmt = stmt.where(Task.deleted_at.is_(None))
     if not include_archived:
         stmt = stmt.where(Task.is_archived.is_(False))
-    if status is not None:
-        stmt = stmt.where(Task.status == status)
+    if state_id is not None:
+        stmt = stmt.where(Task.state_id == state_id)
     if parent_task_id is not None:
         stmt = stmt.where(Task.parent_task_id == parent_task_id)
     if tag_id is not None:
@@ -175,6 +186,40 @@ async def update_task(
     return new_version
 
 
+async def set_state(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    task_id: uuid.UUID,
+    expected_version: int,
+    state_id: uuid.UUID,
+) -> int:
+    await require_role(session, org_id, actor_id, Role.member)
+    task = await get_task(session, org_id=org_id, task_id=task_id)
+    workflow = await wf.effective_workflow_for_task(session, org_id, task_id)
+    if not await wf.state_in_workflow(session, workflow.id, state_id):
+        raise DomainError(MessageCode.TRANSITION_NOT_ALLOWED)
+    if task.state_id != state_id:
+        await wf.assert_transition(session, workflow.id, task.state_id, state_id)
+    new_version = await optimistic_update(
+        session,
+        Task,
+        pk=task_id,
+        expected_version=expected_version,
+        values={"state_id": state_id},
+    )
+    await audit.log(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        entity="task",
+        entity_id=task_id,
+        action="set_state",
+    )
+    return new_version
+
+
 async def _set(
     session: AsyncSession,
     *,
@@ -203,26 +248,6 @@ async def _set(
         action=action,
     )
     return new_version
-
-
-async def set_status(
-    session: AsyncSession,
-    *,
-    org_id: uuid.UUID,
-    actor_id: uuid.UUID,
-    task_id: uuid.UUID,
-    expected_version: int,
-    status: TaskStatus,
-) -> int:
-    return await _set(
-        session,
-        org_id=org_id,
-        actor_id=actor_id,
-        task_id=task_id,
-        expected_version=expected_version,
-        values={"status": status},
-        action="set_status",
-    )
 
 
 async def archive_task(

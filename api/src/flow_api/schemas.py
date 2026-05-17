@@ -9,7 +9,7 @@ from decimal import Decimal
 from pydantic import BaseModel, Field
 
 from flow_core.models.tag import TagKind
-from flow_core.models.task import ExecKind, TaskStatus
+from flow_core.models.task import ExecKind
 
 
 class SignupIn(BaseModel):
@@ -125,9 +125,17 @@ class TaskPatchIn(BaseModel):
     parent_task_id: uuid.UUID | None = None
 
 
-class TaskStatusIn(BaseModel):
+class TaskStateIn(BaseModel):
     expected_version: int = Field(ge=1)
-    status: TaskStatus
+    state_id: uuid.UUID
+
+
+class StateOut(BaseModel):
+    id: uuid.UUID
+    name: str
+    ord: int
+    is_initial: bool
+    is_terminal: bool
 
 
 class ExpectedVersionIn(BaseModel):
@@ -138,7 +146,8 @@ class TaskOut(BaseModel):
     id: uuid.UUID
     title: str
     description: str | None
-    status: TaskStatus
+    state_id: uuid.UUID
+    state: str
     priority: int
     start_date: datetime.date | None
     due_date: datetime.date | None

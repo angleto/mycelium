@@ -1,5 +1,6 @@
-"""Task: primary unit. F1 subset (workflow states in F2, scheduler
-fields in F3). Executor = human user or LLM agent (docs/adr/0004)."""
+"""Task: primary unit. State is a workflow state (docs/adr/0004,
+FR-6); scheduler fields arrive in F3. Executor = human user or LLM
+agent."""
 
 from __future__ import annotations
 
@@ -8,7 +9,15 @@ import enum
 import uuid
 from decimal import Decimal
 
-from sqlalchemy import Date, DateTime, ForeignKey, Numeric, SmallInteger, String, Text
+from sqlalchemy import (
+    Date,
+    DateTime,
+    ForeignKey,
+    Numeric,
+    SmallInteger,
+    String,
+    Text,
+)
 from sqlalchemy import Enum as SAEnum
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -20,13 +29,6 @@ from flow_core.models.base import (
     UUIDPKMixin,
     VersionMixin,
 )
-
-
-class TaskStatus(enum.StrEnum):
-    todo = "todo"
-    in_progress = "in_progress"
-    blocked = "blocked"
-    done = "done"
 
 
 class ExecKind(enum.StrEnum):
@@ -42,10 +44,11 @@ class Task(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, Base):
     priority: Mapped[int] = mapped_column(SmallInteger, nullable=False, server_default="3")
     start_date: Mapped[datetime.date | None] = mapped_column(Date, nullable=True)
     due_date: Mapped[datetime.date | None] = mapped_column(Date, nullable=True)
-    status: Mapped[TaskStatus] = mapped_column(
-        SAEnum(TaskStatus, name="task_status", native_enum=True, create_type=False),
+    state_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("workflow_states.id", ondelete="RESTRICT"),
         nullable=False,
-        server_default="todo",
+        index=True,
     )
     estimate_effort_h: Mapped[Decimal | None] = mapped_column(Numeric(8, 2), nullable=True)
     parent_task_id: Mapped[uuid.UUID | None] = mapped_column(

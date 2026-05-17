@@ -22,7 +22,7 @@ from flow_core.db import tenant_session
 from flow_core.errors import AuthError
 from flow_core.i18n import MessageCode
 from flow_core.models.tag import Tag, TagKind
-from flow_core.models.task import Task, TaskStatus
+from flow_core.models.task import Task
 from flow_core.security import decode_token
 from flow_core.services import tasks, taxonomy
 from flow_core.services.rbac import get_role
@@ -65,7 +65,7 @@ def _task(t: Task) -> dict[str, Any]:
     return {
         "id": str(t.id),
         "title": t.title,
-        "status": t.status.value,
+        "state_id": str(t.state_id),
         "priority": t.priority,
         "version": t.version,
     }
@@ -168,10 +168,14 @@ async def create_task(
 
 
 @mcp.tool()
-async def list_tasks(token: str, org_id: str, status: str | None = None) -> list[dict[str, Any]]:
-    """List tasks, optionally filtered by status."""
+async def list_tasks(token: str, org_id: str, state_id: str | None = None) -> list[dict[str, Any]]:
+    """List tasks, optionally filtered by workflow state id."""
     async with _tenant(token, org_id) as (s, org, _user):
-        rows = await tasks.list_tasks(s, org_id=org, status=TaskStatus(status) if status else None)
+        rows = await tasks.list_tasks(
+            s,
+            org_id=org,
+            state_id=uuid.UUID(state_id) if state_id else None,
+        )
         return [_task(t) for t in rows]
 
 

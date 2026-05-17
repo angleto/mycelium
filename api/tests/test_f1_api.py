@@ -68,12 +68,22 @@ async def test_f1_api_flow() -> None:
         assert stale.status_code == 409
         assert stale.json()["code"] == "concurrency.stale_version"
 
-        st = await c.post(
-            f"/tasks/{task['id']}/status",
+        states = {
+            s["name"]: s["id"]
+            for s in (await c.get(f"/tasks/{task['id']}/states", headers=h)).json()
+        }
+        s3 = await c.post(
+            f"/tasks/{task['id']}/state",
             headers=h,
-            json={"expected_version": 2, "status": "done"},
+            json={"expected_version": 2, "state_id": states["in_progress"]},
         )
-        assert st.json()["version"] == 3
+        assert s3.json()["version"] == 3
+        s4 = await c.post(
+            f"/tasks/{task['id']}/state",
+            headers=h,
+            json={"expected_version": 3, "state_id": states["done"]},
+        )
+        assert s4.json()["version"] == 4
 
         cm = (await c.post(f"/tasks/{task['id']}/comments", headers=h, json={"body": "n"})).json()
         assert (await c.get(f"/tasks/{task['id']}/comments", headers=h)).json()[0]["id"] == cm["id"]
@@ -81,7 +91,7 @@ async def test_f1_api_flow() -> None:
         await c.post(
             f"/tasks/{task['id']}/delete",
             headers=h,
-            json={"expected_version": 3},
+            json={"expected_version": 4},
         )
         assert (await c.get("/tasks", headers=h)).json() == []
 

@@ -12,7 +12,7 @@ from flow_core.models.memory_blob import MemoryBlob
 from flow_core.models.organization import Organization
 from flow_core.models.project_profile import ProjectProfile
 from flow_core.models.tag import Tag, TagKind
-from flow_core.models.task import ExecKind, Task, TaskStatus
+from flow_core.models.task import ExecKind, Task
 from flow_core.models.task_assignee import TaskAssignee
 from flow_core.models.task_tag import TaskTag
 from flow_core.models.user import User
@@ -39,7 +39,6 @@ __all__ = [
     "Task",
     "TaskAssignee",
     "TaskDependency",
-    "TaskStatus",
     "TaskTag",
     "User",
     "WorkflowDefinition",

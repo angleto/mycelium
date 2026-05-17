@@ -1,4 +1,5 @@
-"""F1 verification (DB-backed): taxonomy + task service layer."""
+"""F1 verification (DB-backed): taxonomy + task service layer.
+Updated for the F2 state-machine cutover."""
 
 from __future__ import annotations
 
@@ -10,8 +11,8 @@ from flow_core.db import admin_session, tenant_session
 from flow_core.errors import ConflictError, DomainError, NotFoundError
 from flow_core.i18n import MessageCode
 from flow_core.models.tag import TagKind
-from flow_core.models.task import TaskStatus
 from flow_core.services import tasks, taxonomy
+from flow_core.services import workflow as wf
 from flow_core.services.auth import signup
 from flow_core.services.taxonomy import ClientInput
 
@@ -49,7 +50,7 @@ async def test_taxonomy_and_duplicate() -> None:
     assert ei.value.code is MessageCode.TAG_DUPLICATE
 
 
-async def test_task_crud_and_isolation() -> None:
+async def test_task_crud_state_and_isolation() -> None:
     org_a, user_a = await _org()
     org_b, user_b = await _org()
     async with tenant_session(str(org_a), str(user_a)) as s:
@@ -63,6 +64,9 @@ async def test_task_crud_and_isolation() -> None:
             assignee_ids=[user_a],
         )
         tid, tv = t.id, t.version
+        d = await wf.get_default_workflow(s, org_a)
+        states = {x.name: x.id for x in await wf.get_states(s, d.id)}
+        assert t.state_id == states["todo"]
     async with tenant_session(str(org_a), str(user_a)) as s:
         rows = await tasks.list_tasks(s, org_id=org_a, tag_id=pr.id)
         assert [r.id for r in rows] == [tid]
@@ -85,23 +89,44 @@ async def test_task_crud_and_isolation() -> None:
                 expected_version=tv,
                 values={"title": "stale"},
             )
+    # Illegal transition todo -> done is rejected; must go via
+    # in_progress (default workflow).
+    with pytest.raises(DomainError) as ei:
+        async with tenant_session(str(org_a), str(user_a)) as s:
+            await tasks.set_state(
+                s,
+                org_id=org_a,
+                actor_id=user_a,
+                task_id=tid,
+                expected_version=v2,
+                state_id=states["done"],
+            )
+    assert ei.value.code is MessageCode.TRANSITION_NOT_ALLOWED
     async with tenant_session(str(org_a), str(user_a)) as s:
-        v3 = await tasks.set_status(
+        v3 = await tasks.set_state(
             s,
             org_id=org_a,
             actor_id=user_a,
             task_id=tid,
             expected_version=v2,
-            status=TaskStatus.done,
+            state_id=states["in_progress"],
         )
-        c = await tasks.add_comment(s, org_id=org_a, actor_id=user_a, task_id=tid, body="n")
-        assert (await tasks.list_comments(s, org_id=org_a, task_id=tid))[0].id == c.id
-        v4 = await tasks.soft_delete_task(
+        v4 = await tasks.set_state(
             s,
             org_id=org_a,
             actor_id=user_a,
             task_id=tid,
             expected_version=v3,
+            state_id=states["done"],
+        )
+        c = await tasks.add_comment(s, org_id=org_a, actor_id=user_a, task_id=tid, body="n")
+        assert (await tasks.list_comments(s, org_id=org_a, task_id=tid))[0].id == c.id
+        v5 = await tasks.soft_delete_task(
+            s,
+            org_id=org_a,
+            actor_id=user_a,
+            task_id=tid,
+            expected_version=v4,
         )
         assert await tasks.list_tasks(s, org_id=org_a) == []
         await tasks.restore_task(
@@ -109,7 +134,7 @@ async def test_task_crud_and_isolation() -> None:
             org_id=org_a,
             actor_id=user_a,
             task_id=tid,
-            expected_version=v4,
+            expected_version=v5,
         )
         assert len(await tasks.list_tasks(s, org_id=org_a)) == 1
     async with tenant_session(str(org_b), str(user_b)) as s:

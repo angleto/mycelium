@@ -6,6 +6,7 @@ import uuid
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, status
+from sqlalchemy import select
 
 from flow_api.deps import TenantCtx, tenant_ctx
 from flow_api.schemas import (
@@ -13,26 +14,30 @@ from flow_api.schemas import (
     CommentCreateIn,
     CommentOut,
     ExpectedVersionIn,
+    StateOut,
     TagRefIn,
     TaskCreateIn,
     TaskOut,
     TaskPatchIn,
-    TaskStatusIn,
+    TaskStateIn,
     VersionOut,
 )
 from flow_core.models.comment import Comment
-from flow_core.models.task import Task, TaskStatus
+from flow_core.models.task import Task
+from flow_core.models.workflow import WorkflowState
 from flow_core.services import tasks as svc
+from flow_core.services import workflow as wf
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
 
-def _out(t: Task) -> TaskOut:
+def _out(t: Task, state_name: str) -> TaskOut:
     return TaskOut(
         id=t.id,
         title=t.title,
         description=t.description,
-        status=t.status,
+        state_id=t.state_id,
+        state=state_name,
         priority=t.priority,
         start_date=t.start_date,
         due_date=t.due_date,
@@ -51,6 +56,17 @@ def _comment_out(c: Comment) -> CommentOut:
         body=c.body,
         version=c.version,
     )
+
+
+async def _state_names(ctx: TenantCtx, state_ids: set[uuid.UUID]) -> dict[uuid.UUID, str]:
+    if not state_ids:
+        return {}
+    rows = (
+        await ctx.session.execute(
+            select(WorkflowState.id, WorkflowState.name).where(WorkflowState.id.in_(state_ids))
+        )
+    ).all()
+    return {sid: name for sid, name in rows}
 
 
 @router.post("", response_model=TaskOut)
@@ -73,13 +89,14 @@ async def create_task(
         tag_ids=body.tag_ids,
         assignee_ids=body.assignee_ids,
     )
-    return _out(task)
+    names = await _state_names(ctx, {task.state_id})
+    return _out(task, names.get(task.state_id, ""))
 
 
 @router.get("", response_model=list[TaskOut])
 async def list_tasks(
     ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
-    task_status: TaskStatus | None = None,
+    state_id: uuid.UUID | None = None,
     tag_id: uuid.UUID | None = None,
     assignee_id: uuid.UUID | None = None,
     parent_task_id: uuid.UUID | None = None,
@@ -89,19 +106,41 @@ async def list_tasks(
     rows = await svc.list_tasks(
         ctx.session,
         org_id=ctx.org_id,
-        status=task_status,
+        state_id=state_id,
         tag_id=tag_id,
         assignee_id=assignee_id,
         parent_task_id=parent_task_id,
         include_archived=include_archived,
         include_deleted=include_deleted,
     )
-    return [_out(t) for t in rows]
+    names = await _state_names(ctx, {t.state_id for t in rows})
+    return [_out(t, names.get(t.state_id, "")) for t in rows]
 
 
 @router.get("/{task_id}", response_model=TaskOut)
 async def get_task(task_id: uuid.UUID, ctx: Annotated[TenantCtx, Depends(tenant_ctx)]) -> TaskOut:
-    return _out(await svc.get_task(ctx.session, org_id=ctx.org_id, task_id=task_id))
+    task = await svc.get_task(ctx.session, org_id=ctx.org_id, task_id=task_id)
+    names = await _state_names(ctx, {task.state_id})
+    return _out(task, names.get(task.state_id, ""))
+
+
+@router.get("/{task_id}/states", response_model=list[StateOut])
+async def task_states(
+    task_id: uuid.UUID, ctx: Annotated[TenantCtx, Depends(tenant_ctx)]
+) -> list[StateOut]:
+    await svc.get_task(ctx.session, org_id=ctx.org_id, task_id=task_id)
+    workflow = await wf.effective_workflow_for_task(ctx.session, ctx.org_id, task_id)
+    states = await wf.get_states(ctx.session, workflow.id)
+    return [
+        StateOut(
+            id=s.id,
+            name=s.name,
+            ord=s.ord,
+            is_initial=s.is_initial,
+            is_terminal=s.is_terminal,
+        )
+        for s in states
+    ]
 
 
 @router.patch("/{task_id}", response_model=VersionOut)
@@ -122,19 +161,19 @@ async def patch_task(
     return VersionOut(id=task_id, version=version)
 
 
-@router.post("/{task_id}/status", response_model=VersionOut)
-async def set_status(
+@router.post("/{task_id}/state", response_model=VersionOut)
+async def set_state(
     task_id: uuid.UUID,
-    body: TaskStatusIn,
+    body: TaskStateIn,
     ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
 ) -> VersionOut:
-    version = await svc.set_status(
+    version = await svc.set_state(
         ctx.session,
         org_id=ctx.org_id,
         actor_id=ctx.user_id,
         task_id=task_id,
         expected_version=body.expected_version,
-        status=body.status,
+        state_id=body.state_id,
     )
     return VersionOut(id=task_id, version=version)
 

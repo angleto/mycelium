@@ -16,6 +16,8 @@ from flow_core.errors import ConflictError, DomainError
 from flow_core.i18n import MessageCode
 from flow_core.models.membership import Role
 from flow_core.models.project_profile import ProjectProfile
+from flow_core.models.tag import Tag, TagKind
+from flow_core.models.task_tag import TaskTag
 from flow_core.models.workflow import (
     WorkflowDefinition,
     WorkflowState,
@@ -227,3 +229,36 @@ async def set_project_workflow(
         action="set_workflow",
     )
     return int(row[0])
+
+
+async def effective_workflow_for_task(
+    session: AsyncSession, org_id: uuid.UUID, task_id: uuid.UUID
+) -> WorkflowDefinition:
+    """A task's effective workflow = the project override of its
+    project-kind tag (if any), else the Org default (docs/adr/0004)."""
+    project_tag_id = (
+        await session.execute(
+            select(Tag.id)
+            .join(TaskTag, TaskTag.tag_id == Tag.id)
+            .where(
+                TaskTag.task_id == task_id,
+                Tag.kind == TagKind.project,
+            )
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    return await resolve_effective_workflow(session, org_id, project_tag_id)
+
+
+async def state_in_workflow(
+    session: AsyncSession, workflow_id: uuid.UUID, state_id: uuid.UUID
+) -> bool:
+    row = (
+        await session.execute(
+            select(WorkflowState.id).where(
+                WorkflowState.id == state_id,
+                WorkflowState.workflow_id == workflow_id,
+            )
+        )
+    ).scalar_one_or_none()
+    return row is not None
