@@ -22,12 +22,12 @@ class Settings(BaseSettings):
 
     # Database
     database_url: str = Field(
-        default="postgresql+asyncpg://flow:flow@localhost:5432/flow",
-        description="URL async (asyncpg) usato dall'app.",
+        default="postgresql+asyncpg://flow_app:flow_app@localhost:5432/flow",
+        description="URL async (asyncpg). Ruolo runtime flow_app (RLS).",
     )
     database_url_sync: str = Field(
         default="postgresql+psycopg://flow:flow@localhost:5432/flow",
-        description="URL sync (psycopg) usato da Alembic.",
+        description="URL sync (psycopg) per Alembic. Ruolo owner flow.",
     )
 
     # Redis

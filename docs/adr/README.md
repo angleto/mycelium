@@ -22,3 +22,4 @@ Formato: Status, Contesto, Decisione, Conseguenze, Alternative scartate.
 - [0012 Astrazione LLM/Embedder, riuso pattern bitvision](0012-llm-embedder-abstraction.md)
 - [0013 Layer di pianificazione advisory, core deterministico](0013-planning-advisory-layer.md)
 - [0014 Dominio personale e budget envelope](0014-personal-domain-budgets.md)
+- [0015 RLS: due ruoli Postgres e provisioning SECURITY DEFINER](0015-rls-two-role-and-provisioning.md)

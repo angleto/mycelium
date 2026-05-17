@@ -27,10 +27,6 @@ class MemoryBlob(UUIDPKMixin, OrgScopedMixin, TimestampMixin, Base):
     project_id: Mapped[uuid.UUID | None] = mapped_column(
         PG_UUID(as_uuid=True), nullable=True, index=True
     )
-    namespace: Mapped[str] = mapped_column(
-        String(40), nullable=False, server_default="email"
-    )
-    tier: Mapped[str] = mapped_column(
-        String(8), nullable=False, server_default="hot"
-    )
+    namespace: Mapped[str] = mapped_column(String(40), nullable=False, server_default="email")
+    tier: Mapped[str] = mapped_column(String(8), nullable=False, server_default="hot")
     text: Mapped[str | None] = mapped_column(Text, nullable=True)

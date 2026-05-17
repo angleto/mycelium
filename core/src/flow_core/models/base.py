@@ -51,15 +51,11 @@ class TimestampMixin:
 class OrgScopedMixin:
     """Ogni riga appartiene a una org. La RLS filtra su questa colonna."""
 
-    org_id: Mapped[uuid.UUID] = mapped_column(
-        PG_UUID(as_uuid=True), nullable=False, index=True
-    )
+    org_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False, index=True)
 
 
 class VersionMixin:
     """Contatore di versione per optimistic concurrency (incrementato
     esplicitamente dal service layer ad ogni update)."""
 
-    version: Mapped[int] = mapped_column(
-        BigInteger, nullable=False, default=1, server_default="1"
-    )
+    version: Mapped[int] = mapped_column(BigInteger, nullable=False, default=1, server_default="1")

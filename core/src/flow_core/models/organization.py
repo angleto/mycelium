@@ -19,6 +19,4 @@ class Organization(UUIDPKMixin, TimestampMixin, VersionMixin, Base):
     __tablename__ = "organizations"
 
     name: Mapped[str] = mapped_column(String(200), nullable=False)
-    fiscal_profile: Mapped[dict[str, Any] | None] = mapped_column(
-        JSONB, nullable=True
-    )
+    fiscal_profile: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)

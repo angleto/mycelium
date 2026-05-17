@@ -36,6 +36,4 @@ class Membership(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, Base
         nullable=False,
         index=True,
     )
-    role: Mapped[Role] = mapped_column(
-        SAEnum(Role, name="role", native_enum=True), nullable=False
-    )
+    role: Mapped[Role] = mapped_column(SAEnum(Role, name="role", native_enum=True), nullable=False)

@@ -18,6 +18,4 @@ class User(UUIDPKMixin, TimestampMixin, Base):
 
     email: Mapped[str] = mapped_column(String(320), nullable=False, unique=True)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
-    is_active: Mapped[bool] = mapped_column(
-        nullable=False, server_default=text("true")
-    )
+    is_active: Mapped[bool] = mapped_column(nullable=False, server_default=text("true"))

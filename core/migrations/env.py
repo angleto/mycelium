@@ -1,0 +1,60 @@
+"""Ambiente Alembic.
+
+Disaccoppiato dalle Settings dell'app: l'URL (sync, psycopg) e letto
+direttamente da FLOW_DATABASE_URL_SYNC, cosi le migrazioni non
+richiedono il segreto JWT. Le migrazioni girano come ruolo owner
+(`flow`), non come `flow_app` (vedi docs/adr/0015).
+"""
+
+from __future__ import annotations
+
+import os
+from logging.config import fileConfig
+
+from alembic import context
+from sqlalchemy import create_engine, pool
+
+from flow_core.models import Base
+
+config = context.config
+if config.config_file_name is not None:
+    fileConfig(config.config_file_name)
+
+target_metadata = Base.metadata
+
+_DEFAULT_URL = "postgresql+psycopg://flow:flow@localhost:5432/flow"
+
+
+def _url() -> str:
+    return os.environ.get("FLOW_DATABASE_URL_SYNC", _DEFAULT_URL)
+
+
+def run_migrations_offline() -> None:
+    context.configure(
+        url=_url(),
+        target_metadata=target_metadata,
+        literal_binds=True,
+        compare_type=True,
+        dialect_opts={"paramstyle": "named"},
+    )
+    with context.begin_transaction():
+        context.run_migrations()
+
+
+def run_migrations_online() -> None:
+    engine = create_engine(_url(), poolclass=pool.NullPool, future=True)
+    with engine.connect() as connection:
+        context.configure(
+            connection=connection,
+            target_metadata=target_metadata,
+            compare_type=True,
+        )
+        with context.begin_transaction():
+            context.run_migrations()
+    engine.dispose()
+
+
+if context.is_offline_mode():
+    run_migrations_offline()
+else:
+    run_migrations_online()
