@@ -48,6 +48,10 @@ class Settings(BaseSettings):
         description="Fernet key for the opaque-secret envelope.",
     )
 
+    # Memory embeddings (docs/adr/0005). Fixed at the DDL level
+    # (migration 0010); re-embedding to a new dim = a new column.
+    embed_dim: int = 384
+
     # App
     env: str = "dev"
     log_level: str = "INFO"

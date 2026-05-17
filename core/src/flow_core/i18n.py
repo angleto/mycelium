@@ -46,6 +46,9 @@ class MessageCode(enum.StrEnum):
     EMAIL_SYNC_FAILED = "email.sync_failed"
     INSUFFICIENT_CREDITS = "billing.insufficient_credits"
     RATE_CARD_NOT_FOUND = "billing.rate_card_not_found"
+    MEMORY_NOT_FOUND = "memory.not_found"
+    MEMORY_DIM_MISMATCH = "memory.dim_mismatch"
+    MEMORY_CROSS_SUBJECT = "memory.cross_subject"
     DOMAIN_ERROR = "domain.error"
 
 
@@ -85,6 +88,11 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
         MessageCode.EMAIL_SYNC_FAILED: "Email sync failed: {detail}",
         MessageCode.INSUFFICIENT_CREDITS: ("Insufficient credits: need {needed}, have {balance}"),
         MessageCode.RATE_CARD_NOT_FOUND: ("No active rate card for model {model_id}"),
+        MessageCode.MEMORY_NOT_FOUND: "Memory blob not found",
+        MessageCode.MEMORY_DIM_MISMATCH: ("Embedding dimension mismatch: expected {expected}"),
+        MessageCode.MEMORY_CROSS_SUBJECT: (
+            "Consolidation cannot cross org/project (hard isolation)"
+        ),
         MessageCode.DOMAIN_ERROR: "Domain error",
     },
 }

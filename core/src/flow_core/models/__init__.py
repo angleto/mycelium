@@ -33,7 +33,7 @@ from flow_core.models.email import (
 )
 from flow_core.models.event import Event, EventParticipant
 from flow_core.models.membership import Membership, Role
-from flow_core.models.memory_blob import MemoryBlob
+from flow_core.models.memory_blob import BlobSource, MemoryBlob, Tier
 from flow_core.models.organization import Organization
 from flow_core.models.project_profile import ProjectProfile
 from flow_core.models.schedule import Schedule
@@ -59,6 +59,7 @@ __all__ = [
     "ActivityLog",
     "Base",
     "BillingConfig",
+    "BlobSource",
     "Budget",
     "BudgetPeriod",
     "CalendarHoliday",
@@ -94,6 +95,7 @@ __all__ = [
     "TaskAssignee",
     "TaskDependency",
     "TaskTag",
+    "Tier",
     "TimeEntry",
     "TimeSource",
     "UsageRecord",

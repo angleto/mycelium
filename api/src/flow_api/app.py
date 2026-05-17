@@ -18,6 +18,7 @@ from flow_api.routers import (
     dependencies,
     email,
     events,
+    memory,
     org,
     schedule,
     tags,
@@ -86,4 +87,5 @@ def create_app() -> FastAPI:
     app.include_router(advisory.router)
     app.include_router(email.router)
     app.include_router(billing.router)
+    app.include_router(memory.router)
     return app

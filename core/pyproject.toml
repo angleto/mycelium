@@ -13,6 +13,7 @@ dependencies = [
     "argon2-cffi>=23.1",
     "pyjwt>=2.9",
     "cryptography>=43",
+    "pgvector>=0.3",
 ]
 
 [build-system]

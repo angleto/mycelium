@@ -671,3 +671,62 @@ class StorageRateIn(BaseModel):
 
 class ByokFactorIn(BaseModel):
     factor: Decimal = Field(ge=0)
+
+
+# --- F6: hierarchical memory (FR-8, docs/adr/0005, 0007, 0016) ---
+
+
+class MemoryWriteIn(BaseModel):
+    project_id: uuid.UUID | None = None
+    text: str = Field(min_length=1)
+    operation_id: str = Field(min_length=1, max_length=128)
+    namespace: str = Field(default="note", max_length=40)
+    sources: list[tuple[str, str]] = Field(default_factory=list)
+    importance: Decimal = Decimal(0)
+
+
+class MemorySearchIn(BaseModel):
+    project_id: uuid.UUID | None = None
+    query: str = Field(min_length=1)
+    operation_id: str = Field(min_length=1, max_length=128)
+    limit: int = Field(default=10, gt=0, le=100)
+    grader_min_rrf: float | None = None
+
+
+class MemoryBlobOut(BaseModel):
+    id: uuid.UUID
+    project_id: uuid.UUID | None
+    namespace: str
+    tier: str
+    text: str | None
+    summary: str | None
+    model_id: str | None
+    dim: int
+    access_count: int
+    cluster_id: uuid.UUID | None
+
+
+class MemoryHitOut(BaseModel):
+    blob: MemoryBlobOut
+    rrf: float
+
+
+class MemoryEraseIn(BaseModel):
+    source_kind: str = Field(min_length=1, max_length=40)
+    source_id: str = Field(min_length=1, max_length=255)
+
+
+class MemoryConsolidateIn(BaseModel):
+    project_id: uuid.UUID | None = None
+    blob_ids: list[uuid.UUID] = Field(min_length=1)
+    operation_id: str = Field(min_length=1, max_length=128)
+
+
+class TierCountsOut(BaseModel):
+    hot: int
+    warm: int
+    cold: int
+
+
+class ErasedOut(BaseModel):
+    deleted: int

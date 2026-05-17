@@ -47,6 +47,12 @@ namespace_packages = true
 explicit_package_bases = true
 mypy_path = "core/src:api/src:mcp/src:worker/src:sdi-inbound/src"
 
+# Untyped third-party libs: pgvector ships no py.typed;
+# sentence-transformers is an optional extra (lazily imported).
+[[tool.mypy.overrides]]
+module = ["pgvector.*", "sentence_transformers.*"]
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["core/tests", "api/tests"]

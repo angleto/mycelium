@@ -27,6 +27,7 @@ from flow_core.models.budget import Budget, BudgetPeriod
 from flow_core.models.dependency import DependencyType
 from flow_core.models.email import EmailAccount, EmailMessage, EmailProvider
 from flow_core.models.event import Event
+from flow_core.models.memory_blob import MemoryBlob
 from flow_core.models.schedule import Schedule
 from flow_core.models.tag import Tag, TagKind
 from flow_core.models.task import ConstraintKind, Necessity, ScheduleMode, Task
@@ -39,6 +40,7 @@ from flow_core.services import calendar as calendars
 from flow_core.services import dependencies, scheduler, tasks, taxonomy
 from flow_core.services import email as email_svc
 from flow_core.services import events as events_svc
+from flow_core.services import memory as memory_svc
 from flow_core.services import time_tracking as time_svc
 from flow_core.services.rbac import get_role
 from flow_core.services.taxonomy import ClientInput
@@ -1088,3 +1090,108 @@ async def list_usage(token: str, org_id: str, limit: int = 100) -> list[dict[str
     """List recent metered usage records."""
     async with _tenant(token, org_id) as (s, org, _user):
         return [_usage(r) for r in await billing_svc.list_usage(s, org_id=org, limit=limit)]
+
+
+# --- F6: hierarchical memory (FR-8) ---
+
+
+def _blob(b: MemoryBlob) -> dict[str, Any]:
+    return {
+        "id": str(b.id),
+        "project_id": str(b.project_id) if b.project_id else None,
+        "namespace": b.namespace,
+        "tier": b.tier,
+        "text": b.text,
+        "model_id": b.model_id,
+        "cluster_id": str(b.cluster_id) if b.cluster_id else None,
+    }
+
+
+@mcp.tool()
+async def memory_write(
+    token: str,
+    org_id: str,
+    text: str,
+    operation_id: str,
+    project_id: str | None = None,
+    namespace: str = "note",
+    source_kind: str | None = None,
+    source_id: str | None = None,
+) -> dict[str, Any]:
+    """Write a memory blob (embedding is metered). Optional provenance
+    for GDPR erasure. The (org, project) boundary is hard."""
+    async with _tenant(token, org_id) as (s, org, user):
+        sources = (
+            [(source_kind, source_id)] if source_kind is not None and source_id is not None else []
+        )
+        blob = await memory_svc.write_blob(
+            s,
+            org_id=org,
+            actor_id=user,
+            project_id=uuid.UUID(project_id) if project_id else None,
+            text_body=text,
+            operation_id=operation_id,
+            namespace=namespace,
+            sources=sources,
+        )
+        return _blob(blob)
+
+
+@mcp.tool()
+async def memory_search(
+    token: str,
+    org_id: str,
+    query: str,
+    operation_id: str,
+    project_id: str | None = None,
+    limit: int = 10,
+) -> list[dict[str, Any]]:
+    """Hybrid RRF retrieval within the (org, project) boundary
+    (retrieval-as-tool, ADR-0016). Deterministic order."""
+    async with _tenant(token, org_id) as (s, org, user):
+        hits = await memory_svc.retrieve(
+            s,
+            org_id=org,
+            actor_id=user,
+            project_id=uuid.UUID(project_id) if project_id else None,
+            query=query,
+            operation_id=operation_id,
+            limit=limit,
+        )
+        return [{"blob": _blob(h.blob), "rrf": h.rrf} for h in hits]
+
+
+@mcp.tool()
+async def memory_erase(token: str, org_id: str, source_kind: str, source_id: str) -> dict[str, Any]:
+    """GDPR erasure by provenance; cascades to embedding/sources."""
+    async with _tenant(token, org_id) as (s, org, user):
+        deleted = await memory_svc.gdpr_erase(
+            s,
+            org_id=org,
+            actor_id=user,
+            source_kind=source_kind,
+            source_id=source_id,
+        )
+        return {"deleted": deleted}
+
+
+@mcp.tool()
+async def memory_consolidate(
+    token: str,
+    org_id: str,
+    blob_ids: list[str],
+    operation_id: str,
+    project_id: str | None = None,
+) -> dict[str, Any]:
+    """Merge same-(org, project) blobs into one concept, provenance
+    preserved. Never crosses org/project."""
+    async with _tenant(token, org_id) as (s, org, user):
+        blob = await memory_svc.consolidate(
+            s,
+            org_id=org,
+            actor_id=user,
+            project_id=uuid.UUID(project_id) if project_id else None,
+            blob_ids=[uuid.UUID(b) for b in blob_ids],
+            operation_id=operation_id,
+        )
+        return _blob(blob)
