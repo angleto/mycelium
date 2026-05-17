@@ -127,6 +127,30 @@ macchina a stati nel service layer (unico choke point GUI/REST/MCP).
   abilitato, corpo verso object storage), cold (embedding pgvector
   HNSW). Con LLM disabilitato: warm = corpo verso object storage +
   metadati, nessun riassunto.
+- Tiering tipo memoria umana (ADR-0016): il tier e guidato da uno
+  score di accesso con decay (frequenza + recency) e da un segnale di
+  importanza, non solo da eta/dimensione. I concetti ricorrenti
+  (cluster consolidati, provenienza preservata, entro (org, progetto))
+  sono promossi a un tier compatto pre-caldo; cio che non ricorre
+  decade ed e demosso. **Invariante**: la frequenza determina solo il
+  tier di latenza, mai la ritenzione ne la visibilita; il cold resta
+  sempre recuperabile (raro != non importante).
+- Grader correttivo (CRAG adattato, ADR-0016): ogni retrieval e
+  graduato (soglia deterministica sullo score RRF fuso + grader LLM
+  locale opzionale). Rami: ok -> usa; incerto -> riscrivi/espandi
+  query; insufficiente -> allarga lo scope entro il tenant o rispondi
+  "evidenza insufficiente". Nessun ramo web (memoria privata, GDPR).
+- Retrieval come tool agentico (ADR-0016): il recupero memoria e
+  esposto come un tool MCP tra i tool deterministici; il planner
+  LLM/MCP sceglie vector/SQL/strutturato. Decisione deterministica
+  (ADR-0004/0013): l'LLM orchestra, non decide.
+- Connessioni: si usa il grafo strutturale gia presente (DAG
+  dipendenze, gerarchia tag/client/project, link email-task e
+  provenienza), non un knowledge graph estratto via LLM dal testo
+  (GraphRAG testuale differito).
+- Multimodale differito: v1 text-first con estrazione testo dagli
+  allegati; embedding multimodale (CLIP/ColPali, indice unico) come
+  fase successiva.
 - Retrieval ibrido baseline: ramo semantico (HNSW) + lessicale
   (tsvector/ts_rank, pg_trgm con indice trigram dedicato). Pre-filtro
   metadati = rilevanza; RLS + partizione = sicurezza. Per filtri molto

@@ -89,7 +89,10 @@ entita org-scoped. La memoria e partizionata per `org_id`.
 
 - `memory_blobs(id, org_id, project_tag_id, namespace, tier[hot|warm|
   cold], text?, summary?, embedding vector, model_id, dim,
-  fts tsvector, trgm, last_accessed_at)`
+  fts tsvector, trgm, last_accessed_at, access_count, access_score,
+  importance, concept_id?)` (access_score = frequenza + recency con
+  decay; tiering guidato da score+importance, ADR-0016; il cold resta
+  sempre interrogabile)
   - `PARTITION BY org_id`; RLS obbligatoria; predicato
     (org_id, project_tag_id) obbligatorio in ogni query
   - indici per partizione: HNSW su `embedding`, GIN su `fts`, GIN/GiST

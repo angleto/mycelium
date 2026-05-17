@@ -23,3 +23,4 @@ Formato: Status, Contesto, Decisione, Conseguenze, Alternative scartate.
 - [0013 Layer di pianificazione advisory, core deterministico](0013-planning-advisory-layer.md)
 - [0014 Dominio personale e budget envelope](0014-personal-domain-budgets.md)
 - [0015 RLS: due ruoli Postgres e provisioning SECURITY DEFINER](0015-rls-two-role-and-provisioning.md)
+- [0016 Memoria: tiering tipo memoria umana e allineamento ai pattern RAG](0016-memory-human-tiering-and-rag-alignment.md)

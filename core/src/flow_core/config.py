@@ -35,7 +35,8 @@ class Settings(BaseSettings):
 
     # Auth / JWT. Nessun default per il segreto: deve essere fornito via
     # FLOW_JWT_SECRET (fail-closed). In dev arriva da .env.
-    jwt_secret: str = Field(min_length=16, description="Segreto firma JWT.")
+    # >=32 byte: requisito RFC 7518 per HMAC-SHA256.
+    jwt_secret: str = Field(min_length=32, description="Segreto firma JWT.")
     jwt_alg: str = "HS256"
     jwt_ttl_seconds: int = 3600
 

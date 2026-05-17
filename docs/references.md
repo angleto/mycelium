@@ -34,6 +34,11 @@
   https://learn.microsoft.com/en-us/azure/search/hybrid-search-ranking
 - RRF, OpenSearch:
   https://opensearch.org/blog/introducing-reciprocal-rank-fusion-hybrid-search/
+- Pattern RAG (hybrid/graph/agentic/corrective/multimodal),
+  riferimento: https://github.com/honestsoul/rag_patterns
+  (vedi ADR-0016 per le nostre adozioni e deviazioni: niente ramo web
+  nel grader perche la memoria e privata; GraphRAG strutturale non
+  testuale; multimodale differito)
 
 ## Interni: pattern di astrazione LLM/Embedding da riusare
 

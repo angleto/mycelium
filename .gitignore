@@ -26,3 +26,6 @@ web/.vite/
 # OS / editor
 .DS_Store
 *.swp
+
+# Reference locale, non versionato (richiesta utente)
+docs/rag-architectures.txt

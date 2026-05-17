@@ -28,9 +28,13 @@ fase.
   REST + MCP; nucleo deterministico, LLM/MCP frontend.
 - **F5 Email**: connector Gmail OAuth2 + IMAP generico, sync, triage,
   email-to-task, invio SMTP (Proton Bridge a seguire).
-- **F6 Memoria**: tiering, summarization, `Embedder` pluggable +
-  pgvector, retrieval ibrido RRF entro (org, progetto), consolidamento
-  con provenienza, job di re-embedding, erasure GDPR.
+- **F6 Memoria**: tiering per frequenza/recency/importanza (ADR-0016,
+  invariante: il cold resta sempre recuperabile), summarization,
+  `Embedder` pluggable + pgvector, retrieval ibrido RRF entro
+  (org, progetto), **grader correttivo** (no ramo web), retrieval
+  esposto come tool MCP agentico, consolidamento con provenienza, job
+  di re-embedding, erasure GDPR. Multimodale e GraphRAG testuale
+  esplicitamente fuori (differiti).
 - **F7a Fatture B2B/B2C**: XML FatturaPA + validazione,
   `ManualExportChannel`, immutabilita, numerazione concorrenza-safe,
   ricerca, marca pagata, nota di credito TD04; tracciamento adesione

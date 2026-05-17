@@ -28,6 +28,7 @@ Decisioni di prodotto e architettura, consolidate e bloccate. Il
 | H | Esecutore | `task.executor` = utente umano (seriale) o agente LLM (parallelo, esente dalla timeline umana) |
 | I | Assistente pianificazione | Layer advisory core v1 sopra lo scheduler: nucleo deterministico (fattibilita + ranking + selezione vincolata), LLM/MCP come frontend in linguaggio naturale |
 | J | Dominio personale + budget | Modellati in v1: task con costo/luogo/contesto/necessita; budget envelope per periodo/categoria; selezione deterministica entro budget (knapsack a priorita) |
+| K | Memoria avanzata | Tiering per frequenza/recency/importanza (cold sempre recuperabile, raro != non importante); grader correttivo senza ramo web; retrieval come tool MCP agentico; grafo strutturale non testuale; multimodale differito (ADR-0016) |
 
 ## Decisioni di scope risolte
 
