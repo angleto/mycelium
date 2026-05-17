@@ -123,6 +123,38 @@ class WorkCalendar:
             cur = dt.datetime.combine(day, dt.time.min, self.tz)
         raise DomainError(MessageCode.DOMAIN_ERROR)
 
+    def add_capped(self, start: dt.datetime, minutes: int, daily_cap_minutes: float) -> dt.datetime:
+        """Like ``add`` but consumes at most ``daily_cap_minutes`` of
+        effort per calendar day (per-user capacity, ADR-0004). Used for
+        task durations; lag uses plain ``add`` (calendar time)."""
+        if minutes == 0:
+            return self.snap_forward(start)
+        if minutes < 0:
+            return self._subtract(start, -minutes)
+        if daily_cap_minutes <= 0:
+            raise DomainError(MessageCode.DOMAIN_ERROR)
+        cur = self.snap_forward(start).astimezone(self.tz)
+        remaining = float(minutes)
+        day = cur.date()
+        for _ in range(_MAX_DAYS):
+            used = 0.0
+            for ws, we in self._windows_on(day):
+                if cur >= we or used >= daily_cap_minutes:
+                    continue
+                seg_start = cur if cur > ws else ws
+                if seg_start >= we:
+                    continue
+                window_left = (we - seg_start).total_seconds() / 60.0
+                avail = min(window_left, daily_cap_minutes - used)
+                if remaining <= avail:
+                    return (seg_start + dt.timedelta(minutes=remaining)).astimezone(dt.UTC)
+                remaining -= avail
+                used += avail
+                cur = seg_start + dt.timedelta(minutes=avail)
+            day = day + dt.timedelta(days=1)
+            cur = dt.datetime.combine(day, dt.time.min, self.tz)
+        raise DomainError(MessageCode.DOMAIN_ERROR)
+
     def _subtract(self, start: dt.datetime, minutes: int) -> dt.datetime:
         cur = self.snap_backward(start).astimezone(self.tz)
         remaining = float(minutes)
