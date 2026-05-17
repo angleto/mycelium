@@ -1,10 +1,15 @@
-"""Schemi I/O dell'API (pydantic v2). Niente logica di dominio."""
+"""API I/O schemas (pydantic v2). No business logic."""
 
 from __future__ import annotations
 
+import datetime
 import uuid
+from decimal import Decimal
 
 from pydantic import BaseModel, Field
+
+from flow_core.models.tag import TagKind
+from flow_core.models.task import ExecKind, TaskStatus
 
 
 class SignupIn(BaseModel):
@@ -39,6 +44,125 @@ class OrgPatchIn(BaseModel):
     expected_version: int = Field(ge=1)
 
 
-class OrgVersionOut(BaseModel):
+class VersionOut(BaseModel):
     id: uuid.UUID
     version: int
+
+
+# Backward-compatible alias used by the org router.
+OrgVersionOut = VersionOut
+
+
+class TagCreateIn(BaseModel):
+    kind: TagKind
+    name: str = Field(min_length=1, max_length=120)
+    color: str | None = Field(default=None, max_length=16)
+
+
+class TagPatchIn(BaseModel):
+    expected_version: int = Field(ge=1)
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    color: str | None = Field(default=None, max_length=16)
+    status: str | None = Field(default=None, max_length=16)
+
+
+class TagOut(BaseModel):
+    id: uuid.UUID
+    kind: TagKind
+    name: str
+    color: str | None
+    status: str
+    version: int
+
+
+class ClientCreateIn(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    ragione_sociale: str = Field(min_length=1, max_length=200)
+    id_paese: str | None = Field(default=None, max_length=2)
+    id_codice: str | None = Field(default=None, max_length=30)
+    codice_fiscale: str | None = Field(default=None, max_length=30)
+    indirizzo: str | None = Field(default=None, max_length=200)
+    cap: str | None = Field(default=None, max_length=10)
+    comune: str | None = Field(default=None, max_length=120)
+    provincia: str | None = Field(default=None, max_length=4)
+    nazione: str | None = Field(default=None, max_length=2)
+    codice_destinatario: str | None = Field(default=None, max_length=7)
+    pec: str | None = Field(default=None, max_length=320)
+
+
+class ProjectCreateIn(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    client_tag_id: uuid.UUID | None = None
+    tariffa: Decimal | None = None
+    valuta: str = Field(default="EUR", max_length=3)
+    budget: Decimal | None = None
+
+
+class TaskCreateIn(BaseModel):
+    title: str = Field(min_length=1, max_length=300)
+    description: str | None = None
+    priority: int = Field(default=3, ge=1, le=4)
+    start_date: datetime.date | None = None
+    due_date: datetime.date | None = None
+    parent_task_id: uuid.UUID | None = None
+    executor_kind: ExecKind = ExecKind.human
+    executor_user_id: uuid.UUID | None = None
+    estimate_effort_h: Decimal | None = None
+    tag_ids: list[uuid.UUID] = Field(default_factory=list)
+    assignee_ids: list[uuid.UUID] = Field(default_factory=list)
+
+
+class TaskPatchIn(BaseModel):
+    expected_version: int = Field(ge=1)
+    title: str | None = Field(default=None, min_length=1, max_length=300)
+    description: str | None = None
+    priority: int | None = Field(default=None, ge=1, le=4)
+    start_date: datetime.date | None = None
+    due_date: datetime.date | None = None
+    estimate_effort_h: Decimal | None = None
+    executor_kind: ExecKind | None = None
+    executor_user_id: uuid.UUID | None = None
+    parent_task_id: uuid.UUID | None = None
+
+
+class TaskStatusIn(BaseModel):
+    expected_version: int = Field(ge=1)
+    status: TaskStatus
+
+
+class ExpectedVersionIn(BaseModel):
+    expected_version: int = Field(ge=1)
+
+
+class TaskOut(BaseModel):
+    id: uuid.UUID
+    title: str
+    description: str | None
+    status: TaskStatus
+    priority: int
+    start_date: datetime.date | None
+    due_date: datetime.date | None
+    parent_task_id: uuid.UUID | None
+    executor_kind: ExecKind
+    is_archived: bool
+    version: int
+
+
+class CommentCreateIn(BaseModel):
+    body: str = Field(min_length=1)
+
+
+class CommentOut(BaseModel):
+    id: uuid.UUID
+    task_id: uuid.UUID
+    user_id: uuid.UUID | None
+    body: str
+    version: int
+
+
+class TagRefIn(BaseModel):
+    tag_id: uuid.UUID
+
+
+class AssigneeIn(BaseModel):
+    user_id: uuid.UUID
