@@ -1,4 +1,5 @@
-.PHONY: sync lint fmt type test up down db-bootstrap migrate revision
+.PHONY: sync lint fmt type test up down db-bootstrap migrate revision \
+        run-api run-mcp run-worker run-sdi
 
 sync:
 	uv sync --all-packages
@@ -21,8 +22,8 @@ up:
 down:
 	docker compose -f deploy/docker-compose.yml down
 
-# Crea/assicura il ruolo runtime flow_app e ne imposta la password da
-# FLOW_DB_APP_PASSWORD (env). Eseguire dopo `up`, prima di `migrate`.
+# Create/ensure the runtime role flow_app and set its password from
+# FLOW_DB_APP_PASSWORD (env). Run after `up`, before `migrate`.
 db-bootstrap:
 	docker compose -f deploy/docker-compose.yml exec -T \
 	  -e PGPASSWORD=$${POSTGRES_PASSWORD:-flow} db \
@@ -35,3 +36,15 @@ migrate:
 
 revision:
 	uv run alembic -c core/alembic.ini revision --autogenerate -m "$(m)"
+
+run-api:
+	uv run uvicorn flow_api.main:app --reload
+
+run-mcp:
+	uv run python -m flow_mcp.main
+
+run-worker:
+	uv run python -m flow_worker.main
+
+run-sdi:
+	uv run uvicorn flow_sdi_inbound.main:app --reload --port 8081
