@@ -18,6 +18,7 @@ from flow_api.routers import (
     schedule,
     tags,
     tasks,
+    time_tracking,
     workflows,
 )
 from flow_core.errors import (
@@ -76,4 +77,5 @@ def create_app() -> FastAPI:
     app.include_router(calendars.router)
     app.include_router(events.router)
     app.include_router(schedule.router)
+    app.include_router(time_tracking.router)
     return app

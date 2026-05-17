@@ -27,6 +27,7 @@ from flow_core.models.task import (
 )
 from flow_core.models.task_assignee import TaskAssignee
 from flow_core.models.task_tag import TaskTag
+from flow_core.models.time_entry import TimeEntry, TimeSource
 from flow_core.models.user import User
 from flow_core.models.workflow import (
     WorkflowDefinition,
@@ -58,6 +59,8 @@ __all__ = [
     "TaskAssignee",
     "TaskDependency",
     "TaskTag",
+    "TimeEntry",
+    "TimeSource",
     "User",
     "UserCalendar",
     "WorkflowDefinition",

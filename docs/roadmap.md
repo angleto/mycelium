@@ -19,8 +19,12 @@ fase.
 - **F3 Scheduler deterministico**: CPM logico + serializzazione
   per-persona + actuals + pin; Events + no-ubiquita; Gantt con
   percorso critico logico e drag.
-- **F4 Time tracking**: timer realtime, voci manuali, report, export;
-  alimenta F3.
+- **F4 Time tracking**: timer realtime (un solo timer attivo per
+  utente, garantito da indice unico parziale), voci manuali, report
+  per progetto/cliente/generico/utente/task con totali billable e
+  snapshot tariffa, export CSV; alimenta F3 via `actual_start`.
+  Export PDF = follow-up sottile di sola presentazione (il CSV
+  soddisfa il requisito di export dati), non un blocker.
 - **F4b Dominio personale, budget, assistente advisory**: attributi
   task (costo, luogo, contesto, necessita), `budgets` envelope,
   capacita advisory (cosa-faccio-ora / errand bundling /

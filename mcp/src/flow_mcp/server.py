@@ -27,12 +27,15 @@ from flow_core.models.event import Event
 from flow_core.models.schedule import Schedule
 from flow_core.models.tag import Tag, TagKind
 from flow_core.models.task import ConstraintKind, ScheduleMode, Task
+from flow_core.models.time_entry import TimeEntry
 from flow_core.security import decode_token
 from flow_core.services import calendar as calendars
 from flow_core.services import dependencies, scheduler, tasks, taxonomy
 from flow_core.services import events as events_svc
+from flow_core.services import time_tracking as time_svc
 from flow_core.services.rbac import get_role
 from flow_core.services.taxonomy import ClientInput
+from flow_core.services.time_tracking import ReportGroup
 
 mcp: FastMCP = FastMCP("flow")
 
@@ -503,3 +506,127 @@ async def list_schedule(
             project_tag_id=(uuid.UUID(project_tag_id) if project_tag_id else None),
         )
         return [_schedule(r) for r in rows]
+
+
+# --- F4: time tracking (FR-5) ---
+
+
+def _time_entry(e: TimeEntry) -> dict[str, Any]:
+    return {
+        "id": str(e.id),
+        "task_id": str(e.task_id),
+        "user_id": str(e.user_id),
+        "started_at": e.started_at.isoformat(),
+        "ended_at": e.ended_at.isoformat() if e.ended_at else None,
+        "duration_seconds": e.duration_seconds,
+        "source": e.source.value,
+        "billable": e.billable,
+        "rate_snapshot": (str(e.rate_snapshot) if e.rate_snapshot is not None else None),
+        "currency": e.currency,
+        "note": e.note,
+        "version": e.version,
+    }
+
+
+@mcp.tool()
+async def start_timer(
+    token: str,
+    org_id: str,
+    task_id: str,
+    billable: bool = True,
+    note: str | None = None,
+) -> dict[str, Any]:
+    """Start the live timer for a task. One running timer per user is
+    enforced; a second start is rejected."""
+    async with _tenant(token, org_id) as (s, org, user):
+        e = await time_svc.start_timer(
+            s,
+            org_id=org,
+            actor_id=user,
+            task_id=uuid.UUID(task_id),
+            billable=billable,
+            note=note,
+        )
+        return _time_entry(e)
+
+
+@mcp.tool()
+async def stop_timer(token: str, org_id: str, note: str | None = None) -> dict[str, Any]:
+    """Stop the running timer; computes the duration."""
+    async with _tenant(token, org_id) as (s, org, user):
+        e = await time_svc.stop_timer(s, org_id=org, actor_id=user, note=note)
+        return _time_entry(e)
+
+
+@mcp.tool()
+async def add_time_entry(
+    token: str,
+    org_id: str,
+    task_id: str,
+    started_at: str,
+    ended_at: str | None = None,
+    duration_seconds: int | None = None,
+    billable: bool = True,
+    note: str | None = None,
+) -> dict[str, Any]:
+    """Add a manual time entry (provide ended_at or duration_seconds)."""
+    async with _tenant(token, org_id) as (s, org, user):
+        e = await time_svc.add_manual_entry(
+            s,
+            org_id=org,
+            actor_id=user,
+            task_id=uuid.UUID(task_id),
+            started_at=dt.datetime.fromisoformat(started_at),
+            ended_at=dt.datetime.fromisoformat(ended_at) if ended_at else None,
+            duration_seconds=duration_seconds,
+            billable=billable,
+            note=note,
+        )
+        return _time_entry(e)
+
+
+@mcp.tool()
+async def list_time_entries(
+    token: str,
+    org_id: str,
+    task_id: str | None = None,
+    user_id: str | None = None,
+) -> list[dict[str, Any]]:
+    """List time entries, optionally filtered by task or user."""
+    async with _tenant(token, org_id) as (s, org, _user):
+        rows = await time_svc.list_entries(
+            s,
+            org_id=org,
+            task_id=uuid.UUID(task_id) if task_id else None,
+            user_id=uuid.UUID(user_id) if user_id else None,
+        )
+        return [_time_entry(e) for e in rows]
+
+
+@mcp.tool()
+async def time_report(
+    token: str,
+    org_id: str,
+    group_by: str = "project",
+    billable: bool | None = None,
+) -> list[dict[str, Any]]:
+    """Aggregated time report grouped by project|client|generic|user|task."""
+    async with _tenant(token, org_id) as (s, org, user):
+        rows = await time_svc.report(
+            s,
+            org_id=org,
+            actor_id=user,
+            group_by=ReportGroup(group_by),
+            billable=billable,
+        )
+        return [
+            {
+                "key": r.key,
+                "label": r.label,
+                "seconds": r.seconds,
+                "billable_seconds": r.billable_seconds,
+                "amount": str(r.amount),
+                "currency": r.currency,
+            }
+            for r in rows
+        ]

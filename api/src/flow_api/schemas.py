@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 from flow_core.models.dependency import DependencyType
 from flow_core.models.tag import TagKind
 from flow_core.models.task import ConstraintKind, ExecKind, ScheduleMode
+from flow_core.models.time_entry import TimeSource
 
 
 class SignupIn(BaseModel):
@@ -336,3 +337,55 @@ class ScheduleOut(BaseModel):
     scheduled_end: datetime.datetime | None
     computed_at: datetime.datetime
     input_fingerprint: str | None
+
+
+# --- F4: time tracking (FR-5, docs/adr/0002) ---
+
+
+class TimeStartIn(BaseModel):
+    task_id: uuid.UUID
+    billable: bool = True
+    note: str | None = None
+
+
+class TimeStopIn(BaseModel):
+    note: str | None = None
+
+
+class TimeManualIn(BaseModel):
+    task_id: uuid.UUID
+    started_at: datetime.datetime
+    ended_at: datetime.datetime | None = None
+    duration_seconds: int | None = Field(default=None, gt=0)
+    billable: bool = True
+    note: str | None = None
+
+
+class TimeEntryPatchIn(BaseModel):
+    expected_version: int = Field(ge=1)
+    note: str | None = None
+    billable: bool | None = None
+
+
+class TimeEntryOut(BaseModel):
+    id: uuid.UUID
+    task_id: uuid.UUID
+    user_id: uuid.UUID
+    started_at: datetime.datetime
+    ended_at: datetime.datetime | None
+    duration_seconds: int | None
+    source: TimeSource
+    billable: bool
+    rate_snapshot: Decimal | None
+    currency: str
+    note: str | None
+    version: int
+
+
+class ReportRowOut(BaseModel):
+    key: str | None
+    label: str | None
+    seconds: int
+    billable_seconds: int
+    amount: Decimal
+    currency: str

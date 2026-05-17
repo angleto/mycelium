@@ -35,6 +35,10 @@ class MessageCode(enum.StrEnum):
     CALENDAR_NOT_FOUND = "calendar.not_found"
     EVENT_NOT_FOUND = "event.not_found"
     EVENT_OVERLAP = "event.overlap"
+    TIMER_ALREADY_RUNNING = "time.timer_already_running"
+    NO_RUNNING_TIMER = "time.no_running_timer"
+    TIME_ENTRY_NOT_FOUND = "time_entry.not_found"
+    TIME_ENTRY_INVALID = "time_entry.invalid"
     DOMAIN_ERROR = "domain.error"
 
 
@@ -63,6 +67,10 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
         MessageCode.CALENDAR_NOT_FOUND: "Working calendar not found",
         MessageCode.EVENT_NOT_FOUND: "Event not found",
         MessageCode.EVENT_OVERLAP: ("Overlapping appointment for a participant (no ubiquity)"),
+        MessageCode.TIMER_ALREADY_RUNNING: ("A timer is already running for this user"),
+        MessageCode.NO_RUNNING_TIMER: "No running timer for this user",
+        MessageCode.TIME_ENTRY_NOT_FOUND: "Time entry not found",
+        MessageCode.TIME_ENTRY_INVALID: ("Invalid time entry: provide a positive interval"),
         MessageCode.DOMAIN_ERROR: "Domain error",
     },
 }
