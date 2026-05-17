@@ -36,6 +36,18 @@ class ExecKind(enum.StrEnum):
     llm_agent = "llm_agent"
 
 
+class ScheduleMode(enum.StrEnum):
+    auto = "auto"
+    manual = "manual"
+
+
+class ConstraintKind(enum.StrEnum):
+    none = "none"
+    SNET = "SNET"  # start no earlier than
+    MSO = "MSO"  # must start on
+    MFO = "MFO"  # must finish on
+
+
 class Task(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, Base):
     __tablename__ = "tasks"
 
@@ -76,3 +88,32 @@ class Task(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, Base):
         ForeignKey("users.id", ondelete="SET NULL"),
         nullable=True,
     )
+    # Scheduler fields (F3). Defaults keep earlier phases unaffected.
+    remaining_effort_h: Mapped[Decimal | None] = mapped_column(Numeric(8, 2), nullable=True)
+    actual_start: Mapped[datetime.datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    schedule_mode: Mapped[ScheduleMode] = mapped_column(
+        SAEnum(
+            ScheduleMode,
+            name="schedule_mode",
+            native_enum=True,
+            create_type=False,
+        ),
+        nullable=False,
+        server_default="auto",
+    )
+    constraint_kind: Mapped[ConstraintKind] = mapped_column(
+        SAEnum(
+            ConstraintKind,
+            name="constraint_kind",
+            native_enum=True,
+            create_type=False,
+        ),
+        nullable=False,
+        server_default="none",
+    )
+    constraint_date: Mapped[datetime.datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    is_milestone: Mapped[bool] = mapped_column(nullable=False, server_default="false")
