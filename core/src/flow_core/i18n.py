@@ -32,6 +32,9 @@ class MessageCode(enum.StrEnum):
     WORKFLOW_INVALID = "workflow.invalid"
     TRANSITION_NOT_ALLOWED = "workflow.transition_not_allowed"
     DEPENDENCY_CYCLE = "dependency.cycle"
+    CALENDAR_NOT_FOUND = "calendar.not_found"
+    EVENT_NOT_FOUND = "event.not_found"
+    EVENT_OVERLAP = "event.overlap"
     DOMAIN_ERROR = "domain.error"
 
 
@@ -57,6 +60,9 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
         MessageCode.WORKFLOW_INVALID: ("Invalid workflow: exactly one initial state is required"),
         MessageCode.TRANSITION_NOT_ALLOWED: ("Transition not allowed by the workflow"),
         MessageCode.DEPENDENCY_CYCLE: ("This dependency would create a cycle"),
+        MessageCode.CALENDAR_NOT_FOUND: "Working calendar not found",
+        MessageCode.EVENT_NOT_FOUND: "Event not found",
+        MessageCode.EVENT_OVERLAP: ("Overlapping appointment for a participant (no ubiquity)"),
         MessageCode.DOMAIN_ERROR: "Domain error",
     },
 }
