@@ -1,0 +1,50 @@
+"""Configurazione applicativa.
+
+Tutte le variabili sono prefissate ``FLOW_`` (12-factor, vedi
+docs/non-functional-requirements.md). Nessun segreto hardcoded.
+"""
+
+from __future__ import annotations
+
+from functools import lru_cache
+
+from pydantic import Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_prefix="FLOW_",
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+
+    # Database
+    database_url: str = Field(
+        default="postgresql+asyncpg://flow:flow@localhost:5432/flow",
+        description="URL async (asyncpg) usato dall'app.",
+    )
+    database_url_sync: str = Field(
+        default="postgresql+psycopg://flow:flow@localhost:5432/flow",
+        description="URL sync (psycopg) usato da Alembic.",
+    )
+
+    # Redis
+    redis_url: str = "redis://localhost:6379/0"
+
+    # Auth / JWT. Nessun default per il segreto: deve essere fornito via
+    # FLOW_JWT_SECRET (fail-closed). In dev arriva da .env.
+    jwt_secret: str = Field(min_length=16, description="Segreto firma JWT.")
+    jwt_alg: str = "HS256"
+    jwt_ttl_seconds: int = 3600
+
+    # App
+    env: str = "dev"
+    log_level: str = "INFO"
+
+
+@lru_cache(maxsize=1)
+def get_settings() -> Settings:
+    """Settings come singleton (cached)."""
+    return Settings()

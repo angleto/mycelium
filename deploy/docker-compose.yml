@@ -1,0 +1,42 @@
+# Infra di sviluppo F0. Immagini multi-arch (arm64 supportato).
+# `docker compose -f deploy/docker-compose.yml up -d`
+# pgvector e pg_trgm vengono abilitate dalla migrazione Alembic baseline.
+
+name: flow
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-flow}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-flow}
+      POSTGRES_DB: ${POSTGRES_DB:-flow}
+    ports:
+      - "${FLOW_DB_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-flow} -d ${POSTGRES_DB:-flow}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    ports:
+      - "${FLOW_REDIS_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+# I servizi applicativi (api, mcp, worker, sdi-inbound) verranno aggiunti
+# con i rispettivi Dockerfile; in F0 girano in locale via uv contro questa
+# infra. Eccezioni stateful note: db (qui), Proton Bridge, sdi-inbound.
+
+volumes:
+  pgdata:

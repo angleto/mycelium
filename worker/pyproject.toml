@@ -1,0 +1,15 @@
+[project]
+name = "flow-worker"
+version = "0.0.0"
+description = "Flow worker: job in background (sync IMAP, scheduler, memoria, ...)"
+requires-python = ">=3.12"
+dependencies = [
+    "flow-core",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/flow_worker"]
