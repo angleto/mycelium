@@ -268,7 +268,7 @@ class Scheduler:
             ]
             busy.sort()
             # Deterministic priority rule (docs/adr/0004): most important
-            # first. Priority is Todoist-like P1..P4 where P1 (= 1) is the
+            # first. Priority is a four-level P1..P4 where P1 (= 1) is the
             # highest, so order by priority ascending; then earliest due,
             # earliest created, and id as the final stable tie-break.
             plist.sort(

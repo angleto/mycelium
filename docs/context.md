@@ -5,8 +5,8 @@
 A multi-tenant/team system that unifies five capabilities that are
 separate today:
 
-1. A Todoist-style task manager (the task as the primary unit).
-2. A Toggl-style time tracker (timer + manual entries, reports).
+1. A lightweight task manager (the task as the primary unit).
+2. A time tracker (timer + manual entries, reports).
 3. Task dependencies with a workflow graph and scheduling/Gantt.
 4. Multi-account email (read + send) with "mail to task".
 5. End-to-end Italian electronic invoicing (SDI).

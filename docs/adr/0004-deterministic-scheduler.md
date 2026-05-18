@@ -21,7 +21,7 @@ No generic RCPSP. Engine = **deterministic logical CPM** over working
 calendars (ES/EF/LS/LF, slack, logical critical path, honest because
 contention-free) + **deterministic per-person serial placement** of
 non-delegated `executor=human` tasks, around fixed appointments, with a
-stable, deterministic priority rule (Todoist-style P1..P4 priority,
+stable, deterministic priority rule (a four-level P1..P4 priority,
 P1 = highest and scheduled first; then earliest due date, earliest
 created, id as the final tie-break). `executor=llm_agent` tasks are off
 the human timeline (parallel, precedence only). Required: plan vs
