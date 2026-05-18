@@ -575,6 +575,17 @@ export const it: Catalog = {
     convertedShort: 'Convertito',
     converted: 'Task creato dalla nota',
     meteredNote: 'Le risposte di conversazione usano il LLM (a consumo); la trascrizione richiede un provider.',
+    newNote: 'Nuova nota',
+    close: 'Chiudi',
+    allProjects: 'Tutti i progetti',
+    allTags: 'Tutti i tag',
+    project: 'Progetto',
+    noProject: 'Nessun progetto',
+    tags: 'Tag',
+    addTag: 'Aggiungi tag…',
+    deleteBtn: 'Sposta nel cestino',
+    confirmErase:
+      'Cancellare definitivamente "{{title}}" e la sua memoria? Operazione irreversibile.',
   },
   invoices: {
     nav: 'Fatture',

@@ -1747,6 +1747,40 @@ export interface paths {
         patch: operations["update_note_notes__note_id__patch"];
         trace?: never;
     };
+    "/notes/{note_id}/tags": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Attach Note Tag */
+        post: operations["attach_note_tag_notes__note_id__tags_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/notes/{note_id}/tags/{tag_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Detach Note Tag */
+        delete: operations["detach_note_tag_notes__note_id__tags__tag_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/notes/{note_id}/delete": {
         parameters: {
             query?: never;
@@ -3544,6 +3578,11 @@ export interface components {
             is_archived: boolean;
             /** Deleted At */
             deleted_at?: string | null;
+            /**
+             * Tags
+             * @default []
+             */
+            tags: components["schemas"]["TagBrief"][];
             /** Version */
             version: number;
         };
@@ -3561,6 +3600,14 @@ export interface components {
          * @enum {string}
          */
         NoteStatus: "captured" | "transcribing" | "ready" | "error";
+        /** NoteTagIn */
+        NoteTagIn: {
+            /**
+             * Tag Id
+             * Format: uuid
+             */
+            tag_id: string;
+        };
         /** NoteTranscribeIn */
         NoteTranscribeIn: {
             /** Operation Id */
@@ -8876,6 +8923,8 @@ export interface operations {
             query?: {
                 include_archived?: boolean;
                 include_deleted?: boolean;
+                project_id?: string | null;
+                tag_id?: string | null;
             };
             header: {
                 "x-workspace-id": string;
@@ -9002,6 +9051,75 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["VersionOut"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    attach_note_tag_notes__note_id__tags_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+            };
+            path: {
+                note_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NoteTagIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    detach_note_tag_notes__note_id__tags__tag_id__delete: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+            };
+            path: {
+                note_id: string;
+                tag_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

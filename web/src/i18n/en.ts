@@ -576,6 +576,17 @@ export const en = {
     convertedShort: 'Converted',
     converted: 'Task created from note',
     meteredNote: 'Conversation replies use the LLM (metered); transcription needs a provider.',
+    newNote: 'New note',
+    close: 'Close',
+    allProjects: 'All projects',
+    allTags: 'All tags',
+    project: 'Project',
+    noProject: 'No project',
+    tags: 'Tags',
+    addTag: 'Add tag…',
+    deleteBtn: 'Move to Trash',
+    confirmErase:
+      'Permanently erase "{{title}}" and its memory? This cannot be undone.',
   },
   invoices: {
     nav: 'Invoices',

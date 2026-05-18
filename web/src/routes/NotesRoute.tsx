@@ -12,155 +12,163 @@ import { api, errMessage, workspaceHeader } from '../api/client'
 import { useSession } from '../auth/useSession'
 import { RichEditor } from '../components/RichEditor'
 import { MarkdownView } from '../components/Markdown'
+import { TagChip } from '../components/TagChip'
 import type { components } from '../api/schema'
 
 type Note = components['schemas']['NoteOut']
 type Turn = components['schemas']['NoteTurnOut']
 type Kind = components['schemas']['NoteKind']
+type Tag = components['schemas']['TagOut']
 
 const KINDS: Kind[] = ['text', 'voice', 'conversation']
 
-// Real GET /notes list (newest first; titles auto-derived). The
-// canonical command is deterministic/offline (ADR-0021, not metered);
-// conversation replies use the LLM (metered) and need a provider.
+// Notes: list with project + tag filters; create/edit happen in a
+// modal you leave only on purpose (Esc or Close; the backdrop does not
+// dismiss, and edits autosave so nothing is lost). Soft delete is
+// reversible (Trash) so it does not confirm; erase is permanent and
+// confirms hard.
 export function NotesRoute() {
   const { t } = useTranslation()
   const session = useSession()
   const activeId = session?.workspaceId
-  const [kind, setKind] = useState<Kind>('text')
-  const [title, setTitle] = useState('')
-  const [text, setText] = useState('')
+
+  const [notes, setNotes] = useState<Note[]>([])
+  const [tags, setTags] = useState<Tag[]>([])
+  const [fProject, setFProject] = useState('')
+  const [fTag, setFTag] = useState('')
   const [cmd, setCmd] = useState('')
-  const [created, setCreated] = useState<Note[]>([])
+  const [msg, setMsg] = useState<string | null>(null)
+  const [err, setErr] = useState<string | null>(null)
+  const [made, setMade] = useState<{ id: string; title: string } | null>(null)
+  const [converting, setConverting] = useState<string | null>(null)
+  const [convertedIds, setConvertedIds] = useState<Set<string>>(new Set())
+
+  // Modal: a note open for edit (or a fresh draft being created).
   const [sel, setSel] = useState<Note | null>(null)
   const [eTitle, setETitle] = useState('')
   const [eText, setEText] = useState('')
   const [turns, setTurns] = useState<Turn[]>([])
-  const [content, setContent] = useState('')
-  const [msg, setMsg] = useState<string | null>(null)
-  const [err, setErr] = useState<string | null>(null)
-  const [made, setMade] = useState<{ id: string; title: string } | null>(null)
-  // Guard the note->task button: one conversion in flight at a time and
-  // a note already converted stays disabled, so repeated clicks cannot
-  // spawn N duplicate tasks.
-  const [converting, setConverting] = useState<string | null>(null)
-  const [convertedIds, setConvertedIds] = useState<Set<string>>(new Set())
-  // Autosave for long edits: debounced; the last-saved snapshot guards
-  // against re-saving unchanged content (and autosave loops).
+  const [convMsg, setConvMsg] = useState('')
   const [noteSaving, setNoteSaving] = useState(false)
   const savedSnap = useRef<{ title: string; text: string }>({
     title: '',
     text: '',
   })
+  // Create draft (modal in create mode, before the note exists).
+  const [creating, setCreating] = useState(false)
+  const [cKind, setCKind] = useState<Kind>('text')
+  const [cTitle, setCTitle] = useState('')
+  const [cText, setCText] = useState('')
+  const [cProject, setCProject] = useState('')
+
+  const projects = tags.filter((x) => x.kind === 'project')
 
   const loadNotes = useCallback(async () => {
     const { data } = await api.GET('/notes', {
-      params: { header: workspaceHeader() },
+      params: {
+        header: workspaceHeader(),
+        query: {
+          ...(fProject ? { project_id: fProject } : {}),
+          ...(fTag ? { tag_id: fTag } : {}),
+        },
+      },
     })
-    if (data) setCreated(data)
-  }, [])
+    if (data) setNotes(data)
+  }, [fProject, fTag])
 
   useEffect(() => {
     let active = true
     void (async () => {
-      const { data } = await api.GET('/notes', {
-        params: { header: workspaceHeader() },
-      })
-      if (active && data) setCreated(data)
+      const [n, g] = await Promise.all([
+        api.GET('/notes', {
+          params: {
+            header: workspaceHeader(),
+            query: {
+              ...(fProject ? { project_id: fProject } : {}),
+              ...(fTag ? { tag_id: fTag } : {}),
+            },
+          },
+        }),
+        api.GET('/tags', { params: { header: workspaceHeader() } }),
+      ])
+      if (!active) return
+      if (n.data) setNotes(n.data)
+      if (g.data) setTags(g.data)
     })()
     return () => {
       active = false
     }
-  }, [activeId])
+  }, [activeId, fProject, fTag])
 
-  async function onCreate(e: FormEvent) {
-    e.preventDefault()
-    setErr(null)
-    const { data, error } = await api.POST('/notes', {
-      params: { header: workspaceHeader() },
-      body: { kind, title: title || null, text: text || null },
-    })
-    if (error || !data) {
-      setErr(errMessage(error))
-      return
-    }
-    await loadNotes()
-    setText('')
-    setTitle('')
+  function closeModal() {
+    setSel(null)
+    setCreating(false)
   }
 
-  async function onCommand(e: FormEvent) {
-    e.preventDefault()
-    setErr(null)
-    const { data, error } = await api.POST('/notes/command', {
-      params: { header: workspaceHeader() },
-      body: { text: cmd },
-    })
-    if (error || !data) {
-      setErr(errMessage(error))
-      return
+  // Esc closes the modal (the only implicit exit; the backdrop does
+  // not, to avoid losing a long note by a stray click).
+  useEffect(() => {
+    if (!sel && !creating) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') closeModal()
     }
-    await loadNotes()
-    setCmd('')
-  }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [sel, creating])
 
-  async function onStartConv() {
+  async function openEdit(n: Note) {
     setErr(null)
-    const { data, error } = await api.POST('/notes/conversations', {
-      params: { header: workspaceHeader() },
-      body: {},
-    })
-    if (error || !data) {
-      setErr(errMessage(error))
-      return
-    }
-    await loadNotes()
-  }
-
-  async function editNote(n: Note) {
-    setSel(n)
     setMsg(null)
-    setErr(null)
+    setCreating(false)
+    setSel(n)
     savedSnap.current = { title: n.title ?? '', text: n.transcript ?? '' }
     setETitle(n.title ?? '')
     setEText(n.transcript ?? '')
-    const { data } = await api.GET('/notes/{note_id}/turns', {
-      params: { header: workspaceHeader(), path: { note_id: n.id } },
-    })
-    setTurns(data ?? [])
+    if (n.kind === 'conversation') {
+      const { data } = await api.GET('/notes/{note_id}/turns', {
+        params: { header: workspaceHeader(), path: { note_id: n.id } },
+      })
+      setTurns(data ?? [])
+    } else {
+      setTurns([])
+    }
   }
 
-  async function saveNote() {
-    if (!sel) return
+  function openCreate() {
     setErr(null)
-    const { error, response } = await api.PATCH('/notes/{note_id}', {
-      params: { header: workspaceHeader(), path: { note_id: sel.id } },
+    setMsg(null)
+    setSel(null)
+    setCKind('text')
+    setCTitle('')
+    setCText('')
+    setCProject(fProject)
+    setCreating(true)
+  }
+
+  async function doCreate() {
+    setErr(null)
+    const { data, error } = await api.POST('/notes', {
+      params: { header: workspaceHeader() },
       body: {
-        expected_version: sel.version,
-        title: eTitle,
-        text: eText,
+        kind: cKind,
+        title: cTitle || null,
+        text: cText || null,
+        project_id: cProject || null,
       },
     })
-    if (response.status === 409) {
-      setErr(t('tasks.conflict'))
-      await loadNotes()
-      return
-    }
-    if (error) {
+    if (error || !data) {
       setErr(errMessage(error))
       return
     }
-    setMsg(t('notes.saved'))
-    setSel(null)
     await loadNotes()
+    // Continue in edit mode on the created note: tags / convert /
+    // autosave are all available without leaving the modal.
+    await openEdit(data)
   }
 
   const autoSaveNote = useCallback(async () => {
     if (!sel || sel.kind === 'conversation') return
-    if (
-      eTitle === savedSnap.current.title &&
-      eText === savedSnap.current.text
-    )
+    if (eTitle === savedSnap.current.title && eText === savedSnap.current.text)
       return
     setNoteSaving(true)
     const { data, error, response } = await api.PATCH('/notes/{note_id}', {
@@ -181,18 +189,68 @@ export function NotesRoute() {
     setSel((p) => (p ? { ...p, version: data.version, title: eTitle } : p))
   }, [sel, eTitle, eText, t, loadNotes])
 
-  // Debounced autosave while editing a note (long edits don't need the
-  // Save button). Each keystroke resets the 1.2s timer.
+  // Debounced autosave (1.2s after the last keystroke).
   useEffect(() => {
     if (!sel || sel.kind === 'conversation') return
-    if (
-      eTitle === savedSnap.current.title &&
-      eText === savedSnap.current.text
-    )
+    if (eTitle === savedSnap.current.title && eText === savedSnap.current.text)
       return
     const h = setTimeout(() => void autoSaveNote(), 1200)
     return () => clearTimeout(h)
   }, [eTitle, eText, sel, autoSaveNote])
+
+  async function refreshSel() {
+    if (!sel) return
+    const { data } = await api.GET('/notes/{note_id}', {
+      params: { header: workspaceHeader(), path: { note_id: sel.id } },
+    })
+    if (data) setSel(data)
+    await loadNotes()
+  }
+
+  async function addTag(tagId: string) {
+    if (!sel || !tagId) return
+    setErr(null)
+    const { error } = await api.POST('/notes/{note_id}/tags', {
+      params: { header: workspaceHeader(), path: { note_id: sel.id } },
+      body: { tag_id: tagId },
+    })
+    if (error) {
+      setErr(errMessage(error))
+      return
+    }
+    await refreshSel()
+  }
+
+  async function removeTag(tagId: string) {
+    if (!sel) return
+    setErr(null)
+    const { error } = await api.DELETE('/notes/{note_id}/tags/{tag_id}', {
+      params: {
+        header: workspaceHeader(),
+        path: { note_id: sel.id, tag_id: tagId },
+      },
+    })
+    if (error) {
+      setErr(errMessage(error))
+      return
+    }
+    await refreshSel()
+  }
+
+  async function onCommand(e: FormEvent) {
+    e.preventDefault()
+    setErr(null)
+    const { data, error } = await api.POST('/notes/command', {
+      params: { header: workspaceHeader() },
+      body: { text: cmd },
+    })
+    if (error || !data) {
+      setErr(errMessage(error))
+      return
+    }
+    await loadNotes()
+    setCmd('')
+  }
 
   async function archiveNote(n: Note) {
     setErr(null)
@@ -204,12 +262,12 @@ export function NotesRoute() {
       setErr(errMessage(error))
       return
     }
-    if (sel?.id === n.id) setSel(null)
+    if (sel?.id === n.id) closeModal()
     await loadNotes()
   }
 
+  // Soft delete: reversible (Trash + Restore), so no confirmation.
   async function delNote(n: Note) {
-    if (!window.confirm(t('notes.confirmDelete'))) return
     setErr(null)
     const { error } = await api.POST('/notes/{note_id}/delete', {
       params: { header: workspaceHeader(), path: { note_id: n.id } },
@@ -219,8 +277,30 @@ export function NotesRoute() {
       setErr(errMessage(error))
       return
     }
-    if (sel?.id === n.id) setSel(null)
+    if (sel?.id === n.id) closeModal()
+    setMsg(t('notes.confirmDelete'))
     await loadNotes()
+  }
+
+  // Erase: permanent (note + memory), so it confirms hard.
+  async function eraseNote(n: Note) {
+    if (
+      !window.confirm(
+        t('notes.confirmErase', { title: n.title || n.kind }),
+      )
+    )
+      return
+    setErr(null)
+    const { error } = await api.POST('/notes/{note_id}/erase', {
+      params: { header: workspaceHeader(), path: { note_id: n.id } },
+    })
+    if (error) {
+      setErr(errMessage(error))
+      return
+    }
+    setNotes((xs) => xs.filter((x) => x.id !== n.id))
+    if (sel?.id === n.id) closeModal()
+    setMsg(t('notes.erased'))
   }
 
   async function onSend(e: FormEvent) {
@@ -229,19 +309,16 @@ export function NotesRoute() {
     setErr(null)
     const { error } = await api.POST('/notes/{note_id}/messages', {
       params: { header: workspaceHeader(), path: { note_id: sel.id } },
-      body: { content, operation_id: crypto.randomUUID() },
+      body: { content: convMsg, operation_id: crypto.randomUUID() },
     })
     if (error) {
       setErr(errMessage(error))
       return
     }
-    setContent('')
-    await editNote(sel)
+    setConvMsg('')
+    await openEdit(sel)
   }
 
-  // No backend note->task: compose POST /tasks. The new task carries a
-  // resolved back-reference [label](@note:id) so the link is two-way in
-  // practice (the task points at the note; notes can @task the task).
   async function onConvert(n: Note) {
     if (converting !== null || convertedIds.has(n.id)) return
     setErr(null)
@@ -266,19 +343,11 @@ export function NotesRoute() {
     setMade({ id: data.id, title: label })
   }
 
-  async function onErase(n: Note) {
-    setErr(null)
-    const { error } = await api.POST('/notes/{note_id}/erase', {
-      params: { header: workspaceHeader(), path: { note_id: n.id } },
-    })
-    if (error) {
-      setErr(errMessage(error))
-      return
-    }
-    setCreated((xs) => xs.filter((x) => x.id !== n.id))
-    if (sel?.id === n.id) setSel(null)
-    setMsg(t('notes.erased'))
-  }
+  const modalOpen = sel !== null || creating
+  // Tags not already on the open note (for the add-tag picker).
+  const addable = sel
+    ? tags.filter((g) => !(sel.tags ?? []).some((s) => s.id === g.id))
+    : []
 
   return (
     <section className="card">
@@ -293,62 +362,49 @@ export function NotesRoute() {
         </p>
       )}
 
-      <form onSubmit={(e) => void onCreate(e)}>
-        <div className="row">
-          <select value={kind} onChange={(e) => setKind(e.target.value as Kind)}>
-            {KINDS.map((k) => (
-              <option key={k} value={k}>
-                {k}
-              </option>
-            ))}
-          </select>
-          <input
-            placeholder={t('notes.noteTitle')}
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-          />
-        </div>
-        <label>
-          {t('notes.text')}
-          <RichEditor value={text} onChange={setText} large />
-        </label>
-        <div className="row">
-          <button type="submit">{t('notes.create')}</button>
-          <button type="button" onClick={() => void onStartConv()}>
-            {t('notes.startConv')}
-          </button>
-        </div>
-      </form>
-      <p className="hint">{t('notes.kindsHint')}</p>
-
-      <h2>{t('notes.cmdTitle')}</h2>
-      <p className="hint">{t('notes.cmdHint')}</p>
-      <form onSubmit={(e) => void onCommand(e)} className="row">
-        <input
-          required
-          placeholder={t('notes.commandPh')}
-          value={cmd}
-          onChange={(e) => setCmd(e.target.value)}
-        />
-        <button type="submit">{t('notes.run')}</button>
-      </form>
+      <div className="row">
+        <button type="button" onClick={openCreate}>
+          {t('notes.newNote')}
+        </button>
+        <select value={fProject} onChange={(e) => setFProject(e.target.value)}>
+          <option value="">{t('notes.allProjects')}</option>
+          {projects.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.name}
+            </option>
+          ))}
+        </select>
+        <select value={fTag} onChange={(e) => setFTag(e.target.value)}>
+          <option value="">{t('notes.allTags')}</option>
+          {tags.map((g) => (
+            <option key={g.id} value={g.id}>
+              {g.kind}: {g.name}
+            </option>
+          ))}
+        </select>
+      </div>
 
       <h2>{t('notes.yours')}</h2>
-      {created.length === 0 ? (
+      {notes.length === 0 ? (
         <p className="hint">{t('notes.none')}</p>
       ) : (
         <ul className="list">
-          {created.map((n) => (
+          {notes.map((n) => (
             <li key={n.id}>
-              {n.title || n.kind}{' '}
-              <span className="muted">· {n.kind} · {n.status}</span>
               <button
                 type="button"
                 className="btn--ghost btn--sm"
-                onClick={() => void editNote(n)}
+                onClick={() => void openEdit(n)}
               >
-                {t('notes.edit')}
-              </button>
+                {t('notes.open')}
+              </button>{' '}
+              {n.title || n.kind}{' '}
+              <span className="muted">
+                · {n.kind} · {n.status}
+              </span>{' '}
+              {(n.tags ?? []).map((g) => (
+                <TagChip key={g.id} name={g.name} color={g.color} kind={g.kind} />
+              ))}
               <button
                 type="button"
                 className="btn--sm"
@@ -373,13 +429,13 @@ export function NotesRoute() {
                 className="btn--ghost btn--sm"
                 onClick={() => void delNote(n)}
               >
-                {t('notes.delete')}
+                {t('notes.deleteBtn')}
               </button>
               <button
                 type="button"
-                className="btn--ghost btn--sm"
+                className="btn--danger btn--sm"
                 title={t('notes.eraseHint')}
-                onClick={() => void onErase(n)}
+                onClick={() => void eraseNote(n)}
               >
                 {t('notes.erase')}
               </button>
@@ -388,57 +444,188 @@ export function NotesRoute() {
         </ul>
       )}
 
-      {sel && sel.kind !== 'conversation' && (
-        <div className="card" style={{ marginTop: '0.6rem' }}>
-          <h2>{t('notes.editing')}</h2>
-          <input
-            placeholder={t('notes.titlePlaceholder')}
-            value={eTitle}
-            onChange={(e) => setETitle(e.target.value)}
-          />
-          <label>
-            {t('notes.text')}
-            <RichEditor value={eText} onChange={setEText} large />
-          </label>
-          <div className="row">
-            <button type="button" onClick={() => void saveNote()}>
-              {t('notes.saveNote')}
-            </button>
-            <button
-              type="button"
-              className="btn--ghost"
-              onClick={() => setSel(null)}
-            >
-              {t('notes.cancel')}
-            </button>
-            <span className="muted">
-              {noteSaving ? t('notes.saving') : t('notes.autosaved')}
-            </span>
-          </div>
-        </div>
-      )}
+      <h2>{t('notes.cmdTitle')}</h2>
+      <p className="hint">{t('notes.cmdHint')}</p>
+      <form onSubmit={(e) => void onCommand(e)} className="row">
+        <input
+          required
+          placeholder={t('notes.commandPh')}
+          value={cmd}
+          onChange={(e) => setCmd(e.target.value)}
+        />
+        <button type="submit">{t('notes.run')}</button>
+      </form>
 
-      {sel && sel.kind === 'conversation' && (
-        <div>
-          <h2>
-            {t('notes.turns')}: {sel.title || sel.kind}
-          </h2>
-          <ul className="list">
-            {turns.map((tr) => (
-              <li key={tr.id}>
-                <strong>{tr.role}:</strong> <MarkdownView text={tr.content} />
-              </li>
-            ))}
-          </ul>
-          <form onSubmit={(e) => void onSend(e)} className="row">
-            <input
-              required
-              placeholder={t('notes.message')}
-              value={content}
-              onChange={(e) => setContent(e.target.value)}
-            />
-            <button type="submit">{t('notes.send')}</button>
-          </form>
+      {modalOpen && (
+        <div
+          className="modal__backdrop"
+          role="dialog"
+          aria-modal="true"
+          aria-label={creating ? t('notes.newNote') : t('notes.editing')}
+        >
+          <div className="modal__panel">
+            <div className="modal__head">
+              <strong>
+                {creating ? t('notes.newNote') : t('notes.editing')}
+              </strong>
+              <span className="modal__sp" />
+              {!creating && sel && sel.kind !== 'conversation' && (
+                <span className="muted">
+                  {noteSaving ? t('notes.saving') : t('notes.autosaved')}
+                </span>
+              )}
+              <button
+                type="button"
+                className="btn--ghost btn--sm"
+                onClick={closeModal}
+              >
+                {t('notes.close')}
+              </button>
+            </div>
+
+            {creating && (
+              <div className="modal__body">
+                <div className="row">
+                  <select
+                    value={cKind}
+                    onChange={(e) => setCKind(e.target.value as Kind)}
+                  >
+                    {KINDS.map((k) => (
+                      <option key={k} value={k}>
+                        {k}
+                      </option>
+                    ))}
+                  </select>
+                  <input
+                    placeholder={t('notes.noteTitle')}
+                    value={cTitle}
+                    onChange={(e) => setCTitle(e.target.value)}
+                  />
+                  <select
+                    value={cProject}
+                    onChange={(e) => setCProject(e.target.value)}
+                  >
+                    <option value="">{t('notes.noProject')}</option>
+                    {projects.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                {cKind !== 'conversation' && (
+                  <label>
+                    {t('notes.text')}
+                    <RichEditor value={cText} onChange={setCText} large />
+                  </label>
+                )}
+                <div className="row">
+                  <button type="button" onClick={() => void doCreate()}>
+                    {t('notes.create')}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn--ghost"
+                    onClick={closeModal}
+                  >
+                    {t('notes.close')}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {!creating && sel && sel.kind !== 'conversation' && (
+              <div className="modal__body">
+                <input
+                  placeholder={t('notes.titlePlaceholder')}
+                  value={eTitle}
+                  onChange={(e) => setETitle(e.target.value)}
+                />
+                <div className="chips">
+                  {(sel.tags ?? []).map((g) => (
+                    <button
+                      key={g.id}
+                      type="button"
+                      className="chip chip--rm"
+                      title={t('notes.tags')}
+                      onClick={() => void removeTag(g.id)}
+                    >
+                      {g.name} ✕
+                    </button>
+                  ))}
+                  <select
+                    value=""
+                    onChange={(e) => void addTag(e.target.value)}
+                  >
+                    <option value="">{t('notes.addTag')}</option>
+                    {addable.map((g) => (
+                      <option key={g.id} value={g.id}>
+                        {g.kind}: {g.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <label>
+                  {t('notes.text')}
+                  <RichEditor value={eText} onChange={setEText} large />
+                </label>
+                <div className="row">
+                  <button
+                    type="button"
+                    disabled={converting !== null || convertedIds.has(sel.id)}
+                    onClick={() => void onConvert(sel)}
+                  >
+                    {convertedIds.has(sel.id)
+                      ? t('notes.convertedShort')
+                      : t('notes.toTask')}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn--ghost"
+                    onClick={() => void archiveNote(sel)}
+                  >
+                    {t('notes.archive')}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn--ghost"
+                    onClick={() => void delNote(sel)}
+                  >
+                    {t('notes.deleteBtn')}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn--danger"
+                    onClick={() => void eraseNote(sel)}
+                  >
+                    {t('notes.erase')}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {!creating && sel && sel.kind === 'conversation' && (
+              <div className="modal__body">
+                <ul className="list">
+                  {turns.map((tr) => (
+                    <li key={tr.id}>
+                      <strong>{tr.role}:</strong>{' '}
+                      <MarkdownView text={tr.content} />
+                    </li>
+                  ))}
+                </ul>
+                <form onSubmit={(e) => void onSend(e)} className="row">
+                  <input
+                    required
+                    placeholder={t('notes.message')}
+                    value={convMsg}
+                    onChange={(e) => setConvMsg(e.target.value)}
+                  />
+                  <button type="submit">{t('notes.send')}</button>
+                </form>
+              </div>
+            )}
+          </div>
         </div>
       )}
     </section>
