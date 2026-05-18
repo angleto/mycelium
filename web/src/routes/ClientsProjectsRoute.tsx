@@ -1,4 +1,9 @@
-import { useCallback, useEffect, useState } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useState,
+  type FormEvent,
+} from 'react'
 import { useTranslation } from 'react-i18next'
 import { api, errMessage, workspaceHeader } from '../api/client'
 import { useSession } from '../auth/useSession'
@@ -22,24 +27,50 @@ const CLIENT_FIELDS: Array<keyof Client> = [
   'description',
 ]
 
+// Add-a-project row, scoped to one client (its own input state so
+// typing in one client's box does not touch another's).
+function AddProjectInline({
+  onAdd,
+}: {
+  onAdd: (name: string) => Promise<void>
+}) {
+  const { t } = useTranslation()
+  const [name, setName] = useState('')
+  return (
+    <form
+      className="cpadd"
+      onSubmit={(e) => {
+        e.preventDefault()
+        const n = name.trim()
+        if (!n) return
+        void onAdd(n).then(() => setName(''))
+      }}
+    >
+      <input
+        placeholder={t('cp.addProjectHere')}
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+      />
+      <button type="submit" className="btn--sm" disabled={!name.trim()}>
+        {t('cp.add')}
+      </button>
+    </form>
+  )
+}
+
 // Manage clients and projects (tags + their satellite profiles).
-// Clients carry the invoicing card + the billable default (billing is
-// a client relationship); projects carry rate/currency/budget, an
-// optional colour and a description (AI context) + the client link.
+// Clients carry the invoicing card + the billable default and the
+// hourly rate (billing is a client relationship); projects carry the
+// budget, an optional colour and a description (AI context) and link
+// to their client. Projects are nested under the client, collapsed.
 export function ClientsProjectsRoute() {
   const { t } = useTranslation()
   const session = useSession()
   const activeId = session?.workspaceId
   const [clients, setClients] = useState<Client[]>([])
   const [projects, setProjects] = useState<Project[]>([])
-  const [cName, setCName] = useState('')
-  const [cRag, setCRag] = useState('')
-  const [pName, setPName] = useState('')
-  const [pClient, setPClient] = useState('')
-  const [defClient, setDefClient] = useState<string>('')
   const [editC, setEditC] = useState<string | null>(null)
   const [editP, setEditP] = useState<string | null>(null)
-  // Projects are nested under their client, collapsed by default.
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [showArchived, setShowArchived] = useState(false)
   const [err, setErr] = useState<string | null>(null)
@@ -47,67 +78,64 @@ export function ClientsProjectsRoute() {
 
   const load = useCallback(async () => {
     const h = workspaceHeader()
-    const [c, p, ws] = await Promise.all([
+    const [c, p] = await Promise.all([
       api.GET('/clients', { params: { header: h } }),
       api.GET('/projects', { params: { header: h } }),
-      api.GET('/workspaces/me', { params: { header: h } }),
     ])
     if (c.data) setClients(c.data)
     if (p.data) setProjects(p.data)
-    const dft = ws.data?.settings?.default_client_tag_id ?? ''
-    setDefClient(dft)
-    setPClient((v) => v || dft)
   }, [])
 
   useEffect(() => {
     let active = true
     void (async () => {
       const h = workspaceHeader()
-      const [c, p, ws] = await Promise.all([
+      const [c, p] = await Promise.all([
         api.GET('/clients', { params: { header: h } }),
         api.GET('/projects', { params: { header: h } }),
-        api.GET('/workspaces/me', { params: { header: h } }),
       ])
       if (!active) return
       if (c.data) setClients(c.data)
       if (p.data) setProjects(p.data)
-      const dft = ws.data?.settings?.default_client_tag_id ?? ''
-      setDefClient(dft)
-      setPClient((v) => v || dft)
     })()
     return () => {
       active = false
     }
   }, [activeId])
 
-  async function addClient() {
-    if (!cName || !cRag) return
+  async function addClient(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault()
+    const form = e.currentTarget
+    const fd = new FormData(form)
+    const name = (fd.get('name') as string).trim()
+    const rag = (fd.get('ragione_sociale') as string).trim()
+    if (!name || !rag) return
     setErr(null)
     const { error } = await api.POST('/clients', {
       params: { header: workspaceHeader() },
       body: {
-        name: cName,
-        ragione_sociale: cRag,
-        default_billable: true,
-        valuta: 'EUR',
+        name,
+        ragione_sociale: rag,
+        tariffa: (fd.get('tariffa') as string) || null,
+        valuta: (fd.get('valuta') as string) || 'EUR',
+        default_billable: fd.get('default_billable') === 'on',
       },
     })
     if (error) return setErr(errMessage(error))
-    setCName('')
-    setCRag('')
+    form.reset()
     await load()
   }
 
-  async function addProject() {
-    if (!pName) return
+  async function createProject(name: string, clientId: string) {
     setErr(null)
     const { error } = await api.POST('/projects', {
       params: { header: workspaceHeader() },
-      body: { name: pName, client_tag_id: pClient || null },
+      body: { name, client_tag_id: clientId },
     })
-    if (error) return setErr(errMessage(error))
-    setPName('')
-    setPClient('')
+    if (error) {
+      setErr(errMessage(error))
+      return
+    }
     await load()
   }
 
@@ -137,12 +165,7 @@ export function ClientsProjectsRoute() {
     await load()
   }
 
-  // Clients and projects are tags: archive = tag status (optimistic).
-  async function setArchive(
-    id: string,
-    version: number,
-    archived: boolean,
-  ) {
+  async function setArchive(id: string, version: number, archived: boolean) {
     setErr(null)
     setMsg(null)
     const { error, response } = await api.PATCH('/tags/{tag_id}', {
@@ -183,10 +206,9 @@ export function ClientsProjectsRoute() {
   const expandAll = () => setExpanded(new Set(visClients.map((c) => c.id)))
   const collapseAll = () => setExpanded(new Set())
 
-  // One project row, reused inside each client's nested list (no dup).
   const renderProject = (p: Project) => (
-    <li key={p.id}>
-      <div className="cprow">
+    <li key={p.id} className="cpitem">
+      <div className="cpitem__head">
         {p.color && (
           <span
             className="swatch"
@@ -194,12 +216,18 @@ export function ClientsProjectsRoute() {
             title={p.color}
           />
         )}
-        <strong>{p.name}</strong>
-        <span className="muted">
-          {p.budget ? `· ${t('cp.budget')} ${p.budget}` : ''}
-          {p.status === 'archived' ? ` · ${t('cp.archived')}` : ''}
+        <span className="cpitem__name">{p.name}</span>
+        <span className="cpmeta">
+          {p.budget != null && (
+            <span className="tag">
+              {t('cp.budget')}: {p.budget}
+            </span>
+          )}
+          {p.status === 'archived' && (
+            <span className="tag tag--muted">{t('cp.archived')}</span>
+          )}
         </span>
-        <span className="cprow__sp" />
+        <span className="grow" />
         <button
           type="button"
           className="btn--ghost btn--sm"
@@ -238,10 +266,7 @@ export function ClientsProjectsRoute() {
           </label>
           <label>
             {t('cp.clientLabel')}
-            <select
-              name="client_tag_id"
-              defaultValue={p.client_tag_id ?? defClient}
-            >
+            <select name="client_tag_id" defaultValue={p.client_tag_id ?? ''}>
               {clients.map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.name}
@@ -282,182 +307,229 @@ export function ClientsProjectsRoute() {
   )
 
   return (
-    <section className="card">
-      <h1>{t('cp.title')}</h1>
-      {err && <p className="err">{err}</p>}
-      {msg && <p className="ok">{msg}</p>}
-      <label className="row">
-        <input
-          type="checkbox"
-          checked={showArchived}
-          onChange={(e) => setShowArchived(e.target.checked)}
-        />
-        {t('cp.showArchived')}
-      </label>
+    <>
+      <h1 className="page-title">{t('cp.title')}</h1>
+      <section className="card">
+        {err && <p className="err">{err}</p>}
+        {msg && <p className="ok">{msg}</p>}
 
-      <h2>{t('cp.clients')}</h2>
-      <div className="row">
-        <input
-          placeholder={t('cp.name')}
-          value={cName}
-          onChange={(e) => setCName(e.target.value)}
-        />
-        <input
-          placeholder={t('cp.ragioneSociale')}
-          value={cRag}
-          onChange={(e) => setCRag(e.target.value)}
-        />
-        <button type="button" className="btn--sm" onClick={() => void addClient()}>
-          {t('cp.add')}
-        </button>
-      </div>
-      <div className="row">
-        <button type="button" className="btn--ghost btn--sm" onClick={expandAll}>
-          {t('cp.expandAll')}
-        </button>
-        <button
-          type="button"
-          className="btn--ghost btn--sm"
-          onClick={collapseAll}
-        >
-          {t('cp.collapseAll')}
-        </button>
-      </div>
-      <ul className="list">
-        {visClients.map((c) => {
-          const open = expanded.has(c.id)
-          const projs = projectsOf(c.id)
-          return (
-          <li key={c.id}>
-            <div className="cprow">
-              <button
-                type="button"
-                className="btn--ghost btn--sm cprow__toggle"
-                aria-expanded={open}
-                onClick={() => toggleClient(c.id)}
-              >
-                {open ? '▾' : '▸'}
-              </button>
-              <strong>{c.name}</strong>
-              <span className="muted">
-                · {c.ragione_sociale} ·{' '}
-                {c.tariffa ? `${c.tariffa} ${c.valuta}/h` : t('cp.noRate')} ·{' '}
-                {c.default_billable ? t('cp.billable') : t('cp.nonBillable')} ·{' '}
-                {t('cp.projectsN', { n: projs.length })}
-                {c.status === 'archived' ? ` · ${t('cp.archived')}` : ''}
-              </span>
-              <span className="cprow__sp" />
-              <button
-                type="button"
-                className="btn--ghost btn--sm"
-                onClick={() => setEditC(editC === c.id ? null : c.id)}
-              >
-                {t('cp.edit')}
-              </button>
-              <button
-                type="button"
-                className="btn--ghost btn--sm"
-                onClick={() =>
-                  void setArchive(c.id, c.version, c.status !== 'archived')
-                }
-              >
-                {c.status === 'archived' ? t('cp.unarchive') : t('cp.archive')}
-              </button>
-            </div>
-            {editC === c.id && (
-              <form
-                className="cpform"
-                onSubmit={(e) => {
-                  e.preventDefault()
-                  const fd = new FormData(e.currentTarget)
-                  const patch: Record<string, unknown> = {
-                    name: fd.get('name'),
-                    default_billable: fd.get('default_billable') === 'on',
-                    tariffa: (fd.get('tariffa') as string) || null,
-                    valuta: (fd.get('valuta') as string) || 'EUR',
-                  }
-                  for (const f of CLIENT_FIELDS)
-                    patch[f] = (fd.get(f) as string) || null
-                  void saveClient(c, patch)
-                }}
-              >
-                <label>
-                  {t('cp.name')}
-                  <input name="name" defaultValue={c.name} />
-                </label>
-                <label>
-                  {t('cp.rate')}
-                  <input
-                    name="tariffa"
-                    type="number"
-                    step="0.01"
-                    defaultValue={c.tariffa ?? ''}
-                  />
-                </label>
-                <label>
-                  {t('cp.currency')}
-                  <input name="valuta" defaultValue={c.valuta} />
-                </label>
-                <label className="cpform__chk">
-                  <input
-                    type="checkbox"
-                    name="default_billable"
-                    defaultChecked={c.default_billable}
-                  />
-                  {t('cp.defaultBillable')}
-                </label>
-                {CLIENT_FIELDS.map((f) => (
-                  <label
-                    key={f}
-                    className={f === 'description' ? 'cpform__wide' : ''}
-                  >
-                    {t(`cp.f.${f}`)}
-                    <input
-                      name={f}
-                      defaultValue={(c[f] as string | null) ?? ''}
-                    />
-                  </label>
-                ))}
-                <div className="cpform__actions">
-                  <button type="submit" className="btn--sm">
-                    {t('cp.save')}
-                  </button>
-                </div>
-              </form>
-            )}
-            {open && (
-              <ul className="list nested">
-                {projs.length === 0 ? (
-                  <li className="hint">{t('cp.noProjects')}</li>
-                ) : (
-                  projs.map(renderProject)
-                )}
-              </ul>
-            )}
-          </li>
-          )
-        })}
-      </ul>
+        <h2>{t('cp.newClient')}</h2>
+        <form className="cpform" onSubmit={(e) => void addClient(e)}>
+          <label>
+            {t('cp.name')}
+            <input name="name" required />
+          </label>
+          <label>
+            {t('cp.ragioneSociale')}
+            <input name="ragione_sociale" required />
+          </label>
+          <label>
+            {t('cp.rate')}
+            <input name="tariffa" type="number" step="0.01" />
+          </label>
+          <label>
+            {t('cp.currency')}
+            <input name="valuta" defaultValue="EUR" />
+          </label>
+          <label className="cpform__chk">
+            <input type="checkbox" name="default_billable" defaultChecked />
+            {t('cp.defaultBillable')}
+          </label>
+          <div className="cpform__actions">
+            <button type="submit" className="btn--sm">
+              {t('cp.add')}
+            </button>
+          </div>
+        </form>
+      </section>
 
-      <h2>{t('cp.addProject')}</h2>
-      <div className="cprow">
-        <input
-          placeholder={t('cp.name')}
-          value={pName}
-          onChange={(e) => setPName(e.target.value)}
-          style={{ minWidth: '14rem' }}
-        />
-        <select value={pClient} onChange={(e) => setPClient(e.target.value)}>
-          {clients.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.name}
-            </option>
-          ))}
-        </select>
-        <button type="button" className="btn--sm" onClick={() => void addProject()}>
-          {t('cp.add')}
-        </button>
-      </div>
-    </section>
+      <section className="card">
+        <div className="cptoolbar">
+          <h2>{t('cp.clients')}</h2>
+          <span className="grow" />
+          <label className="cpcheck">
+            <input
+              type="checkbox"
+              checked={showArchived}
+              onChange={(e) => setShowArchived(e.target.checked)}
+            />
+            {t('cp.showArchived')}
+          </label>
+          <button
+            type="button"
+            className="btn--ghost btn--sm"
+            onClick={expandAll}
+          >
+            {t('cp.expandAll')}
+          </button>
+          <button
+            type="button"
+            className="btn--ghost btn--sm"
+            onClick={collapseAll}
+          >
+            {t('cp.collapseAll')}
+          </button>
+        </div>
+
+        {visClients.length === 0 ? (
+          <p className="hint">{t('cp.noProjects')}</p>
+        ) : (
+          <ul className="list">
+            {visClients.map((c) => {
+              const open = expanded.has(c.id)
+              const projs = projectsOf(c.id)
+              return (
+                <li key={c.id} className="cpitem">
+                  <div className="cpitem__head">
+                    <button
+                      type="button"
+                      className="cpcaret"
+                      aria-expanded={open}
+                      onClick={() => toggleClient(c.id)}
+                    >
+                      {open ? '▾' : '▸'}
+                    </button>
+                    <button
+                      type="button"
+                      className="cpitem__name cpitem__name--btn"
+                      onClick={() => toggleClient(c.id)}
+                    >
+                      {c.name}
+                    </button>
+                    <span className="cpmeta">
+                      <span className="tag">
+                        {c.tariffa
+                          ? `${c.tariffa} ${c.valuta}/h`
+                          : t('cp.noRate')}
+                      </span>
+                      <span
+                        className={
+                          c.default_billable ? 'tag' : 'tag tag--muted'
+                        }
+                      >
+                        {c.default_billable
+                          ? t('cp.billable')
+                          : t('cp.nonBillable')}
+                      </span>
+                      <span className="tag tag--muted">
+                        {t('cp.projectsN', { n: projs.length })}
+                      </span>
+                      {c.status === 'archived' && (
+                        <span className="tag tag--muted">
+                          {t('cp.archived')}
+                        </span>
+                      )}
+                    </span>
+                    <span className="grow" />
+                    <button
+                      type="button"
+                      className="btn--ghost btn--sm"
+                      onClick={() => setEditC(editC === c.id ? null : c.id)}
+                    >
+                      {t('cp.edit')}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn--ghost btn--sm"
+                      onClick={() =>
+                        void setArchive(
+                          c.id,
+                          c.version,
+                          c.status !== 'archived',
+                        )
+                      }
+                    >
+                      {c.status === 'archived'
+                        ? t('cp.unarchive')
+                        : t('cp.archive')}
+                    </button>
+                  </div>
+
+                  {editC === c.id && (
+                    <form
+                      className="cpform"
+                      onSubmit={(e) => {
+                        e.preventDefault()
+                        const fd = new FormData(e.currentTarget)
+                        const patch: Record<string, unknown> = {
+                          name: fd.get('name'),
+                          default_billable:
+                            fd.get('default_billable') === 'on',
+                          tariffa: (fd.get('tariffa') as string) || null,
+                          valuta: (fd.get('valuta') as string) || 'EUR',
+                        }
+                        for (const f of CLIENT_FIELDS)
+                          patch[f] = (fd.get(f) as string) || null
+                        void saveClient(c, patch)
+                      }}
+                    >
+                      <label>
+                        {t('cp.name')}
+                        <input name="name" defaultValue={c.name} />
+                      </label>
+                      <label>
+                        {t('cp.rate')}
+                        <input
+                          name="tariffa"
+                          type="number"
+                          step="0.01"
+                          defaultValue={c.tariffa ?? ''}
+                        />
+                      </label>
+                      <label>
+                        {t('cp.currency')}
+                        <input name="valuta" defaultValue={c.valuta} />
+                      </label>
+                      <label className="cpform__chk">
+                        <input
+                          type="checkbox"
+                          name="default_billable"
+                          defaultChecked={c.default_billable}
+                        />
+                        {t('cp.defaultBillable')}
+                      </label>
+                      {CLIENT_FIELDS.map((f) => (
+                        <label
+                          key={f}
+                          className={
+                            f === 'description' ? 'cpform__wide' : ''
+                          }
+                        >
+                          {t(`cp.f.${f}`)}
+                          <input
+                            name={f}
+                            defaultValue={(c[f] as string | null) ?? ''}
+                          />
+                        </label>
+                      ))}
+                      <div className="cpform__actions">
+                        <button type="submit" className="btn--sm">
+                          {t('cp.save')}
+                        </button>
+                      </div>
+                    </form>
+                  )}
+
+                  {open && (
+                    <div className="cpchildren">
+                      {projs.length === 0 ? (
+                        <p className="hint">{t('cp.noProjects')}</p>
+                      ) : (
+                        <ul className="list nested">
+                          {projs.map(renderProject)}
+                        </ul>
+                      )}
+                      <AddProjectInline
+                        onAdd={(name) => createProject(name, c.id)}
+                      />
+                    </div>
+                  )}
+                </li>
+              )
+            })}
+          </ul>
+        )}
+      </section>
+    </>
   )
 }

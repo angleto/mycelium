@@ -202,7 +202,7 @@ export function GraphRoute() {
 
       <div className="row">
         <label>
-          {t('graph.scopeAll')}
+          {t('graph.scopeLabel')}
           <select
             value={scope}
             onChange={(e) => setScope(e.target.value as 'all' | 'mine' | 'ai')}

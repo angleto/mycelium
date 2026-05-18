@@ -320,6 +320,8 @@ export const it: Catalog = {
     noProjects: 'Nessun progetto',
     clientLabel: 'Cliente',
     addProject: 'Aggiungi progetto',
+    newClient: 'Nuovo cliente',
+    addProjectHere: 'Aggiungi un progetto a questo cliente',
     rateOnClient: 'Tariffa e fatturabilita si impostano sul cliente.',
     f: {
       ragione_sociale: 'Ragione sociale',
@@ -383,6 +385,7 @@ export const it: Catalog = {
     scopeAll: 'Tutti',
     scopeMine: 'Miei',
     scopeAi: 'IA',
+    scopeLabel: 'Mostra',
     connectHint: 'Clicca un riquadro task, poi un altro, per collegarli (fine→inizio). Clicca la relazione per cambiarne il tipo. Clicca un titolo per aprire il task.',
     tagsLabel: 'Filtra per tag',
     noTags: 'Nessun tag su questi task.',

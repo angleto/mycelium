@@ -321,6 +321,8 @@ export const en = {
     noProjects: 'No projects',
     clientLabel: 'Client',
     addProject: 'Add project',
+    newClient: 'New client',
+    addProjectHere: 'Add a project to this client',
     rateOnClient: 'Rate & billable are set on the client.',
     f: {
       ragione_sociale: 'Legal name',
@@ -381,6 +383,7 @@ export const en = {
     depSS: 'start → start',
     depFF: 'finish → finish',
     depSF: 'start → finish',
+    scopeLabel: 'Show',
     scopeAll: 'All',
     scopeMine: 'Mine',
     scopeAi: 'AI',

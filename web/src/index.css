@@ -1186,3 +1186,94 @@ button.btn--danger:hover {
   color: var(--text-h);
   border-color: var(--accent);
 }
+
+/* Clients & projects: clean two-row items, contextual add, meta chips.
+   (Replaces the cramped single-line cprow layout the user disliked.) */
+.grow {
+  flex: 1 1 auto;
+}
+.cptoolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.4rem;
+}
+.cptoolbar h2 {
+  margin: 0;
+}
+.cpcheck {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+.cpitem {
+  padding: 0.55rem 0.2rem;
+  border-bottom: 1px solid var(--border);
+}
+.cpitem:last-child {
+  border-bottom: 0;
+}
+.cpitem__head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.cpcaret {
+  background: none;
+  border: 0;
+  color: var(--muted);
+  padding: 0 0.15rem;
+  font-size: 0.9rem;
+  cursor: pointer;
+  width: 1.3rem;
+}
+.cpitem__name {
+  font-weight: 600;
+  color: var(--text-h);
+}
+.cpitem__name--btn {
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  font-size: inherit;
+}
+.cpitem__name--btn:hover {
+  color: var(--accent);
+}
+.cpmeta {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  align-items: center;
+}
+.tag {
+  font-size: 0.72rem;
+  padding: 0.05rem 0.45rem;
+  border-radius: 999px;
+  background: var(--accent-weak);
+  color: var(--accent);
+  white-space: nowrap;
+}
+.tag--muted {
+  background: var(--surface-2);
+  color: var(--muted);
+}
+.cpchildren {
+  margin: 0.4rem 0 0.2rem 1.45rem;
+  padding-left: 0.7rem;
+  border-left: 2px solid var(--border);
+}
+.cpadd {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+.cpadd input {
+  flex: 1 1 auto;
+  max-width: 22rem;
+}
