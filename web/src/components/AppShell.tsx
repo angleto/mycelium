@@ -230,7 +230,6 @@ export function AppShell() {
     {
       title: t('nav.groups.productivity'),
       items: [
-        { to: '/', label: t('home.title'), icon: 'home' },
         { to: '/tasks', label: t('tasks.nav'), icon: 'tasks' },
         { to: '/time', label: t('time.nav'), icon: 'time' },
         { to: '/schedule', label: t('scheduler.nav'), icon: 'schedule' },

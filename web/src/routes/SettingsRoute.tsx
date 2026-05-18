@@ -3,7 +3,6 @@ import { useTranslation } from 'react-i18next'
 import { api, errMessage } from '../api/client'
 import { EstimatePresets } from '../components/EstimatePresets'
 import { IssuerProfiles } from '../components/IssuerProfiles'
-import { WorkspaceManager } from '../components/WorkspaceManager'
 import type { components } from '../api/schema'
 
 type Status = components['schemas']['MfaStatusOut']
@@ -150,7 +149,6 @@ export function SettingsRoute() {
         </form>
       )}
     </section>
-    <WorkspaceManager />
     <IssuerProfiles />
     <EstimatePresets />
     </>

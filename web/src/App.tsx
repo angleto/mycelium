@@ -7,7 +7,6 @@ import { RegisterRoute } from './routes/RegisterRoute'
 import { VerifyEmailRoute } from './routes/VerifyEmailRoute'
 import { ForgotPasswordRoute } from './routes/ForgotPasswordRoute'
 import { ResetPasswordRoute } from './routes/ResetPasswordRoute'
-import { HomeRoute } from './routes/HomeRoute'
 import { TasksRoute } from './routes/TasksRoute'
 import { TrashRoute } from './routes/TrashRoute'
 import { ClientsProjectsRoute } from './routes/ClientsProjectsRoute'
@@ -40,7 +39,7 @@ function App() {
         <Route path="/reset-password" element={<ResetPasswordRoute />} />
         <Route element={<RequireAuth />}>
           <Route element={<AppShell />}>
-            <Route path="/" element={<HomeRoute />} />
+            <Route path="/" element={<Navigate to="/notes" replace />} />
             <Route path="/tasks" element={<TasksRoute />} />
             <Route path="/tasks/:id" element={<TaskDetailRoute />} />
             <Route path="/trash" element={<TrashRoute />} />
@@ -62,7 +61,7 @@ function App() {
             <Route path="/settings" element={<SettingsRoute />} />
           </Route>
         </Route>
-        <Route path="*" element={<Navigate to="/" replace />} />
+        <Route path="*" element={<Navigate to="/notes" replace />} />
       </Routes>
       </FocusProvider>
     </BrowserRouter>
