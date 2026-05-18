@@ -539,27 +539,56 @@ button.btn--danger:hover {
   border: 1px solid var(--border);
   border-radius: 12px;
   box-shadow: var(--shadow);
-  width: min(900px, 96vw);
-  max-height: 94vh;
+  width: min(1200px, 96vw);
+  height: 92vh;
   display: flex;
   flex-direction: column;
 }
-.modal__head {
+.modal__head,
+.modal__foot {
   display: flex;
   align-items: center;
   gap: 0.6rem;
   padding: 0.7rem 1rem;
+  flex: 0 0 auto;
+}
+.modal__head {
   border-bottom: 1px solid var(--border);
+}
+.modal__foot {
+  border-top: 1px solid var(--border);
+  flex-wrap: wrap;
 }
 .modal__sp {
   flex: 1;
 }
+/* Only the body scrolls; head + foot stay put. */
 .modal__body {
+  flex: 1 1 auto;
+  min-height: 0;
   padding: 1rem;
   overflow: auto;
   display: flex;
   flex-direction: column;
   gap: 0.7rem;
+}
+/* The editor grows to use the available height. */
+.modal__body .grow {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.modal__body .grow .rte {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.modal__body .grow .rte .ProseMirror,
+.modal__body .grow .rte .rte__raw {
+  flex: 1 1 auto;
+  min-height: 14rem;
 }
 .chips {
   display: flex;

@@ -4,7 +4,6 @@ import { useTranslation } from 'react-i18next'
 import { api, workspaceHeader } from '../api/client'
 import { clearSession } from '../auth/session'
 import { useSession } from '../auth/useSession'
-import { WorkspaceSwitcher } from './WorkspaceSwitcher'
 import { Logo } from './Logo'
 import { Icon, type IconName } from './NavIcon'
 import { ThemeToggle } from './ThemeToggle'
@@ -134,6 +133,7 @@ export function AppShell() {
     {
       title: t('nav.groups.productivity'),
       items: [
+        { to: '/notes', label: t('notes.nav'), icon: 'notes' },
         { to: '/', label: t('home.title'), icon: 'home' },
         { to: '/tasks', label: t('tasks.nav'), icon: 'tasks' },
         { to: '/time', label: t('time.nav'), icon: 'time' },
@@ -161,7 +161,6 @@ export function AppShell() {
     {
       title: t('nav.groups.knowledge'),
       items: [
-        { to: '/notes', label: t('notes.nav'), icon: 'notes' },
         { to: '/memory', label: t('memory.nav'), icon: 'memory' },
       ],
     },
@@ -219,7 +218,6 @@ export function AppShell() {
       <div className="layout">
         <aside className="sidebar">
           <div className="sidebar__ws">
-            <WorkspaceSwitcher />
             <ProjectFocus />
           </div>
           <nav className="nav">

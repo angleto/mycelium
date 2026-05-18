@@ -150,6 +150,15 @@ export function WorkspaceManager() {
                   {archived ? ` · ${t('wsmgr.archived')}` : ''}
                   {w.id === activeId ? ` · ${t('wsmgr.current')}` : ''}
                 </span>
+                {!archived && w.id !== activeId && (
+                  <button
+                    type="button"
+                    className="btn--sm"
+                    onClick={() => setActiveWorkspace(w.id)}
+                  >
+                    {t('wsmgr.switch')}
+                  </button>
+                )}
                 {archived ? (
                   <button
                     type="button"

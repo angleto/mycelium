@@ -253,8 +253,12 @@ export function NotesRoute() {
     setCmd('')
   }
 
+  // Closing the modal first disarms the debounced autosave (its effect
+  // tears down on sel→null and clears the pending timer), so a stale
+  // PATCH can't race a destructive op into a 409 "Stale version write".
   async function archiveNote(n: Note) {
     setErr(null)
+    if (sel?.id === n.id) closeModal()
     const { error } = await api.POST('/notes/{note_id}/archive', {
       params: { header: workspaceHeader(), path: { note_id: n.id } },
       body: { expected_version: n.version },
@@ -263,13 +267,13 @@ export function NotesRoute() {
       setErr(errMessage(error))
       return
     }
-    if (sel?.id === n.id) closeModal()
     await loadNotes()
   }
 
   // Soft delete: reversible (Trash + Restore), so no confirmation.
   async function delNote(n: Note) {
     setErr(null)
+    if (sel?.id === n.id) closeModal()
     const { error } = await api.POST('/notes/{note_id}/delete', {
       params: { header: workspaceHeader(), path: { note_id: n.id } },
       body: { expected_version: n.version },
@@ -278,7 +282,6 @@ export function NotesRoute() {
       setErr(errMessage(error))
       return
     }
-    if (sel?.id === n.id) closeModal()
     setMsg(t('notes.confirmDelete'))
     await loadNotes()
   }
@@ -292,6 +295,7 @@ export function NotesRoute() {
     )
       return
     setErr(null)
+    if (sel?.id === n.id) closeModal()
     const { error } = await api.POST('/notes/{note_id}/erase', {
       params: { header: workspaceHeader(), path: { note_id: n.id } },
     })
@@ -300,7 +304,6 @@ export function NotesRoute() {
       return
     }
     setNotes((xs) => xs.filter((x) => x.id !== n.id))
-    if (sel?.id === n.id) closeModal()
     setMsg(t('notes.erased'))
   }
 
@@ -507,23 +510,25 @@ export function NotesRoute() {
                   </select>
                 </div>
                 {cKind !== 'conversation' && (
-                  <label>
+                  <label className="grow">
                     {t('notes.text')}
                     <RichEditor value={cText} onChange={setCText} large />
                   </label>
                 )}
-                <div className="row">
-                  <button type="button" onClick={() => void doCreate()}>
-                    {t('notes.create')}
-                  </button>
-                  <button
-                    type="button"
-                    className="btn--ghost"
-                    onClick={closeModal}
-                  >
-                    {t('notes.close')}
-                  </button>
-                </div>
+              </div>
+            )}
+            {creating && (
+              <div className="modal__foot">
+                <button type="button" onClick={() => void doCreate()}>
+                  {t('notes.create')}
+                </button>
+                <button
+                  type="button"
+                  className="btn--ghost"
+                  onClick={closeModal}
+                >
+                  {t('notes.close')}
+                </button>
               </div>
             )}
 
@@ -558,42 +563,45 @@ export function NotesRoute() {
                     ))}
                   </select>
                 </div>
-                <label>
+                <label className="grow">
                   {t('notes.text')}
                   <RichEditor value={eText} onChange={setEText} large />
                 </label>
-                <div className="row">
-                  <button
-                    type="button"
-                    disabled={converting !== null || convertedIds.has(sel.id)}
-                    onClick={() => void onConvert(sel)}
-                  >
-                    {convertedIds.has(sel.id)
-                      ? t('notes.convertedShort')
-                      : t('notes.toTask')}
-                  </button>
-                  <button
-                    type="button"
-                    className="btn--ghost"
-                    onClick={() => void archiveNote(sel)}
-                  >
-                    {t('notes.archive')}
-                  </button>
-                  <button
-                    type="button"
-                    className="btn--ghost"
-                    onClick={() => void delNote(sel)}
-                  >
-                    {t('notes.deleteBtn')}
-                  </button>
-                  <button
-                    type="button"
-                    className="btn--danger"
-                    onClick={() => void eraseNote(sel)}
-                  >
-                    {t('notes.erase')}
-                  </button>
-                </div>
+              </div>
+            )}
+            {!creating && sel && sel.kind !== 'conversation' && (
+              <div className="modal__foot">
+                <button
+                  type="button"
+                  disabled={converting !== null || convertedIds.has(sel.id)}
+                  onClick={() => void onConvert(sel)}
+                >
+                  {convertedIds.has(sel.id)
+                    ? t('notes.convertedShort')
+                    : t('notes.toTask')}
+                </button>
+                <span className="modal__sp" />
+                <button
+                  type="button"
+                  className="btn--ghost"
+                  onClick={() => void archiveNote(sel)}
+                >
+                  {t('notes.archive')}
+                </button>
+                <button
+                  type="button"
+                  className="btn--ghost"
+                  onClick={() => void delNote(sel)}
+                >
+                  {t('notes.deleteBtn')}
+                </button>
+                <button
+                  type="button"
+                  className="btn--danger"
+                  onClick={() => void eraseNote(sel)}
+                >
+                  {t('notes.erase')}
+                </button>
               </div>
             )}
 

@@ -108,6 +108,7 @@ export const it: Catalog = {
     none: 'Nessun workspace.',
     archived: 'archiviato',
     current: 'corrente',
+    switch: 'Passa a',
     archive: 'Archivia',
     unarchive: 'Ripristina',
     delete: 'Elimina',
