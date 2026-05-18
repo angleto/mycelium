@@ -24,17 +24,20 @@ from flow_core.errors import AuthError
 from flow_core.i18n import MessageCode
 from flow_core.models.billing import CostBasis, RateCard, UsageRecord
 from flow_core.models.budget import Budget, BudgetPeriod
-from flow_core.models.dependency import DependencyType
+from flow_core.models.client_profile import ClientProfile
+from flow_core.models.dependency import DependencyType, TaskDependency
 from flow_core.models.email import EmailAccount, EmailMessage, EmailProvider
 from flow_core.models.event import Event
 from flow_core.models.invoice import Invoice
 from flow_core.models.memory_blob import MemoryBlob
 from flow_core.models.note import Note, NoteKind, NoteTurn
 from flow_core.models.notification import NotificationChannelKind, RecurrenceFreq
+from flow_core.models.project_profile import ProjectProfile
 from flow_core.models.schedule import Schedule
 from flow_core.models.tag import Tag, TagKind
 from flow_core.models.task import ConstraintKind, Necessity, ScheduleMode, Task
 from flow_core.models.time_entry import TimeEntry
+from flow_core.models.workflow import WorkflowDefinition, WorkflowState, WorkflowTransition
 from flow_core.security import decode_token
 from flow_core.services import advisory as advisory_svc
 from flow_core.services import billing as billing_svc
@@ -48,9 +51,11 @@ from flow_core.services import memory as memory_svc
 from flow_core.services import notes as notes_svc
 from flow_core.services import notifications as notif_svc
 from flow_core.services import time_tracking as time_svc
+from flow_core.services import workflow as workflow_svc
 from flow_core.services.rbac import get_role
 from flow_core.services.taxonomy import ClientInput
 from flow_core.services.time_tracking import ReportGroup
+from flow_core.services.workflow import StateEdit, StateSpec
 
 mcp: FastMCP = FastMCP("flow")
 
@@ -163,6 +168,194 @@ async def list_tags(token: str, org_id: str, kind: str | None = None) -> list[di
     async with _tenant(token, org_id) as (s, org, _user):
         rows = await taxonomy.list_tags(s, org_id=org, kind=TagKind(kind) if kind else None)
         return [_tag(t) for t in rows]
+
+
+def _client(t: Tag, p: ClientProfile) -> dict[str, Any]:
+    return {
+        "id": str(t.id),
+        "name": t.name,
+        "status": t.status,
+        "version": t.version,
+        "ragione_sociale": p.ragione_sociale,
+        "id_paese": p.id_paese,
+        "id_codice": p.id_codice,
+        "codice_fiscale": p.codice_fiscale,
+        "indirizzo": p.indirizzo,
+        "cap": p.cap,
+        "comune": p.comune,
+        "provincia": p.provincia,
+        "nazione": p.nazione,
+        "codice_destinatario": p.codice_destinatario,
+        "pec": p.pec,
+        "description": p.description,
+        "default_billable": p.default_billable,
+        "tariffa": str(p.tariffa) if p.tariffa is not None else None,
+        "valuta": p.valuta,
+    }
+
+
+def _project(t: Tag, p: ProjectProfile) -> dict[str, Any]:
+    return {
+        "id": str(t.id),
+        "name": t.name,
+        "status": t.status,
+        "version": t.version,
+        "client_tag_id": str(p.client_tag_id) if p.client_tag_id else None,
+        "budget": str(p.budget) if p.budget is not None else None,
+        "color": t.color,
+        "description": p.description,
+        "workflow_id": str(p.workflow_id) if p.workflow_id else None,
+    }
+
+
+@mcp.tool()
+async def list_clients(token: str, org_id: str) -> list[dict[str, Any]]:
+    """List clients with their invoicing profile."""
+    async with _tenant(token, org_id) as (s, org, _user):
+        rows = await taxonomy.list_clients(s, org_id=org)
+        return [_client(t, p) for t, p in rows]
+
+
+@mcp.tool()
+async def list_projects(token: str, org_id: str) -> list[dict[str, Any]]:
+    """List projects with their profile (client link, budget, color)."""
+    async with _tenant(token, org_id) as (s, org, _user):
+        rows = await taxonomy.list_projects(s, org_id=org)
+        return [_project(t, p) for t, p in rows]
+
+
+@mcp.tool()
+async def get_tag(token: str, org_id: str, tag_id: str) -> dict[str, Any]:
+    """Read one tag (generic/client/project)."""
+    async with _tenant(token, org_id) as (s, org, _user):
+        t = await taxonomy.get_tag(s, org_id=org, tag_id=uuid.UUID(tag_id))
+        return _tag(t)
+
+
+@mcp.tool()
+async def update_tag(
+    token: str,
+    org_id: str,
+    tag_id: str,
+    expected_version: int,
+    name: str | None = None,
+    color: str | None = None,
+    status: str | None = None,
+) -> dict[str, Any]:
+    """Rename / recolor / set status of a tag (status: active|archived)."""
+    async with _tenant(token, org_id) as (s, org, user):
+        version = await taxonomy.update_tag(
+            s,
+            org_id=org,
+            actor_id=user,
+            tag_id=uuid.UUID(tag_id),
+            expected_version=expected_version,
+            name=name,
+            color=color,
+            status=status,
+        )
+        return {"tag_id": tag_id, "version": version}
+
+
+@mcp.tool()
+async def update_client(
+    token: str,
+    org_id: str,
+    tag_id: str,
+    name: str | None = None,
+    ragione_sociale: str | None = None,
+    id_paese: str | None = None,
+    id_codice: str | None = None,
+    codice_fiscale: str | None = None,
+    indirizzo: str | None = None,
+    cap: str | None = None,
+    comune: str | None = None,
+    provincia: str | None = None,
+    nazione: str | None = None,
+    codice_destinatario: str | None = None,
+    pec: str | None = None,
+    description: str | None = None,
+) -> dict[str, Any]:
+    """Edit a client's name and invoicing card. Only the given fields
+    are changed."""
+    fields: dict[str, str | None] = {}
+    for key, val in (
+        ("ragione_sociale", ragione_sociale),
+        ("id_paese", id_paese),
+        ("id_codice", id_codice),
+        ("codice_fiscale", codice_fiscale),
+        ("indirizzo", indirizzo),
+        ("cap", cap),
+        ("comune", comune),
+        ("provincia", provincia),
+        ("nazione", nazione),
+        ("codice_destinatario", codice_destinatario),
+        ("pec", pec),
+        ("description", description),
+    ):
+        if val is not None:
+            fields[key] = val
+    async with _tenant(token, org_id) as (s, org, user):
+        await taxonomy.update_client(
+            s,
+            org_id=org,
+            actor_id=user,
+            tag_id=uuid.UUID(tag_id),
+            name=name,
+            fields=fields,
+        )
+        return {"tag_id": tag_id, "updated": True}
+
+
+@mcp.tool()
+async def update_project(
+    token: str,
+    org_id: str,
+    tag_id: str,
+    name: str | None = None,
+    client_tag_id: str | None = None,
+    budget: float | None = None,
+    color: str | None = None,
+    description: str | None = None,
+) -> dict[str, Any]:
+    """Edit a project. Pass ``client_tag_id`` to reassign the project
+    to another client. Only the given fields are changed."""
+    fields: dict[str, object] = {}
+    if client_tag_id is not None:
+        fields["client_tag_id"] = uuid.UUID(client_tag_id)
+    if budget is not None:
+        fields["budget"] = Decimal(str(budget))
+    if color is not None:
+        fields["color"] = color
+    if description is not None:
+        fields["description"] = description
+    async with _tenant(token, org_id) as (s, org, user):
+        await taxonomy.update_project(
+            s,
+            org_id=org,
+            actor_id=user,
+            tag_id=uuid.UUID(tag_id),
+            name=name,
+            fields=fields,
+        )
+        return {"tag_id": tag_id, "updated": True}
+
+
+@mcp.tool()
+async def set_tag_scope(
+    token: str, org_id: str, tag_id: str, target_ids: list[str]
+) -> dict[str, Any]:
+    """Replace a tag's scope with the given project/client tag ids
+    (empty list = global / visible everywhere). Admin."""
+    async with _tenant(token, org_id) as (s, org, user):
+        await taxonomy.set_tag_scope(
+            s,
+            org_id=org,
+            actor_id=user,
+            tag_id=uuid.UUID(tag_id),
+            target_ids=[uuid.UUID(t) for t in target_ids],
+        )
+        return {"tag_id": tag_id, "targets": len(target_ids)}
 
 
 @mcp.tool()
@@ -288,6 +481,301 @@ async def set_task_state(
         return {"task_id": task_id, "version": version}
 
 
+def _task_full(t: Task) -> dict[str, Any]:
+    return {
+        "id": str(t.id),
+        "title": t.title,
+        "description": t.description,
+        "state_id": str(t.state_id),
+        "priority": t.priority,
+        "importance": t.importance,
+        "urgency": t.urgency,
+        "start_date": t.start_date.isoformat() if t.start_date else None,
+        "due_date": t.due_date.isoformat() if t.due_date else None,
+        "billable": t.billable,
+        "parent_task_id": (str(t.parent_task_id) if t.parent_task_id else None),
+        "estimate_effort_h": (
+            str(t.estimate_effort_h) if t.estimate_effort_h is not None else None
+        ),
+        "monetary_cost": (str(t.monetary_cost) if t.monetary_cost is not None else None),
+        "location": t.location,
+        "necessity": t.necessity.value,
+        "budget_id": str(t.budget_id) if t.budget_id else None,
+        "is_archived": t.is_archived,
+        "deleted_at": t.deleted_at.isoformat() if t.deleted_at else None,
+        "version": t.version,
+    }
+
+
+@mcp.tool()
+async def get_task(token: str, org_id: str, task_id: str) -> dict[str, Any]:
+    """Read one task with its full attribute set (for editing)."""
+    async with _tenant(token, org_id) as (s, org, _user):
+        t = await tasks.get_task(s, org_id=org, task_id=uuid.UUID(task_id))
+        return _task_full(t)
+
+
+@mcp.tool()
+async def update_task(
+    token: str,
+    org_id: str,
+    task_id: str,
+    expected_version: int,
+    title: str | None = None,
+    description: str | None = None,
+    priority: int | None = None,
+    importance: int | None = None,
+    urgency: int | None = None,
+    start_date: str | None = None,
+    due_date: str | None = None,
+    billable: bool | None = None,
+    estimate_effort_h: float | None = None,
+    parent_task_id: str | None = None,
+    monetary_cost: float | None = None,
+    location: str | None = None,
+    necessity: str | None = None,
+    budget_id: str | None = None,
+) -> dict[str, Any]:
+    """Edit task fields (only the given ones). Priority is re-derived
+    when both importance and urgency are present (Eisenhower)."""
+    values: dict[str, Any] = {}
+    if title is not None:
+        values["title"] = title
+    if description is not None:
+        values["description"] = description
+    if priority is not None:
+        values["priority"] = priority
+    if importance is not None:
+        values["importance"] = importance
+    if urgency is not None:
+        values["urgency"] = urgency
+    if start_date is not None:
+        values["start_date"] = dt.date.fromisoformat(start_date)
+    if due_date is not None:
+        values["due_date"] = dt.date.fromisoformat(due_date)
+    if billable is not None:
+        values["billable"] = billable
+    if estimate_effort_h is not None:
+        values["estimate_effort_h"] = Decimal(str(estimate_effort_h))
+    if parent_task_id is not None:
+        values["parent_task_id"] = uuid.UUID(parent_task_id)
+    if monetary_cost is not None:
+        values["monetary_cost"] = Decimal(str(monetary_cost))
+    if location is not None:
+        values["location"] = location
+    if necessity is not None:
+        values["necessity"] = Necessity(necessity)
+    if budget_id is not None:
+        values["budget_id"] = uuid.UUID(budget_id)
+    async with _tenant(token, org_id) as (s, org, user):
+        version = await tasks.update_task(
+            s,
+            org_id=org,
+            actor_id=user,
+            task_id=uuid.UUID(task_id),
+            expected_version=expected_version,
+            values=values,
+        )
+        return {"task_id": task_id, "version": version}
+
+
+@mcp.tool()
+async def archive_task(
+    token: str,
+    org_id: str,
+    task_id: str,
+    expected_version: int,
+    archived: bool = True,
+) -> dict[str, Any]:
+    """Archive (or unarchive with ``archived=False``) a task."""
+    async with _tenant(token, org_id) as (s, org, user):
+        version = await tasks.archive_task(
+            s,
+            org_id=org,
+            actor_id=user,
+            task_id=uuid.UUID(task_id),
+            expected_version=expected_version,
+            archived=archived,
+        )
+        return {"task_id": task_id, "version": version}
+
+
+@mcp.tool()
+async def delete_task(
+    token: str, org_id: str, task_id: str, expected_version: int
+) -> dict[str, Any]:
+    """Soft-delete a task (recoverable via restore_task)."""
+    async with _tenant(token, org_id) as (s, org, user):
+        version = await tasks.soft_delete_task(
+            s,
+            org_id=org,
+            actor_id=user,
+            task_id=uuid.UUID(task_id),
+            expected_version=expected_version,
+        )
+        return {"task_id": task_id, "version": version}
+
+
+@mcp.tool()
+async def restore_task(
+    token: str, org_id: str, task_id: str, expected_version: int
+) -> dict[str, Any]:
+    """Restore a soft-deleted task."""
+    async with _tenant(token, org_id) as (s, org, user):
+        version = await tasks.restore_task(
+            s,
+            org_id=org,
+            actor_id=user,
+            task_id=uuid.UUID(task_id),
+            expected_version=expected_version,
+        )
+        return {"task_id": task_id, "version": version}
+
+
+@mcp.tool()
+async def add_task_tag(token: str, org_id: str, task_id: str, tag_id: str) -> dict[str, Any]:
+    """Attach a tag to a task (idempotent). Use a project tag to move
+    the task into a project, or a generic/client tag to label it."""
+    async with _tenant(token, org_id) as (s, org, user):
+        await tasks.attach_tag(
+            s,
+            org_id=org,
+            actor_id=user,
+            task_id=uuid.UUID(task_id),
+            tag_id=uuid.UUID(tag_id),
+        )
+        return {"task_id": task_id, "tag_id": tag_id}
+
+
+@mcp.tool()
+async def remove_task_tag(token: str, org_id: str, task_id: str, tag_id: str) -> dict[str, Any]:
+    """Detach a tag from a task."""
+    async with _tenant(token, org_id) as (s, org, user):
+        await tasks.detach_tag(
+            s,
+            org_id=org,
+            actor_id=user,
+            task_id=uuid.UUID(task_id),
+            tag_id=uuid.UUID(tag_id),
+        )
+        return {"task_id": task_id, "tag_id": tag_id, "removed": True}
+
+
+@mcp.tool()
+async def move_task_to_project(
+    token: str, org_id: str, task_id: str, project_tag_id: str
+) -> dict[str, Any]:
+    """Reassign a task to another project: detach its current project
+    tag(s) and attach the new one. Composed from tag operations; the
+    task's client follows from the project."""
+    async with _tenant(token, org_id) as (s, org, user):
+        new_project = uuid.UUID(project_tag_id)
+        tagmap = await tasks.tags_by_task(s, task_ids=[uuid.UUID(task_id)])
+        for tag in tagmap.get(uuid.UUID(task_id), []):
+            if tag.kind is TagKind.project and tag.id != new_project:
+                await tasks.detach_tag(
+                    s,
+                    org_id=org,
+                    actor_id=user,
+                    task_id=uuid.UUID(task_id),
+                    tag_id=tag.id,
+                )
+        await tasks.attach_tag(
+            s,
+            org_id=org,
+            actor_id=user,
+            task_id=uuid.UUID(task_id),
+            tag_id=new_project,
+        )
+        return {"task_id": task_id, "project_tag_id": project_tag_id}
+
+
+@mcp.tool()
+async def assign_task(token: str, org_id: str, task_id: str, user_id: str) -> dict[str, Any]:
+    """Assign a user to a task (idempotent)."""
+    async with _tenant(token, org_id) as (s, org, user):
+        await tasks.assign(
+            s,
+            org_id=org,
+            actor_id=user,
+            task_id=uuid.UUID(task_id),
+            user_id=uuid.UUID(user_id),
+        )
+        return {"task_id": task_id, "user_id": user_id}
+
+
+@mcp.tool()
+async def unassign_task(token: str, org_id: str, task_id: str, user_id: str) -> dict[str, Any]:
+    """Unassign a user from a task."""
+    async with _tenant(token, org_id) as (s, org, user):
+        await tasks.unassign(
+            s,
+            org_id=org,
+            actor_id=user,
+            task_id=uuid.UUID(task_id),
+            user_id=uuid.UUID(user_id),
+        )
+        return {"task_id": task_id, "user_id": user_id, "removed": True}
+
+
+@mcp.tool()
+async def list_comments(token: str, org_id: str, task_id: str) -> list[dict[str, Any]]:
+    """List a task's comments, oldest first."""
+    async with _tenant(token, org_id) as (s, org, _user):
+        rows = await tasks.list_comments(s, org_id=org, task_id=uuid.UUID(task_id))
+        return [
+            {
+                "id": str(c.id),
+                "task_id": str(c.task_id),
+                "user_id": str(c.user_id) if c.user_id else None,
+                "body": c.body,
+                "created_at": c.created_at.isoformat(),
+            }
+            for c in rows
+        ]
+
+
+# --- task dependencies: remove + list (FR-3) ---
+
+
+def _dependency(d: TaskDependency) -> dict[str, Any]:
+    return {
+        "id": str(d.id),
+        "predecessor_id": str(d.predecessor_id),
+        "successor_id": str(d.successor_id),
+        "type": d.type.value,
+        "lag_working_minutes": d.lag_working_minutes,
+        "version": d.version,
+    }
+
+
+@mcp.tool()
+async def list_dependencies(
+    token: str, org_id: str, task_id: str | None = None
+) -> list[dict[str, Any]]:
+    """List task dependencies, optionally only those touching a task."""
+    async with _tenant(token, org_id) as (s, org, _user):
+        rows = await dependencies.list_dependencies(
+            s,
+            org_id=org,
+            task_id=uuid.UUID(task_id) if task_id else None,
+        )
+        return [_dependency(d) for d in rows]
+
+
+@mcp.tool()
+async def remove_dependency(token: str, org_id: str, dependency_id: str) -> dict[str, Any]:
+    """Remove a task dependency edge."""
+    async with _tenant(token, org_id) as (s, org, user):
+        await dependencies.remove_dependency(
+            s,
+            org_id=org,
+            actor_id=user,
+            dependency_id=uuid.UUID(dependency_id),
+        )
+        return {"dependency_id": dependency_id, "removed": True}
+
+
 # --- F3: calendars, events, deterministic schedule (FR-4) ---
 
 
@@ -365,6 +853,28 @@ async def add_holiday(token: str, org_id: str, calendar_id: str, day: str) -> di
             day=dt.date.fromisoformat(day),
         )
         return {"calendar_id": calendar_id, "day": day}
+
+
+@mcp.tool()
+async def list_holidays(token: str, org_id: str, calendar_id: str) -> list[dict[str, Any]]:
+    """List a calendar's holidays (ascending)."""
+    async with _tenant(token, org_id) as (s, org, _user):
+        rows = await calendars.list_holidays(s, org_id=org, calendar_id=uuid.UUID(calendar_id))
+        return [{"calendar_id": calendar_id, "day": d.isoformat()} for d in rows]
+
+
+@mcp.tool()
+async def remove_holiday(token: str, org_id: str, calendar_id: str, day: str) -> dict[str, Any]:
+    """Remove a holiday (ISO date) from a calendar."""
+    async with _tenant(token, org_id) as (s, org, user):
+        await calendars.remove_holiday(
+            s,
+            org_id=org,
+            actor_id=user,
+            calendar_id=uuid.UUID(calendar_id),
+            day=dt.date.fromisoformat(day),
+        )
+        return {"calendar_id": calendar_id, "day": day, "removed": True}
 
 
 @mcp.tool()
@@ -653,6 +1163,62 @@ async def list_time_entries(
 
 
 @mcp.tool()
+async def get_time_entry(token: str, org_id: str, entry_id: str) -> dict[str, Any]:
+    """Read one time entry."""
+    async with _tenant(token, org_id) as (s, org, _user):
+        e = await time_svc.get_entry(s, org_id=org, entry_id=uuid.UUID(entry_id))
+        return _time_entry(e)
+
+
+@mcp.tool()
+async def list_running_timers(token: str, org_id: str, user_id: str) -> list[dict[str, Any]]:
+    """All live timers for a user (the serial one plus any parallel)."""
+    async with _tenant(token, org_id) as (s, org, _user):
+        rows = await time_svc.running_entries(s, org_id=org, user_id=uuid.UUID(user_id))
+        return [_time_entry(e) for e in rows]
+
+
+@mcp.tool()
+async def update_time_entry(
+    token: str,
+    org_id: str,
+    entry_id: str,
+    expected_version: int,
+    note: str | None = None,
+    billable: bool | None = None,
+) -> dict[str, Any]:
+    """Edit a time entry's note and/or billable flag."""
+    values: dict[str, Any] = {}
+    if note is not None:
+        values["note"] = note
+    if billable is not None:
+        values["billable"] = billable
+    async with _tenant(token, org_id) as (s, org, user):
+        version = await time_svc.update_entry(
+            s,
+            org_id=org,
+            actor_id=user,
+            entry_id=uuid.UUID(entry_id),
+            expected_version=expected_version,
+            values=values,
+        )
+        return {"entry_id": entry_id, "version": version}
+
+
+@mcp.tool()
+async def delete_time_entry(token: str, org_id: str, entry_id: str) -> dict[str, Any]:
+    """Delete a time entry."""
+    async with _tenant(token, org_id) as (s, org, user):
+        await time_svc.delete_entry(
+            s,
+            org_id=org,
+            actor_id=user,
+            entry_id=uuid.UUID(entry_id),
+        )
+        return {"entry_id": entry_id, "deleted": True}
+
+
+@mcp.tool()
 async def time_report(
     token: str,
     org_id: str,
@@ -747,6 +1313,61 @@ async def budget_consumption(token: str, org_id: str, budget_id: str) -> dict[st
             "residual": str(c.residual),
             "task_count": c.task_count,
         }
+
+
+@mcp.tool()
+async def update_budget(
+    token: str,
+    org_id: str,
+    budget_id: str,
+    expected_version: int,
+    name: str | None = None,
+    category: str | None = None,
+    period_kind: str | None = None,
+    period_start: str | None = None,
+    period_end: str | None = None,
+    amount: float | None = None,
+    currency: str | None = None,
+) -> dict[str, Any]:
+    """Edit a budget envelope (only the given fields)."""
+    values: dict[str, Any] = {}
+    if name is not None:
+        values["name"] = name
+    if category is not None:
+        values["category"] = category
+    if period_kind is not None:
+        values["period_kind"] = BudgetPeriod(period_kind)
+    if period_start is not None:
+        values["period_start"] = dt.date.fromisoformat(period_start)
+    if period_end is not None:
+        values["period_end"] = dt.date.fromisoformat(period_end)
+    if amount is not None:
+        values["amount"] = Decimal(str(amount))
+    if currency is not None:
+        values["currency"] = currency
+    async with _tenant(token, org_id) as (s, org, user):
+        version = await budgets_svc.update_budget(
+            s,
+            org_id=org,
+            actor_id=user,
+            budget_id=uuid.UUID(budget_id),
+            expected_version=expected_version,
+            values=values,
+        )
+        return {"budget_id": budget_id, "version": version}
+
+
+@mcp.tool()
+async def delete_budget(token: str, org_id: str, budget_id: str) -> dict[str, Any]:
+    """Delete a budget envelope."""
+    async with _tenant(token, org_id) as (s, org, user):
+        await budgets_svc.delete_budget(
+            s,
+            org_id=org,
+            actor_id=user,
+            budget_id=uuid.UUID(budget_id),
+        )
+        return {"budget_id": budget_id, "deleted": True}
 
 
 @mcp.tool()
@@ -1286,11 +1907,148 @@ async def create_note(
 
 
 @mcp.tool()
-async def list_notes(token: str, org_id: str) -> list[dict[str, Any]]:
-    """List notes in the workspace (newest first); for the @note picker."""
+async def list_notes(
+    token: str,
+    org_id: str,
+    project_id: str | None = None,
+    tag_id: str | None = None,
+    include_archived: bool = False,
+    include_deleted: bool = False,
+) -> list[dict[str, Any]]:
+    """List notes (newest first); for the @note picker. Optional
+    project/tag focus and archive/trash views."""
     async with _tenant(token, org_id) as (s, org, _user):
-        rows = await notes_svc.list_notes(s, org_id=org)
+        rows = await notes_svc.list_notes(
+            s,
+            org_id=org,
+            project_id=uuid.UUID(project_id) if project_id else None,
+            tag_id=uuid.UUID(tag_id) if tag_id else None,
+            include_archived=include_archived,
+            include_deleted=include_deleted,
+        )
         return [_note(n) for n in rows]
+
+
+@mcp.tool()
+async def get_note(token: str, org_id: str, note_id: str) -> dict[str, Any]:
+    """Read one note."""
+    async with _tenant(token, org_id) as (s, org, _user):
+        note = await notes_svc.get_note(s, org_id=org, note_id=uuid.UUID(note_id))
+        return _note(note)
+
+
+@mcp.tool()
+async def update_note(
+    token: str,
+    org_id: str,
+    note_id: str,
+    expected_version: int,
+    title: str | None = None,
+    text: str | None = None,
+) -> dict[str, Any]:
+    """Edit a note's title/body. A blank title is re-derived from the
+    first line of the body."""
+    async with _tenant(token, org_id) as (s, org, user):
+        version = await notes_svc.update_note(
+            s,
+            org_id=org,
+            actor_id=user,
+            note_id=uuid.UUID(note_id),
+            expected_version=expected_version,
+            title=title,
+            text=text,
+        )
+        return {"note_id": note_id, "version": version}
+
+
+@mcp.tool()
+async def archive_note(
+    token: str,
+    org_id: str,
+    note_id: str,
+    expected_version: int,
+    archived: bool = True,
+) -> dict[str, Any]:
+    """Archive (or unarchive with ``archived=False``) a note."""
+    async with _tenant(token, org_id) as (s, org, user):
+        version = await notes_svc.archive_note(
+            s,
+            org_id=org,
+            actor_id=user,
+            note_id=uuid.UUID(note_id),
+            expected_version=expected_version,
+            archived=archived,
+        )
+        return {"note_id": note_id, "version": version}
+
+
+@mcp.tool()
+async def delete_note(
+    token: str, org_id: str, note_id: str, expected_version: int
+) -> dict[str, Any]:
+    """Soft-delete a note (recoverable via restore_note)."""
+    async with _tenant(token, org_id) as (s, org, user):
+        version = await notes_svc.soft_delete_note(
+            s,
+            org_id=org,
+            actor_id=user,
+            note_id=uuid.UUID(note_id),
+            expected_version=expected_version,
+        )
+        return {"note_id": note_id, "version": version}
+
+
+@mcp.tool()
+async def restore_note(
+    token: str, org_id: str, note_id: str, expected_version: int
+) -> dict[str, Any]:
+    """Restore a soft-deleted note."""
+    async with _tenant(token, org_id) as (s, org, user):
+        version = await notes_svc.restore_note(
+            s,
+            org_id=org,
+            actor_id=user,
+            note_id=uuid.UUID(note_id),
+            expected_version=expected_version,
+        )
+        return {"note_id": note_id, "version": version}
+
+
+@mcp.tool()
+async def add_note_tag(token: str, org_id: str, note_id: str, tag_id: str) -> dict[str, Any]:
+    """Attach a tag to a note (idempotent). A client tag sets the
+    note's client; a project tag organizes it under a project."""
+    async with _tenant(token, org_id) as (s, org, user):
+        await notes_svc.attach_tag(
+            s,
+            org_id=org,
+            actor_id=user,
+            note_id=uuid.UUID(note_id),
+            tag_id=uuid.UUID(tag_id),
+        )
+        return {"note_id": note_id, "tag_id": tag_id}
+
+
+@mcp.tool()
+async def remove_note_tag(token: str, org_id: str, note_id: str, tag_id: str) -> dict[str, Any]:
+    """Detach a tag from a note."""
+    async with _tenant(token, org_id) as (s, org, user):
+        await notes_svc.detach_tag(
+            s,
+            org_id=org,
+            actor_id=user,
+            note_id=uuid.UUID(note_id),
+            tag_id=uuid.UUID(tag_id),
+        )
+        return {"note_id": note_id, "tag_id": tag_id, "removed": True}
+
+
+@mcp.tool()
+async def list_turns(token: str, org_id: str, note_id: str) -> list[dict[str, Any]]:
+    """List the turns of a conversation note, in order."""
+    async with _tenant(token, org_id) as (s, org, _user):
+        rows = await notes_svc.list_turns(s, org_id=org, note_id=uuid.UUID(note_id))
+        return [_turn(t) for t in rows]
 
 
 @mcp.tool()
@@ -1607,3 +2365,169 @@ async def scan_reminders(token: str, org_id: str, within_days: int = 1) -> dict[
     async with _tenant(token, org_id) as (s, org, user):
         n = await notif_svc.scan_reminders(s, org_id=org, actor_id=user, within_days=within_days)
         return {"count": n}
+
+
+# --- F6c: workflows (FR-6) ---
+
+
+def _workflow(w: WorkflowDefinition) -> dict[str, Any]:
+    return {
+        "id": str(w.id),
+        "name": w.name,
+        "is_default": w.is_default,
+        "version": w.version,
+    }
+
+
+def _state(st: WorkflowState) -> dict[str, Any]:
+    return {
+        "id": str(st.id),
+        "name": st.name,
+        "ord": st.ord,
+        "is_initial": st.is_initial,
+        "is_terminal": st.is_terminal,
+    }
+
+
+def _transition(tr: WorkflowTransition) -> dict[str, Any]:
+    return {
+        "from_state_id": str(tr.from_state_id),
+        "to_state_id": str(tr.to_state_id),
+    }
+
+
+@mcp.tool()
+async def list_workflows(token: str, org_id: str) -> list[dict[str, Any]]:
+    """List the org workflow definitions."""
+    async with _tenant(token, org_id) as (s, org, _user):
+        rows = await workflow_svc.list_workflows(s, org)
+        return [_workflow(w) for w in rows]
+
+
+@mcp.tool()
+async def workflow_states(token: str, org_id: str, workflow_id: str) -> list[dict[str, Any]]:
+    """List a workflow's states (ordered)."""
+    async with _tenant(token, org_id) as (s, _org, _user):
+        rows = await workflow_svc.get_states(s, uuid.UUID(workflow_id))
+        return [_state(st) for st in rows]
+
+
+@mcp.tool()
+async def workflow_transitions(token: str, org_id: str, workflow_id: str) -> list[dict[str, Any]]:
+    """List a workflow's allowed (from -> to) transitions."""
+    async with _tenant(token, org_id) as (s, _org, _user):
+        rows = await workflow_svc.list_transitions(s, uuid.UUID(workflow_id))
+        return [_transition(tr) for tr in rows]
+
+
+@mcp.tool()
+async def create_workflow(
+    token: str,
+    org_id: str,
+    name: str,
+    states: list[dict[str, Any]],
+    transitions: list[list[str]],
+) -> dict[str, Any]:
+    """Create a workflow. ``states`` items: {name, ord?, is_initial?,
+    is_terminal?} (exactly one initial). ``transitions``: [from, to]
+    name pairs."""
+    async with _tenant(token, org_id) as (s, org, user):
+        w = await workflow_svc.create_workflow(
+            s,
+            org_id=org,
+            actor_id=user,
+            name=name,
+            states=[
+                StateSpec(
+                    name=st["name"],
+                    ord=int(st.get("ord", 0)),
+                    is_initial=bool(st.get("is_initial", False)),
+                    is_terminal=bool(st.get("is_terminal", False)),
+                )
+                for st in states
+            ],
+            transitions=[(t[0], t[1]) for t in transitions],
+        )
+        return _workflow(w)
+
+
+@mcp.tool()
+async def update_workflow(
+    token: str,
+    org_id: str,
+    workflow_id: str,
+    name: str,
+    states: list[dict[str, Any]],
+    transitions: list[list[str]],
+) -> dict[str, Any]:
+    """Rename + reconcile a workflow's states (match by ``id``; new
+    ones omit it; dropped only if unused) and replace transitions."""
+    async with _tenant(token, org_id) as (s, org, user):
+        await workflow_svc.update_workflow(
+            s,
+            org_id=org,
+            actor_id=user,
+            workflow_id=uuid.UUID(workflow_id),
+            name=name,
+            states=[
+                StateEdit(
+                    id=uuid.UUID(st["id"]) if st.get("id") else None,
+                    name=st["name"],
+                    ord=int(st.get("ord", 0)),
+                    is_initial=bool(st.get("is_initial", False)),
+                    is_terminal=bool(st.get("is_terminal", False)),
+                )
+                for st in states
+            ],
+            transitions=[(t[0], t[1]) for t in transitions],
+        )
+        return {"workflow_id": workflow_id, "updated": True}
+
+
+@mcp.tool()
+async def delete_workflow(token: str, org_id: str, workflow_id: str) -> dict[str, Any]:
+    """Delete a workflow (refused for the default or if its states
+    still hold tasks)."""
+    async with _tenant(token, org_id) as (s, org, user):
+        await workflow_svc.delete_workflow(
+            s,
+            org_id=org,
+            actor_id=user,
+            workflow_id=uuid.UUID(workflow_id),
+        )
+        return {"workflow_id": workflow_id, "deleted": True}
+
+
+@mcp.tool()
+async def set_default_workflow(token: str, org_id: str, workflow_id: str) -> dict[str, Any]:
+    """Promote a workflow to the org default (keeps exactly one)."""
+    async with _tenant(token, org_id) as (s, org, user):
+        await workflow_svc.set_default_workflow(
+            s,
+            org_id=org,
+            actor_id=user,
+            workflow_id=uuid.UUID(workflow_id),
+        )
+        return {"workflow_id": workflow_id, "is_default": True}
+
+
+@mcp.tool()
+async def set_project_workflow(
+    token: str,
+    org_id: str,
+    project_tag_id: str,
+    expected_version: int,
+    workflow_id: str | None = None,
+) -> dict[str, Any]:
+    """Set (or clear, with ``workflow_id=None``) a project's workflow
+    override. None falls back to the org default."""
+    async with _tenant(token, org_id) as (s, org, user):
+        version = await workflow_svc.set_project_workflow(
+            s,
+            org_id=org,
+            actor_id=user,
+            project_tag_id=uuid.UUID(project_tag_id),
+            workflow_id=uuid.UUID(workflow_id) if workflow_id else None,
+            expected_version=expected_version,
+        )
+        return {"project_tag_id": project_tag_id, "version": version}
