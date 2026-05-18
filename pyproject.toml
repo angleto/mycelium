@@ -50,7 +50,7 @@ mypy_path = "core/src:api/src:mcp/src:worker/src:sdi-inbound/src"
 # Untyped third-party libs: pgvector ships no py.typed;
 # sentence-transformers is an optional extra (lazily imported).
 [[tool.mypy.overrides]]
-module = ["pgvector.*", "sentence_transformers.*"]
+module = ["pgvector.*", "sentence_transformers.*", "pyotp.*", "qrcode.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

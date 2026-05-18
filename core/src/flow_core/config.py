@@ -52,6 +52,19 @@ class Settings(BaseSettings):
     # (migration 0010); re-embedding to a new dim = a new column.
     embed_dim: int = 384
 
+    # Auth hardening (W1b, ported from bitvision_phoenix; ADR-0024).
+    require_email_verification: bool = False
+    email_verification_ttl_seconds: int = 86400
+    password_reset_ttl_minutes: int = 30
+    # TOTP MFA.
+    mfa_issuer: str = "Flow"
+    require_mfa_for_admin: bool = False
+    # Login lockout (failed attempts within the window lock the account).
+    login_max_failures: int = 5
+    login_lockout_seconds: int = 900
+    # Base URL the verification/reset links point at (the SPA).
+    frontend_base_url: str = "http://localhost:5173"
+
     # App
     env: str = "dev"
     log_level: str = "INFO"

@@ -3,6 +3,11 @@
 from __future__ import annotations
 
 from flow_core.models.activity_log import ActivityLog
+from flow_core.models.auth_tokens import (
+    EmailVerificationToken,
+    PasswordResetToken,
+    RevokedToken,
+)
 from flow_core.models.base import Base
 from flow_core.models.billing import (
     BillingConfig,
@@ -98,6 +103,7 @@ __all__ = [
     "EmailAccountStatus",
     "EmailMessage",
     "EmailProvider",
+    "EmailVerificationToken",
     "Event",
     "EventParticipant",
     "ExecKind",
@@ -120,11 +126,13 @@ __all__ = [
     "NotificationStatus",
     "OrgFiscalProfile",
     "Organization",
+    "PasswordResetToken",
     "PaymentStatus",
     "ProjectProfile",
     "RateCard",
     "RateUnit",
     "RecurrenceFreq",
+    "RevokedToken",
     "Role",
     "Schedule",
     "ScheduleMode",

@@ -19,6 +19,20 @@ class MessageCode(enum.StrEnum):
     AUTH_MISSING_BEARER = "auth.missing_bearer"
     AUTH_TOKEN_INVALID = "auth.token_invalid"  # noqa: S105 (message code, not a secret)
     AUTH_TOKEN_NO_SUB = "auth.token_no_sub"  # noqa: S105 (message code, not a secret)
+    AUTH_EMAIL_ALREADY_REGISTERED = "auth.email_already_registered"
+    AUTH_EMAIL_NOT_VERIFIED = "auth.email_not_verified"
+    AUTH_ACCOUNT_LOCKED = "auth.account_locked"
+    AUTH_MFA_REQUIRED = "auth.mfa_required"
+    AUTH_MFA_ENROLL_REQUIRED = "auth.mfa_enroll_required"
+    AUTH_MFA_ALREADY_ENABLED = "auth.mfa_already_enabled"
+    AUTH_MFA_NOT_ENABLED = "auth.mfa_not_enabled"
+    AUTH_MFA_SETUP_REQUIRED = "auth.mfa_setup_required"
+    AUTH_INVALID_TOTP = "auth.invalid_totp"
+    AUTH_TOKEN_REVOKED = "auth.token_revoked"  # noqa: S105 (message code, not a secret)
+    AUTH_RESET_TOKEN_INVALID = "auth.reset_token_invalid"  # noqa: S105 (code, not a secret)
+    AUTH_VERIFICATION_TOKEN_INVALID = (
+        "auth.verification_token_invalid"  # noqa: S105 (code, not a secret)
+    )
     RBAC_NO_MEMBERSHIP = "rbac.no_membership"
     RBAC_ROLE_INSUFFICIENT = "rbac.role_insufficient"
     ORG_NOT_FOUND = "org.not_found"
@@ -67,6 +81,20 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
         MessageCode.AUTH_MISSING_BEARER: "Missing Authorization: Bearer header",
         MessageCode.AUTH_TOKEN_INVALID: "Invalid or expired token",
         MessageCode.AUTH_TOKEN_NO_SUB: "Token without subject",
+        MessageCode.AUTH_EMAIL_ALREADY_REGISTERED: "Email already registered",
+        MessageCode.AUTH_EMAIL_NOT_VERIFIED: "Email not verified",
+        MessageCode.AUTH_ACCOUNT_LOCKED: (
+            "Account temporarily locked due to repeated failed logins"
+        ),
+        MessageCode.AUTH_MFA_REQUIRED: "Multi-factor authentication required",
+        MessageCode.AUTH_MFA_ENROLL_REQUIRED: "Multi-factor enrolment required",
+        MessageCode.AUTH_MFA_ALREADY_ENABLED: "MFA is already enabled",
+        MessageCode.AUTH_MFA_NOT_ENABLED: "MFA is not enabled",
+        MessageCode.AUTH_MFA_SETUP_REQUIRED: "MFA setup is required first",
+        MessageCode.AUTH_INVALID_TOTP: "Invalid authentication code",
+        MessageCode.AUTH_TOKEN_REVOKED: "Token has been revoked",
+        MessageCode.AUTH_RESET_TOKEN_INVALID: "Invalid or expired reset token",
+        MessageCode.AUTH_VERIFICATION_TOKEN_INVALID: "Invalid or expired token",
         MessageCode.RBAC_NO_MEMBERSHIP: "Not a member of this workspace",
         MessageCode.RBAC_ROLE_INSUFFICIENT: (
             "Role {current} is insufficient, requires >= {minimum}"

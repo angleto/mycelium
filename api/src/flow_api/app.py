@@ -34,6 +34,7 @@ from flow_core.errors import (
     ConflictError,
     DomainError,
     ForbiddenError,
+    LockedError,
     NotFoundError,
 )
 from flow_core.i18n import DEFAULT_LOCALE, render
@@ -43,6 +44,7 @@ _STATUS: dict[type[DomainError], int] = {
     ForbiddenError: 403,
     NotFoundError: 404,
     ConflictError: 409,
+    LockedError: 423,
     DomainError: 400,
 }
 

@@ -36,3 +36,8 @@ class AuthError(DomainError):
 
 class ForbiddenError(DomainError):
     """Insufficient role in the current org context (403)."""
+
+
+class LockedError(DomainError):
+    """Account temporarily locked (repeated failed logins): HTTP 423.
+    Distinct from AuthError so clients can stop retrying (ADR-0024)."""

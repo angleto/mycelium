@@ -6,6 +6,7 @@ No insecure fallback: the JWT secret is mandatory (config.py).
 from __future__ import annotations
 
 import datetime as dt
+import uuid
 from typing import Any
 
 import jwt
@@ -36,6 +37,7 @@ def create_access_token(*, user_id: str, extra: dict[str, Any] | None = None) ->
     now = dt.datetime.now(tz=dt.UTC)
     payload: dict[str, Any] = {
         "sub": user_id,
+        "jti": str(uuid.uuid4()),
         "iat": int(now.timestamp()),
         "exp": int((now + dt.timedelta(seconds=s.jwt_ttl_seconds)).timestamp()),
     }

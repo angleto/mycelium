@@ -7,6 +7,7 @@ dependencies = [
     "flow-core",
     "fastapi>=0.115",
     "uvicorn[standard]>=0.30",
+    "qrcode[pil]>=7.4",
 ]
 
 [build-system]
