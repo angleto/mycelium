@@ -35,6 +35,7 @@ export function ClientsProjectsRoute() {
   const [cRag, setCRag] = useState('')
   const [pName, setPName] = useState('')
   const [pClient, setPClient] = useState('')
+  const [defClient, setDefClient] = useState<string>('')
   const [editC, setEditC] = useState<string | null>(null)
   const [editP, setEditP] = useState<string | null>(null)
   const [err, setErr] = useState<string | null>(null)
@@ -42,25 +43,33 @@ export function ClientsProjectsRoute() {
 
   const load = useCallback(async () => {
     const h = workspaceHeader()
-    const [c, p] = await Promise.all([
+    const [c, p, ws] = await Promise.all([
       api.GET('/clients', { params: { header: h } }),
       api.GET('/projects', { params: { header: h } }),
+      api.GET('/workspaces/me', { params: { header: h } }),
     ])
     if (c.data) setClients(c.data)
     if (p.data) setProjects(p.data)
+    const dft = ws.data?.settings?.default_client_tag_id ?? ''
+    setDefClient(dft)
+    setPClient((v) => v || dft)
   }, [])
 
   useEffect(() => {
     let active = true
     void (async () => {
       const h = workspaceHeader()
-      const [c, p] = await Promise.all([
+      const [c, p, ws] = await Promise.all([
         api.GET('/clients', { params: { header: h } }),
         api.GET('/projects', { params: { header: h } }),
+        api.GET('/workspaces/me', { params: { header: h } }),
       ])
       if (!active) return
       if (c.data) setClients(c.data)
       if (p.data) setProjects(p.data)
+      const dft = ws.data?.settings?.default_client_tag_id ?? ''
+      setDefClient(dft)
+      setPClient((v) => v || dft)
     })()
     return () => {
       active = false
@@ -202,7 +211,6 @@ export function ClientsProjectsRoute() {
           onChange={(e) => setPName(e.target.value)}
         />
         <select value={pClient} onChange={(e) => setPClient(e.target.value)}>
-          <option value="">{t('cp.noClient')}</option>
           {clients.map((c) => (
             <option key={c.id} value={c.id}>
               {c.name}
@@ -247,8 +255,10 @@ export function ClientsProjectsRoute() {
                 }}
               >
                 <input name="name" defaultValue={p.name} placeholder={t('cp.name')} />
-                <select name="client_tag_id" defaultValue={p.client_tag_id ?? ''}>
-                  <option value="">{t('cp.noClient')}</option>
+                <select
+                  name="client_tag_id"
+                  defaultValue={p.client_tag_id ?? defClient}
+                >
                   {clients.map((c) => (
                     <option key={c.id} value={c.id}>
                       {c.name}

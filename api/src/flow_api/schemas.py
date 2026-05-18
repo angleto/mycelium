@@ -121,6 +121,7 @@ class WorkspaceSettings(BaseModel):
     estimate_presets: list[Decimal] = Field(
         default_factory=lambda: list(DEFAULT_ESTIMATE_PRESETS)
     )
+    default_client_tag_id: uuid.UUID | None = None
 
 
 class WorkspaceOut(BaseModel):

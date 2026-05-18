@@ -4280,6 +4280,8 @@ export interface components {
         WorkspaceSettings: {
             /** Estimate Presets */
             estimate_presets?: string[];
+            /** Default Client Tag Id */
+            default_client_tag_id?: string | null;
         };
         /** WorkspaceSettingsIn */
         WorkspaceSettingsIn: {

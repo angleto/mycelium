@@ -17,6 +17,7 @@ from flow_core.errors import DomainError, NotFoundError
 from flow_core.i18n import MessageCode
 from flow_core.models.client_profile import ClientProfile
 from flow_core.models.membership import Role
+from flow_core.models.organization import Organization
 from flow_core.models.project_profile import ProjectProfile
 from flow_core.models.tag import Tag, TagKind
 from flow_core.services import audit
@@ -117,6 +118,54 @@ async def create_client(
     return tag
 
 
+_DEFAULT_CLIENT_NAME = "Personal"
+
+
+async def ensure_default_client(
+    session: AsyncSession, *, org_id: uuid.UUID, actor_id: uuid.UUID
+) -> uuid.UUID:
+    """Every project belongs to a client; a workspace always has a
+    default ("Personal") for personal projects/tasks. Idempotent: the
+    id is remembered in organizations.settings.default_client_tag_id.
+    System action (no role gate) so a member can create a project."""
+    org = (
+        await session.execute(
+            select(Organization).where(Organization.id == org_id)
+        )
+    ).scalar_one_or_none()
+    settings = dict(org.settings) if org and org.settings else {}
+    cur = settings.get("default_client_tag_id")
+    if cur is not None:
+        exists = (
+            await session.execute(
+                select(Tag.id).where(
+                    Tag.id == uuid.UUID(str(cur)), Tag.kind == TagKind.client
+                )
+            )
+        ).scalar_one_or_none()
+        if exists is not None:
+            return uuid.UUID(str(cur))
+    tag = await _insert_tag(session, org_id, TagKind.client, _DEFAULT_CLIENT_NAME, None)
+    session.add(
+        ClientProfile(
+            tag_id=tag.id, org_id=org_id, ragione_sociale=_DEFAULT_CLIENT_NAME
+        )
+    )
+    await session.flush()
+    if org is not None:
+        org.settings = {**settings, "default_client_tag_id": str(tag.id)}
+        await session.flush()
+    await audit.log(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        entity="tag",
+        entity_id=tag.id,
+        action="ensure_default_client",
+    )
+    return tag.id
+
+
 async def create_project(
     session: AsyncSession,
     *,
@@ -130,7 +179,12 @@ async def create_project(
     default_billable: bool = True,
 ) -> Tag:
     await require_role(session, org_id, actor_id, Role.admin)
-    if client_tag_id is not None:
+    if client_tag_id is None:
+        # Every project belongs to a client; default to "Personal".
+        client_tag_id = await ensure_default_client(
+            session, org_id=org_id, actor_id=actor_id
+        )
+    else:
         client = await session.execute(
             select(Tag.id).where(Tag.id == client_tag_id, Tag.kind == TagKind.client)
         )
