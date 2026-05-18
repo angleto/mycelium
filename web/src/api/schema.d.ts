@@ -633,6 +633,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/workflows/{workflow_id}/transitions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Workflow Transitions */
+        get: operations["workflow_transitions_workflows__workflow_id__transitions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/projects/{project_tag_id}/workflow": {
         parameters: {
             query?: never;
@@ -3815,6 +3832,19 @@ export interface components {
             /** To State */
             to_state: string;
         };
+        /** TransitionOut */
+        TransitionOut: {
+            /**
+             * From State Id
+             * Format: uuid
+             */
+            from_state_id: string;
+            /**
+             * To State Id
+             * Format: uuid
+             */
+            to_state_id: string;
+        };
         /** TransmitIn */
         TransmitIn: {
             /** Progressivo */
@@ -5350,6 +5380,40 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["StateOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    workflow_transitions_workflows__workflow_id__transitions_get: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+            };
+            path: {
+                workflow_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TransitionOut"][];
                 };
             };
             /** @description Validation Error */

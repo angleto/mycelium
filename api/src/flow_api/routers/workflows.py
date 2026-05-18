@@ -12,6 +12,7 @@ from flow_api.deps import TenantCtx, tenant_ctx
 from flow_api.schemas import (
     ProjectWorkflowIn,
     StateOut,
+    TransitionOut,
     VersionOut,
     WorkflowCreateIn,
     WorkflowOut,
@@ -76,6 +77,21 @@ async def workflow_states(
             is_terminal=s.is_terminal,
         )
         for s in states
+    ]
+
+
+@router.get(
+    "/workflows/{workflow_id}/transitions",
+    response_model=list[TransitionOut],
+)
+async def workflow_transitions(
+    workflow_id: uuid.UUID,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+) -> list[TransitionOut]:
+    edges = await wf.list_transitions(ctx.session, workflow_id)
+    return [
+        TransitionOut(from_state_id=e.from_state_id, to_state_id=e.to_state_id)
+        for e in edges
     ]
 
 

@@ -583,3 +583,11 @@ button.btn--ghost {
   max-width: 40%;
   overflow: hidden;
 }
+.taskrow__sel {
+  flex: none;
+  margin: 0;
+}
+.taskrow__state {
+  font-size: 0.8rem;
+  padding: 0.1rem 0.3rem;
+}

@@ -90,6 +90,24 @@ async def get_states(session: AsyncSession, workflow_id: uuid.UUID) -> list[Work
     )
 
 
+async def list_transitions(
+    session: AsyncSession, workflow_id: uuid.UUID
+) -> list[WorkflowTransition]:
+    """The allowed (from -> to) edges of a workflow. Lets the UI offer
+    only legal next states instead of probing the backend per click."""
+    return list(
+        (
+            await session.execute(
+                select(WorkflowTransition).where(
+                    WorkflowTransition.workflow_id == workflow_id
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+
 async def get_initial_state(session: AsyncSession, workflow_id: uuid.UUID) -> WorkflowState:
     st = (
         await session.execute(

@@ -245,6 +245,11 @@ class StateOut(BaseModel):
     is_terminal: bool
 
 
+class TransitionOut(BaseModel):
+    from_state_id: uuid.UUID
+    to_state_id: uuid.UUID
+
+
 class ExpectedVersionIn(BaseModel):
     expected_version: int = Field(ge=1)
 
