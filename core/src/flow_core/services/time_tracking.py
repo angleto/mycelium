@@ -31,7 +31,7 @@ from flow_core.i18n import MessageCode
 from flow_core.models.membership import Role
 from flow_core.models.project_profile import ProjectProfile
 from flow_core.models.tag import Tag, TagKind
-from flow_core.models.task import Task
+from flow_core.models.task import ExecKind, Task
 from flow_core.models.task_tag import TaskTag
 from flow_core.models.time_entry import TimeEntry, TimeSource
 from flow_core.models.user import User
@@ -126,7 +126,7 @@ async def start_timer(
     note: str | None = None,
 ) -> TimeEntry:
     await require_role(session, org_id, actor_id, Role.member)
-    await get_task(session, org_id=org_id, task_id=task_id)
+    task = await get_task(session, org_id=org_id, task_id=task_id)
     rate, currency = await _rate(session, task_id)
     started = _now()
     entry = TimeEntry(
@@ -137,6 +137,7 @@ async def start_timer(
         ended_at=None,
         duration_seconds=None,
         source=TimeSource.timer,
+        executor_kind=task.executor_kind,
         billable=billable,
         rate_snapshot=rate,
         currency=currency,
@@ -209,7 +210,7 @@ async def add_manual_entry(
     note: str | None = None,
 ) -> TimeEntry:
     await require_role(session, org_id, actor_id, Role.member)
-    await get_task(session, org_id=org_id, task_id=task_id)
+    task = await get_task(session, org_id=org_id, task_id=task_id)
     if ended_at is not None:
         if ended_at <= started_at:
             raise DomainError(MessageCode.TIME_ENTRY_INVALID)
@@ -228,6 +229,7 @@ async def add_manual_entry(
         ended_at=ended_at,
         duration_seconds=seconds,
         source=TimeSource.manual,
+        executor_kind=task.executor_kind,
         billable=billable,
         rate_snapshot=rate,
         currency=currency,
@@ -361,6 +363,7 @@ async def report(
     start_from: dt.datetime | None = None,
     start_to: dt.datetime | None = None,
     billable: bool | None = None,
+    executor_kind: ExecKind | None = None,
 ) -> list[ReportRow]:
     """Aggregate completed entries (running timers excluded). Amount
     sums only billable entries that carry a rate snapshot."""
@@ -373,6 +376,8 @@ async def report(
         billable=billable,
     )
     entries = [e for e in entries if e.duration_seconds is not None]
+    if executor_kind is not None:
+        entries = [e for e in entries if e.executor_kind is executor_kind]
 
     # acc key -> [label, seconds, billable_seconds, amount, currency]
     acc: dict[str | None, list[Any]] = {}

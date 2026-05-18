@@ -51,6 +51,7 @@ def _out(t: Task, state_name: str, tags: list[Tag] | None = None) -> TaskOut:
         due_date=t.due_date,
         parent_task_id=t.parent_task_id,
         executor_kind=t.executor_kind,
+        estimate_effort_h=t.estimate_effort_h,
         monetary_cost=t.monetary_cost,
         location=t.location,
         necessity=t.necessity,

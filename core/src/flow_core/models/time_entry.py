@@ -31,6 +31,7 @@ from flow_core.models.base import (
     UUIDPKMixin,
     VersionMixin,
 )
+from flow_core.models.task import ExecKind
 
 
 class TimeSource(enum.StrEnum):
@@ -71,6 +72,13 @@ class TimeEntry(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, Base)
     source: Mapped[TimeSource] = mapped_column(
         SAEnum(TimeSource, name="time_source", native_enum=True, create_type=False),
         nullable=False,
+    )
+    # Snapshot of the task's executor at entry time so AI-tracked time
+    # is distinguishable and never summed into a human's totals.
+    executor_kind: Mapped[ExecKind] = mapped_column(
+        SAEnum(ExecKind, name="exec_kind", native_enum=True, create_type=False),
+        nullable=False,
+        server_default="human",
     )
     billable: Mapped[bool] = mapped_column(nullable=False, server_default="true")
     rate_snapshot: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)

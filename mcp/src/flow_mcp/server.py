@@ -554,6 +554,7 @@ def _time_entry(e: TimeEntry) -> dict[str, Any]:
         "ended_at": e.ended_at.isoformat() if e.ended_at else None,
         "duration_seconds": e.duration_seconds,
         "source": e.source.value,
+        "executor_kind": e.executor_kind.value,
         "billable": e.billable,
         "rate_snapshot": (str(e.rate_snapshot) if e.rate_snapshot is not None else None),
         "currency": e.currency,

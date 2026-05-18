@@ -25,6 +25,7 @@ from flow_api.schemas import (
     TimeStopIn,
     VersionOut,
 )
+from flow_core.models.task import ExecKind
 from flow_core.models.time_entry import TimeEntry
 from flow_core.services import time_tracking as svc
 from flow_core.services.time_tracking import ReportGroup
@@ -41,6 +42,7 @@ def _out(e: TimeEntry) -> TimeEntryOut:
         ended_at=e.ended_at,
         duration_seconds=e.duration_seconds,
         source=e.source,
+        executor_kind=e.executor_kind,
         billable=e.billable,
         rate_snapshot=e.rate_snapshot,
         currency=e.currency,
@@ -172,6 +174,7 @@ async def _report(
     start_from: datetime.datetime | None,
     start_to: datetime.datetime | None,
     billable: bool | None,
+    executor_kind: ExecKind | None,
 ) -> list[svc.ReportRow]:
     return await svc.report(
         ctx.session,
@@ -181,6 +184,7 @@ async def _report(
         start_from=start_from,
         start_to=start_to,
         billable=billable,
+        executor_kind=executor_kind,
     )
 
 
@@ -191,8 +195,11 @@ async def report(
     start_from: datetime.datetime | None = None,
     start_to: datetime.datetime | None = None,
     billable: bool | None = None,
+    executor_kind: ExecKind | None = None,
 ) -> list[ReportRowOut]:
-    rows = await _report(ctx, group_by, start_from, start_to, billable)
+    rows = await _report(
+        ctx, group_by, start_from, start_to, billable, executor_kind
+    )
     return [
         ReportRowOut(
             key=r.key,
@@ -213,8 +220,11 @@ async def report_csv(
     start_from: datetime.datetime | None = None,
     start_to: datetime.datetime | None = None,
     billable: bool | None = None,
+    executor_kind: ExecKind | None = None,
 ) -> Response:
-    rows = await _report(ctx, group_by, start_from, start_to, billable)
+    rows = await _report(
+        ctx, group_by, start_from, start_to, billable, executor_kind
+    )
     buf = io.StringIO()
     w = csv.writer(buf)
     w.writerow(["key", "label", "seconds", "billable_seconds", "amount", "currency"])

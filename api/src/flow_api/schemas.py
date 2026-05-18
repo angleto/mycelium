@@ -261,6 +261,7 @@ class TaskOut(BaseModel):
     due_date: datetime.date | None
     parent_task_id: uuid.UUID | None
     executor_kind: ExecKind
+    estimate_effort_h: Decimal | None
     monetary_cost: Decimal | None
     location: str | None
     necessity: Necessity
@@ -486,6 +487,7 @@ class TimeEntryOut(BaseModel):
     ended_at: datetime.datetime | None
     duration_seconds: int | None
     source: TimeSource
+    executor_kind: ExecKind
     billable: bool
     rate_snapshot: Decimal | None
     currency: str

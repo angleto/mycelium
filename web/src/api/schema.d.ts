@@ -3375,6 +3375,19 @@ export interface components {
             /** Operation Id */
             operation_id: string;
         };
+        /** TagBrief */
+        TagBrief: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            kind: components["schemas"]["TagKind"];
+            /** Name */
+            name: string;
+            /** Color */
+            color: string | null;
+        };
         /** TagCreateIn */
         TagCreateIn: {
             kind: components["schemas"]["TagKind"];
@@ -3514,6 +3527,8 @@ export interface components {
             is_archived: boolean;
             /** Version */
             version: number;
+            /** Tags */
+            tags?: components["schemas"]["TagBrief"][];
         };
         /** TaskPatchIn */
         TaskPatchIn: {
