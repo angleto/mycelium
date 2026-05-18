@@ -39,6 +39,7 @@ export function WorkflowsRoute() {
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const [editing, setEditing] = useState<Edit | null>(null)
+  const [showCreate, setShowCreate] = useState(false)
 
   const loadMeta = useCallback(async (wfs: Workflow[]) => {
     const h = workspaceHeader()
@@ -124,6 +125,7 @@ export function WorkflowsRoute() {
       return
     }
     setName('')
+    setShowCreate(false)
     await load()
   }
 
@@ -395,10 +397,13 @@ export function WorkflowsRoute() {
                       {t('workflows.addState')}
                     </button>
                     <h3>{t('workflows.transitions')}</h3>
-                    {editing.tr.map((x, i) => (
+                    {editing.tr.map((x, i) => {
+                      const opts = editing.states
+                        .map((s) => s.name.trim())
+                        .filter((nm) => nm !== '')
+                      return (
                       <div className="row" key={i}>
-                        <input
-                          placeholder={t('workflows.from')}
+                        <select
                           value={x.from_state}
                           onChange={(e) =>
                             patchE({
@@ -409,9 +414,16 @@ export function WorkflowsRoute() {
                               ),
                             })
                           }
-                        />
-                        <input
-                          placeholder={t('workflows.to')}
+                        >
+                          <option value="">{t('workflows.from')}</option>
+                          {opts.map((nm) => (
+                            <option key={nm} value={nm}>
+                              {nm}
+                            </option>
+                          ))}
+                        </select>
+                        <span>→</span>
+                        <select
                           value={x.to_state}
                           onChange={(e) =>
                             patchE({
@@ -422,7 +434,14 @@ export function WorkflowsRoute() {
                               ),
                             })
                           }
-                        />
+                        >
+                          <option value="">{t('workflows.to')}</option>
+                          {opts.map((nm) => (
+                            <option key={nm} value={nm}>
+                              {nm}
+                            </option>
+                          ))}
+                        </select>
                         <button
                           type="button"
                           className="btn--ghost btn--sm"
@@ -435,7 +454,8 @@ export function WorkflowsRoute() {
                           ✕
                         </button>
                       </div>
-                    ))}
+                      )
+                    })}
                     <button
                       type="button"
                       className="btn--sm"
@@ -475,7 +495,15 @@ export function WorkflowsRoute() {
       )}
       {err && <p className="err">{err}</p>}
 
+      {!showCreate && (
+        <button type="button" onClick={() => setShowCreate(true)}>
+          {t('workflows.newWorkflow')}
+        </button>
+      )}
+
+      {showCreate && (
       <form onSubmit={(e) => void onCreate(e)}>
+        <h2>{t('workflows.newWorkflow')}</h2>
         <label>
           {t('workflows.name')}
           <input required value={name} onChange={(e) => setName(e.target.value)} />
@@ -536,28 +564,50 @@ export function WorkflowsRoute() {
         </button>
 
         <h2>{t('workflows.transitions')}</h2>
-        {transitions.map((tr, i) => (
-          <div className="row" key={i}>
-            <input
-              placeholder={t('workflows.from')}
-              value={tr.from_state}
-              onChange={(e) =>
-                setTransitions((xs) =>
-                  xs.map((x, j) => (j === i ? { ...x, from_state: e.target.value } : x)),
-                )
-              }
-            />
-            <input
-              placeholder={t('workflows.to')}
-              value={tr.to_state}
-              onChange={(e) =>
-                setTransitions((xs) =>
-                  xs.map((x, j) => (j === i ? { ...x, to_state: e.target.value } : x)),
-                )
-              }
-            />
-          </div>
-        ))}
+        {transitions.map((tr, i) => {
+          const opts = states
+            .map((s) => s.name.trim())
+            .filter((nm) => nm !== '')
+          return (
+            <div className="row" key={i}>
+              <select
+                value={tr.from_state}
+                onChange={(e) =>
+                  setTransitions((xs) =>
+                    xs.map((x, j) =>
+                      j === i ? { ...x, from_state: e.target.value } : x,
+                    ),
+                  )
+                }
+              >
+                <option value="">{t('workflows.from')}</option>
+                {opts.map((nm) => (
+                  <option key={nm} value={nm}>
+                    {nm}
+                  </option>
+                ))}
+              </select>
+              <span>→</span>
+              <select
+                value={tr.to_state}
+                onChange={(e) =>
+                  setTransitions((xs) =>
+                    xs.map((x, j) =>
+                      j === i ? { ...x, to_state: e.target.value } : x,
+                    ),
+                  )
+                }
+              >
+                <option value="">{t('workflows.to')}</option>
+                {opts.map((nm) => (
+                  <option key={nm} value={nm}>
+                    {nm}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )
+        })}
         <button
           type="button"
           onClick={() =>
@@ -568,10 +618,20 @@ export function WorkflowsRoute() {
         </button>
 
         {err && <p className="err">{err}</p>}
-        <button type="submit" disabled={busy}>
-          {busy ? t('workflows.creating') : t('workflows.create')}
-        </button>
+        <div className="row">
+          <button type="submit" disabled={busy}>
+            {busy ? t('workflows.creating') : t('workflows.create')}
+          </button>
+          <button
+            type="button"
+            className="btn--ghost"
+            onClick={() => setShowCreate(false)}
+          >
+            {t('workflows.cancel')}
+          </button>
+        </div>
       </form>
+      )}
     </section>
   )
 }

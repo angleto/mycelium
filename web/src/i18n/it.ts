@@ -287,6 +287,7 @@ export const it: Catalog = {
     create: 'Crea workflow',
     creating: 'Creazione...',
     isDefault: 'predefinito',
+    newWorkflow: 'Nuovo workflow',
     edit: 'Modifica',
     save: 'Salva',
     cancel: 'Annulla',

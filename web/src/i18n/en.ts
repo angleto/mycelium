@@ -288,6 +288,7 @@ export const en = {
     create: 'Create workflow',
     creating: 'Creating...',
     isDefault: 'default',
+    newWorkflow: 'New workflow',
     edit: 'Edit',
     save: 'Save',
     cancel: 'Cancel',
