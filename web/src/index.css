@@ -412,3 +412,53 @@ button.btn--ghost {
   fill: var(--muted);
   font-size: 11px;
 }
+
+/* ---- markdown editor / view ---- */
+.mde {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.mde__tabs {
+  display: flex;
+  gap: 0.4rem;
+}
+.mde__ref {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.mde__preview {
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 0.6rem 0.8rem;
+  background: var(--surface-2);
+  min-height: 6rem;
+}
+.md {
+  color: var(--text);
+  font-size: 0.92rem;
+}
+.md p {
+  margin: 0 0 0.6rem;
+}
+.md :where(h1, h2, h3) {
+  margin: 0.6rem 0 0.4rem;
+}
+.md code {
+  font-family: var(--mono);
+  font-size: 0.85em;
+  background: var(--surface-2);
+  padding: 0.1rem 0.3rem;
+  border-radius: 4px;
+}
+.md pre {
+  background: var(--surface-2);
+  padding: 0.7rem;
+  border-radius: 7px;
+  overflow: auto;
+}
+.md a.chip {
+  text-decoration: none;
+}

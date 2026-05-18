@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { api, errMessage, workspaceHeader } from '../api/client'
+import { MarkdownEditor } from '../components/MarkdownEditor'
 import type { components } from '../api/schema'
 
 type Task = components['schemas']['TaskOut']
@@ -203,10 +204,7 @@ export function TaskDetailRoute() {
         </label>
         <label>
           {t('tasks.description')}
-          <textarea
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-          />
+          <MarkdownEditor value={description} onChange={setDescription} />
         </label>
         <label>
           {t('tasks.priority')}

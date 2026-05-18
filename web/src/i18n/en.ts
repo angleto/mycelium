@@ -392,6 +392,12 @@ export const en = {
     count: 'Count: {{n}}',
     loading: 'Loading...',
   },
+  md: {
+    write: 'Write',
+    preview: 'Preview',
+    pick: 'pick reference...',
+    insert: 'Insert @ref',
+  },
   error: { generic: 'Something went wrong.', network: 'Network error.' },
 }
 

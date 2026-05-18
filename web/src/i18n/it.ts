@@ -391,5 +391,11 @@ export const it: Catalog = {
     count: 'Conteggio: {{n}}',
     loading: 'Caricamento...',
   },
+  md: {
+    write: 'Scrivi',
+    preview: 'Anteprima',
+    pick: 'scegli riferimento...',
+    insert: 'Inserisci @rif',
+  },
   error: { generic: 'Si e verificato un errore.', network: 'Errore di rete.' },
 }

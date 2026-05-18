@@ -1,6 +1,8 @@
 import { useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { api, errMessage, workspaceHeader } from '../api/client'
+import { MarkdownEditor } from '../components/MarkdownEditor'
+import { MarkdownView } from '../components/Markdown'
 import type { components } from '../api/schema'
 
 type Note = components['schemas']['NoteOut']
@@ -138,7 +140,7 @@ export function NotesRoute() {
         </div>
         <label>
           {t('notes.text')}
-          <textarea value={text} onChange={(e) => setText(e.target.value)} />
+          <MarkdownEditor value={text} onChange={setText} />
         </label>
         <div className="row">
           <button type="submit">{t('notes.create')}</button>
@@ -186,7 +188,7 @@ export function NotesRoute() {
           <ul className="list">
             {turns.map((tr) => (
               <li key={tr.id}>
-                <strong>{tr.role}:</strong> {tr.content}
+                <strong>{tr.role}:</strong> <MarkdownView text={tr.content} />
               </li>
             ))}
           </ul>
