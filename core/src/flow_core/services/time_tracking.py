@@ -106,14 +106,87 @@ async def get_entry(session: AsyncSession, *, org_id: uuid.UUID, entry_id: uuid.
     return e
 
 
-async def running_entry(
+async def running_entries(
     session: AsyncSession, *, org_id: uuid.UUID, user_id: uuid.UUID
+) -> list[TimeEntry]:
+    """All live timers for the user (serial + any parallel ones)."""
+    return list(
+        (
+            await session.execute(
+                select(TimeEntry)
+                .where(TimeEntry.user_id == user_id, TimeEntry.ended_at.is_(None))
+                .order_by(TimeEntry.started_at)
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+
+async def running_serial(
+    session: AsyncSession, *, org_id: uuid.UUID, user_id: uuid.UUID
+) -> TimeEntry | None:
+    """The single mutually-exclusive timer (parallel = false), if any."""
+    return (
+        await session.execute(
+            select(TimeEntry).where(
+                TimeEntry.user_id == user_id,
+                TimeEntry.ended_at.is_(None),
+                TimeEntry.parallel.is_(False),
+            )
+        )
+    ).scalar_one_or_none()
+
+
+async def running_for_task(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    user_id: uuid.UUID,
+    task_id: uuid.UUID,
 ) -> TimeEntry | None:
     return (
         await session.execute(
-            select(TimeEntry).where(TimeEntry.user_id == user_id, TimeEntry.ended_at.is_(None))
+            select(TimeEntry).where(
+                TimeEntry.user_id == user_id,
+                TimeEntry.task_id == task_id,
+                TimeEntry.ended_at.is_(None),
+            )
         )
     ).scalar_one_or_none()
+
+
+async def _stop_entry(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    entry: TimeEntry,
+    note: str | None = None,
+) -> TimeEntry:
+    ended = _now()
+    values: dict[str, Any] = {
+        "ended_at": ended,
+        "duration_seconds": int((ended - entry.started_at).total_seconds()),
+    }
+    if note is not None:
+        values["note"] = note
+    await optimistic_update(
+        session,
+        TimeEntry,
+        pk=entry.id,
+        expected_version=entry.version,
+        values=values,
+    )
+    await audit.log(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        entity="time_entry",
+        entity_id=entry.id,
+        action="stop",
+    )
+    return await get_entry(session, org_id=org_id, entry_id=entry.id)
 
 
 async def start_timer(
@@ -124,9 +197,20 @@ async def start_timer(
     task_id: uuid.UUID,
     billable: bool = True,
     note: str | None = None,
+    parallel: bool = False,
 ) -> TimeEntry:
+    """Serial (default): one running timer at a time; starting it stops
+    the previous serial one. Parallel: runs alongside others (e.g. LLM
+    tasks), stops nothing. The same task is never double-tracked (DB
+    partial unique index -> TIMER_ALREADY_RUNNING)."""
     await require_role(session, org_id, actor_id, Role.member)
     task = await get_task(session, org_id=org_id, task_id=task_id)
+    if not parallel:
+        current = await running_serial(session, org_id=org_id, user_id=actor_id)
+        if current is not None:
+            await _stop_entry(
+                session, org_id=org_id, actor_id=actor_id, entry=current
+            )
     rate, currency = await _rate(session, task_id)
     started = _now()
     entry = TimeEntry(
@@ -142,6 +226,7 @@ async def start_timer(
         rate_snapshot=rate,
         currency=currency,
         note=note,
+        parallel=parallel,
     )
     try:
         async with session.begin_nested():
@@ -166,35 +251,23 @@ async def stop_timer(
     *,
     org_id: uuid.UUID,
     actor_id: uuid.UUID,
+    task_id: uuid.UUID | None = None,
     note: str | None = None,
 ) -> TimeEntry:
+    """Stop the running timer for ``task_id`` (a specific row), or the
+    serial timer when ``task_id`` is omitted."""
     await require_role(session, org_id, actor_id, Role.member)
-    entry = await running_entry(session, org_id=org_id, user_id=actor_id)
+    if task_id is not None:
+        entry = await running_for_task(
+            session, org_id=org_id, user_id=actor_id, task_id=task_id
+        )
+    else:
+        entry = await running_serial(session, org_id=org_id, user_id=actor_id)
     if entry is None:
         raise DomainError(MessageCode.NO_RUNNING_TIMER)
-    ended = _now()
-    values: dict[str, Any] = {
-        "ended_at": ended,
-        "duration_seconds": int((ended - entry.started_at).total_seconds()),
-    }
-    if note is not None:
-        values["note"] = note
-    await optimistic_update(
-        session,
-        TimeEntry,
-        pk=entry.id,
-        expected_version=entry.version,
-        values=values,
+    return await _stop_entry(
+        session, org_id=org_id, actor_id=actor_id, entry=entry, note=note
     )
-    await audit.log(
-        session,
-        org_id=org_id,
-        actor_id=actor_id,
-        entity="time_entry",
-        entity_id=entry.id,
-        action="stop",
-    )
-    return await get_entry(session, org_id=org_id, entry_id=entry.id)
 
 
 async def add_manual_entry(

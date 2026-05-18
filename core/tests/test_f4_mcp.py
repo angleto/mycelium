@@ -32,9 +32,10 @@ async def test_mcp_time_tracking() -> None:
 
     t = await create_task(token=token, org_id=org, title="MCP timed")
     e1 = await start_timer(token=token, org_id=org, task_id=t["id"])
-    assert e1["ended_at"] is None
+    assert e1["ended_at"] is None and e1["parallel"] is False
+    # The same task can't be double-tracked simultaneously.
     with pytest.raises(DomainError):
-        await start_timer(token=token, org_id=org, task_id=t["id"])
+        await start_timer(token=token, org_id=org, task_id=t["id"], parallel=True)
     stopped = await stop_timer(token=token, org_id=org)
     assert stopped["id"] == e1["id"] and stopped["ended_at"] is not None
 

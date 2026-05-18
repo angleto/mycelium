@@ -80,6 +80,9 @@ class TimeEntry(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, Base)
         nullable=False,
         server_default="human",
     )
+    # Serial (false): classic single running timer, mutually exclusive.
+    # Parallel (true): runs concurrently with others (e.g. LLM tasks).
+    parallel: Mapped[bool] = mapped_column(nullable=False, server_default="false")
     billable: Mapped[bool] = mapped_column(nullable=False, server_default="true")
     rate_snapshot: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
     currency: Mapped[str] = mapped_column(String(3), nullable=False, server_default="EUR")

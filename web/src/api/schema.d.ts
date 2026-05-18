@@ -3810,6 +3810,8 @@ export interface components {
             executor_kind: components["schemas"]["ExecKind"];
             /** Billable */
             billable: boolean;
+            /** Parallel */
+            parallel: boolean;
             /** Rate Snapshot */
             rate_snapshot: string | null;
             /** Currency */
@@ -3871,9 +3873,16 @@ export interface components {
             billable: boolean;
             /** Note */
             note?: string | null;
+            /**
+             * Parallel
+             * @default false
+             */
+            parallel: boolean;
         };
         /** TimeStopIn */
         TimeStopIn: {
+            /** Task Id */
+            task_id?: string | null;
             /** Note */
             note?: string | null;
         };
@@ -6398,7 +6407,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["TimeEntryOut"] | null;
+                    "application/json": components["schemas"]["TimeEntryOut"][];
                 };
             };
             /** @description Validation Error */

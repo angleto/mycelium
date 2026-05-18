@@ -44,6 +44,7 @@ def _out(e: TimeEntry) -> TimeEntryOut:
         source=e.source,
         executor_kind=e.executor_kind,
         billable=e.billable,
+        parallel=e.parallel,
         rate_snapshot=e.rate_snapshot,
         currency=e.currency,
         note=e.note,
@@ -63,6 +64,7 @@ async def start_timer(
         task_id=body.task_id,
         billable=body.billable,
         note=body.note,
+        parallel=body.parallel,
     )
     return _out(e)
 
@@ -76,17 +78,20 @@ async def stop_timer(
         ctx.session,
         org_id=ctx.org_id,
         actor_id=ctx.user_id,
+        task_id=body.task_id,
         note=body.note,
     )
     return _out(e)
 
 
-@router.get("/time/running", response_model=TimeEntryOut | None)
+@router.get("/time/running", response_model=list[TimeEntryOut])
 async def running(
     ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
-) -> TimeEntryOut | None:
-    e = await svc.running_entry(ctx.session, org_id=ctx.org_id, user_id=ctx.user_id)
-    return _out(e) if e is not None else None
+) -> list[TimeEntryOut]:
+    rows = await svc.running_entries(
+        ctx.session, org_id=ctx.org_id, user_id=ctx.user_id
+    )
+    return [_out(e) for e in rows]
 
 
 @router.post("/time/entries", response_model=TimeEntryOut)

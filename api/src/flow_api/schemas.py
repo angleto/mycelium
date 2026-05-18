@@ -494,9 +494,14 @@ class TimeStartIn(BaseModel):
     task_id: uuid.UUID
     billable: bool = True
     note: str | None = None
+    # Double-play: run alongside other timers instead of replacing the
+    # serial one (e.g. parallel LLM tasks).
+    parallel: bool = False
 
 
 class TimeStopIn(BaseModel):
+    # Stop a specific task's running timer; omit to stop the serial one.
+    task_id: uuid.UUID | None = None
     note: str | None = None
 
 
@@ -525,6 +530,7 @@ class TimeEntryOut(BaseModel):
     source: TimeSource
     executor_kind: ExecKind
     billable: bool
+    parallel: bool
     rate_snapshot: Decimal | None
     currency: str
     note: str | None

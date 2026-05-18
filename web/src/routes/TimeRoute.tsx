@@ -26,7 +26,7 @@ export function TimeRoute() {
   const session = useSession()
   const activeId = session?.workspaceId
   const [tasks, setTasks] = useState<Task[]>([])
-  const [running, setRunning] = useState<Entry | null>(null)
+  const [running, setRunning] = useState<Entry[]>([])
   const [entries, setEntries] = useState<Entry[]>([])
   const [report, setReport] = useState<Row[]>([])
   const [group, setGroup] = useState<Group>('project')
@@ -79,7 +79,7 @@ export function TimeRoute() {
       const { data } = await api.GET('/time/running', {
         params: { header: workspaceHeader() },
       })
-      if (active) setRunning(data ?? null)
+      if (active) setRunning(data ?? [])
     }
     void tick()
     const poll = setInterval(() => void tick(), 5000)
@@ -125,41 +125,49 @@ export function TimeRoute() {
     }
   }, [activeId, reportQuery])
 
-  async function onStart(e: FormEvent) {
-    e.preventDefault()
-    if (!pick) return
-    setErr(null)
-    const { error } = await api.POST('/time/start', {
-      params: { header: workspaceHeader() },
-      body: { task_id: pick, billable: true },
-    })
-    if (error) {
-      setErr(errMessage(error))
-      return
-    }
+  const refreshRunning = useCallback(async () => {
     const { data } = await api.GET('/time/running', {
       params: { header: workspaceHeader() },
     })
-    setRunning(data ?? null)
-  }
+    setRunning(data ?? [])
+  }, [])
 
-  async function onStop() {
+  async function startTask(taskId: string, parallel: boolean) {
+    if (!taskId) return
     setErr(null)
-    const { error } = await api.POST('/time/stop', {
+    const { error } = await api.POST('/time/start', {
       params: { header: workspaceHeader() },
-      body: {},
+      body: { task_id: taskId, billable: true, parallel },
     })
     if (error) {
       setErr(errMessage(error))
       return
     }
-    setRunning(null)
+    await refreshRunning()
     await reloadEntries()
   }
 
-  const elapsed = running
-    ? (now - new Date(running.started_at).getTime()) / 1000
-    : 0
+  async function stopTask(taskId: string) {
+    setErr(null)
+    const { error } = await api.POST('/time/stop', {
+      params: { header: workspaceHeader() },
+      body: { task_id: taskId },
+    })
+    if (error) {
+      setErr(errMessage(error))
+      return
+    }
+    await refreshRunning()
+    await reloadEntries()
+  }
+
+  async function onStart(e: FormEvent, parallel: boolean) {
+    e.preventDefault()
+    await startTask(pick, parallel)
+  }
+
+  const runningByTask = new Set(running.map((r) => r.task_id))
+  const secs = (iso: string) => (now - new Date(iso).getTime()) / 1000
 
   return (
     <section className="card">
@@ -167,20 +175,40 @@ export function TimeRoute() {
       <p className="hint">{t('time.realtimeNote')}</p>
       {err && <p className="err">{err}</p>}
 
-      {running ? (
-        <div className="row">
-          <strong>
-            {t('time.runningOn')}: {titleOf(running.task_id)}
-          </strong>
-          <span>
-            {t('time.elapsed')}: {hhmmss(elapsed)}
-          </span>
-          <button type="button" onClick={() => void onStop()}>
-            {t('time.stop')}
-          </button>
-        </div>
-      ) : (
-        <form onSubmit={(e) => void onStart(e)} className="row">
+      <div className="card card--running">
+        <h2>{t('time.runningNow')}</h2>
+        {running.length === 0 ? (
+          <p className="hint">{t('time.idle')}</p>
+        ) : (
+          <ul className="list">
+            {running.map((r) => (
+              <li key={r.id} className="taskrow">
+                <span className="taskrow__title">
+                  {titleOf(r.task_id)}{' '}
+                  {r.executor_kind === 'llm_agent' && (
+                    <span className="aibadge" title={t('tasks.aiTitle')}>
+                      {t('tasks.aiBadge')}
+                    </span>
+                  )}
+                  <span className="chip">
+                    {r.parallel ? t('time.parallel') : t('time.serial')}
+                  </span>
+                </span>
+                <span className="taskrow__meta">
+                  <strong>{hhmmss(secs(r.started_at))}</strong>
+                  <button
+                    type="button"
+                    className="btn--sm"
+                    onClick={() => void stopTask(r.task_id)}
+                  >
+                    ⏱■ {t('time.stop')}
+                  </button>
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+        <form className="row" onSubmit={(e) => void onStart(e, false)}>
           <label>
             {t('time.pick')}
             <select value={pick} onChange={(e) => setPick(e.target.value)}>
@@ -192,9 +220,19 @@ export function TimeRoute() {
               ))}
             </select>
           </label>
-          <button type="submit">{t('time.start')}</button>
+          <button type="submit" title={t('time.startSerial')}>
+            ⏱▶ {t('time.startSerial')}
+          </button>
+          <button
+            type="button"
+            className="btn--ghost"
+            title={t('time.startParallel')}
+            onClick={() => void startTask(pick, true)}
+          >
+            ⏱⏩ {t('time.startParallel')}
+          </button>
         </form>
-      )}
+      </div>
 
       <h2>{t('time.entries')}</h2>
       {entries.length === 0 ? (
@@ -202,16 +240,51 @@ export function TimeRoute() {
       ) : (
         <ul className="list">
           {entries.map((en) => (
-            <li key={en.id}>
-              {titleOf(en.task_id)}{' '}
-              {en.executor_kind === 'llm_agent' && (
-                <span className="aibadge" title={t('tasks.aiTitle')}>
-                  {t('tasks.aiBadge')}
+            <li key={en.id} className="taskrow">
+              <span className="taskrow__title">
+                {titleOf(en.task_id)}{' '}
+                {en.executor_kind === 'llm_agent' && (
+                  <span className="aibadge" title={t('tasks.aiTitle')}>
+                    {t('tasks.aiBadge')}
+                  </span>
+                )}
+                <span className="muted">
+                  {' '}
+                  · {en.duration_seconds != null
+                    ? hhmmss(en.duration_seconds)
+                    : '...'}
+                  {en.billable ? ` · ${t('time.billable')}` : ''}
                 </span>
-              )}{' '}
-              <span className="muted">
-                · {en.duration_seconds != null ? hhmmss(en.duration_seconds) : '...'}
-                {en.billable ? ` · ${t('time.billable')}` : ''}
+              </span>
+              <span className="taskrow__meta">
+                {runningByTask.has(en.task_id) ? (
+                  <button
+                    type="button"
+                    className="btn--sm"
+                    onClick={() => void stopTask(en.task_id)}
+                  >
+                    ⏱■
+                  </button>
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      className="btn--ghost btn--sm"
+                      title={t('time.startSerial')}
+                      onClick={() => void startTask(en.task_id, false)}
+                    >
+                      ⏱▶
+                    </button>
+                    <button
+                      type="button"
+                      className="btn--ghost btn--sm"
+                      title={t('time.startParallel')}
+                      onClick={() => void startTask(en.task_id, true)}
+                    >
+                      ⏱⏩
+                    </button>
+                  </>
+                )}
               </span>
             </li>
           ))}

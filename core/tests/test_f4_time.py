@@ -36,22 +36,44 @@ async def test_single_running_timer_and_stop() -> None:
         a = await signup(s, email=_email(), password="pw-strong-123", org_name="TT")
     org, user = a.org_id, a.user_id
     async with tenant_session(str(org), str(user)) as s:
-        t = await tasks.create_task(s, org_id=org, actor_id=user, title="T")
-        e1 = await tt.start_timer(s, org_id=org, actor_id=user, task_id=t.id)
-        assert e1.ended_at is None and e1.duration_seconds is None
-        # A second start while one runs is rejected (partial unique).
+        t1 = await tasks.create_task(s, org_id=org, actor_id=user, title="T1")
+        t2 = await tasks.create_task(s, org_id=org, actor_id=user, title="T2")
+        t3 = await tasks.create_task(s, org_id=org, actor_id=user, title="T3")
+
+        # Serial timer: starting another serial one stops the previous.
+        e1 = await tt.start_timer(s, org_id=org, actor_id=user, task_id=t1.id)
+        assert e1.ended_at is None and e1.parallel is False
+        e2 = await tt.start_timer(s, org_id=org, actor_id=user, task_id=t2.id)
+        assert e2.id != e1.id
+        running = await tt.running_entries(s, org_id=org, user_id=user)
+        assert [r.id for r in running] == [e2.id]  # e1 auto-stopped
+
+        # Parallel timer runs alongside the serial one.
+        p3 = await tt.start_timer(
+            s, org_id=org, actor_id=user, task_id=t3.id, parallel=True
+        )
+        assert p3.parallel is True
+        running = await tt.running_entries(s, org_id=org, user_id=user)
+        assert {r.id for r in running} == {e2.id, p3.id}
+
+        # The same task can't be double-tracked simultaneously.
         with pytest.raises(DomainError):
-            await tt.start_timer(s, org_id=org, actor_id=user, task_id=t.id)
-        stopped = await tt.stop_timer(s, org_id=org, actor_id=user)
-        assert stopped.id == e1.id
-        assert stopped.ended_at is not None
-        assert stopped.duration_seconds is not None and stopped.duration_seconds >= 0
-        # Stopping with nothing running is a domain error.
+            await tt.start_timer(
+                s, org_id=org, actor_id=user, task_id=t3.id, parallel=True
+            )
+
+        # Stop a specific row by task; the other keeps running.
+        s3 = await tt.stop_timer(s, org_id=org, actor_id=user, task_id=t3.id)
+        assert s3.id == p3.id and s3.ended_at is not None
+        running = await tt.running_entries(s, org_id=org, user_id=user)
+        assert [r.id for r in running] == [e2.id]
+
+        # No task -> stop the serial one. Then nothing running -> error.
+        s2 = await tt.stop_timer(s, org_id=org, actor_id=user)
+        assert s2.id == e2.id and s2.ended_at is not None
+        assert await tt.running_entries(s, org_id=org, user_id=user) == []
         with pytest.raises(DomainError):
             await tt.stop_timer(s, org_id=org, actor_id=user)
-        # After stop a new timer can start (no longer "running").
-        e2 = await tt.start_timer(s, org_id=org, actor_id=user, task_id=t.id)
-        assert e2.id != e1.id
 
 
 async def test_report_aggregation_billable_and_rate_snapshot() -> None:

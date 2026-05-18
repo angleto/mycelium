@@ -556,6 +556,7 @@ def _time_entry(e: TimeEntry) -> dict[str, Any]:
         "source": e.source.value,
         "executor_kind": e.executor_kind.value,
         "billable": e.billable,
+        "parallel": e.parallel,
         "rate_snapshot": (str(e.rate_snapshot) if e.rate_snapshot is not None else None),
         "currency": e.currency,
         "note": e.note,
@@ -570,9 +571,12 @@ async def start_timer(
     task_id: str,
     billable: bool = True,
     note: str | None = None,
+    parallel: bool = False,
 ) -> dict[str, Any]:
-    """Start the live timer for a task. One running timer per user is
-    enforced; a second start is rejected."""
+    """Start the live timer for a task. Serial (default) replaces the
+    single running timer; ``parallel=True`` runs alongside others
+    (e.g. concurrent LLM tasks). The same task is never
+    double-tracked."""
     async with _tenant(token, org_id) as (s, org, user):
         e = await time_svc.start_timer(
             s,
@@ -581,15 +585,28 @@ async def start_timer(
             task_id=uuid.UUID(task_id),
             billable=billable,
             note=note,
+            parallel=parallel,
         )
         return _time_entry(e)
 
 
 @mcp.tool()
-async def stop_timer(token: str, org_id: str, note: str | None = None) -> dict[str, Any]:
-    """Stop the running timer; computes the duration."""
+async def stop_timer(
+    token: str,
+    org_id: str,
+    task_id: str | None = None,
+    note: str | None = None,
+) -> dict[str, Any]:
+    """Stop a running timer: the one for ``task_id`` if given, else the
+    serial timer. Computes the duration."""
     async with _tenant(token, org_id) as (s, org, user):
-        e = await time_svc.stop_timer(s, org_id=org, actor_id=user, note=note)
+        e = await time_svc.stop_timer(
+            s,
+            org_id=org,
+            actor_id=user,
+            task_id=uuid.UUID(task_id) if task_id else None,
+            note=note,
+        )
         return _time_entry(e)
 
 

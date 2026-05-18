@@ -263,6 +263,11 @@ button.btn--ghost {
   padding: 0.28rem 0.55rem;
   font-size: 0.8rem;
 }
+.card--running {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 6%, var(--surface));
+  margin-bottom: 1rem;
+}
 .btn--danger,
 button.btn--danger {
   background: transparent;

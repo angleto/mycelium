@@ -41,7 +41,7 @@ export function TasksRoute() {
   const [cName, setCName] = useState('')
   const [cLegal, setCLegal] = useState('')
   const [pName, setPName] = useState('')
-  const [running, setRunning] = useState<Running | null>(null)
+  const [running, setRunning] = useState<Running[]>([])
   const [now, setNow] = useState<number>(() => Date.now())
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
@@ -141,7 +141,7 @@ export function TasksRoute() {
       const { data } = await api.GET('/time/running', {
         params: { header: workspaceHeader() },
       })
-      if (active) setRunning(data ?? null)
+      if (active) setRunning(data ?? [])
     }
     void tick()
     const poll = setInterval(() => void tick(), 5000)
@@ -217,12 +217,15 @@ export function TasksRoute() {
 
   async function toggleTimer(taskId: string) {
     setErr(null)
-    const onThis = running?.task_id === taskId
+    const onThis = running.some((r) => r.task_id === taskId)
     const { error } = onThis
-      ? await api.POST('/time/stop', { params: { header: workspaceHeader() }, body: {} })
+      ? await api.POST('/time/stop', {
+          params: { header: workspaceHeader() },
+          body: { task_id: taskId },
+        })
       : await api.POST('/time/start', {
           params: { header: workspaceHeader() },
-          body: { task_id: taskId, billable: true },
+          body: { task_id: taskId, billable: true, parallel: false },
         })
     if (error) {
       setErr(errMessage(error))
@@ -231,7 +234,7 @@ export function TasksRoute() {
     const { data } = await api.GET('/time/running', {
       params: { header: workspaceHeader() },
     })
-    setRunning(data ?? null)
+    setRunning(data ?? [])
   }
 
   function toggleSel(id: string) {
@@ -607,9 +610,10 @@ export function TasksRoute() {
       ) : (
         <ul className="list tasklist">
           {shown.map((tk) => {
-            const onThis = running?.task_id === tk.id
-            const elapsed = onThis
-              ? (now - new Date(running.started_at).getTime()) / 1000
+            const cur = running.find((r) => r.task_id === tk.id)
+            const onThis = cur != null
+            const elapsed = cur
+              ? (now - new Date(cur.started_at).getTime()) / 1000
               : 0
             const score =
               tk.importance != null && tk.urgency != null
