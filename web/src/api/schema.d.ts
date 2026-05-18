@@ -55,22 +55,225 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/orgs/me": {
+    "/auth/login-mfa": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /** Get My Org */
-        get: operations["get_my_org_orgs_me_get"];
+        get?: never;
+        put?: never;
+        /**
+         * Login Mfa Endpoint
+         * @description Combined password + TOTP/backup-code login. Use once /auth/login
+         *     has answered 401 auth.mfa_required.
+         */
+        post: operations["login_mfa_endpoint_auth_login_mfa_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/verify-email": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Verify Email Endpoint */
+        post: operations["verify_email_endpoint_auth_verify_email_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/resend-verification": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Resend Verification Endpoint */
+        post: operations["resend_verification_endpoint_auth_resend_verification_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/forgot-password": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Forgot Password Endpoint */
+        post: operations["forgot_password_endpoint_auth_forgot_password_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/reset-password": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reset Password Endpoint */
+        post: operations["reset_password_endpoint_auth_reset_password_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/logout": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Logout Endpoint
+         * @description Real server-side logout: revoke the current token's jti so it
+         *     cannot be reused even though JWTs are stateless.
+         */
+        post: operations["logout_endpoint_auth_logout_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/mfa/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Mfa Status */
+        get: operations["mfa_status_mfa_status_get"];
         put?: never;
         post?: never;
         delete?: never;
         options?: never;
         head?: never;
-        /** Patch My Org */
-        patch: operations["patch_my_org_orgs_me_patch"];
+        patch?: never;
+        trace?: never;
+    };
+    "/mfa/setup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Mfa Setup */
+        post: operations["mfa_setup_mfa_setup_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/mfa/activate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Mfa Activate */
+        post: operations["mfa_activate_mfa_activate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/mfa/disable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Mfa Disable */
+        post: operations["mfa_disable_mfa_disable_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workspaces": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List My Workspaces
+         * @description Workspaces the authenticated user belongs to (for the switcher).
+         */
+        get: operations["list_my_workspaces_workspaces_get"];
+        put?: never;
+        /**
+         * Create My Workspace
+         * @description Create an additional workspace (the caller becomes its owner).
+         *     In-app, no re-auth.
+         */
+        post: operations["create_my_workspace_workspaces_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workspaces/me": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get My Workspace */
+        get: operations["get_my_workspace_workspaces_me_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Patch My Workspace */
+        patch: operations["patch_my_workspace_workspaces_me_patch"];
         trace?: never;
     };
     "/tags": {
@@ -2083,6 +2286,15 @@ export interface components {
          * @enum {string}
          */
         EmailAccountStatus: "active" | "error" | "disabled";
+        /**
+         * EmailIn
+         * @description Used by resend-verification and forgot-password (enumeration-safe;
+         *     the response never reveals whether the address exists).
+         */
+        EmailIn: {
+            /** Email */
+            email: string;
+        };
         /** EmailMessageOut */
         EmailMessageOut: {
             /**
@@ -2532,6 +2744,15 @@ export interface components {
             /** Password */
             password: string;
         };
+        /** LoginMfaIn */
+        LoginMfaIn: {
+            /** Email */
+            email: string;
+            /** Password */
+            password: string;
+            /** Totp Code */
+            totp_code: string;
+        };
         /** MemoryBlobOut */
         MemoryBlobOut: {
             /**
@@ -2640,6 +2861,55 @@ export interface components {
             units_out: number | string;
             /** @default local */
             basis: components["schemas"]["CostBasis"];
+        };
+        /** MfaActivateIn */
+        MfaActivateIn: {
+            /** Totp Code */
+            totp_code: string;
+        };
+        /** MfaActivateOut */
+        MfaActivateOut: {
+            /**
+             * Backup Codes
+             * @description Shown once; store securely.
+             */
+            backup_codes: string[];
+            /**
+             * Enabled At
+             * Format: date-time
+             */
+            enabled_at: string;
+        };
+        /** MfaDisableIn */
+        MfaDisableIn: {
+            /**
+             * Code
+             * @description TOTP or a backup code.
+             */
+            code: string;
+        };
+        /** MfaSetupOut */
+        MfaSetupOut: {
+            /** Provisioning Uri */
+            provisioning_uri: string;
+            /** Qr Png Base64 */
+            qr_png_base64: string;
+            /**
+             * Secret
+             * @description Base32 TOTP secret; shown once at setup.
+             */
+            secret: string;
+        };
+        /** MfaStatusOut */
+        MfaStatusOut: {
+            /** Enabled */
+            enabled: boolean;
+            /** Pending */
+            pending: boolean;
+            /** Enabled At */
+            enabled_at: string | null;
+            /** Backup Codes Remaining */
+            backup_codes_remaining: number;
         };
         /**
          * Necessity
@@ -2785,25 +3055,6 @@ export interface components {
          * @enum {string}
          */
         NotificationStatus: "pending" | "sent" | "failed";
-        /** OrgOut */
-        OrgOut: {
-            /**
-             * Id
-             * Format: uuid
-             */
-            id: string;
-            /** Name */
-            name: string;
-            /** Version */
-            version: number;
-        };
-        /** OrgPatchIn */
-        OrgPatchIn: {
-            /** Name */
-            name: string;
-            /** Expected Version */
-            expected_version: number;
-        };
         /**
          * PaymentStatus
          * @enum {string}
@@ -2982,6 +3233,13 @@ export interface components {
             /** Currency */
             currency: string;
         };
+        /** ResetPasswordIn */
+        ResetPasswordIn: {
+            /** Token */
+            token: string;
+            /** New Password */
+            new_password: string;
+        };
         /**
          * ScheduleMode
          * @enum {string}
@@ -3034,8 +3292,10 @@ export interface components {
             email: string;
             /** Password */
             password: string;
-            /** Org Name */
-            org_name: string;
+            /** Display Name */
+            display_name?: string | null;
+            /** Workspace Name */
+            workspace_name?: string | null;
         };
         /** SignupOut */
         SignupOut: {
@@ -3045,12 +3305,17 @@ export interface components {
              */
             user_id: string;
             /**
-             * Org Id
+             * Workspace Id
              * Format: uuid
              */
-            org_id: string;
+            workspace_id: string;
             /** Token */
-            token: string;
+            token?: string | null;
+            /**
+             * Email Verification Required
+             * @default false
+             */
+            email_verification_required: boolean;
         };
         /** StateOut */
         StateOut: {
@@ -3475,6 +3740,11 @@ export interface components {
             /** Context */
             ctx?: Record<string, never>;
         };
+        /** VerifyEmailIn */
+        VerifyEmailIn: {
+            /** Token */
+            token: string;
+        };
         /** VersionOut */
         VersionOut: {
             /**
@@ -3541,6 +3811,46 @@ export interface components {
              * @default false
              */
             is_terminal: boolean;
+        };
+        /** WorkspaceCreateIn */
+        WorkspaceCreateIn: {
+            /** Name */
+            name: string;
+        };
+        /** WorkspaceOut */
+        WorkspaceOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Name */
+            name: string;
+            /** Version */
+            version: number;
+        };
+        /** WorkspacePatchIn */
+        WorkspacePatchIn: {
+            /** Name */
+            name: string;
+            /** Expected Version */
+            expected_version: number;
+        };
+        /**
+         * WorkspaceSummaryOut
+         * @description A workspace the authenticated user belongs to (pre-tenant
+         *     selection, for the in-app switcher).
+         */
+        WorkspaceSummaryOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Name */
+            name: string;
+            /** Role */
+            role: string;
         };
     };
     responses: never;
@@ -3639,17 +3949,18 @@ export interface operations {
             };
         };
     };
-    get_my_org_orgs_me_get: {
+    login_mfa_endpoint_auth_login_mfa_post: {
         parameters: {
             query?: never;
-            header: {
-                "x-org-id": string;
-                "x-project-id"?: string | null;
-            };
+            header?: never;
             path?: never;
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LoginMfaIn"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {
@@ -3657,7 +3968,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["OrgOut"];
+                    "application/json": components["schemas"]["TokenOut"];
                 };
             };
             /** @description Validation Error */
@@ -3671,11 +3982,346 @@ export interface operations {
             };
         };
     };
-    patch_my_org_orgs_me_patch: {
+    verify_email_endpoint_auth_verify_email_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["VerifyEmailIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TokenOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    resend_verification_endpoint_auth_resend_verification_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EmailIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    forgot_password_endpoint_auth_forgot_password_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EmailIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reset_password_endpoint_auth_reset_password_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResetPasswordIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    logout_endpoint_auth_logout_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    mfa_status_mfa_status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MfaStatusOut"];
+                };
+            };
+        };
+    };
+    mfa_setup_mfa_setup_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MfaSetupOut"];
+                };
+            };
+        };
+    };
+    mfa_activate_mfa_activate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MfaActivateIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MfaActivateOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    mfa_disable_mfa_disable_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MfaDisableIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_my_workspaces_workspaces_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceSummaryOut"][];
+                };
+            };
+        };
+    };
+    create_my_workspace_workspaces_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WorkspaceCreateIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_my_workspace_workspaces_me_get: {
         parameters: {
             query?: never;
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    patch_my_workspace_workspaces_me_patch: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path?: never;
@@ -3683,7 +4329,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["OrgPatchIn"];
+                "application/json": components["schemas"]["WorkspacePatchIn"];
             };
         };
         responses: {
@@ -3713,7 +4359,7 @@ export interface operations {
                 kind?: components["schemas"]["TagKind"] | null;
             };
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path?: never;
@@ -3745,7 +4391,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path?: never;
@@ -3781,7 +4427,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path?: never;
@@ -3817,7 +4463,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path?: never;
@@ -3853,7 +4499,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path: {
@@ -3898,7 +4544,7 @@ export interface operations {
                 include_deleted?: boolean;
             };
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path?: never;
@@ -3930,7 +4576,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path?: never;
@@ -3966,7 +4612,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path: {
@@ -4000,7 +4646,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path: {
@@ -4038,7 +4684,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path: {
@@ -4072,7 +4718,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path: {
@@ -4110,7 +4756,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path: {
@@ -4148,7 +4794,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path: {
@@ -4186,7 +4832,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path: {
@@ -4222,7 +4868,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path: {
@@ -4255,7 +4901,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path: {
@@ -4291,7 +4937,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path: {
@@ -4324,7 +4970,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path: {
@@ -4358,7 +5004,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path: {
@@ -4396,7 +5042,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path?: never;
@@ -4428,7 +5074,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path?: never;
@@ -4464,7 +5110,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path: {
@@ -4498,7 +5144,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path: {
@@ -4538,7 +5184,7 @@ export interface operations {
                 task_id?: string | null;
             };
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path?: never;
@@ -4570,7 +5216,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path?: never;
@@ -4606,7 +5252,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path: {
@@ -4640,7 +5286,7 @@ export interface operations {
                 project_tag_id?: string | null;
             };
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path?: never;
@@ -4672,7 +5318,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path?: never;
@@ -4704,7 +5350,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path?: never;
@@ -4740,7 +5386,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path: {
@@ -4774,7 +5420,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path: {
@@ -4810,7 +5456,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path: {
@@ -4843,7 +5489,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path: {
@@ -4883,7 +5529,7 @@ export interface operations {
                 start_to?: string | null;
             };
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path?: never;
@@ -4915,7 +5561,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path?: never;
@@ -4951,7 +5597,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path: {
@@ -4985,7 +5631,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path: {
@@ -5017,7 +5663,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path: {
@@ -5055,7 +5701,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path?: never;
@@ -5093,7 +5739,7 @@ export interface operations {
                 project_tag_id?: string | null;
             };
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path?: never;
@@ -5125,7 +5771,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path: {
@@ -5159,7 +5805,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path: {
@@ -5197,7 +5843,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path?: never;
@@ -5233,7 +5879,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path?: never;
@@ -5269,7 +5915,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path?: never;
@@ -5307,7 +5953,7 @@ export interface operations {
                 billable?: boolean | null;
             };
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path?: never;
@@ -5339,7 +5985,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path?: never;
@@ -5375,7 +6021,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path: {
@@ -5409,7 +6055,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path: {
@@ -5441,7 +6087,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path: {
@@ -5484,7 +6130,7 @@ export interface operations {
                 billable?: boolean | null;
             };
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path?: never;
@@ -5521,7 +6167,7 @@ export interface operations {
                 billable?: boolean | null;
             };
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path?: never;
@@ -5553,7 +6199,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path?: never;
@@ -5585,7 +6231,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path?: never;
@@ -5621,7 +6267,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path: {
@@ -5655,7 +6301,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path: {
@@ -5687,7 +6333,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path: {
@@ -5725,7 +6371,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path: {
@@ -5759,7 +6405,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path?: never;
@@ -5795,7 +6441,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path?: never;
@@ -5831,7 +6477,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path: {
@@ -5865,7 +6511,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path?: never;
@@ -5897,7 +6543,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path?: never;
@@ -5933,7 +6579,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path: {
@@ -5967,7 +6613,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path: {
@@ -5999,7 +6645,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path: {
@@ -6037,7 +6683,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path: {
@@ -6077,7 +6723,7 @@ export interface operations {
                 limit?: number;
             };
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path: {
@@ -6114,7 +6760,7 @@ export interface operations {
                 linked?: boolean | null;
             };
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path?: never;
@@ -6146,7 +6792,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path: {
@@ -6180,7 +6826,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path: {
@@ -6218,7 +6864,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path: {
@@ -6256,7 +6902,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path: {
@@ -6294,7 +6940,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path?: never;
@@ -6326,7 +6972,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path?: never;
@@ -6362,7 +7008,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path?: never;
@@ -6400,7 +7046,7 @@ export interface operations {
                 limit?: number;
             };
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path?: never;
@@ -6434,7 +7080,7 @@ export interface operations {
                 limit?: number;
             };
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path?: never;
@@ -6466,7 +7112,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path?: never;
@@ -6498,7 +7144,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path?: never;
@@ -6534,7 +7180,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path?: never;
@@ -6570,7 +7216,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path?: never;
@@ -6606,7 +7252,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path?: never;
@@ -6642,7 +7288,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path?: never;
@@ -6678,7 +7324,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path: {
@@ -6712,7 +7358,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path?: never;
@@ -6748,7 +7394,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path?: never;
@@ -6784,7 +7430,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path?: never;
@@ -6816,7 +7462,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path?: never;
@@ -6852,7 +7498,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path: {
@@ -6886,7 +7532,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path: {
@@ -6924,7 +7570,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path?: never;
@@ -6960,7 +7606,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path: {
@@ -6998,7 +7644,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path: {
@@ -7032,7 +7678,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path?: never;
@@ -7068,7 +7714,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path?: never;
@@ -7104,7 +7750,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path: {
@@ -7138,7 +7784,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path?: never;
@@ -7170,7 +7816,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path?: never;
@@ -7206,7 +7852,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path?: never;
@@ -7242,7 +7888,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path?: never;
@@ -7274,7 +7920,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path?: never;
@@ -7310,7 +7956,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path: {
@@ -7344,7 +7990,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path: {
@@ -7382,7 +8028,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path: {
@@ -7416,7 +8062,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path: {
@@ -7448,7 +8094,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path: {
@@ -7486,7 +8132,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path: {
@@ -7520,7 +8166,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path?: never;
@@ -7556,7 +8202,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path: {
@@ -7590,7 +8236,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path?: never;
@@ -7626,7 +8272,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path?: never;
@@ -7658,7 +8304,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path?: never;
@@ -7694,7 +8340,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path?: never;
@@ -7726,7 +8372,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path?: never;
@@ -7758,7 +8404,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path?: never;
@@ -7794,7 +8440,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path?: never;
@@ -7828,7 +8474,7 @@ export interface operations {
                 within_days?: number;
             };
             header: {
-                "x-org-id": string;
+                "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
             path?: never;

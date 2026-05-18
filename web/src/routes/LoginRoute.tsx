@@ -1,43 +1,103 @@
 import { useState, type FormEvent } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { api, errMessage } from '../api/client'
-import { setSession } from '../auth/session'
+import { api, errCode, errMessage, establishSession } from '../api/client'
 
-// W0 uses signup (creates org + user, returns token + org_id), the
-// end-to-end flow already verified against the live backend. Login for
-// an existing account needs an "orgs I belong to" listing; that lands
-// with W1.
+// Login is email+password only (never a workspace choice, ADR-0024).
+// /auth/login answers 401 auth.mfa_required when MFA is active: we
+// pivot to the TOTP form and call /auth/login-mfa. 403
+// email_not_verified offers a resend; 423 means locked.
 export function LoginRoute() {
   const { t } = useTranslation()
   const navigate = useNavigate()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [orgName, setOrgName] = useState('')
+  const [totp, setTotp] = useState('')
+  const [mfa, setMfa] = useState(false)
+  const [notVerified, setNotVerified] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [info, setInfo] = useState<string | null>(null)
   const [err, setErr] = useState<string | null>(null)
+
+  async function finish(token: string) {
+    await establishSession(token)
+    navigate('/', { replace: true })
+  }
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault()
     setBusy(true)
     setErr(null)
-    const { data, error } = await api.POST('/auth/signup', {
-      body: { email, password, org_name: orgName },
+    setInfo(null)
+    const { data, error, response } = await api.POST('/auth/login', {
+      body: { email, password },
     })
-    setBusy(false)
-    if (error || !data) {
-      setErr(errMessage(error))
+    if (response.ok && data) {
+      await finish(data.token)
       return
     }
-    setSession({ token: data.token, orgId: data.org_id })
-    navigate('/', { replace: true })
+    setBusy(false)
+    const code = errCode(error)
+    if (response.status === 401 && code === 'auth.mfa_required') {
+      setMfa(true)
+    } else if (response.status === 403 && code === 'auth.email_not_verified') {
+      setNotVerified(true)
+      setErr(t('login.emailNotVerified'))
+    } else if (response.status === 423) {
+      setErr(t('login.locked'))
+    } else {
+      setErr(errMessage(error))
+    }
+  }
+
+  async function onSubmitMfa(e: FormEvent) {
+    e.preventDefault()
+    setBusy(true)
+    setErr(null)
+    const { data, error, response } = await api.POST('/auth/login-mfa', {
+      body: { email, password, totp_code: totp },
+    })
+    if (response.ok && data) {
+      await finish(data.token)
+      return
+    }
+    setBusy(false)
+    setErr(errMessage(error))
+  }
+
+  async function onResend() {
+    setBusy(true)
+    await api.POST('/auth/resend-verification', { body: { email } })
+    setBusy(false)
+    setInfo(t('login.resent'))
+  }
+
+  if (mfa) {
+    return (
+      <form className="card" onSubmit={(e) => void onSubmitMfa(e)}>
+        <h1>{t('login.mfaTitle')}</h1>
+        <label>
+          {t('login.mfaCode')}
+          <input
+            required
+            value={totp}
+            onChange={(e) => setTotp(e.target.value)}
+            autoComplete="one-time-code"
+          />
+        </label>
+        {err && <p className="err">{err}</p>}
+        <button type="submit" disabled={busy}>
+          {busy ? t('auth.working') : t('login.verify')}
+        </button>
+      </form>
+    )
   }
 
   return (
     <form className="card" onSubmit={(e) => void onSubmit(e)}>
       <h1>{t('login.title')}</h1>
       <label>
-        {t('login.email')}
+        {t('auth.email')}
         <input
           type="email"
           required
@@ -46,28 +106,29 @@ export function LoginRoute() {
         />
       </label>
       <label>
-        {t('login.password')}
+        {t('auth.password')}
         <input
           type="password"
           required
-          minLength={8}
           value={password}
           onChange={(e) => setPassword(e.target.value)}
         />
       </label>
-      <label>
-        {t('login.orgName')}
-        <input
-          required
-          value={orgName}
-          onChange={(e) => setOrgName(e.target.value)}
-        />
-      </label>
       {err && <p className="err">{err}</p>}
+      {info && <p className="ok">{info}</p>}
       <button type="submit" disabled={busy}>
-        {busy ? t('login.submitting') : t('login.submit')}
+        {busy ? t('auth.working') : t('auth.signIn')}
       </button>
-      <p className="hint">{t('login.hint')}</p>
+      {notVerified && (
+        <button type="button" onClick={() => void onResend()} disabled={busy}>
+          {t('login.resend')}
+        </button>
+      )}
+      <p className="hint">
+        <Link to="/forgot-password">{t('auth.forgotLink')}</Link>
+        {' · '}
+        <Link to="/register">{t('auth.toRegister')}</Link>
+      </p>
     </form>
   )
 }

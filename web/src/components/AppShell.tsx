@@ -1,15 +1,28 @@
-import { Outlet } from 'react-router-dom'
+import { Link, Outlet } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
+import { api } from '../api/client'
 import { clearSession } from '../auth/session'
+import { WorkspaceSwitcher } from './WorkspaceSwitcher'
 import i18n from '../i18n'
 
 export function AppShell() {
   const { t } = useTranslation()
+
+  async function onLogout() {
+    // Real server-side logout: revoke the JWT, then drop the session.
+    await api.POST('/auth/logout')
+    clearSession()
+  }
+
   return (
     <div className="shell">
       <header className="shell__bar">
-        <span className="shell__brand">{t('app.title')}</span>
+        <Link to="/" className="shell__brand">
+          {t('app.title')}
+        </Link>
+        <WorkspaceSwitcher />
         <div className="shell__actions">
+          <Link to="/settings">{t('nav.settings')}</Link>
           <label className="shell__lang">
             {t('nav.language')}{' '}
             <select
@@ -20,7 +33,7 @@ export function AppShell() {
               <option value="it">IT</option>
             </select>
           </label>
-          <button type="button" onClick={() => clearSession()}>
+          <button type="button" onClick={() => void onLogout()}>
             {t('nav.logout')}
           </button>
         </div>

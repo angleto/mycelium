@@ -1,12 +1,14 @@
-// Client-side session: JWT token + the tenant org id. X-Org-Id is
-// per-request tenant scoping (not a credential), carried explicitly on
-// typed calls; the token is injected as the Authorization bearer by the
-// API client middleware. Cached so the snapshot reference is stable for
+// Client session: JWT (user identity) + the active workspace id.
+// Personal-first (ADR-0024): the workspace is NOT chosen at login; it
+// is a per-request context switched in-app with no re-auth. The last
+// active workspace is remembered so a returning user lands where they
+// left off. Cached so the snapshot ref is stable for
 // useSyncExternalStore.
 
-export type Session = { token: string; orgId: string }
+export type Session = { token: string; workspaceId: string }
 
 const KEY = 'flow.session'
+const LAST_WS = 'flow.lastWorkspace'
 type Listener = () => void
 const listeners = new Set<Listener>()
 
@@ -15,7 +17,7 @@ function read(): Session | null {
   if (!raw) return null
   try {
     const v = JSON.parse(raw) as Partial<Session>
-    return v.token && v.orgId ? { token: v.token, orgId: v.orgId } : null
+    return v.token && v.workspaceId ? { token: v.token, workspaceId: v.workspaceId } : null
   } catch {
     return null
   }
@@ -27,6 +29,10 @@ export function getSession(): Session | null {
   return cache
 }
 
+export function lastWorkspaceId(): string | null {
+  return localStorage.getItem(LAST_WS)
+}
+
 function emit(): void {
   for (const l of listeners) l()
 }
@@ -34,6 +40,15 @@ function emit(): void {
 export function setSession(s: Session): void {
   cache = s
   localStorage.setItem(KEY, JSON.stringify(s))
+  localStorage.setItem(LAST_WS, s.workspaceId)
+  emit()
+}
+
+export function setActiveWorkspace(workspaceId: string): void {
+  if (!cache) return
+  cache = { token: cache.token, workspaceId }
+  localStorage.setItem(KEY, JSON.stringify(cache))
+  localStorage.setItem(LAST_WS, workspaceId)
   emit()
 }
 

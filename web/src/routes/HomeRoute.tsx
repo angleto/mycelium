@@ -1,16 +1,19 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
-import { api, errMessage, orgHeader } from '../api/client'
+import { api, errMessage, workspaceHeader } from '../api/client'
+import { useSession } from '../auth/useSession'
 import type { components } from '../api/schema'
 
-type Org = components['schemas']['OrgOut']
+type Workspace = components['schemas']['WorkspaceOut']
 
-// Demonstrates the contract that matters here: optimistic concurrency.
-// Renaming sends expected_version; a stale write yields 409 and we
-// reload the canonical state instead of trusting the PATCH body shape.
+// Shows the active workspace and demonstrates optimistic concurrency
+// (rename sends expected_version; 409 -> reload). Reloads when the
+// in-app switcher changes the active workspace.
 export function HomeRoute() {
   const { t } = useTranslation()
-  const [org, setOrg] = useState<Org | null>(null)
+  const session = useSession()
+  const activeId = session?.workspaceId
+  const [ws, setWs] = useState<Workspace | null>(null)
   const [name, setName] = useState('')
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState<string | null>(null)
@@ -18,47 +21,45 @@ export function HomeRoute() {
 
   const load = useCallback(async () => {
     setErr(null)
-    const { data, error } = await api.GET('/orgs/me', {
-      params: { header: orgHeader() },
+    const { data, error } = await api.GET('/workspaces/me', {
+      params: { header: workspaceHeader() },
     })
     if (error || !data) {
       setErr(errMessage(error))
       return
     }
-    setOrg(data)
+    setWs(data)
     setName(data.name)
   }, [])
 
-  // Initial fetch: state is set only after the await (in the async
-  // continuation), never synchronously in the effect body.
   useEffect(() => {
     let active = true
     void (async () => {
-      const { data, error } = await api.GET('/orgs/me', {
-        params: { header: orgHeader() },
+      const { data, error } = await api.GET('/workspaces/me', {
+        params: { header: workspaceHeader() },
       })
       if (!active) return
       if (error || !data) {
         setErr(errMessage(error))
         return
       }
-      setOrg(data)
+      setWs(data)
       setName(data.name)
     })()
     return () => {
       active = false
     }
-  }, [])
+  }, [activeId])
 
   async function onRename(e: FormEvent) {
     e.preventDefault()
-    if (!org) return
+    if (!ws) return
     setBusy(true)
     setMsg(null)
     setErr(null)
-    const { error, response } = await api.PATCH('/orgs/me', {
-      params: { header: orgHeader() },
-      body: { name, expected_version: org.version },
+    const { error, response } = await api.PATCH('/workspaces/me', {
+      params: { header: workspaceHeader() },
+      body: { name, expected_version: ws.version },
     })
     setBusy(false)
     if (response.status === 409) {
@@ -74,19 +75,19 @@ export function HomeRoute() {
     setMsg(t('home.renamed'))
   }
 
-  if (err && !org) return <p className="err">{err}</p>
-  if (!org) return <p>{t('home.loading')}</p>
+  if (err && !ws) return <p className="err">{err}</p>
+  if (!ws) return <p>{t('home.loading')}</p>
 
   return (
     <section className="card">
       <h1>{t('home.title')}</h1>
       <dl className="kv">
         <dt>{t('home.id')}</dt>
-        <dd>{org.id}</dd>
+        <dd>{ws.id}</dd>
         <dt>{t('home.name')}</dt>
-        <dd>{org.name}</dd>
+        <dd>{ws.name}</dd>
         <dt>{t('home.version')}</dt>
-        <dd>{org.version}</dd>
+        <dd>{ws.version}</dd>
       </dl>
       <form onSubmit={(e) => void onRename(e)}>
         <h2>{t('home.rename')}</h2>
