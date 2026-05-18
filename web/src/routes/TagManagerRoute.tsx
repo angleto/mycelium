@@ -159,9 +159,31 @@ export function TagManagerRoute() {
             <p className="hint">{t('tagmgr.none')}</p>
           ) : (
             <ul className="list">
-              {visible.map((tg) => (
-                <TagRow key={tg.id} tag={tg} onChanged={() => void load()} />
-              ))}
+              {visible.map((tg) =>
+                tg.kind === 'generic' ? (
+                  <TagRow key={tg.id} tag={tg} onChanged={() => void load()} />
+                ) : (
+                  // Client/project tags are auto-created from their
+                  // profile; they are managed in Clients & projects,
+                  // not here. Read-only, just surface the kind.
+                  <li key={tg.id}>
+                    <TagChip
+                      name={tg.name}
+                      color={tg.color || '#6d28d9'}
+                      kind={tg.kind}
+                    />
+                    <span className="muted">
+                      {' '}
+                      {tg.kind}
+                      {tg.status === 'archived'
+                        ? ` · ${t('tagmgr.archived')}`
+                        : ''}
+                      {' · '}
+                      {t('cp.managedHere')}
+                    </span>
+                  </li>
+                ),
+              )}
             </ul>
           )
         })()

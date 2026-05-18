@@ -257,6 +257,12 @@ export const it: Catalog = {
     defaultBillable: 'Task fatturabili di default',
     color: 'Colore',
     description: 'Descrizione (contesto AI)',
+    archive: 'Archivia',
+    unarchive: 'Ripristina',
+    showArchived: 'Mostra archiviati',
+    archived: 'archiviato',
+    conflict: 'È cambiato nel frattempo; ricaricato.',
+    managedHere: 'I tag cliente e progetto si gestiscono qui, in Clienti e progetti.',
     f: {
       ragione_sociale: 'Ragione sociale',
       codice_fiscale: 'Codice fiscale',

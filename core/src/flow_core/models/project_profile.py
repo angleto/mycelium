@@ -36,10 +36,9 @@ class ProjectProfile(OrgScopedMixin, TimestampMixin, VersionMixin, Base):
     # (see time_tracking._amount).
     tariffa: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
     valuta: Mapped[str] = mapped_column(String(3), nullable=False, server_default="EUR")
-    # Optional UI colour (hex) and free description; the description is
-    # useful as AI context (docs/adr/0005). Billable is NOT here — it
-    # is a client-level default (see ClientProfile.default_billable).
-    color: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    # Free description, useful as AI context (docs/adr/0005). The
+    # project's colour lives on its tag (tags.color); billable is a
+    # client-level default (ClientProfile.default_billable).
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     budget: Mapped[Decimal | None] = mapped_column(Numeric(14, 2), nullable=True)
     workflow_id: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)

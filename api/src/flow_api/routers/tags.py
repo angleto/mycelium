@@ -141,7 +141,7 @@ def _project_out(t: Tag, p: object) -> ProjectOut:
         tariffa=p.tariffa,  # type: ignore[attr-defined]
         valuta=p.valuta,  # type: ignore[attr-defined]
         budget=p.budget,  # type: ignore[attr-defined]
-        color=p.color,  # type: ignore[attr-defined]
+        color=t.color,
         description=p.description,  # type: ignore[attr-defined]
     )
 

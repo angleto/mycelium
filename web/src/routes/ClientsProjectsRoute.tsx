@@ -39,6 +39,7 @@ export function ClientsProjectsRoute() {
   const [defClient, setDefClient] = useState<string>('')
   const [editC, setEditC] = useState<string | null>(null)
   const [editP, setEditP] = useState<string | null>(null)
+  const [showArchived, setShowArchived] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const [msg, setMsg] = useState<string | null>(null)
 
@@ -133,14 +134,55 @@ export function ClientsProjectsRoute() {
     await load()
   }
 
+  // Clients and projects are tags: archive = tag status (optimistic).
+  async function setArchive(
+    id: string,
+    version: number,
+    archived: boolean,
+  ) {
+    setErr(null)
+    setMsg(null)
+    const { error, response } = await api.PATCH('/tags/{tag_id}', {
+      params: { header: workspaceHeader(), path: { tag_id: id } },
+      body: {
+        expected_version: version,
+        status: archived ? 'archived' : 'active',
+      },
+    })
+    if (response.status === 409) {
+      setErr(t('cp.conflict'))
+      await load()
+      return
+    }
+    if (error) {
+      setErr(errMessage(error))
+      return
+    }
+    await load()
+  }
+
   const clientName = (id: string | null) =>
     clients.find((c) => c.id === id)?.name ?? '-'
+  const visClients = clients.filter(
+    (c) => showArchived || c.status !== 'archived',
+  )
+  const visProjects = projects.filter(
+    (p) => showArchived || p.status !== 'archived',
+  )
 
   return (
     <section className="card">
       <h1>{t('cp.title')}</h1>
       {err && <p className="err">{err}</p>}
       {msg && <p className="ok">{msg}</p>}
+      <label className="row">
+        <input
+          type="checkbox"
+          checked={showArchived}
+          onChange={(e) => setShowArchived(e.target.checked)}
+        />
+        {t('cp.showArchived')}
+      </label>
 
       <h2>{t('cp.clients')}</h2>
       <div className="row">
@@ -159,12 +201,13 @@ export function ClientsProjectsRoute() {
         </button>
       </div>
       <ul className="list">
-        {clients.map((c) => (
+        {visClients.map((c) => (
           <li key={c.id}>
             <strong>{c.name}</strong>{' '}
             <span className="muted">
               · {c.ragione_sociale} ·{' '}
               {c.default_billable ? t('cp.billable') : t('cp.nonBillable')}
+              {c.status === 'archived' ? ` · ${t('cp.archived')}` : ''}
             </span>
             <button
               type="button"
@@ -172,6 +215,15 @@ export function ClientsProjectsRoute() {
               onClick={() => setEditC(editC === c.id ? null : c.id)}
             >
               {t('cp.edit')}
+            </button>
+            <button
+              type="button"
+              className="btn--ghost btn--sm"
+              onClick={() =>
+                void setArchive(c.id, c.version, c.status !== 'archived')
+              }
+            >
+              {c.status === 'archived' ? t('cp.unarchive') : t('cp.archive')}
             </button>
             {editC === c.id && (
               <form
@@ -234,7 +286,7 @@ export function ClientsProjectsRoute() {
         </button>
       </div>
       <ul className="list">
-        {projects.map((p) => (
+        {visProjects.map((p) => (
           <li key={p.id}>
             <strong>{p.name}</strong>{' '}
             {p.color && (
@@ -247,6 +299,7 @@ export function ClientsProjectsRoute() {
             <span className="muted">
               · {clientName(p.client_tag_id)} ·{' '}
               {p.tariffa ? `${p.tariffa} ${p.valuta}` : t('cp.noRate')}
+              {p.status === 'archived' ? ` · ${t('cp.archived')}` : ''}
             </span>
             <button
               type="button"
@@ -254,6 +307,15 @@ export function ClientsProjectsRoute() {
               onClick={() => setEditP(editP === p.id ? null : p.id)}
             >
               {t('cp.edit')}
+            </button>
+            <button
+              type="button"
+              className="btn--ghost btn--sm"
+              onClick={() =>
+                void setArchive(p.id, p.version, p.status !== 'archived')
+              }
+            >
+              {p.status === 'archived' ? t('cp.unarchive') : t('cp.archive')}
             </button>
             {editP === p.id && (
               <form

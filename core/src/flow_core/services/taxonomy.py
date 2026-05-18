@@ -195,7 +195,8 @@ async def create_project(
         )
         if client.scalar_one_or_none() is None:
             raise DomainError(MessageCode.TAG_KIND_MISMATCH)
-    tag = await _insert_tag(session, org_id, TagKind.project, name, None)
+    # The project's colour is the project tag's colour (single source).
+    tag = await _insert_tag(session, org_id, TagKind.project, name, color)
     session.add(
         ProjectProfile(
             tag_id=tag.id,
@@ -204,7 +205,6 @@ async def create_project(
             tariffa=tariffa,
             valuta=valuta,
             budget=budget,
-            color=color,
             description=description,
         )
     )
@@ -327,8 +327,15 @@ async def update_project(
         )
         if ok.scalar_one_or_none() is None:
             raise DomainError(MessageCode.TAG_KIND_MISMATCH)
+    tag_dirty = False
     if name is not None:
         tag.name = name
+        tag_dirty = True
+    # Colour is a tag attribute (single source), not a profile column.
+    if "color" in flds:
+        tag.color = flds.pop("color")  # type: ignore[assignment]
+        tag_dirty = True
+    if tag_dirty:
         tag.version += 1
     for k, v in flds.items():
         setattr(prof, k, v)

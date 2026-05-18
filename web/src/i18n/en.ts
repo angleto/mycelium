@@ -258,6 +258,12 @@ export const en = {
     defaultBillable: 'Tasks billable by default',
     color: 'Color',
     description: 'Description (AI context)',
+    archive: 'Archive',
+    unarchive: 'Unarchive',
+    showArchived: 'Show archived',
+    archived: 'archived',
+    conflict: 'It changed meanwhile; reloaded.',
+    managedHere: 'Client and project tags are managed here, in Clients & projects.',
     f: {
       ragione_sociale: 'Legal name',
       codice_fiscale: 'Tax code',
