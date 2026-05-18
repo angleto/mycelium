@@ -1,13 +1,46 @@
+import { useEffect, useState } from 'react'
 import { NavLink, Outlet } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { api } from '../api/client'
+import { api, workspaceHeader } from '../api/client'
 import { clearSession } from '../auth/session'
+import { useSession } from '../auth/useSession'
 import { WorkspaceSwitcher } from './WorkspaceSwitcher'
 import { Logo } from './Logo'
 import { Icon, type IconName } from './NavIcon'
+import { getTheme, setTheme, type Theme } from '../lib/theme'
 import i18n from '../i18n'
 
 type Item = { to: string; label: string; icon: IconName }
+
+// Slow spinner in the sidebar while any timer is running (poll, same
+// cadence the timer views use).
+function RunningIndicator() {
+  const { t } = useTranslation()
+  const session = useSession()
+  const [n, setN] = useState(0)
+  useEffect(() => {
+    let active = true
+    const tick = async () => {
+      const { data } = await api.GET('/time/running', {
+        params: { header: workspaceHeader() },
+      })
+      if (active) setN((data ?? []).length)
+    }
+    void tick()
+    const poll = setInterval(() => void tick(), 5000)
+    return () => {
+      active = false
+      clearInterval(poll)
+    }
+  }, [session?.workspaceId])
+  if (n === 0) return null
+  return (
+    <div className="running" title={t('time.runningNow')}>
+      <span className="running__spin" aria-hidden="true" />
+      {t('time.runningNow')} ({n})
+    </div>
+  )
+}
 
 function NavGroup({ title, items }: { title: string; items: Item[] }) {
   return (
@@ -32,6 +65,7 @@ function NavGroup({ title, items }: { title: string; items: Item[] }) {
 
 export function AppShell() {
   const { t } = useTranslation()
+  const [theme, setThemeState] = useState<Theme>(getTheme())
 
   async function onLogout() {
     // Real server-side logout: revoke the JWT, then drop the session.
@@ -91,20 +125,33 @@ export function AppShell() {
   ]
 
   return (
-    <div className="layout">
-      <aside className="sidebar">
-        <div className="sidebar__brand">
+    <div className="app">
+      <header className="topbar">
+        <div className="topbar__brand">
           <Logo /> {t('app.title')}
         </div>
-        <div className="sidebar__ws">
-          <WorkspaceSwitcher />
-        </div>
-        <nav className="nav">
-          {groups.map((g) => (
-            <NavGroup key={g.title} title={g.title} items={g.items} />
-          ))}
-        </nav>
-        <div className="sidebar__footer">
+        <div className="topbar__actions">
+          <select
+            aria-label={t('settings.theme')}
+            value={theme}
+            onChange={(e) => {
+              const v = e.target.value as Theme
+              setTheme(v)
+              setThemeState(v)
+            }}
+          >
+            <option value="auto">{t('settings.themeAuto')}</option>
+            <option value="light">{t('settings.themeLight')}</option>
+            <option value="dark">{t('settings.themeDark')}</option>
+          </select>
+          <select
+            aria-label="language"
+            value={i18n.language}
+            onChange={(e) => void i18n.changeLanguage(e.target.value)}
+          >
+            <option value="en">EN</option>
+            <option value="it">IT</option>
+          </select>
           <NavLink
             to="/settings"
             className={({ isActive }) =>
@@ -114,15 +161,6 @@ export function AppShell() {
             <Icon name="settings" />
             {t('nav.settings')}
           </NavLink>
-          <label className="sidebar__lang">
-            <select
-              value={i18n.language}
-              onChange={(e) => void i18n.changeLanguage(e.target.value)}
-            >
-              <option value="en">EN</option>
-              <option value="it">IT</option>
-            </select>
-          </label>
           <button
             type="button"
             className="btn btn--ghost"
@@ -131,10 +169,23 @@ export function AppShell() {
             {t('nav.logout')}
           </button>
         </div>
-      </aside>
-      <main className="content">
-        <Outlet />
-      </main>
+      </header>
+      <div className="layout">
+        <aside className="sidebar">
+          <div className="sidebar__ws">
+            <WorkspaceSwitcher />
+          </div>
+          <RunningIndicator />
+          <nav className="nav">
+            {groups.map((g) => (
+              <NavGroup key={g.title} title={g.title} items={g.items} />
+            ))}
+          </nav>
+        </aside>
+        <main className="content">
+          <Outlet />
+        </main>
+      </div>
     </div>
   )
 }

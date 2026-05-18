@@ -15,6 +15,7 @@
   --shadow: 0 1px 2px rgba(16, 18, 27, 0.06), 0 1px 8px rgba(16, 18, 27, 0.04);
   --sans: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
   --mono: ui-monospace, SFMono-Regular, Consolas, monospace;
+  --topbar-h: 52px;
 
   font: 15px/1.5 var(--sans);
   color: var(--text);
@@ -23,8 +24,29 @@
   -webkit-font-smoothing: antialiased;
 }
 
+/* Dark palette. Applied (a) when the user forces dark
+   (html[data-theme="dark"]) and (b) when the system is dark AND the
+   user has not forced light (data-theme auto/unset). Forced light just
+   keeps the :root defaults. The block is duplicated because a media
+   query is the only way to read the system preference; keep the two
+   copies in sync. */
+:root[data-theme='dark'] {
+  --bg: #15161b;
+  --surface: #1d1f26;
+  --surface-2: #24262f;
+  --text: #c3c8d4;
+  --text-h: #f3f4f7;
+  --muted: #8b93a4;
+  --border: #2e313b;
+  --accent: #a78bfa;
+  --accent-weak: #2a2342;
+  --accent-fg: #15161b;
+  --err: #f87171;
+  --ok: #4ade80;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 1px 10px rgba(0, 0, 0, 0.3);
+}
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme='light']):not([data-theme='dark']) {
     --bg: #15161b;
     --surface: #1d1f26;
     --surface-2: #24262f;
@@ -74,9 +96,45 @@ a:hover {
 }
 
 /* ---- layout: sidebar rail + content ---- */
+.app {
+  display: flex;
+  flex-direction: column;
+  min-height: 100svh;
+}
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  height: var(--topbar-h);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0 1rem;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+.topbar__brand {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-weight: 800;
+  font-size: 1.1rem;
+  color: var(--text-h);
+  letter-spacing: -0.3px;
+}
+.topbar__actions {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+.topbar__actions .nav__link {
+  padding: 0.3rem 0.5rem;
+}
 .layout {
   display: flex;
-  min-height: 100svh;
+  flex: 1;
+  min-height: 0;
 }
 .sidebar {
   width: 232px;
@@ -88,23 +146,39 @@ a:hover {
   padding: 0.9rem 0.7rem;
   gap: 0.5rem;
   position: sticky;
-  top: 0;
-  height: 100svh;
+  top: var(--topbar-h);
+  height: calc(100svh - var(--topbar-h));
   overflow-y: auto;
-}
-.sidebar__brand {
-  display: flex;
-  align-items: center;
-  gap: 0.45rem;
-  font-weight: 800;
-  font-size: 1.15rem;
-  color: var(--text-h);
-  padding: 0.2rem 0.5rem 0.4rem;
-  letter-spacing: -0.3px;
 }
 .sidebar__ws {
   padding: 0 0.25rem 0.4rem;
   border-bottom: 1px solid var(--border);
+}
+.running {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.78rem;
+  color: var(--muted);
+  padding: 0.2rem 0.5rem;
+}
+.running__spin {
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: running-spin 2s linear infinite;
+}
+@keyframes running-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .running__spin {
+    animation-duration: 6s;
+  }
 }
 .nav {
   flex: 1;
@@ -151,16 +225,6 @@ a:hover {
   background: var(--accent-weak);
   color: var(--accent);
   font-weight: 600;
-}
-.sidebar__footer {
-  border-top: 1px solid var(--border);
-  padding-top: 0.6rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.4rem;
-}
-.sidebar__lang select {
-  width: 100%;
 }
 .content {
   flex: 1;

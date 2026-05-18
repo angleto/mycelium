@@ -4,6 +4,12 @@
 // (string values, not literals) so other locales must mirror it.
 export const en = {
   app: { title: 'Flow' },
+  settings: {
+    theme: 'Theme',
+    themeAuto: 'Auto',
+    themeLight: 'Light',
+    themeDark: 'Dark',
+  },
   nav: {
     logout: 'Sign out',
     language: 'Language',
