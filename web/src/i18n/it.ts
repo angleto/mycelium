@@ -418,6 +418,8 @@ export const it: Catalog = {
     erase: 'Cancella',
     erased: 'Cancellata.',
     toTask: 'Trasforma in task',
+    converting: 'Conversione...',
+    convertedShort: 'Convertito',
     converted: 'Task creato dalla nota',
     meteredNote: 'Le risposte di conversazione usano il LLM (a consumo); la trascrizione richiede un provider.',
   },

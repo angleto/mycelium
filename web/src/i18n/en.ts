@@ -419,6 +419,8 @@ export const en = {
     erase: 'Erase',
     erased: 'Erased.',
     toTask: 'Convert to task',
+    converting: 'Converting...',
+    convertedShort: 'Converted',
     converted: 'Task created from note',
     meteredNote: 'Conversation replies use the LLM (metered); transcription needs a provider.',
   },

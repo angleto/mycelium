@@ -32,6 +32,11 @@ export function NotesRoute() {
   const [msg, setMsg] = useState<string | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const [made, setMade] = useState<{ id: string; title: string } | null>(null)
+  // Guard the note->task button: one conversion in flight at a time and
+  // a note already converted stays disabled, so repeated clicks cannot
+  // spawn N duplicate tasks.
+  const [converting, setConverting] = useState<string | null>(null)
+  const [convertedIds, setConvertedIds] = useState<Set<string>>(new Set())
 
   const loadNotes = useCallback(async () => {
     const { data } = await api.GET('/notes', {
@@ -127,7 +132,9 @@ export function NotesRoute() {
   // resolved back-reference [label](@note:id) so the link is two-way in
   // practice (the task points at the note; notes can @task the task).
   async function onConvert(n: Note) {
+    if (converting !== null || convertedIds.has(n.id)) return
     setErr(null)
+    setConverting(n.id)
     const label = n.title || n.kind
     const { data, error } = await api.POST('/tasks', {
       params: { header: workspaceHeader() },
@@ -139,10 +146,12 @@ export function NotesRoute() {
         necessity: 'should',
       },
     })
+    setConverting(null)
     if (error || !data) {
       setErr(errMessage(error))
       return
     }
+    setConvertedIds((s) => new Set(s).add(n.id))
     setMade({ id: data.id, title: label })
   }
 
@@ -229,9 +238,14 @@ export function NotesRoute() {
               <button
                 type="button"
                 className="btn--sm"
+                disabled={converting !== null || convertedIds.has(n.id)}
                 onClick={() => void onConvert(n)}
               >
-                {t('notes.toTask')}
+                {converting === n.id
+                  ? t('notes.converting')
+                  : convertedIds.has(n.id)
+                    ? t('notes.convertedShort')
+                    : t('notes.toTask')}
               </button>
               <button
                 type="button"
