@@ -240,6 +240,22 @@ export function TasksRoute() {
     setRunning(data ?? [])
   }
 
+  async function startParallel(taskId: string) {
+    setErr(null)
+    const { error } = await api.POST('/time/start', {
+      params: { header: workspaceHeader() },
+      body: { task_id: taskId, billable: true, parallel: true },
+    })
+    if (error) {
+      setErr(errMessage(error))
+      return
+    }
+    const { data } = await api.GET('/time/running', {
+      params: { header: workspaceHeader() },
+    })
+    setRunning(data ?? [])
+  }
+
   function toggleSel(id: string) {
     setSel((s) => {
       const n = new Set(s)
@@ -661,10 +677,20 @@ export function TasksRoute() {
                     type="button"
                     className={onThis ? 'btn--sm' : 'btn--ghost btn--sm'}
                     onClick={() => void toggleTimer(tk.id)}
-                    title={onThis ? t('tasks.stop') : t('tasks.start')}
+                    title={onThis ? t('tasks.stop') : t('time.startSerial')}
                   >
                     {onThis ? `⏱■ ${hms(elapsed)}` : '⏱▶'}
                   </button>
+                  {!onThis && (
+                    <button
+                      type="button"
+                      className="btn--ghost btn--sm"
+                      onClick={() => void startParallel(tk.id)}
+                      title={t('time.startParallel')}
+                    >
+                      ⏱⏩
+                    </button>
+                  )}
                 </span>
               </li>
             )
