@@ -48,6 +48,7 @@ export function NoteListItem({
           <button
             type="button"
             className="btn--sm"
+            title={t('notes.toTaskHint')}
             disabled={converting || converted}
             onClick={onConvert}
           >

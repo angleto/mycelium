@@ -1156,3 +1156,33 @@ button.btn--danger:hover {
   gap: 0.4rem;
   flex-wrap: wrap;
 }
+
+/* Graph tag filter: unmistakable selected vs unselected (the old
+   chip/chip--rm pair was visually identical, so selection looked
+   inert). */
+.tagfilter {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0.5rem 0;
+}
+.chip--on,
+.chip--off {
+  cursor: pointer;
+}
+.chip--on {
+  background: var(--accent);
+  color: var(--accent-fg);
+  border-color: var(--accent);
+}
+.chip--off {
+  background: transparent;
+  color: var(--muted);
+  border-color: var(--border);
+  font-weight: 500;
+}
+.chip--off:hover {
+  color: var(--text-h);
+  border-color: var(--accent);
+}

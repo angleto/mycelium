@@ -49,9 +49,6 @@ export function NotesRoute() {
   const [converting, setConverting] = useState<string | null>(null)
   const [convertedIds, setConvertedIds] = useState<Set<string>>(new Set())
 
-  // Scope-filtered tag pool for the open note's project (null = use
-  // all tags, e.g. no project on the note).
-  const [scopedTags, setScopedTags] = useState<Tag[] | null>(null)
   // Modal: a note open for edit (or a fresh draft being created).
   const [sel, setSel] = useState<Note | null>(null)
   const [eTitle, setETitle] = useState('')
@@ -230,25 +227,6 @@ export function NotesRoute() {
     return () => clearTimeout(h)
   }, [eTitle, eText, sel, autoSaveNote])
 
-  // Scope the add-tag picker to the open note's project (global +
-  // tags scoped to that project / its client).
-  useEffect(() => {
-    let active = true
-    void (async () => {
-      const pid = sel?.project_id
-      if (!pid) {
-        if (active) setScopedTags(null)
-        return
-      }
-      const { data } = await api.GET('/tags', {
-        params: { header: workspaceHeader(), query: { for_project: pid } },
-      })
-      if (active) setScopedTags(data ?? null)
-    })()
-    return () => {
-      active = false
-    }
-  }, [sel?.id, sel?.project_id])
 
   async function refreshSel() {
     if (!sel) return
@@ -374,19 +352,69 @@ export function NotesRoute() {
     await openEdit(sel)
   }
 
+  function inheritedTagIds(n: Note): string[] {
+    return (n.tags ?? []).map((g) => g.id)
+  }
+
+  // Case 1 — the note IS the actionable: a task with the note's title +
+  // body, inheriting its tags (the backend adds a default project if
+  // none, so the task still resolves to a project/client), then the
+  // note is archived (it has become the task).
   async function onConvert(n: Note) {
     if (converting !== null || convertedIds.has(n.id)) return
     setErr(null)
     setConverting(n.id)
     const label = n.title || n.kind
+    const body = (n.transcript ?? '').trim()
     const { data, error } = await api.POST('/tasks', {
       params: { header: workspaceHeader() },
       body: {
         title: label,
-        description: `From note: ${mentionLink('note', n.id, label)}`,
+        description:
+          (body ? body + '\n\n' : '') +
+          `From note: ${mentionLink('note', n.id, label)}`,
         priority: 3,
         executor_kind: 'human',
         necessity: 'should',
+        tag_ids: inheritedTagIds(n),
+      },
+    })
+    if (error || !data) {
+      setConverting(null)
+      setErr(errMessage(error))
+      return
+    }
+    setConvertedIds((s) => new Set(s).add(n.id))
+    setMade({ id: data.id, title: label })
+    // The note has become the task: archive it (also closes the modal
+    // when open, which disarms the autosave so it cannot race).
+    await archiveNote(n)
+    setConverting(null)
+  }
+
+  // Case 2 — a long/structured note: spin a task off the current text
+  // selection (note stays, repeatable), inheriting the note's tags.
+  async function onTaskFromSelection(n: Note) {
+    if (converting !== null) return
+    const selText = (window.getSelection()?.toString() ?? '').trim()
+    if (!selText) {
+      setErr(t('notes.selectFirst'))
+      return
+    }
+    setErr(null)
+    setConverting(n.id)
+    const title = selText.split('\n')[0].slice(0, 80)
+    const { data, error } = await api.POST('/tasks', {
+      params: { header: workspaceHeader() },
+      body: {
+        title,
+        description:
+          selText +
+          `\n\nFrom note: ${mentionLink('note', n.id, n.title || n.kind)}`,
+        priority: 3,
+        executor_kind: 'human',
+        necessity: 'should',
+        tag_ids: inheritedTagIds(n),
       },
     })
     setConverting(null)
@@ -394,8 +422,7 @@ export function NotesRoute() {
       setErr(errMessage(error))
       return
     }
-    setConvertedIds((s) => new Set(s).add(n.id))
-    setMade({ id: data.id, title: label })
+    setMade({ id: data.id, title })
   }
 
   const modalOpen = sel !== null || creating
@@ -406,12 +433,11 @@ export function NotesRoute() {
     sel.kind !== 'conversation' &&
     (eTitle !== savedSnap.current.title ||
       eText !== savedSnap.current.text)
-  // Tags not already on the open note (for the add-tag picker). When
-  // the note has a project, only globally-scoped tags + tags scoped to
-  // that project/its client are offered (scopedTags); else all tags.
-  const pickFrom = scopedTags ?? tags
+  // Notes are generic: any tag can be attached (a tag may belong to
+  // one/many projects or be global, but a note is not constrained to a
+  // project's scope — only tasks resolve to a project/client).
   const addable = sel
-    ? pickFrom.filter((g) => !(sel.tags ?? []).some((s) => s.id === g.id))
+    ? tags.filter((g) => !(sel.tags ?? []).some((s) => s.id === g.id))
     : []
 
   return (
@@ -611,12 +637,21 @@ export function NotesRoute() {
                 <button
                   type="button"
                   className="btn--ghost"
+                  title={t('notes.toTaskHint')}
                   disabled={converting !== null || convertedIds.has(sel.id)}
                   onClick={() => void onConvert(sel)}
                 >
                   {convertedIds.has(sel.id)
                     ? t('notes.convertedShort')
                     : t('notes.toTask')}
+                </button>
+                <button
+                  type="button"
+                  className="btn--ghost"
+                  disabled={converting !== null}
+                  onClick={() => void onTaskFromSelection(sel)}
+                >
+                  {t('notes.fromSelection')}
                 </button>
                 <span className="modal__sp" />
                 <button

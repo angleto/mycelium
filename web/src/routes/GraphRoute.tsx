@@ -213,36 +213,41 @@ export function GraphRoute() {
           </select>
         </label>
       </div>
-      <div className="row" style={{ flexWrap: 'wrap' }}>
-        <span className="muted">{t('tasks.filterTag')}:</span>
-        {allTags.map((g) => {
-          const on = tagFilter.has(g.id)
-          return (
-            <button
-              key={g.id}
-              type="button"
-              className={on ? 'chip' : 'chip--rm'}
-              onClick={() =>
-                setTagFilter((s) => {
-                  const n = new Set(s)
-                  if (n.has(g.id)) n.delete(g.id)
-                  else n.add(g.id)
-                  return n
-                })
-              }
-            >
-              {g.name}
-              {on ? ' ✕' : ''}
-            </button>
-          )
-        })}
+      <div className="tagfilter">
+        <span className="muted">{t('graph.tagsLabel')}:</span>
+        {allTags.length === 0 ? (
+          <span className="hint">{t('graph.noTags')}</span>
+        ) : (
+          allTags.map((g) => {
+            const on = tagFilter.has(g.id)
+            return (
+              <button
+                key={g.id}
+                type="button"
+                aria-pressed={on}
+                className={'chip ' + (on ? 'chip--on' : 'chip--off')}
+                onClick={() =>
+                  setTagFilter((s) => {
+                    const n = new Set(s)
+                    if (n.has(g.id)) n.delete(g.id)
+                    else n.add(g.id)
+                    return n
+                  })
+                }
+              >
+                {on ? '✓ ' : ''}
+                {g.name}
+              </button>
+            )
+          })
+        )}
         {tagFilter.size > 0 && (
           <button
             type="button"
             className="btn--ghost btn--sm"
             onClick={() => setTagFilter(new Set())}
           >
-            {t('graph.scopeAll')}
+            {t('graph.clearTags')}
           </button>
         )}
       </div>

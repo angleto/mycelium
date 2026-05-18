@@ -385,6 +385,9 @@ export const en = {
     scopeMine: 'Mine',
     scopeAi: 'AI',
     connectHint: 'Click a task box, then another, to link them (finish→start). Click the relation label to change its type. Click a title to open the task.',
+    tagsLabel: 'Filter by tags',
+    noTags: 'No tags on these tasks yet.',
+    clearTags: 'Clear',
   },
   scheduler: {
     nav: 'Schedule',
@@ -624,6 +627,10 @@ export const en = {
     erase: 'Erase',
     erased: 'Erased.',
     toTask: 'Convert to task',
+    toTaskHint:
+      'Creates a task with the note content and tags, then archives the note.',
+    fromSelection: 'Task from selection',
+    selectFirst: 'Select some text in the note first.',
     converting: 'Converting...',
     convertedShort: 'Converted',
     converted: 'Task created from note',

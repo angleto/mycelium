@@ -384,6 +384,9 @@ export const it: Catalog = {
     scopeMine: 'Miei',
     scopeAi: 'IA',
     connectHint: 'Clicca un riquadro task, poi un altro, per collegarli (fine→inizio). Clicca la relazione per cambiarne il tipo. Clicca un titolo per aprire il task.',
+    tagsLabel: 'Filtra per tag',
+    noTags: 'Nessun tag su questi task.',
+    clearTags: 'Azzera',
   },
   scheduler: {
     nav: 'Pianificazione',
@@ -623,6 +626,10 @@ export const it: Catalog = {
     erase: 'Cancella',
     erased: 'Cancellata.',
     toTask: 'Trasforma in task',
+    toTaskHint:
+      'Crea un task con contenuto e tag della nota, poi archivia la nota.',
+    fromSelection: 'Task da selezione',
+    selectFirst: 'Seleziona prima del testo nella nota.',
     converting: 'Conversione...',
     convertedShort: 'Convertito',
     converted: 'Task creato dalla nota',
