@@ -44,7 +44,10 @@ class SignupIn(BaseModel):
 class SignupOut(BaseModel):
     user_id: uuid.UUID
     workspace_id: uuid.UUID
-    token: str
+    # None when email verification is required: the SPA shows a
+    # "check your email" state instead of logging the user in.
+    token: str | None = None
+    email_verification_required: bool = False
 
 
 class LoginIn(BaseModel):
@@ -54,6 +57,22 @@ class LoginIn(BaseModel):
 
 class TokenOut(BaseModel):
     token: str
+
+
+class VerifyEmailIn(BaseModel):
+    token: str = Field(min_length=16, max_length=256)
+
+
+class EmailIn(BaseModel):
+    """Used by resend-verification and forgot-password (enumeration-safe;
+    the response never reveals whether the address exists)."""
+
+    email: str = Field(min_length=3, max_length=320)
+
+
+class ResetPasswordIn(BaseModel):
+    token: str = Field(min_length=16, max_length=512)
+    new_password: str = Field(min_length=8, max_length=200)
 
 
 class WorkspaceOut(BaseModel):

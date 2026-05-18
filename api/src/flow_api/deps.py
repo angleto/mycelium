@@ -10,17 +10,18 @@ from __future__ import annotations
 import uuid
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import Depends, Header
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from flow_core.db import tenant_session
+from flow_core.db import admin_session, tenant_session
 from flow_core.errors import AuthError, ForbiddenError, NotFoundError
 from flow_core.i18n import MessageCode
 from flow_core.models.membership import Role
 from flow_core.security import decode_token
+from flow_core.services.auth import assert_token_not_revoked
 from flow_core.services.rbac import get_role
 
 # auto_error=False: the scheme is published to OpenAPI (so Swagger shows
@@ -40,13 +41,31 @@ def _bearer_token(
     return credentials.credentials
 
 
-def current_user_id(
+def current_claims(
     token: Annotated[str, Depends(_bearer_token)],
+) -> dict[str, Any]:
+    """Decoded JWT claims (sub, jti, exp). Used by logout/revoke."""
+    return decode_token(token)
+
+
+async def current_user_id(
+    claims: Annotated[dict[str, Any], Depends(current_claims)],
 ) -> uuid.UUID:
-    claims = decode_token(token)
     sub = claims.get("sub")
     if not isinstance(sub, str):
         raise AuthError(MessageCode.AUTH_TOKEN_NO_SUB)
+    # Stateless JWT + revocation list: every authenticated request
+    # checks the jti against revoked_tokens (ADR-0024). Malformed jti
+    # is treated as "no jti" (legacy tokens), not a 500.
+    jti = claims.get("jti")
+    if isinstance(jti, str):
+        try:
+            jti_uuid = uuid.UUID(jti)
+        except ValueError:
+            jti_uuid = None
+        if jti_uuid is not None:
+            async with admin_session() as session:
+                await assert_token_not_revoked(session, jti=jti_uuid)
     return uuid.UUID(sub)
 
 
