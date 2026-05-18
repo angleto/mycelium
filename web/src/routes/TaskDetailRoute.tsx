@@ -7,6 +7,7 @@ import type { components } from '../api/schema'
 type Task = components['schemas']['TaskOut']
 type State = components['schemas']['StateOut']
 type Tag = components['schemas']['TagOut']
+type Dep = components['schemas']['DependencyOut']
 
 // Task detail with optimistic concurrency: edits send expected_version;
 // a stale write yields 409 and we reload the canonical task.
@@ -21,6 +22,10 @@ export function TaskDetailRoute() {
   const [priority, setPriority] = useState(3)
   const [stateId, setStateId] = useState('')
   const [tagId, setTagId] = useState('')
+  const [allTasks, setAllTasks] = useState<Task[]>([])
+  const [deps, setDeps] = useState<Dep[]>([])
+  const [depOther, setDepOther] = useState('')
+  const [depRel, setDepRel] = useState<'depends' | 'blocks'>('depends')
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState<string | null>(null)
   const [err, setErr] = useState<string | null>(null)
@@ -45,22 +50,33 @@ export function TaskDetailRoute() {
     apply(data)
   }, [id, apply])
 
+  const reloadDeps = useCallback(async () => {
+    const { data } = await api.GET('/dependencies', {
+      params: { header: workspaceHeader() },
+    })
+    if (data) setDeps(data)
+  }, [])
+
   useEffect(() => {
     let active = true
     void (async () => {
       const h = workspaceHeader()
-      const [tk, st, tg] = await Promise.all([
+      const [tk, st, tg, all, dp] = await Promise.all([
         api.GET('/tasks/{task_id}', { params: { header: h, path: { task_id: id } } }),
         api.GET('/tasks/{task_id}/states', {
           params: { header: h, path: { task_id: id } },
         }),
         api.GET('/tags', { params: { header: h } }),
+        api.GET('/tasks', { params: { header: h } }),
+        api.GET('/dependencies', { params: { header: h } }),
       ])
       if (!active) return
       if (tk.data) apply(tk.data)
       else setErr(errMessage(tk.error))
       if (st.data) setStates(st.data)
       if (tg.data) setTags(tg.data)
+      if (all.data) setAllTasks(all.data)
+      if (dp.data) setDeps(dp.data)
     })()
     return () => {
       active = false
@@ -128,6 +144,45 @@ export function TaskDetailRoute() {
     }
     setMsg(t('tasks.saved'))
   }
+
+  async function onAddDep() {
+    if (!depOther) return
+    setErr(null)
+    // depends-on: the other task must finish first (it is the
+    // predecessor). blocks: this task is the predecessor. FS edges feed
+    // the deterministic scheduler; cycles are rejected server-side.
+    const body =
+      depRel === 'depends'
+        ? { predecessor_id: depOther, successor_id: id, type: 'FS' as const }
+        : { predecessor_id: id, successor_id: depOther, type: 'FS' as const }
+    const { error } = await api.POST('/dependencies', {
+      params: { header: workspaceHeader() },
+      body: { ...body, lag_working_minutes: 0 },
+    })
+    if (error) {
+      setErr(errMessage(error))
+      return
+    }
+    setDepOther('')
+    await reloadDeps()
+  }
+
+  async function onRemoveDep(depId: string) {
+    setErr(null)
+    const { error } = await api.DELETE('/dependencies/{dependency_id}', {
+      params: { header: workspaceHeader(), path: { dependency_id: depId } },
+    })
+    if (error) {
+      setErr(errMessage(error))
+      return
+    }
+    await reloadDeps()
+  }
+
+  const titleOf = (tid: string) =>
+    allTasks.find((x) => x.id === tid)?.title ?? tid.slice(0, 8)
+  const dependsOn = deps.filter((d) => d.successor_id === id)
+  const blocks = deps.filter((d) => d.predecessor_id === id)
 
   if (err && !task) return <p className="err">{err}</p>
   if (!task) return <p>{t('tasks.loading')}</p>
@@ -202,6 +257,67 @@ export function TaskDetailRoute() {
           {t('tasks.addTag')}
         </button>
       </div>
+
+      <h2>{t('tasks.deps')}</h2>
+      {dependsOn.length === 0 && blocks.length === 0 ? (
+        <p className="hint">{t('tasks.depNone')}</p>
+      ) : (
+        <ul className="list">
+          {dependsOn.map((d) => (
+            <li key={d.id}>
+              <strong>{t('tasks.dependsOn')}:</strong> {titleOf(d.predecessor_id)}
+              <button
+                type="button"
+                className="btn--ghost btn--sm"
+                onClick={() => void onRemoveDep(d.id)}
+              >
+                {t('tasks.remove')}
+              </button>
+            </li>
+          ))}
+          {blocks.map((d) => (
+            <li key={d.id}>
+              <strong>{t('tasks.blocksL')}:</strong> {titleOf(d.successor_id)}
+              <button
+                type="button"
+                className="btn--ghost btn--sm"
+                onClick={() => void onRemoveDep(d.id)}
+              >
+                {t('tasks.remove')}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <div className="row">
+        <label>
+          {t('tasks.relation')}
+          <select
+            value={depRel}
+            onChange={(e) => setDepRel(e.target.value as 'depends' | 'blocks')}
+          >
+            <option value="depends">{t('tasks.dependsOn')}</option>
+            <option value="blocks">{t('tasks.blocksL')}</option>
+          </select>
+        </label>
+        <label>
+          {t('tasks.otherTask')}
+          <select value={depOther} onChange={(e) => setDepOther(e.target.value)}>
+            <option value="">--</option>
+            {allTasks
+              .filter((x) => x.id !== id)
+              .map((x) => (
+                <option key={x.id} value={x.id}>
+                  {x.title}
+                </option>
+              ))}
+          </select>
+        </label>
+        <button type="button" onClick={() => void onAddDep()}>
+          {t('tasks.addDep')}
+        </button>
+      </div>
+      <p className="hint">{t('tasks.relatedTo')}</p>
     </section>
   )
 }
