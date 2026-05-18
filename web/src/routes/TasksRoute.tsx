@@ -602,7 +602,7 @@ export function TasksRoute() {
                       onClick={() => void startParallel(tk.id)}
                       title={t('time.startParallel')}
                     >
-                      ⏱⏩
+                      ⏱▶▶
                     </button>
                   )}
                 </span>
