@@ -7,24 +7,31 @@ import { useSession } from '../auth/useSession'
 import { WorkspaceSwitcher } from './WorkspaceSwitcher'
 import { Logo } from './Logo'
 import { Icon, type IconName } from './NavIcon'
-import { getTheme, setTheme, type Theme } from '../lib/theme'
+import { ThemeToggle } from './ThemeToggle'
+import { hms, elapsedSec } from '../lib/time'
+import type { components } from '../api/schema'
 import i18n from '../i18n'
 
 type Item = { to: string; label: string; icon: IconName }
+type Running = components['schemas']['TimeEntryOut']
 
-// Slow spinner in the sidebar while any timer is running (poll, same
-// cadence the timer views use).
+// Top-bar running indicator: a slow spinner shown only while a timer
+// runs, the count of running timers, and the live elapsed of the
+// current (most recently started) one, ticking each second. Polls
+// /time/running on the same 5s cadence as the timer views.
 function RunningIndicator() {
   const { t } = useTranslation()
   const session = useSession()
-  const [n, setN] = useState(0)
+  const [runs, setRuns] = useState<Running[]>([])
+  const [now, setNow] = useState(() => Date.now())
+
   useEffect(() => {
     let active = true
     const tick = async () => {
       const { data } = await api.GET('/time/running', {
         params: { header: workspaceHeader() },
       })
-      if (active) setN((data ?? []).length)
+      if (active) setRuns(data ?? [])
     }
     void tick()
     const poll = setInterval(() => void tick(), 5000)
@@ -33,11 +40,23 @@ function RunningIndicator() {
       clearInterval(poll)
     }
   }, [session?.workspaceId])
-  if (n === 0) return null
+
+  useEffect(() => {
+    if (runs.length === 0) return
+    const clock = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(clock)
+  }, [runs.length])
+
+  if (runs.length === 0) return null
+  const cur = [...runs].sort(
+    (a, b) =>
+      new Date(b.started_at).getTime() - new Date(a.started_at).getTime(),
+  )[0]
   return (
     <div className="running" title={t('time.runningNow')}>
       <span className="running__spin" aria-hidden="true" />
-      {t('time.runningNow')} ({n})
+      <span className="running__n">{runs.length}</span>
+      <span className="running__t">{hms(elapsedSec(cur.started_at, now))}</span>
     </div>
   )
 }
@@ -65,7 +84,6 @@ function NavGroup({ title, items }: { title: string; items: Item[] }) {
 
 export function AppShell() {
   const { t } = useTranslation()
-  const [theme, setThemeState] = useState<Theme>(getTheme())
 
   async function onLogout() {
     // Real server-side logout: revoke the JWT, then drop the session.
@@ -131,19 +149,8 @@ export function AppShell() {
           <Logo /> {t('app.title')}
         </div>
         <div className="topbar__actions">
-          <select
-            aria-label={t('settings.theme')}
-            value={theme}
-            onChange={(e) => {
-              const v = e.target.value as Theme
-              setTheme(v)
-              setThemeState(v)
-            }}
-          >
-            <option value="auto">{t('settings.themeAuto')}</option>
-            <option value="light">{t('settings.themeLight')}</option>
-            <option value="dark">{t('settings.themeDark')}</option>
-          </select>
+          <RunningIndicator />
+          <ThemeToggle />
           <select
             aria-label="language"
             value={i18n.language}
@@ -175,7 +182,6 @@ export function AppShell() {
           <div className="sidebar__ws">
             <WorkspaceSwitcher />
           </div>
-          <RunningIndicator />
           <nav className="nav">
             {groups.map((g) => (
               <NavGroup key={g.title} title={g.title} items={g.items} />
