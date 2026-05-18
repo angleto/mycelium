@@ -309,18 +309,6 @@ export function TasksRoute() {
     setBulkMsg(t('tasks.bulkTagDone'))
   }
 
-  async function delTask(tk: Task) {
-    if (!window.confirm(t('tasks.confirmDelete', { title: tk.title }))) return
-    setErr(null)
-    setBulkMsg(null)
-    const { error } = await api.POST('/tasks/{task_id}/delete', {
-      params: { header: workspaceHeader(), path: { task_id: tk.id } },
-      body: { expected_version: tk.version },
-    })
-    if (error) setErr(errMessage(error))
-    await loadTasks()
-  }
-
   async function bulkDelete() {
     const picked = tasks.filter((x) => sel.has(x.id))
     if (picked.length === 0) return
@@ -337,17 +325,6 @@ export function TasksRoute() {
     setSel(new Set())
     await loadTasks()
     setBulkMsg(t('tasks.bulkResult', { applied: done, skipped: picked.length - done }))
-  }
-
-  async function archTask(tk: Task) {
-    setErr(null)
-    setBulkMsg(null)
-    const { error } = await api.POST('/tasks/{task_id}/archive', {
-      params: { header: workspaceHeader(), path: { task_id: tk.id } },
-      body: { expected_version: tk.version },
-    })
-    if (error) setErr(errMessage(error))
-    await loadTasks()
   }
 
   async function bulkArchive() {
@@ -670,22 +647,6 @@ export function TasksRoute() {
                     title={onThis ? t('tasks.stop') : t('tasks.start')}
                   >
                     {onThis ? `⏱■ ${hms(elapsed)}` : '⏱▶'}
-                  </button>
-                  <button
-                    type="button"
-                    className="btn--ghost btn--sm"
-                    onClick={() => void archTask(tk)}
-                    title={t('tasks.archive')}
-                  >
-                    📦
-                  </button>
-                  <button
-                    type="button"
-                    className="btn--ghost btn--sm"
-                    onClick={() => void delTask(tk)}
-                    title={t('tasks.delete')}
-                  >
-                    🗑
                   </button>
                 </span>
               </li>
