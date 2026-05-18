@@ -8,13 +8,40 @@ import type { components } from '../api/schema'
 
 type Tag = components['schemas']['TagOut']
 
-function TagRow({ tag, onChanged }: { tag: Tag; onChanged: () => void }) {
+function TagRow({
+  tag,
+  targets,
+  onChanged,
+}: {
+  tag: Tag
+  targets: Tag[]
+  onChanged: () => void
+}) {
   const { t } = useTranslation()
   const [name, setName] = useState(tag.name)
   const [color, setColor] = useState(tag.color || '#6d28d9')
+  const [scope, setScope] = useState<string[]>(tag.scope_target_ids ?? [])
   const [msg, setMsg] = useState<string | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const archived = tag.status === 'archived'
+  const targetName = (id: string) =>
+    targets.find((x) => x.id === id)?.name ?? id.slice(0, 8)
+
+  async function saveScope(next: string[]) {
+    setErr(null)
+    setMsg(null)
+    const { error } = await api.PUT('/tags/{tag_id}/scope', {
+      params: { header: workspaceHeader(), path: { tag_id: tag.id } },
+      body: { target_ids: next },
+    })
+    if (error) {
+      setErr(errMessage(error))
+      return
+    }
+    setScope(next)
+    setMsg(t('tagmgr.saved'))
+    onChanged()
+  }
 
   async function patch(body: Record<string, unknown>) {
     setErr(null)
@@ -76,6 +103,38 @@ function TagRow({ tag, onChanged }: { tag: Tag; onChanged: () => void }) {
       </span>
       {msg && <span className="ok">{msg}</span>}
       {err && <span className="err">{err}</span>}
+      <div className="chips" style={{ marginTop: '0.35rem' }}>
+        <span className="muted">{t('tagmgr.scope')}:</span>
+        {scope.length === 0 && (
+          <span className="muted">{t('tagmgr.global')}</span>
+        )}
+        {scope.map((id) => (
+          <button
+            key={id}
+            type="button"
+            className="chip chip--rm"
+            title={t('tagmgr.scopeRemove')}
+            onClick={() => void saveScope(scope.filter((x) => x !== id))}
+          >
+            {targetName(id)} ✕
+          </button>
+        ))}
+        <select
+          value=""
+          onChange={(e) =>
+            e.target.value && void saveScope([...scope, e.target.value])
+          }
+        >
+          <option value="">{t('tagmgr.scopeAdd')}</option>
+          {targets
+            .filter((x) => !scope.includes(x.id))
+            .map((x) => (
+              <option key={x.id} value={x.id}>
+                {x.kind}: {x.name}
+              </option>
+            ))}
+        </select>
+      </div>
     </li>
   )
 }
@@ -156,13 +215,21 @@ export function TagManagerRoute() {
           const visible = tags.filter(
             (tg) => showArchived || tg.status !== 'archived',
           )
+          const targets = tags.filter(
+            (tg) => tg.kind === 'project' || tg.kind === 'client',
+          )
           return visible.length === 0 ? (
             <p className="hint">{t('tagmgr.none')}</p>
           ) : (
             <ul className="list">
               {visible.map((tg) =>
                 tg.kind === 'generic' ? (
-                  <TagRow key={tg.id} tag={tg} onChanged={() => void load()} />
+                  <TagRow
+                    key={tg.id}
+                    tag={tg}
+                    targets={targets}
+                    onChanged={() => void load()}
+                  />
                 ) : (
                   // Client/project tags are auto-created from their
                   // profile; they are managed in Clients & projects,

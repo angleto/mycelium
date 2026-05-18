@@ -32,6 +32,10 @@ export const it: Catalog = {
   tagmgr: {
     nav: 'Tag',
     title: 'Tag',
+    scope: 'Ambito',
+    global: 'Globale (ovunque)',
+    scopeAdd: 'Limita a…',
+    scopeRemove: 'Rimuovi dall ambito',
     rename: 'Rinomina',
     color: 'Colore',
     archive: 'Archivia',

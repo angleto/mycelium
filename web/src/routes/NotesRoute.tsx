@@ -49,6 +49,9 @@ export function NotesRoute() {
   const [converting, setConverting] = useState<string | null>(null)
   const [convertedIds, setConvertedIds] = useState<Set<string>>(new Set())
 
+  // Scope-filtered tag pool for the open note's project (null = use
+  // all tags, e.g. no project on the note).
+  const [scopedTags, setScopedTags] = useState<Tag[] | null>(null)
   // Modal: a note open for edit (or a fresh draft being created).
   const [sel, setSel] = useState<Note | null>(null)
   const [eTitle, setETitle] = useState('')
@@ -227,6 +230,26 @@ export function NotesRoute() {
     return () => clearTimeout(h)
   }, [eTitle, eText, sel, autoSaveNote])
 
+  // Scope the add-tag picker to the open note's project (global +
+  // tags scoped to that project / its client).
+  useEffect(() => {
+    let active = true
+    void (async () => {
+      const pid = sel?.project_id
+      if (!pid) {
+        if (active) setScopedTags(null)
+        return
+      }
+      const { data } = await api.GET('/tags', {
+        params: { header: workspaceHeader(), query: { for_project: pid } },
+      })
+      if (active) setScopedTags(data ?? null)
+    })()
+    return () => {
+      active = false
+    }
+  }, [sel?.id, sel?.project_id])
+
   async function refreshSel() {
     if (!sel) return
     const { data } = await api.GET('/notes/{note_id}', {
@@ -383,9 +406,12 @@ export function NotesRoute() {
     sel.kind !== 'conversation' &&
     (eTitle !== savedSnap.current.title ||
       eText !== savedSnap.current.text)
-  // Tags not already on the open note (for the add-tag picker).
+  // Tags not already on the open note (for the add-tag picker). When
+  // the note has a project, only globally-scoped tags + tags scoped to
+  // that project/its client are offered (scopedTags); else all tags.
+  const pickFrom = scopedTags ?? tags
   const addable = sel
-    ? tags.filter((g) => !(sel.tags ?? []).some((s) => s.id === g.id))
+    ? pickFrom.filter((g) => !(sel.tags ?? []).some((s) => s.id === g.id))
     : []
 
   return (

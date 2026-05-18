@@ -33,6 +33,10 @@ export const en = {
   tagmgr: {
     nav: 'Tags',
     title: 'Tags',
+    scope: 'Scope',
+    global: 'Global (everywhere)',
+    scopeAdd: 'Restrict to…',
+    scopeRemove: 'Remove from scope',
     rename: 'Rename',
     color: 'Color',
     archive: 'Archive',
