@@ -19,6 +19,7 @@ import { BudgetsRoute } from './routes/BudgetsRoute'
 import { EmailRoute } from './routes/EmailRoute'
 import { BillingRoute } from './routes/BillingRoute'
 import { MemoryRoute } from './routes/MemoryRoute'
+import { NotesRoute } from './routes/NotesRoute'
 import { SettingsRoute } from './routes/SettingsRoute'
 
 function App() {
@@ -45,6 +46,7 @@ function App() {
             <Route path="/email" element={<EmailRoute />} />
             <Route path="/billing" element={<BillingRoute />} />
             <Route path="/memory" element={<MemoryRoute />} />
+            <Route path="/notes" element={<NotesRoute />} />
             <Route path="/settings" element={<SettingsRoute />} />
           </Route>
         </Route>

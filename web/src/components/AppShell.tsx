@@ -33,6 +33,7 @@ export function AppShell() {
           <Link to="/email">{t('email.nav')}</Link>
           <Link to="/billing">{t('billing.nav')}</Link>
           <Link to="/memory">{t('memory.nav')}</Link>
+          <Link to="/notes">{t('notes.nav')}</Link>
           <Link to="/settings">{t('nav.settings')}</Link>
           <label className="shell__lang">
             {t('nav.language')}{' '}
