@@ -8,7 +8,7 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass
 
-from sqlalchemy import select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,6 +17,7 @@ from flow_core.i18n import MessageCode
 from flow_core.models.membership import Role
 from flow_core.models.project_profile import ProjectProfile
 from flow_core.models.tag import Tag, TagKind
+from flow_core.models.task import Task
 from flow_core.models.task_tag import TaskTag
 from flow_core.models.workflow import (
     WorkflowDefinition,
@@ -203,6 +204,202 @@ async def create_workflow(
         action="create",
     )
     return wf
+
+
+@dataclass(frozen=True, slots=True)
+class StateEdit:
+    name: str
+    ord: int = 0
+    is_initial: bool = False
+    is_terminal: bool = False
+    id: uuid.UUID | None = None  # None = new state
+
+
+async def set_default_workflow(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    workflow_id: uuid.UUID,
+) -> None:
+    """Exactly one default. Promoting another keeps the >=1 invariant
+    and is the supported way to retire the previous default."""
+    await require_role(session, org_id, actor_id, Role.admin)
+    wf = (
+        await session.execute(
+            select(WorkflowDefinition).where(WorkflowDefinition.id == workflow_id)
+        )
+    ).scalar_one_or_none()
+    if wf is None:
+        raise DomainError(MessageCode.WORKFLOW_NOT_FOUND)
+    await session.execute(
+        update(WorkflowDefinition)
+        .where(WorkflowDefinition.is_default.is_(True))
+        .values(is_default=False)
+    )
+    wf.is_default = True
+    await session.flush()
+    await audit.log(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        entity="workflow",
+        entity_id=workflow_id,
+        action="set_default",
+    )
+
+
+async def delete_workflow(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    workflow_id: uuid.UUID,
+) -> None:
+    """Refused for the default (pick another default first: keeps the
+    >=1 invariant) and for a workflow whose states still hold tasks.
+    Project overrides pointing here fall back to the default."""
+    await require_role(session, org_id, actor_id, Role.admin)
+    wf = (
+        await session.execute(
+            select(WorkflowDefinition).where(WorkflowDefinition.id == workflow_id)
+        )
+    ).scalar_one_or_none()
+    if wf is None:
+        raise DomainError(MessageCode.WORKFLOW_NOT_FOUND)
+    if wf.is_default:
+        raise DomainError(MessageCode.WORKFLOW_IN_USE)
+    in_use = (
+        await session.execute(
+            select(func.count())
+            .select_from(Task)
+            .join(WorkflowState, WorkflowState.id == Task.state_id)
+            .where(WorkflowState.workflow_id == workflow_id)
+        )
+    ).scalar_one()
+    if in_use:
+        raise DomainError(MessageCode.WORKFLOW_IN_USE)
+    await session.execute(
+        update(ProjectProfile)
+        .where(ProjectProfile.workflow_id == workflow_id)
+        .values(workflow_id=None)
+    )
+    await session.execute(
+        delete(WorkflowTransition).where(
+            WorkflowTransition.workflow_id == workflow_id
+        )
+    )
+    await session.execute(
+        delete(WorkflowState).where(WorkflowState.workflow_id == workflow_id)
+    )
+    await session.execute(
+        delete(WorkflowDefinition).where(WorkflowDefinition.id == workflow_id)
+    )
+    await session.flush()
+    await audit.log(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        entity="workflow",
+        entity_id=workflow_id,
+        action="delete",
+    )
+
+
+async def update_workflow(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    workflow_id: uuid.UUID,
+    name: str,
+    states: list[StateEdit],
+    transitions: list[tuple[str, str]],
+) -> None:
+    """Rename + reconcile states (match by id; new ones inserted; ones
+    dropped only if no task uses them) + replace transitions. Exactly
+    one initial state."""
+    await require_role(session, org_id, actor_id, Role.admin)
+    wf = (
+        await session.execute(
+            select(WorkflowDefinition).where(WorkflowDefinition.id == workflow_id)
+        )
+    ).scalar_one_or_none()
+    if wf is None:
+        raise DomainError(MessageCode.WORKFLOW_NOT_FOUND)
+    if sum(1 for s in states if s.is_initial) != 1:
+        raise DomainError(MessageCode.WORKFLOW_INVALID)
+    existing = {s.id: s for s in await get_states(session, workflow_id)}
+    keep_ids = {s.id for s in states if s.id is not None}
+    # Drop removed states only when no task references them.
+    for sid in existing:
+        if sid in keep_ids:
+            continue
+        used = (
+            await session.execute(
+                select(func.count()).select_from(Task).where(Task.state_id == sid)
+            )
+        ).scalar_one()
+        if used:
+            raise DomainError(MessageCode.WORKFLOW_IN_USE)
+    # Transitions reference states; rebuild them after states settle.
+    await session.execute(
+        delete(WorkflowTransition).where(
+            WorkflowTransition.workflow_id == workflow_id
+        )
+    )
+    for sid in existing:
+        if sid not in keep_ids:
+            await session.execute(
+                delete(WorkflowState).where(WorkflowState.id == sid)
+            )
+    by_name: dict[str, uuid.UUID] = {}
+    try:
+        async with session.begin_nested():
+            for spec in states:
+                if spec.id is not None and spec.id in existing:
+                    st = existing[spec.id]
+                    st.name = spec.name
+                    st.ord = spec.ord
+                    st.is_initial = spec.is_initial
+                    st.is_terminal = spec.is_terminal
+                    by_name[spec.name] = st.id
+                else:
+                    st = WorkflowState(
+                        org_id=org_id,
+                        workflow_id=workflow_id,
+                        name=spec.name,
+                        ord=spec.ord,
+                        is_initial=spec.is_initial,
+                        is_terminal=spec.is_terminal,
+                    )
+                    session.add(st)
+                    await session.flush()
+                    by_name[spec.name] = st.id
+            wf.name = name
+            await session.flush()
+    except IntegrityError as exc:
+        raise DomainError(MessageCode.WORKFLOW_INVALID) from exc
+    for src, dst in transitions:
+        if src not in by_name or dst not in by_name:
+            raise DomainError(MessageCode.WORKFLOW_INVALID)
+        session.add(
+            WorkflowTransition(
+                org_id=org_id,
+                workflow_id=workflow_id,
+                from_state_id=by_name[src],
+                to_state_id=by_name[dst],
+            )
+        )
+    await session.flush()
+    await audit.log(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        entity="workflow",
+        entity_id=workflow_id,
+        action="update",
+    )
 
 
 async def set_project_workflow(

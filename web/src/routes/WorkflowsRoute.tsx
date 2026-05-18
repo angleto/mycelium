@@ -10,6 +10,8 @@ type Edge = components['schemas']['TransitionOut']
 type WfMeta = { states: State[]; edges: Edge[] }
 type StateRow = { name: string; is_initial: boolean; is_terminal: boolean }
 type Transition = { from_state: string; to_state: string }
+type EditRow = StateRow & { id?: string }
+type Edit = { id: string; name: string; states: EditRow[]; tr: Transition[] }
 
 // WorkflowDefinition editor. The backend enforces "exactly one initial
 // state" (workflow.invalid) and the transition rules; errors surface
@@ -36,6 +38,7 @@ export function WorkflowsRoute() {
   ])
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
+  const [editing, setEditing] = useState<Edit | null>(null)
 
   const loadMeta = useCallback(async (wfs: Workflow[]) => {
     const h = workspaceHeader()
@@ -124,6 +127,85 @@ export function WorkflowsRoute() {
     await load()
   }
 
+  function openEdit(w: Workflow) {
+    const m = meta[w.id]
+    if (!m) return
+    const nameById = new Map(m.states.map((s) => [s.id, s.name]))
+    setEditing({
+      id: w.id,
+      name: w.name,
+      states: [...m.states]
+        .sort((a, b) => a.ord - b.ord)
+        .map((s) => ({
+          id: s.id,
+          name: s.name,
+          is_initial: s.is_initial,
+          is_terminal: s.is_terminal,
+        })),
+      tr: m.edges.map((e) => ({
+        from_state: nameById.get(e.from_state_id) ?? '',
+        to_state: nameById.get(e.to_state_id) ?? '',
+      })),
+    })
+    setErr(null)
+  }
+
+  function patchE(p: Partial<Edit>) {
+    setEditing((e) => (e ? { ...e, ...p } : e))
+  }
+
+  async function saveEdit() {
+    if (!editing) return
+    setBusy(true)
+    setErr(null)
+    const { error } = await api.PATCH('/workflows/{workflow_id}', {
+      params: { header: workspaceHeader(), path: { workflow_id: editing.id } },
+      body: {
+        name: editing.name,
+        states: editing.states.map((s, i) => ({
+          id: s.id,
+          name: s.name,
+          ord: i,
+          is_initial: s.is_initial,
+          is_terminal: s.is_terminal,
+        })),
+        transitions: editing.tr.filter((x) => x.from_state && x.to_state),
+      },
+    })
+    setBusy(false)
+    if (error) {
+      setErr(errMessage(error))
+      return
+    }
+    setEditing(null)
+    await load()
+  }
+
+  async function setDefault(id: string) {
+    setErr(null)
+    const { error } = await api.POST('/workflows/{workflow_id}/default', {
+      params: { header: workspaceHeader(), path: { workflow_id: id } },
+    })
+    if (error) {
+      setErr(errMessage(error))
+      return
+    }
+    await load()
+  }
+
+  async function removeWf(w: Workflow) {
+    if (!window.confirm(t('workflows.confirmDelete', { name: w.name }))) return
+    setErr(null)
+    const { error } = await api.DELETE('/workflows/{workflow_id}', {
+      params: { header: workspaceHeader(), path: { workflow_id: w.id } },
+    })
+    if (error) {
+      setErr(errMessage(error))
+      return
+    }
+    await load()
+  }
+
   return (
     <section className="card">
       <h1>{t('workflows.title')}</h1>
@@ -162,11 +244,236 @@ export function WorkflowsRoute() {
                       .join(' , ')}
                   </div>
                 )}
+                <div className="row">
+                  <button
+                    type="button"
+                    className="btn--ghost btn--sm"
+                    onClick={() => openEdit(w)}
+                  >
+                    {t('workflows.edit')}
+                  </button>
+                  {!w.is_default && (
+                    <button
+                      type="button"
+                      className="btn--ghost btn--sm"
+                      onClick={() => void setDefault(w.id)}
+                    >
+                      {t('workflows.makeDefault')}
+                    </button>
+                  )}
+                  {!w.is_default && (
+                    <button
+                      type="button"
+                      className="btn--danger btn--sm"
+                      onClick={() => void removeWf(w)}
+                    >
+                      {t('workflows.delete')}
+                    </button>
+                  )}
+                </div>
+                {editing?.id === w.id && (
+                  <div className="card" style={{ marginTop: '0.5rem' }}>
+                    <label>
+                      {t('workflows.name')}
+                      <input
+                        value={editing.name}
+                        onChange={(e) => patchE({ name: e.target.value })}
+                      />
+                    </label>
+                    <h3>{t('workflows.states')}</h3>
+                    {editing.states.map((s, i) => (
+                      <div className="row" key={s.id ?? `n${i}`}>
+                        <input
+                          value={s.name}
+                          onChange={(e) =>
+                            patchE({
+                              states: editing.states.map((x, j) =>
+                                j === i ? { ...x, name: e.target.value } : x,
+                              ),
+                            })
+                          }
+                        />
+                        <label>
+                          <input
+                            type="checkbox"
+                            checked={s.is_initial}
+                            onChange={(e) =>
+                              patchE({
+                                states: editing.states.map((x, j) =>
+                                  j === i
+                                    ? { ...x, is_initial: e.target.checked }
+                                    : x,
+                                ),
+                              })
+                            }
+                          />{' '}
+                          {t('workflows.initial')}
+                        </label>
+                        <label>
+                          <input
+                            type="checkbox"
+                            checked={s.is_terminal}
+                            onChange={(e) =>
+                              patchE({
+                                states: editing.states.map((x, j) =>
+                                  j === i
+                                    ? { ...x, is_terminal: e.target.checked }
+                                    : x,
+                                ),
+                              })
+                            }
+                          />{' '}
+                          {t('workflows.terminal')}
+                        </label>
+                        <button
+                          type="button"
+                          className="btn--ghost btn--sm"
+                          disabled={i === 0}
+                          onClick={() =>
+                            patchE({
+                              states: editing.states.map((x, j) =>
+                                j === i - 1
+                                  ? editing.states[i]
+                                  : j === i
+                                    ? editing.states[i - 1]
+                                    : x,
+                              ),
+                            })
+                          }
+                        >
+                          ↑
+                        </button>
+                        <button
+                          type="button"
+                          className="btn--ghost btn--sm"
+                          disabled={i === editing.states.length - 1}
+                          onClick={() =>
+                            patchE({
+                              states: editing.states.map((x, j) =>
+                                j === i + 1
+                                  ? editing.states[i]
+                                  : j === i
+                                    ? editing.states[i + 1]
+                                    : x,
+                              ),
+                            })
+                          }
+                        >
+                          ↓
+                        </button>
+                        <button
+                          type="button"
+                          className="btn--ghost btn--sm"
+                          onClick={() =>
+                            patchE({
+                              states: editing.states.filter(
+                                (_, j) => j !== i,
+                              ),
+                            })
+                          }
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    ))}
+                    <button
+                      type="button"
+                      className="btn--sm"
+                      onClick={() =>
+                        patchE({
+                          states: [
+                            ...editing.states,
+                            {
+                              name: '',
+                              is_initial: false,
+                              is_terminal: false,
+                            },
+                          ],
+                        })
+                      }
+                    >
+                      {t('workflows.addState')}
+                    </button>
+                    <h3>{t('workflows.transitions')}</h3>
+                    {editing.tr.map((x, i) => (
+                      <div className="row" key={i}>
+                        <input
+                          placeholder={t('workflows.from')}
+                          value={x.from_state}
+                          onChange={(e) =>
+                            patchE({
+                              tr: editing.tr.map((y, j) =>
+                                j === i
+                                  ? { ...y, from_state: e.target.value }
+                                  : y,
+                              ),
+                            })
+                          }
+                        />
+                        <input
+                          placeholder={t('workflows.to')}
+                          value={x.to_state}
+                          onChange={(e) =>
+                            patchE({
+                              tr: editing.tr.map((y, j) =>
+                                j === i
+                                  ? { ...y, to_state: e.target.value }
+                                  : y,
+                              ),
+                            })
+                          }
+                        />
+                        <button
+                          type="button"
+                          className="btn--ghost btn--sm"
+                          onClick={() =>
+                            patchE({
+                              tr: editing.tr.filter((_, j) => j !== i),
+                            })
+                          }
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    ))}
+                    <button
+                      type="button"
+                      className="btn--sm"
+                      onClick={() =>
+                        patchE({
+                          tr: [
+                            ...editing.tr,
+                            { from_state: '', to_state: '' },
+                          ],
+                        })
+                      }
+                    >
+                      {t('workflows.addTransition')}
+                    </button>
+                    <div className="row">
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => void saveEdit()}
+                      >
+                        {busy ? t('workflows.creating') : t('workflows.save')}
+                      </button>
+                      <button
+                        type="button"
+                        className="btn--ghost"
+                        onClick={() => setEditing(null)}
+                      >
+                        {t('workflows.cancel')}
+                      </button>
+                    </div>
+                  </div>
+                )}
               </li>
             )
           })}
         </ul>
       )}
+      {err && <p className="err">{err}</p>}
 
       <form onSubmit={(e) => void onCreate(e)}>
         <label>

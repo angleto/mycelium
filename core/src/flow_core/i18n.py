@@ -44,6 +44,7 @@ class MessageCode(enum.StrEnum):
     TAG_KIND_MISMATCH = "tag.kind_mismatch"
     WORKFLOW_NOT_FOUND = "workflow.not_found"
     WORKFLOW_INVALID = "workflow.invalid"
+    WORKFLOW_IN_USE = "workflow.in_use"
     TRANSITION_NOT_ALLOWED = "workflow.transition_not_allowed"
     DEPENDENCY_CYCLE = "dependency.cycle"
     CALENDAR_NOT_FOUND = "calendar.not_found"
@@ -110,6 +111,10 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
         MessageCode.TAG_KIND_MISMATCH: "Tag is not of the expected kind",
         MessageCode.WORKFLOW_NOT_FOUND: "Workflow not found",
         MessageCode.WORKFLOW_INVALID: ("Invalid workflow: exactly one initial state is required"),
+        MessageCode.WORKFLOW_IN_USE: (
+            "Workflow in use or default: reassign its tasks / pick another "
+            "default first"
+        ),
         MessageCode.TRANSITION_NOT_ALLOWED: ("Transition not allowed by the workflow"),
         MessageCode.DEPENDENCY_CYCLE: ("This dependency would create a cycle"),
         MessageCode.CALENDAR_NOT_FOUND: "Working calendar not found",

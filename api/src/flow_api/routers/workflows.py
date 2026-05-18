@@ -16,9 +16,10 @@ from flow_api.schemas import (
     VersionOut,
     WorkflowCreateIn,
     WorkflowOut,
+    WorkflowPatchIn,
 )
 from flow_core.services import workflow as wf
-from flow_core.services.workflow import StateSpec
+from flow_core.services.workflow import StateEdit, StateSpec
 
 router = APIRouter(tags=["workflows"])
 
@@ -44,6 +45,58 @@ async def create_workflow(
         transitions=[(t.from_state, t.to_state) for t in body.transitions],
     )
     return WorkflowOut(id=w.id, name=w.name, is_default=w.is_default, version=w.version)
+
+
+@router.patch("/workflows/{workflow_id}", status_code=204)
+async def update_workflow(
+    workflow_id: uuid.UUID,
+    body: WorkflowPatchIn,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+) -> None:
+    await wf.update_workflow(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        workflow_id=workflow_id,
+        name=body.name,
+        states=[
+            StateEdit(
+                id=s.id,
+                name=s.name,
+                ord=s.ord,
+                is_initial=s.is_initial,
+                is_terminal=s.is_terminal,
+            )
+            for s in body.states
+        ],
+        transitions=[(t.from_state, t.to_state) for t in body.transitions],
+    )
+
+
+@router.delete("/workflows/{workflow_id}", status_code=204)
+async def delete_workflow(
+    workflow_id: uuid.UUID,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+) -> None:
+    await wf.delete_workflow(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        workflow_id=workflow_id,
+    )
+
+
+@router.post("/workflows/{workflow_id}/default", status_code=204)
+async def set_default_workflow(
+    workflow_id: uuid.UUID,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+) -> None:
+    await wf.set_default_workflow(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        workflow_id=workflow_id,
+    )
 
 
 @router.get("/workflows", response_model=list[WorkflowOut])

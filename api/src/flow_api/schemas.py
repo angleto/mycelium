@@ -403,6 +403,20 @@ class WorkflowCreateIn(BaseModel):
     transitions: list[TransitionIn] = Field(default_factory=list)
 
 
+class WorkflowStateEditIn(BaseModel):
+    id: uuid.UUID | None = None  # None = new state
+    name: str = Field(min_length=1, max_length=80)
+    ord: int = 0
+    is_initial: bool = False
+    is_terminal: bool = False
+
+
+class WorkflowPatchIn(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    states: list[WorkflowStateEditIn]
+    transitions: list[TransitionIn] = Field(default_factory=list)
+
+
 class WorkflowOut(BaseModel):
     id: uuid.UUID
     name: str
