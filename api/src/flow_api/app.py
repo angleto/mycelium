@@ -11,6 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.responses import JSONResponse, Response
 
 from flow_api.routers import (
+    admin_users,
     advisory,
     auth,
     billing,
@@ -95,6 +96,7 @@ def create_app() -> FastAPI:
         )
 
     app.include_router(auth.router)
+    app.include_router(admin_users.router)
     app.include_router(mfa.router)
     app.include_router(workspace.router)
     app.include_router(tags.router)

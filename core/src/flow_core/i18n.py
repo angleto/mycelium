@@ -30,11 +30,12 @@ class MessageCode(enum.StrEnum):
     AUTH_INVALID_TOTP = "auth.invalid_totp"
     AUTH_TOKEN_REVOKED = "auth.token_revoked"  # noqa: S105 (message code, not a secret)
     AUTH_RESET_TOKEN_INVALID = "auth.reset_token_invalid"  # noqa: S105 (code, not a secret)
-    AUTH_VERIFICATION_TOKEN_INVALID = (
-        "auth.verification_token_invalid"  # noqa: S105 (code, not a secret)
-    )
+    AUTH_VERIFICATION_TOKEN_INVALID = "auth.verification_token_invalid"  # noqa: S105 (code, not a secret)
     RBAC_NO_MEMBERSHIP = "rbac.no_membership"
     RBAC_ROLE_INSUFFICIENT = "rbac.role_insufficient"
+    ADMIN_REQUIRED = "admin.required"
+    ADMIN_SELF_GUARD = "admin.self_guard"
+    USER_NOT_FOUND = "user.not_found"
     ORG_NOT_FOUND = "org.not_found"
     CONFLICT_STALE_VERSION = "concurrency.stale_version"
     TASK_NOT_FOUND = "task.not_found"
@@ -104,6 +105,12 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
         MessageCode.RBAC_ROLE_INSUFFICIENT: (
             "Role {current} is insufficient, requires >= {minimum}"
         ),
+        MessageCode.ADMIN_REQUIRED: "Administrator privileges required",
+        MessageCode.ADMIN_SELF_GUARD: (
+            "You cannot remove your own admin role or deactivate "
+            "yourself; ask another administrator"
+        ),
+        MessageCode.USER_NOT_FOUND: "User not found",
         MessageCode.ORG_NOT_FOUND: "Workspace not found",
         MessageCode.CONFLICT_STALE_VERSION: "Stale version write",
         MessageCode.TASK_NOT_FOUND: "Task not found",
@@ -114,8 +121,7 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
         MessageCode.WORKFLOW_NOT_FOUND: "Workflow not found",
         MessageCode.WORKFLOW_INVALID: ("Invalid workflow: exactly one initial state is required"),
         MessageCode.WORKFLOW_IN_USE: (
-            "Workflow in use or default: reassign its tasks / pick another "
-            "default first"
+            "Workflow in use or default: reassign its tasks / pick another default first"
         ),
         MessageCode.TRANSITION_NOT_ALLOWED: ("Transition not allowed by the workflow"),
         MessageCode.DEPENDENCY_CYCLE: ("This dependency would create a cycle"),
@@ -149,8 +155,7 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
             "The issuer profile is missing or incomplete: {detail}"
         ),
         MessageCode.ISSUER_PROFILE_IN_USE: (
-            "This issuer profile is used by one or more invoices and "
-            "cannot be deleted"
+            "This issuer profile is used by one or more invoices and cannot be deleted"
         ),
         MessageCode.ISSUER_PROFILE_SOLE_DEFAULT: (
             "Set another profile as default before deleting this one"

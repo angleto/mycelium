@@ -59,6 +59,32 @@ class TokenOut(BaseModel):
     token: str
 
 
+class MeOut(BaseModel):
+    """Canonical identity for the SPA (hydrated on load). is_admin is
+    server-checked here; the JWT claim is only a render hint."""
+
+    user_id: uuid.UUID
+    email: str
+    display_name: str | None = None
+    is_admin: bool
+
+
+class AdminUserOut(BaseModel):
+    id: uuid.UUID
+    email: str
+    display_name: str | None = None
+    is_admin: bool
+    is_active: bool
+    email_verified: bool
+    mfa_enabled: bool
+    created_at: datetime.datetime
+
+
+class AdminUserPatchIn(BaseModel):
+    is_admin: bool | None = None
+    is_active: bool | None = None
+
+
 class VerifyEmailIn(BaseModel):
     token: str = Field(min_length=16, max_length=256)
 
@@ -118,9 +144,7 @@ DEFAULT_ESTIMATE_PRESETS: list[Decimal] = [
 class WorkspaceSettings(BaseModel):
     # Task-estimate dropdown values, in hours. Configurable per
     # workspace; the task form adds a "custom value" beyond these.
-    estimate_presets: list[Decimal] = Field(
-        default_factory=lambda: list(DEFAULT_ESTIMATE_PRESETS)
-    )
+    estimate_presets: list[Decimal] = Field(default_factory=lambda: list(DEFAULT_ESTIMATE_PRESETS))
     default_client_tag_id: uuid.UUID | None = None
 
 

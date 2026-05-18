@@ -12,11 +12,12 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Response, status
 
-from flow_api.deps import current_claims
+from flow_api.deps import current_claims, current_user
 from flow_api.schemas import (
     EmailIn,
     LoginIn,
     LoginMfaIn,
+    MeOut,
     ResetPasswordIn,
     SignupIn,
     SignupOut,
@@ -24,6 +25,7 @@ from flow_api.schemas import (
     VerifyEmailIn,
 )
 from flow_core.db import admin_session
+from flow_core.models.user import User
 from flow_core.services.auth import (
     login,
     login_mfa,
@@ -79,6 +81,20 @@ async def login_mfa_endpoint(body: LoginMfaIn) -> TokenOut:
     return TokenOut(token=token)
 
 
+@router.get("/me", response_model=MeOut)
+async def me_endpoint(
+    user: Annotated[User, Depends(current_user)],
+) -> MeOut:
+    """Canonical identity for the SPA. Server-checks is_admin (the JWT
+    claim is only a render hint and may lag a role change)."""
+    return MeOut(
+        user_id=user.id,
+        email=user.email,
+        display_name=user.display_name,
+        is_admin=user.is_admin,
+    )
+
+
 @router.post("/verify-email", response_model=TokenOut)
 async def verify_email_endpoint(body: VerifyEmailIn) -> TokenOut:
     async with admin_session() as session:
@@ -103,9 +119,7 @@ async def forgot_password_endpoint(body: EmailIn) -> Response:
 @router.post("/reset-password", status_code=status.HTTP_204_NO_CONTENT)
 async def reset_password_endpoint(body: ResetPasswordIn) -> Response:
     async with admin_session() as session:
-        await reset_password(
-            session, raw_token=body.token, new_password=body.new_password
-        )
+        await reset_password(session, raw_token=body.token, new_password=body.new_password)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 

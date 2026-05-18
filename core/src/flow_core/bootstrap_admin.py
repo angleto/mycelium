@@ -39,30 +39,32 @@ def _check_password(pw: str) -> None:
     if len(set(pw)) < 5:
         problems.append("more variety")
     if problems:
-        raise SystemExit(
-            "FLOW_ADMIN_PASSWORD is too weak; needs: " + ", ".join(problems)
-        )
+        raise SystemExit("FLOW_ADMIN_PASSWORD is too weak; needs: " + ", ".join(problems))
 
 
 async def ensure_admin(email: str, password: str) -> str:
     email = email.strip().lower()
     async with admin_session() as s:
-        existing = (
-            await s.execute(select(User.id).where(User.email == email))
-        ).scalar_one_or_none()
+        existing = (await s.execute(select(User).where(User.email == email))).scalar_one_or_none()
         if existing is not None:
+            # Idempotent: never reset the password here (rotate via the
+            # reset flow), but make sure the account actually carries the
+            # admin flag (the whole point of this bootstrap).
+            if not existing.is_admin:
+                existing.is_admin = True
+                return f"admin {email} already existed; promoted to admin"
             return f"admin {email} already exists; left untouched"
-        await signup(s, email=email, password=password, org_name="Personal")
-    return f"admin {email} created (owner of a personal workspace)"
+        result = await signup(s, email=email, password=password, org_name="Personal")
+        created = (await s.execute(select(User).where(User.id == result.user_id))).scalar_one()
+        created.is_admin = True
+    return f"admin {email} created (admin, owner of a personal workspace)"
 
 
 def main() -> None:
     email = os.environ.get("FLOW_ADMIN_EMAIL", "").strip()
     password = os.environ.get("FLOW_ADMIN_PASSWORD", "")
     if not email or not password:
-        raise SystemExit(
-            "FLOW_ADMIN_EMAIL and FLOW_ADMIN_PASSWORD must both be set"
-        )
+        raise SystemExit("FLOW_ADMIN_EMAIL and FLOW_ADMIN_PASSWORD must both be set")
     _check_password(password)
     msg = asyncio.run(ensure_admin(email, password))
     sys.stdout.write(msg + "\n")

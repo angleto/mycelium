@@ -68,6 +68,16 @@ def _hash_token(raw: str) -> str:
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
+def _token_for(user: User) -> str:
+    """Access token carrying identity claims (email, is_admin) so the
+    SPA can render the admin affordances without an extra round-trip;
+    /auth/me remains the canonical, server-checked source."""
+    return create_access_token(
+        user_id=str(user.id),
+        extra={"email": user.email, "is_admin": user.is_admin},
+    )
+
+
 async def _provision_org(session: AsyncSession, *, name: str, user_id: uuid.UUID) -> uuid.UUID:
     result = await session.execute(
         text("SELECT provision_organization(:n, :u)"),
@@ -81,9 +91,7 @@ async def _issue_verification(session: AsyncSession, *, user: User) -> None:
     raw = secrets.token_urlsafe(32)
     expires = dt.datetime.now(dt.UTC) + dt.timedelta(seconds=s.email_verification_ttl_seconds)
     session.add(
-        EmailVerificationToken(
-            user_id=user.id, token_hash=_hash_token(raw), expires_at=expires
-        )
+        EmailVerificationToken(user_id=user.id, token_hash=_hash_token(raw), expires_at=expires)
     )
     await session.flush()
     url = f"{s.frontend_base_url.rstrip('/')}/verify-email?token={raw}"
@@ -108,7 +116,7 @@ async def signup(
     if require_verify:
         await _issue_verification(session, user=user)
     else:
-        token = create_access_token(user_id=str(user.id))
+        token = _token_for(user)
     return SignupResult(
         user_id=user.id,
         org_id=org_id,
@@ -117,25 +125,18 @@ async def signup(
     )
 
 
-async def create_org_for_user(
-    session: AsyncSession, *, user_id: uuid.UUID, name: str
-) -> uuid.UUID:
+async def create_org_for_user(session: AsyncSession, *, user_id: uuid.UUID, name: str) -> uuid.UUID:
     """Create an additional org for an existing authenticated user (they
     become its owner). Powers in-app workspace creation, no re-auth."""
     return await _provision_org(session, name=name, user_id=user_id)
 
 
-async def list_user_orgs(
-    session: AsyncSession, *, user_id: uuid.UUID
-) -> list[OrgMembership]:
+async def list_user_orgs(session: AsyncSession, *, user_id: uuid.UUID) -> list[OrgMembership]:
     """Orgs the user belongs to (pre-tenant; for the in-app switcher).
     Crosses the RLS boundary only via the SECURITY DEFINER
     ``list_user_organizations`` function (migration 0014)."""
     rows = await session.execute(
-        text(
-            "SELECT org_id, name, role, status "
-            "FROM list_user_organizations(:u) ORDER BY name"
-        ),
+        text("SELECT org_id, name, role, status FROM list_user_organizations(:u) ORDER BY name"),
         {"u": str(user_id)},
     )
     return [
@@ -193,9 +194,7 @@ async def set_workspace_status(
 
 
 async def get_user(session: AsyncSession, *, user_id: uuid.UUID) -> User:
-    user = (
-        await session.execute(select(User).where(User.id == user_id))
-    ).scalar_one_or_none()
+    user = (await session.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
     if user is None:
         raise AuthError(MessageCode.AUTH_TOKEN_NO_SUB)
     return user
@@ -218,9 +217,7 @@ async def _record_login_failure(user_id: uuid.UUID) -> None:
     raised AuthError). Locks the account past the threshold."""
     s = get_settings()
     async with admin_session() as session:
-        user = (
-            await session.execute(select(User).where(User.id == user_id))
-        ).scalar_one_or_none()
+        user = (await session.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
         if user is None:
             return
         user.failed_login_count += 1
@@ -256,12 +253,10 @@ async def login(session: AsyncSession, *, email: str, password: str) -> str:
     if user.mfa_enabled_at is not None:
         # 401 mfa_required: the SPA pivots to /auth/login-mfa.
         raise AuthError(MessageCode.AUTH_MFA_REQUIRED)
-    return create_access_token(user_id=str(user.id))
+    return _token_for(user)
 
 
-async def login_mfa(
-    session: AsyncSession, *, email: str, password: str, totp_code: str
-) -> str:
+async def login_mfa(session: AsyncSession, *, email: str, password: str, totp_code: str) -> str:
     """Combined password + TOTP/backup-code login (used once MFA is
     active). Consuming a backup code is persisted."""
     from flow_core.services.mfa import verify_mfa_code
@@ -272,7 +267,7 @@ async def login_mfa(
     if not verify_mfa_code(user, totp_code):
         raise AuthError(MessageCode.AUTH_INVALID_TOTP)
     await session.flush()  # persist backup-code consumption, if any
-    return create_access_token(user_id=str(user.id))
+    return _token_for(user)
 
 
 # ---- email verification -------------------------------------------------
@@ -292,16 +287,14 @@ async def verify_email(session: AsyncSession, *, raw_token: str) -> str:
     ).scalar_one_or_none()
     if row is None or row.used_at is not None or row.expires_at < now:
         raise AuthError(MessageCode.AUTH_VERIFICATION_TOKEN_INVALID)
-    user = (
-        await session.execute(select(User).where(User.id == row.user_id))
-    ).scalar_one_or_none()
+    user = (await session.execute(select(User).where(User.id == row.user_id))).scalar_one_or_none()
     if user is None:
         raise AuthError(MessageCode.AUTH_VERIFICATION_TOKEN_INVALID)
     row.used_at = now
     if user.email_verified_at is None:
         user.email_verified_at = now
     await session.flush()
-    return create_access_token(user_id=str(user.id))
+    return _token_for(user)
 
 
 async def resend_verification(session: AsyncSession, *, email: str) -> None:
@@ -350,9 +343,7 @@ async def request_password_reset(
     )
 
 
-async def reset_password(
-    session: AsyncSession, *, raw_token: str, new_password: str
-) -> None:
+async def reset_password(session: AsyncSession, *, raw_token: str, new_password: str) -> None:
     """Consume a reset token, set the new password, and invalidate every
     other outstanding reset token for that user (defence in depth)."""
     now = dt.datetime.now(dt.UTC)
@@ -365,9 +356,7 @@ async def reset_password(
     ).scalar_one_or_none()
     if row is None or row.used_at is not None or row.expires_at <= now:
         raise AuthError(MessageCode.AUTH_RESET_TOKEN_INVALID)
-    user = (
-        await session.execute(select(User).where(User.id == row.user_id))
-    ).scalar_one_or_none()
+    user = (await session.execute(select(User).where(User.id == row.user_id))).scalar_one_or_none()
     if user is None:
         raise AuthError(MessageCode.AUTH_RESET_TOKEN_INVALID)
     user.password_hash = hash_password(new_password)
