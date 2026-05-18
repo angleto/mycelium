@@ -29,19 +29,12 @@ from flow_core.services.rbac import require_role
 
 
 def derive_priority(importance: int, urgency: int) -> int:
-    """Eisenhower: priority is derived from importance x urgency (each
-    1..5). The product (1..25, higher = do first) is bucketed into the
-    backend's 1..4 scale where 1 = highest (ADR-0004: scheduler orders
-    by priority ascending). importance/urgency are persisted so the
-    matrix round-trips; this collapses them for the scheduler."""
-    s = importance * urgency
-    if s >= 16:
-        return 1
-    if s >= 9:
-        return 2
-    if s >= 4:
-        return 3
-    return 4
+    """Eisenhower: priority = 26 - importance*urgency (each 1..5), so
+    priority runs 1 (most prioritary, 5x5) .. 25 (least, 1x1). 1 is
+    highest and the default task / scheduler ordering is ascending
+    (ADR-0004), so the smallest number is always done first.
+    importance/urgency are persisted so the matrix round-trips."""
+    return max(1, min(25, 26 - importance * urgency))
 
 
 _UPDATABLE = frozenset(
@@ -186,7 +179,9 @@ async def list_tasks(
         stmt = stmt.join(TaskAssignee, TaskAssignee.task_id == Task.id).where(
             TaskAssignee.user_id == assignee_id
         )
-    stmt = stmt.order_by(Task.created_at.desc())
+    # Default order: most prioritary first (priority asc, 1 = top),
+    # newest as tiebreak. The number is always "smaller = sooner".
+    stmt = stmt.order_by(Task.priority.asc(), Task.created_at.desc())
     return list((await session.execute(stmt)).scalars().unique().all())
 
 

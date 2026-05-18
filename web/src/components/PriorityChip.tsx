@@ -1,12 +1,10 @@
-// Derived priority 1..4 (1 = highest, ADR-0024). Color scale: 1 = red
-// (hot/immediate), ascending toward cool/light (per the user's rule).
-// Distinct hues (not a single warm ramp) so P1..P4 are clearly
-// separable: red, orange, teal, blue. 1 = hottest/immediate.
-const COLORS: Record<number, string> = {
-  1: '#d11149',
-  2: '#e8590c',
-  3: '#0d9488',
-  4: '#3b6fb6',
+// Priority 1..25 (1 = most prioritary, 25 = least; the default task
+// ordering is ascending so 1 is always on top). Continuous hue ramp:
+// 1 = red (hot / immediate) shifting toward cool blue as it grows.
+function color(priority: number): string {
+  const p = Math.max(1, Math.min(25, priority))
+  const hue = Math.round(((p - 1) / 24) * 220) // 0 red -> 220 blue
+  return `hsl(${hue} 70% 45%)`
 }
 
 export function PriorityChip({
@@ -16,15 +14,22 @@ export function PriorityChip({
   priority: number
   score?: number | null
 }) {
-  const c = COLORS[priority] ?? COLORS[4]
+  const c = color(priority)
   return (
     <span
       className="chip prio"
-      style={{ background: `${c}22`, borderColor: `${c}66`, color: c }}
-      title={score != null ? `importance x urgency = ${score}` : `priority ${priority}`}
+      style={{
+        background: `color-mix(in srgb, ${c} 14%, transparent)`,
+        borderColor: `color-mix(in srgb, ${c} 45%, transparent)`,
+        color: c,
+      }}
+      title={
+        score != null
+          ? `importance x urgency = ${score}`
+          : `priority ${priority}`
+      }
     >
       <span className="chip__dot" style={{ background: c }} />P{priority}
-      {score != null ? ` · ${score}` : ''}
     </span>
   )
 }

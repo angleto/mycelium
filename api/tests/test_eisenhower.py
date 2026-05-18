@@ -37,7 +37,7 @@ async def test_priority_derived_from_importance_urgency() -> None:
         assert t1["importance"] == 5
         assert t1["urgency"] == 5
 
-        # 1 x 1 = 1 -> priority 4 (lowest)
+        # 1 x 1 = 1 -> priority 25 (lowest); 26 - 1
         t2 = (
             await c.post(
                 "/tasks",
@@ -45,9 +45,9 @@ async def test_priority_derived_from_importance_urgency() -> None:
                 json={"title": "meh", "importance": 1, "urgency": 1},
             )
         ).json()
-        assert t2["priority"] == 4
+        assert t2["priority"] == 25
 
-        # patch importance/urgency -> priority re-derived (3 x 3 = 9 -> 2)
+        # patch importance/urgency -> priority re-derived (3 x 3 = 9 -> 17)
         r = await c.patch(
             f"/tasks/{t1['id']}",
             headers=h,
@@ -57,7 +57,7 @@ async def test_priority_derived_from_importance_urgency() -> None:
         got = (await c.get(f"/tasks/{t1['id']}", headers=h)).json()
         assert got["importance"] == 3
         assert got["urgency"] == 3
-        assert got["priority"] == 2
+        assert got["priority"] == 17
 
         # legacy path: explicit priority, no importance/urgency
         t3 = (

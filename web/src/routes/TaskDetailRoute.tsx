@@ -7,12 +7,10 @@ import { PriorityChip } from '../components/PriorityChip'
 import { ScaleSelect } from '../components/ScaleSelect'
 import { formatHours } from '../lib/estimate'
 
+// Mirrors backend derive_priority: 26 - importance*urgency, so
+// priority is 1 (most prioritary, 5x5) .. 25 (least, 1x1).
 function derivePriority(imp: number, urg: number): number {
-  const s = imp * urg
-  if (s >= 16) return 1
-  if (s >= 9) return 2
-  if (s >= 4) return 3
-  return 4
+  return Math.max(1, Math.min(25, 26 - imp * urg))
 }
 import type { components } from '../api/schema'
 
