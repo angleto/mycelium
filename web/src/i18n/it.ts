@@ -463,6 +463,7 @@ export const it: Catalog = {
     amount: 'Importo',
     reason: 'Motivo (opzionale)',
     grantBtn: 'Aggiungi crediti',
+    grantAdminOnly: 'Solo un admin/owner del workspace puo aggiungere crediti.',
     ledger: 'Registro',
     rateCards: 'Tariffari',
     usage: 'Consumo',

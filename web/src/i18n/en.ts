@@ -464,6 +464,7 @@ export const en = {
     amount: 'Amount',
     reason: 'Reason (optional)',
     grantBtn: 'Add credits',
+    grantAdminOnly: 'Only a workspace admin/owner can add credits.',
     ledger: 'Ledger',
     rateCards: 'Rate cards',
     usage: 'Usage',

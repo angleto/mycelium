@@ -18,7 +18,9 @@ export function BillingRoute() {
   const [usage, setUsage] = useState<Usage[]>([])
   const [amount, setAmount] = useState(0)
   const [reason, setReason] = useState('')
+  const [role, setRole] = useState<string>('')
   const [err, setErr] = useState<string | null>(null)
+  const isAdmin = role === 'owner' || role === 'admin'
 
   const reload = useCallback(async () => {
     const h = workspaceHeader()
@@ -32,7 +34,10 @@ export function BillingRoute() {
     if (l.data) setLedger(l.data)
     if (r.data) setRates(r.data)
     if (u.data) setUsage(u.data)
-  }, [])
+    const ws = await api.GET('/workspaces')
+    const me = ws.data?.find((w) => w.id === activeId)
+    if (me) setRole(me.role)
+  }, [activeId])
 
   useEffect(() => {
     let active = true
@@ -49,6 +54,11 @@ export function BillingRoute() {
       if (l.data) setLedger(l.data)
       if (r.data) setRates(r.data)
       if (u.data) setUsage(u.data)
+      const ws = await api.GET('/workspaces')
+      if (active) {
+        const me = ws.data?.find((w) => w.id === activeId)
+        if (me) setRole(me.role)
+      }
     })()
     return () => {
       active = false
@@ -79,6 +89,8 @@ export function BillingRoute() {
         <strong>{t('billing.balance')}:</strong> {balance || '0'}
       </p>
 
+      {!isAdmin && <p className="hint">{t('billing.grantAdminOnly')}</p>}
+      {isAdmin && (
       <form onSubmit={(e) => void onGrant(e)} className="row">
         <input
           type="number"
@@ -94,6 +106,7 @@ export function BillingRoute() {
         />
         <button type="submit">{t('billing.grantBtn')}</button>
       </form>
+      )}
 
       <h2>{t('billing.ledger')}</h2>
       {ledger.length === 0 ? (
