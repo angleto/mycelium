@@ -94,6 +94,21 @@ export const it: Catalog = {
     newName: 'Nome workspace',
     creating: 'Creazione...',
   },
+  wsmgr: {
+    title: 'Workspace',
+    showArchived: 'Mostra archiviati',
+    loading: 'Caricamento...',
+    none: 'Nessun workspace.',
+    archived: 'archiviato',
+    current: 'corrente',
+    archive: 'Archivia',
+    unarchive: 'Ripristina',
+    delete: 'Elimina',
+    ownerOnly: 'Solo il proprietario puo eliminare un workspace',
+    soleHint: 'Non puoi eliminare il tuo unico workspace',
+    confirmDelete:
+      'Eliminare "{{name}}" e tutti i suoi dati? Operazione irreversibile.',
+  },
   home: {
     title: 'Il mio workspace',
     id: 'ID workspace',

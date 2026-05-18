@@ -95,6 +95,21 @@ export const en = {
     newName: 'Workspace name',
     creating: 'Creating...',
   },
+  wsmgr: {
+    title: 'Workspaces',
+    showArchived: 'Show archived',
+    loading: 'Loading...',
+    none: 'No workspaces.',
+    archived: 'archived',
+    current: 'current',
+    archive: 'Archive',
+    unarchive: 'Unarchive',
+    delete: 'Delete',
+    ownerOnly: 'Only the owner can delete a workspace',
+    soleHint: 'Cannot delete your only workspace',
+    confirmDelete:
+      'Delete "{{name}}" and all its data? This cannot be undone.',
+  },
   home: {
     title: 'My workspace',
     id: 'Workspace ID',

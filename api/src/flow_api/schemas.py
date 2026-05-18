@@ -129,6 +129,7 @@ class WorkspaceSummaryOut(BaseModel):
     id: uuid.UUID
     name: str
     role: str
+    status: str
 
 
 class VersionOut(BaseModel):

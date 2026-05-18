@@ -19,4 +19,7 @@ class Organization(UUIDPKMixin, TimestampMixin, VersionMixin, Base):
     __tablename__ = "organizations"
 
     name: Mapped[str] = mapped_column(String(200), nullable=False)
+    # 'active' | 'archived'. Archived workspaces are hidden from the
+    # switcher by default but stay fully usable (mirrors tag archive).
+    status: Mapped[str] = mapped_column(String(16), nullable=False, server_default="active")
     fiscal_profile: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)

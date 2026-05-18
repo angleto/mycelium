@@ -36,7 +36,7 @@ export function WorkspaceSwitcher() {
     return () => {
       active = false
     }
-  }, [])
+  }, [session?.workspaceId])
 
   async function onCreate(e: FormEvent) {
     e.preventDefault()
@@ -62,11 +62,17 @@ export function WorkspaceSwitcher() {
           value={session?.workspaceId ?? ''}
           onChange={(e) => setActiveWorkspace(e.target.value)}
         >
-          {list.map((w) => (
-            <option key={w.id} value={w.id}>
-              {w.name}
-            </option>
-          ))}
+          {list
+            .filter(
+              (w) =>
+                w.status !== 'archived' || w.id === session?.workspaceId,
+            )
+            .map((w) => (
+              <option key={w.id} value={w.id}>
+                {w.name}
+                {w.status === 'archived' ? ` (${t('wsmgr.archived')})` : ''}
+              </option>
+            ))}
         </select>
       </label>
       {creating ? (

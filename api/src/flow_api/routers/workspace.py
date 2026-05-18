@@ -12,7 +12,7 @@ from __future__ import annotations
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Response, status
 from sqlalchemy import select
 
 from flow_api.deps import TenantCtx, current_user_id, tenant_ctx
@@ -29,7 +29,12 @@ from flow_core.errors import NotFoundError
 from flow_core.i18n import MessageCode
 from flow_core.models.membership import Role
 from flow_core.models.organization import Organization
-from flow_core.services.auth import create_org_for_user, list_user_orgs
+from flow_core.services.auth import (
+    create_org_for_user,
+    delete_org_for_user,
+    list_user_orgs,
+    set_workspace_status,
+)
 from flow_core.services.rbac import ensure_role
 
 router = APIRouter(prefix="/workspaces", tags=["workspaces"])
@@ -42,7 +47,10 @@ async def list_my_workspaces(
     """Workspaces the authenticated user belongs to (for the switcher)."""
     async with admin_session() as session:
         rows = await list_user_orgs(session, user_id=user_id)
-    return [WorkspaceSummaryOut(id=r.id, name=r.name, role=r.role) for r in rows]
+    return [
+        WorkspaceSummaryOut(id=r.id, name=r.name, role=r.role, status=r.status)
+        for r in rows
+    ]
 
 
 @router.post("", response_model=WorkspaceOut)
@@ -82,3 +90,55 @@ async def patch_my_workspace(
         values={"name": body.name},
     )
     return WorkspaceVersionOut(id=ctx.org_id, version=new_version)
+
+
+@router.delete(
+    "/{workspace_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_class=Response,
+)
+async def delete_my_workspace(
+    workspace_id: uuid.UUID,
+    user_id: Annotated[uuid.UUID, Depends(current_user_id)],
+) -> Response:
+    """Hard-delete a workspace and all its tenant data (owner only;
+    cannot delete the caller's only workspace). Pre-tenant: no org
+    context, the switcher calls it directly."""
+    async with admin_session() as session:
+        await delete_org_for_user(session, user_id=user_id, org_id=workspace_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post(
+    "/{workspace_id}/archive",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_class=Response,
+)
+async def archive_my_workspace(
+    workspace_id: uuid.UUID,
+    user_id: Annotated[uuid.UUID, Depends(current_user_id)],
+) -> Response:
+    """Hide a workspace from the switcher by default (owner/admin).
+    Reversible via unarchive; the workspace stays fully usable."""
+    async with admin_session() as session:
+        await set_workspace_status(
+            session, user_id=user_id, org_id=workspace_id, status="archived"
+        )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post(
+    "/{workspace_id}/unarchive",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_class=Response,
+)
+async def unarchive_my_workspace(
+    workspace_id: uuid.UUID,
+    user_id: Annotated[uuid.UUID, Depends(current_user_id)],
+) -> Response:
+    """Restore an archived workspace to the default switcher view."""
+    async with admin_session() as session:
+        await set_workspace_status(
+            session, user_id=user_id, org_id=workspace_id, status="active"
+        )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

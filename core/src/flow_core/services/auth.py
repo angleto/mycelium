@@ -27,7 +27,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from flow_core.config import get_settings
 from flow_core.db import admin_session
-from flow_core.errors import AuthError, DomainError, ForbiddenError, LockedError
+from flow_core.errors import (
+    AuthError,
+    DomainError,
+    ForbiddenError,
+    LockedError,
+    NotFoundError,
+)
 from flow_core.i18n import MessageCode
 from flow_core.models.auth_tokens import (
     EmailVerificationToken,
@@ -54,6 +60,7 @@ class OrgMembership:
     id: uuid.UUID
     name: str
     role: str
+    status: str
 
 
 def _hash_token(raw: str) -> str:
@@ -125,13 +132,64 @@ async def list_user_orgs(
     Crosses the RLS boundary only via the SECURITY DEFINER
     ``list_user_organizations`` function (migration 0014)."""
     rows = await session.execute(
-        text("SELECT org_id, name, role FROM list_user_organizations(:u) ORDER BY name"),
+        text(
+            "SELECT org_id, name, role, status "
+            "FROM list_user_organizations(:u) ORDER BY name"
+        ),
         {"u": str(user_id)},
     )
     return [
-        OrgMembership(id=uuid.UUID(str(r.org_id)), name=str(r.name), role=str(r.role))
+        OrgMembership(
+            id=uuid.UUID(str(r.org_id)),
+            name=str(r.name),
+            role=str(r.role),
+            status=str(r.status),
+        )
         for r in rows
     ]
+
+
+async def delete_org_for_user(
+    session: AsyncSession, *, user_id: uuid.UUID, org_id: uuid.UUID
+) -> None:
+    """Hard-delete a workspace (owner only; refuses the user's sole
+    workspace). The org-scoped data goes with it via ON DELETE CASCADE.
+    Crosses the RLS boundary only through the SECURITY DEFINER
+    ``delete_organization`` function (migration 0019), which re-checks
+    both preconditions atomically (defense in depth)."""
+    orgs = await list_user_orgs(session, user_id=user_id)
+    target = next((o for o in orgs if o.id == org_id), None)
+    if target is None:
+        raise NotFoundError(MessageCode.ORG_NOT_FOUND)
+    if target.role != "owner":
+        raise ForbiddenError(MessageCode.WORKSPACE_NOT_OWNER)
+    if len(orgs) <= 1:
+        raise DomainError(MessageCode.WORKSPACE_SOLE)
+    await session.execute(
+        text("SELECT delete_organization(:o, :u)"),
+        {"o": str(org_id), "u": str(user_id)},
+    )
+
+
+async def set_workspace_status(
+    session: AsyncSession, *, user_id: uuid.UUID, org_id: uuid.UUID, status: str
+) -> None:
+    """Archive / unarchive a workspace (owner or admin). Archived
+    workspaces are hidden from the switcher by default but stay usable.
+    Routed through the SECURITY DEFINER ``set_organization_status``
+    function (migration 0019)."""
+    if status not in ("active", "archived"):
+        raise DomainError(MessageCode.DOMAIN_ERROR)
+    orgs = await list_user_orgs(session, user_id=user_id)
+    target = next((o for o in orgs if o.id == org_id), None)
+    if target is None:
+        raise NotFoundError(MessageCode.ORG_NOT_FOUND)
+    if target.role not in ("owner", "admin"):
+        raise ForbiddenError(MessageCode.RBAC_ROLE_INSUFFICIENT)
+    await session.execute(
+        text("SELECT set_organization_status(:o, :u, :s)"),
+        {"o": str(org_id), "u": str(user_id), "s": status},
+    )
 
 
 async def get_user(session: AsyncSession, *, user_id: uuid.UUID) -> User:

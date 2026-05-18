@@ -13,7 +13,7 @@ from __future__ import annotations
 import datetime
 import uuid
 
-from sqlalchemy import BigInteger, DateTime, MetaData, func
+from sqlalchemy import BigInteger, DateTime, ForeignKey, MetaData, func
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -49,9 +49,16 @@ class TimestampMixin:
 
 
 class OrgScopedMixin:
-    """Every row belongs to an org. RLS filters on this column."""
+    """Every row belongs to an org. RLS filters on this column; the FK
+    (ON DELETE CASCADE) gives DB-enforced referential integrity so
+    deleting a workspace removes all of its tenant data atomically."""
 
-    org_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False, index=True)
+    org_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("organizations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
 
 
 class VersionMixin:

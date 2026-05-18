@@ -71,6 +71,8 @@ class MessageCode(enum.StrEnum):
     FISCAL_PROFILE_REQUIRED = "invoice.fiscal_profile_required"
     NOTIFICATION_NOT_FOUND = "notification.not_found"
     RECURRENCE_WITH_DEPS = "recurrence.with_dependencies"
+    WORKSPACE_NOT_OWNER = "workspace.not_owner"
+    WORKSPACE_SOLE = "workspace.sole"
     DOMAIN_ERROR = "domain.error"
 
 
@@ -142,6 +144,10 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
         MessageCode.NOTIFICATION_NOT_FOUND: "Notification not found",
         MessageCode.RECURRENCE_WITH_DEPS: (
             "A recurring task cannot have dependencies (mutually exclusive in v1)"
+        ),
+        MessageCode.WORKSPACE_NOT_OWNER: "Only the workspace owner can do this",
+        MessageCode.WORKSPACE_SOLE: (
+            "Cannot delete your only workspace: create or join another first"
         ),
         MessageCode.DOMAIN_ERROR: "Domain error",
     },

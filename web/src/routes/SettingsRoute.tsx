@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { api, errMessage } from '../api/client'
+import { WorkspaceManager } from '../components/WorkspaceManager'
 import type { components } from '../api/schema'
 
 type Status = components['schemas']['MfaStatusOut']
@@ -77,6 +78,7 @@ export function SettingsRoute() {
   }
 
   return (
+    <>
     <section className="card">
       <h1>{t('mfa.title')}</h1>
       {status === null ? (
@@ -145,5 +147,7 @@ export function SettingsRoute() {
         </form>
       )}
     </section>
+    <WorkspaceManager />
+    </>
   )
 }
