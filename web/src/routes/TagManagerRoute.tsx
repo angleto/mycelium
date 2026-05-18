@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
+import { Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { api, errMessage, workspaceHeader } from '../api/client'
 import { useSession } from '../auth/useSession'
@@ -180,7 +181,10 @@ export function TagManagerRoute() {
                         : ''}
                       {' · '}
                       {t('cp.managedHere')}
-                    </span>
+                    </span>{' '}
+                    <Link to="/clients" className="btn--ghost btn--sm">
+                      {t('cp.nav')}
+                    </Link>
                   </li>
                 ),
               )}
