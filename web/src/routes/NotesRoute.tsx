@@ -5,7 +5,7 @@ import {
   useState,
   type FormEvent,
 } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { mentionLink } from '../lib/mentions'
 import { api, errMessage, workspaceHeader } from '../api/client'
@@ -34,6 +34,7 @@ export function NotesRoute() {
   const activeId = session?.workspaceId
 
   const { projectId: focusProject } = useFocus()
+  const [searchParams, setSearchParams] = useSearchParams()
   const [notes, setNotes] = useState<Note[]>([])
   const [tags, setTags] = useState<Tag[]>([])
   const [fTag, setFTag] = useState('')
@@ -116,6 +117,28 @@ export function NotesRoute() {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [sel, creating])
+
+  // Deep links (mention resolution): /notes?open=<id> opens the note
+  // modal (view + edit, reusing it — no duplicate viewer); ?tag=<id>
+  // pre-filters. Params are consumed then cleared.
+  useEffect(() => {
+    const openId = searchParams.get('open')
+    const tagId = searchParams.get('tag')
+    if (!openId && !tagId) return
+    void (async () => {
+      if (tagId) setFTag(tagId)
+      if (openId) {
+        const { data } = await api.GET('/notes/{note_id}', {
+          params: { header: workspaceHeader(), path: { note_id: openId } },
+        })
+        if (data) await openEdit(data)
+      }
+      setSearchParams({}, { replace: true })
+    })()
+    // openEdit/setters are stable enough; params are cleared so this
+    // runs once per incoming deep link.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams])
 
   async function openEdit(n: Note) {
     setErr(null)
