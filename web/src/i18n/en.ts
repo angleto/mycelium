@@ -107,6 +107,7 @@ export const en = {
     delete: 'Delete',
     ownerOnly: 'Only the owner can delete a workspace',
     soleHint: 'Cannot delete your only workspace',
+    cancel: 'Cancel',
     confirmDelete:
       'Delete "{{name}}" and all its data? This cannot be undone.',
   },

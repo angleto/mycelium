@@ -1,31 +1,19 @@
-import { useCallback, useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { api, errMessage } from '../api/client'
+import { api } from '../api/client'
 import { setActiveWorkspace } from '../auth/session'
 import { useSession } from '../auth/useSession'
 import type { components } from '../api/schema'
 
 type Workspace = components['schemas']['WorkspaceSummaryOut']
 
-// In-app switcher (ADR-0024): switching is just changing the active
-// workspace id; no re-auth. Creating a workspace is in-app too.
+// Sidebar: just the quick switch (ADR-0024 — switching is only an
+// active-id change, no re-auth). Creating / archiving / deleting a
+// workspace lives in Settings → workspace block, not in the menu.
 export function WorkspaceSwitcher() {
   const { t } = useTranslation()
   const session = useSession()
   const [list, setList] = useState<Workspace[]>([])
-  const [creating, setCreating] = useState(false)
-  const [name, setName] = useState('')
-  const [busy, setBusy] = useState(false)
-  const [err, setErr] = useState<string | null>(null)
-
-  const load = useCallback(async () => {
-    const { data, error } = await api.GET('/workspaces')
-    if (error || !data) {
-      setErr(errMessage(error))
-      return
-    }
-    setList(data)
-  }, [])
 
   useEffect(() => {
     let active = true
@@ -38,22 +26,6 @@ export function WorkspaceSwitcher() {
     }
   }, [session?.workspaceId])
 
-  async function onCreate(e: FormEvent) {
-    e.preventDefault()
-    setBusy(true)
-    setErr(null)
-    const { data, error } = await api.POST('/workspaces', { body: { name } })
-    setBusy(false)
-    if (error || !data) {
-      setErr(errMessage(error))
-      return
-    }
-    setName('')
-    setCreating(false)
-    await load()
-    setActiveWorkspace(data.id)
-  }
-
   return (
     <div className="switcher">
       <label>
@@ -64,8 +36,7 @@ export function WorkspaceSwitcher() {
         >
           {list
             .filter(
-              (w) =>
-                w.status !== 'archived' || w.id === session?.workspaceId,
+              (w) => w.status !== 'archived' || w.id === session?.workspaceId,
             )
             .map((w) => (
               <option key={w.id} value={w.id}>
@@ -75,24 +46,6 @@ export function WorkspaceSwitcher() {
             ))}
         </select>
       </label>
-      {creating ? (
-        <form onSubmit={(e) => void onCreate(e)} className="switcher__create">
-          <input
-            required
-            placeholder={t('switcher.newName')}
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-          />
-          <button type="submit" disabled={busy}>
-            {busy ? t('switcher.creating') : t('switcher.create')}
-          </button>
-        </form>
-      ) : (
-        <button type="button" onClick={() => setCreating(true)}>
-          {t('switcher.create')}
-        </button>
-      )}
-      {err && <span className="err">{err}</span>}
     </div>
   )
 }

@@ -106,6 +106,7 @@ export const it: Catalog = {
     delete: 'Elimina',
     ownerOnly: 'Solo il proprietario puo eliminare un workspace',
     soleHint: 'Non puoi eliminare il tuo unico workspace',
+    cancel: 'Annulla',
     confirmDelete:
       'Eliminare "{{name}}" e tutti i suoi dati? Operazione irreversibile.',
   },

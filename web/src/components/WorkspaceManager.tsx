@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { api, errMessage } from '../api/client'
 import { setActiveWorkspace } from '../auth/session'
@@ -17,6 +17,9 @@ export function WorkspaceManager() {
   const [list, setList] = useState<Workspace[] | null>(null)
   const [showArchived, setShowArchived] = useState(false)
   const [err, setErr] = useState<string | null>(null)
+  const [creating, setCreating] = useState(false)
+  const [name, setName] = useState('')
+  const [busy, setBusy] = useState(false)
 
   const load = useCallback(async () => {
     const { data, error } = await api.GET('/workspaces')
@@ -37,6 +40,22 @@ export function WorkspaceManager() {
       active = false
     }
   }, [])
+
+  async function onCreate(e: FormEvent) {
+    e.preventDefault()
+    setBusy(true)
+    setErr(null)
+    const { data, error } = await api.POST('/workspaces', { body: { name } })
+    setBusy(false)
+    if (error || !data) {
+      setErr(errMessage(error))
+      return
+    }
+    setName('')
+    setCreating(false)
+    await load()
+    setActiveWorkspace(data.id)
+  }
 
   async function setStatus(id: string, archive: boolean) {
     setErr(null)
@@ -77,6 +96,33 @@ export function WorkspaceManager() {
     <section className="card">
       <h1>{t('wsmgr.title')}</h1>
       {err && <p className="err">{err}</p>}
+      {creating ? (
+        <form onSubmit={(e) => void onCreate(e)} className="row">
+          <input
+            required
+            placeholder={t('switcher.newName')}
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+          />
+          <button type="submit" disabled={busy}>
+            {busy ? t('switcher.creating') : t('switcher.create')}
+          </button>
+          <button
+            type="button"
+            className="btn--ghost"
+            onClick={() => {
+              setCreating(false)
+              setName('')
+            }}
+          >
+            {t('wsmgr.cancel')}
+          </button>
+        </form>
+      ) : (
+        <button type="button" onClick={() => setCreating(true)}>
+          {t('switcher.create')}
+        </button>
+      )}
       <label className="row">
         <input
           type="checkbox"

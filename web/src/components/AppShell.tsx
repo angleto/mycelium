@@ -4,9 +4,10 @@ import { api } from '../api/client'
 import { clearSession } from '../auth/session'
 import { WorkspaceSwitcher } from './WorkspaceSwitcher'
 import { Logo } from './Logo'
+import { Icon, type IconName } from './NavIcon'
 import i18n from '../i18n'
 
-type Item = { to: string; label: string }
+type Item = { to: string; label: string; icon: IconName }
 
 function NavGroup({ title, items }: { title: string; items: Item[] }) {
   return (
@@ -21,6 +22,7 @@ function NavGroup({ title, items }: { title: string; items: Item[] }) {
             isActive ? 'nav__link nav__link--active' : 'nav__link'
           }
         >
+          <Icon name={it.icon} />
           {it.label}
         </NavLink>
       ))}
@@ -41,49 +43,49 @@ export function AppShell() {
     {
       title: t('nav.groups.productivity'),
       items: [
-        { to: '/', label: t('home.title') },
-        { to: '/tasks', label: t('tasks.nav') },
-        { to: '/trash', label: t('trash.nav') },
-        { to: '/time', label: t('time.nav') },
-        { to: '/schedule', label: t('scheduler.nav') },
-        { to: '/calendar', label: t('events.nav') },
+        { to: '/', label: t('home.title'), icon: 'home' },
+        { to: '/tasks', label: t('tasks.nav'), icon: 'tasks' },
+        { to: '/time', label: t('time.nav'), icon: 'time' },
+        { to: '/schedule', label: t('scheduler.nav'), icon: 'schedule' },
+        { to: '/calendar', label: t('events.nav'), icon: 'calendar' },
+        { to: '/trash', label: t('trash.nav'), icon: 'trash' },
       ],
     },
     {
       title: t('nav.groups.structure'),
       items: [
-        { to: '/workflows', label: t('workflows.nav') },
-        { to: '/graph', label: t('graph.nav') },
-        { to: '/tags', label: t('tagmgr.nav') },
-        { to: '/clients', label: t('cp.nav') },
+        { to: '/workflows', label: t('workflows.nav'), icon: 'workflows' },
+        { to: '/graph', label: t('graph.nav'), icon: 'graph' },
+        { to: '/tags', label: t('tagmgr.nav'), icon: 'tags' },
+        { to: '/clients', label: t('cp.nav'), icon: 'clients' },
       ],
     },
     {
       title: t('nav.groups.planning'),
       items: [
-        { to: '/advisory', label: t('advisory.nav') },
-        { to: '/budgets', label: t('budgets.nav') },
+        { to: '/advisory', label: t('advisory.nav'), icon: 'advisory' },
+        { to: '/budgets', label: t('budgets.nav'), icon: 'budgets' },
       ],
     },
     {
       title: t('nav.groups.knowledge'),
       items: [
-        { to: '/notes', label: t('notes.nav') },
-        { to: '/memory', label: t('memory.nav') },
+        { to: '/notes', label: t('notes.nav'), icon: 'notes' },
+        { to: '/memory', label: t('memory.nav'), icon: 'memory' },
       ],
     },
     {
       title: t('nav.groups.comms'),
       items: [
-        { to: '/email', label: t('email.nav') },
-        { to: '/notifications', label: t('notif.nav') },
+        { to: '/email', label: t('email.nav'), icon: 'email' },
+        { to: '/notifications', label: t('notif.nav'), icon: 'notifications' },
       ],
     },
     {
       title: t('nav.groups.billing'),
       items: [
-        { to: '/billing', label: t('billing.nav') },
-        { to: '/invoices', label: t('invoices.nav') },
+        { to: '/billing', label: t('billing.nav'), icon: 'billing' },
+        { to: '/invoices', label: t('invoices.nav'), icon: 'invoices' },
       ],
     },
   ]
@@ -109,6 +111,7 @@ export function AppShell() {
               isActive ? 'nav__link nav__link--active' : 'nav__link'
             }
           >
+            <Icon name="settings" />
             {t('nav.settings')}
           </NavLink>
           <label className="sidebar__lang">
