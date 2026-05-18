@@ -6,7 +6,7 @@ import datetime
 import uuid
 from decimal import Decimal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from flow_core.models.billing import CostBasis, RateUnit, StorageKind
 from flow_core.models.budget import BudgetPeriod
@@ -107,15 +107,44 @@ class MfaStatusOut(BaseModel):
     backup_codes_remaining: int
 
 
+DEFAULT_ESTIMATE_PRESETS: list[Decimal] = [
+    Decimal("0.5"),
+    Decimal("1"),
+    Decimal("4"),
+    Decimal("8"),
+]
+
+
+class WorkspaceSettings(BaseModel):
+    # Task-estimate dropdown values, in hours. Configurable per
+    # workspace; the task form adds a "custom value" beyond these.
+    estimate_presets: list[Decimal] = Field(
+        default_factory=lambda: list(DEFAULT_ESTIMATE_PRESETS)
+    )
+
+
 class WorkspaceOut(BaseModel):
     id: uuid.UUID
     name: str
     version: int
+    settings: WorkspaceSettings = Field(default_factory=WorkspaceSettings)
 
 
 class WorkspacePatchIn(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     expected_version: int = Field(ge=1)
+
+
+class WorkspaceSettingsIn(BaseModel):
+    expected_version: int = Field(ge=1)
+    estimate_presets: list[Decimal] = Field(min_length=1, max_length=20)
+
+    @field_validator("estimate_presets")
+    @classmethod
+    def _positive_sorted_unique(cls, v: list[Decimal]) -> list[Decimal]:
+        if any(x <= 0 for x in v):
+            raise ValueError("estimate presets must be positive")
+        return sorted(set(v))
 
 
 class WorkspaceCreateIn(BaseModel):

@@ -189,6 +189,15 @@ export const it: Catalog = {
     aiTitle: "Creato/gestito dall'agente IA",
     search: 'Cerca per titolo o tag...',
     estimate: 'Stima (h)',
+    estNone: '— nessuna —',
+    estCustom: 'Personalizzato...',
+  },
+  estpre: {
+    title: 'Preset di stima',
+    note: 'Valori del dropdown nel campo stima del task, in ore. Condivisi in questo workspace.',
+    add: 'Aggiungi',
+    addHours: 'Ore (es. 0.5)',
+    remove: 'Rimuovi',
   },
   workflows: {
     nav: 'Workflow',

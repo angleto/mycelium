@@ -276,6 +276,27 @@ export interface paths {
         patch: operations["patch_my_workspace_workspaces_me_patch"];
         trace?: never;
     };
+    "/workspaces/me/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Patch My Workspace Settings
+         * @description Per-workspace config (admin). Merges into the settings bag so a
+         *     future key is not clobbered by an estimate-presets save.
+         */
+        patch: operations["patch_my_workspace_settings_workspaces_me_settings_patch"];
+        trace?: never;
+    };
     "/workspaces/{workspace_id}": {
         parameters: {
             query?: never;
@@ -3992,6 +4013,7 @@ export interface components {
             name: string;
             /** Version */
             version: number;
+            settings?: components["schemas"]["WorkspaceSettings"];
         };
         /** WorkspacePatchIn */
         WorkspacePatchIn: {
@@ -3999,6 +4021,18 @@ export interface components {
             name: string;
             /** Expected Version */
             expected_version: number;
+        };
+        /** WorkspaceSettings */
+        WorkspaceSettings: {
+            /** Estimate Presets */
+            estimate_presets?: string[];
+        };
+        /** WorkspaceSettingsIn */
+        WorkspaceSettingsIn: {
+            /** Expected Version */
+            expected_version: number;
+            /** Estimate Presets */
+            estimate_presets: (number | string)[];
         };
         /**
          * WorkspaceSummaryOut
@@ -4496,6 +4530,42 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["WorkspacePatchIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VersionOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    patch_my_workspace_settings_workspaces_me_settings_patch: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WorkspaceSettingsIn"];
             };
         };
         responses: {

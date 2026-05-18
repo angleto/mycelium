@@ -190,6 +190,15 @@ export const en = {
     aiTitle: 'Created/owned by the AI agent',
     search: 'Search title or tag...',
     estimate: 'Estimate (h)',
+    estNone: '— none —',
+    estCustom: 'Custom...',
+  },
+  estpre: {
+    title: 'Estimate presets',
+    note: 'Dropdown values on the task estimate field, in hours. Shared across this workspace.',
+    add: 'Add',
+    addHours: 'Hours (e.g. 0.5)',
+    remove: 'Remove',
   },
   workflows: {
     nav: 'Workflows',

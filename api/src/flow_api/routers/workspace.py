@@ -20,6 +20,8 @@ from flow_api.schemas import (
     WorkspaceCreateIn,
     WorkspaceOut,
     WorkspacePatchIn,
+    WorkspaceSettings,
+    WorkspaceSettingsIn,
     WorkspaceSummaryOut,
     WorkspaceVersionOut,
 )
@@ -73,7 +75,42 @@ async def get_my_workspace(
     org = result.scalar_one_or_none()
     if org is None:
         raise NotFoundError(MessageCode.ORG_NOT_FOUND)
-    return WorkspaceOut(id=org.id, name=org.name, version=org.version)
+    return WorkspaceOut(
+        id=org.id,
+        name=org.name,
+        version=org.version,
+        settings=WorkspaceSettings.model_validate(org.settings or {}),
+    )
+
+
+@router.patch("/me/settings", response_model=WorkspaceVersionOut)
+async def patch_my_workspace_settings(
+    body: WorkspaceSettingsIn,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+) -> WorkspaceVersionOut:
+    """Per-workspace config (admin). Merges into the settings bag so a
+    future key is not clobbered by an estimate-presets save."""
+    ensure_role(ctx.role, Role.admin)
+    result = await ctx.session.execute(
+        select(Organization).where(Organization.id == ctx.org_id)
+    )
+    org = result.scalar_one_or_none()
+    if org is None:
+        raise NotFoundError(MessageCode.ORG_NOT_FOUND)
+    # Store the canonical Decimal string (JSONB has no decimal type):
+    # round-tripping through float would render 1 as "1.0".
+    merged = {
+        **(org.settings or {}),
+        "estimate_presets": [str(x) for x in body.estimate_presets],
+    }
+    new_version = await optimistic_update(
+        ctx.session,
+        Organization,
+        pk=ctx.org_id,
+        expected_version=body.expected_version,
+        values={"settings": merged},
+    )
+    return WorkspaceVersionOut(id=ctx.org_id, version=new_version)
 
 
 @router.patch("/me", response_model=WorkspaceVersionOut)

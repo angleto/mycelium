@@ -5,6 +5,7 @@ import { api, errMessage, workspaceHeader } from '../api/client'
 import { RichEditor } from '../components/RichEditor'
 import { PriorityChip } from '../components/PriorityChip'
 import { ScaleSelect } from '../components/ScaleSelect'
+import { formatHours } from '../lib/estimate'
 
 function derivePriority(imp: number, urg: number): number {
   const s = imp * urg
@@ -33,6 +34,8 @@ export function TaskDetailRoute() {
   const [importance, setImportance] = useState(2)
   const [urgency, setUrgency] = useState(2)
   const [estimate, setEstimate] = useState('')
+  const [estCustom, setEstCustom] = useState(false)
+  const [presets, setPresets] = useState<string[]>([])
   const [stateId, setStateId] = useState('')
   const [tagId, setTagId] = useState('')
   const [allTasks, setAllTasks] = useState<Task[]>([])
@@ -76,7 +79,7 @@ export function TaskDetailRoute() {
     let active = true
     void (async () => {
       const h = workspaceHeader()
-      const [tk, st, tg, all, dp] = await Promise.all([
+      const [tk, st, tg, all, dp, ws] = await Promise.all([
         api.GET('/tasks/{task_id}', { params: { header: h, path: { task_id: id } } }),
         api.GET('/tasks/{task_id}/states', {
           params: { header: h, path: { task_id: id } },
@@ -84,6 +87,7 @@ export function TaskDetailRoute() {
         api.GET('/tags', { params: { header: h } }),
         api.GET('/tasks', { params: { header: h } }),
         api.GET('/dependencies', { params: { header: h } }),
+        api.GET('/workspaces/me', { params: { header: h } }),
       ])
       if (!active) return
       if (tk.data) apply(tk.data)
@@ -92,6 +96,7 @@ export function TaskDetailRoute() {
       if (tg.data) setTags(tg.data)
       if (all.data) setAllTasks(all.data)
       if (dp.data) setDeps(dp.data)
+      if (ws.data) setPresets(ws.data.settings?.estimate_presets ?? [])
     })()
     return () => {
       active = false
@@ -274,13 +279,45 @@ export function TaskDetailRoute() {
         </div>
         <label>
           {t('tasks.estimate')}
-          <input
-            type="number"
-            min={0}
-            step="0.25"
-            value={estimate}
-            onChange={(e) => setEstimate(e.target.value)}
-          />
+          <select
+            value={
+              estimate.trim() === ''
+                ? ''
+                : estCustom ||
+                    !presets.some((p) => Number(p) === Number(estimate))
+                  ? 'custom'
+                  : String(Number(estimate))
+            }
+            onChange={(e) => {
+              const v = e.target.value
+              if (v === '') {
+                setEstimate('')
+                setEstCustom(false)
+              } else if (v === 'custom') {
+                setEstCustom(true)
+              } else {
+                setEstimate(v)
+                setEstCustom(false)
+              }
+            }}
+          >
+            <option value="">{t('tasks.estNone')}</option>
+            {presets.map((p) => (
+              <option key={p} value={String(Number(p))}>
+                {formatHours(Number(p))}
+              </option>
+            ))}
+            <option value="custom">{t('tasks.estCustom')}</option>
+          </select>
+          {estCustom && (
+            <input
+              type="number"
+              min={0}
+              step="0.25"
+              value={estimate}
+              onChange={(e) => setEstimate(e.target.value)}
+            />
+          )}
         </label>
         {msg && <p className="ok">{msg}</p>}
         {err && <p className="err">{err}</p>}

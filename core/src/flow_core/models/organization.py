@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from sqlalchemy import String
+from sqlalchemy import String, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -22,4 +22,9 @@ class Organization(UUIDPKMixin, TimestampMixin, VersionMixin, Base):
     # 'active' | 'archived'. Archived workspaces are hidden from the
     # switcher by default but stay fully usable (mirrors tag archive).
     status: Mapped[str] = mapped_column(String(16), nullable=False, server_default="active")
+    # Per-workspace UI/config bag (e.g. estimate_presets). Generic so
+    # small workspace prefs do not each need a column/migration.
+    settings: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'")
+    )
     fiscal_profile: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)

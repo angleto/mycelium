@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { api, errMessage } from '../api/client'
+import { EstimatePresets } from '../components/EstimatePresets'
 import { WorkspaceManager } from '../components/WorkspaceManager'
 import type { components } from '../api/schema'
 
@@ -148,6 +149,7 @@ export function SettingsRoute() {
       )}
     </section>
     <WorkspaceManager />
+    <EstimatePresets />
     </>
   )
 }
