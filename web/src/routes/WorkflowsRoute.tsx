@@ -51,6 +51,18 @@ export function WorkflowsRoute() {
     }
   }, [activeId])
 
+  function moveState(i: number, dir: -1 | 1) {
+    setStates((rs) => {
+      const j = i + dir
+      if (j < 0 || j >= rs.length) return rs
+      const next = [...rs]
+      const tmp = next[i]
+      next[i] = next[j]
+      next[j] = tmp
+      return next
+    })
+  }
+
   function setState(i: number, patch: Partial<StateRow>) {
     setStates((rs) => rs.map((r, j) => (j === i ? { ...r, ...patch } : r)))
   }
@@ -128,6 +140,24 @@ export function WorkflowsRoute() {
               />{' '}
               {t('workflows.terminal')}
             </label>
+            <button
+              type="button"
+              className="btn--ghost btn--sm"
+              disabled={i === 0}
+              onClick={() => moveState(i, -1)}
+              aria-label="move up"
+            >
+              ↑
+            </button>
+            <button
+              type="button"
+              className="btn--ghost btn--sm"
+              disabled={i === states.length - 1}
+              onClick={() => moveState(i, 1)}
+              aria-label="move down"
+            >
+              ↓
+            </button>
           </div>
         ))}
         <button
