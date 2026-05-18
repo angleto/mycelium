@@ -273,6 +273,10 @@ export const en = {
     archived: 'archived',
     conflict: 'It changed meanwhile; reloaded.',
     managedHere: 'Client and project tags are managed here, in Clients & projects.',
+    expandAll: 'Expand all',
+    collapseAll: 'Collapse all',
+    projectsN: 'Projects ({{n}})',
+    noProjects: 'No projects',
     f: {
       ragione_sociale: 'Legal name',
       codice_fiscale: 'Tax code',

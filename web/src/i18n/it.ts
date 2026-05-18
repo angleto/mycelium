@@ -272,6 +272,10 @@ export const it: Catalog = {
     archived: 'archiviato',
     conflict: 'È cambiato nel frattempo; ricaricato.',
     managedHere: 'I tag cliente e progetto si gestiscono qui, in Clienti e progetti.',
+    expandAll: 'Espandi tutto',
+    collapseAll: 'Comprimi tutto',
+    projectsN: 'Progetti ({{n}})',
+    noProjects: 'Nessun progetto',
     f: {
       ragione_sociale: 'Ragione sociale',
       codice_fiscale: 'Codice fiscale',

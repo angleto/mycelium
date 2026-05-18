@@ -39,6 +39,8 @@ export function ClientsProjectsRoute() {
   const [defClient, setDefClient] = useState<string>('')
   const [editC, setEditC] = useState<string | null>(null)
   const [editP, setEditP] = useState<string | null>(null)
+  // Projects are nested under their client, collapsed by default.
+  const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [showArchived, setShowArchived] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const [msg, setMsg] = useState<string | null>(null)
@@ -161,13 +163,118 @@ export function ClientsProjectsRoute() {
     await load()
   }
 
-  const clientName = (id: string | null) =>
-    clients.find((c) => c.id === id)?.name ?? '-'
   const visClients = clients.filter(
     (c) => showArchived || c.status !== 'archived',
   )
   const visProjects = projects.filter(
     (p) => showArchived || p.status !== 'archived',
+  )
+  const projectsOf = (clientId: string) =>
+    visProjects.filter((p) => p.client_tag_id === clientId)
+  function toggleClient(id: string) {
+    setExpanded((s) => {
+      const n = new Set(s)
+      if (n.has(id)) n.delete(id)
+      else n.add(id)
+      return n
+    })
+  }
+  const expandAll = () => setExpanded(new Set(visClients.map((c) => c.id)))
+  const collapseAll = () => setExpanded(new Set())
+
+  // One project row, reused inside each client's nested list (no dup).
+  const renderProject = (p: Project) => (
+    <li key={p.id}>
+      <strong>{p.name}</strong>{' '}
+      {p.color && (
+        <span
+          className="swatch"
+          style={{ background: p.color }}
+          title={p.color}
+        />
+      )}{' '}
+      <span className="muted">
+        · {p.tariffa ? `${p.tariffa} ${p.valuta}` : t('cp.noRate')}
+        {p.status === 'archived' ? ` · ${t('cp.archived')}` : ''}
+      </span>
+      <button
+        type="button"
+        className="btn--ghost btn--sm"
+        onClick={() => setEditP(editP === p.id ? null : p.id)}
+      >
+        {t('cp.edit')}
+      </button>
+      <button
+        type="button"
+        className="btn--ghost btn--sm"
+        onClick={() => void setArchive(p.id, p.version, p.status !== 'archived')}
+      >
+        {p.status === 'archived' ? t('cp.unarchive') : t('cp.archive')}
+      </button>
+      {editP === p.id && (
+        <form
+          className="row"
+          style={{ flexWrap: 'wrap', marginTop: '0.4rem' }}
+          onSubmit={(e) => {
+            e.preventDefault()
+            const fd = new FormData(e.currentTarget)
+            void saveProject(p, {
+              name: fd.get('name'),
+              client_tag_id: (fd.get('client_tag_id') as string) || null,
+              tariffa: (fd.get('tariffa') as string) || null,
+              valuta: (fd.get('valuta') as string) || 'EUR',
+              budget: (fd.get('budget') as string) || null,
+              color: (fd.get('color') as string) || null,
+              description: (fd.get('description') as string) || null,
+            })
+          }}
+        >
+          <input name="name" defaultValue={p.name} placeholder={t('cp.name')} />
+          <select name="client_tag_id" defaultValue={p.client_tag_id ?? defClient}>
+            {clients.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+          </select>
+          <input
+            name="tariffa"
+            type="number"
+            step="0.01"
+            defaultValue={p.tariffa ?? ''}
+            placeholder={t('cp.rate')}
+          />
+          <input
+            name="valuta"
+            defaultValue={p.valuta}
+            placeholder={t('cp.currency')}
+            style={{ width: '4rem' }}
+          />
+          <input
+            name="budget"
+            type="number"
+            step="0.01"
+            defaultValue={p.budget ?? ''}
+            placeholder={t('cp.budget')}
+          />
+          <input
+            name="color"
+            type="color"
+            defaultValue={p.color ?? '#888888'}
+            title={t('cp.color')}
+            style={{ width: '3rem', padding: 0 }}
+          />
+          <input
+            name="description"
+            defaultValue={p.description ?? ''}
+            placeholder={t('cp.description')}
+          />
+          <button type="submit" className="btn--sm">
+            {t('cp.save')}
+          </button>
+        </form>
+      )}
+    </li>
   )
 
   return (
@@ -200,13 +307,38 @@ export function ClientsProjectsRoute() {
           {t('cp.add')}
         </button>
       </div>
+      <div className="row">
+        <button type="button" className="btn--ghost btn--sm" onClick={expandAll}>
+          {t('cp.expandAll')}
+        </button>
+        <button
+          type="button"
+          className="btn--ghost btn--sm"
+          onClick={collapseAll}
+        >
+          {t('cp.collapseAll')}
+        </button>
+      </div>
       <ul className="list">
-        {visClients.map((c) => (
+        {visClients.map((c) => {
+          const open = expanded.has(c.id)
+          const projs = projectsOf(c.id)
+          return (
           <li key={c.id}>
+            <button
+              type="button"
+              className="btn--ghost btn--sm"
+              aria-expanded={open}
+              onClick={() => toggleClient(c.id)}
+            >
+              {open ? '▾' : '▸'}
+            </button>{' '}
             <strong>{c.name}</strong>{' '}
             <span className="muted">
               · {c.ragione_sociale} ·{' '}
               {c.default_billable ? t('cp.billable') : t('cp.nonBillable')}
+              {' · '}
+              {t('cp.projectsN', { n: projs.length })}
               {c.status === 'archived' ? ` · ${t('cp.archived')}` : ''}
             </span>
             <button
@@ -263,8 +395,18 @@ export function ClientsProjectsRoute() {
                 </button>
               </form>
             )}
+            {open && (
+              <ul className="list nested">
+                {projs.length === 0 ? (
+                  <li className="hint">{t('cp.noProjects')}</li>
+                ) : (
+                  projs.map(renderProject)
+                )}
+              </ul>
+            )}
           </li>
-        ))}
+          )
+        })}
       </ul>
 
       <h2>{t('cp.projects')}</h2>
@@ -285,107 +427,6 @@ export function ClientsProjectsRoute() {
           {t('cp.add')}
         </button>
       </div>
-      <ul className="list">
-        {visProjects.map((p) => (
-          <li key={p.id}>
-            <strong>{p.name}</strong>{' '}
-            {p.color && (
-              <span
-                className="swatch"
-                style={{ background: p.color }}
-                title={p.color}
-              />
-            )}{' '}
-            <span className="muted">
-              · {clientName(p.client_tag_id)} ·{' '}
-              {p.tariffa ? `${p.tariffa} ${p.valuta}` : t('cp.noRate')}
-              {p.status === 'archived' ? ` · ${t('cp.archived')}` : ''}
-            </span>
-            <button
-              type="button"
-              className="btn--ghost btn--sm"
-              onClick={() => setEditP(editP === p.id ? null : p.id)}
-            >
-              {t('cp.edit')}
-            </button>
-            <button
-              type="button"
-              className="btn--ghost btn--sm"
-              onClick={() =>
-                void setArchive(p.id, p.version, p.status !== 'archived')
-              }
-            >
-              {p.status === 'archived' ? t('cp.unarchive') : t('cp.archive')}
-            </button>
-            {editP === p.id && (
-              <form
-                className="row"
-                style={{ flexWrap: 'wrap', marginTop: '0.4rem' }}
-                onSubmit={(e) => {
-                  e.preventDefault()
-                  const fd = new FormData(e.currentTarget)
-                  void saveProject(p, {
-                    name: fd.get('name'),
-                    client_tag_id: (fd.get('client_tag_id') as string) || null,
-                    tariffa: (fd.get('tariffa') as string) || null,
-                    valuta: (fd.get('valuta') as string) || 'EUR',
-                    budget: (fd.get('budget') as string) || null,
-                    color: (fd.get('color') as string) || null,
-                    description: (fd.get('description') as string) || null,
-                  })
-                }}
-              >
-                <input name="name" defaultValue={p.name} placeholder={t('cp.name')} />
-                <select
-                  name="client_tag_id"
-                  defaultValue={p.client_tag_id ?? defClient}
-                >
-                  {clients.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name}
-                    </option>
-                  ))}
-                </select>
-                <input
-                  name="tariffa"
-                  type="number"
-                  step="0.01"
-                  defaultValue={p.tariffa ?? ''}
-                  placeholder={t('cp.rate')}
-                />
-                <input
-                  name="valuta"
-                  defaultValue={p.valuta}
-                  placeholder={t('cp.currency')}
-                  style={{ width: '4rem' }}
-                />
-                <input
-                  name="budget"
-                  type="number"
-                  step="0.01"
-                  defaultValue={p.budget ?? ''}
-                  placeholder={t('cp.budget')}
-                />
-                <input
-                  name="color"
-                  type="color"
-                  defaultValue={p.color ?? '#888888'}
-                  title={t('cp.color')}
-                  style={{ width: '3rem', padding: 0 }}
-                />
-                <input
-                  name="description"
-                  defaultValue={p.description ?? ''}
-                  placeholder={t('cp.description')}
-                />
-                <button type="submit" className="btn--sm">
-                  {t('cp.save')}
-                </button>
-              </form>
-            )}
-          </li>
-        ))}
-      </ul>
     </section>
   )
 }

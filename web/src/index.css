@@ -501,6 +501,12 @@ button.btn--danger:hover {
 .switcher select {
   font-weight: 600;
 }
+.list.nested {
+  margin: 0.35rem 0 0.5rem 1.3rem;
+  padding-left: 0.7rem;
+  border-left: 2px solid var(--border);
+}
+
 .swatch {
   display: inline-block;
   width: 0.7rem;
