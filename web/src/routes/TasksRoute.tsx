@@ -5,13 +5,12 @@ import { api, errMessage, workspaceHeader } from '../api/client'
 import { useSession } from '../auth/useSession'
 import { TagChip } from '../components/TagChip'
 import { PriorityChip } from '../components/PriorityChip'
+import { ScaleSelect } from '../components/ScaleSelect'
 import type { components } from '../api/schema'
 
 type Task = components['schemas']['TaskOut']
 type Tag = components['schemas']['TagOut']
 type Running = components['schemas']['TimeEntryOut']
-
-const SCALE = [1, 2, 3, 4, 5]
 
 function hms(sec: number): string {
   const s = Math.max(0, Math.floor(sec))
@@ -199,26 +198,19 @@ export function TasksRoute() {
         />
         <label>
           {t('tasks.importance')}
-          <select
+          <ScaleSelect
             value={importance}
-            onChange={(e) => setImportance(Number(e.target.value))}
-          >
-            {SCALE.map((n) => (
-              <option key={n} value={n}>
-                {n}
-              </option>
-            ))}
-          </select>
+            onChange={setImportance}
+            labelsKey="tasks.impLabels"
+          />
         </label>
         <label>
           {t('tasks.urgency')}
-          <select value={urgency} onChange={(e) => setUrgency(Number(e.target.value))}>
-            {SCALE.map((n) => (
-              <option key={n} value={n}>
-                {n}
-              </option>
-            ))}
-          </select>
+          <ScaleSelect
+            value={urgency}
+            onChange={setUrgency}
+            labelsKey="tasks.urgLabels"
+          />
         </label>
         <label>
           {t('tasks.client')}

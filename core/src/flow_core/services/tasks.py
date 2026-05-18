@@ -190,6 +190,24 @@ async def list_tasks(
     return list((await session.execute(stmt)).scalars().unique().all())
 
 
+async def tags_by_task(
+    session: AsyncSession, *, task_ids: Sequence[uuid.UUID]
+) -> dict[uuid.UUID, list[Tag]]:
+    """Batched task -> tags (for showing tag chips in the task list
+    without an N+1)."""
+    out: dict[uuid.UUID, list[Tag]] = {}
+    if not task_ids:
+        return out
+    rows = await session.execute(
+        select(TaskTag.task_id, Tag)
+        .join(Tag, Tag.id == TaskTag.tag_id)
+        .where(TaskTag.task_id.in_(task_ids))
+    )
+    for tid, tag in rows.all():
+        out.setdefault(tid, []).append(tag)
+    return out
+
+
 async def update_task(
     session: AsyncSession,
     *,

@@ -162,6 +162,13 @@ class TagOut(BaseModel):
     version: int
 
 
+class TagBrief(BaseModel):
+    id: uuid.UUID
+    kind: TagKind
+    name: str
+    color: str | None
+
+
 class ClientCreateIn(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     ragione_sociale: str = Field(min_length=1, max_length=200)
@@ -260,6 +267,7 @@ class TaskOut(BaseModel):
     budget_id: uuid.UUID | None
     is_archived: bool
     version: int
+    tags: list[TagBrief] = Field(default_factory=list)
 
 
 class CommentCreateIn(BaseModel):

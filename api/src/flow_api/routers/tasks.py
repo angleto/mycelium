@@ -15,6 +15,7 @@ from flow_api.schemas import (
     CommentOut,
     ExpectedVersionIn,
     StateOut,
+    TagBrief,
     TagRefIn,
     TaskCreateIn,
     TaskOut,
@@ -23,6 +24,7 @@ from flow_api.schemas import (
     VersionOut,
 )
 from flow_core.models.comment import Comment
+from flow_core.models.tag import Tag
 from flow_core.models.task import Task
 from flow_core.models.workflow import WorkflowState
 from flow_core.services import tasks as svc
@@ -31,8 +33,12 @@ from flow_core.services import workflow as wf
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
 
-def _out(t: Task, state_name: str) -> TaskOut:
+def _out(t: Task, state_name: str, tags: list[Tag] | None = None) -> TaskOut:
     return TaskOut(
+        tags=[
+            TagBrief(id=g.id, kind=g.kind, name=g.name, color=g.color)
+            for g in (tags or [])
+        ],
         id=t.id,
         title=t.title,
         description=t.description,
@@ -102,7 +108,8 @@ async def create_task(
         assignee_ids=body.assignee_ids,
     )
     names = await _state_names(ctx, {task.state_id})
-    return _out(task, names.get(task.state_id, ""))
+    tagmap = await svc.tags_by_task(ctx.session, task_ids=[task.id])
+    return _out(task, names.get(task.state_id, ""), tagmap.get(task.id, []))
 
 
 @router.get("", response_model=list[TaskOut])
@@ -126,14 +133,16 @@ async def list_tasks(
         include_deleted=include_deleted,
     )
     names = await _state_names(ctx, {t.state_id for t in rows})
-    return [_out(t, names.get(t.state_id, "")) for t in rows]
+    tagmap = await svc.tags_by_task(ctx.session, task_ids=[t.id for t in rows])
+    return [_out(t, names.get(t.state_id, ""), tagmap.get(t.id, [])) for t in rows]
 
 
 @router.get("/{task_id}", response_model=TaskOut)
 async def get_task(task_id: uuid.UUID, ctx: Annotated[TenantCtx, Depends(tenant_ctx)]) -> TaskOut:
     task = await svc.get_task(ctx.session, org_id=ctx.org_id, task_id=task_id)
     names = await _state_names(ctx, {task.state_id})
-    return _out(task, names.get(task.state_id, ""))
+    tagmap = await svc.tags_by_task(ctx.session, task_ids=[task.id])
+    return _out(task, names.get(task.state_id, ""), tagmap.get(task.id, []))
 
 
 @router.get("/{task_id}/states", response_model=list[StateOut])

@@ -158,6 +158,8 @@ export const en = {
     legalName: 'Legal name',
     newProjectName: 'New project name',
     addInline: 'Add',
+    impLabels: ['Trivial', 'Low', 'Medium', 'High', 'Critical'],
+    urgLabels: ['Whenever', 'Low', 'Soon', 'High', 'Now'],
   },
   workflows: {
     nav: 'Workflows',

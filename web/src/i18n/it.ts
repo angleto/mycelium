@@ -157,6 +157,8 @@ export const it: Catalog = {
     legalName: 'Ragione sociale',
     newProjectName: 'Nome nuovo progetto',
     addInline: 'Aggiungi',
+    impLabels: ['Banale', 'Bassa', 'Media', 'Alta', 'Critica'],
+    urgLabels: ['Quando capita', 'Bassa', 'Presto', 'Alta', 'Adesso'],
   },
   workflows: {
     nav: 'Workflow',

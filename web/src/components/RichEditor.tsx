@@ -26,15 +26,22 @@ type Cand = { kind: MentionKind; id: string; label: string }
 
 async function searchCandidates(query: string): Promise<Cand[]> {
   const h = workspaceHeader()
-  const [tk, tg] = await Promise.all([
+  const [tk, tg, nt] = await Promise.all([
     api.GET('/tasks', { params: { header: h } }),
     api.GET('/tags', { params: { header: h } }),
+    api.GET('/notes', { params: { header: h } }),
   ])
   const q = query.trim().toLowerCase()
   const out: Cand[] = []
   for (const t of tk.data ?? []) {
     if (!q || t.title.toLowerCase().includes(q)) {
       out.push({ kind: 'task', id: t.id, label: t.title })
+    }
+  }
+  for (const n of nt.data ?? []) {
+    const label = n.title ?? n.kind
+    if (!q || label.toLowerCase().includes(q)) {
+      out.push({ kind: 'note', id: n.id, label })
     }
   }
   for (const g of tg.data ?? []) {

@@ -4,8 +4,8 @@ import { useTranslation } from 'react-i18next'
 import { api, errMessage, workspaceHeader } from '../api/client'
 import { RichEditor } from '../components/RichEditor'
 import { PriorityChip } from '../components/PriorityChip'
+import { ScaleSelect } from '../components/ScaleSelect'
 
-const SCALE = [1, 2, 3, 4, 5]
 function derivePriority(imp: number, urg: number): number {
   const s = imp * urg
   if (s >= 16) return 1
@@ -222,29 +222,19 @@ export function TaskDetailRoute() {
         <div className="row">
           <label>
             {t('tasks.importance')}
-            <select
+            <ScaleSelect
               value={importance}
-              onChange={(e) => setImportance(Number(e.target.value))}
-            >
-              {SCALE.map((n) => (
-                <option key={n} value={n}>
-                  {n}
-                </option>
-              ))}
-            </select>
+              onChange={setImportance}
+              labelsKey="tasks.impLabels"
+            />
           </label>
           <label>
             {t('tasks.urgency')}
-            <select
+            <ScaleSelect
               value={urgency}
-              onChange={(e) => setUrgency(Number(e.target.value))}
-            >
-              {SCALE.map((n) => (
-                <option key={n} value={n}>
-                  {n}
-                </option>
-              ))}
-            </select>
+              onChange={setUrgency}
+              labelsKey="tasks.urgLabels"
+            />
           </label>
           <PriorityChip
             priority={derivePriority(importance, urgency)}
