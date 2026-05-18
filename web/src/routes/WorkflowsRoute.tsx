@@ -230,7 +230,7 @@ export function WorkflowsRoute() {
                     {m.states.map((s) => (
                       <span key={s.id} className="chip">
                         {s.name}
-                        {s.is_initial ? ` · ${t('workflows.initial')}` : ''}
+                        {s.is_initial ? ` · ${t('workflows.defaultState')}` : ''}
                         {s.is_terminal ? ` · ${t('workflows.terminal')}` : ''}
                       </span>
                     ))}
@@ -297,19 +297,19 @@ export function WorkflowsRoute() {
                         />
                         <label>
                           <input
-                            type="checkbox"
+                            type="radio"
+                            name="wf-edit-default"
                             checked={s.is_initial}
-                            onChange={(e) =>
+                            onChange={() =>
                               patchE({
-                                states: editing.states.map((x, j) =>
-                                  j === i
-                                    ? { ...x, is_initial: e.target.checked }
-                                    : x,
-                                ),
+                                states: editing.states.map((x, j) => ({
+                                  ...x,
+                                  is_initial: j === i,
+                                })),
                               })
                             }
                           />{' '}
-                          {t('workflows.initial')}
+                          {t('workflows.defaultState')}
                         </label>
                         <label>
                           <input
@@ -520,11 +520,16 @@ export function WorkflowsRoute() {
             />
             <label>
               <input
-                type="checkbox"
+                type="radio"
+                name="wf-new-default"
                 checked={s.is_initial}
-                onChange={(e) => setState(i, { is_initial: e.target.checked })}
+                onChange={() =>
+                  setStates((rs) =>
+                    rs.map((r, j) => ({ ...r, is_initial: j === i })),
+                  )
+                }
               />{' '}
-              {t('workflows.initial')}
+              {t('workflows.defaultState')}
             </label>
             <label>
               <input

@@ -353,6 +353,7 @@ export const en = {
     addState: 'Add state',
     stateName: 'State name',
     initial: 'Initial',
+    defaultState: 'Default',
     terminal: 'Terminal',
     transitions: 'Transitions (from -> to, by state name)',
     addTransition: 'Add transition',

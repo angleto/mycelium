@@ -352,6 +352,7 @@ export const it: Catalog = {
     addState: 'Aggiungi stato',
     stateName: 'Nome stato',
     initial: 'Iniziale',
+    defaultState: 'Predefinito',
     terminal: 'Finale',
     transitions: 'Transizioni (da -> a, per nome stato)',
     addTransition: 'Aggiungi transizione',
