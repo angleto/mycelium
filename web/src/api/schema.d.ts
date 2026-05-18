@@ -378,6 +378,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/tags/{tag_id}/scope": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Set Tag Scope */
+        put: operations["set_tag_scope_tags__tag_id__scope_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/clients": {
         parameters: {
             query?: never;
@@ -4120,6 +4137,11 @@ export interface components {
             color: string | null;
             /** Status */
             status: string;
+            /**
+             * Scope Target Ids
+             * @default []
+             */
+            scope_target_ids: string[];
             /** Version */
             version: number;
         };
@@ -4141,6 +4163,14 @@ export interface components {
              * Format: uuid
              */
             tag_id: string;
+        };
+        /** TagScopeIn */
+        TagScopeIn: {
+            /**
+             * Target Ids
+             * @default []
+             */
+            target_ids: string[];
         };
         /** TaskCreateIn */
         TaskCreateIn: {
@@ -5288,6 +5318,7 @@ export interface operations {
         parameters: {
             query?: {
                 kind?: components["schemas"]["TagKind"] | null;
+                for_project?: string | null;
             };
             header: {
                 "x-workspace-id": string;
@@ -5342,6 +5373,42 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["TagOut"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_tag_scope_tags__tag_id__scope_put: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+            };
+            path: {
+                tag_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TagScopeIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

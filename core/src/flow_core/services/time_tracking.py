@@ -85,18 +85,17 @@ async def _rate(
     prof = (
         await session.execute(select(ProjectProfile).where(ProjectProfile.tag_id == project_tag_id))
     ).scalar_one_or_none()
-    if prof is None:
+    if prof is None or prof.client_tag_id is None:
         return (None, "EUR", True)
-    client_billable = True
-    if prof.client_tag_id is not None:
-        cp = (
-            await session.execute(
-                select(ClientProfile).where(ClientProfile.tag_id == prof.client_tag_id)
-            )
-        ).scalar_one_or_none()
-        if cp is not None:
-            client_billable = cp.default_billable
-    return (prof.tariffa, prof.valuta, client_billable)
+    # Rate, currency AND billable default all live on the client.
+    cp = (
+        await session.execute(
+            select(ClientProfile).where(ClientProfile.tag_id == prof.client_tag_id)
+        )
+    ).scalar_one_or_none()
+    if cp is None:
+        return (None, "EUR", True)
+    return (cp.tariffa, cp.valuta, cp.default_billable)
 
 
 def _effective_billable(

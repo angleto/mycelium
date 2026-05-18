@@ -222,13 +222,13 @@ class ClientCreateIn(BaseModel):
     pec: str | None = Field(default=None, max_length=320)
     description: str | None = None
     default_billable: bool = True
+    tariffa: Decimal | None = None
+    valuta: str = Field(default="EUR", max_length=3)
 
 
 class ProjectCreateIn(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     client_tag_id: uuid.UUID | None = None
-    tariffa: Decimal | None = None
-    valuta: str = Field(default="EUR", max_length=3)
     budget: Decimal | None = None
     color: str | None = Field(default=None, max_length=16)
     description: str | None = None
@@ -249,6 +249,8 @@ class ClientPatchIn(BaseModel):
     pec: str | None = Field(default=None, max_length=320)
     description: str | None = None
     default_billable: bool | None = None
+    tariffa: Decimal | None = None
+    valuta: str | None = Field(default=None, max_length=3)
 
 
 class ClientOut(BaseModel):
@@ -269,13 +271,13 @@ class ClientOut(BaseModel):
     pec: str | None
     description: str | None
     default_billable: bool
+    tariffa: Decimal | None
+    valuta: str
 
 
 class ProjectPatchIn(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=120)
     client_tag_id: uuid.UUID | None = None
-    tariffa: Decimal | None = None
-    valuta: str | None = Field(default=None, max_length=3)
     budget: Decimal | None = None
     color: str | None = Field(default=None, max_length=16)
     description: str | None = None
@@ -287,8 +289,6 @@ class ProjectOut(BaseModel):
     status: str
     version: int
     client_tag_id: uuid.UUID | None
-    tariffa: Decimal | None
-    valuta: str
     budget: Decimal | None
     color: str | None
     description: str | None

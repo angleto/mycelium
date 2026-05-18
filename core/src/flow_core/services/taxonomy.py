@@ -41,6 +41,8 @@ class ClientInput:
     pec: str | None = None
     description: str | None = None
     default_billable: bool = True
+    tariffa: Decimal | None = None
+    valuta: str = "EUR"
 
 
 async def _insert_tag(
@@ -110,6 +112,8 @@ async def create_client(
             pec=profile.pec,
             description=profile.description,
             default_billable=profile.default_billable,
+            tariffa=profile.tariffa,
+            valuta=profile.valuta,
         )
     )
     await session.flush()
@@ -171,8 +175,6 @@ async def create_project(
     actor_id: uuid.UUID,
     name: str,
     client_tag_id: uuid.UUID | None = None,
-    tariffa: Decimal | None = None,
-    valuta: str = "EUR",
     budget: Decimal | None = None,
     color: str | None = None,
     description: str | None = None,
@@ -194,8 +196,6 @@ async def create_project(
             tag_id=tag.id,
             org_id=org_id,
             client_tag_id=client_tag_id,
-            tariffa=tariffa,
-            valuta=valuta,
             budget=budget,
             description=description,
         )

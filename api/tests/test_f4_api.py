@@ -32,7 +32,26 @@ async def test_f4_api_flow() -> None:
         ).json()
         h = {"Authorization": f"Bearer {a['token']}", "X-Workspace-Id": a["workspace_id"]}
 
-        proj = (await c.post("/projects", headers=h, json={"name": "P", "tariffa": "120"})).json()
+        # Rate is a client-level relationship now.
+        cli = (
+            await c.post(
+                "/clients",
+                headers=h,
+                json={
+                    "name": "C",
+                    "ragione_sociale": "C",
+                    "tariffa": "120",
+                    "default_billable": True,
+                },
+            )
+        ).json()
+        proj = (
+            await c.post(
+                "/projects",
+                headers=h,
+                json={"name": "P", "client_tag_id": cli["id"]},
+            )
+        ).json()
         t = (await c.post("/tasks", headers=h, json={"title": "T", "tag_ids": [proj["id"]]})).json()
 
         t2 = (await c.post("/tasks", headers=h, json={"title": "T2"})).json()

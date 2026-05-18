@@ -143,10 +143,9 @@ async def create_project(
     org_id: str,
     name: str,
     client_tag_id: str | None = None,
-    tariffa: float | None = None,
-    valuta: str = "EUR",
 ) -> dict[str, Any]:
-    """Create a project tag with billing profile."""
+    """Create a project under a client. Rate/billable are client-level
+    (set on the client); the project carries name/budget/description."""
     async with _tenant(token, org_id) as (s, org, user):
         tag = await taxonomy.create_project(
             s,
@@ -154,8 +153,6 @@ async def create_project(
             actor_id=user,
             name=name,
             client_tag_id=(uuid.UUID(client_tag_id) if client_tag_id else None),
-            tariffa=Decimal(str(tariffa)) if tariffa is not None else None,
-            valuta=valuta,
         )
         return _tag(tag)
 

@@ -4,8 +4,9 @@
 from __future__ import annotations
 
 import uuid
+from decimal import Decimal
 
-from sqlalchemy import ForeignKey, String, Text
+from sqlalchemy import ForeignKey, Numeric, String, Text
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -42,3 +43,7 @@ class ClientProfile(OrgScopedMixin, TimestampMixin, VersionMixin, Base):
     # overrides it. Lives on the CLIENT (was on the project): billing
     # is a client relationship, not a per-project trait.
     default_billable: Mapped[bool] = mapped_column(nullable=False, server_default="true")
+    # Hourly rate is also a client relationship (billed amount =
+    # duration_seconds / 3600 * tariffa; see time_tracking._rate).
+    tariffa: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
+    valuta: Mapped[str] = mapped_column(String(3), nullable=False, server_default="EUR")

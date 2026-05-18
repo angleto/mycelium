@@ -18,7 +18,7 @@ from sqlalchemy import update
 
 from flow_core.db import admin_session, tenant_session
 from flow_core.errors import DomainError
-from flow_core.models.project_profile import ProjectProfile
+from flow_core.models.client_profile import ClientProfile
 from flow_core.services import scheduler as sch
 from flow_core.services import tasks, taxonomy
 from flow_core.services import time_tracking as tt
@@ -81,8 +81,19 @@ async def test_report_aggregation_billable_and_rate_snapshot() -> None:
         a = await signup(s, email=_email(), password="pw-strong-123", org_name="RPT")
     org, user = a.org_id, a.user_id
     async with tenant_session(str(org), str(user)) as s:
+        # Rate is client-level: a client carries the tariffa, the
+        # project just links to it.
+        cli = await taxonomy.create_client(
+            s,
+            org_id=org,
+            actor_id=user,
+            name="Cli",
+            profile=taxonomy.ClientInput(
+                ragione_sociale="Cli", tariffa=Decimal(100)
+            ),
+        )
         proj = await taxonomy.create_project(
-            s, org_id=org, actor_id=user, name="Proj", tariffa=Decimal(100)
+            s, org_id=org, actor_id=user, name="Proj", client_tag_id=cli.id
         )
         t = await tasks.create_task(s, org_id=org, actor_id=user, title="Billed", tag_ids=[proj.id])
         base = dt.datetime(2026, 1, 12, 9, 0, tzinfo=dt.UTC)
@@ -107,8 +118,8 @@ async def test_report_aggregation_billable_and_rate_snapshot() -> None:
         )
         # Rate edited after the fact must not rewrite history.
         await s.execute(
-            update(ProjectProfile)
-            .where(ProjectProfile.tag_id == proj.id)
+            update(ClientProfile)
+            .where(ClientProfile.tag_id == cli.id)
             .values(tariffa=Decimal(999))
         )
         rows = await tt.report(s, org_id=org, actor_id=user, group_by=tt.ReportGroup.project)
