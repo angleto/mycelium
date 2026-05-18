@@ -78,7 +78,10 @@ async def test_explicit_and_inherited_tags_cross_org_rejected() -> None:
         )
         tagmap = await mem.tags_by_blob(s, blob_ids=[blob.id])
     got = {t.id for t in tagmap[blob.id]}
-    assert got == {topic.id, src_tag.id}  # explicit (own) + inherited
+    # Explicit (own) + inherited from the task. The task also carries
+    # its auto-assigned default project tag (no orphan tasks), which
+    # inherits too; assert the meaningful subset, not exact equality.
+    assert {topic.id, src_tag.id} <= got
     assert foreign.id not in got  # cross-org tag rejected
 
 

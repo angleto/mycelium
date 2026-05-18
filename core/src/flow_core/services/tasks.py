@@ -23,7 +23,7 @@ from flow_core.models.tag import Tag, TagKind
 from flow_core.models.task import ExecKind, Necessity, Task
 from flow_core.models.task_assignee import TaskAssignee
 from flow_core.models.task_tag import TaskTag
-from flow_core.services import audit
+from flow_core.services import audit, taxonomy
 from flow_core.services import workflow as wf
 from flow_core.services.rbac import require_role
 
@@ -107,13 +107,24 @@ async def create_task(
     await require_role(session, org_id, actor_id, Role.member)
     if parent_task_id is not None:
         await get_task(session, org_id=org_id, task_id=parent_task_id)
+    eff_tag_ids = list(tag_ids)
     project_tag_id: uuid.UUID | None = None
-    if tag_ids:
+    if eff_tag_ids:
         project_tag_id = (
             await session.execute(
-                select(Tag.id).where(Tag.id.in_(tag_ids), Tag.kind == TagKind.project).limit(1)
+                select(Tag.id)
+                .where(Tag.id.in_(eff_tag_ids), Tag.kind == TagKind.project)
+                .limit(1)
             )
         ).scalar_one_or_none()
+    if project_tag_id is None:
+        # No orphan tasks: every task gets a project (hence, via the
+        # project, a client). Falls back to the default "General"
+        # project under the default "Personal" client.
+        project_tag_id = await taxonomy.ensure_default_project(
+            session, org_id=org_id, actor_id=actor_id
+        )
+        eff_tag_ids.append(project_tag_id)
     workflow = await wf.resolve_effective_workflow(session, org_id, project_tag_id)
     initial = await wf.get_initial_state(session, workflow.id)
     if importance is not None and urgency is not None:
@@ -141,7 +152,7 @@ async def create_task(
     )
     session.add(task)
     await session.flush()
-    for tag_id in tag_ids:
+    for tag_id in eff_tag_ids:
         await _require_tag(session, tag_id)
         session.add(TaskTag(org_id=org_id, task_id=task.id, tag_id=tag_id))
     for user_id in assignee_ids:

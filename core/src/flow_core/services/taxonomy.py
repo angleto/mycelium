@@ -168,6 +168,55 @@ async def ensure_default_client(
     return tag.id
 
 
+_DEFAULT_PROJECT_NAME = "General"
+
+
+async def ensure_default_project(
+    session: AsyncSession, *, org_id: uuid.UUID, actor_id: uuid.UUID
+) -> uuid.UUID:
+    """Every task belongs to a project (and thus, transitively, to a
+    client). A workspace always has a default ("General") project under
+    the default ("Personal") client for otherwise-orphan tasks.
+    Idempotent: id remembered in settings.default_project_tag_id."""
+    org = (
+        await session.execute(select(Organization).where(Organization.id == org_id))
+    ).scalar_one_or_none()
+    settings = dict(org.settings) if org and org.settings else {}
+    cur = settings.get("default_project_tag_id")
+    if cur is not None:
+        exists = (
+            await session.execute(
+                select(Tag.id).where(
+                    Tag.id == uuid.UUID(str(cur)), Tag.kind == TagKind.project
+                )
+            )
+        ).scalar_one_or_none()
+        if exists is not None:
+            return uuid.UUID(str(cur))
+    client_id = await ensure_default_client(
+        session, org_id=org_id, actor_id=actor_id
+    )
+    tag = await _insert_tag(
+        session, org_id, TagKind.project, _DEFAULT_PROJECT_NAME, None
+    )
+    session.add(
+        ProjectProfile(tag_id=tag.id, org_id=org_id, client_tag_id=client_id)
+    )
+    await session.flush()
+    if org is not None:
+        org.settings = {**settings, "default_project_tag_id": str(tag.id)}
+        await session.flush()
+    await audit.log(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        entity="tag",
+        entity_id=tag.id,
+        action="ensure_default_project",
+    )
+    return tag.id
+
+
 async def create_project(
     session: AsyncSession,
     *,
