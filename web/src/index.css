@@ -513,13 +513,17 @@ button.btn--danger:hover {
 }
 .noteitem__main {
   display: flex;
-  align-items: baseline;
+  align-items: center;
+  justify-content: flex-start;
   gap: 0.5rem;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  width: 100%;
 }
 .noteitem__title {
+  flex: 0 1 auto;
   background: none;
   border: none;
+  margin: 0;
   padding: 0;
   font: inherit;
   font-weight: 600;
@@ -529,6 +533,17 @@ button.btn--danger:hover {
 }
 .noteitem__title:hover {
   color: var(--accent);
+}
+.noteitem__preview {
+  margin-left: auto;
+  max-width: 55%;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--muted);
+  font-size: 0.85rem;
+  border-left: 1px solid var(--border);
+  padding-left: 0.6rem;
 }
 .noteitem__meta {
   display: flex;

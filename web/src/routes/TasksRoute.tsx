@@ -28,7 +28,7 @@ export function TasksRoute() {
   const { t } = useTranslation()
   const session = useSession()
   const activeId = session?.workspaceId
-  const { projectId: focusProject } = useFocus()
+  const { focusIds, active: focusActive } = useFocus()
   const [tasks, setTasks] = useState<Task[]>([])
   const [tags, setTags] = useState<Tag[]>([])
   const [filter, setFilter] = useState('')
@@ -335,11 +335,11 @@ export function TasksRoute() {
           (tk.tags ?? []).some((g) => g.name.toLowerCase().includes(ql)),
       )
     : tasks
-  // Project focus (sidebar): when set, only tasks tagged with that
-  // project are shown — distraction-free, additive to the tag filter.
-  const focused = focusProject
+  // Focus (sidebar): client (all its projects) or one project. Only
+  // tasks tagged with a focused project show — additive to the filter.
+  const focused = focusActive
     ? matched.filter((tk) =>
-        (tk.tags ?? []).some((g) => g.id === focusProject),
+        (tk.tags ?? []).some((g) => focusIds.includes(g.id)),
       )
     : matched
   const shown = showDone

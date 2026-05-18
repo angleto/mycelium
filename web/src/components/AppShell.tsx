@@ -15,41 +15,72 @@ import i18n from '../i18n'
 type Item = { to: string; label: string; icon: IconName }
 type Running = components['schemas']['TimeEntryOut']
 type Tag = components['schemas']['TagOut']
+type Project = components['schemas']['ProjectOut']
 
-// Project focus: pick a project and the project-scoped views (Notes,
-// Tasks) filter to it (fewer clicks, less noise). Empty = everything.
+// Focus: pick a client (all its projects) and optionally narrow to one
+// project. The project-scoped views (Notes, Tasks) filter accordingly.
 function ProjectFocus() {
   const { t } = useTranslation()
   const session = useSession()
-  const { projectId, setProjectId } = useFocus()
-  const [projects, setProjects] = useState<Tag[]>([])
+  const { clientId, projectId, setClient, setProject, setClientProjectIds } =
+    useFocus()
+  const [clients, setClients] = useState<Tag[]>([])
+  const [projects, setProjects] = useState<Project[]>([])
+
   useEffect(() => {
     let active = true
     void (async () => {
-      const { data } = await api.GET('/tags', {
-        params: { header: workspaceHeader(), query: { kind: 'project' } },
-      })
-      if (active && data) setProjects(data)
+      const h = workspaceHeader()
+      const [c, p] = await Promise.all([
+        api.GET('/tags', { params: { header: h, query: { kind: 'client' } } }),
+        api.GET('/projects', { params: { header: h } }),
+      ])
+      if (!active) return
+      if (c.data) setClients(c.data)
+      if (p.data) setProjects(p.data)
     })()
     return () => {
       active = false
     }
   }, [session?.workspaceId])
+
+  const ofClient = projects.filter((p) => p.client_tag_id === clientId)
+  // Keep the provider's effective allow-list in sync with the data.
+  useEffect(() => {
+    setClientProjectIds(
+      clientId
+        ? projects
+            .filter((p) => p.client_tag_id === clientId)
+            .map((p) => p.id)
+        : [],
+    )
+  }, [clientId, projects, setClientProjectIds])
+
   return (
-    <label className="focus">
+    <div className="focus">
       <span className="focus__lbl">{t('focus.label')}</span>
-      <select
-        value={projectId}
-        onChange={(e) => setProjectId(e.target.value)}
-      >
-        <option value="">{t('focus.all')}</option>
-        {projects.map((p) => (
-          <option key={p.id} value={p.id}>
-            {p.name}
+      <select value={clientId} onChange={(e) => setClient(e.target.value)}>
+        <option value="">{t('focus.allClients')}</option>
+        {clients.map((c) => (
+          <option key={c.id} value={c.id}>
+            {c.name}
           </option>
         ))}
       </select>
-    </label>
+      {clientId && (
+        <select
+          value={projectId}
+          onChange={(e) => setProject(e.target.value)}
+        >
+          <option value="">{t('focus.allOfClient')}</option>
+          {ofClient.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.name}
+            </option>
+          ))}
+        </select>
+      )}
+    </div>
   )
 }
 

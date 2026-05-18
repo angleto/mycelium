@@ -26,6 +26,7 @@ export function NoteListItem({
   onErase: () => void
 }) {
   const { t } = useTranslation()
+  const preview = (note.transcript ?? '').split('\n')[0].trim()
   return (
     <li className="noteitem">
       <div className="noteitem__main">
@@ -35,6 +36,7 @@ export function NoteListItem({
         <span className="muted">
           {note.kind} · {note.status}
         </span>
+        {preview && <span className="noteitem__preview">{preview}</span>}
       </div>
       <div className="noteitem__meta">
         <span className="noteitem__tags">

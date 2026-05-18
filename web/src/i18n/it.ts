@@ -3,7 +3,12 @@ import type { Catalog } from './en'
 // Italian catalog. Same key shape as en (typed via Catalog).
 export const it: Catalog = {
   app: { title: 'Flow' },
-  focus: { label: 'Progetto focus', all: 'Tutti i progetti' },
+  focus: {
+    label: 'Focus',
+    all: 'Tutti i progetti',
+    allClients: 'Tutti i clienti',
+    allOfClient: 'Tutto il cliente',
+  },
   settings: {
     theme: 'Tema',
     themeAuto: 'Auto',

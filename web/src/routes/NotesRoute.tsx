@@ -33,7 +33,11 @@ export function NotesRoute() {
   const session = useSession()
   const activeId = session?.workspaceId
 
-  const { projectId: focusProject } = useFocus()
+  const {
+    projectId: focusProject,
+    focusIds,
+    active: focusActive,
+  } = useFocus()
   const [searchParams, setSearchParams] = useSearchParams()
   const [notes, setNotes] = useState<Note[]>([])
   const [tags, setTags] = useState<Tag[]>([])
@@ -69,14 +73,11 @@ export function NotesRoute() {
     const { data } = await api.GET('/notes', {
       params: {
         header: workspaceHeader(),
-        query: {
-          ...(focusProject ? { project_id: focusProject } : {}),
-          ...(fTag ? { tag_id: fTag } : {}),
-        },
+        query: { ...(fTag ? { tag_id: fTag } : {}) },
       },
     })
     if (data) setNotes(data)
-  }, [focusProject, fTag])
+  }, [fTag])
 
   useEffect(() => {
     let active = true
@@ -85,10 +86,7 @@ export function NotesRoute() {
         api.GET('/notes', {
           params: {
             header: workspaceHeader(),
-            query: {
-              ...(focusProject ? { project_id: focusProject } : {}),
-              ...(fTag ? { tag_id: fTag } : {}),
-            },
+            query: { ...(fTag ? { tag_id: fTag } : {}) },
           },
         }),
         api.GET('/tags', { params: { header: workspaceHeader() } }),
@@ -100,7 +98,14 @@ export function NotesRoute() {
     return () => {
       active = false
     }
-  }, [activeId, focusProject, fTag])
+  }, [activeId, fTag])
+
+  // Focus (client/project) filters the list client-side, reactively.
+  const shownNotes = focusActive
+    ? notes.filter(
+        (n) => n.project_id != null && focusIds.includes(n.project_id),
+      )
+    : notes
 
   function closeModal() {
     setSel(null)
@@ -411,11 +416,11 @@ export function NotesRoute() {
       </div>
 
       <h2>{t('notes.yours')}</h2>
-      {notes.length === 0 ? (
+      {shownNotes.length === 0 ? (
         <p className="hint">{t('notes.none')}</p>
       ) : (
         <ul className="list">
-          {notes.map((n) => (
+          {shownNotes.map((n) => (
             <NoteListItem
               key={n.id}
               note={n}
