@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { NavLink, Outlet } from 'react-router-dom'
+import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { api, workspaceHeader } from '../api/client'
 import { clearSession } from '../auth/session'
@@ -8,6 +8,7 @@ import { Logo } from './Logo'
 import { Icon, type IconName } from './NavIcon'
 import { ThemeToggle } from './ThemeToggle'
 import { hms, elapsedSec } from '../lib/time'
+import { parseMentionHref, routeForMention } from '../lib/mentions'
 import { useFocus } from '../lib/focus'
 import type { components } from '../api/schema'
 import i18n from '../i18n'
@@ -191,6 +192,26 @@ function NavGroup({ title, items }: { title: string; items: Item[] }) {
 
 export function AppShell() {
   const { t } = useTranslation()
+  const navigate = useNavigate()
+
+  // Mention links (@kind:id) are stored as plain markdown. MarkdownView
+  // renders them as router Links, but the tiptap editor renders a raw
+  // <a href="@note:id"> which the browser would resolve to a broken
+  // /tasks/@note:... URL. One capture-phase interceptor routes ANY such
+  // anchor app-side — no per-view duplication.
+  useEffect(() => {
+    const onClick = (e: MouseEvent) => {
+      const a = (e.target as HTMLElement | null)?.closest('a')
+      const href = a?.getAttribute('href')
+      if (!href) return
+      const m = parseMentionHref(href)
+      if (!m) return
+      e.preventDefault()
+      navigate(routeForMention(m.kind, m.id))
+    }
+    document.addEventListener('click', onClick, true)
+    return () => document.removeEventListener('click', onClick, true)
+  }, [navigate])
 
   async function onLogout() {
     // Real server-side logout: revoke the JWT, then drop the session.

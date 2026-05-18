@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { api, errMessage, workspaceHeader } from '../api/client'
 import { useSession } from '../auth/useSession'
+import { useFocus } from '../lib/focus'
 import type { components } from '../api/schema'
 
 type Task = components['schemas']['TaskOut']
@@ -47,6 +48,7 @@ export function GraphRoute() {
   const navigate = useNavigate()
   const session = useSession()
   const activeId = session?.workspaceId
+  const { focusIds, active: focusActive } = useFocus()
   const [tasks, setTasks] = useState<Task[]>([])
   const [graph, setGraph] = useState<Graph | null>(null)
   const [deps, setDeps] = useState<Dep[]>([])
@@ -101,6 +103,13 @@ export function GraphRoute() {
     // Multi-tag: AND — the task must carry every selected tag.
     for (const tid of tagFilter) {
       if (!(tk?.tags ?? []).some((g) => g.id === tid)) return false
+    }
+    // Project/client focus (sidebar).
+    if (
+      focusActive &&
+      !(tk?.tags ?? []).some((g) => focusIds.includes(g.id))
+    ) {
+      return false
     }
     return true
   }
