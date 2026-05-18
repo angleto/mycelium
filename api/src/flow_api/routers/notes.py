@@ -15,13 +15,16 @@ from flow_api.schemas import (
     AppendMessageIn,
     CommandIn,
     ConversationStartIn,
+    ExpectedVersionIn,
     NoteCreateIn,
     NoteEraseOut,
     NoteOut,
+    NotePatchIn,
     NoteTranscribeIn,
     NoteTurnOut,
     SynthesizeIn,
     SynthOut,
+    VersionOut,
 )
 from flow_core.models.note import Note, NoteKind, NoteTurn
 from flow_core.services import notes as svc
@@ -39,6 +42,8 @@ def _out(n: Note) -> NoteOut:
         transcript=n.transcript,
         summary=n.summary,
         audio_ref=n.audio_ref,
+        is_archived=n.is_archived,
+        deleted_at=n.deleted_at,
         version=n.version,
     )
 
@@ -69,8 +74,15 @@ async def create_note(
 @router.get("", response_model=list[NoteOut])
 async def list_notes(
     ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    include_archived: bool = False,
+    include_deleted: bool = False,
 ) -> list[NoteOut]:
-    rows = await svc.list_notes(ctx.session, org_id=ctx.org_id)
+    rows = await svc.list_notes(
+        ctx.session,
+        org_id=ctx.org_id,
+        include_archived=include_archived,
+        include_deleted=include_deleted,
+    )
     return [_out(n) for n in rows]
 
 
@@ -80,6 +92,90 @@ async def get_note(
     ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
 ) -> NoteOut:
     return _out(await svc.get_note(ctx.session, org_id=ctx.org_id, note_id=note_id))
+
+
+@router.patch("/{note_id}", response_model=VersionOut)
+async def update_note(
+    note_id: uuid.UUID,
+    body: NotePatchIn,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+) -> VersionOut:
+    v = await svc.update_note(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        note_id=note_id,
+        expected_version=body.expected_version,
+        title=body.title,
+        text=body.text,
+    )
+    return VersionOut(id=note_id, version=v)
+
+
+@router.post("/{note_id}/delete", response_model=VersionOut)
+async def delete_note(
+    note_id: uuid.UUID,
+    body: ExpectedVersionIn,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+) -> VersionOut:
+    v = await svc.soft_delete_note(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        note_id=note_id,
+        expected_version=body.expected_version,
+    )
+    return VersionOut(id=note_id, version=v)
+
+
+@router.post("/{note_id}/restore", response_model=VersionOut)
+async def restore_note(
+    note_id: uuid.UUID,
+    body: ExpectedVersionIn,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+) -> VersionOut:
+    v = await svc.restore_note(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        note_id=note_id,
+        expected_version=body.expected_version,
+    )
+    return VersionOut(id=note_id, version=v)
+
+
+@router.post("/{note_id}/archive", response_model=VersionOut)
+async def archive_note(
+    note_id: uuid.UUID,
+    body: ExpectedVersionIn,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+) -> VersionOut:
+    v = await svc.archive_note(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        note_id=note_id,
+        expected_version=body.expected_version,
+        archived=True,
+    )
+    return VersionOut(id=note_id, version=v)
+
+
+@router.post("/{note_id}/unarchive", response_model=VersionOut)
+async def unarchive_note(
+    note_id: uuid.UUID,
+    body: ExpectedVersionIn,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+) -> VersionOut:
+    v = await svc.archive_note(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        note_id=note_id,
+        expected_version=body.expected_version,
+        archived=False,
+    )
+    return VersionOut(id=note_id, version=v)
 
 
 @router.post("/{note_id}/transcribe", response_model=NoteOut)

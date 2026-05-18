@@ -72,6 +72,10 @@ class Note(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, Base):
     audio_ref: Mapped[str | None] = mapped_column(String(512), nullable=True)
     audio_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    is_archived: Mapped[bool] = mapped_column(nullable=False, server_default="false")
+    deleted_at: Mapped[datetime.datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
 
 class NoteTurn(UUIDPKMixin, OrgScopedMixin, Base):

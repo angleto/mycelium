@@ -27,6 +27,8 @@ export function NotesRoute() {
   const [cmd, setCmd] = useState('')
   const [created, setCreated] = useState<Note[]>([])
   const [sel, setSel] = useState<Note | null>(null)
+  const [eTitle, setETitle] = useState('')
+  const [eText, setEText] = useState('')
   const [turns, setTurns] = useState<Turn[]>([])
   const [content, setContent] = useState('')
   const [msg, setMsg] = useState<string | null>(null)
@@ -102,14 +104,70 @@ export function NotesRoute() {
     await loadNotes()
   }
 
-  async function openNote(n: Note) {
+  async function editNote(n: Note) {
     setSel(n)
     setMsg(null)
     setErr(null)
+    setETitle(n.title ?? '')
+    setEText(n.transcript ?? '')
     const { data } = await api.GET('/notes/{note_id}/turns', {
       params: { header: workspaceHeader(), path: { note_id: n.id } },
     })
     setTurns(data ?? [])
+  }
+
+  async function saveNote() {
+    if (!sel) return
+    setErr(null)
+    const { error, response } = await api.PATCH('/notes/{note_id}', {
+      params: { header: workspaceHeader(), path: { note_id: sel.id } },
+      body: {
+        expected_version: sel.version,
+        title: eTitle,
+        text: eText,
+      },
+    })
+    if (response.status === 409) {
+      setErr(t('tasks.conflict'))
+      await loadNotes()
+      return
+    }
+    if (error) {
+      setErr(errMessage(error))
+      return
+    }
+    setMsg(t('notes.saved'))
+    setSel(null)
+    await loadNotes()
+  }
+
+  async function archiveNote(n: Note) {
+    setErr(null)
+    const { error } = await api.POST('/notes/{note_id}/archive', {
+      params: { header: workspaceHeader(), path: { note_id: n.id } },
+      body: { expected_version: n.version },
+    })
+    if (error) {
+      setErr(errMessage(error))
+      return
+    }
+    if (sel?.id === n.id) setSel(null)
+    await loadNotes()
+  }
+
+  async function delNote(n: Note) {
+    if (!window.confirm(t('notes.confirmDelete'))) return
+    setErr(null)
+    const { error } = await api.POST('/notes/{note_id}/delete', {
+      params: { header: workspaceHeader(), path: { note_id: n.id } },
+      body: { expected_version: n.version },
+    })
+    if (error) {
+      setErr(errMessage(error))
+      return
+    }
+    if (sel?.id === n.id) setSel(null)
+    await loadNotes()
   }
 
   async function onSend(e: FormEvent) {
@@ -125,7 +183,7 @@ export function NotesRoute() {
       return
     }
     setContent('')
-    await openNote(sel)
+    await editNote(sel)
   }
 
   // No backend note->task: compose POST /tasks. The new task carries a
@@ -208,7 +266,10 @@ export function NotesRoute() {
           </button>
         </div>
       </form>
+      <p className="hint">{t('notes.kindsHint')}</p>
 
+      <h2>{t('notes.cmdTitle')}</h2>
+      <p className="hint">{t('notes.cmdHint')}</p>
       <form onSubmit={(e) => void onCommand(e)} className="row">
         <input
           required
@@ -231,9 +292,9 @@ export function NotesRoute() {
               <button
                 type="button"
                 className="btn--ghost btn--sm"
-                onClick={() => void openNote(n)}
+                onClick={() => void editNote(n)}
               >
-                {t('notes.open')}
+                {t('notes.edit')}
               </button>
               <button
                 type="button"
@@ -250,6 +311,21 @@ export function NotesRoute() {
               <button
                 type="button"
                 className="btn--ghost btn--sm"
+                onClick={() => void archiveNote(n)}
+              >
+                {t('notes.archive')}
+              </button>
+              <button
+                type="button"
+                className="btn--ghost btn--sm"
+                onClick={() => void delNote(n)}
+              >
+                {t('notes.delete')}
+              </button>
+              <button
+                type="button"
+                className="btn--ghost btn--sm"
+                title={t('notes.eraseHint')}
                 onClick={() => void onErase(n)}
               >
                 {t('notes.erase')}
@@ -259,7 +335,34 @@ export function NotesRoute() {
         </ul>
       )}
 
-      {sel && (
+      {sel && sel.kind !== 'conversation' && (
+        <div className="card" style={{ marginTop: '0.6rem' }}>
+          <h2>{t('notes.editing')}</h2>
+          <input
+            placeholder={t('notes.titlePlaceholder')}
+            value={eTitle}
+            onChange={(e) => setETitle(e.target.value)}
+          />
+          <label>
+            {t('notes.text')}
+            <RichEditor value={eText} onChange={setEText} />
+          </label>
+          <div className="row">
+            <button type="button" onClick={() => void saveNote()}>
+              {t('notes.saveNote')}
+            </button>
+            <button
+              type="button"
+              className="btn--ghost"
+              onClick={() => setSel(null)}
+            >
+              {t('notes.cancel')}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {sel && sel.kind === 'conversation' && (
         <div>
           <h2>
             {t('notes.turns')}: {sel.title || sel.kind}
@@ -271,17 +374,15 @@ export function NotesRoute() {
               </li>
             ))}
           </ul>
-          {sel.kind === 'conversation' && (
-            <form onSubmit={(e) => void onSend(e)} className="row">
-              <input
-                required
-                placeholder={t('notes.message')}
-                value={content}
-                onChange={(e) => setContent(e.target.value)}
-              />
-              <button type="submit">{t('notes.send')}</button>
-            </form>
-          )}
+          <form onSubmit={(e) => void onSend(e)} className="row">
+            <input
+              required
+              placeholder={t('notes.message')}
+              value={content}
+              onChange={(e) => setContent(e.target.value)}
+            />
+            <button type="submit">{t('notes.send')}</button>
+          </form>
         </div>
       )}
     </section>

@@ -970,7 +970,15 @@ class NoteOut(BaseModel):
     transcript: str | None
     summary: str | None
     audio_ref: str | None
+    is_archived: bool = False
+    deleted_at: datetime.datetime | None = None
     version: int
+
+
+class NotePatchIn(BaseModel):
+    expected_version: int = Field(ge=1)
+    title: str | None = Field(default=None, max_length=300)
+    text: str | None = None
 
 
 class NoteTranscribeIn(BaseModel):

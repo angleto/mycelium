@@ -11,10 +11,12 @@ provenance; erasure cascades there.
 
 from __future__ import annotations
 
+import datetime as dt
 import re
 import uuid
 from dataclasses import dataclass
 from decimal import Decimal
+from typing import Any
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -27,6 +29,7 @@ from flow_core.ai_providers import (
     get_stt,
     get_tts,
 )
+from flow_core.concurrency import optimistic_update
 from flow_core.errors import DomainError, NotFoundError
 from flow_core.i18n import MessageCode
 from flow_core.models.billing import CostBasis
@@ -124,21 +127,152 @@ def _derive_title(text: str | None) -> str | None:
 
 
 async def list_notes(
-    session: AsyncSession, *, org_id: uuid.UUID, limit: int = 200
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    limit: int = 200,
+    include_archived: bool = False,
+    include_deleted: bool = False,
 ) -> list[Note]:
     """Notes in the workspace, newest first (for the @note picker and
-    the notes list). RLS scopes to the org."""
-    rows = await session.execute(
-        select(Note).order_by(Note.created_at.desc()).limit(limit)
-    )
-    return list(rows.scalars().all())
+    the notes list). RLS scopes to the org. Archived/deleted are
+    excluded unless explicitly requested (trash & archive view)."""
+    stmt = select(Note)
+    if not include_deleted:
+        stmt = stmt.where(Note.deleted_at.is_(None))
+    if not include_archived:
+        stmt = stmt.where(Note.is_archived.is_(False))
+    stmt = stmt.order_by(Note.created_at.desc()).limit(limit)
+    return list((await session.execute(stmt)).scalars().all())
 
 
-async def get_note(session: AsyncSession, *, org_id: uuid.UUID, note_id: uuid.UUID) -> Note:
+async def get_note(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    note_id: uuid.UUID,
+    include_deleted: bool = False,
+) -> Note:
     n = (await session.execute(select(Note).where(Note.id == note_id))).scalar_one_or_none()
-    if n is None:
+    if n is None or (n.deleted_at is not None and not include_deleted):
         raise NotFoundError(MessageCode.NOTE_NOT_FOUND)
     return n
+
+
+async def _note_set(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    note_id: uuid.UUID,
+    expected_version: int,
+    values: dict[str, Any],
+    action: str,
+) -> int:
+    await require_role(session, org_id, actor_id, Role.member)
+    await get_note(session, org_id=org_id, note_id=note_id, include_deleted=True)
+    new_version = await optimistic_update(
+        session,
+        Note,
+        pk=note_id,
+        expected_version=expected_version,
+        values=values,
+    )
+    await audit.log(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        entity="note",
+        entity_id=note_id,
+        action=action,
+    )
+    return new_version
+
+
+async def update_note(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    note_id: uuid.UUID,
+    expected_version: int,
+    title: str | None = None,
+    text: str | None = None,
+) -> int:
+    """Edit title/body. When the title is blank it is re-derived from
+    the first line of the body (Apple Notes style)."""
+    values: dict[str, Any] = {}
+    if text is not None:
+        values["transcript"] = text
+    eff_title = title if (title and title.strip()) else _derive_title(text)
+    values["title"] = eff_title
+    return await _note_set(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        note_id=note_id,
+        expected_version=expected_version,
+        values=values,
+        action="update",
+    )
+
+
+async def archive_note(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    note_id: uuid.UUID,
+    expected_version: int,
+    archived: bool = True,
+) -> int:
+    return await _note_set(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        note_id=note_id,
+        expected_version=expected_version,
+        values={"is_archived": archived},
+        action="archive",
+    )
+
+
+async def soft_delete_note(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    note_id: uuid.UUID,
+    expected_version: int,
+) -> int:
+    return await _note_set(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        note_id=note_id,
+        expected_version=expected_version,
+        values={"deleted_at": dt.datetime.now(tz=dt.UTC)},
+        action="delete",
+    )
+
+
+async def restore_note(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    note_id: uuid.UUID,
+    expected_version: int,
+) -> int:
+    return await _note_set(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        note_id=note_id,
+        expected_version=expected_version,
+        values={"deleted_at": None},
+        action="restore",
+    )
 
 
 async def create_note(
