@@ -263,6 +263,16 @@ button.btn--ghost {
   padding: 0.28rem 0.55rem;
   font-size: 0.8rem;
 }
+.btn--danger,
+button.btn--danger {
+  background: transparent;
+  color: #d11149;
+  border-color: #d1114966;
+}
+.btn--danger:hover,
+button.btn--danger:hover {
+  background: #d111491a;
+}
 
 /* ---- lists / key-value ---- */
 .list {

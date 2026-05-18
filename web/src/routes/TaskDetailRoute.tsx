@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { api, errMessage, workspaceHeader } from '../api/client'
 import { RichEditor } from '../components/RichEditor'
@@ -25,6 +25,7 @@ type Dep = components['schemas']['DependencyOut']
 // a stale write yields 409 and we reload the canonical task.
 export function TaskDetailRoute() {
   const { t } = useTranslation()
+  const navigate = useNavigate()
   const { id = '' } = useParams()
   const [task, setTask] = useState<Task | null>(null)
   const [states, setStates] = useState<State[]>([])
@@ -130,6 +131,21 @@ export function TaskDetailRoute() {
     }
     await reload()
     setMsg(t('tasks.saved'))
+  }
+
+  async function onDelete() {
+    if (!task) return
+    if (!window.confirm(t('tasks.confirmDelete', { title: task.title }))) return
+    setErr(null)
+    const { error } = await api.POST('/tasks/{task_id}/delete', {
+      params: { header: workspaceHeader(), path: { task_id: id } },
+      body: { expected_version: task.version },
+    })
+    if (error) {
+      setErr(errMessage(error))
+      return
+    }
+    navigate('/tasks')
   }
 
   // Auto-save (no Save button): importance/urgency changes patch
@@ -321,9 +337,18 @@ export function TaskDetailRoute() {
         </label>
         {msg && <p className="ok">{msg}</p>}
         {err && <p className="err">{err}</p>}
-        <button type="submit" disabled={busy}>
-          {busy ? t('tasks.saving') : t('tasks.save')}
-        </button>
+        <div className="row">
+          <button type="submit" disabled={busy}>
+            {busy ? t('tasks.saving') : t('tasks.save')}
+          </button>
+          <button
+            type="button"
+            className="btn--danger btn--sm"
+            onClick={() => void onDelete()}
+          >
+            {t('tasks.delete')}
+          </button>
+        </div>
       </form>
 
       <div className="row">

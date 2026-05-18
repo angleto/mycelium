@@ -305,6 +305,36 @@ export function TasksRoute() {
     setBulkMsg(t('tasks.bulkTagDone'))
   }
 
+  async function delTask(tk: Task) {
+    if (!window.confirm(t('tasks.confirmDelete', { title: tk.title }))) return
+    setErr(null)
+    setBulkMsg(null)
+    const { error } = await api.POST('/tasks/{task_id}/delete', {
+      params: { header: workspaceHeader(), path: { task_id: tk.id } },
+      body: { expected_version: tk.version },
+    })
+    if (error) setErr(errMessage(error))
+    await loadTasks()
+  }
+
+  async function bulkDelete() {
+    const picked = tasks.filter((x) => sel.has(x.id))
+    if (picked.length === 0) return
+    if (!window.confirm(t('tasks.confirmDeleteN', { n: picked.length }))) return
+    setErr(null)
+    let done = 0
+    for (const tk of picked) {
+      const { error } = await api.POST('/tasks/{task_id}/delete', {
+        params: { header: workspaceHeader(), path: { task_id: tk.id } },
+        body: { expected_version: tk.version },
+      })
+      if (!error) done += 1
+    }
+    setSel(new Set())
+    await loadTasks()
+    setBulkMsg(t('tasks.bulkResult', { applied: done, skipped: picked.length - done }))
+  }
+
   const activeTag = tags.find((x) => x.id === filter)
   const ql = q.trim().toLowerCase()
   const shown = ql
@@ -508,6 +538,13 @@ export function TasksRoute() {
               >
                 {t('tasks.bulkRemoveTag')}
               </button>
+              <button
+                type="button"
+                className="btn--danger btn--sm"
+                onClick={() => void bulkDelete()}
+              >
+                {t('tasks.bulkDelete')}
+              </button>
             </>
           )}
         </div>
@@ -577,6 +614,14 @@ export function TasksRoute() {
                     title={onThis ? t('tasks.stop') : t('tasks.start')}
                   >
                     {onThis ? `⏱■ ${hms(elapsed)}` : '⏱▶'}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn--ghost btn--sm"
+                    onClick={() => void delTask(tk)}
+                    title={t('tasks.delete')}
+                  >
+                    🗑
                   </button>
                 </span>
               </li>
