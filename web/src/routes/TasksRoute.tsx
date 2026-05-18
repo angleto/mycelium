@@ -38,11 +38,6 @@ export function TasksRoute() {
   const [q, setQ] = useState('')
   const [clientId, setClientId] = useState('')
   const [projectId, setProjectId] = useState('')
-  const [addCli, setAddCli] = useState(false)
-  const [addProj, setAddProj] = useState(false)
-  const [cName, setCName] = useState('')
-  const [cLegal, setCLegal] = useState('')
-  const [pName, setPName] = useState('')
   const [running, setRunning] = useState<Running[]>([])
   const [now, setNow] = useState<number>(() => Date.now())
   const [busy, setBusy] = useState(false)
@@ -79,11 +74,6 @@ export function TasksRoute() {
     }
     setTasks(data)
   }, [filter])
-
-  const loadTags = useCallback(async () => {
-    const { data } = await api.GET('/tags', { params: { header: workspaceHeader() } })
-    if (data) setTags(data)
-  }, [])
 
   useEffect(() => {
     let active = true
@@ -182,46 +172,6 @@ export function TasksRoute() {
     setTitle('')
     setDue('')
     await loadTasks()
-  }
-
-  async function onAddClient() {
-    if (!cName) return
-    setErr(null)
-    const { data, error } = await api.POST('/clients', {
-      params: { header: workspaceHeader() },
-      body: { name: cName, ragione_sociale: cLegal || cName },
-    })
-    if (error || !data) {
-      setErr(errMessage(error))
-      return
-    }
-    setCName('')
-    setCLegal('')
-    setAddCli(false)
-    await loadTags()
-    setClientId(data.id)
-  }
-
-  async function onAddProject() {
-    if (!pName) return
-    setErr(null)
-    const { data, error } = await api.POST('/projects', {
-      params: { header: workspaceHeader() },
-      body: {
-        name: pName,
-        client_tag_id: clientId || null,
-        valuta: 'EUR',
-        default_billable: true,
-      },
-    })
-    if (error || !data) {
-      setErr(errMessage(error))
-      return
-    }
-    setPName('')
-    setAddProj(false)
-    await loadTags()
-    setProjectId(data.id)
   }
 
   async function toggleTimer(taskId: string) {
@@ -434,14 +384,6 @@ export function TasksRoute() {
             ))}
           </select>
         </label>
-        <button
-          type="button"
-          className="btn--ghost btn--sm"
-          onClick={() => setAddCli((v) => !v)}
-          title={t('tasks.addClient')}
-        >
-          +
-        </button>
         <label>
           {t('tasks.project')}
           <select value={projectId} onChange={(e) => setProjectId(e.target.value)}>
@@ -453,48 +395,14 @@ export function TasksRoute() {
             ))}
           </select>
         </label>
-        <button
-          type="button"
-          className="btn--ghost btn--sm"
-          onClick={() => setAddProj((v) => !v)}
-          title={t('tasks.addProject')}
-        >
-          +
-        </button>
         <button type="submit" disabled={busy}>
           {busy ? t('tasks.saving') : t('tasks.create')}
         </button>
       </form>
-
-      {addCli && (
-        <div className="row">
-          <input
-            placeholder={t('tasks.newClientName')}
-            value={cName}
-            onChange={(e) => setCName(e.target.value)}
-          />
-          <input
-            placeholder={t('tasks.legalName')}
-            value={cLegal}
-            onChange={(e) => setCLegal(e.target.value)}
-          />
-          <button type="button" className="btn--sm" onClick={() => void onAddClient()}>
-            {t('tasks.addInline')}
-          </button>
-        </div>
-      )}
-      {addProj && (
-        <div className="row">
-          <input
-            placeholder={t('tasks.newProjectName')}
-            value={pName}
-            onChange={(e) => setPName(e.target.value)}
-          />
-          <button type="button" className="btn--sm" onClick={() => void onAddProject()}>
-            {t('tasks.addInline')}
-          </button>
-        </div>
-      )}
+      <p className="hint">
+        {t('tasks.cpManaged')}{' '}
+        <Link to="/clients">{t('cp.nav')}</Link>
+      </p>
 
       <div className="row">
         <input
