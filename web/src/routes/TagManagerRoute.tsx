@@ -38,30 +38,36 @@ function TagRow({ tag, onChanged }: { tag: Tag; onChanged: () => void }) {
   return (
     <li>
       <TagChip name={name} color={color} kind={tag.kind} />
-      {!archived && (
-        <>
-          <input value={name} onChange={(e) => setName(e.target.value)} />
-          <input
-            type="color"
-            value={/^#[0-9a-fA-F]{6}$/.test(color) ? color : '#6d28d9'}
-            onChange={(e) => setColor(e.target.value)}
-            aria-label={t('tagmgr.color')}
-          />
-          <button
-            type="button"
-            className="btn--sm"
-            onClick={() => void patch({ name, color })}
-          >
-            {t('tagmgr.save')}
-          </button>
-          <button
-            type="button"
-            className="btn--ghost btn--sm"
-            onClick={() => void patch({ status: 'archived' })}
-          >
-            {t('tagmgr.archive')}
-          </button>
-        </>
+      <input value={name} onChange={(e) => setName(e.target.value)} />
+      <input
+        type="color"
+        value={/^#[0-9a-fA-F]{6}$/.test(color) ? color : '#6d28d9'}
+        onChange={(e) => setColor(e.target.value)}
+        aria-label={t('tagmgr.color')}
+      />
+      <button
+        type="button"
+        className="btn--sm"
+        onClick={() => void patch({ name, color })}
+      >
+        {t('tagmgr.save')}
+      </button>
+      {archived ? (
+        <button
+          type="button"
+          className="btn--sm"
+          onClick={() => void patch({ status: 'active' })}
+        >
+          {t('tagmgr.unarchive')}
+        </button>
+      ) : (
+        <button
+          type="button"
+          className="btn--ghost btn--sm"
+          onClick={() => void patch({ status: 'archived' })}
+        >
+          {t('tagmgr.archive')}
+        </button>
       )}
       <span className="muted">
         {tag.kind}
@@ -79,6 +85,7 @@ export function TagManagerRoute() {
   const activeId = session?.workspaceId
   const [tags, setTags] = useState<Tag[] | null>(null)
   const [name, setName] = useState('')
+  const [showArchived, setShowArchived] = useState(false)
   const [err, setErr] = useState<string | null>(null)
 
   const load = useCallback(async () => {
@@ -132,17 +139,32 @@ export function TagManagerRoute() {
           onChange={(e) => setName(e.target.value)}
         />
         <button type="submit">+</button>
+        <label className="row">
+          <input
+            type="checkbox"
+            checked={showArchived}
+            onChange={(e) => setShowArchived(e.target.checked)}
+          />
+          {t('tagmgr.showArchived')}
+        </label>
       </form>
       {tags === null ? (
         <p>{t('tagmgr.loading')}</p>
-      ) : tags.length === 0 ? (
-        <p className="hint">{t('tagmgr.none')}</p>
       ) : (
-        <ul className="list">
-          {tags.map((tg) => (
-            <TagRow key={tg.id} tag={tg} onChanged={() => void load()} />
-          ))}
-        </ul>
+        (() => {
+          const visible = tags.filter(
+            (tg) => showArchived || tg.status !== 'archived',
+          )
+          return visible.length === 0 ? (
+            <p className="hint">{t('tagmgr.none')}</p>
+          ) : (
+            <ul className="list">
+              {visible.map((tg) => (
+                <TagRow key={tg.id} tag={tg} onChanged={() => void load()} />
+              ))}
+            </ul>
+          )
+        })()
       )}
     </section>
   )

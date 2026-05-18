@@ -24,6 +24,8 @@ export const en = {
     rename: 'Rename',
     color: 'Color',
     archive: 'Archive',
+    unarchive: 'Unarchive',
+    showArchived: 'Show archived',
     archived: 'archived',
     save: 'Save',
     saved: 'Saved.',

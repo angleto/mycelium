@@ -23,6 +23,8 @@ export const it: Catalog = {
     rename: 'Rinomina',
     color: 'Colore',
     archive: 'Archivia',
+    unarchive: 'Ripristina',
+    showArchived: 'Mostra archiviati',
     archived: 'archiviato',
     save: 'Salva',
     saved: 'Salvato.',

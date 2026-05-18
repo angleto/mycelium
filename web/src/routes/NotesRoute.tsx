@@ -1,8 +1,9 @@
-import { useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { mentionLink } from '../lib/mentions'
 import { api, errMessage, workspaceHeader } from '../api/client'
+import { useSession } from '../auth/useSession'
 import { RichEditor } from '../components/RichEditor'
 import { MarkdownView } from '../components/Markdown'
 import type { components } from '../api/schema'
@@ -13,12 +14,13 @@ type Kind = components['schemas']['NoteKind']
 
 const KINDS: Kind[] = ['text', 'voice', 'conversation']
 
-// No GET /notes list endpoint exists (tracked API gap), so created
-// notes are kept session-local. The canonical command is deterministic
-// and offline (ADR-0021, not metered); conversation replies use the
-// LLM (metered) and need a provider configured on the server.
+// Real GET /notes list (newest first; titles auto-derived). The
+// canonical command is deterministic/offline (ADR-0021, not metered);
+// conversation replies use the LLM (metered) and need a provider.
 export function NotesRoute() {
   const { t } = useTranslation()
+  const session = useSession()
+  const activeId = session?.workspaceId
   const [kind, setKind] = useState<Kind>('text')
   const [title, setTitle] = useState('')
   const [text, setText] = useState('')
@@ -31,9 +33,25 @@ export function NotesRoute() {
   const [err, setErr] = useState<string | null>(null)
   const [made, setMade] = useState<{ id: string; title: string } | null>(null)
 
-  function remember(n: Note) {
-    setCreated((xs) => [n, ...xs.filter((x) => x.id !== n.id)])
-  }
+  const loadNotes = useCallback(async () => {
+    const { data } = await api.GET('/notes', {
+      params: { header: workspaceHeader() },
+    })
+    if (data) setCreated(data)
+  }, [])
+
+  useEffect(() => {
+    let active = true
+    void (async () => {
+      const { data } = await api.GET('/notes', {
+        params: { header: workspaceHeader() },
+      })
+      if (active && data) setCreated(data)
+    })()
+    return () => {
+      active = false
+    }
+  }, [activeId])
 
   async function onCreate(e: FormEvent) {
     e.preventDefault()
@@ -46,7 +64,7 @@ export function NotesRoute() {
       setErr(errMessage(error))
       return
     }
-    remember(data)
+    await loadNotes()
     setText('')
     setTitle('')
   }
@@ -62,7 +80,7 @@ export function NotesRoute() {
       setErr(errMessage(error))
       return
     }
-    remember(data)
+    await loadNotes()
     setCmd('')
   }
 
@@ -76,7 +94,7 @@ export function NotesRoute() {
       setErr(errMessage(error))
       return
     }
-    remember(data)
+    await loadNotes()
   }
 
   async function openNote(n: Note) {
