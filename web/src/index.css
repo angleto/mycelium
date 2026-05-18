@@ -402,6 +402,15 @@ button.btn--danger:hover {
 .switcher select {
   font-weight: 600;
 }
+.swatch {
+  display: inline-block;
+  width: 0.7rem;
+  height: 0.7rem;
+  border-radius: 3px;
+  border: 1px solid var(--border);
+  vertical-align: middle;
+}
+
 .banner {
   display: flex;
   align-items: center;

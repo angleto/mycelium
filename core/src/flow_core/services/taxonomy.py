@@ -37,6 +37,8 @@ class ClientInput:
     nazione: str | None = None
     codice_destinatario: str | None = None
     pec: str | None = None
+    description: str | None = None
+    default_billable: bool = True
 
 
 async def _insert_tag(
@@ -104,6 +106,8 @@ async def create_client(
             nazione=profile.nazione,
             codice_destinatario=profile.codice_destinatario,
             pec=profile.pec,
+            description=profile.description,
+            default_billable=profile.default_billable,
         )
     )
     await session.flush()
@@ -176,7 +180,8 @@ async def create_project(
     tariffa: Decimal | None = None,
     valuta: str = "EUR",
     budget: Decimal | None = None,
-    default_billable: bool = True,
+    color: str | None = None,
+    description: str | None = None,
 ) -> Tag:
     await require_role(session, org_id, actor_id, Role.admin)
     if client_tag_id is None:
@@ -199,7 +204,8 @@ async def create_project(
             tariffa=tariffa,
             valuta=valuta,
             budget=budget,
-            default_billable=default_billable,
+            color=color,
+            description=description,
         )
     )
     await session.flush()
@@ -301,7 +307,7 @@ async def update_project(
     fields: dict[str, object] | None = None,
 ) -> None:
     """Edit a project's name and its profile (rate/currency/budget/
-    default_billable/client link)."""
+    color/description/client link). Billable is a client default now."""
     await require_role(session, org_id, actor_id, Role.admin)
     tag = await get_tag(session, org_id=org_id, tag_id=tag_id)
     if tag.kind is not TagKind.project:

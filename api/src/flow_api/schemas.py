@@ -213,6 +213,8 @@ class ClientCreateIn(BaseModel):
     nazione: str | None = Field(default=None, max_length=2)
     codice_destinatario: str | None = Field(default=None, max_length=7)
     pec: str | None = Field(default=None, max_length=320)
+    description: str | None = None
+    default_billable: bool = True
 
 
 class ProjectCreateIn(BaseModel):
@@ -221,7 +223,8 @@ class ProjectCreateIn(BaseModel):
     tariffa: Decimal | None = None
     valuta: str = Field(default="EUR", max_length=3)
     budget: Decimal | None = None
-    default_billable: bool = True
+    color: str | None = Field(default=None, max_length=16)
+    description: str | None = None
 
 
 class ClientPatchIn(BaseModel):
@@ -237,6 +240,8 @@ class ClientPatchIn(BaseModel):
     nazione: str | None = Field(default=None, max_length=2)
     codice_destinatario: str | None = Field(default=None, max_length=7)
     pec: str | None = Field(default=None, max_length=320)
+    description: str | None = None
+    default_billable: bool | None = None
 
 
 class ClientOut(BaseModel):
@@ -255,6 +260,8 @@ class ClientOut(BaseModel):
     nazione: str | None
     codice_destinatario: str | None
     pec: str | None
+    description: str | None
+    default_billable: bool
 
 
 class ProjectPatchIn(BaseModel):
@@ -263,7 +270,8 @@ class ProjectPatchIn(BaseModel):
     tariffa: Decimal | None = None
     valuta: str | None = Field(default=None, max_length=3)
     budget: Decimal | None = None
-    default_billable: bool | None = None
+    color: str | None = Field(default=None, max_length=16)
+    description: str | None = None
 
 
 class ProjectOut(BaseModel):
@@ -275,7 +283,8 @@ class ProjectOut(BaseModel):
     tariffa: Decimal | None
     valuta: str
     budget: Decimal | None
-    default_billable: bool
+    color: str | None
+    description: str | None
 
 
 class TaskCreateIn(BaseModel):

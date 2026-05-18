@@ -19,12 +19,13 @@ const CLIENT_FIELDS: Array<keyof Client> = [
   'nazione',
   'codice_destinatario',
   'pec',
+  'description',
 ]
 
 // Manage clients and projects (tags + their satellite profiles).
-// Clients carry the invoicing card; projects carry the automatic
-// properties (rate/currency/budget/default billable/client link)
-// that tasks inherit.
+// Clients carry the invoicing card + the billable default (billing is
+// a client relationship); projects carry rate/currency/budget, an
+// optional colour and a description (AI context) + the client link.
 export function ClientsProjectsRoute() {
   const { t } = useTranslation()
   const session = useSession()
@@ -81,7 +82,7 @@ export function ClientsProjectsRoute() {
     setErr(null)
     const { error } = await api.POST('/clients', {
       params: { header: workspaceHeader() },
-      body: { name: cName, ragione_sociale: cRag },
+      body: { name: cName, ragione_sociale: cRag, default_billable: true },
     })
     if (error) return setErr(errMessage(error))
     setCName('')
@@ -98,7 +99,6 @@ export function ClientsProjectsRoute() {
         name: pName,
         client_tag_id: pClient || null,
         valuta: 'EUR',
-        default_billable: true,
       },
     })
     if (error) return setErr(errMessage(error))
@@ -162,7 +162,10 @@ export function ClientsProjectsRoute() {
         {clients.map((c) => (
           <li key={c.id}>
             <strong>{c.name}</strong>{' '}
-            <span className="muted">· {c.ragione_sociale}</span>
+            <span className="muted">
+              · {c.ragione_sociale} ·{' '}
+              {c.default_billable ? t('cp.billable') : t('cp.nonBillable')}
+            </span>
             <button
               type="button"
               className="btn--ghost btn--sm"
@@ -179,6 +182,7 @@ export function ClientsProjectsRoute() {
                   const fd = new FormData(e.currentTarget)
                   const patch: Record<string, unknown> = {
                     name: fd.get('name'),
+                    default_billable: fd.get('default_billable') === 'on',
                   }
                   for (const f of CLIENT_FIELDS)
                     patch[f] = (fd.get(f) as string) || null
@@ -190,10 +194,18 @@ export function ClientsProjectsRoute() {
                   <input
                     key={f}
                     name={f}
-                    defaultValue={c[f] ?? ''}
+                    defaultValue={(c[f] as string | null) ?? ''}
                     placeholder={t(`cp.f.${f}`)}
                   />
                 ))}
+                <label>
+                  <input
+                    type="checkbox"
+                    name="default_billable"
+                    defaultChecked={c.default_billable}
+                  />{' '}
+                  {t('cp.defaultBillable')}
+                </label>
                 <button type="submit" className="btn--sm">
                   {t('cp.save')}
                 </button>
@@ -225,10 +237,16 @@ export function ClientsProjectsRoute() {
         {projects.map((p) => (
           <li key={p.id}>
             <strong>{p.name}</strong>{' '}
+            {p.color && (
+              <span
+                className="swatch"
+                style={{ background: p.color }}
+                title={p.color}
+              />
+            )}{' '}
             <span className="muted">
               · {clientName(p.client_tag_id)} ·{' '}
-              {p.tariffa ? `${p.tariffa} ${p.valuta}` : t('cp.noRate')} ·{' '}
-              {p.default_billable ? t('cp.billable') : t('cp.nonBillable')}
+              {p.tariffa ? `${p.tariffa} ${p.valuta}` : t('cp.noRate')}
             </span>
             <button
               type="button"
@@ -250,7 +268,8 @@ export function ClientsProjectsRoute() {
                     tariffa: (fd.get('tariffa') as string) || null,
                     valuta: (fd.get('valuta') as string) || 'EUR',
                     budget: (fd.get('budget') as string) || null,
-                    default_billable: fd.get('default_billable') === 'on',
+                    color: (fd.get('color') as string) || null,
+                    description: (fd.get('description') as string) || null,
                   })
                 }}
               >
@@ -285,14 +304,18 @@ export function ClientsProjectsRoute() {
                   defaultValue={p.budget ?? ''}
                   placeholder={t('cp.budget')}
                 />
-                <label>
-                  <input
-                    type="checkbox"
-                    name="default_billable"
-                    defaultChecked={p.default_billable}
-                  />{' '}
-                  {t('cp.defaultBillable')}
-                </label>
+                <input
+                  name="color"
+                  type="color"
+                  defaultValue={p.color ?? '#888888'}
+                  title={t('cp.color')}
+                  style={{ width: '3rem', padding: 0 }}
+                />
+                <input
+                  name="description"
+                  defaultValue={p.description ?? ''}
+                  placeholder={t('cp.description')}
+                />
                 <button type="submit" className="btn--sm">
                   {t('cp.save')}
                 </button>

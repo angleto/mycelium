@@ -77,6 +77,8 @@ async def create_client(
         nazione=body.nazione,
         codice_destinatario=body.codice_destinatario,
         pec=body.pec,
+        description=body.description,
+        default_billable=body.default_billable,
     )
     tag = await taxonomy.create_client(
         ctx.session,
@@ -101,7 +103,8 @@ async def create_project(
         tariffa=body.tariffa,
         valuta=body.valuta,
         budget=body.budget,
-        default_billable=body.default_billable,
+        color=body.color,
+        description=body.description,
     )
     return _out(tag)
 
@@ -123,6 +126,8 @@ def _client_out(t: Tag, p: object) -> ClientOut:
         nazione=p.nazione,  # type: ignore[attr-defined]
         codice_destinatario=p.codice_destinatario,  # type: ignore[attr-defined]
         pec=p.pec,  # type: ignore[attr-defined]
+        description=p.description,  # type: ignore[attr-defined]
+        default_billable=p.default_billable,  # type: ignore[attr-defined]
     )
 
 
@@ -136,7 +141,8 @@ def _project_out(t: Tag, p: object) -> ProjectOut:
         tariffa=p.tariffa,  # type: ignore[attr-defined]
         valuta=p.valuta,  # type: ignore[attr-defined]
         budget=p.budget,  # type: ignore[attr-defined]
-        default_billable=p.default_billable,  # type: ignore[attr-defined]
+        color=p.color,  # type: ignore[attr-defined]
+        description=p.description,  # type: ignore[attr-defined]
     )
 
 

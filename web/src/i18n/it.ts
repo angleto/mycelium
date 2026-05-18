@@ -255,6 +255,8 @@ export const it: Catalog = {
     billable: 'fatturabile',
     nonBillable: 'non fatturabile',
     defaultBillable: 'Task fatturabili di default',
+    color: 'Colore',
+    description: 'Descrizione (contesto AI)',
     f: {
       ragione_sociale: 'Ragione sociale',
       codice_fiscale: 'Codice fiscale',
@@ -267,6 +269,7 @@ export const it: Catalog = {
       nazione: 'Nazione',
       codice_destinatario: 'Codice SDI',
       pec: 'PEC',
+      description: 'Descrizione (contesto AI)',
     },
   },
   workflows: {

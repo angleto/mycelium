@@ -6,7 +6,7 @@ from __future__ import annotations
 import uuid
 from decimal import Decimal
 
-from sqlalchemy import ForeignKey, Numeric, String
+from sqlalchemy import ForeignKey, Numeric, String, Text
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -36,8 +36,10 @@ class ProjectProfile(OrgScopedMixin, TimestampMixin, VersionMixin, Base):
     # (see time_tracking._amount).
     tariffa: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
     valuta: Mapped[str] = mapped_column(String(3), nullable=False, server_default="EUR")
-    # Automatic project property: its tasks are billable unless a task
-    # overrides via task.billable.
-    default_billable: Mapped[bool] = mapped_column(nullable=False, server_default="true")
+    # Optional UI colour (hex) and free description; the description is
+    # useful as AI context (docs/adr/0005). Billable is NOT here — it
+    # is a client-level default (see ClientProfile.default_billable).
+    color: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
     budget: Mapped[Decimal | None] = mapped_column(Numeric(14, 2), nullable=True)
     workflow_id: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)

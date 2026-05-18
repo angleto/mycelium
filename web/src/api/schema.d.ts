@@ -2467,6 +2467,13 @@ export interface components {
             codice_destinatario?: string | null;
             /** Pec */
             pec?: string | null;
+            /** Description */
+            description?: string | null;
+            /**
+             * Default Billable
+             * @default true
+             */
+            default_billable: boolean;
         };
         /** ClientOut */
         ClientOut: {
@@ -2503,6 +2510,10 @@ export interface components {
             codice_destinatario: string | null;
             /** Pec */
             pec: string | null;
+            /** Description */
+            description: string | null;
+            /** Default Billable */
+            default_billable: boolean;
         };
         /** ClientPatchIn */
         ClientPatchIn: {
@@ -2530,6 +2541,10 @@ export interface components {
             codice_destinatario?: string | null;
             /** Pec */
             pec?: string | null;
+            /** Description */
+            description?: string | null;
+            /** Default Billable */
+            default_billable?: boolean | null;
         };
         /** CommandIn */
         CommandIn: {
@@ -3652,11 +3667,10 @@ export interface components {
             valuta: string;
             /** Budget */
             budget?: number | string | null;
-            /**
-             * Default Billable
-             * @default true
-             */
-            default_billable: boolean;
+            /** Color */
+            color?: string | null;
+            /** Description */
+            description?: string | null;
         };
         /** ProjectOut */
         ProjectOut: {
@@ -3679,8 +3693,10 @@ export interface components {
             valuta: string;
             /** Budget */
             budget: string | null;
-            /** Default Billable */
-            default_billable: boolean;
+            /** Color */
+            color: string | null;
+            /** Description */
+            description: string | null;
         };
         /** ProjectPatchIn */
         ProjectPatchIn: {
@@ -3694,8 +3710,10 @@ export interface components {
             valuta?: string | null;
             /** Budget */
             budget?: number | string | null;
-            /** Default Billable */
-            default_billable?: boolean | null;
+            /** Color */
+            color?: string | null;
+            /** Description */
+            description?: string | null;
         };
         /** ProjectWorkflowIn */
         ProjectWorkflowIn: {

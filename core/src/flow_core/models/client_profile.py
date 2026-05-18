@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import ForeignKey, String
+from sqlalchemy import ForeignKey, String, Text
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -36,3 +36,9 @@ class ClientProfile(OrgScopedMixin, TimestampMixin, VersionMixin, Base):
     nazione: Mapped[str | None] = mapped_column(String(2), nullable=True)
     codice_destinatario: Mapped[str | None] = mapped_column(String(7), nullable=True)
     pec: Mapped[str | None] = mapped_column(String(320), nullable=True)
+    # Optional free description; useful as AI context (docs/adr/0005).
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Automatic billing default: a task is billable unless the task
+    # overrides it. Lives on the CLIENT (was on the project): billing
+    # is a client relationship, not a per-project trait.
+    default_billable: Mapped[bool] = mapped_column(nullable=False, server_default="true")

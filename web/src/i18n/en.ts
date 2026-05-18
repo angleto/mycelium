@@ -256,6 +256,8 @@ export const en = {
     billable: 'billable',
     nonBillable: 'non-billable',
     defaultBillable: 'Tasks billable by default',
+    color: 'Color',
+    description: 'Description (AI context)',
     f: {
       ragione_sociale: 'Legal name',
       codice_fiscale: 'Tax code',
@@ -268,6 +270,7 @@ export const en = {
       nazione: 'Country',
       codice_destinatario: 'SDI code',
       pec: 'PEC email',
+      description: 'Description (AI context)',
     },
   },
   workflows: {

@@ -28,6 +28,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from flow_core.concurrency import optimistic_update
 from flow_core.errors import DomainError, NotFoundError
 from flow_core.i18n import MessageCode
+from flow_core.models.client_profile import ClientProfile
 from flow_core.models.membership import Role
 from flow_core.models.project_profile import ProjectProfile
 from flow_core.models.tag import Tag, TagKind
@@ -67,9 +68,9 @@ def _now() -> dt.datetime:
 async def _rate(
     session: AsyncSession, task_id: uuid.UUID
 ) -> tuple[Decimal | None, str, bool]:
-    """Rate + currency + the project's default_billable, snapshotted
-    from the task's project tag. Defaults (no project): no rate, EUR,
-    billable."""
+    """Rate + currency (from the task's project) + the billable default
+    (from that project's CLIENT — billing is a client relationship).
+    Defaults (no project / no client): no rate, EUR, billable."""
     project_tag_id = (
         await session.execute(
             select(Tag.id)
@@ -86,19 +87,28 @@ async def _rate(
     ).scalar_one_or_none()
     if prof is None:
         return (None, "EUR", True)
-    return (prof.tariffa, prof.valuta, prof.default_billable)
+    client_billable = True
+    if prof.client_tag_id is not None:
+        cp = (
+            await session.execute(
+                select(ClientProfile).where(ClientProfile.tag_id == prof.client_tag_id)
+            )
+        ).scalar_one_or_none()
+        if cp is not None:
+            client_billable = cp.default_billable
+    return (prof.tariffa, prof.valuta, client_billable)
 
 
 def _effective_billable(
-    explicit: bool | None, task: Task, project_default: bool
+    explicit: bool | None, task: Task, client_default: bool
 ) -> bool:
-    """Explicit arg wins; else the task override; else the project's
-    default_billable (true with no project)."""
+    """Explicit arg wins; else the task override; else the client's
+    default_billable (true with no client)."""
     if explicit is not None:
         return explicit
     if task.billable is not None:
         return task.billable
-    return project_default
+    return client_default
 
 
 async def _touch_actual_start(session: AsyncSession, task_id: uuid.UUID, ts: dt.datetime) -> None:
@@ -227,8 +237,8 @@ async def start_timer(
             await _stop_entry(
                 session, org_id=org_id, actor_id=actor_id, entry=current
             )
-    rate, currency, proj_billable = await _rate(session, task_id)
-    eff_billable = _effective_billable(billable, task, proj_billable)
+    rate, currency, client_billable = await _rate(session, task_id)
+    eff_billable = _effective_billable(billable, task, client_billable)
     started = _now()
     entry = TimeEntry(
         org_id=org_id,
@@ -310,8 +320,8 @@ async def add_manual_entry(
         ended_at = started_at + dt.timedelta(seconds=seconds)
     else:
         raise DomainError(MessageCode.TIME_ENTRY_INVALID)
-    rate, currency, proj_billable = await _rate(session, task_id)
-    eff_billable = _effective_billable(billable, task, proj_billable)
+    rate, currency, client_billable = await _rate(session, task_id)
+    eff_billable = _effective_billable(billable, task, client_billable)
     entry = TimeEntry(
         org_id=org_id,
         task_id=task_id,
