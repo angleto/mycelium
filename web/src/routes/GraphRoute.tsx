@@ -51,7 +51,7 @@ export function GraphRoute() {
   const [graph, setGraph] = useState<Graph | null>(null)
   const [deps, setDeps] = useState<Dep[]>([])
   const [scope, setScope] = useState<'all' | 'mine' | 'ai'>('all')
-  const [tagFilter, setTagFilter] = useState('')
+  const [tagFilter, setTagFilter] = useState<Set<string>>(new Set())
   const [from, setFrom] = useState<string | null>(null)
   const [err, setErr] = useState<string | null>(null)
 
@@ -98,7 +98,10 @@ export function GraphRoute() {
     const tk = taskById.get(id)
     if (scope === 'mine' && tk?.executor_kind !== 'human') return false
     if (scope === 'ai' && tk?.executor_kind !== 'llm_agent') return false
-    if (tagFilter && !(tk?.tags ?? []).some((g) => g.id === tagFilter)) return false
+    // Multi-tag: AND — the task must carry every selected tag.
+    for (const tid of tagFilter) {
+      if (!(tk?.tags ?? []).some((g) => g.id === tid)) return false
+    }
     return true
   }
 
@@ -200,17 +203,39 @@ export function GraphRoute() {
             <option value="ai">{t('graph.scopeAi')}</option>
           </select>
         </label>
-        <label>
-          {t('tasks.filterTag')}
-          <select value={tagFilter} onChange={(e) => setTagFilter(e.target.value)}>
-            <option value="">{t('graph.scopeAll')}</option>
-            {allTags.map((g) => (
-              <option key={g.id} value={g.id}>
-                {g.name}
-              </option>
-            ))}
-          </select>
-        </label>
+      </div>
+      <div className="row" style={{ flexWrap: 'wrap' }}>
+        <span className="muted">{t('tasks.filterTag')}:</span>
+        {allTags.map((g) => {
+          const on = tagFilter.has(g.id)
+          return (
+            <button
+              key={g.id}
+              type="button"
+              className={on ? 'chip' : 'chip--rm'}
+              onClick={() =>
+                setTagFilter((s) => {
+                  const n = new Set(s)
+                  if (n.has(g.id)) n.delete(g.id)
+                  else n.add(g.id)
+                  return n
+                })
+              }
+            >
+              {g.name}
+              {on ? ' ✕' : ''}
+            </button>
+          )
+        })}
+        {tagFilter.size > 0 && (
+          <button
+            type="button"
+            className="btn--ghost btn--sm"
+            onClick={() => setTagFilter(new Set())}
+          >
+            {t('graph.scopeAll')}
+          </button>
+        )}
       </div>
       {err && <p className="err">{err}</p>}
 

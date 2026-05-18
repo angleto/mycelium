@@ -501,13 +501,15 @@ button.btn--danger:hover {
 .switcher select {
   font-weight: 600;
 }
-/* ---- note list row (two rows: title / tags + actions) ---- */
-.noteitem {
-  display: flex;
+/* ---- note list row: two left-aligned rows. Overrides the generic
+   .list li (which centers and right-floats buttons). ---- */
+.list li.noteitem {
   flex-direction: column;
-  gap: 0.3rem;
-  padding: 0.55rem 0;
-  border-bottom: 1px solid var(--border);
+  align-items: stretch;
+  gap: 0.35rem;
+}
+.noteitem button {
+  margin-left: 0; /* cancel `.list li button { margin-left:auto }` */
 }
 .noteitem__main {
   display: flex;
@@ -531,7 +533,6 @@ button.btn--danger:hover {
 .noteitem__meta {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 0.6rem;
   flex-wrap: wrap;
 }
@@ -544,6 +545,7 @@ button.btn--danger:hover {
   display: flex;
   gap: 0.35rem;
   flex-wrap: wrap;
+  margin-left: auto; /* group actions to the right of row 2 */
 }
 
 .list.nested {
