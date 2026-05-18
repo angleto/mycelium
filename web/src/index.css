@@ -204,3 +204,36 @@ button:disabled {
   color: var(--accent);
   text-decoration: none;
 }
+
+.dag {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin: 0.75rem 0;
+  max-height: 60vh;
+}
+.dag__node {
+  fill: var(--surface);
+  stroke: var(--border);
+}
+.dag__node--blocked {
+  stroke: var(--err);
+  stroke-width: 2;
+}
+.dag__edge {
+  stroke: var(--text);
+  stroke-width: 1.5;
+  opacity: 0.5;
+}
+.dag__lbl {
+  fill: var(--text);
+  font-size: 11px;
+}
+.dag__title {
+  fill: var(--text-h);
+  font-size: 12px;
+  font-weight: 600;
+}
+.dag__state {
+  fill: var(--text);
+  font-size: 11px;
+}

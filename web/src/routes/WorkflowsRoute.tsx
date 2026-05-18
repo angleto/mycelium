@@ -1,0 +1,181 @@
+import { useCallback, useEffect, useState, type FormEvent } from 'react'
+import { useTranslation } from 'react-i18next'
+import { api, errMessage, workspaceHeader } from '../api/client'
+import { useSession } from '../auth/useSession'
+import type { components } from '../api/schema'
+
+type Workflow = components['schemas']['WorkflowOut']
+type StateRow = { name: string; is_initial: boolean; is_terminal: boolean }
+type Transition = { from_state: string; to_state: string }
+
+// WorkflowDefinition editor. The backend enforces "exactly one initial
+// state" (workflow.invalid) and the transition rules; errors surface
+// here verbatim from the i18n catalog.
+export function WorkflowsRoute() {
+  const { t } = useTranslation()
+  const session = useSession()
+  const activeId = session?.workspaceId
+  const [list, setList] = useState<Workflow[]>([])
+  const [name, setName] = useState('')
+  const [states, setStates] = useState<StateRow[]>([
+    { name: 'todo', is_initial: true, is_terminal: false },
+    { name: 'done', is_initial: false, is_terminal: true },
+  ])
+  const [transitions, setTransitions] = useState<Transition[]>([
+    { from_state: 'todo', to_state: 'done' },
+  ])
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+
+  const load = useCallback(async () => {
+    const { data, error } = await api.GET('/workflows', {
+      params: { header: workspaceHeader() },
+    })
+    if (error || !data) {
+      setErr(errMessage(error))
+      return
+    }
+    setList(data)
+  }, [])
+
+  useEffect(() => {
+    let active = true
+    void (async () => {
+      const { data } = await api.GET('/workflows', {
+        params: { header: workspaceHeader() },
+      })
+      if (active && data) setList(data)
+    })()
+    return () => {
+      active = false
+    }
+  }, [activeId])
+
+  function setState(i: number, patch: Partial<StateRow>) {
+    setStates((rs) => rs.map((r, j) => (j === i ? { ...r, ...patch } : r)))
+  }
+
+  async function onCreate(e: FormEvent) {
+    e.preventDefault()
+    setBusy(true)
+    setErr(null)
+    const { error } = await api.POST('/workflows', {
+      params: { header: workspaceHeader() },
+      body: {
+        name,
+        states: states.map((s, i) => ({
+          name: s.name,
+          ord: i,
+          is_initial: s.is_initial,
+          is_terminal: s.is_terminal,
+        })),
+        transitions,
+      },
+    })
+    setBusy(false)
+    if (error) {
+      setErr(errMessage(error))
+      return
+    }
+    setName('')
+    await load()
+  }
+
+  return (
+    <section className="card">
+      <h1>{t('workflows.title')}</h1>
+      {list.length === 0 ? (
+        <p className="hint">{t('workflows.none')}</p>
+      ) : (
+        <ul className="list">
+          {list.map((w) => (
+            <li key={w.id}>
+              {w.name}
+              {w.is_default && <span className="muted"> · {t('workflows.isDefault')}</span>}
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <form onSubmit={(e) => void onCreate(e)}>
+        <label>
+          {t('workflows.name')}
+          <input required value={name} onChange={(e) => setName(e.target.value)} />
+        </label>
+
+        <h2>{t('workflows.states')}</h2>
+        {states.map((s, i) => (
+          <div className="row" key={i}>
+            <input
+              required
+              placeholder={t('workflows.stateName')}
+              value={s.name}
+              onChange={(e) => setState(i, { name: e.target.value })}
+            />
+            <label>
+              <input
+                type="checkbox"
+                checked={s.is_initial}
+                onChange={(e) => setState(i, { is_initial: e.target.checked })}
+              />{' '}
+              {t('workflows.initial')}
+            </label>
+            <label>
+              <input
+                type="checkbox"
+                checked={s.is_terminal}
+                onChange={(e) => setState(i, { is_terminal: e.target.checked })}
+              />{' '}
+              {t('workflows.terminal')}
+            </label>
+          </div>
+        ))}
+        <button
+          type="button"
+          onClick={() =>
+            setStates((rs) => [...rs, { name: '', is_initial: false, is_terminal: false }])
+          }
+        >
+          {t('workflows.addState')}
+        </button>
+
+        <h2>{t('workflows.transitions')}</h2>
+        {transitions.map((tr, i) => (
+          <div className="row" key={i}>
+            <input
+              placeholder={t('workflows.from')}
+              value={tr.from_state}
+              onChange={(e) =>
+                setTransitions((xs) =>
+                  xs.map((x, j) => (j === i ? { ...x, from_state: e.target.value } : x)),
+                )
+              }
+            />
+            <input
+              placeholder={t('workflows.to')}
+              value={tr.to_state}
+              onChange={(e) =>
+                setTransitions((xs) =>
+                  xs.map((x, j) => (j === i ? { ...x, to_state: e.target.value } : x)),
+                )
+              }
+            />
+          </div>
+        ))}
+        <button
+          type="button"
+          onClick={() =>
+            setTransitions((xs) => [...xs, { from_state: '', to_state: '' }])
+          }
+        >
+          {t('workflows.addTransition')}
+        </button>
+
+        {err && <p className="err">{err}</p>}
+        <button type="submit" disabled={busy}>
+          {busy ? t('workflows.creating') : t('workflows.create')}
+        </button>
+      </form>
+    </section>
+  )
+}

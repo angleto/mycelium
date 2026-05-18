@@ -23,6 +23,8 @@ export function AppShell() {
         <WorkspaceSwitcher />
         <div className="shell__actions">
           <Link to="/tasks">{t('tasks.nav')}</Link>
+          <Link to="/workflows">{t('workflows.nav')}</Link>
+          <Link to="/graph">{t('graph.nav')}</Link>
           <Link to="/settings">{t('nav.settings')}</Link>
           <label className="shell__lang">
             {t('nav.language')}{' '}
