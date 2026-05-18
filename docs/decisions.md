@@ -1,54 +1,52 @@
-# Decisioni
+# Decisions
 
-Decisioni di prodotto e architettura, consolidate e bloccate. Il
-*perche* e le alternative scartate sono negli [ADR](adr/README.md).
+Product and architecture decisions, consolidated and locked. The *why*
+and the rejected alternatives are in the [ADRs](adr/README.md).
 
-## Tabella decisioni
+## Decisions table
 
-| # | Tema | Decisione |
+| # | Topic | Decision |
 |---|---|---|
-| 1/A | Fatturazione SDI | v1 solo B2B/B2C (PA differita). Canale unico condiviso; Flow trasmittente/intermediario sotto mandato per-Org; identita tenant nel payload FatturaPA; conservazione = servizio AdE gratuito (adesione per-tenant); introdotta per fasi |
-| 2/B | Auth email | Gmail OAuth2; Proton via sidecar Bridge; IMAP/SMTP generico |
-| 3 | Scheduling | CPM logico deterministico + serializzazione per-persona dei task umani non delegati attorno agli appuntamenti; non RCPSP generico |
-| 4 | Workflow stati | Configurabili per Org, override per progetto |
-| 5 | Dipendenze | 4 tipi (FS/SS/FF/SF) + lag/lead in tempo-calendario |
-| 6 | Concorrenza | Optimistic concurrency via `version` (conflitto = 409) + activity log append-only; niente last-write-wins |
-| 7 | Notifiche | Telegram + email; canali aggiuntivi predisposti |
-| 8 | Migrazione | Nessuna |
-| 9 | Memoria | Gerarchica su pgvector; isolamento duro per (org, progetto) |
-| 10 | Mobile | Web responsive ora; API-first per mobile futuro |
-| 11 | Hosting | Cloud, PostgreSQL, nodo ARM; design K8s-ready |
-| 12 | Nome | "Flow" |
-| 13 | Tag | Un solo concetto `tag` con `kind`; client/project con profili tipizzati satellite (FK a `tag.id`), non JSONB libero |
-| C | Embedding | Locale, astrazione `Embedder` pluggable, job di re-embedding |
-| D | Retrieval | Hybrid lessicale + semantico baseline, fusione RRF (k circa 60), scope (org, progetto) |
-| E | Astrazione LLM/Embedding | Riusa il pattern di bitvision_phoenix; Flow aggiunge `EmbedderProvider` |
-| F | Isolamento memoria | Confine duro per (org, progetto): RLS obbligatoria + partizione + predicato; mai per sola rilevanza |
-| G | No-ubiquita | Entita `events`; appuntamenti della stessa persona non si sovrappongono (rifiuto) |
-| H | Esecutore | `task.executor` = utente umano (seriale) o agente LLM (parallelo, esente dalla timeline umana) |
-| I | Assistente pianificazione | Layer advisory core v1 sopra lo scheduler: nucleo deterministico (fattibilita + ranking + selezione vincolata), LLM/MCP come frontend in linguaggio naturale |
-| J | Dominio personale + budget | Modellati in v1: task con costo/luogo/contesto/necessita; budget envelope per periodo/categoria; selezione deterministica entro budget (knapsack a priorita) |
-| K | Memoria avanzata | Tiering per frequenza/recency/importanza (cold sempre recuperabile, raro != non importante); grader correttivo senza ramo web; retrieval come tool MCP agentico; grafo strutturale non testuale; multimodale differito (ADR-0016) |
-| L | Archive backup target | Doppia copia DB + store esterno via `ArchiveBackupTarget` pluggable, async/idempotente, separato dalla conservazione legale (ADR-0010). v1 = object storage S3 EU; Proton Drive backend sperimentale via sidecar rclone, poi SDK ufficiale Proton (ADR-0018) |
-| M | Metering e crediti | Billing a crediti: wallet per org + ledger append-only idempotente + check-and-debit atomico; rate card per modello (riuso pattern bitvision); locale/nostra-chiave/BYOK con basi di costo distinte (BYOK = fee piattaforma configurabile); storage DB e S3 a rate distinti; admin aggiunge crediti; a crediti zero stop alle operazioni a costo, accesso/export/dati legali preservati (ADR-0019) |
-| N | Note vocali e cattura | `Note` (voice/text/conversation); cattura offline-first PWA -> S3 non metered (anche a crediti zero/offline); STT pluggable locale-default (esterno opt-in+audit); l'LLM risponde (online dal vivo, offline differito + notifica FR-12); TTS voce-out in v1 (`TtsProvider` pluggable, metered); brainstorming salvato come nota e in memoria; metering con unita generalizzata (refina ADR-0019); retention audio configurabile; fase F6b (ADR-0020) |
-| O | Command/intent layer | NL -> azione deterministica: grammatica canonica deterministica/offline/non-metered + fallback LLM metered; risoluzione progetto con conferma (mai mis-scoping, ADR-0007); scope default esplicito; voce/testo/MCP (ADR-0021) |
-| P | Attivazione hands-free | Pulsante cuffie/assistente OS richiede componente nativo; la PWA web non puo a schermo spento; hands-free = post web-v1 via app companion nativa (decisione #10, ADR-0022) |
+| 1/A | SDI invoicing | v1 B2B/B2C only (PA deferred). Single shared channel; Flow as transmitter/intermediary under a per-Org mandate; tenant identity in the FatturaPA payload; conservation = free AdE service (per-tenant adhesion); introduced in phases |
+| 2/B | Email auth | Gmail OAuth2; Proton via Bridge sidecar; generic IMAP/SMTP |
+| 3 | Scheduling | Deterministic logical CPM + per-person serialization of non-delegated human tasks around appointments; not generic RCPSP |
+| 4 | Workflow states | Configurable per Org, project override |
+| 5 | Dependencies | 4 types (FS/SS/FF/SF) + lag/lead in calendar time |
+| 6 | Concurrency | Optimistic concurrency via `version` (conflict = 409) + append-only activity log; no last-write-wins |
+| 7 | Notifications | Telegram + email; additional channels prepared |
+| 8 | Migration | None |
+| 9 | Memory | Hierarchical on pgvector; hard isolation per (org, project) |
+| 10 | Mobile | Responsive web now; API-first for future mobile |
+| 11 | Hosting | Cloud, PostgreSQL, ARM node; K8s-ready design |
+| 12 | Name | "Flow" |
+| 13 | Tag | A single `tag` concept with `kind`; client/project with typed satellite profiles (FK to `tag.id`), not free JSONB |
+| C | Embedding | Local, pluggable `Embedder` abstraction, re-embedding job |
+| D | Retrieval | Hybrid lexical + semantic baseline, RRF fusion (k ~ 60), (org, project) scope |
+| E | LLM/Embedding abstraction | Reuse the bitvision_phoenix pattern; Flow adds `EmbedderProvider` |
+| F | Memory isolation | Hard boundary per (org, project): mandatory RLS + partition + predicate; never relevance only |
+| G | No-ubiquity | `events` entity; the same person's appointments do not overlap (rejection) |
+| H | Executor | `task.executor` = human user (serial) or LLM agent (parallel, off the human timeline) |
+| I | Planning assistant | Advisory layer in the v1 core on top of the scheduler: deterministic core (feasibility + ranking + constrained selection), LLM/MCP as the natural-language frontend |
+| J | Personal domain + budget | Modeled in v1: tasks with cost/location/context/necessity; budget envelope per period/category; deterministic selection within budget (priority knapsack) |
+| K | Advanced memory | Tiering by frequency/recency/importance (cold always retrievable, rare != not important); corrective grader with no web branch; retrieval as an agentic MCP tool; structural, non-textual graph; multimodal deferred (ADR-0016) |
+| L | Archive backup target | Double copy DB + external store via a pluggable `ArchiveBackupTarget`, async/idempotent, separate from legal conservation (ADR-0010). v1 = S3 EU object storage; Proton Drive backend experimental via an rclone sidecar, then the official Proton SDK (ADR-0018) |
+| M | Metering and credits | Credit-based billing: per-org wallet + append-only idempotent ledger + atomic check-and-debit; per-model rate card (reuse the bitvision pattern); local/our-key/BYOK with distinct cost bases (BYOK = configurable platform fee); DB and S3 storage at distinct rates; admin tops up credits; at zero credits stop cost-incurring operations, access/export/legal data preserved (ADR-0019) |
+| N | Voice notes and capture | `Note` (voice/text/conversation); offline-first PWA capture -> S3, not metered (even at zero credits/offline); pluggable STT local-default (external opt-in+audit); the LLM replies (online live, offline deferred + notification FR-12); TTS voice-out in v1 (pluggable `TtsProvider`, metered); brainstorming saved as a note and into memory; metering with a generalized unit (refines ADR-0019); configurable audio retention; phase F6b (ADR-0020) |
+| O | Command/intent layer | NL -> deterministic action: a deterministic/offline/unmetered canonical grammar + a metered LLM fallback; project resolution with confirmation (never mis-scoping, ADR-0007); explicit default scope; voice/text/MCP (ADR-0021) |
+| P | Hands-free activation | A headphone button/OS assistant requires a native component; the web PWA cannot do it with the screen off; hands-free = post web-v1 via a native companion app (decision #10, ADR-0022) |
 
-## Decisioni di scope risolte
+## Resolved scope decisions
 
-1. SDI v1 = solo B2B/B2C. PA/B2G, firma, notifiche NE/DT/EC/SE e ciclo
-   passivo sono differiti post-v1.
-2. Conservazione = servizio AdE gratuito con adesione per-tenant. Flow
-   traccia e guida l'adesione; copertura effettiva da quando le fatture
-   transitano da SdI; le fatture da export manuale iniziale sono fuori
-   copertura, a carico del tenant.
-3. MVP stratificato accettato: tutto il resto completo da subito, SDI a
-   profilo fiscale minimo ed estesa per fasi.
-4. Assistente di pianificazione advisory = core v1 (nucleo
-   deterministico, LLM/MCP frontend); dominio personale e budget
-   modellati in v1.
+1. SDI v1 = B2B/B2C only. PA/B2G, signature, NE/DT/EC/SE notifications
+   and the passive cycle are deferred post-v1.
+2. Conservation = free AdE service with per-tenant adhesion. Flow
+   tracks and guides the adhesion; effective coverage from when
+   invoices transit SdI; invoices from the initial manual export are
+   out of coverage, the tenant's responsibility.
+3. Layered MVP accepted: everything else complete from the start, SDI
+   at a minimal fiscal profile and extended in phases.
+4. The advisory planning assistant = v1 core (deterministic core,
+   LLM/MCP frontend); personal domain and budget modeled in v1.
 
-Decisi su indicazione esplicita dell'utente: isolamento memoria duro
-per (org, progetto); no-ubiquita; esecutore umano seriale vs LLM
-parallelo.
+Decided on the user's explicit direction: hard per-(org, project)
+memory isolation; no-ubiquity; serial human executor vs parallel LLM.

@@ -1,45 +1,45 @@
-# Flow, documentazione di progetto
+# Flow, project documentation
 
-Flow e un sistema multi-tenant di task e workflow management che unifica
-task manager, time tracker, scheduler, email-to-task, fatturazione
-elettronica italiana (SDI) e una memoria gerarchica con recupero
-semantico, con un layer MCP co-paritario alla GUI.
+Flow is a multi-tenant task and workflow management system that unifies
+a task manager, a time tracker, a scheduler, email-to-task, Italian
+electronic invoicing (SDI) and a hierarchical memory with semantic
+retrieval, with an MCP layer co-equal to the GUI.
 
-Stato: requisiti e architettura **decisi** (post revisione critica).
-Scope: **MVP stratificato** (tutto completo da subito tranne la
-fatturazione SDI, introdotta per fasi). Ultimo aggiornamento:
-2026-05-17.
+Status: requirements and architecture **decided** (post critical
+review). Scope: **layered MVP** (everything complete from the start
+except SDI invoicing, introduced in phases). Last updated: 2026-05-17.
 
-Questi documenti sono la fonte di verita e sostituiscono ogni bozza di
-pianificazione precedente.
+These documents are the source of truth and supersede any earlier
+planning draft.
 
-## Indice
+## Index
 
-- [Contesto, scope, MVP](context.md)
-- [Decisioni](decisions.md)
-- [Modello di dominio](domain-model.md)
-- [Modello dati](data-model.md)
-- [Requisiti funzionali](functional-requirements.md)
-- [Requisiti non funzionali](non-functional-requirements.md)
-- [Architettura](architecture.md)
-- [Roadmap a fasi e criteri di verifica](roadmap.md)
-- [Riferimenti](references.md)
+- [Context, scope, MVP](context.md)
+- [Decisions](decisions.md)
+- [Domain model](domain-model.md)
+- [Data model](data-model.md)
+- [Functional requirements](functional-requirements.md)
+- [Non-functional requirements](non-functional-requirements.md)
+- [Architecture](architecture.md)
+- [Phased roadmap and verification criteria](roadmap.md)
+- [References](references.md)
 - [Architecture Decision Records](adr/README.md)
 
-## Come leggere
+## How to read
 
-Per capire **cosa** si costruisce: contesto, requisiti funzionali e non
-funzionali. Per capire **come**: modello di dominio, modello dati,
-architettura. Per capire **perche** una scelta non ovvia e stata fatta
-(e quali alternative sono state scartate): gli ADR. Per capire
-**quando**: roadmap.
+To understand **what** is built: context, functional and non-functional
+requirements. To understand **how**: domain model, data model,
+architecture. To understand **why** a non-obvious choice was made (and
+which alternatives were rejected): the ADRs. To understand **when**:
+the roadmap.
 
-## Principi non negoziabili
+## Non-negotiable principles
 
-- Service layer unico in `core/`; `api/` (REST/WS) e `mcp/` sono
-  adapter sottili senza logica di business.
-- Multi-tenant con isolamento duro: RLS obbligatoria, e per la memoria
-  isolamento per (org, progetto), mai per sola rilevanza.
-- Optimistic concurrency, niente last-write-wins.
-- Proporre la soluzione architetturale corretta, non la piu comoda; le
-  scelte corrette gia prese non vanno regredite (vedi ADR).
+- Single service layer in `core/`; `api/` (REST/WS) and `mcp/` are thin
+  adapters with no business logic.
+- Multi-tenant with hard isolation: mandatory RLS, and for memory
+  per-(org, project) isolation, never relevance only.
+- Optimistic concurrency, no last-write-wins.
+- Propose the correct architectural solution, not the most convenient
+  one; the correct choices already made must not be regressed (see the
+  ADRs).

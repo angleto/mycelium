@@ -1,65 +1,65 @@
-# Modello di dominio
+# Domain model
 
-Entita concettuali. Lo schema fisico e in [data-model.md](data-model.md).
+Conceptual entities. The physical schema is in
+[data-model.md](data-model.md).
 
-- **Organization**: confine di tenancy. Possiede un **profilo fiscale
-  emittente** (RegimeFiscale RF01.., P.IVA/CF, sede strutturata, REA,
-  cassa) necessario alla fatturazione. Tutto e org-scoped.
-- **User / Membership / Role**: utenti, appartenenza a una o piu Org,
-  RBAC (owner, admin, member, guest read-only).
-- **Tag** con `kind` in {generic, client, project}. Un solo concetto di
-  etichetta. I dati legali/fiscali e di billing non stanno in JSONB
-  libero ma in profili tipizzati satellite con FK a `tag.id`:
-  - `client_profile`: ragione sociale, IdFiscaleIVA (paese + id),
-    codice fiscale, sede strutturata, codice destinatario o PEC.
-  - `project_profile`: riferimento al tag client (parent), tariffa,
-    valuta, budget, eventuale workflow override.
-  Associare cliente/progetto a un task = attaccare il tag relativo
-  (stessa relazione many-to-many di ogni tag).
-- **Task**: unita primaria. Stato (dalla workflow), priorita,
+- **Organization**: the tenancy boundary. Owns an **issuer fiscal
+  profile** (RegimeFiscale RF01.., VAT/CF, structured address, REA,
+  cassa) needed for invoicing. Everything is org-scoped.
+- **User / Membership / Role**: users, membership in one or more Orgs,
+  RBAC (owner, admin, member, read-only guest).
+- **Tag** with `kind` in {generic, client, project}. A single label
+  concept. Legal/fiscal and billing data does not live in free JSONB
+  but in typed satellite profiles with an FK to `tag.id`:
+  - `client_profile`: legal name, IdFiscaleIVA (country + id), tax
+    code, structured address, recipient code or PEC.
+  - `project_profile`: reference to the client tag (parent), rate,
+    currency, budget, optional workflow override.
+  Associating a client/project with a task = attaching the relevant
+  tag (the same many-to-many relation as any tag).
+- **Task**: the primary unit. State (from the workflow), priority,
   `estimate_effort_h`, `remaining_effort_h`, `actual_start`,
-  `is_milestone`, **`executor`** (utente umano oppure agente LLM),
-  sottotask, tag, commenti, allegati. Attributi di pianificazione
-  personale: `monetary_cost?`, `location?`, `necessity`
-  (must/should/nice), contesto/precondizioni via tag generic (es.
-  `ctx:richiede-computer`, `place:brico`), `budget_id?`. Un task puo
-  appartenere a un progetto personale (project non fatturabile) oltre
-  che a progetti cliente.
-- **TaskDependency**: arco diretto tipizzato (FS/SS/FF/SF) con `lag`
-  (minuti lavorativi con segno; calendario di riferimento =
-  predecessore). L'insieme e un DAG; il rilevamento cicli e
-  obbligatorio.
-- **Event (appuntamento)**: org-scoped, tag client/project,
-  partecipanti, intervallo time-pinned, luogo. Vincolo: nessuna
-  sovrapposizione per partecipante (no-ubiquita).
-- **WorkflowDefinition**: stati ordinati e transizioni; default per
-  Org; override agganciabile a un `project_profile`.
-- **WorkingCalendar**: ore settimanali, festivita, timezone; default
-  Org + override per utente (capacita giornaliera).
-- **TimeEntry**: da timer o manuale; billable; snapshot della tariffa;
-  alimenta `remaining_effort` e le fatture.
-- **EmailAccount / EmailMessage**: connector Gmail OAuth2, Proton
-  Bridge, IMAP generico; messaggi per triage con link al Task creato.
-- **MemoryBlob + BlobSource**: memoria gerarchica (tier hot/warm/cold)
-  con provenienza N:1 esplicita per la cancellazione GDPR; scope
-  (org, progetto).
-- **Invoice**: macchina a stati (draft, issued/transmitted, terminale
-  SdI); immutabile dopo emissione; correzione solo via nota di credito
-  TD04.
-- **SdiMandate**: autorizzazione per-Org a trasmettere per suo conto
-  (scope, validita, revoca, audit).
-- **ConservationRecord**: stato della conservazione a norma per fattura
-  e per ricevuta SdI (modello "servizio AdE gratuito").
-- **Budget**: envelope di spesa org-scoped per periodo e categoria
-  (es. spese di casa) con importo allocabile; i task con
-  `monetary_cost` lo consumano.
-- **PlanningQuery (capacita advisory, non entita persistente)**:
-  capacita del service layer = filtro di fattibilita + ranking +
-  selezione vincolata (knapsack a priorita) su task accessibili
-  all'utente entro una org. LLM/MCP come frontend in linguaggio
-  naturale. Non viola l'isolamento memoria (ADR-0007), che governa il
-  contenuto RAG/email, non la lista task dell'utente.
-- **Notification / NotificationPref**: messaggio su canale
-  (Telegram/email) e preferenze per utente ed evento.
-- **Comment / Attachment / ActivityLog**: collaborazione e audit
-  (log append-only).
+  `is_milestone`, **`executor`** (human user or LLM agent), subtasks,
+  tags, comments, attachments. Personal-planning attributes:
+  `monetary_cost?`, `location?`, `necessity` (must/should/nice),
+  context/preconditions via generic tags (e.g.
+  `ctx:requires-computer`, `place:hardware`), `budget_id?`. A task may
+  belong to a personal project (a non-billable project) as well as to
+  client projects.
+- **TaskDependency**: a typed directed edge (FS/SS/FF/SF) with `lag`
+  (signed working minutes; reference calendar = the predecessor). The
+  set is a DAG; cycle detection is mandatory.
+- **Event (appointment)**: org-scoped, client/project tag,
+  participants, time-pinned interval, location. Constraint: no overlap
+  per participant (no-ubiquity).
+- **WorkflowDefinition**: ordered states and transitions; default per
+  Org; an override attachable to a `project_profile`.
+- **WorkingCalendar**: weekly hours, holidays, timezone; Org default +
+  per-user override (daily capacity).
+- **TimeEntry**: from a timer or manual; billable; rate snapshot; feeds
+  `remaining_effort` and the invoices.
+- **EmailAccount / EmailMessage**: Gmail OAuth2, Proton Bridge, generic
+  IMAP connector; messages for triage with a link to the created Task.
+- **MemoryBlob + BlobSource**: hierarchical memory (hot/warm/cold
+  tiers) with explicit N:1 provenance for GDPR deletion; (org, project)
+  scope.
+- **Invoice**: a state machine (draft, issued/transmitted, SdI
+  terminal); immutable after emission; correction only via a TD04
+  credit note.
+- **SdiMandate**: per-Org authorization to transmit on its behalf
+  (scope, validity, revocation, audit).
+- **ConservationRecord**: the compliant-conservation status per invoice
+  and per SdI receipt ("free AdE service" model).
+- **Budget**: an org-scoped spending envelope per period and category
+  (e.g. home expenses) with an allocatable amount; tasks with
+  `monetary_cost` consume it.
+- **PlanningQuery (advisory capability, not a persistent entity)**: a
+  service-layer capability = feasibility filter + ranking + constrained
+  selection (priority knapsack) over tasks accessible to the user
+  within an org. LLM/MCP as the natural-language frontend. Does not
+  violate memory isolation (ADR-0007), which governs RAG/email content,
+  not the user's task list.
+- **Notification / NotificationPref**: a message on a channel
+  (Telegram/email) and per-user, per-event preferences.
+- **Comment / Attachment / ActivityLog**: collaboration and audit
+  (append-only log).

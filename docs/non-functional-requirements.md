@@ -1,79 +1,79 @@
-# Requisiti non funzionali
+# Non-functional requirements
 
-## Sicurezza
+## Security
 
-- Cifratura at-rest = cifratura del **volume** Postgres + object storage
-  (LUKS / block storage cifrato / TDE managed): body, tsvector ed
-  embedding restano indicizzabili. L'envelope app-level
-  (libsodium/Fernet) e riservato ai **segreti opachi non indicizzati**:
-  token OAuth, credenziali, materiale del canale SdI. Modello di
-  minaccia dichiarato: protegge da disco/snapshot rubato, non da
-  connessione DB viva. Vedi
+- At-rest encryption = encryption of the Postgres **volume** + object
+  storage (LUKS / encrypted block storage / managed TDE): body,
+  tsvector and embedding stay indexable. The app-level envelope
+  (libsodium/Fernet) is reserved for **opaque, non-indexed secrets**:
+  OAuth tokens, credentials, SdI channel material. Stated threat model:
+  protects against a stolen disk/snapshot, not against a live DB
+  connection. See
   [ADR-0006](adr/0006-at-rest-volume-encryption.md).
-- Certificato del canale SdI e (post-v1, se PA) certificato qualificato
-  con custodia dedicata (HSM o firma remota).
-- L'endpoint SOAP inbound SdI sempre attivo e con mutua TLS e una nuova
-  superficie d'attacco e un impegno di disponibilita: va trattato come
-  tale (non come un worker poll).
-- RBAC nel service layer; rate limiting su SMTP e chiamate esterne;
-  audit log append-only delle azioni sensibili (invio fattura, invio
-  email, modifica workflow, cambio canale SdI, accesso cross-progetto
-  alla memoria).
+- SdI channel certificate and (post-v1, if PA) a qualified certificate
+  with dedicated custody (HSM or remote signing).
+- The always-on, mutual-TLS inbound SdI SOAP endpoint is a new attack
+  surface and an availability commitment: it must be treated as such
+  (not as a polling worker).
+- RBAC in the service layer; rate limiting on SMTP and external calls;
+  append-only audit log of sensitive actions (invoice send, email
+  send, workflow change, SdI channel change, cross-project memory
+  access).
 
-## Privacy e GDPR
+## Privacy and GDPR
 
-- Isolamento per (org, progetto); provenienza esplicita e propagazione
-  della cancellazione (erasure) a embedding, summary, object storage e
-  blob consolidati; nessun merge cross-soggetto.
-- Embedding locale: il corpo email non lascia il perimetro.
-  Summarization/consolidamento via LLM esterno solo con opt-in per-Org
-  esplicito e auditato; tracciamento di cio che esce dal perimetro.
+- Per (org, project) isolation; explicit provenance and propagation of
+  erasure to embedding, summary, object storage and consolidated
+  blobs; no cross-subject merge.
+- Local embedding: the email body does not leave the perimeter.
+  Summarization/consolidation via an external LLM only with explicit,
+  audited per-Org opt-in; tracking of what leaves the perimeter.
 
-## Isolamento multi-tenant
+## Multi-tenant isolation
 
-RLS obbligatoria su tutte le entita org-scoped. Memoria partizionata
-per `org_id` con predicato (org, progetto) obbligatorio in ogni query.
-Test esplicito: una ricerca senza filtro non deve mai restituire dati
-di un altro tenant o di un altro progetto.
+Mandatory RLS on every org-scoped entity. Memory partitioned by
+`org_id` with a mandatory (org, project) predicate in every query.
+Explicit test: an unfiltered search must never return data from
+another tenant or another project.
 
-## Performance e nodo ARM
+## Performance and ARM node
 
-CPM deterministico O(V+E) (millisecondi su centinaia di task). HNSW
-per-partizione con budget RAM dichiarato. Re-embedding pesante off-peak
-o su nodo transitorio piu grande; `halfvec`/quantizzazione se serve.
+Deterministic CPM O(V+E) (milliseconds on hundreds of tasks).
+Per-partition HNSW with a stated RAM budget. Heavy re-embedding
+off-peak or on a larger transient node; `halfvec`/quantization if
+needed.
 
-## Affidabilita
+## Reliability
 
-Sync IMAP e callback SDI idempotenti, retry con backoff, isolamento dei
-guasti per account/canale.
+Idempotent IMAP sync and SDI callbacks, retry with backoff, fault
+isolation per account/channel.
 
 ## Cloud, K8s-ready
 
-Servizi stateless, immagini arm64, config/secret esternalizzati
-(12-factor), object storage per allegati/blob, health/readiness probe,
-worker scalabili. Deploy v1 a nodo singolo (Docker Compose) portabile a
-K8s. Eccezioni stateful note: Postgres, sidecar Proton Bridge, endpoint
-SOAP inbound SdI.
+Stateless services, arm64 images, externalized config/secrets
+(12-factor), object storage for attachments/blobs, health/readiness
+probes, scalable workers. v1 single-node deploy (Docker Compose)
+portable to K8s. Known stateful exceptions: Postgres, Proton Bridge
+sidecar, inbound SdI SOAP endpoint.
 
-## Estensibilita predisposta
+## Built-in extensibility
 
-API-first per mobile futuro; astrazione canali di notifica; versioning
-+ event log per collaborazione futura; `Embedder`, `LLMProvider`,
-`SdiChannel`, `ConservationProvider` pluggable; namespace memoria
-generico.
+API-first for future mobile; notification-channel abstraction;
+versioning + event log for future collaboration; pluggable `Embedder`,
+`LLMProvider`, `SdiChannel`, `ConservationProvider`; generic memory
+namespace.
 
-## Osservabilita
+## Observability
 
-Logging strutturato, health endpoint, metriche sui job (sync email,
-scheduler, memoria/re-embedding, ricevute SdI).
+Structured logging, health endpoint, job metrics (email sync,
+scheduler, memory/re-embedding, SdI receipts).
 
 ## Testing
 
-Unit di dominio (4 disuguaglianze di dipendenza su calendario con
-festivita, serializzazione per-persona, no-ubiquita, RBAC, macchina a
-stati, RRF, erasure GDPR, numerazione concorrente,
-fattibilita/ranking advisory e selezione knapsack entro budget,
-determinismo dell'advisory a parita di input), integration API,
-test dei tool MCP, fixture multi-tenant e multi-progetto, golden XML
-FatturaPA per piu casi, contract test del canale SdICoop contro
-l'ambiente di test SdI.
+Domain unit tests (the 4 dependency inequalities over a calendar with
+holidays, per-person serialization, no-ubiquity, RBAC, state machine,
+RRF, GDPR erasure, concurrent numbering, advisory feasibility/ranking
+and within-budget knapsack selection, advisory determinism for equal
+input), API integration, MCP tool tests, multi-tenant and
+multi-project fixtures, golden FatturaPA XML for several cases,
+SdICoop channel contract tests against the SdI test environment.

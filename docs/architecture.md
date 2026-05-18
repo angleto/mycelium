@@ -1,69 +1,70 @@
-# Architettura
+# Architecture
 
-Monorepo Python + frontend TypeScript.
+Python monorepo + TypeScript frontend.
 
-## Componenti
+## Components
 
-- `core/`: dominio + **service layer unico** (business logic, RBAC,
-  macchina a stati, scheduler, motore di pianificazione advisory
-  (fattibilita + ranking + selezione vincolata), budget, motore
-  memoria, generazione/validazione XML SDI, mandato e conservazione).
-  Unico punto di verita.
-- `api/`: FastAPI, REST + WebSocket. Adapter sottile sul service layer.
-- `mcp/`: MCP server (SDK Python). Adapter sottile, pari ad `api/`.
-- `web/`: SPA React/TS (liste/board/calendario, grafo, Gantt, triage
-  email, fatture, report). Tipi generati da OpenAPI.
-- `worker/`: job (sync IMAP, scheduler, memoria/promozione/
-  re-embedding, ricorrenze, reminder).
-- `sdi-inbound/`: servizio SOAP sempre attivo con mutua TLS per le
-  notifiche SdI in push (non e un worker poll).
-- `db`: PostgreSQL con `pgvector`. SQLAlchemy + Alembic. `org_id`
-  ovunque, RLS obbligatoria, memoria partizionata per `org_id`.
-- `cache/broker`: Redis (coda dei job, pub/sub per WebSocket).
-- connectors: Gmail OAuth2; sidecar Proton Bridge (arm64); IMAP
-  generico; `SdiChannel`; `ConservationProvider`;
-  `Embedder`/`LLMProvider` (pattern bitvision_phoenix).
+- `core/`: domain + the **single service layer** (business logic, RBAC,
+  state machine, scheduler, advisory planning engine (feasibility +
+  ranking + constrained selection), budgets, memory engine, SDI XML
+  generation/validation, mandate and conservation). Single source of
+  truth.
+- `api/`: FastAPI, REST + WebSocket. Thin adapter over the service
+  layer.
+- `mcp/`: MCP server (Python SDK). Thin adapter, co-equal to `api/`.
+- `web/`: React/TS SPA (lists/board/calendar, graph, Gantt, email
+  triage, invoices, reports). Types generated from OpenAPI.
+- `worker/`: jobs (IMAP sync, scheduler, memory/promotion/re-embedding,
+  recurrences, reminders).
+- `sdi-inbound/`: an always-on SOAP service with mutual TLS for push
+  SdI notifications (not a polling worker).
+- `db`: PostgreSQL with `pgvector`. SQLAlchemy + Alembic. `org_id`
+  everywhere, mandatory RLS, memory partitioned by `org_id`.
+- `cache/broker`: Redis (job queue, pub/sub for WebSocket).
+- connectors: Gmail OAuth2; Proton Bridge sidecar (arm64); generic
+  IMAP; `SdiChannel`; `ConservationProvider`; `Embedder`/`LLMProvider`
+  (bitvision_phoenix pattern).
 
-## Diagramma
+## Diagram
 
 ```
  Claude → mcp/ ─┐
-                ├─► core/ (service, RBAC, scheduler, memoria, SDI) ─► PG+pgvector (part. per org, RLS)
+                ├─► core/ (service, RBAC, scheduler, memory, SDI) ─► PG+pgvector (part. per org, RLS)
 Browser → web/ ─┤          ▲                                    ▲
       REST/WS   │          │                                    │
               api/ ────────┘                                    │
                 │                                               │
-            worker/ ── IMAP · scheduler · memoria/re-embed · ricorrenze · reminder
+            worker/ ── IMAP · scheduler · memory/re-embed · recurrences · reminders
                 │
-   sdi-inbound/ (SOAP mutua-TLS, push notifiche SdI)
+   sdi-inbound/ (SOAP mutual-TLS, push SdI notifications)
    connectors: Gmail · Proton Bridge · SdiChannel · Conservation · Embedder
 ```
 
-## Principi architetturali
+## Architectural principles
 
-- `api/` e `mcp/` non contengono logica di business: sono due adapter
-  sottili sullo stesso `core/`. GUI e MCP restano realmente
-  co-paritari e non divergono.
-- L'enforcement di RBAC, macchina a stati, isolamento (org, progetto) e
-  optimistic concurrency e nel service layer: e l'unico choke point
-  attraversato da GUI, REST e MCP.
-- Astrazioni pluggable (`SdiChannel`, `ConservationProvider`,
-  `Embedder`, `LLMProvider`) con factory DB-driven e DTO neutri,
-  riusando il pattern di bitvision_phoenix (vedi
-  [ADR-0012](adr/0012-llm-embedder-abstraction.md) e
+- `api/` and `mcp/` contain no business logic: they are two thin
+  adapters over the same `core/`. GUI and MCP stay genuinely co-equal
+  and do not diverge.
+- Enforcement of RBAC, the state machine, (org, project) isolation and
+  optimistic concurrency is in the service layer: it is the single
+  choke point crossed by GUI, REST and MCP.
+- Pluggable abstractions (`SdiChannel`, `ConservationProvider`,
+  `Embedder`, `LLMProvider`) with a DB-driven factory and neutral DTOs,
+  reusing the bitvision_phoenix pattern (see
+  [ADR-0012](adr/0012-llm-embedder-abstraction.md) and
   [references.md](references.md)).
-- Deploy v1: Docker Compose su nodo ARM cloud; design K8s-ready.
+- v1 deploy: Docker Compose on a cloud ARM node; K8s-ready design.
 
-## Layout monorepo (indicativo)
+## Monorepo layout (indicative)
 
 ```
 flow/
-  core/        # dominio + service layer (pacchetto Python)
+  core/        # domain + service layer (Python package)
   api/         # FastAPI REST + WebSocket
   mcp/         # MCP server
-  sdi-inbound/ # servizio SOAP inbound SdI
-  worker/      # job in background
-  web/         # SPA React/TS
-  deploy/      # Docker Compose, config, migrazioni
-  docs/        # questa documentazione
+  sdi-inbound/ # inbound SdI SOAP service
+  worker/      # background jobs
+  web/         # React/TS SPA
+  deploy/      # Docker Compose, config, migrations
+  docs/        # this documentation
 ```

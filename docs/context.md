@@ -1,69 +1,68 @@
-# Contesto, scope, MVP
+# Context, scope, MVP
 
-## Cosa e Flow
+## What Flow is
 
-Sistema multi-tenant/team che unifica cinque capacita oggi separate:
+A multi-tenant/team system that unifies five capabilities that are
+separate today:
 
-1. Task manager in stile Todoist (il task come unita primaria).
-2. Time tracker in stile Toggl (timer + voci manuali, report).
-3. Dipendenze tra task con grafo di workflow e scheduling/Gantt.
-4. Email multi-account (lettura + invio) con "mail to task".
-5. Fatturazione elettronica italiana (SDI) end-to-end.
+1. A Todoist-style task manager (the task as the primary unit).
+2. A Toggl-style time tracker (timer + manual entries, reports).
+3. Task dependencies with a workflow graph and scheduling/Gantt.
+4. Multi-account email (read + send) with "mail to task".
+5. End-to-end Italian electronic invoicing (SDI).
 
-Layer MCP co-paritario alla GUI: stessa logica di dominio, due client.
+An MCP layer co-equal to the GUI: same domain logic, two clients.
 
-Terminologia: l'entita primaria si chiama sempre **Task** (in
-discussione informale a volte detta "card").
+Terminology: the primary entity is always called **Task** (in informal
+discussion sometimes called a "card").
 
-## Obiettivi
+## Goals
 
-- Essere un copilota di pianificazione: rispondere a query advisory
-  contestuali (cosa fare in una finestra libera, cosa serve per un
-  errand/luogo, priorita entro un budget di spesa), con nucleo
-  decisionale deterministico e LLM/MCP come interfaccia in linguaggio
-  naturale.
-- Organizzare l'informazione per conto dell'utente senza mescolare
-  contesti: nessun data leak tra tenant ne tra progetti.
-- Pianificazione realistica del tempo dell'utente: niente ubiquita
-  (non due impegni contemporanei per la stessa persona); i task che
-  l'utente deve svolgere di persona non sono concorrenti, salvo delega
-  a un agente LLM.
-- Fatturare in modo semplice il tempo tracciato, senza passare dal
-  portale dell'Agenzia delle Entrate.
+- Be a planning copilot: answer contextual advisory queries (what to do
+  in a free window, what is needed for an errand/place, priorities
+  within a spending budget), with a deterministic decision core and
+  LLM/MCP as the natural-language interface.
+- Organize information on the user's behalf without mixing contexts: no
+  data leak across tenants nor across projects.
+- Realistic planning of the user's time: no ubiquity (not two
+  concurrent engagements for the same person); tasks the user must do
+  in person are not concurrent, unless delegated to an LLM agent.
+- Bill tracked time simply, without going through the Agenzia delle
+  Entrate portal.
 
-## Realismo di scope (esplicito)
+## Scope realism (explicit)
 
-"Tutto perfetto dal primo giorno" non e un v1: sono di fatto piu
-prodotti. La stratificazione e dettata da realta legale e algoritmica,
-non da comodita.
+"Everything perfect from day one" is not a v1: these are effectively
+several products. The layering is dictated by legal and algorithmic
+reality, not by convenience.
 
-### Completo da subito (fattibile e corretto)
+### Complete from the start (feasible and correct)
 
-Task, tassonomia, workflow configurabili, dipendenze e grafo, scheduler
-deterministico, time tracking, eventi/no-ubiquita, esecutore
-umano/LLM, email Gmail + IMAP generico, memoria con isolamento per
-progetto, dominio personale + budget, assistente di pianificazione
-advisory, MCP, multi-tenant con RLS e optimistic concurrency.
+Tasks, taxonomy, configurable workflows, dependencies and graph,
+deterministic scheduler, time tracking, events/no-ubiquity, human/LLM
+executor, Gmail + generic IMAP email, memory with per-project
+isolation, personal domain + budget, advisory planning assistant, MCP,
+multi-tenant with RLS and optimistic concurrency.
 
-### Stratificato (MVP stratificato, scelta confermata)
+### Layered (layered MVP, confirmed choice)
 
-Fatturazione SDI:
+SDI invoicing:
 
-- v1 **solo B2B/B2C** a profilo fiscale minimo esplicito (TD01/TD04,
-  aliquote standard + insieme Natura ridotto, ritenuta opzionale, bollo
-  come flag con export trimestrale manuale).
-- Poi canale SdICoop in ambiente di test, quindi in produzione.
-- **Post-v1**: PA/B2G (firma CAdES/XAdES + certificato qualificato,
-  notifiche NE/DT/EC/SE), ciclo passivo, reverse charge/autofattura
-  TD16-TD19, clienti esteri, liquidazione trimestrale del bollo,
-  leveling ottimizzante CP-SAT.
+- v1 **B2B/B2C only** at an explicit minimal fiscal profile (TD01/TD04,
+  standard rates + a reduced Natura set, optional withholding, stamp
+  duty as a flag with manual quarterly export).
+- Then the SdICoop channel in a test environment, then in production.
+- **Post-v1**: PA/B2G (CAdES/XAdES signature + qualified certificate,
+  NE/DT/EC/SE notifications), passive cycle, reverse charge/self-billing
+  TD16-TD19, foreign clients, quarterly stamp-duty settlement, CP-SAT
+  optimizing leveling.
 
-Proton Mail (via Bridge) dopo Gmail.
+Proton Mail (via Bridge) after Gmail.
 
-Conseguenza operativa da possedere consapevolmente: la conservazione a
-norma scelta e il servizio gratuito dell'AdE, che richiede l'adesione
-del singolo tenant nel proprio cassetto fiscale e conserva solo cio che
-transita da SdI. Le fatture emesse via export manuale in fase iniziale
-non sono coperte dall'AdE e restano a carico del tenant finche il
-canale SdICoop non e attivo. Vedi
-[ADR-0010](adr/0010-conservazione-ade-free-service.md).
+An operational consequence to own consciously: the chosen compliant
+conservation is the free AdE service, which requires each tenant's
+adhesion in their own tax portal and conserves only what transits SdI.
+Invoices issued via the initial manual export are not covered by AdE
+and remain the tenant's responsibility until the SdICoop channel is
+active. See
+[ADR-0010](adr/0010-conservation-ade-free-service.md).

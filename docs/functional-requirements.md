@@ -1,347 +1,347 @@
-# Requisiti funzionali
+# Functional requirements
 
 ## FR-1 Task management
 
-CRUD task (titolo, descrizione markdown, priorita P1-P4, date
-start/due, assegnatari, `executor`), sottotask gerarchici, checklist,
-quick-add con parsing naturale (es. `domani #tag @progetto !p1`), viste
-lista/board/calendario/oggi-prossimi, filtri salvati, ricerca
-full-text, completamento, archiviazione, soft-delete con ripristino,
-commenti, log attivita, allegati. Task ricorrenti e reminder (FR-12).
-I task portano anche attributi di pianificazione personale (costo,
-luogo, contesto, necessita): vedi FR-14.
+Task CRUD (title, markdown description, P1-P4 priority, start/due
+dates, assignees, `executor`), hierarchical subtasks, checklists,
+quick-add with natural parsing (e.g. `tomorrow #tag @project !p1`),
+list/board/calendar/today-upcoming views, saved filters, full-text
+search, completion, archiving, soft-delete with restore, comments,
+activity log, attachments. Recurring tasks and reminders (FR-12). Tasks
+also carry personal-planning attributes (cost, location, context,
+necessity): see FR-14.
 
-Carve-out: la soft-delete **non** si applica a fatture emesse e
-documenti conservati (vedi FR-9 e ADR-0009).
+Carve-out: soft-delete does **not** apply to issued invoices and
+conserved documents (see FR-9 and ADR-0009).
 
-## FR-2 Tassonomia unificata
+## FR-2 Unified taxonomy
 
-Un solo `tag` con `kind`. `client` e `project` hanno profili satellite
-tipizzati (vincoli, validazione, FK), non JSONB libero: serve sia alla
-fatturazione (dati legali) sia all'isolamento memoria per progetto.
-Associazione task-tag unica. RBAC e org-scope su tutti i tag.
+A single `tag` with `kind`. `client` and `project` have typed satellite
+profiles (constraints, validation, FK), not free JSONB: needed both for
+invoicing (legal data) and for per-project memory isolation. A single
+task-tag association. RBAC and org-scope on all tags.
 
-## FR-3 Dipendenze e grafo di workflow
+## FR-3 Dependencies and workflow graph
 
-Quattro tipi di dipendenza (FS/SS/FF/SF) con lag/lead; semantica nelle
-disuguaglianze in tempo lavorativo (FR-4). Rilevamento cicli prima
-dell'inserimento, nel service layer. Vincoli DB: no self-dependency,
-unique (predecessore, successore, tipo), stesso org. Visualizzatore
-grafo DAG (pan/zoom, click apre il task, layout a livelli dagre/elkjs).
-"Bloccato" e un overlay derivato non persistente, non uno stato di
-workflow.
+Four dependency types (FS/SS/FF/SF) with lag/lead; semantics in the
+working-time inequalities (FR-4). Cycle detection before insertion, in
+the service layer. DB constraints: no self-dependency, unique
+(predecessor, successor, type), same org. DAG graph viewer (pan/zoom,
+click opens the task, dagre/elkjs layered layout). "Blocked" is a
+non-persistent derived overlay, not a workflow state.
 
-## FR-4 Scheduling deterministico (completo da subito)
+## FR-4 Deterministic scheduling (complete from the start)
 
-Modello risorse:
+Resource model:
 
-- ogni persona e una risorsa unaria sul proprio calendario;
-- gli eventi/appuntamenti sono prenotazioni fisse esclusive;
-- i task con `executor=human` della stessa persona sono **serializzati**
-  (nessuna sovrapposizione temporale) attorno agli appuntamenti;
-- i task con `executor=llm_agent` sono fuori dalla timeline umana
-  (paralleli, schedulati solo per precedenza).
+- each person is a unary resource on their own calendar;
+- events/appointments are exclusive fixed reservations;
+- the same person's `executor=human` tasks are **serialized** (no time
+  overlap) around appointments;
+- `executor=llm_agent` tasks are off the human timeline (parallel,
+  scheduled by precedence only).
 
-Motore: passata avanti/indietro CPM **logico** deterministico su
-calendari lavorativi (ES/EF/LS/LF, slack, percorso critico logico,
-onesti perche senza contesa di risorse) + **piazzamento seriale
-deterministico per-persona** con regola a priorita (priority desc, due
-asc, created asc, id) nelle finestre libere. Output stabile: i pin
-sopravvivono al ricalcolo.
+Engine: a deterministic **logical** CPM forward/backward pass over
+working calendars (ES/EF/LS/LF, slack, logical critical path, honest
+because contention-free) + **deterministic per-person serial
+placement** with a priority rule (priority desc, due asc, created asc,
+id) into the free windows. Stable output: pins survive recompute.
 
-Piano vs consuntivo: `remaining_effort_h` (default = stima),
-`actual_start` (da prima time entry o transizione di stato); task in
-stato terminale = durata residua zero; task in corso = ES pinnato a
-`actual_start`, si schedula solo il residuo.
+Plan vs actuals: `remaining_effort_h` (default = estimate),
+`actual_start` (from the first time entry or a state transition); a
+terminal-state task = zero residual duration; an in-progress task = ES
+pinned to `actual_start`, only the residual is scheduled.
 
-Modalita/pin: `schedule_mode` {auto (ASAP), manual} + `constraint`
-{none, SNET, MSO, MFO}. Il drag con write-back imposta manual o un
-constraint e il ricalcolo lo rispetta.
+Mode/pin: `schedule_mode` {auto (ASAP), manual} + `constraint` {none,
+SNET, MSO, MFO}. Drag with write-back sets manual or a constraint and
+the recompute respects it.
 
-Determinismo: dato l'input, output identico; `schedule` derivata con
-`computed_at` + `input_fingerprint` + flag di staleness; la
-ricomputazione piu recente supera la precedente.
+Determinism: given the input, identical output; a derived `schedule`
+with `computed_at` + `input_fingerprint` + a staleness flag; the most
+recent recompute supersedes the previous.
 
-Rollup: effort sulle foglie; il task sommario deriva start = min,
-finish = max dei figli; in v1 le dipendenze solo su foglie.
+Rollup: effort on the leaves; the summary task derives start = min,
+finish = max of the children; in v1 dependencies only on leaves.
 
-Gantt: barre, dipendenze, percorso critico logico, milestone,
-indicatore di sovraccarico per persona/giorno, drag.
+Gantt: bars, dependencies, logical critical path, milestones, a
+per-person/day overload indicator, drag.
 
-Disuguaglianze in tempo lavorativo (lag in minuti lavorativi con segno,
-calendario del predecessore):
+Working-time inequalities (lag in signed working minutes, the
+predecessor's calendar):
 
 - FS: `start_succ >= finish_pred + lag`
 - SS: `start_succ >= start_pred + lag`
 - FF: `finish_succ >= finish_pred + lag`
 - SF: `finish_succ >= start_pred + lag`
 
-Il leveling ottimizzante (CP-SAT) e un enhancement post-v1, non il
-default. Vedi [ADR-0004](adr/0004-deterministic-scheduler.md).
+Optimizing leveling (CP-SAT) is a post-v1 enhancement, not the default.
+See [ADR-0004](adr/0004-deterministic-scheduler.md).
 
 ## FR-5 Time tracking
 
-Timer live (uno running per utente, start/stop/ripresa), voci manuali,
-idle detection lato client, timer running visibile in GUI e MCP in
-realtime, report per tag client/project/generic/utente/periodo,
-billable, tariffe, export CSV/PDF. Alimenta `remaining_effort` (FR-4) e
-le fatture (FR-9).
+Live timer (one running per user, start/stop/resume), manual entries,
+client-side idle detection, the running timer visible in GUI and MCP
+in realtime, reports per client/project/generic tag/user/period,
+billable, rates, CSV/PDF export. Feeds `remaining_effort` (FR-4) and
+the invoices (FR-9).
 
-## FR-6 Workflow di stato configurabili
+## FR-6 Configurable state workflows
 
-WorkflowDefinition per Org (una di default): stati ordinati,
-transizioni, iniziale/terminale. Override per progetto: un
-`project_profile` punta a un workflow che estende il default (es.
-aggiunge uno stato e ne impone il passaggio). Enforcement della
-macchina a stati nel service layer (unico choke point GUI/REST/MCP).
+WorkflowDefinition per Org (one default): ordered states, transitions,
+initial/terminal. Project override: a `project_profile` points at a
+workflow that extends the default (e.g. adds a state and mandates the
+transition). State-machine enforcement in the service layer (the
+single GUI/REST/MCP choke point).
 
-## FR-7 Email: connector, triage, invio
+## FR-7 Email: connector, triage, send
 
-- Gmail: OAuth2 (XOAUTH2 IMAP/SMTP), token cifrati, refresh.
-- Proton Mail: via Proton Mail Bridge (piano a pagamento), sidecar
-  headless arm64; un'istanza per account, controller a scala; opex
-  documentata, non blocker; introdotto dopo Gmail.
-- IMAP/SMTP generico: self-hosted/Dovecot, basic o OAuth.
-- Sync background idempotente e resiliente; il guasto di un account non
-  degrada il resto.
-- "Email to Task" da GUI o tool MCP: titolo da subject, descrizione da
-  corpo, allegati riportati, assegnazione tag/client/project/
-  assegnatario, link al messaggio sorgente.
-- Invio/risposta SMTP nel thread. Niente gestione cartelle/label
-  server-side in v1.
+- Gmail: OAuth2 (XOAUTH2 IMAP/SMTP), encrypted tokens, refresh.
+- Proton Mail: via Proton Mail Bridge (paid plan), headless arm64
+  sidecar; one instance per account, controller at scale; opex
+  documented, not a blocker; introduced after Gmail.
+- Generic IMAP/SMTP: self-hosted/Dovecot, basic or OAuth.
+- Idempotent, resilient background sync; one account's failure does not
+  degrade the rest.
+- "Email to Task" from GUI or an MCP tool: title from subject,
+  description from body, attachments carried over,
+  tag/client/project/assignee assignment, a link to the source
+  message.
+- SMTP send/reply in the thread. No server-side folder/label
+  management in v1.
 
-## FR-8 Memoria gerarchica e recupero
+## FR-8 Hierarchical memory and retrieval
 
-- Isolamento duro per (org, progetto): `memory_blobs` partizionata per
-  org, predicato (org, progetto) obbligatorio, RLS obbligatoria. Default
-  = progetto corrente; cross-progetto solo con autorizzazione esplicita
-  e auditata. Nessun retrieval/summarization/consolidamento attraversa
-  progetti o tenant.
-- Provenienza esplicita `blob_sources` (N:1). Consolidamento solo entro
-  stesso (org, progetto, thread/account), mai cross-soggetto; tombstone,
-  non delete silenzioso.
-- GDPR erasure: cancellare un messaggio propaga a embedding, summary,
-  copia object-storage e a ogni blob consolidato che lo include
-  (re-consolidamento dai sopravvissuti o tombstone).
-- Tier: hot (corpo in PG su volume cifrato), warm (riassunto LLM se
-  abilitato, corpo verso object storage), cold (embedding pgvector
-  HNSW). Con LLM disabilitato: warm = corpo verso object storage +
-  metadati, nessun riassunto.
-- Tiering tipo memoria umana (ADR-0016): il tier e guidato da uno
-  score di accesso con decay (frequenza + recency) e da un segnale di
-  importanza, non solo da eta/dimensione. I concetti ricorrenti
-  (cluster consolidati, provenienza preservata, entro (org, progetto))
-  sono promossi a un tier compatto pre-caldo; cio che non ricorre
-  decade ed e demosso. **Invariante**: la frequenza determina solo il
-  tier di latenza, mai la ritenzione ne la visibilita; il cold resta
-  sempre recuperabile (raro != non importante).
-- Grader correttivo (CRAG adattato, ADR-0016): ogni retrieval e
-  graduato (soglia deterministica sullo score RRF fuso + grader LLM
-  locale opzionale). Rami: ok -> usa; incerto -> riscrivi/espandi
-  query; insufficiente -> allarga lo scope entro il tenant o rispondi
-  "evidenza insufficiente". Nessun ramo web (memoria privata, GDPR).
-- Retrieval come tool agentico (ADR-0016): il recupero memoria e
-  esposto come un tool MCP tra i tool deterministici; il planner
-  LLM/MCP sceglie vector/SQL/strutturato. Decisione deterministica
-  (ADR-0004/0013): l'LLM orchestra, non decide.
-- Connessioni: si usa il grafo strutturale gia presente (DAG
-  dipendenze, gerarchia tag/client/project, link email-task e
-  provenienza), non un knowledge graph estratto via LLM dal testo
-  (GraphRAG testuale differito).
-- Multimodale differito: v1 text-first con estrazione testo dagli
-  allegati; embedding multimodale (CLIP/ColPali, indice unico) come
-  fase successiva.
-- Retrieval ibrido baseline: ramo semantico (HNSW) + lessicale
-  (tsvector/ts_rank, pg_trgm con indice trigram dedicato). Pre-filtro
-  metadati = rilevanza; RLS + partizione = sicurezza. Per filtri molto
-  selettivi (message-id, numero fattura) path esatto, non HNSW.
-  `hnsw.iterative_scan = relaxed_order` tarato.
-- RRF: K sovracampionato per ramo (circa 100), fusione RRF con k circa
-  60, tiebreak deterministico (rank singolo, poi received_at, poi id),
-  N finale; fusione entro (org, progetto).
-- Embedder/LLM pluggable (pattern bitvision_phoenix: Protocol + factory
-  DB-driven + DTO neutri + settings env + registry modelli). Flow
-  aggiunge `EmbedderProvider`. Default modello multilingue piccolo
-  CPU/ARM; scelta concreta in implementazione (BGE-M3, multilingual-E5,
-  GTE-multilingual, Qwen3-Embedding su MTEB corrente).
-- Re-embedding: nuova colonna/tabella per il nuovo modello (dim fissa),
-  dual-write durante il backfill, backfill resumable, `CREATE INDEX
-  CONCURRENTLY`. Garanzia onesta: nessun write-downtime; letture sul
-  vecchio indice durante il backfill con possibile degrado di latenza
-  su nodo singolo; cutover = swap del puntatore in transazione;
-  rollback finche vecchia colonna+indice esistono.
-- "Niente numpy" = nessuno store di similarita numpy lato app; i
-  vettori stanno in pgvector server-side (l'`Embedder` locale puo
-  dipendere da numpy transitivamente).
+- Hard isolation per (org, project): `memory_blobs` partitioned by org,
+  mandatory (org, project) predicate, mandatory RLS. Default = current
+  project; cross-project only with explicit, audited authorization. No
+  retrieval/summarization/consolidation crosses projects or tenants.
+- Explicit `blob_sources` provenance (N:1). Consolidation only within
+  the same (org, project, thread/account), never cross-subject;
+  tombstone, not silent delete.
+- GDPR erasure: deleting a message propagates to embedding, summary,
+  the object-storage copy and every consolidated blob that includes it
+  (re-consolidation from survivors or a tombstone).
+- Tiers: hot (body in PG on an encrypted volume), warm (LLM summary if
+  enabled, body to object storage), cold (pgvector HNSW embedding).
+  With the LLM disabled: warm = body to object storage + metadata, no
+  summary.
+- Human-like tiering (ADR-0016): the tier is driven by an access score
+  with decay (frequency + recency) and an importance signal, not just
+  age/size. Recurring concepts (consolidated clusters, preserved
+  provenance, within (org, project)) are promoted to a compact pre-warm
+  tier; what does not recur decays and is demoted. **Invariant**:
+  frequency determines only the latency tier, never retention nor
+  visibility; cold stays always retrievable (rare != not important).
+- Corrective grader (adapted CRAG, ADR-0016): every retrieval is graded
+  (a deterministic threshold on the fused RRF score + an optional local
+  LLM grader). Branches: ok -> use; uncertain -> rewrite/expand the
+  query; insufficient -> widen the scope within the tenant or answer
+  "insufficient evidence". No web branch (private memory, GDPR).
+- Retrieval as an agentic tool (ADR-0016): memory retrieval is exposed
+  as an MCP tool among the deterministic tools; the LLM/MCP planner
+  chooses vector/SQL/structured. Deterministic decision
+  (ADR-0004/0013): the LLM orchestrates, it does not decide.
+- Connections: use the structural graph already present (dependency
+  DAG, tag/client/project hierarchy, email-task link and provenance),
+  not an LLM-extracted knowledge graph from text (textual GraphRAG
+  deferred).
+- Multimodal deferred: v1 text-first with text extraction from
+  attachments; multimodal embedding (CLIP/ColPali, single index) as a
+  later phase.
+- Baseline hybrid retrieval: a semantic branch (HNSW) + lexical
+  (tsvector/ts_rank, pg_trgm with a dedicated trigram index). Metadata
+  pre-filter = relevance; RLS + partition = security. For very
+  selective filters (message-id, invoice number) an exact path, not
+  HNSW. `hnsw.iterative_scan = relaxed_order` tuned.
+- RRF: K oversampled per branch (around 100), RRF fusion with k around
+  60, deterministic tiebreak (single rank, then received_at, then id),
+  final N; fusion within (org, project).
+- Pluggable Embedder/LLM (bitvision_phoenix pattern: Protocol +
+  DB-driven factory + neutral DTOs + env settings + model registry).
+  Flow adds `EmbedderProvider`. Default a small multilingual CPU/ARM
+  model; concrete choice at implementation (BGE-M3, multilingual-E5,
+  GTE-multilingual, Qwen3-Embedding on the current MTEB).
+- Re-embedding: a new column/table for the new model (fixed dim),
+  dual-write during the backfill, resumable backfill, `CREATE INDEX
+  CONCURRENTLY`. Honest guarantee: no write downtime; reads on the old
+  index during the backfill with possible latency degradation on a
+  single node; cutover = swap of the pointer in a transaction;
+  rollback while the old column+index exist.
+- "No numpy" = no app-side numpy similarity store; vectors live in
+  pgvector server-side (the local `Embedder` may depend on numpy
+  transitively).
 
-## FR-9 Fatturazione elettronica SDI (v1 B2B/B2C)
+## FR-9 SDI electronic invoicing (v1 B2B/B2C)
 
-- Ruolo legale: in multi-tenant Flow trasmette per conto del tenant ed
-  e quindi trasmittente/intermediario. Modello esplicito `SdiMandate`
-  per-Org. Canale unico condiviso; identita del tenant nel payload
-  (`CedentePrestatore`, `TerzoIntermediarioOSoggettoEmittente`), mai
-  nell'identita TLS.
-- Canale dietro astrazione `SdiChannel`:
-  - `ManualExportChannel` (subito): XML scaricabile; le fatture cosi
-    emesse sono gia legalmente emesse.
-  - `SdICoopChannel` test: endpoint SOAP inbound sempre attivo esposto
-    da Flow (SdI fa push, non polling), mutua TLS lato server; test di
-    interoperabilita.
-  - `SdICoopChannel` produzione: dopo Accordo di servizio e
-    accreditamento (item pesante, non un passo finale minore).
-- Conservazione a norma (obbligo art. 39 DPR 633/72, 10 anni):
-  strategia = servizio AdE gratuito. `ConservationProvider =
-  AdeFreeConservation`: Flow non conserva in proprio, traccia e guida
-  l'adesione per-tenant nel cassetto fiscale; l'AdE conserva solo cio
-  che passa da SdI; le fatture da `ManualExportChannel` in F7a sono
-  marcate "fuori copertura AdE, a carico del tenant". Copertura
-  effettiva da F7b.
-- Firma: v1 B2B/B2C senza firma (via canale accreditato non richiesta).
-  PA/B2G (CAdES/XAdES-BES + certificato qualificato) differita post-v1.
-- Esiti: notifiche SdI in push sull'endpoint inbound, correlate per
-  `IdentificativoSdI` (colonna indicizzata di prima classe). Ciclo
-  attivo v1: RC, MC, NS, AT. NE/DT/EC/SE e ciclo passivo differiti con
-  la PA.
-- Profilo fiscale v1 minimo: TD01/TD04, aliquote standard + insieme
-  Natura ridotto, ritenuta d'acconto opzionale, bollo come flag +
-  export trimestrale manuale. Differiti: PA/split payment, reverse
-  charge/autofattura TD16-TD19, clienti esteri, liquidazione
-  trimestrale del bollo, cassa previdenziale avanzata.
-- Immutabilita: macchina a stati; solo `draft` cancellabile; emessa =
-  append-only; correzione solo via nota di credito TD04.
-- Numerazione: progressiva per (Org, serie, anno), concorrenza-safe
-  (sequence o `FOR UPDATE`), allocata solo alla transizione
-  draft -> transmitted nella stessa transazione; mai riusata.
-- Ricerca storico; marca pagata (riconciliazione manuale v1); nota di
-  credito TD04.
+- Legal role: in multi-tenant, Flow transmits on the tenant's behalf
+  and is therefore a transmitter/intermediary. An explicit per-Org
+  `SdiMandate` model. A single shared channel; the tenant's identity in
+  the payload (`CedentePrestatore`,
+  `TerzoIntermediarioOSoggettoEmittente`), never in the TLS identity.
+- The channel behind the `SdiChannel` abstraction:
+  - `ManualExportChannel` (immediately): downloadable XML; invoices
+    issued this way are already legally issued.
+  - `SdICoopChannel` test: an always-on inbound SOAP endpoint exposed
+    by Flow (SdI pushes, not polling), server-side mutual TLS;
+    interoperability tests.
+  - `SdICoopChannel` production: after the service agreement and
+    accreditation (a heavy item, not a minor final step).
+- Compliant conservation (obligation art. 39 DPR 633/72, 10 years):
+  strategy = free AdE service. `ConservationProvider =
+  AdeFreeConservation`: Flow does not conserve in-house, it tracks and
+  guides per-tenant adhesion in the tax portal; AdE conserves only what
+  passes through SdI; invoices from `ManualExportChannel` in F7a are
+  marked "out of AdE coverage, the tenant's responsibility". Effective
+  coverage from F7b.
+- Signature: v1 B2B/B2C unsigned (not required via an accredited
+  channel). PA/B2G (CAdES/XAdES-BES + qualified certificate) deferred
+  post-v1.
+- Outcomes: push SdI notifications on the inbound endpoint, correlated
+  by `IdentificativoSdI` (a first-class indexed column). v1 active
+  cycle: RC, MC, NS, AT. NE/DT/EC/SE and the passive cycle deferred
+  with PA.
+- Minimal v1 fiscal profile: TD01/TD04, standard rates + a reduced
+  Natura set, optional withholding, stamp duty as a flag + manual
+  quarterly export. Deferred: PA/split payment, reverse
+  charge/self-billing TD16-TD19, foreign clients, quarterly stamp-duty
+  settlement, advanced social-security fund.
+- Immutability: a state machine; only `draft` is deletable; issued =
+  append-only; correction only via a TD04 credit note.
+- Numbering: progressive per (Org, series, year), concurrency-safe
+  (sequence or `FOR UPDATE`), allocated only at the
+  draft -> transmitted transition in the same transaction; never
+  reused.
+- History search; mark paid (manual reconciliation in v1); TD04 credit
+  note.
 
-## FR-10 MCP server (co-paritario)
+## FR-10 MCP server (co-equal)
 
-Espone il dominio come tool MCP, **stesso service layer, RBAC,
-isolamento (org, progetto)** della REST. Auth come utente in una Org +
-progetto (token con scope), idempotenza sui tool mutanti, conflitti
-optimistic = 409. Trasporto stdio (Claude locale) e HTTP/SSE (remoto).
-L'isolamento memoria per progetto vale specialmente qui.
+Exposes the domain as MCP tools, **the same service layer, RBAC,
+(org, project) isolation** as REST. Auth as a user in an Org + project
+(scoped token), idempotency on mutating tools, optimistic conflicts =
+409. stdio transport (local Claude) and HTTP/SSE (remote). Per-project
+memory isolation matters especially here.
 
-## FR-11 Multi-utente, auth, RBAC, concorrenza
+## FR-11 Multi-user, auth, RBAC, concurrency
 
-Signup/login, JWT, Org multiple per utente, inviti, ruoli. RBAC nel
-service layer. RLS obbligatoria su entita org-scoped (difesa primaria,
-non opzionale). Optimistic concurrency: `UPDATE ... WHERE id AND
-version`; 0 righe -> 409; niente lost-update silenzioso; activity log
-append-only; invalidazione realtime via WebSocket. Modello idoneo a
-collaborazione futura.
+Signup/login, JWT, multiple Orgs per user, invitations, roles. RBAC in
+the service layer. Mandatory RLS on org-scoped entities (primary
+defense, not optional). Optimistic concurrency: `UPDATE ... WHERE id
+AND version`; 0 rows -> 409; no silent lost update; append-only
+activity log; realtime invalidation via WebSocket. A model fit for
+future collaboration.
 
-## FR-12 Notifiche, ricorrenze, reminder
+## FR-12 Notifications, recurrences, reminders
 
-Astrazione canale con adapter: Telegram e email in v1, altri
-predisposti. Reminder su scadenze, task ricorrenti materializzati dal
-worker (istanze = righe task indipendenti; in v1 ricorrenza e
-dipendenze mutuamente esclusive), notifiche su eventi (assegnazione,
-blocco, no-ubiquita, esito SDI). Preferenze per utente ed evento.
+A channel abstraction with adapters: Telegram and email in v1, others
+prepared. Deadline reminders, recurring tasks materialized by the
+worker (instances = independent task rows; in v1 recurrence and
+dependencies are mutually exclusive), event notifications (assignment,
+block, no-ubiquity, SDI outcome). Per-user, per-event preferences.
 
-## FR-13 Assistente di pianificazione (advisory, core v1)
+## FR-13 Planning assistant (advisory, v1 core)
 
-Capacita advisory di prima classe nel service layer, esposte via REST
-+ tool MCP, con l'LLM/MCP come interfaccia in linguaggio naturale e il
-nucleo decisionale **deterministico e spiegabile** (coerente con
-ADR-0004). Tre archetipi:
+First-class advisory capabilities in the service layer, exposed via
+REST + MCP tools, with the LLM/MCP as the natural-language interface
+and the decision core **deterministic and explainable** (consistent
+with ADR-0004). Three archetypes:
 
-- **Cosa-faccio-ora**: dato un intervallo libero (inizio, durata,
-  luogo/contesto, opzionale energia), restituisce i task fattibili,
-  ordinati. Fattibilita = entra nella finestra (`remaining_effort_h`
-  vs durata), non bloccato da dipendenze, `executor=human` e l'utente
-  disponibile (no conflitto con eventi/no-ubiquita, FR-4/ADR-0008),
-  luogo/contesto compatibili. Ranking deterministico per
-  urgenza/priorita/necessita/valore.
-- **Errand/contesto**: dato un luogo o contesto (es. "vado al brico"),
-  aggrega gli item rilevanti (task con `location`/contesto compatibile)
-  tra i progetti accessibili all'utente entro la org.
-- **Prioritizzazione entro budget**: dato un `budget` (envelope), una
-  selezione vincolata (knapsack a priorita/valore-densita, must-have
-  prima) dei task/voci con `monetary_cost` che massimizza il valore
-  entro l'importo, con spiegazione.
+- **What-can-I-do-now**: given a free interval (start, duration,
+  location/context, optional energy), returns the feasible tasks,
+  ordered. Feasibility = fits the window (`remaining_effort_h` vs
+  duration), not blocked by dependencies, `executor=human` and the
+  user available (no conflict with events/no-ubiquity, FR-4/ADR-0008),
+  compatible location/context. Deterministic ranking by
+  urgency/priority/necessity/value.
+- **Errand/context**: given a place or context (e.g. "I'm going to the
+  hardware store"), aggregates the relevant items (tasks with a
+  compatible `location`/context) across the projects accessible to the
+  user within the org.
+- **Prioritization within budget**: given a `budget` (envelope), a
+  constrained selection (priority/value-density knapsack, must-have
+  first) of the tasks/items with `monetary_cost` that maximizes value
+  within the amount, with an explanation.
 
-Determinismo verificabile (stesso input, stesso output). Isolamento:
-opera sui task accessibili all'utente entro una org (anche
-multi-progetto); non e una violazione dell'isolamento memoria
-(ADR-0007), che governa il contenuto RAG/email. Vedi
-[ADR-0013](adr/0013-planning-advisory-layer.md).
+Verifiable determinism (same input, same output). Isolation: operates
+on the tasks accessible to the user within an org (even multi-project);
+not a memory-isolation violation (ADR-0007), which governs RAG/email
+content. See [ADR-0013](adr/0013-planning-advisory-layer.md).
 
-## FR-14 Dominio personale e budget
+## FR-14 Personal domain and budget
 
-- I task portano `monetary_cost?`, `location?`, `necessity`
-  (must/should/nice) e contesto/precondizioni via tag `generic` con
-  convenzione di namespace (es. `ctx:richiede-computer`, `place:brico`).
-- Un progetto puo essere personale (project non fatturabile): stessa
-  tassonomia (ADR-0003), nessuna entita parallela.
-- `Budget`: envelope org-scoped per periodo (mese/trimestre/anno/
-  custom) e categoria (es. spese di casa) con importo allocabile e
-  valuta; i task vi si agganciano via `budget_id`; consumo vs residuo
-  calcolato dal service layer.
-- La selezione entro budget e deterministica (knapsack a priorita),
-  non un giudizio opaco dell'LLM; l'LLM traduce la richiesta in query
-  strutturata e narra il risultato. Vedi
+- Tasks carry `monetary_cost?`, `location?`, `necessity`
+  (must/should/nice) and context/preconditions via `generic` tags with
+  a namespace convention (e.g. `ctx:requires-computer`,
+  `place:hardware`).
+- A project can be personal (a non-billable project): the same
+  taxonomy (ADR-0003), no parallel entity.
+- `Budget`: an org-scoped envelope per period (month/quarter/year/
+  custom) and category (e.g. home expenses) with an allocatable amount
+  and currency; tasks attach via `budget_id`; consumption vs residual
+  computed by the service layer.
+- Selection within budget is deterministic (priority knapsack), not an
+  opaque LLM judgment; the LLM translates the request into a structured
+  query and narrates the result. See
   [ADR-0014](adr/0014-personal-domain-budgets.md).
 
-## FR-15 Metering, crediti, billing (ADR-0019)
+## FR-15 Metering, credits, billing (ADR-0019)
 
-Billing a crediti (riuso pattern bitvision). Wallet per org + ledger
-append-only idempotente + check-and-debit atomico (niente scoperto in
-concorrenza). Rate card per modello (credits/token in-out, provider,
-markup, is_active, tier). Basi di costo: locale = rate card; nostra
-chiave = costo provider x markup; BYOK = nessun costo token, fee di
-piattaforma configurabile (es. 0.0001 x unita), chiave utente cifrata
-(ADR-0006). Metering: `usage_record` per operazione + debito sul
-ledger. Storage misurato: DB e S3 a rate distinti configurabili
-(GB-mese); allegati/documenti pesanti su S3, il DB tiene solo metadati
-+ testo indicizzabile. Enforcement nel service layer (choke point come
-RBAC): a crediti insufficienti le operazioni a costo (LLM, embedding,
-advisory con LLM, scritture storage pesanti) sono rifiutate con codice
-i18n; lettura, export GDPR e recupero documenti fiscali/conservati
-restano disponibili. Admin (ruolo) aggiunge crediti, edita rate
-card/percentuali/rate storage; azioni auditate. Gateway di pagamento
-fuori v1 (v1 = grant manuale admin). Vedi
+Credit-based billing (reuse the bitvision pattern). Per-org wallet +
+append-only idempotent ledger + atomic check-and-debit (no overdraft
+under concurrency). Per-model rate card (credits/token in-out,
+provider, markup, is_active, tier). Cost bases: local = rate card; our
+key = provider cost x markup; BYOK = no token cost, a configurable
+platform fee (e.g. 0.0001 x unit), the user key encrypted (ADR-0006).
+Metering: a `usage_record` per operation + a debit on the ledger.
+Metered storage: DB and S3 at distinct configurable rates (GB-month);
+heavy attachments/documents on S3, the DB keeps only metadata +
+indexable text. Enforcement in the service layer (choke point like
+RBAC): at insufficient credits the cost-incurring operations (LLM,
+embedding, advisory with an LLM, heavy storage writes) are rejected
+with an i18n code; read, GDPR export and retrieval of
+fiscal/conserved documents stay available. Admin (role) tops up
+credits, edits rate cards/percentages/storage rates; audited actions. A
+payment gateway is out of v1 (v1 = manual admin grant). See
 [ADR-0019](adr/0019-metering-credits-billing.md).
 
-## FR-16 Note vocali e cattura conversazionale (ADR-0020)
+## FR-16 Voice notes and conversational capture (ADR-0020)
 
-Cattura separata dall'elaborazione. Cattura offline-first (PWA:
-MediaRecorder, coda IndexedDB, Service Worker background sync, upload
-ripreso multipart presigned su S3); audio grezzo su S3, mai DB; la
-cattura NON e operazione a costo (funziona offline e a crediti zero,
-cosi non perdi l'idea mentre corri). Entita `Note` (kind
-voice|text|conversation): transcript, audio_ref S3, output LLM
-opzionali (titolo/summary/action item -> Task riusando il flusso
-email->task), tag, scope (org, progetto), provenienza per erasure
-GDPR. `TranscriptionProvider` pluggable (pattern ADR-0012): default
-STT locale multilingue (Whisper/faster-whisper, CPU/ARM, sostituibile
-GPU/large/API); STT esterno solo con opt-in per Org + audit (l'audio e
-dato personale). Modalita conversazione/brainstorming (testo o voce):
-turni utente/LLM (provider ADR-0012, metered ADR-0019), salvati come
-Note e riassunti in memoria (ADR-0016) entro l'isolamento
-(org, progetto). Metering: STT per minuti audio, TTS per
-caratteri/secondi; l'unita del rate card e di prima classe
-(token|audio-min|tts-char|GB-mese), refina ADR-0019. Retention audio
-configurabile, default cancella dopo trascrizione confermata
-(minimizzazione GDPR); erasure a cascata (audio S3 + transcript + blob
-memoria + task generati). Vincolo onesto: cattura in background sul
-web limitata (v1 foreground + coda; always-on = app nativa, mobile
-dopo). Modello di interazione: l'LLM risponde. Online: loop dal vivo
-(parli -> STT -> LLM -> risposta testo; a voce solo se TTS abilitato).
-Offline (tipico mentre corri senza segnale): STT/LLM sono server-side,
-metered, online; la domanda e catturata offline (non metered, mai
-persa) e risposta appena torna la connettivita (il worker esegue
-l'LLM, accoda il turno di risposta nella Note e notifica via FR-12).
-LLM on-device per risposte offline vere = fuori scope.
-TTS/voce in uscita: in v1 via `TtsProvider` pluggable (locale
-default, esterno opt-in), metered per caratteri/secondi (ADR-0019);
-online, offline la risposta e testo notificato e parlata al rientro.
-Vedi
+Capture separated from processing. Offline-first capture (PWA:
+MediaRecorder, IndexedDB queue, Service Worker background sync,
+resumable presigned multipart upload to S3); raw audio on S3, never
+the DB; capture is NOT a cost operation (works offline and at zero
+credits, so you do not lose the idea while running). `Note` entity
+(kind voice|text|conversation): transcript, S3 audio_ref, optional LLM
+outputs (title/summary/action item -> Task reusing the email->task
+flow), tags, (org, project) scope, provenance for GDPR erasure.
+Pluggable `TranscriptionProvider` (ADR-0012 pattern): default local
+multilingual STT (Whisper/faster-whisper, CPU/ARM, replaceable with
+GPU/large/API); external STT only with per-Org opt-in + audit (audio
+is personal data). Conversation/brainstorming mode (text or voice):
+user/LLM turns (provider ADR-0012, metered ADR-0019), saved as Notes
+and summarized into memory (ADR-0016) within the (org, project)
+isolation. Metering: STT per audio minute, TTS per characters/seconds;
+the rate-card unit is first-class
+(token|audio-min|tts-char|GB-month), refines ADR-0019. Configurable
+audio retention, default delete after confirmed transcription (GDPR
+minimization); cascading erasure (S3 audio + transcript + memory blob
++ generated tasks). Honest constraint: background capture on the web
+is limited (v1 foreground + queue; always-on = native app, mobile
+later). Interaction model: the LLM replies. Online: a live loop
+(you speak -> STT -> LLM -> text reply; spoken only if TTS is
+enabled). Offline (typical while running with no signal): STT/LLM are
+server-side, metered, online; the question is captured offline (not
+metered, never lost) and answered as soon as connectivity returns
+(the worker runs the LLM, queues the answer turn into the Note and
+notifies via FR-12). On-device LLM for true offline replies = out of
+scope. Outbound TTS/voice: in v1 via a pluggable `TtsProvider` (local
+default, external opt-in), metered per characters/seconds (ADR-0019);
+online; offline the reply is text notified and spoken on reconnect.
+See
 [ADR-0020](adr/0020-voice-notes-conversational-capture.md).
-Comandi in linguaggio naturale ("crea una nota", "nuova conversazione
-[nel progetto X]"): intent layer deterministico per i comandi canonici
-+ fallback LLM, risoluzione progetto con conferma (mai mis-scoping),
-voce/testo/MCP (ADR-0021). Attivazione hands-free dal pulsante cuffie
-o assistente OS: richiede app companion nativa, post web-v1
-(ADR-0022).
+Natural-language commands ("create a note", "new conversation
+[in project X]"): a deterministic intent layer for the canonical
+commands + an LLM fallback, project resolution with confirmation
+(never mis-scoping), voice/text/MCP (ADR-0021). Hands-free activation
+from the headphone button or OS assistant: requires a native companion
+app, post web-v1 (ADR-0022).

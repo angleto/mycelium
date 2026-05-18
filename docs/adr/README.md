@@ -18,7 +18,7 @@ Format: Status, Context, Decision, Consequences, Alternatives rejected.
 - [0007 Hard memory isolation per (org, project)](0007-memory-hard-isolation-org-project.md)
 - [0008 No-ubiquity: events entity](0008-no-ubiquity-events.md)
 - [0009 Invoice immutability, soft-delete carve-out](0009-invoice-immutability.md)
-- [0010 Conservation: free AdE service](0010-conservazione-ade-free-service.md)
+- [0010 Conservation: free AdE service](0010-conservation-ade-free-service.md)
 - [0011 SDI: intermediary/mandate model, v1 B2B/B2C](0011-sdi-intermediary-mandate-v1-b2b.md)
 - [0012 LLM/Embedder abstraction, reuse the bitvision pattern](0012-llm-embedder-abstraction.md)
 - [0013 Planning advisory layer, deterministic core](0013-planning-advisory-layer.md)
