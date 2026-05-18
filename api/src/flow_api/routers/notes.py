@@ -66,6 +66,14 @@ async def create_note(
     return _out(n)
 
 
+@router.get("", response_model=list[NoteOut])
+async def list_notes(
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+) -> list[NoteOut]:
+    rows = await svc.list_notes(ctx.session, org_id=ctx.org_id)
+    return [_out(n) for n in rows]
+
+
 @router.get("/{note_id}", response_model=NoteOut)
 async def get_note(
     note_id: uuid.UUID,

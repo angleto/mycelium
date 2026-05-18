@@ -111,6 +111,29 @@ async def resolve_project(
     raise DomainError(MessageCode.TAG_AMBIGUOUS, name=name)
 
 
+def _derive_title(text: str | None) -> str | None:
+    """Apple Notes style: when no title is given, the first non-empty
+    line of the body becomes the title (trimmed, capped at 120)."""
+    if not text:
+        return None
+    for line in text.splitlines():
+        s = line.strip().lstrip("#").strip()
+        if s:
+            return s[:120]
+    return None
+
+
+async def list_notes(
+    session: AsyncSession, *, org_id: uuid.UUID, limit: int = 200
+) -> list[Note]:
+    """Notes in the workspace, newest first (for the @note picker and
+    the notes list). RLS scopes to the org."""
+    rows = await session.execute(
+        select(Note).order_by(Note.created_at.desc()).limit(limit)
+    )
+    return list(rows.scalars().all())
+
+
 async def get_note(session: AsyncSession, *, org_id: uuid.UUID, note_id: uuid.UUID) -> Note:
     n = (await session.execute(select(Note).where(Note.id == note_id))).scalar_one_or_none()
     if n is None:
@@ -142,6 +165,8 @@ async def create_note(
     else:  # voice
         status = NoteStatus.captured
         transcript = None
+    if not (title and title.strip()):
+        title = _derive_title(text)
     note = Note(
         org_id=org_id,
         project_id=project_id,

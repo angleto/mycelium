@@ -1255,6 +1255,14 @@ async def create_note(
 
 
 @mcp.tool()
+async def list_notes(token: str, org_id: str) -> list[dict[str, Any]]:
+    """List notes in the workspace (newest first); for the @note picker."""
+    async with _tenant(token, org_id) as (s, org, _user):
+        rows = await notes_svc.list_notes(s, org_id=org)
+        return [_note(n) for n in rows]
+
+
+@mcp.tool()
 async def start_conversation_session(
     token: str,
     org_id: str,
