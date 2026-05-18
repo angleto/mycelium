@@ -16,6 +16,7 @@ import { EventsRoute } from './routes/EventsRoute'
 import { TimeRoute } from './routes/TimeRoute'
 import { AdvisoryRoute } from './routes/AdvisoryRoute'
 import { BudgetsRoute } from './routes/BudgetsRoute'
+import { EmailRoute } from './routes/EmailRoute'
 import { SettingsRoute } from './routes/SettingsRoute'
 
 function App() {
@@ -39,6 +40,7 @@ function App() {
             <Route path="/time" element={<TimeRoute />} />
             <Route path="/advisory" element={<AdvisoryRoute />} />
             <Route path="/budgets" element={<BudgetsRoute />} />
+            <Route path="/email" element={<EmailRoute />} />
             <Route path="/settings" element={<SettingsRoute />} />
           </Route>
         </Route>
