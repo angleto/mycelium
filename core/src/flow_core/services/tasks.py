@@ -27,11 +27,30 @@ from flow_core.services import audit
 from flow_core.services import workflow as wf
 from flow_core.services.rbac import require_role
 
+
+def derive_priority(importance: int, urgency: int) -> int:
+    """Eisenhower: priority is derived from importance x urgency (each
+    1..5). The product (1..25, higher = do first) is bucketed into the
+    backend's 1..4 scale where 1 = highest (ADR-0004: scheduler orders
+    by priority ascending). importance/urgency are persisted so the
+    matrix round-trips; this collapses them for the scheduler."""
+    s = importance * urgency
+    if s >= 16:
+        return 1
+    if s >= 9:
+        return 2
+    if s >= 4:
+        return 3
+    return 4
+
+
 _UPDATABLE = frozenset(
     {
         "title",
         "description",
         "priority",
+        "importance",
+        "urgency",
         "start_date",
         "due_date",
         "estimate_effort_h",
@@ -73,6 +92,8 @@ async def create_task(
     title: str,
     description: str | None = None,
     priority: int = 3,
+    importance: int | None = None,
+    urgency: int | None = None,
     start_date: dt.date | None = None,
     due_date: dt.date | None = None,
     parent_task_id: uuid.UUID | None = None,
@@ -98,11 +119,15 @@ async def create_task(
         ).scalar_one_or_none()
     workflow = await wf.resolve_effective_workflow(session, org_id, project_tag_id)
     initial = await wf.get_initial_state(session, workflow.id)
+    if importance is not None and urgency is not None:
+        priority = derive_priority(importance, urgency)
     task = Task(
         org_id=org_id,
         title=title,
         description=description,
         priority=priority,
+        importance=importance,
+        urgency=urgency,
         start_date=start_date,
         due_date=due_date,
         state_id=initial.id,
@@ -178,7 +203,12 @@ async def update_task(
     if unknown:
         raise DomainError(MessageCode.DOMAIN_ERROR)
     await require_role(session, org_id, actor_id, Role.member)
-    await get_task(session, org_id=org_id, task_id=task_id)
+    current = await get_task(session, org_id=org_id, task_id=task_id)
+    if "importance" in values or "urgency" in values:
+        imp = values.get("importance", current.importance)
+        urg = values.get("urgency", current.urgency)
+        if imp is not None and urg is not None:
+            values["priority"] = derive_priority(imp, urg)
     new_version = await optimistic_update(
         session,
         Task,

@@ -175,6 +175,8 @@ async def create_task(
     title: str,
     description: str | None = None,
     priority: int = 3,
+    importance: int | None = None,
+    urgency: int | None = None,
     tag_ids: list[str] | None = None,
     estimate_effort_h: float | None = None,
     monetary_cost: float | None = None,
@@ -193,6 +195,8 @@ async def create_task(
             title=title,
             description=description,
             priority=priority,
+            importance=importance,
+            urgency=urgency,
             estimate_effort_h=(
                 Decimal(str(estimate_effort_h)) if estimate_effort_h is not None else None
             ),

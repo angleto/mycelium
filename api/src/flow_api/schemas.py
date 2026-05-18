@@ -189,6 +189,8 @@ class TaskCreateIn(BaseModel):
     title: str = Field(min_length=1, max_length=300)
     description: str | None = None
     priority: int = Field(default=3, ge=1, le=4)
+    importance: int | None = Field(default=None, ge=1, le=5)
+    urgency: int | None = Field(default=None, ge=1, le=5)
     start_date: datetime.date | None = None
     due_date: datetime.date | None = None
     parent_task_id: uuid.UUID | None = None
@@ -208,6 +210,8 @@ class TaskPatchIn(BaseModel):
     title: str | None = Field(default=None, min_length=1, max_length=300)
     description: str | None = None
     priority: int | None = Field(default=None, ge=1, le=4)
+    importance: int | None = Field(default=None, ge=1, le=5)
+    urgency: int | None = Field(default=None, ge=1, le=5)
     start_date: datetime.date | None = None
     due_date: datetime.date | None = None
     estimate_effort_h: Decimal | None = None
@@ -244,6 +248,8 @@ class TaskOut(BaseModel):
     state_id: uuid.UUID
     state: str
     priority: int
+    importance: int | None
+    urgency: int | None
     start_date: datetime.date | None
     due_date: datetime.date | None
     parent_task_id: uuid.UUID | None
