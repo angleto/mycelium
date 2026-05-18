@@ -1,4 +1,5 @@
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
+import { FocusProvider } from './lib/focus'
 import { RequireAuth } from './components/RequireAuth'
 import { AppShell } from './components/AppShell'
 import { LoginRoute } from './routes/LoginRoute'
@@ -30,6 +31,7 @@ import { SettingsRoute } from './routes/SettingsRoute'
 function App() {
   return (
     <BrowserRouter>
+      <FocusProvider>
       <Routes>
         <Route path="/login" element={<LoginRoute />} />
         <Route path="/register" element={<RegisterRoute />} />
@@ -62,6 +64,7 @@ function App() {
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
+      </FocusProvider>
     </BrowserRouter>
   )
 }

@@ -13,6 +13,7 @@ import { useSession } from '../auth/useSession'
 import { RichEditor } from '../components/RichEditor'
 import { MarkdownView } from '../components/Markdown'
 import { TagChip } from '../components/TagChip'
+import { useFocus } from '../lib/focus'
 import type { components } from '../api/schema'
 
 type Note = components['schemas']['NoteOut']
@@ -32,9 +33,9 @@ export function NotesRoute() {
   const session = useSession()
   const activeId = session?.workspaceId
 
+  const { projectId: focusProject } = useFocus()
   const [notes, setNotes] = useState<Note[]>([])
   const [tags, setTags] = useState<Tag[]>([])
-  const [fProject, setFProject] = useState('')
   const [fTag, setFTag] = useState('')
   const [cmd, setCmd] = useState('')
   const [msg, setMsg] = useState<string | null>(null)
@@ -68,13 +69,13 @@ export function NotesRoute() {
       params: {
         header: workspaceHeader(),
         query: {
-          ...(fProject ? { project_id: fProject } : {}),
+          ...(focusProject ? { project_id: focusProject } : {}),
           ...(fTag ? { tag_id: fTag } : {}),
         },
       },
     })
     if (data) setNotes(data)
-  }, [fProject, fTag])
+  }, [focusProject, fTag])
 
   useEffect(() => {
     let active = true
@@ -84,7 +85,7 @@ export function NotesRoute() {
           params: {
             header: workspaceHeader(),
             query: {
-              ...(fProject ? { project_id: fProject } : {}),
+              ...(focusProject ? { project_id: focusProject } : {}),
               ...(fTag ? { tag_id: fTag } : {}),
             },
           },
@@ -98,7 +99,7 @@ export function NotesRoute() {
     return () => {
       active = false
     }
-  }, [activeId, fProject, fTag])
+  }, [activeId, focusProject, fTag])
 
   function closeModal() {
     setSel(null)
@@ -141,7 +142,7 @@ export function NotesRoute() {
     setCKind('text')
     setCTitle('')
     setCText('')
-    setCProject(fProject)
+    setCProject(focusProject)
     setCreating(true)
   }
 
@@ -366,14 +367,6 @@ export function NotesRoute() {
         <button type="button" onClick={openCreate}>
           {t('notes.newNote')}
         </button>
-        <select value={fProject} onChange={(e) => setFProject(e.target.value)}>
-          <option value="">{t('notes.allProjects')}</option>
-          {projects.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.name}
-            </option>
-          ))}
-        </select>
         <select value={fTag} onChange={(e) => setFTag(e.target.value)}>
           <option value="">{t('notes.allTags')}</option>
           {tags.map((g) => (

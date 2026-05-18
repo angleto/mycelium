@@ -4,6 +4,7 @@
 // (string values, not literals) so other locales must mirror it.
 export const en = {
   app: { title: 'Flow' },
+  focus: { label: 'Focus project', all: 'All projects' },
   settings: {
     theme: 'Theme',
     themeAuto: 'Auto',

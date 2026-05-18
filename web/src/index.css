@@ -153,6 +153,24 @@ a:hover {
 .sidebar__ws {
   padding: 0 0.25rem 0.4rem;
   border-bottom: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.focus {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+.focus__lbl {
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+.focus select {
+  width: 100%;
 }
 .running {
   display: flex;

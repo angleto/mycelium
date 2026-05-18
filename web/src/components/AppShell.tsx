@@ -9,11 +9,50 @@ import { Logo } from './Logo'
 import { Icon, type IconName } from './NavIcon'
 import { ThemeToggle } from './ThemeToggle'
 import { hms, elapsedSec } from '../lib/time'
+import { useFocus } from '../lib/focus'
 import type { components } from '../api/schema'
 import i18n from '../i18n'
 
 type Item = { to: string; label: string; icon: IconName }
 type Running = components['schemas']['TimeEntryOut']
+type Tag = components['schemas']['TagOut']
+
+// Project focus: pick a project and the project-scoped views (Notes,
+// Tasks) filter to it (fewer clicks, less noise). Empty = everything.
+function ProjectFocus() {
+  const { t } = useTranslation()
+  const session = useSession()
+  const { projectId, setProjectId } = useFocus()
+  const [projects, setProjects] = useState<Tag[]>([])
+  useEffect(() => {
+    let active = true
+    void (async () => {
+      const { data } = await api.GET('/tags', {
+        params: { header: workspaceHeader(), query: { kind: 'project' } },
+      })
+      if (active && data) setProjects(data)
+    })()
+    return () => {
+      active = false
+    }
+  }, [session?.workspaceId])
+  return (
+    <label className="focus">
+      <span className="focus__lbl">{t('focus.label')}</span>
+      <select
+        value={projectId}
+        onChange={(e) => setProjectId(e.target.value)}
+      >
+        <option value="">{t('focus.all')}</option>
+        {projects.map((p) => (
+          <option key={p.id} value={p.id}>
+            {p.name}
+          </option>
+        ))}
+      </select>
+    </label>
+  )
+}
 
 // Top-bar running indicator: a slow spinner shown only while a timer
 // runs, the count of running timers, and the live elapsed of the
@@ -181,6 +220,7 @@ export function AppShell() {
         <aside className="sidebar">
           <div className="sidebar__ws">
             <WorkspaceSwitcher />
+            <ProjectFocus />
           </div>
           <nav className="nav">
             {groups.map((g) => (

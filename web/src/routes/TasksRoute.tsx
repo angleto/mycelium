@@ -6,6 +6,7 @@ import { useSession } from '../auth/useSession'
 import { TagChip } from '../components/TagChip'
 import { PriorityChip } from '../components/PriorityChip'
 import { ScaleSelect } from '../components/ScaleSelect'
+import { useFocus } from '../lib/focus'
 import type { components } from '../api/schema'
 
 type Task = components['schemas']['TaskOut']
@@ -27,6 +28,7 @@ export function TasksRoute() {
   const { t } = useTranslation()
   const session = useSession()
   const activeId = session?.workspaceId
+  const { projectId: focusProject } = useFocus()
   const [tasks, setTasks] = useState<Task[]>([])
   const [tags, setTags] = useState<Tag[]>([])
   const [filter, setFilter] = useState('')
@@ -333,9 +335,16 @@ export function TasksRoute() {
           (tk.tags ?? []).some((g) => g.name.toLowerCase().includes(ql)),
       )
     : tasks
+  // Project focus (sidebar): when set, only tasks tagged with that
+  // project are shown — distraction-free, additive to the tag filter.
+  const focused = focusProject
+    ? matched.filter((tk) =>
+        (tk.tags ?? []).some((g) => g.id === focusProject),
+      )
+    : matched
   const shown = showDone
-    ? matched
-    : matched.filter((tk) => !terminalIds.has(tk.state_id))
+    ? focused
+    : focused.filter((tk) => !terminalIds.has(tk.state_id))
 
   return (
     <section className="card">
