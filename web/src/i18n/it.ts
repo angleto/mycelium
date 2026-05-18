@@ -480,10 +480,24 @@ export const it: Catalog = {
     erased: 'Cancellati {{n}} blob.',
     meteredNote: 'Scrittura e ricerca sono a consumo; assicurati che il workspace abbia crediti.',
     intro:
-      'Memoria a lungo termine per la AI: frammenti che potra richiamare per significato. Isolata a questo workspace (e progetto, se impostato).',
-    writeTitle: 'Memorizza qualcosa',
+      'La memoria a lungo termine della AI: brevi frammenti richiamabili per significato. Qui puoi ispezionarla, aggiungerne una a mano e fare pulizia.',
+    howAuto:
+      'Per lo piu automatica: l\'assistente scrive qui i frammenti come effetto collaterale di note, email e conversazioni (ognuno porta la sua sorgente).',
+    howManual:
+      'Puoi anche aggiungerne uno a mano qui sotto (es. una preferenza o un fatto duraturo).',
+    howEdit:
+      'I frammenti non si modificano in loco: gestiscili con i tag, lascia che la AI li consolidi, oppure cancellali (GDPR) per sorgente.',
+    howTier:
+      'Il tier (hot/warm/cold) e solo un indizio di recency da quanto viene richiamato. Niente viene mai eliminato dal tiering; il cold resta cercabile.',
+    howConsolidate:
+      'Il consolidamento (fatto dalla AI) fonde piu frammenti correlati dello stesso workspace/progetto in un concetto "consolidated"; gli originali mantengono la provenienza.',
+    howIsolation:
+      'Isolamento duro: una ricerca vede solo questo workspace (e progetto, se impostato), mai un altro tenant.',
+    tierLegend:
+      'Ogni risultato mostra il tier (hot/warm/cold = indizio di recency, non ritenzione) e rrf (punteggio di pertinenza, piu alto = meglio).',
+    writeTitle: 'Aggiungi una memoria manualmente (opzionale)',
     writeHint:
-      'Salva un frammento (un fatto, una preferenza, una decisione). La AI lo recupera dopo per ricerca semantica + parole chiave.',
+      'Di solito l\'assistente riempie la memoria da solo. Aggiungi qui solo un fatto/preferenza duraturo che vuoi gli resti.',
     writePlaceholder: 'es. Il cliente preferisce le fatture via PEC, non email.',
     searchTitle: 'Richiama',
     searchHint:

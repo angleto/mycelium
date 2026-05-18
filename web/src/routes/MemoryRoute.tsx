@@ -143,6 +143,14 @@ export function MemoryRoute() {
     <section className="card">
       <h1>{t('memory.title')}</h1>
       <p className="hint">{t('memory.intro')}</p>
+      <ul className="hint">
+        <li>{t('memory.howAuto')}</li>
+        <li>{t('memory.howManual')}</li>
+        <li>{t('memory.howEdit')}</li>
+        <li>{t('memory.howTier')}</li>
+        <li>{t('memory.howConsolidate')}</li>
+        <li>{t('memory.howIsolation')}</li>
+      </ul>
       <p className="hint">{t('memory.meteredNote')}</p>
       {err && <p className="err">{err}</p>}
       {msg && <p className="ok">{msg}</p>}
@@ -226,6 +234,7 @@ export function MemoryRoute() {
       {hits && (
         <>
           <h2>{t('memory.results')}</h2>
+          <p className="hint">{t('memory.tierLegend')}</p>
           {hits.length === 0 ? (
             <p className="hint">{t('memory.none')}</p>
           ) : (

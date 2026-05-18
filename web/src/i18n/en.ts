@@ -481,10 +481,24 @@ export const en = {
     erased: 'Erased {{n}} blob(s).',
     meteredNote: 'Write and search are metered; ensure the workspace has credits.',
     intro:
-      'Long-term memory for the AI: snippets it can recall later by meaning. Hard-isolated to this workspace (and project, if set).',
-    writeTitle: 'Remember something',
+      'The AI long-term memory: short snippets it can recall later by meaning. This page lets you inspect it, add one by hand, and clean it up.',
+    howAuto:
+      'Mostly automatic: the assistant writes snippets here as a side effect of notes, emails and conversations (each carries its source).',
+    howManual:
+      'You can also add one by hand below (e.g. a durable preference or fact).',
+    howEdit:
+      'Snippets are not edited in place: manage them with tags, let the AI consolidate them, or GDPR-erase by source.',
+    howTier:
+      'Tier (hot/warm/cold) is only a recency hint from how often it is recalled. Nothing is ever deleted by tiering; cold stays fully searchable.',
+    howConsolidate:
+      'Consolidation (done by the AI) merges several related snippets of the same workspace/project into one "consolidated" concept; the originals keep their provenance.',
+    howIsolation:
+      'Hard-isolated: a search only ever sees this workspace (and project, if set), never another tenant.',
+    tierLegend:
+      'Each result shows its tier (hot/warm/cold = recency hint, not retention) and rrf (relevance score, higher = better).',
+    writeTitle: 'Add a memory manually (optional)',
     writeHint:
-      'Save a snippet (a fact, a preference, a decision). The AI retrieves it later by semantic + keyword search.',
+      'The assistant usually fills memory for you. Add one here only for a durable fact/preference you want it to recall.',
     writePlaceholder: 'e.g. The client prefers invoices by PEC, not email.',
     searchTitle: 'Recall',
     searchHint:
