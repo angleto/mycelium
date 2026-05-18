@@ -5,10 +5,11 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import Sequence
 from dataclasses import dataclass
 from decimal import Decimal
 
-from sqlalchemy import select
+from sqlalchemy import delete, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -20,6 +21,7 @@ from flow_core.models.membership import Role
 from flow_core.models.organization import Organization
 from flow_core.models.project_profile import ProjectProfile
 from flow_core.models.tag import Tag, TagKind
+from flow_core.models.tag_scope import TagScope
 from flow_core.services import audit
 from flow_core.services.rbac import require_role
 
@@ -133,28 +135,20 @@ async def ensure_default_client(
     id is remembered in organizations.settings.default_client_tag_id.
     System action (no role gate) so a member can create a project."""
     org = (
-        await session.execute(
-            select(Organization).where(Organization.id == org_id)
-        )
+        await session.execute(select(Organization).where(Organization.id == org_id))
     ).scalar_one_or_none()
     settings = dict(org.settings) if org and org.settings else {}
     cur = settings.get("default_client_tag_id")
     if cur is not None:
         exists = (
             await session.execute(
-                select(Tag.id).where(
-                    Tag.id == uuid.UUID(str(cur)), Tag.kind == TagKind.client
-                )
+                select(Tag.id).where(Tag.id == uuid.UUID(str(cur)), Tag.kind == TagKind.client)
             )
         ).scalar_one_or_none()
         if exists is not None:
             return uuid.UUID(str(cur))
     tag = await _insert_tag(session, org_id, TagKind.client, _DEFAULT_CLIENT_NAME, None)
-    session.add(
-        ClientProfile(
-            tag_id=tag.id, org_id=org_id, ragione_sociale=_DEFAULT_CLIENT_NAME
-        )
-    )
+    session.add(ClientProfile(tag_id=tag.id, org_id=org_id, ragione_sociale=_DEFAULT_CLIENT_NAME))
     await session.flush()
     if org is not None:
         org.settings = {**settings, "default_client_tag_id": str(tag.id)}
@@ -186,9 +180,7 @@ async def create_project(
     await require_role(session, org_id, actor_id, Role.admin)
     if client_tag_id is None:
         # Every project belongs to a client; default to "Personal".
-        client_tag_id = await ensure_default_client(
-            session, org_id=org_id, actor_id=actor_id
-        )
+        client_tag_id = await ensure_default_client(session, org_id=org_id, actor_id=actor_id)
     else:
         client = await session.execute(
             select(Tag.id).where(Tag.id == client_tag_id, Tag.kind == TagKind.client)
@@ -221,12 +213,86 @@ async def create_project(
 
 
 async def list_tags(
-    session: AsyncSession, *, org_id: uuid.UUID, kind: TagKind | None = None
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    kind: TagKind | None = None,
+    for_project: uuid.UUID | None = None,
 ) -> list[Tag]:
     stmt = select(Tag).order_by(Tag.kind, Tag.name)
     if kind is not None:
         stmt = stmt.where(Tag.kind == kind)
+    if for_project is not None:
+        # Visible for a project = global (no scope rows) OR scoped to
+        # that project or its client.
+        targets: list[uuid.UUID] = [for_project]
+        prof = (
+            await session.execute(
+                select(ProjectProfile.client_tag_id).where(ProjectProfile.tag_id == for_project)
+            )
+        ).scalar_one_or_none()
+        if prof is not None:
+            targets.append(prof)
+        scoped = select(TagScope.tag_id).distinct()
+        in_scope = select(TagScope.tag_id).where(TagScope.target_tag_id.in_(targets))
+        stmt = stmt.where(or_(Tag.id.not_in(scoped), Tag.id.in_(in_scope)))
     return list((await session.execute(stmt)).scalars().all())
+
+
+async def scopes_by_tag(
+    session: AsyncSession, *, tag_ids: Sequence[uuid.UUID]
+) -> dict[uuid.UUID, list[uuid.UUID]]:
+    """Batched tag -> its scope target ids (empty list = global)."""
+    out: dict[uuid.UUID, list[uuid.UUID]] = {}
+    if not tag_ids:
+        return out
+    rows = await session.execute(
+        select(TagScope.tag_id, TagScope.target_tag_id).where(TagScope.tag_id.in_(tag_ids))
+    )
+    for tid, target in rows.all():
+        out.setdefault(tid, []).append(target)
+    return out
+
+
+async def set_tag_scope(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    tag_id: uuid.UUID,
+    target_ids: Sequence[uuid.UUID],
+) -> None:
+    """Replace a tag's scope with ``target_ids`` (each a project or
+    client tag). Empty => global."""
+    await require_role(session, org_id, actor_id, Role.admin)
+    await get_tag(session, org_id=org_id, tag_id=tag_id)
+    valid = {
+        r
+        for (r,) in (
+            await session.execute(
+                select(Tag.id).where(
+                    Tag.id.in_(list(target_ids)),
+                    Tag.kind.in_([TagKind.project, TagKind.client]),
+                )
+            )
+        ).all()
+    }
+    bad = set(target_ids) - valid
+    if bad:
+        raise DomainError(MessageCode.TAG_KIND_MISMATCH)
+    await session.execute(delete(TagScope).where(TagScope.tag_id == tag_id))
+    for target in valid:
+        session.add(TagScope(org_id=org_id, tag_id=tag_id, target_tag_id=target))
+    await session.flush()
+    await audit.log(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        entity="tag",
+        entity_id=tag_id,
+        action="set_scope",
+        diff={"targets": str(len(valid))},
+    )
 
 
 async def get_tag(session: AsyncSession, *, org_id: uuid.UUID, tag_id: uuid.UUID) -> Tag:
@@ -275,9 +341,7 @@ async def update_client(
     if tag.kind is not TagKind.client:
         raise DomainError(MessageCode.TAG_KIND_MISMATCH)
     prof = (
-        await session.execute(
-            select(ClientProfile).where(ClientProfile.tag_id == tag_id)
-        )
+        await session.execute(select(ClientProfile).where(ClientProfile.tag_id == tag_id))
     ).scalar_one_or_none()
     if prof is None:
         raise NotFoundError(MessageCode.TAG_NOT_FOUND)
@@ -313,18 +377,14 @@ async def update_project(
     if tag.kind is not TagKind.project:
         raise DomainError(MessageCode.TAG_KIND_MISMATCH)
     prof = (
-        await session.execute(
-            select(ProjectProfile).where(ProjectProfile.tag_id == tag_id)
-        )
+        await session.execute(select(ProjectProfile).where(ProjectProfile.tag_id == tag_id))
     ).scalar_one_or_none()
     if prof is None:
         raise NotFoundError(MessageCode.TAG_NOT_FOUND)
     flds = fields or {}
     ctid = flds.get("client_tag_id")
     if ctid is not None:
-        ok = await session.execute(
-            select(Tag.id).where(Tag.id == ctid, Tag.kind == TagKind.client)
-        )
+        ok = await session.execute(select(Tag.id).where(Tag.id == ctid, Tag.kind == TagKind.client))
         if ok.scalar_one_or_none() is None:
             raise DomainError(MessageCode.TAG_KIND_MISMATCH)
     tag_dirty = False

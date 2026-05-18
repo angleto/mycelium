@@ -190,7 +190,14 @@ class TagOut(BaseModel):
     name: str
     color: str | None
     status: str
+    # Scope: project/client tag ids this tag is restricted to. Empty =
+    # global (available everywhere).
+    scope_target_ids: list[uuid.UUID] = []
     version: int
+
+
+class TagScopeIn(BaseModel):
+    target_ids: list[uuid.UUID] = []
 
 
 class TagBrief(BaseModel):

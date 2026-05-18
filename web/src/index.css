@@ -533,8 +533,10 @@ button.btn--danger:hover {
   align-items: stretch;
   gap: 0.35rem;
 }
-.noteitem button {
-  margin-left: 0; /* cancel `.list li button { margin-left:auto }` */
+/* Must out-specify `.list li button { margin-left:auto }` (0,1,2),
+   else the title button gets right-shifted (empty space at left). */
+.list li.noteitem button {
+  margin-left: 0;
 }
 .noteitem__main {
   display: flex;

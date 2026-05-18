@@ -66,6 +66,7 @@ from flow_core.models.organization import Organization
 from flow_core.models.project_profile import ProjectProfile
 from flow_core.models.schedule import Schedule
 from flow_core.models.tag import Tag, TagKind
+from flow_core.models.tag_scope import TagScope
 from flow_core.models.task import (
     ConstraintKind,
     ExecKind,
@@ -143,6 +144,7 @@ __all__ = [
     "StorageRate",
     "Tag",
     "TagKind",
+    "TagScope",
     "Task",
     "TaskAssignee",
     "TaskDependency",

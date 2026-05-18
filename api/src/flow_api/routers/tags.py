@@ -19,6 +19,7 @@ from flow_api.schemas import (
     TagCreateIn,
     TagOut,
     TagPatchIn,
+    TagScopeIn,
     VersionOut,
 )
 from flow_core.models.tag import Tag, TagKind
@@ -28,13 +29,14 @@ from flow_core.services.taxonomy import ClientInput
 router = APIRouter(tags=["taxonomy"])
 
 
-def _out(tag: Tag) -> TagOut:
+def _out(tag: Tag, scope: list[uuid.UUID] | None = None) -> TagOut:
     return TagOut(
         id=tag.id,
         kind=tag.kind,
         name=tag.name,
         color=tag.color,
         status=tag.status,
+        scope_target_ids=scope or [],
         version=tag.version,
     )
 
@@ -56,9 +58,30 @@ async def create_tag(body: TagCreateIn, ctx: Annotated[TenantCtx, Depends(tenant
 async def list_tags(
     ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
     kind: TagKind | None = None,
+    for_project: uuid.UUID | None = None,
 ) -> list[TagOut]:
-    tags = await taxonomy.list_tags(ctx.session, org_id=ctx.org_id, kind=kind)
-    return [_out(t) for t in tags]
+    tags = await taxonomy.list_tags(
+        ctx.session, org_id=ctx.org_id, kind=kind, for_project=for_project
+    )
+    scopes = await taxonomy.scopes_by_tag(
+        ctx.session, tag_ids=[t.id for t in tags]
+    )
+    return [_out(t, scopes.get(t.id, [])) for t in tags]
+
+
+@router.put("/tags/{tag_id}/scope", status_code=204)
+async def set_tag_scope(
+    tag_id: uuid.UUID,
+    body: TagScopeIn,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+) -> None:
+    await taxonomy.set_tag_scope(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        tag_id=tag_id,
+        target_ids=body.target_ids,
+    )
 
 
 @router.post("/clients", response_model=TagOut)
