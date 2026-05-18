@@ -112,6 +112,12 @@ export const it: Catalog = {
   },
   wsmgr: {
     title: 'Workspace',
+    id: 'ID workspace',
+    rename: 'Nome workspace',
+    save: 'Salva',
+    saving: 'Salvataggio…',
+    saved: 'Salvato.',
+    conflict: 'È cambiato nel frattempo; ricaricato.',
     showArchived: 'Mostra archiviati',
     loading: 'Caricamento...',
     none: 'Nessun workspace.',
