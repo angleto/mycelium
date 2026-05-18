@@ -51,6 +51,10 @@ class MessageCode(enum.StrEnum):
     MEMORY_CROSS_SUBJECT = "memory.cross_subject"
     NOTE_NOT_FOUND = "note.not_found"
     INTENT_UNRECOGNIZED = "intent.unrecognized"
+    INVOICE_NOT_FOUND = "invoice.not_found"
+    INVOICE_NOT_DRAFT = "invoice.not_draft"
+    INVOICE_INVALID = "invoice.invalid"
+    FISCAL_PROFILE_REQUIRED = "invoice.fiscal_profile_required"
     DOMAIN_ERROR = "domain.error"
 
 
@@ -97,6 +101,14 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
         ),
         MessageCode.NOTE_NOT_FOUND: "Note not found",
         MessageCode.INTENT_UNRECOGNIZED: ("Command not recognized: {raw}"),
+        MessageCode.INVOICE_NOT_FOUND: "Invoice not found",
+        MessageCode.INVOICE_NOT_DRAFT: (
+            "Invoice is emitted and immutable (only draft is editable)"
+        ),
+        MessageCode.INVOICE_INVALID: ("Invalid invoice: {detail}"),
+        MessageCode.FISCAL_PROFILE_REQUIRED: (
+            "The organization fiscal profile is incomplete: {detail}"
+        ),
         MessageCode.DOMAIN_ERROR: "Domain error",
     },
 }

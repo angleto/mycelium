@@ -27,6 +27,7 @@ from flow_core.models.budget import Budget, BudgetPeriod
 from flow_core.models.dependency import DependencyType
 from flow_core.models.email import EmailAccount, EmailMessage, EmailProvider
 from flow_core.models.event import Event
+from flow_core.models.invoice import Invoice
 from flow_core.models.memory_blob import MemoryBlob
 from flow_core.models.note import Note, NoteKind, NoteTurn
 from flow_core.models.schedule import Schedule
@@ -41,6 +42,7 @@ from flow_core.services import calendar as calendars
 from flow_core.services import dependencies, scheduler, tasks, taxonomy
 from flow_core.services import email as email_svc
 from flow_core.services import events as events_svc
+from flow_core.services import invoice as invoice_svc
 from flow_core.services import memory as memory_svc
 from flow_core.services import notes as notes_svc
 from flow_core.services import time_tracking as time_svc
@@ -1320,3 +1322,134 @@ async def synthesize_speech(
             text=text,
             operation_id=operation_id,
         )
+
+
+# --- F7: electronic invoicing (FR-9) ---
+
+
+def _invoice(i: Invoice) -> dict[str, Any]:
+    return {
+        "id": str(i.id),
+        "kind": i.kind.value,
+        "document_type": i.document_type.value,
+        "series": i.series,
+        "year": i.year,
+        "number": i.number,
+        "state": i.state.value,
+        "total": str(i.total),
+        "identificativo_sdi": i.identificativo_sdi,
+        "sdi_status": i.sdi_status.value,
+        "conservation_status": i.conservation_status.value,
+        "version": i.version,
+    }
+
+
+@mcp.tool()
+async def set_fiscal_profile(
+    token: str,
+    org_id: str,
+    denominazione: str,
+    piva: str | None = None,
+    codice_fiscale: str | None = None,
+    indirizzo: str = "",
+    cap: str = "",
+    comune: str = "",
+) -> dict[str, Any]:
+    """Set the issuer fiscal profile (admin)."""
+    async with _tenant(token, org_id) as (s, org, user):
+        p = await invoice_svc.upsert_fiscal_profile(
+            s,
+            org_id=org,
+            actor_id=user,
+            denominazione=denominazione,
+            piva=piva,
+            codice_fiscale=codice_fiscale,
+            indirizzo=indirizzo,
+            cap=cap,
+            comune=comune,
+        )
+        return {"denominazione": p.denominazione, "version": p.version}
+
+
+@mcp.tool()
+async def create_invoice(
+    token: str, org_id: str, client_tag_id: str, series: str = "A"
+) -> dict[str, Any]:
+    """Create a draft invoice."""
+    async with _tenant(token, org_id) as (s, org, user):
+        inv = await invoice_svc.create_draft(
+            s,
+            org_id=org,
+            actor_id=user,
+            client_tag_id=uuid.UUID(client_tag_id),
+            series=series,
+        )
+        return _invoice(inv)
+
+
+@mcp.tool()
+async def add_invoice_line(
+    token: str,
+    org_id: str,
+    invoice_id: str,
+    description: str,
+    unit_price: float,
+    quantity: float = 1.0,
+    vat_rate: float = 22.0,
+) -> dict[str, Any]:
+    """Add a line to a draft invoice."""
+    async with _tenant(token, org_id) as (s, org, user):
+        ln = await invoice_svc.add_line(
+            s,
+            org_id=org,
+            actor_id=user,
+            invoice_id=uuid.UUID(invoice_id),
+            description=description,
+            unit_price=Decimal(str(unit_price)),
+            quantity=Decimal(str(quantity)),
+            vat_rate=Decimal(str(vat_rate)),
+        )
+        return {"id": str(ln.id), "line_no": ln.line_no}
+
+
+@mcp.tool()
+async def transmit_invoice(token: str, org_id: str, invoice_id: str) -> dict[str, Any]:
+    """Validate, allocate the progressive number and transmit (channel
+    injected; manual export by default)."""
+    async with _tenant(token, org_id) as (s, org, user):
+        inv = await invoice_svc.transmit(
+            s, org_id=org, actor_id=user, invoice_id=uuid.UUID(invoice_id)
+        )
+        return _invoice(inv)
+
+
+@mcp.tool()
+async def invoice_credit_note(
+    token: str, org_id: str, parent_invoice_id: str, causale: str | None = None
+) -> dict[str, Any]:
+    """Create a TD04 credit note linked to a transmitted invoice."""
+    async with _tenant(token, org_id) as (s, org, user):
+        inv = await invoice_svc.create_credit_note(
+            s,
+            org_id=org,
+            actor_id=user,
+            parent_invoice_id=uuid.UUID(parent_invoice_id),
+            causale=causale,
+        )
+        return _invoice(inv)
+
+
+@mcp.tool()
+async def ingest_sdi_receipt(
+    token: str, org_id: str, identificativo_sdi: str, outcome: str
+) -> dict[str, Any]:
+    """Correlate an SdI receipt (RC/MC/NS/AT) by IdentificativoSdI."""
+    async with _tenant(token, org_id) as (s, org, user):
+        inv = await invoice_svc.ingest_receipt(
+            s,
+            org_id=org,
+            actor_id=user,
+            identificativo_sdi=identificativo_sdi,
+            outcome=outcome,
+        )
+        return _invoice(inv)

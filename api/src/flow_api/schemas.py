@@ -12,6 +12,14 @@ from flow_core.models.billing import CostBasis, RateUnit, StorageKind
 from flow_core.models.budget import BudgetPeriod
 from flow_core.models.dependency import DependencyType
 from flow_core.models.email import EmailAccountStatus, EmailProvider
+from flow_core.models.invoice import (
+    ConservationStatus,
+    DocumentType,
+    InvoiceKind,
+    InvoiceState,
+    PaymentStatus,
+    SdiStatus,
+)
 from flow_core.models.note import NoteKind, NoteStatus, TurnRole
 from flow_core.models.tag import TagKind
 from flow_core.models.task import ConstraintKind, ExecKind, Necessity, ScheduleMode
@@ -796,3 +804,96 @@ class CommandIn(BaseModel):
 class NoteEraseOut(BaseModel):
     audio_ref: str | None
     memory_blobs_deleted: int
+
+
+# --- F7: electronic invoicing (FR-9, docs/adr/0009, 0010, 0011) ---
+
+
+class FiscalProfileIn(BaseModel):
+    denominazione: str = Field(min_length=1, max_length=200)
+    piva: str | None = Field(default=None, max_length=28)
+    codice_fiscale: str | None = Field(default=None, max_length=16)
+    regime_fiscale: str = Field(default="RF01", max_length=4)
+    paese: str = Field(default="IT", max_length=2)
+    indirizzo: str = Field(default="", max_length=200)
+    cap: str = Field(default="", max_length=10)
+    comune: str = Field(default="", max_length=120)
+    provincia: str | None = Field(default=None, max_length=4)
+    nazione: str = Field(default="IT", max_length=2)
+
+
+class FiscalProfileOut(BaseModel):
+    denominazione: str
+    piva: str | None
+    codice_fiscale: str | None
+    regime_fiscale: str
+    conservation_adhesion: str
+    version: int
+
+
+class ConservationAdhesionIn(BaseModel):
+    adhesion: str = Field(pattern="^(none|requested|active)$")
+
+
+class InvoiceCreateIn(BaseModel):
+    client_tag_id: uuid.UUID
+    year: int | None = None
+    series: str = Field(default="A", max_length=20)
+    causale: str | None = Field(default=None, max_length=200)
+
+
+class InvoiceLineIn(BaseModel):
+    description: str = Field(min_length=1, max_length=1000)
+    unit_price: Decimal
+    quantity: Decimal = Decimal(1)
+    vat_rate: Decimal = Decimal(22)
+    natura: str | None = Field(default=None, max_length=4)
+
+
+class InvoiceLineOut(BaseModel):
+    id: uuid.UUID
+    line_no: int
+    description: str
+    quantity: Decimal
+    unit_price: Decimal
+    vat_rate: Decimal
+    natura: str | None
+
+
+class InvoiceOut(BaseModel):
+    id: uuid.UUID
+    client_tag_id: uuid.UUID
+    kind: InvoiceKind
+    document_type: DocumentType
+    parent_invoice_id: uuid.UUID | None
+    series: str
+    year: int
+    number: int | None
+    state: InvoiceState
+    currency: str
+    taxable: Decimal
+    vat: Decimal
+    total: Decimal
+    identificativo_sdi: str | None
+    sdi_status: SdiStatus
+    payment_status: PaymentStatus
+    conservation_status: ConservationStatus
+    version: int
+
+
+class TransmitIn(BaseModel):
+    progressivo: str | None = None
+
+
+class CreditNoteIn(BaseModel):
+    parent_invoice_id: uuid.UUID
+    causale: str | None = Field(default=None, max_length=200)
+
+
+class ReceiptIn(BaseModel):
+    identificativo_sdi: str = Field(min_length=1, max_length=40)
+    outcome: str = Field(pattern="^(RC|MC|NS|AT)$")
+
+
+class InvoiceXmlOut(BaseModel):
+    xml: str
