@@ -1934,25 +1934,61 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/fiscal-profile": {
+    "/issuer-profiles": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /** Get Fiscal Profile */
-        get: operations["get_fiscal_profile_fiscal_profile_get"];
-        /** Set Fiscal Profile */
-        put: operations["set_fiscal_profile_fiscal_profile_put"];
-        post?: never;
+        /** List Issuer Profiles */
+        get: operations["list_issuer_profiles_issuer_profiles_get"];
+        put?: never;
+        /** Create Issuer Profile */
+        post: operations["create_issuer_profile_issuer_profiles_post"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/fiscal-profile/conservation": {
+    "/issuer-profiles/{profile_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Issuer Profile */
+        get: operations["get_issuer_profile_issuer_profiles__profile_id__get"];
+        put?: never;
+        post?: never;
+        /** Delete Issuer Profile */
+        delete: operations["delete_issuer_profile_issuer_profiles__profile_id__delete"];
+        options?: never;
+        head?: never;
+        /** Update Issuer Profile */
+        patch: operations["update_issuer_profile_issuer_profiles__profile_id__patch"];
+        trace?: never;
+    };
+    "/issuer-profiles/{profile_id}/default": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Set Default Issuer Profile */
+        post: operations["set_default_issuer_profile_issuer_profiles__profile_id__default_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/issuer-profiles/{profile_id}/conservation": {
         parameters: {
             query?: never;
             header?: never;
@@ -1961,7 +1997,7 @@ export interface paths {
         };
         get?: never;
         /** Set Conservation */
-        put: operations["set_conservation_fiscal_profile_conservation_put"];
+        put: operations["set_conservation_issuer_profiles__profile_id__conservation_put"];
         post?: never;
         delete?: never;
         options?: never;
@@ -1987,6 +2023,25 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/invoices/{invoice_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Invoice */
+        get: operations["get_invoice_invoices__invoice_id__get"];
+        put?: never;
+        post?: never;
+        /** Delete Draft */
+        delete: operations["delete_draft_invoices__invoice_id__delete"];
+        options?: never;
+        head?: never;
+        /** Update Invoice */
+        patch: operations["update_invoice_invoices__invoice_id__patch"];
+        trace?: never;
+    };
     "/invoices/{invoice_id}/lines": {
         parameters: {
             query?: never;
@@ -2005,19 +2060,19 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/invoices/{invoice_id}": {
+    "/invoices/{invoice_id}/lines/{line_id}": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /** Get Invoice */
-        get: operations["get_invoice_invoices__invoice_id__get"];
-        put?: never;
+        get?: never;
+        /** Update Line */
+        put: operations["update_line_invoices__invoice_id__lines__line_id__put"];
         post?: never;
-        /** Delete Draft */
-        delete: operations["delete_draft_invoices__invoice_id__delete"];
+        /** Delete Line */
+        delete: operations["delete_line_invoices__invoice_id__lines__line_id__delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -2904,62 +2959,6 @@ export interface components {
             /** Remaining Minutes */
             remaining_minutes: number;
         };
-        /** FiscalProfileIn */
-        FiscalProfileIn: {
-            /** Denominazione */
-            denominazione: string;
-            /** Piva */
-            piva?: string | null;
-            /** Codice Fiscale */
-            codice_fiscale?: string | null;
-            /**
-             * Regime Fiscale
-             * @default RF01
-             */
-            regime_fiscale: string;
-            /**
-             * Paese
-             * @default IT
-             */
-            paese: string;
-            /**
-             * Indirizzo
-             * @default
-             */
-            indirizzo: string;
-            /**
-             * Cap
-             * @default
-             */
-            cap: string;
-            /**
-             * Comune
-             * @default
-             */
-            comune: string;
-            /** Provincia */
-            provincia?: string | null;
-            /**
-             * Nazione
-             * @default IT
-             */
-            nazione: string;
-        };
-        /** FiscalProfileOut */
-        FiscalProfileOut: {
-            /** Denominazione */
-            denominazione: string;
-            /** Piva */
-            piva: string | null;
-            /** Codice Fiscale */
-            codice_fiscale: string | null;
-            /** Regime Fiscale */
-            regime_fiscale: string;
-            /** Conservation Adhesion */
-            conservation_adhesion: string;
-            /** Version */
-            version: number;
-        };
         /** GrantIn */
         GrantIn: {
             /** Amount */
@@ -3024,6 +3023,8 @@ export interface components {
              * Format: uuid
              */
             client_tag_id: string;
+            /** Issuer Profile Id */
+            issuer_profile_id?: string | null;
             /** Year */
             year?: number | null;
             /**
@@ -3090,6 +3091,8 @@ export interface components {
              * Format: uuid
              */
             client_tag_id: string;
+            /** Issuer Profile Id */
+            issuer_profile_id: string | null;
             kind: components["schemas"]["InvoiceKind"];
             document_type: components["schemas"]["DocumentType"];
             /** Parent Invoice Id */
@@ -3103,6 +3106,14 @@ export interface components {
             state: components["schemas"]["InvoiceState"];
             /** Currency */
             currency: string;
+            /** Causale */
+            causale: string | null;
+            /** Notes */
+            notes: string | null;
+            /** Payment Iban */
+            payment_iban: string | null;
+            /** Payment Due Date */
+            payment_due_date: string | null;
             /** Taxable */
             taxable: string;
             /** Vat */
@@ -3117,6 +3128,25 @@ export interface components {
             /** Version */
             version: number;
         };
+        /** InvoicePatchIn */
+        InvoicePatchIn: {
+            /** Client Tag Id */
+            client_tag_id?: string | null;
+            /** Issuer Profile Id */
+            issuer_profile_id?: string | null;
+            /** Series */
+            series?: string | null;
+            /** Currency */
+            currency?: string | null;
+            /** Causale */
+            causale?: string | null;
+            /** Notes */
+            notes?: string | null;
+            /** Payment Iban */
+            payment_iban?: string | null;
+            /** Payment Due Date */
+            payment_due_date?: string | null;
+        };
         /**
          * InvoiceState
          * @enum {string}
@@ -3126,6 +3156,123 @@ export interface components {
         InvoiceXmlOut: {
             /** Xml */
             xml: string;
+        };
+        /** IssuerProfileIn */
+        IssuerProfileIn: {
+            /** Label */
+            label: string;
+            /** Denominazione */
+            denominazione: string;
+            /** Piva */
+            piva?: string | null;
+            /** Codice Fiscale */
+            codice_fiscale?: string | null;
+            /**
+             * Regime Fiscale
+             * @default RF01
+             */
+            regime_fiscale: string;
+            /**
+             * Paese
+             * @default IT
+             */
+            paese: string;
+            /**
+             * Indirizzo
+             * @default
+             */
+            indirizzo: string;
+            /**
+             * Cap
+             * @default
+             */
+            cap: string;
+            /**
+             * Comune
+             * @default
+             */
+            comune: string;
+            /** Provincia */
+            provincia?: string | null;
+            /**
+             * Nazione
+             * @default IT
+             */
+            nazione: string;
+            /** Rea */
+            rea?: string | null;
+            /**
+             * Is Default
+             * @default false
+             */
+            is_default: boolean;
+        };
+        /** IssuerProfileOut */
+        IssuerProfileOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Label */
+            label: string;
+            /** Denominazione */
+            denominazione: string;
+            /** Piva */
+            piva: string | null;
+            /** Codice Fiscale */
+            codice_fiscale: string | null;
+            /** Regime Fiscale */
+            regime_fiscale: string;
+            /** Paese */
+            paese: string;
+            /** Indirizzo */
+            indirizzo: string;
+            /** Cap */
+            cap: string;
+            /** Comune */
+            comune: string;
+            /** Provincia */
+            provincia: string | null;
+            /** Nazione */
+            nazione: string;
+            /** Rea */
+            rea: string | null;
+            /** Is Default */
+            is_default: boolean;
+            /** Conservation Adhesion */
+            conservation_adhesion: string;
+            /** Version */
+            version: number;
+        };
+        /** IssuerProfilePatchIn */
+        IssuerProfilePatchIn: {
+            /** Label */
+            label?: string | null;
+            /** Denominazione */
+            denominazione?: string | null;
+            /** Piva */
+            piva?: string | null;
+            /** Codice Fiscale */
+            codice_fiscale?: string | null;
+            /** Regime Fiscale */
+            regime_fiscale?: string | null;
+            /** Paese */
+            paese?: string | null;
+            /** Indirizzo */
+            indirizzo?: string | null;
+            /** Cap */
+            cap?: string | null;
+            /** Comune */
+            comune?: string | null;
+            /** Provincia */
+            provincia?: string | null;
+            /** Nazione */
+            nazione?: string | null;
+            /** Rea */
+            rea?: string | null;
+            /** Is Default */
+            is_default?: boolean | null;
         };
         /** LedgerOut */
         LedgerOut: {
@@ -9253,7 +9400,7 @@ export interface operations {
             };
         };
     };
-    get_fiscal_profile_fiscal_profile_get: {
+    list_issuer_profiles_issuer_profiles_get: {
         parameters: {
             query?: never;
             header: {
@@ -9271,7 +9418,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["FiscalProfileOut"];
+                    "application/json": components["schemas"]["IssuerProfileOut"][];
                 };
             };
             /** @description Validation Error */
@@ -9285,7 +9432,7 @@ export interface operations {
             };
         };
     };
-    set_fiscal_profile_fiscal_profile_put: {
+    create_issuer_profile_issuer_profiles_post: {
         parameters: {
             query?: never;
             header: {
@@ -9297,7 +9444,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["FiscalProfileIn"];
+                "application/json": components["schemas"]["IssuerProfileIn"];
             };
         };
         responses: {
@@ -9307,7 +9454,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["FiscalProfileOut"];
+                    "application/json": components["schemas"]["IssuerProfileOut"];
                 };
             };
             /** @description Validation Error */
@@ -9321,14 +9468,154 @@ export interface operations {
             };
         };
     };
-    set_conservation_fiscal_profile_conservation_put: {
+    get_issuer_profile_issuer_profiles__profile_id__get: {
         parameters: {
             query?: never;
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
             };
-            path?: never;
+            path: {
+                profile_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IssuerProfileOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_issuer_profile_issuer_profiles__profile_id__delete: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+            };
+            path: {
+                profile_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_issuer_profile_issuer_profiles__profile_id__patch: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+            };
+            path: {
+                profile_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IssuerProfilePatchIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IssuerProfileOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_default_issuer_profile_issuer_profiles__profile_id__default_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+            };
+            path: {
+                profile_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IssuerProfileOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_conservation_issuer_profiles__profile_id__conservation_put: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+            };
+            path: {
+                profile_id: string;
+            };
             cookie?: never;
         };
         requestBody: {
@@ -9343,7 +9630,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["FiscalProfileOut"];
+                    "application/json": components["schemas"]["IssuerProfileOut"];
                 };
             };
             /** @description Validation Error */
@@ -9402,6 +9689,110 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["InvoiceCreateIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvoiceOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_invoice_invoices__invoice_id__get: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+            };
+            path: {
+                invoice_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvoiceOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_draft_invoices__invoice_id__delete: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+            };
+            path: {
+                invoice_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_invoice_invoices__invoice_id__patch: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+            };
+            path: {
+                invoice_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InvoicePatchIn"];
             };
         };
         responses: {
@@ -9497,7 +9888,7 @@ export interface operations {
             };
         };
     };
-    get_invoice_invoices__invoice_id__get: {
+    update_line_invoices__invoice_id__lines__line_id__put: {
         parameters: {
             query?: never;
             header: {
@@ -9506,10 +9897,15 @@ export interface operations {
             };
             path: {
                 invoice_id: string;
+                line_id: string;
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InvoiceLineIn"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {
@@ -9517,7 +9913,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["InvoiceOut"];
+                    "application/json": components["schemas"]["InvoiceLineOut"];
                 };
             };
             /** @description Validation Error */
@@ -9531,7 +9927,7 @@ export interface operations {
             };
         };
     };
-    delete_draft_invoices__invoice_id__delete: {
+    delete_line_invoices__invoice_id__lines__line_id__delete: {
         parameters: {
             query?: never;
             header: {
@@ -9540,6 +9936,7 @@ export interface operations {
             };
             path: {
                 invoice_id: string;
+                line_id: string;
             };
             cookie?: never;
         };

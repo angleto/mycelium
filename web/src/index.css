@@ -403,6 +403,25 @@ button.btn--danger:hover {
   overflow: auto;
 }
 
+/* ---- compact data table (invoice lines) ---- */
+.tbl {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.86rem;
+  margin: 0.5rem 0;
+}
+.tbl th,
+.tbl td {
+  text-align: left;
+  padding: 0.35rem 0.5rem;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+.tbl th {
+  color: var(--muted);
+  font-weight: 600;
+}
+
 /* ---- dependency DAG / gantt ---- */
 .dag {
   border: 1px solid var(--border);
