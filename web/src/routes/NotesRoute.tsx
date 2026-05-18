@@ -35,6 +35,7 @@ export function NotesRoute() {
 
   const {
     projectId: focusProject,
+    clientId: focusClient,
     focusIds,
     active: focusActive,
   } = useFocus()
@@ -101,10 +102,25 @@ export function NotesRoute() {
   }, [activeId, fTag])
 
   // Focus (client/project) filters the list client-side, reactively.
+  // A note belongs to a client and may have no project, so matching by
+  // project alone hid client-only notes. In focus a note is shown when
+  // its project is in scope, OR one of its tags is in scope, OR its
+  // client tag is the focused client (client-only notes included).
   const shownNotes = focusActive
-    ? notes.filter(
-        (n) => n.project_id != null && focusIds.includes(n.project_id),
-      )
+    ? notes.filter((n) => {
+        if (n.project_id != null && focusIds.includes(n.project_id))
+          return true
+        const tagIds = (n.tags ?? []).map((g) => g.id)
+        if (tagIds.some((id) => focusIds.includes(id))) return true
+        if (
+          focusClient &&
+          (n.tags ?? []).some(
+            (g) => g.kind === 'client' && g.id === focusClient,
+          )
+        )
+          return true
+        return false
+      })
     : notes
 
   function closeModal() {
