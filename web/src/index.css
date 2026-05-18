@@ -412,6 +412,23 @@ button.btn--ghost {
   fill: var(--muted);
   font-size: 11px;
 }
+.dag__node--btn {
+  cursor: pointer;
+}
+.dag__node--sel {
+  stroke: var(--accent);
+  stroke-width: 3;
+}
+.dag__title--link {
+  cursor: pointer;
+}
+.dag__title--link:hover {
+  text-decoration: underline;
+}
+.dag__lbl--btn {
+  cursor: pointer;
+  text-decoration: underline;
+}
 
 /* ---- markdown editor / view ---- */
 .mde {

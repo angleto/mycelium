@@ -16,6 +16,8 @@ export function SchedulerRoute() {
   const activeId = session?.workspaceId
   const [tasks, setTasks] = useState<Task[]>([])
   const [rows, setRows] = useState<Row[]>([])
+  const [scope, setScope] = useState<'all' | 'mine' | 'ai'>('all')
+  const [tagFilter, setTagFilter] = useState('')
   const [pinTask, setPinTask] = useState('')
   const [pinDate, setPinDate] = useState('')
   const [busy, setBusy] = useState(false)
@@ -90,7 +92,20 @@ export function SchedulerRoute() {
     await reload()
   }
 
-  const dated = rows.filter((r) => r.es && r.ef)
+  const taskById = new Map(tasks.map((x) => [x.id, x]))
+  const allTags = [
+    ...new Map(
+      tasks.flatMap((x) => (x.tags ?? []).map((g) => [g.id, g] as const)),
+    ).values(),
+  ]
+  const dated = rows.filter((r) => {
+    if (!r.es || !r.ef) return false
+    const tk = taskById.get(r.task_id)
+    if (scope === 'mine' && tk?.executor_kind !== 'human') return false
+    if (scope === 'ai' && tk?.executor_kind !== 'llm_agent') return false
+    if (tagFilter && !(tk?.tags ?? []).some((g) => g.id === tagFilter)) return false
+    return true
+  })
   const times = dated.flatMap((r) => [
     new Date(r.es as string).getTime(),
     new Date(r.ef as string).getTime(),
@@ -108,6 +123,31 @@ export function SchedulerRoute() {
         </button>
         {msg && <span className="ok">{msg}</span>}
         {err && <span className="err">{err}</span>}
+      </div>
+
+      <div className="row">
+        <label>
+          {t('graph.scopeAll')}
+          <select
+            value={scope}
+            onChange={(e) => setScope(e.target.value as 'all' | 'mine' | 'ai')}
+          >
+            <option value="all">{t('graph.scopeAll')}</option>
+            <option value="mine">{t('graph.scopeMine')}</option>
+            <option value="ai">{t('graph.scopeAi')}</option>
+          </select>
+        </label>
+        <label>
+          {t('tasks.filterTag')}
+          <select value={tagFilter} onChange={(e) => setTagFilter(e.target.value)}>
+            <option value="">{t('graph.scopeAll')}</option>
+            {allTags.map((g) => (
+              <option key={g.id} value={g.id}>
+                {g.name}
+              </option>
+            ))}
+          </select>
+        </label>
       </div>
 
       {dated.length === 0 ? (
