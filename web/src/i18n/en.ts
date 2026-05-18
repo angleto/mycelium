@@ -473,6 +473,19 @@ export const en = {
     erase: 'Erase',
     erased: 'Erased {{n}} blob(s).',
     meteredNote: 'Write and search are metered; ensure the workspace has credits.',
+    intro:
+      'Long-term memory for the AI: snippets it can recall later by meaning. Hard-isolated to this workspace (and project, if set).',
+    writeTitle: 'Remember something',
+    writeHint:
+      'Save a snippet (a fact, a preference, a decision). The AI retrieves it later by semantic + keyword search.',
+    writePlaceholder: 'e.g. The client prefers invoices by PEC, not email.',
+    searchTitle: 'Recall',
+    searchHint:
+      'Hybrid search (meaning + keywords). Optionally narrow by tags. Results are ranked, most relevant first.',
+    nsHint:
+      'Namespace = a coarse bucket label (note / idea / fact / email / consolidated). Leave "note" if unsure; it only groups entries, it does not affect isolation.',
+    eraseHint:
+      'GDPR erasure by provenance: removes the link from a source (kind + id); a snippet left with no source is deleted.',
     tags: 'Tags',
     filterTags: 'Filter by tags',
     addTag: 'Add tag',

@@ -142,15 +142,19 @@ export function MemoryRoute() {
   return (
     <section className="card">
       <h1>{t('memory.title')}</h1>
+      <p className="hint">{t('memory.intro')}</p>
       <p className="hint">{t('memory.meteredNote')}</p>
       {err && <p className="err">{err}</p>}
       {msg && <p className="ok">{msg}</p>}
 
+      <h2>{t('memory.writeTitle')}</h2>
+      <p className="hint">{t('memory.writeHint')}</p>
       <form onSubmit={(e) => void onWrite(e)}>
         <label>
           {t('memory.writeText')}
           <textarea
             required
+            placeholder={t('memory.writePlaceholder')}
             value={text}
             onChange={(e) => setText(e.target.value)}
           />
@@ -173,14 +177,23 @@ export function MemoryRoute() {
           </div>
         )}
         <div className="row">
-          <label>
+          <label title={t('memory.nsHint')}>
             {t('memory.namespace')}
-            <input value={ns} onChange={(e) => setNs(e.target.value)} />
+            <select value={ns} onChange={(e) => setNs(e.target.value)}>
+              {['note', 'idea', 'fact', 'email', 'consolidated'].map((n) => (
+                <option key={n} value={n}>
+                  {n}
+                </option>
+              ))}
+            </select>
           </label>
           <button type="submit">{t('memory.write')}</button>
         </div>
+        <p className="hint">{t('memory.nsHint')}</p>
       </form>
 
+      <h2>{t('memory.searchTitle')}</h2>
+      <p className="hint">{t('memory.searchHint')}</p>
       <form onSubmit={(e) => void onSearch(e)}>
         <div className="row">
           <input
@@ -271,6 +284,7 @@ export function MemoryRoute() {
       )}
 
       <h2>{t('memory.eraseTitle')}</h2>
+      <p className="hint">{t('memory.eraseHint')}</p>
       <form onSubmit={(e) => void onErase(e)} className="row">
         <input
           required

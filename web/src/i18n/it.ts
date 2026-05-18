@@ -472,6 +472,19 @@ export const it: Catalog = {
     erase: 'Cancella',
     erased: 'Cancellati {{n}} blob.',
     meteredNote: 'Scrittura e ricerca sono a consumo; assicurati che il workspace abbia crediti.',
+    intro:
+      'Memoria a lungo termine per la AI: frammenti che potra richiamare per significato. Isolata a questo workspace (e progetto, se impostato).',
+    writeTitle: 'Memorizza qualcosa',
+    writeHint:
+      'Salva un frammento (un fatto, una preferenza, una decisione). La AI lo recupera dopo per ricerca semantica + parole chiave.',
+    writePlaceholder: 'es. Il cliente preferisce le fatture via PEC, non email.',
+    searchTitle: 'Richiama',
+    searchHint:
+      'Ricerca ibrida (significato + parole chiave). Puoi restringere per tag. Risultati ordinati per pertinenza.',
+    nsHint:
+      'Namespace = etichetta di raggruppamento grossolana (note / idea / fact / email / consolidated). Lascia "note" se non sai; raggruppa solo le voci, non cambia l\'isolamento.',
+    eraseHint:
+      'Cancellazione GDPR per provenienza: rimuove il collegamento da una sorgente (tipo + id); un frammento rimasto senza sorgente viene eliminato.',
     tags: 'Tag',
     filterTags: 'Filtra per tag',
     addTag: 'Aggiungi tag',
