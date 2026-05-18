@@ -498,8 +498,24 @@ button.btn--danger:hover {
 /* ---- WYSIWYG (TipTap) ---- */
 .rte__bar {
   display: flex;
-  justify-content: flex-end;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.4rem;
   margin-bottom: 0.3rem;
+}
+.rte__tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.2rem;
+}
+.rte__fmt {
+  min-width: 1.9rem;
+  font-weight: 600;
+}
+.rte__fmt--on {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
 }
 .rte__raw {
   width: 100%;

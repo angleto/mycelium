@@ -197,9 +197,58 @@ export function RichEditor({
     }
   }, [value, editor])
 
+  const fmt = !rawMode && editor != null
+  const tb = (
+    label: string,
+    titleKey: string,
+    run: () => void,
+    activeName?: string,
+    activeAttrs?: Record<string, unknown>,
+  ) => (
+    <button
+      type="button"
+      className={
+        'btn--ghost btn--sm rte__fmt' +
+        (activeName && editor?.isActive(activeName, activeAttrs)
+          ? ' rte__fmt--on'
+          : '')
+      }
+      title={t(titleKey)}
+      disabled={!fmt}
+      onClick={run}
+    >
+      {label}
+    </button>
+  )
+
   return (
     <div className="rte" data-placeholder={placeholder}>
       <div className="rte__bar">
+        <span className="rte__tools">
+          {tb('B', 'editor.bold', () =>
+            editor?.chain().focus().toggleBold().run(), 'bold')}
+          {tb('I', 'editor.italic', () =>
+            editor?.chain().focus().toggleItalic().run(), 'italic')}
+          {tb('S', 'editor.strike', () =>
+            editor?.chain().focus().toggleStrike().run(), 'strike')}
+          {tb('H1', 'editor.h1', () =>
+            editor?.chain().focus().toggleHeading({ level: 1 }).run(),
+            'heading', { level: 1 })}
+          {tb('H2', 'editor.h2', () =>
+            editor?.chain().focus().toggleHeading({ level: 2 }).run(),
+            'heading', { level: 2 })}
+          {tb('H3', 'editor.h3', () =>
+            editor?.chain().focus().toggleHeading({ level: 3 }).run(),
+            'heading', { level: 3 })}
+          {tb('•', 'editor.bullet', () =>
+            editor?.chain().focus().toggleBulletList().run(), 'bulletList')}
+          {tb('1.', 'editor.ordered', () =>
+            editor?.chain().focus().toggleOrderedList().run(), 'orderedList')}
+          {tb('❝', 'editor.quote', () =>
+            editor?.chain().focus().toggleBlockquote().run(), 'blockquote')}
+          {tb('</>', 'editor.code', () =>
+            editor?.chain().focus().toggleCode().run(), 'code')}
+        </span>
         <button
           type="button"
           className="btn--ghost btn--sm"
