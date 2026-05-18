@@ -371,6 +371,13 @@ export function NotesRoute() {
   }
 
   const modalOpen = sel !== null || creating
+  // Unsaved changes vs the last saved snapshot: the manual Save stays
+  // available alongside autosave, enabled only while dirty.
+  const noteDirty =
+    !!sel &&
+    sel.kind !== 'conversation' &&
+    (eTitle !== savedSnap.current.title ||
+      eText !== savedSnap.current.text)
   // Tags not already on the open note (for the add-tag picker).
   const addable = sel
     ? tags.filter((g) => !(sel.tags ?? []).some((s) => s.id === g.id))
@@ -596,6 +603,14 @@ export function NotesRoute() {
               <div className="modal__foot">
                 <button
                   type="button"
+                  disabled={!noteDirty || noteSaving}
+                  onClick={() => void autoSaveNote()}
+                >
+                  {noteSaving ? t('notes.saving') : t('notes.saveNote')}
+                </button>
+                <button
+                  type="button"
+                  className="btn--ghost"
                   disabled={converting !== null || convertedIds.has(sel.id)}
                   onClick={() => void onConvert(sel)}
                 >
