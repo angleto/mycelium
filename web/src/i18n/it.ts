@@ -184,7 +184,8 @@ export const it: Catalog = {
     relation: 'Relazione',
     otherTask: 'Task',
     depSearch: 'Cerca un task...',
-    depNone: 'Nessuna dipendenza. I fratelli vanno in parallelo; aggiungi un ordine solo se serve.',
+    depNone:
+      'Nessuna dipendenza: questo task non ha prerequisiti. Aggiungine una solo se deve attendere il completamento di un altro task.',
     quickAdd: 'Aggiungi task al volo...',
     importance: 'Importanza',
     urgency: 'Urgenza',

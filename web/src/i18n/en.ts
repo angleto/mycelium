@@ -185,7 +185,8 @@ export const en = {
     relation: 'Relation',
     otherTask: 'Task',
     depSearch: 'Search a task...',
-    depNone: 'No dependencies. Siblings run in parallel; add an order only when needed.',
+    depNone:
+      'No dependencies: this task has no prerequisites. Add one only if it must wait for another task to finish first.',
     quickAdd: 'Quick add a task...',
     importance: 'Importance',
     urgency: 'Urgency',
