@@ -501,6 +501,51 @@ button.btn--danger:hover {
 .switcher select {
   font-weight: 600;
 }
+/* ---- note list row (two rows: title / tags + actions) ---- */
+.noteitem {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding: 0.55rem 0;
+  border-bottom: 1px solid var(--border);
+}
+.noteitem__main {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.noteitem__title {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  font-weight: 600;
+  color: var(--text-h);
+  cursor: pointer;
+  text-align: left;
+}
+.noteitem__title:hover {
+  color: var(--accent);
+}
+.noteitem__meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+.noteitem__tags {
+  display: flex;
+  gap: 0.3rem;
+  flex-wrap: wrap;
+}
+.noteitem__actions {
+  display: flex;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+
 .list.nested {
   margin: 0.35rem 0 0.5rem 1.3rem;
   padding-left: 0.7rem;

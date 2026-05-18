@@ -12,7 +12,7 @@ import { api, errMessage, workspaceHeader } from '../api/client'
 import { useSession } from '../auth/useSession'
 import { RichEditor } from '../components/RichEditor'
 import { MarkdownView } from '../components/Markdown'
-import { TagChip } from '../components/TagChip'
+import { NoteListItem } from '../components/NoteListItem'
 import { useFocus } from '../lib/focus'
 import type { components } from '../api/schema'
 
@@ -416,56 +416,17 @@ export function NotesRoute() {
       ) : (
         <ul className="list">
           {notes.map((n) => (
-            <li key={n.id}>
-              <button
-                type="button"
-                className="btn--ghost btn--sm"
-                onClick={() => void openEdit(n)}
-              >
-                {t('notes.open')}
-              </button>{' '}
-              {n.title || n.kind}{' '}
-              <span className="muted">
-                · {n.kind} · {n.status}
-              </span>{' '}
-              {(n.tags ?? []).map((g) => (
-                <TagChip key={g.id} name={g.name} color={g.color} kind={g.kind} />
-              ))}
-              <button
-                type="button"
-                className="btn--sm"
-                disabled={converting !== null || convertedIds.has(n.id)}
-                onClick={() => void onConvert(n)}
-              >
-                {converting === n.id
-                  ? t('notes.converting')
-                  : convertedIds.has(n.id)
-                    ? t('notes.convertedShort')
-                    : t('notes.toTask')}
-              </button>
-              <button
-                type="button"
-                className="btn--ghost btn--sm"
-                onClick={() => void archiveNote(n)}
-              >
-                {t('notes.archive')}
-              </button>
-              <button
-                type="button"
-                className="btn--ghost btn--sm"
-                onClick={() => void delNote(n)}
-              >
-                {t('notes.deleteBtn')}
-              </button>
-              <button
-                type="button"
-                className="btn--danger btn--sm"
-                title={t('notes.eraseHint')}
-                onClick={() => void eraseNote(n)}
-              >
-                {t('notes.erase')}
-              </button>
-            </li>
+            <NoteListItem
+              key={n.id}
+              note={n}
+              converting={converting === n.id}
+              converted={convertedIds.has(n.id)}
+              onOpen={() => void openEdit(n)}
+              onConvert={() => void onConvert(n)}
+              onArchive={() => void archiveNote(n)}
+              onDelete={() => void delNote(n)}
+              onErase={() => void eraseNote(n)}
+            />
           ))}
         </ul>
       )}
