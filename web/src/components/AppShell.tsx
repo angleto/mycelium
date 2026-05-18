@@ -84,15 +84,17 @@ function ProjectFocus() {
   )
 }
 
-// Top-bar running indicator: a slow spinner shown only while a timer
-// runs, the count of running timers, and the live elapsed of the
-// current (most recently started) one, ticking each second. Polls
-// /time/running on the same 5s cadence as the timer views.
+// Top-bar running indicator. One timer: spinner + title + live
+// elapsed. Several: cycles every 5s through them showing "i/n", the
+// task title (scrolling) and that timer's live elapsed. Polls
+// /time/running on the timer views' 5s cadence.
 function RunningIndicator() {
   const { t } = useTranslation()
   const session = useSession()
   const [runs, setRuns] = useState<Running[]>([])
+  const [titles, setTitles] = useState<Record<string, string>>({})
   const [now, setNow] = useState(() => Date.now())
+  const [idx, setIdx] = useState(0)
 
   useEffect(() => {
     let active = true
@@ -110,21 +112,59 @@ function RunningIndicator() {
     }
   }, [session?.workspaceId])
 
+  // Resolve task titles for the running entries (TimeEntryOut has only
+  // task_id). One list fetch, cached by id.
+  useEffect(() => {
+    let active = true
+    void (async () => {
+      const { data } = await api.GET('/tasks', {
+        params: { header: workspaceHeader() },
+      })
+      if (active && data) {
+        setTitles(Object.fromEntries(data.map((tk) => [tk.id, tk.title])))
+      }
+    })()
+    return () => {
+      active = false
+    }
+  }, [session?.workspaceId])
+
   useEffect(() => {
     if (runs.length === 0) return
     const clock = setInterval(() => setNow(Date.now()), 1000)
     return () => clearInterval(clock)
   }, [runs.length])
 
+  // Cycle through the running entries every 5s when there is >1.
+  useEffect(() => {
+    if (runs.length <= 1) {
+      setIdx(0)
+      return
+    }
+    const c = setInterval(
+      () => setIdx((i) => (i + 1) % runs.length),
+      5000,
+    )
+    return () => clearInterval(c)
+  }, [runs.length])
+
   if (runs.length === 0) return null
-  const cur = [...runs].sort(
+  const ordered = [...runs].sort(
     (a, b) =>
-      new Date(b.started_at).getTime() - new Date(a.started_at).getTime(),
-  )[0]
+      new Date(a.started_at).getTime() - new Date(b.started_at).getTime(),
+  )
+  const safeIdx = idx % ordered.length
+  const cur = ordered[safeIdx]
+  const title = titles[cur.task_id] ?? cur.task_id.slice(0, 8)
   return (
     <div className="running" title={t('time.runningNow')}>
       <span className="running__spin" aria-hidden="true" />
-      <span className="running__n">{runs.length}</span>
+      <span className="running__n">
+        {safeIdx + 1}/{ordered.length}
+      </span>
+      <span className="running__title">
+        <span>{title}</span>
+      </span>
       <span className="running__t">{hms(elapsedSec(cur.started_at, now))}</span>
     </div>
   )
