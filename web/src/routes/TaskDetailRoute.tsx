@@ -44,6 +44,8 @@ export function TaskDetailRoute() {
   const [allTasks, setAllTasks] = useState<Task[]>([])
   const [deps, setDeps] = useState<Dep[]>([])
   const [depOther, setDepOther] = useState('')
+  const [depQuery, setDepQuery] = useState('')
+  const [depOpen, setDepOpen] = useState(false)
   const [depRel, setDepRel] = useState<'depends' | 'blocks'>('depends')
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState<string | null>(null)
@@ -261,6 +263,8 @@ export function TaskDetailRoute() {
       return
     }
     setDepOther('')
+    setDepQuery('')
+    setDepOpen(false)
     await reloadDeps()
   }
 
@@ -280,6 +284,16 @@ export function TaskDetailRoute() {
     allTasks.find((x) => x.id === tid)?.title ?? tid.slice(0, 8)
   const dependsOn = deps.filter((d) => d.successor_id === id)
   const blocks = deps.filter((d) => d.predecessor_id === id)
+  const depQ = depQuery.trim().toLowerCase()
+  const depMatches = allTasks
+    .filter(
+      (x) =>
+        x.id !== id &&
+        (depQ === '' ||
+          x.title.toLowerCase().includes(depQ) ||
+          x.id.startsWith(depQ)),
+    )
+    .slice(0, 10)
 
   if (err && !task) return <p className="err">{err}</p>
   if (!task) return <p>{t('tasks.loading')}</p>
@@ -493,18 +507,42 @@ export function TaskDetailRoute() {
             <option value="blocks">{t('tasks.blocksL')}</option>
           </select>
         </label>
-        <label>
+        <label className="deppick">
           {t('tasks.otherTask')}
-          <select value={depOther} onChange={(e) => setDepOther(e.target.value)}>
-            <option value="">--</option>
-            {allTasks
-              .filter((x) => x.id !== id)
-              .map((x) => (
-                <option key={x.id} value={x.id}>
+          <input
+            type="text"
+            value={depQuery}
+            placeholder={t('tasks.depSearch')}
+            onChange={(e) => {
+              setDepQuery(e.target.value)
+              setDepOther('')
+              setDepOpen(true)
+            }}
+            onFocus={() => setDepOpen(true)}
+            onBlur={() => window.setTimeout(() => setDepOpen(false), 150)}
+          />
+          {depOpen && depMatches.length > 0 && (
+            <div className="deppick__list">
+              {depMatches.map((x) => (
+                <button
+                  key={x.id}
+                  type="button"
+                  className={
+                    'deppick__row' +
+                    (x.id === depOther ? ' deppick__row--sel' : '')
+                  }
+                  onMouseDown={(e) => {
+                    e.preventDefault()
+                    setDepOther(x.id)
+                    setDepQuery(x.title)
+                    setDepOpen(false)
+                  }}
+                >
                   {x.title}
-                </option>
+                </button>
               ))}
-          </select>
+            </div>
+          )}
         </label>
         <button type="button" onClick={() => void onAddDep()}>
           {t('tasks.addDep')}

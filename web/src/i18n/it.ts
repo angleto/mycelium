@@ -179,6 +179,7 @@ export const it: Catalog = {
     addDep: 'Aggiungi',
     relation: 'Relazione',
     otherTask: 'Task',
+    depSearch: 'Cerca un task...',
     depNone: 'Nessuna dipendenza. I fratelli vanno in parallelo; aggiungi un ordine solo se serve.',
     quickAdd: 'Aggiungi task al volo...',
     importance: 'Importanza',

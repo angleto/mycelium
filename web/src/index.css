@@ -660,3 +660,32 @@ button.btn--danger:hover {
   min-width: 7rem;
   max-width: 10rem;
 }
+.deppick {
+  position: relative;
+}
+.deppick__list {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 20;
+  min-width: 16rem;
+  max-height: 14rem;
+  overflow-y: auto;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18);
+}
+.deppick__row {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 0.35rem 0.6rem;
+}
+.deppick__row:hover,
+.deppick__row--sel {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+}

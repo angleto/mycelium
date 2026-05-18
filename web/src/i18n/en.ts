@@ -180,6 +180,7 @@ export const en = {
     addDep: 'Add',
     relation: 'Relation',
     otherTask: 'Task',
+    depSearch: 'Search a task...',
     depNone: 'No dependencies. Siblings run in parallel; add an order only when needed.',
     quickAdd: 'Quick add a task...',
     importance: 'Importance',
