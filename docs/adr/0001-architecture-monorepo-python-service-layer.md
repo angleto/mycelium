@@ -1,33 +1,32 @@
-# ADR-0001 Architettura: monorepo Python, service layer unico
+# ADR-0001 Architecture: Python monorepo, single service layer
 
-Status: accettata.
+Status: accepted.
 
-## Contesto
+## Context
 
-Servono GUI e MCP co-paritari (stessa logica, due client) piu worker e
-un servizio SOAP inbound SdI. Il rischio e duplicare la logica di
-dominio tra REST e MCP e farli divergere.
+We need a co-equal GUI and MCP (same logic, two clients) plus a worker
+and an inbound SdI SOAP service. The risk is duplicating the domain
+logic between REST and MCP and letting them diverge.
 
-## Decisione
+## Decision
 
-Monorepo Python. `core/` contiene dominio + service layer con TUTTA la
-business logic, l'enforcement RBAC, la macchina a stati, lo scheduler,
-il motore memoria, la generazione/validazione XML SDI. `api/`
-(FastAPI REST + WebSocket) e `mcp/` (SDK Python) sono adapter sottili
-sullo stesso service layer. Frontend React/TS con tipi generati da
-OpenAPI. `worker/` per i job, `sdi-inbound/` per le notifiche SdI in
-push.
+Python monorepo. `core/` holds the domain + service layer with ALL the
+business logic, RBAC enforcement, the state machine, the scheduler, the
+memory engine, and SDI XML generation/validation. `api/` (FastAPI REST
++ WebSocket) and `mcp/` (Python SDK) are thin adapters over the same
+service layer. React/TS frontend with types generated from OpenAPI.
+`worker/` for jobs, `sdi-inbound/` for push SdI notifications.
 
-## Conseguenze
+## Consequences
 
-- Un solo choke point per RBAC, isolamento, optimistic concurrency,
-  macchina a stati: GUI, REST e MCP non possono divergere.
-- Ogni fase di dominio espone subito REST + tool MCP.
-- Disciplina necessaria: vietato mettere logica in `api/` o `mcp/`.
+- A single choke point for RBAC, isolation, optimistic concurrency and
+  the state machine: GUI, REST and MCP cannot diverge.
+- Every domain phase exposes REST + MCP tools from the start.
+- Required discipline: no logic in `api/` or `mcp/`.
 
-## Alternative scartate
+## Alternatives rejected
 
-- Servizi separati per REST e MCP: duplicazione di logica e drift,
-  esattamente il rischio da evitare.
-- Backend non-Python: l'SDK MCP di riferimento e Python e il pattern di
-  astrazione LLM/Embedding riusato (ADR-0012) e Python.
+- Separate services for REST and MCP: logic duplication and drift,
+  exactly the risk to avoid.
+- Non-Python backend: the reference MCP SDK is Python and the reused
+  LLM/Embedding abstraction pattern (ADR-0012) is Python.

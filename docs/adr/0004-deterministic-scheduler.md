@@ -1,48 +1,45 @@
-# ADR-0004 Scheduler deterministico, non RCPSP
+# ADR-0004 Deterministic scheduler, not RCPSP
 
-Status: accettata. Corregge un'incoerenza algoritmica di una bozza
-precedente.
+Status: accepted. Corrects an algorithmic inconsistency in an earlier
+draft.
 
-## Contesto
+## Context
 
-Una bozza prescriveva un "motore CPM che rispetta calendari e
-capacita". E una contraddizione: il CPM assume risorse illimitate e
-durate fisse; con capacita per-utente, assegnatari multipli e durate
-derivate dall'effort diventa RCPSP, NP-hard, senza una passata
-avanti/indietro ne un singolo percorso critico ben definito. Lo schema
-`schedule` (uno slack, un flag percorso critico) era vincolato
-all'oggetto sbagliato. L'utente ha poi chiarito il modello reale: i
-task che deve svolgere di persona non sono concorrenti; quelli delegati
-a un LLM possono esserlo; e non ha il dono dell'ubiquita (vedi
-ADR-0008).
+A draft prescribed a "CPM engine that respects calendars and
+capacity". That is a contradiction: CPM assumes unlimited resources and
+fixed durations; with per-user capacity, multiple assignees and
+effort-derived durations it becomes RCPSP, NP-hard, with no
+forward/backward pass nor a single well-defined critical path. The
+`schedule` schema (one slack, one critical-path flag) was bound to the
+wrong object. The user then clarified the real model: tasks they must
+do in person are not concurrent; tasks delegated to an LLM can be; and
+they do not have the gift of ubiquity (see ADR-0008).
 
-## Decisione
+## Decision
 
-Niente RCPSP generico. Motore = **CPM logico deterministico** su
-calendari lavorativi (ES/EF/LS/LF, slack, percorso critico logico,
-onesti perche senza contesa) + **piazzamento seriale deterministico
-per-persona** dei task `executor=human` non delegati, attorno agli
-appuntamenti fissi, con regola a priorita stabile e deterministica
-(priorita P1..P4 in stile Todoist, P1 = piu alta e schedulata per
-prima; poi due-date crescente, creazione crescente, id come tie-break
-finale). I task `executor=llm_agent` sono fuori dalla timeline umana
-(paralleli, solo precedenza). Necessari: piano vs consuntivo (`remaining_effort_h`,
-`actual_start`, stato terminale), `schedule_mode`/constraint con drag
-write-back che sopravvive al ricalcolo, determinismo verificabile,
-rollup sommario. Le 4 disuguaglianze di dipendenza sono in tempo
-lavorativo (vedi functional-requirements FR-4).
+No generic RCPSP. Engine = **deterministic logical CPM** over working
+calendars (ES/EF/LS/LF, slack, logical critical path, honest because
+contention-free) + **deterministic per-person serial placement** of
+non-delegated `executor=human` tasks, around fixed appointments, with a
+stable, deterministic priority rule (Todoist-style P1..P4 priority,
+P1 = highest and scheduled first; then earliest due date, earliest
+created, id as the final tie-break). `executor=llm_agent` tasks are off
+the human timeline (parallel, precedence only). Required: plan vs
+actuals (`remaining_effort_h`, `actual_start`, terminal state),
+`schedule_mode`/constraint with drag write-back that survives recompute,
+verifiable determinism, summary rollup. The 4 dependency inequalities
+are in working time (see functional-requirements FR-4).
 
-## Conseguenze
+## Consequences
 
-- Deterministico, O(V+E), millisecondi su centinaia di task su nodo
-  ARM; slack e percorso critico ben definiti perche logici.
-- Il sovraccarico tra task e gestito da serializzazione per-persona
-  (cio che l'utente vuole) piu un indicatore di sovraccarico, non da
-  un solver opaco.
+- Deterministic, O(V+E), milliseconds on hundreds of tasks on an ARM
+  node; slack and critical path well-defined because logical.
+- Cross-task overload is handled by per-person serialization (what the
+  user wants) plus an overload indicator, not by an opaque solver.
 
-## Alternative scartate
+## Alternatives rejected
 
-- RCPSP / leveling euristico stile MS Project: euristico, instabile e
-  inspiegabile; pessimo trade-off per "pronto all'uso da subito".
-- CP-SAT (OR-Tools): leveling ottimizzante, valido ma post-v1 opzionale
-  (non interattivo-istantaneo, output meno spiegabile).
+- RCPSP / MS-Project-style heuristic leveling: heuristic, unstable and
+  unexplainable; a poor trade-off for "usable out of the box".
+- CP-SAT (OR-Tools): optimizing leveling, valid but optional post-v1
+  (not interactive-instant, less explainable output).

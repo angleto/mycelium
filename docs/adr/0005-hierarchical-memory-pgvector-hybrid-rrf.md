@@ -1,43 +1,43 @@
-# ADR-0005 Memoria gerarchica su pgvector, retrieval ibrido RRF
+# ADR-0005 Hierarchical memory on pgvector, hybrid RRF retrieval
 
-Status: accettata.
+Status: accepted.
 
-## Contesto
+## Context
 
-Serve una memoria multi-livello che riassuma il vecchio, lo mandi in
-recupero semantico e lo ritrovi, su DB (non store numpy lato app).
-L'utente ha richiesto esplicitamente il ramo lessicale nella ricerca
-ibrida (era stato proposto opzionale; ora e baseline).
+We need a multi-level memory that summarizes the old, sends it to
+semantic retrieval and finds it again, on the DB (not an app-side numpy
+store). The user explicitly requested the lexical branch in hybrid
+search (it had been proposed as optional; it is now baseline).
 
-## Decisione
+## Decision
 
-Tier hot/warm/cold. Cold = embedding in `pgvector` con indice HNSW.
-Retrieval ibrido baseline: ramo semantico (HNSW) + ramo lessicale
-(`tsvector`/`ts_rank`, `pg_trgm` con indice trigram dedicato), fusione
-**RRF** (rank-based, k circa 60, niente normalizzazione di score
-incommensurabili). K sovracampionato per ramo (circa 100) prima della
-fusione; tiebreak deterministico; fusione entro (org, progetto). Per
-filtri molto selettivi (message-id, numero fattura) path esatto, non
-HNSW. `hnsw.iterative_scan = relaxed_order` tarato. Embedding pluggable
-(ADR-0012) con `model_id`+`dim` per blob e job di re-embedding
-(nuova colonna/tabella, dual-write, `CREATE INDEX CONCURRENTLY`,
-cutover atomico): garanzia onesta = nessun write-downtime, possibile
-degrado di latenza in lettura su nodo singolo durante il backfill.
-Provenienza N:1 esplicita (`blob_sources`) per la cancellazione GDPR;
-consolidamento mai cross-soggetto. Isolamento: vedi ADR-0007.
+Hot/warm/cold tiers. Cold = embedding in `pgvector` with an HNSW
+index. Baseline hybrid retrieval: a semantic branch (HNSW) + a lexical
+branch (`tsvector`/`ts_rank`, `pg_trgm` with a dedicated trigram
+index), fused with **RRF** (rank-based, k around 60, no normalization
+of incommensurable scores). K oversampled per branch (around 100)
+before fusion; deterministic tiebreak; fusion within (org, project).
+For very selective filters (message-id, invoice number) an exact path,
+not HNSW. `hnsw.iterative_scan = relaxed_order` tuned. Pluggable
+embedding (ADR-0012) with `model_id`+`dim` per blob and a re-embedding
+job (new column/table, dual-write, `CREATE INDEX CONCURRENTLY`, atomic
+cutover): honest guarantee = no write downtime, possible read-latency
+degradation on a single node during the backfill. Explicit N:1
+provenance (`blob_sources`) for GDPR deletion; consolidation never
+cross-subject. Isolation: see ADR-0007.
 
-## Conseguenze
+## Consequences
 
-- Recupero robusto su match esatti e semantici; nessun iperparametro
-  di score da tarare (solo `k` di RRF).
-- "Niente numpy" significa: nessuno store di similarita numpy lato app;
-  l'`Embedder` locale puo dipendere da numpy transitivamente.
+- Robust retrieval on exact and semantic matches; no score
+  hyperparameter to tune (only RRF's `k`).
+- "No numpy" means: no app-side numpy similarity store; the local
+  `Embedder` may depend on numpy transitively.
 
-## Alternative scartate
+## Alternatives rejected
 
-- Solo semantico: perde i match esatti su token rari in testo libero
-  (l'utente ha richiesto esplicitamente il lessicale).
-- Fusione con pesi su score grezzi: score di `ts_rank` e cosine
-  incommensurabili; RRF rank-based evita il problema.
-- Claim "nessun read-downtime" sul re-embedding: non sostenibile su
-  nodo ARM singolo; sostituito con una garanzia onesta.
+- Semantic only: loses exact matches on rare tokens in free text (the
+  user explicitly requested lexical).
+- Fusion with weights on raw scores: `ts_rank` and cosine scores are
+  incommensurable; rank-based RRF avoids the problem.
+- Claiming "no read downtime" for re-embedding: not sustainable on a
+  single ARM node; replaced with an honest guarantee.

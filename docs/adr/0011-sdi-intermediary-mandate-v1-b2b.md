@@ -1,46 +1,46 @@
-# ADR-0011 SDI: modello intermediario/mandato, v1 B2B/B2C
+# ADR-0011 SDI: intermediary/mandate model, v1 B2B/B2C
 
-Status: accettata. Corregge un errore legale di una bozza precedente.
+Status: accepted. Corrects a legal error in an earlier draft.
 
-## Contesto
+## Context
 
-Una bozza decideva "accreditamento diretto, nessun intermediario terzo"
-come elemento distintivo. In un SaaS multi-tenant e sbagliato sul
-diritto: nel momento in cui un unico canale accreditato trasmette
-fatture il cui `CedentePrestatore` e di tenant diversi, l'operatore
-**e** trasmittente per conto terzi, cioe intermediario. Il certificato
-mutua-TLS del canale e legato a un solo codice fiscale (CA AdE) e non
-porta identita per-tenant; l'accreditamento per-tenant e infattibile.
+A draft decided "direct accreditation, no third-party intermediary" as
+a distinguishing feature. In a multi-tenant SaaS this is legally wrong:
+the moment a single accredited channel transmits invoices whose
+`CedentePrestatore` belongs to different tenants, the operator **is** a
+transmitter on behalf of third parties, i.e. an intermediary. The
+channel's mutual-TLS certificate is tied to a single tax code (AdE CA)
+and carries no per-tenant identity; per-tenant accreditation is
+infeasible.
 
-## Decisione
+## Decision
 
-Canale **unico condiviso**; identita del tenant nel **payload
-FatturaPA** (`CedentePrestatore`, `TerzoIntermediarioOSoggetto
-Emittente`), mai nell'identita TLS. Modello esplicito `SdiMandate`
-per-Org (scope, validita, revoca, audit): Flow trasmette per conto del
-tenant sotto mandato e assume i doveri operativi dell'intermediario
-(endpoint SOAP inbound sempre attivo, correlazione notifiche per
-`IdentificativoSdI`, audit). v1 = **solo B2B/B2C**: nessuna firma (via
-canale accreditato non richiesta), notifiche del ciclo attivo RC, MC,
-NS, AT. **Post-v1**: PA/B2G (firma CAdES/XAdES + certificato
-qualificato, NE/DT/EC/SE), ciclo passivo, reverse charge/autofattura,
-esteri, bollo trimestrale. Introduzione per fasi (F7a manuale, F7b
-SdICoop test, F7c produzione).
+A **single shared channel**; the tenant's identity in the **FatturaPA
+payload** (`CedentePrestatore`, `TerzoIntermediarioOSoggettoEmittente`),
+never in the TLS identity. An explicit per-Org `SdiMandate` model
+(scope, validity, revocation, audit): Flow transmits on the tenant's
+behalf under mandate and assumes the intermediary's operational duties
+(always-on inbound SOAP endpoint, notification correlation by
+`IdentificativoSdI`, audit). v1 = **B2B/B2C only**: no signature (not
+required via an accredited channel), active-cycle notifications RC, MC,
+NS, AT. **Post-v1**: PA/B2G (CAdES/XAdES signature + qualified
+certificate, NE/DT/EC/SE), passive cycle, reverse charge/self-billing,
+foreign clients, quarterly stamp duty. Phased rollout (F7a manual, F7b
+SdICoop test, F7c production).
 
-## Conseguenze
+## Consequences
 
-- `IdentificativoSdI` e colonna indicizzata di prima classe per
-  correlare le notifiche in push al tenant giusto.
-- F7c (Accordo di servizio + accreditamento + endpoint inbound mutua
-  TLS sempre attivo) e l'item piu pesante, va risorsato come tale.
-- Scope fiscale v1 minimo esplicito; il resto dichiarato come differito,
-  non implicitamente "completo".
+- `IdentificativoSdI` is a first-class indexed column to correlate
+  push notifications to the right tenant.
+- F7c (service agreement + accreditation + always-on inbound mutual-TLS
+  endpoint) is the heaviest item and must be resourced as such.
+- The v1 fiscal scope is explicitly minimal; the rest is declared as
+  deferred, not implicitly "complete".
 
-## Alternative scartate
+## Alternatives rejected
 
-- "Accreditamento diretto senza intermediario" in multi-tenant: errato
-  sul diritto e tecnicamente infattibile (un canale = un codice
-  fiscale).
-- Intermediario terzo via API: valido ma scartato perche l'utente vuole
-  niente terzo che veda le fatture; il modello a mandato con canale
-  proprio soddisfa il vincolo restando legalmente corretto.
+- "Direct accreditation with no intermediary" in multi-tenant: legally
+  wrong and technically infeasible (one channel = one tax code).
+- Third-party intermediary via API: valid but rejected because the user
+  wants no third party seeing the invoices; the mandate model with our
+  own channel satisfies the constraint while staying legally correct.

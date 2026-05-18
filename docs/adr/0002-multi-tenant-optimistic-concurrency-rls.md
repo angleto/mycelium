@@ -1,37 +1,35 @@
-# ADR-0002 Multi-tenant: optimistic concurrency, RLS obbligatoria
+# ADR-0002 Multi-tenant: optimistic concurrency, mandatory RLS
 
-Status: accettata. Corregge una scelta sbagliata di una bozza
-precedente.
+Status: accepted. Corrects a wrong choice in an earlier draft.
 
-## Contesto
+## Context
 
-Una bozza precedente prescriveva contemporaneamente "last-write-wins"
-**e** "version (optimistic concurrency)". Sono politiche di conflitto
-opposte: LWW accetta la scrittura stale sovrascrivendo (lost update
-accettato); l'optimistic concurrency rifiuta la scrittura stale (lost
-update prevenuto). Non possono coesistere sullo stesso path. Inoltre la
-bozza marcava la RLS come "opzionale": per un sistema multi-tenant che
-contiene email e dati fiscali, lasciare l'isolamento alla sola
-diligenza delle query e una regressione di sicurezza.
+An earlier draft prescribed both "last-write-wins" **and** "version
+(optimistic concurrency)" at once. These are opposite conflict
+policies: LWW accepts the stale write by overwriting (lost update
+accepted); optimistic concurrency rejects the stale write (lost update
+prevented). They cannot coexist on the same path. The draft also marked
+RLS as "optional": for a multi-tenant system holding email and fiscal
+data, leaving isolation to query diligence alone is a security
+regression.
 
-## Decisione
+## Decision
 
-Solo **optimistic concurrency**: `UPDATE ... WHERE id = ? AND
-version = ?`; 0 righe -> `409 Conflict` propagato a GUI/REST/MCP
-(enforce nel service layer). Activity log append-only. Invalidazione
-realtime via WebSocket. Niente lost update silenzioso. **RLS
-obbligatoria** su tutte le entita org-scoped come difesa primaria, non
-opzionale.
+Optimistic concurrency **only**: `UPDATE ... WHERE id = ? AND
+version = ?`; 0 rows -> `409 Conflict` propagated to GUI/REST/MCP
+(enforced in the service layer). Append-only activity log. Realtime
+invalidation via WebSocket. No silent lost update. **Mandatory RLS**
+on every org-scoped entity as the primary defense, not optional.
 
-## Conseguenze
+## Consequences
 
-- Il modello e idoneo a introdurre collaborazione in futuro senza
-  riprogettare il core (LWW farebbe il contrario).
-- Le righe derivate (es. `schedule`) non sono soggette a optimistic
-  concurrency utente: vince la ricomputazione piu recente.
+- The model is fit to introduce collaboration later without redesigning
+  the core (LWW would do the opposite).
+- Derived rows (e.g. `schedule`) are not subject to user optimistic
+  concurrency: the most recent recompute wins.
 
-## Alternative scartate
+## Alternatives rejected
 
-- Last-write-wins: introduce lost update strutturali che qualunque
-  feature collaborativa futura dovrebbe poi disfare.
-- RLS opzionale: un singolo predicato dimenticato = leak cross-tenant.
+- Last-write-wins: introduces structural lost updates that any future
+  collaborative feature would then have to undo.
+- Optional RLS: a single forgotten predicate = cross-tenant leak.

@@ -1,37 +1,36 @@
-# ADR-0007 Isolamento memoria duro per (org, progetto)
+# ADR-0007 Hard memory isolation per (org, project)
 
-Status: accettata. Requisito esplicito dell'utente.
+Status: accepted. Explicit user requirement.
 
-## Contesto
+## Context
 
-Il sistema gestira molta informazione organizzata per conto
-dell'utente. Requisito: non mescolare la memoria di un progetto con
-quella di un altro, nessun data leak, ne tra tenant ne tra progetti.
-Un filtro di sola rilevanza non e una garanzia di isolamento (vedi la
-trappola filtered-ANN: un `WHERE` selettivo su HNSW puo degradare a
-post-filtro inaffidabile).
+The system will manage a lot of information organized on the user's
+behalf. Requirement: do not mix one project's memory with another's, no
+data leak, neither across tenants nor across projects. A relevance-only
+filter is not an isolation guarantee (see the filtered-ANN trap: a
+selective `WHERE` over HNSW can degrade to an unreliable post-filter).
 
-## Decisione
+## Decision
 
-Confine **duro**, non per rilevanza. `memory_blobs` partizionata per
-`org_id`, indici HNSW/GIN/trigram per partizione. Predicato
-(org_id, project_tag_id) **obbligatorio** in ogni query di memoria.
-RLS obbligatoria. Default = progetto corrente; accesso cross-progetto
-solo con autorizzazione esplicita e auditata. Nessun
-retrieval/summarization/consolidamento attraversa progetti o tenant; il
-consolidamento e limitato a stesso (org, progetto, thread/account) e
-mai cross-soggetto. La regola vale identica via MCP (FR-10).
+A **hard** boundary, not by relevance. `memory_blobs` partitioned by
+`org_id`, HNSW/GIN/trigram indexes per partition. The
+(org_id, project_tag_id) predicate is **mandatory** in every memory
+query. Mandatory RLS. Default = current project; cross-project access
+only with explicit, audited authorization. No
+retrieval/summarization/consolidation crosses projects or tenants;
+consolidation is limited to the same (org, project, thread/account) and
+never cross-subject. The rule holds identically via MCP (FR-10).
 
-## Conseguenze
+## Consequences
 
-- Isolamento e sicurezza dati garantiti da RLS + partizione +
-  predicato; il pre-filtro metadati resta solo rilevanza.
-- Test obbligatorio: una ricerca senza filtro non restituisce mai dati
-  di un altro progetto/tenant.
+- Isolation and data security guaranteed by RLS + partition +
+  predicate; the metadata pre-filter remains relevance only.
+- Mandatory test: an unfiltered search never returns data from another
+  project/tenant.
 
-## Alternative scartate
+## Alternatives rejected
 
-- Isolamento solo a livello org con progetto come rilevanza: viola il
-  requisito (mescolerebbe progetti).
-- Affidare l'isolamento alla sola query application-level: un predicato
-  dimenticato = leak; serve la difesa in profondita (RLS + partizione).
+- Org-level isolation only with project as relevance: violates the
+  requirement (would mix projects).
+- Relying on the application-level query alone: a forgotten predicate =
+  leak; defense in depth is needed (RLS + partition).

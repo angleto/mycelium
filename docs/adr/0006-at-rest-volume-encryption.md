@@ -1,38 +1,39 @@
-# ADR-0006 Cifratura at-rest a livello di volume
+# ADR-0006 At-rest encryption at the volume level
 
-Status: accettata. Risolve una contraddizione interna di una bozza
-precedente.
+Status: accepted. Resolves an internal contradiction in an earlier
+draft.
 
-## Contesto
+## Context
 
-Una bozza richiedeva "corpo email cifrato at-rest in Postgres" con
-primitive app-level (libsodium/Fernet) e, contemporaneamente, full-text
-`tsvector` ed embedding locale del corpo. Sono incompatibili: un indice
-GIN/tsvector estrae lessemi dal testo in chiaro e un embedding del
-ciphertext e rumore. Con cifratura app-level del corpo, FTS ed embedding
-sul corpo non funzionano.
+A draft required "email body encrypted at-rest in Postgres" with
+app-level primitives (libsodium/Fernet) and, at the same time,
+full-text `tsvector` and a local embedding of the body. These are
+incompatible: a GIN/tsvector index extracts lexemes from cleartext, and
+an embedding of ciphertext is noise. With app-level body encryption,
+FTS and embedding over the body do not work.
 
-## Decisione
+## Decision
 
-Cifratura at-rest = cifratura del **volume** Postgres + object storage
-(LUKS / block storage cifrato / TDE managed): corpo, `tsvector` ed
-`embedding` restano in chiaro dentro il DB ma il disco e cifrato, quindi
-indicizzabili e ricercabili. L'envelope app-level (libsodium/Fernet) e
-riservato ai **segreti opachi non indicizzati**: token OAuth,
-credenziali, materiale del canale SdI. Modello di minaccia dichiarato:
-protegge da disco/snapshot rubato, non da connessione DB viva o app/DBA
-compromessi.
+At-rest encryption = encryption of the Postgres **volume** + object
+storage (LUKS / encrypted block storage / managed TDE): body,
+`tsvector` and `embedding` stay in cleartext inside the DB but the disk
+is encrypted, so they remain indexable and searchable. The app-level
+envelope (libsodium/Fernet) is reserved for **opaque, non-indexed
+secrets**: OAuth tokens, credentials, SdI channel material. Stated
+threat model: protects against a stolen disk/snapshot, not against a
+live DB connection or a compromised app/DBA.
 
-## Conseguenze
+## Consequences
 
-- FTS + embedding del corpo funzionano (requisito di retrieval ibrido).
-- La confidenzialita verso un attaccante con DB vivo non e coperta da
-  questa misura: e una scelta dichiarata, non implicita; si compensa
-  con RLS obbligatoria (ADR-0002) e isolamento (ADR-0007).
+- Body FTS + embedding work (hybrid-retrieval requirement).
+- Confidentiality against an attacker with a live DB is not covered by
+  this measure: a stated, not implicit, choice; compensated by
+  mandatory RLS (ADR-0002) and isolation (ADR-0007).
 
-## Alternative scartate
+## Alternatives rejected
 
-- Envelope app-level del corpo: rompe FTS ed embedding (la
-  contraddizione originale).
-- Searchable encryption (EQL/indici cifrati): nessun ANN cosine su
-  vettori cifrati; complessita sproporzionata per un nodo ARM singolo.
+- App-level envelope of the body: breaks FTS and embedding (the
+  original contradiction).
+- Searchable encryption (EQL/encrypted indexes): no cosine ANN over
+  encrypted vectors; complexity out of proportion for a single ARM
+  node.

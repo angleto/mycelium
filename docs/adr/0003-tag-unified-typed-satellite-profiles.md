@@ -1,36 +1,35 @@
-# ADR-0003 Tag unificato con profili satellite tipizzati
+# ADR-0003 Unified tag with typed satellite profiles
 
-Status: accettata.
+Status: accepted.
 
-## Contesto
+## Context
 
-Requisito dell'utente: client e project sono **tag speciali**, un solo
-concetto di tag, nessuna entita aggiuntiva. Pero i dati di un client
-sono legali/fiscali (P.IVA, codice destinatario, regime) e quelli di un
-project sono di billing (tariffa, valuta, budget): metterli in JSONB
-libero su una tabella tag generica sacrifica vincoli, tipi e validazione
-che la fatturazione richiede per legge e che l'isolamento memoria per
-progetto richiede per integrita.
+User requirement: client and project are **special tags**, a single
+tag concept, no extra entity. But a client's data is legal/fiscal
+(VAT number, recipient code, regime) and a project's is billing (rate,
+currency, budget): putting them in free JSONB on a generic tag table
+sacrifices the constraints, types and validation that invoicing
+requires by law and that per-project memory isolation requires for
+integrity.
 
-## Decisione
+## Decision
 
-Un solo concetto `tags(kind in {generic, client, project})` (rispetta
-il requisito). I dati strutturati stanno in **profili satellite
-tipizzati** con FK a `tags.id`: `client_profile(tag_id PK, ...)` e
-`project_profile(tag_id PK, client_tag_id FK, ...)`. Associare
-cliente/progetto a un task = attaccare il tag (relazione unica per ogni
-kind).
+A single `tags(kind in {generic, client, project})` concept (honors
+the requirement). Structured data lives in **typed satellite
+profiles** with an FK to `tags.id`: `client_profile(tag_id PK, ...)`
+and `project_profile(tag_id PK, client_tag_id FK, ...)`. Associating a
+client/project with a task = attaching the tag (one relation per kind).
 
-## Conseguenze
+## Consequences
 
-- Modello concettuale unico come richiesto, ma con integrita
-  referenziale e validazione sui dati fiscali e di billing.
-- Le query di reporting e fatturazione aggregano via i tag
-  client/project con join ai profili.
+- A single conceptual model as required, but with referential
+  integrity and validation on the fiscal and billing data.
+- Reporting and invoicing queries aggregate via the client/project tags
+  with joins to the profiles.
 
-## Alternative scartate
+## Alternatives rejected
 
-- Attributi in JSONB libero sul tag generico: nessun vincolo,
-  validazione fragile su dati legalmente sensibili.
-- Entita Client/Project separate dai tag: viola il requisito esplicito
-  dell'utente.
+- Free JSONB attributes on the generic tag: no constraints, fragile
+  validation on legally sensitive data.
+- Client/Project entities separate from tags: violates the user's
+  explicit requirement.

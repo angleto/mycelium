@@ -1,34 +1,33 @@
-# ADR-0008 No-ubiquita: entita events
+# ADR-0008 No-ubiquity: events entity
 
-Status: accettata. Requisito esplicito dell'utente.
+Status: accepted. Explicit user requirement.
 
-## Contesto
+## Context
 
-Il sistema organizza appuntamenti per conto dell'utente. L'utente non
-ha il dono dell'ubiquita: non puo avere due impegni con clienti diversi
-nello stesso momento. La sola WorkingCalendar non modella appuntamenti
-a orario fisso.
+The system arranges appointments on the user's behalf. The user does
+not have the gift of ubiquity: they cannot have two engagements with
+different clients at the same time. WorkingCalendar alone does not
+model fixed-time appointments.
 
-## Decisione
+## Decision
 
-Nuova entita `events` (appuntamento): org-scoped, tag client/project,
-partecipanti, intervallo time-pinned, luogo. Vincolo: nessuna
-sovrapposizione di intervalli per lo stesso partecipante; creare o
-spostare un appuntamento che si sovrappone per la stessa persona viene
-**rifiutato**. Gli appuntamenti sono prenotazioni fisse esclusive sulla
-timeline della persona e lo scheduler (ADR-0004) vi colloca attorno i
-task umani non delegati.
+New `events` entity (appointment): org-scoped, client/project tag,
+participants, time-pinned interval, location. Constraint: no
+overlapping intervals for the same participant; creating or moving an
+appointment that overlaps for the same person is **rejected**.
+Appointments are exclusive fixed reservations on a person's timeline
+and the scheduler (ADR-0004) places non-delegated human tasks around
+them.
 
-## Conseguenze
+## Consequences
 
-- Lo scheduler tratta gli eventi come vincoli duri; i task umani della
-  stessa persona non si sovrappongono ne tra loro ne agli appuntamenti.
-- Notifica su tentativo di doppia prenotazione.
+- The scheduler treats events as hard constraints; the same person's
+  human tasks do not overlap each other nor the appointments.
+- A notification is raised on a double-booking attempt.
 
-## Alternative scartate
+## Alternatives rejected
 
-- Modellare gli appuntamenti come task: un task e flessibile e
-  schedulabile, un appuntamento e a orario fisso ed esclusivo; semantica
-  diversa.
-- Solo avviso non bloccante sulla sovrapposizione: il requisito chiede
-  che il sistema non fissi impegni contemporanei, quindi rifiuto.
+- Modeling appointments as tasks: a task is flexible and schedulable,
+  an appointment is fixed-time and exclusive; different semantics.
+- A non-blocking overlap warning only: the requirement is that the
+  system not set concurrent engagements, hence rejection.

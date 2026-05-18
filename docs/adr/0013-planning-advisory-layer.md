@@ -1,39 +1,41 @@
-# ADR-0013 Layer di pianificazione advisory, core deterministico
+# ADR-0013 Planning advisory layer, deterministic core
 
-Status: accettata. Scelta dell'utente (core v1).
+Status: accepted. User's choice (v1 core).
 
-## Contesto
+## Context
 
-La ragion d'essere del prodotto e aiutare nella pianificazione
-efficace: rispondere a domande come "ho mezz'ora, cosa di necessario
-posso fare?", "vado al brico, cosa mi serve?", "budget X per spese di
-casa, quali priorita?". Sono query decisionali contestuali, non CRUD.
+The product's reason for being is to help with effective planning:
+answering questions like "I have half an hour, what useful thing can I
+do?", "I'm going to the hardware store, what do I need?", "budget X for
+home expenses, what are the priorities?". These are contextual decision
+queries, not CRUD.
 
-## Decisione
+## Decision
 
-Layer advisory di prima classe in v1, nel service layer, esposto via
-REST + tool MCP. Nucleo decisionale **deterministico e spiegabile**:
-filtro di fattibilita + ranking + selezione vincolata (knapsack a
-priorita). L'LLM/MCP e il **frontend in linguaggio naturale**: traduce
-la richiesta in query strutturata, compone con la memoria e narra il
-risultato; non e l'oracolo che decide. Tre archetipi: cosa-faccio-ora
-(finestra libera), errand/contesto (luogo), prioritizzazione entro
-budget. Determinismo verificabile (stesso input, stesso output).
+A first-class advisory layer in v1, in the service layer, exposed via
+REST + MCP tools. The decision core is **deterministic and
+explainable**: a feasibility filter + ranking + constrained selection
+(priority knapsack). The LLM/MCP is the **natural-language frontend**:
+it translates the request into a structured query, composes with
+memory and narrates the result; it is not the oracle that decides.
+Three archetypes: what-can-I-do-now (free window), errand/context
+(place), prioritization within budget. Verifiable determinism (same
+input, same output).
 
-## Conseguenze
+## Consequences
 
-- Coerente con ADR-0004 (core deterministico, LLM come interfaccia,
-  niente magia opaca): spiegabilita e fiducia dell'utente.
-- Costruito sopra scheduler (F3), time tracking (F4) e attributi
-  personali/budget (ADR-0014); fase F4b.
-- Opera sui task accessibili all'utente entro una org, anche
-  multi-progetto: NON e una violazione dell'isolamento memoria
-  (ADR-0007), che governa il contenuto RAG/email, non la lista task
-  dell'utente. Distinzione da documentare e testare.
+- Consistent with ADR-0004 (deterministic core, LLM as interface, no
+  opaque magic): explainability and user trust.
+- Built on top of the scheduler (F3), time tracking (F4) and
+  personal/budget attributes (ADR-0014); phase F4b.
+- Operates on the tasks accessible to the user within an org, even
+  multi-project: this is NOT a memory-isolation violation (ADR-0007),
+  which governs RAG/email content, not the user's task list. A
+  distinction to document and test.
 
-## Alternative scartate
+## Alternatives rejected
 
-- Layer successivo / post-core: e la ragion d'essere del prodotto,
-  rimandarlo svuoterebbe il v1.
-- Decisione guidata dall'LLM (ranking/selezione lasciati al modello):
-  non spiegabile ne deterministico, incoerente con ADR-0004.
+- A later / post-core layer: it is the product's reason for being;
+  deferring it would gut v1.
+- LLM-driven decision (ranking/selection left to the model): not
+  explainable nor deterministic, inconsistent with ADR-0004.

@@ -1,39 +1,38 @@
-# ADR-0012 Astrazione LLM/Embedder, riuso pattern bitvision
+# ADR-0012 LLM/Embedder abstraction, reuse the bitvision pattern
 
-Status: accettata.
+Status: accepted.
 
-## Contesto
+## Context
 
-Servono summarization e embedding pluggable: modello locale di default
-(privacy, il corpo non lascia il perimetro) ma sostituibile (es. modello
-SOTA su cluster GPU in futuro). Esiste gia un pattern collaudato
-dell'utente in `bitvision_phoenix`.
+We need pluggable summarization and embedding: a local model by default
+(privacy, the body does not leave the perimeter) but replaceable (e.g.
+a SOTA model on a GPU cluster in the future). The user already has a
+proven pattern in `bitvision_phoenix`.
 
-## Decisione
+## Decision
 
-Riusare il pattern di `bitvision_phoenix`: provider via
-`typing.Protocol` (non ABC), factory DB-driven, DTO neutri, settings
-pydantic con chiavi provider via env, registry modelli a DB con
-`is_active`. File di riferimento in
-[references.md](../references.md). bitvision NON ha un'astrazione di
-embedding (chiamate dirette): Flow aggiunge `EmbedderProvider`
-speculare a `LLMProvider` (`embed_text`, `dim`, `model_id`). Default:
-modello multilingue piccolo CPU/ARM; scelta concreta in implementazione
-tra candidati open source forti (BGE-M3, multilingual-E5,
-GTE-multilingual, Qwen3-Embedding) su MTEB multilingue corrente, non un
-"migliore" fissato a priori. `model_id`+`dim` per blob abilitano il
-re-embedding (ADR-0005).
+Reuse the `bitvision_phoenix` pattern: a provider via `typing.Protocol`
+(not an ABC), a DB-driven factory, neutral DTOs, pydantic settings with
+provider keys from env, a DB model registry with `is_active`.
+Reference files in [references.md](../references.md). bitvision has NO
+embedding abstraction (direct calls): Flow adds an `EmbedderProvider`
+mirroring `LLMProvider` (`embed_text`, `dim`, `model_id`). Default: a
+small multilingual CPU/ARM model; the concrete choice is made at
+implementation among strong open-source candidates (BGE-M3,
+multilingual-E5, GTE-multilingual, Qwen3-Embedding) on the current
+multilingual MTEB, not a "best" fixed a priori. `model_id`+`dim` per
+blob enable re-embedding (ADR-0005).
 
-## Conseguenze
+## Consequences
 
-- Coerenza con un pattern gia validato; sostituzione del modello senza
-  riprogettare il core.
-- Da non copiare da bitvision: cache `ephemeral` Anthropic-specifica,
-  template clinici, gestione DICOM, scoping token MCP medicale.
+- Consistency with an already-validated pattern; model replacement
+  without redesigning the core.
+- Do not copy from bitvision: the Anthropic-specific `ephemeral` cache,
+  clinical templates, DICOM handling, medical MCP token scoping.
 
-## Alternative scartate
+## Alternatives rejected
 
-- Astrazione nuova ad hoc: reinventa un pattern gia funzionante
-  dell'utente.
-- Modello cloud-only: il corpo email lascerebbe il perimetro,
-  incompatibile con la postura privacy (default locale).
+- A new ad-hoc abstraction: reinvents a pattern that already works for
+  the user.
+- A cloud-only model: the email body would leave the perimeter,
+  incompatible with the privacy posture (local default).

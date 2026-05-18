@@ -1,51 +1,51 @@
-# ADR-0015 RLS: due ruoli Postgres e provisioning SECURITY DEFINER
+# ADR-0015 RLS: two Postgres roles and SECURITY DEFINER provisioning
 
-Status: accettata. Emersa implementando F0.
+Status: accepted. Emerged while implementing F0.
 
-## Contesto
+## Context
 
-ADR-0002/0007 impongono RLS come difesa primaria. Due fatti di
-PostgreSQL la rendono non banale:
+ADR-0002/0007 mandate RLS as the primary defense. Two PostgreSQL facts
+make it non-trivial:
 
-1. Un **superuser bypassa sempre la RLS** (anche con FORCE). Se l'app si
-   connette come superuser (il default dell'immagine `postgres`),
-   l'isolamento RLS e un no-op.
-2. RLS + `FORCE` rende la creazione di una nuova organizzazione un
-   problema uovo-gallina: l'INSERT in `organizations` non puo
-   soddisfare una policy che richiede `app.current_org` per una org che
-   non esiste ancora.
+1. A **superuser always bypasses RLS** (even with FORCE). If the app
+   connects as superuser (the `postgres` image default), RLS isolation
+   is a no-op.
+2. RLS + `FORCE` makes creating a new organization a chicken-and-egg
+   problem: the INSERT into `organizations` cannot satisfy a policy
+   requiring `app.current_org` for an org that does not exist yet.
 
-## Decisione
+## Decision
 
-- **Due ruoli**: `flow` (owner/superuser: DDL, migrazioni) e **`flow_app`**
-  (runtime: LOGIN, NOSUPERUSER, non proprietario, soggetto a RLS+FORCE).
-  L'app si connette come `flow_app`; le migrazioni come `flow`.
-- **RLS + FORCE** su tutte le entita org-scoped; policy su
+- **Two roles**: `flow` (owner/superuser: DDL, migrations) and
+  **`flow_app`** (runtime: LOGIN, NOSUPERUSER, non-owner, subject to
+  RLS+FORCE). The app connects as `flow_app`; migrations as `flow`.
+- **RLS + FORCE** on every org-scoped entity; policy on
   `nullif(current_setting('app.current_*', true),'')::uuid`
-  (fail-closed: GUC assente -> nessuna riga).
-- **Provisioning tenant** via funzione `SECURITY DEFINER`
-  `provision_organization(name, user_id)` di proprieta di `flow`
-  (esegue come owner, quindi puo creare org+membership), con
-  `search_path` fisso, `EXECUTE` concesso solo a `flow_app`. Unico punto
-  che crea una org; nessun bypass RLS sparso nel codice.
-- Ruolo creato (senza password) dalla migrazione baseline per
-  idempotenza dello schema; la password di `flow_app` e impostata da un
-  bootstrap separato (`deploy/bootstrap_roles.sql`) a partire da una
-  variabile d'ambiente: nessun segreto nel git.
+  (fail-closed: GUC absent -> no rows).
+- **Tenant provisioning** via a `SECURITY DEFINER` function
+  `provision_organization(name, user_id)` owned by `flow` (runs as
+  owner, so it can create org+membership), with a fixed `search_path`,
+  `EXECUTE` granted only to `flow_app`. The single point that creates an
+  org; no RLS bypass scattered through the code.
+- The role is created (without a password) by the baseline migration
+  for schema idempotency; the `flow_app` password is set by a separate
+  bootstrap (`deploy/bootstrap_roles.sql`) from an environment
+  variable: no secret in git.
 
-## Conseguenze
+## Consequences
 
-- L'isolamento RLS e realmente applicato (l'app non e superuser): i test
-  di verifica F0 connettono come `flow_app`.
-- Ordine operativo: bootstrap ruolo+password, poi `alembic upgrade`.
-- `memory_blobs` e `PARTITION BY HASH (org_id)` (PK composta
-  `(id, org_id)`, vincolo del partitioning); la RLS sulla tabella padre
-  si applica alle partizioni.
-- `activity_log` e append-only via trigger che vieta UPDATE/DELETE.
+- RLS isolation is actually enforced (the app is not superuser): the F0
+  verification tests connect as `flow_app`.
+- Operational order: bootstrap role+password, then `alembic upgrade`.
+- `memory_blobs` is `PARTITION BY HASH (org_id)` (composite PK
+  `(id, org_id)`, a partitioning constraint); RLS on the parent table
+  applies to the partitions.
+- `activity_log` is append-only via a trigger that forbids
+  UPDATE/DELETE.
 
-## Alternative scartate
+## Alternatives rejected
 
-- App come superuser/owner: la RLS non verrebbe applicata (bypass).
-- Bypass RLS ad-hoc nel codice per il provisioning: sparpaglia il
-  privilegio; la funzione SECURITY DEFINER lo confina a un punto solo.
-- Password del ruolo nella migrazione: segreto nel version control.
+- App as superuser/owner: RLS would not be enforced (bypass).
+- Ad-hoc RLS bypass in code for provisioning: scatters the privilege;
+  the SECURITY DEFINER function confines it to one point.
+- Role password in the migration: a secret in version control.

@@ -1,37 +1,37 @@
-# ADR-0010 Conservazione: servizio AdE gratuito
+# ADR-0010 Conservation: free AdE service
 
-Status: accettata. Scelta dell'utente tra le opzioni presentate.
+Status: accepted. User's choice among the options presented.
 
-## Contesto
+## Context
 
-La conservazione sostitutiva a norma e un obbligo legale (art. 39 DPR
-633/72, 10 anni; Linee Guida AgID) sui dati che il sistema memorizza, ed
-era del tutto assente in una bozza. Opzioni: servizio AdE gratuito;
-conservatore qualificato terzo via API; self-managed con Responsabile e
-Manuale della conservazione.
+Compliant substitutive conservation is a legal obligation (art. 39 DPR
+633/72, 10 years; AgID Guidelines) on the data the system stores, and
+was entirely absent in a draft. Options: free AdE service; third-party
+qualified conservator via API; self-managed with a Conservation Officer
+and Manual.
 
-## Decisione
+## Decision
 
-Strategia = **servizio AdE gratuito**. `ConservationProvider =
-AdeFreeConservation`: Flow non conserva in proprio, **traccia e guida
-l'adesione per-tenant** nel cassetto fiscale Fatture e Corrispettivi
-(stato adesione sul profilo Org) e si appoggia alla conservazione AdE
-delle fatture transitate da SdI.
+Strategy = **free AdE service**. `ConservationProvider =
+AdeFreeConservation`: Flow does not conserve in-house, it **tracks and
+guides per-tenant adhesion** in the "Fatture e Corrispettivi" tax
+portal (adhesion status on the Org profile) and relies on AdE
+conservation of invoices that transited SdI.
 
-## Conseguenze
+## Consequences
 
-- Costo minimo, nessun onere di Responsabile/Manuale lato Flow.
-- L'adesione e per soggetto IVA: Flow non puo aderire al posto del
-  tenant, puo solo guidarla/verificarla.
-- L'AdE conserva solo cio che passa da SdI: le fatture emesse via
-  `ManualExportChannel` in F7a sono fuori copertura e vanno marcate "a
-  carico del tenant". Copertura effettiva da F7b.
-- Astrazione `ConservationProvider` mantenuta pluggable per poter
-  passare a conservatore terzo in futuro.
+- Minimal cost, no Conservation Officer/Manual burden on Flow.
+- Adhesion is per VAT subject: Flow cannot adhere on the tenant's
+  behalf, only guide/verify it.
+- AdE conserves only what passes through SdI: invoices issued via
+  `ManualExportChannel` in F7a are out of coverage and must be marked
+  "tenant's responsibility". Effective coverage from F7b.
+- The `ConservationProvider` abstraction is kept pluggable so a
+  third-party conservator can be adopted later.
 
-## Alternative scartate
+## Alternatives rejected
 
-- Conservatore qualificato terzo: miglior trasferimento del rischio per
-  un SaaS ma costo ricorrente e integrazione, non scelto ora.
-- Self-managed: richiede Responsabile della conservazione e Manuale,
-  pacchetti, hash, esibizione; onere continuo elevato.
+- Third-party qualified conservator: better risk transfer for a SaaS
+  but recurring cost and integration, not chosen now.
+- Self-managed: requires a Conservation Officer and Manual, packages,
+  hashes, exhibition; high ongoing burden.

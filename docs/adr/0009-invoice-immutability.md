@@ -1,33 +1,32 @@
-# ADR-0009 Immutabilita della fattura, carve-out soft-delete
+# ADR-0009 Invoice immutability, soft-delete carve-out
 
-Status: accettata. Corregge un conflitto della bozza generica.
+Status: accepted. Corrects a conflict in the generic draft.
 
-## Contesto
+## Context
 
-FR-1 prevede soft-delete con ripristino su tutte le entita. Una fattura
-emessa (trasmessa a SdI e non scartata) e un documento fiscale soggetto
-a obbligo di conservazione decennale e integrita. Soft-delete/ripristino
-generico romperebbe immutabilita e numerazione progressiva.
+FR-1 provides soft-delete with restore on all entities. An issued
+invoice (transmitted to SdI and not rejected) is a fiscal document
+subject to a ten-year conservation and integrity obligation. Generic
+soft-delete/restore would break immutability and progressive
+numbering.
 
-## Decisione
+## Decision
 
-La fattura ha una macchina a stati: `draft` -> `transmitted` -> stati
-terminali SdI. Solo `draft` e cancellabile. Dopo l'emissione il record
-e append-only e immutabile; l'unica "rimozione" logica e una nota di
-credito TD04 collegata via `parent_invoice_id`. Carve-out esplicito in
-FR-1: la soft-delete non si applica a fatture emesse e documenti
-conservati. La numerazione progressiva per (Org, serie, anno) e
-allocata in modo concorrenza-safe solo alla transizione
-draft -> transmitted, nella stessa transazione, e mai riusata (vedi
-FR-9).
+The invoice has a state machine: `draft` -> `transmitted` -> SdI
+terminal states. Only `draft` is deletable. After emission the record
+is append-only and immutable; the only logical "removal" is a TD04
+credit note linked via `parent_invoice_id`. Explicit carve-out in FR-1:
+soft-delete does not apply to issued invoices and conserved documents.
+The progressive number per (Org, series, year) is allocated
+concurrency-safe only at the draft -> transmitted transition, in the
+same transaction, and never reused (see FR-9).
 
-## Conseguenze
+## Consequences
 
-- Integrita e progressivita della numerazione preservate sotto
-  concorrenza.
-- Correzioni solo via TD04, come da prassi.
+- Numbering integrity and progressivity preserved under concurrency.
+- Corrections only via TD04, as is standard practice.
 
-## Alternative scartate
+## Alternatives rejected
 
-- Soft-delete uniforme anche sulle fatture: viola immutabilita e
-  progressivita, non conforme.
+- Uniform soft-delete on invoices too: violates immutability and
+  progressivity, non-compliant.
