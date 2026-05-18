@@ -613,6 +613,11 @@ export const en = {
     saveProfile: 'Save profile',
     delete: 'Delete',
     noProfiles: 'No issuer profile yet. Create one to issue invoices.',
+    noIssuerGuard:
+      'Configure an issuer profile before issuing invoices.',
+    goSettings: 'Settings → Issuer profiles',
+    seriesLegalHint:
+      'New drafts use series A; change it in the draft editor. The progressive number is legally sequential per series and year (FatturaPA), so it cannot be randomised; use a separate series if you need to compartmentalise.',
     client: 'Client',
     issuer: 'Issuer',
     series: 'Series',

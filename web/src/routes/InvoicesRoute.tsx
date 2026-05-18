@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react'
+import { Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { api, errMessage, workspaceHeader } from '../api/client'
 import { useSession } from '../auth/useSession'
@@ -10,18 +11,6 @@ type Profile = components['schemas']['IssuerProfileOut']
 type Tag = components['schemas']['TagOut']
 type ReportRow = components['schemas']['ReportRowOut']
 
-const EMPTY_PROFILE = {
-  label: '',
-  denominazione: '',
-  piva: '',
-  codice_fiscale: '',
-  indirizzo: '',
-  cap: '',
-  comune: '',
-  provincia: '',
-  is_default: false,
-}
-type ProfileForm = typeof EMPTY_PROFILE
 
 const EMPTY_LINE = { description: '', unit_price: 0, quantity: 1, vat_rate: 22 }
 type LineForm = typeof EMPTY_LINE
@@ -54,14 +43,9 @@ export function InvoicesRoute() {
   const [err, setErr] = useState<string | null>(null)
   const [msg, setMsg] = useState<string | null>(null)
 
-  // issuer-profile editor
-  const [pForm, setPForm] = useState<ProfileForm>(EMPTY_PROFILE)
-  const [pEdit, setPEdit] = useState<string | 'new' | null>(null)
-
-  // new-invoice form
+  // new-invoice form (issuer profiles are managed in Settings)
   const [niClient, setNiClient] = useState('')
   const [niIssuer, setNiIssuer] = useState('')
-  const [niSeries, setNiSeries] = useState('A')
 
   // selected invoice + its lines
   const [sel, setSel] = useState<Invoice | null>(null)
@@ -166,87 +150,8 @@ export function InvoicesRoute() {
     await loadList()
   }
 
-  // --- issuer profiles ---
-
-  function startProfile(p: Profile | null) {
-    setErr(null)
-    if (p) {
-      setPEdit(p.id)
-      setPForm({
-        label: p.label,
-        denominazione: p.denominazione,
-        piva: p.piva ?? '',
-        codice_fiscale: p.codice_fiscale ?? '',
-        indirizzo: p.indirizzo,
-        cap: p.cap,
-        comune: p.comune,
-        provincia: p.provincia ?? '',
-        is_default: p.is_default,
-      })
-    } else {
-      setPEdit('new')
-      setPForm(EMPTY_PROFILE)
-    }
-  }
-
-  async function saveProfile(e: FormEvent) {
-    e.preventDefault()
-    setErr(null)
-    const h = workspaceHeader()
-    const common = {
-      label: pForm.label,
-      denominazione: pForm.denominazione,
-      piva: pForm.piva || null,
-      codice_fiscale: pForm.codice_fiscale || null,
-      indirizzo: pForm.indirizzo,
-      cap: pForm.cap,
-      comune: pForm.comune,
-      provincia: pForm.provincia || null,
-      is_default: pForm.is_default,
-    }
-    const res =
-      pEdit === 'new'
-        ? await api.POST('/issuer-profiles', {
-            params: { header: h },
-            body: { regime_fiscale: 'RF01', paese: 'IT', nazione: 'IT', ...common },
-          })
-        : await api.PATCH('/issuer-profiles/{profile_id}', {
-            params: { header: h, path: { profile_id: pEdit as string } },
-            body: common,
-          })
-    if (res.error) {
-      setErr(errMessage(res.error))
-      return
-    }
-    setPEdit(null)
-    setMsg(t('invoices.saved'))
-    await loadList()
-  }
-
-  async function setDefaultProfile(id: string) {
-    setErr(null)
-    const { error } = await api.POST('/issuer-profiles/{profile_id}/default', {
-      params: { header: workspaceHeader(), path: { profile_id: id } },
-    })
-    if (error) {
-      setErr(errMessage(error))
-      return
-    }
-    await loadList()
-  }
-
-  async function deleteProfile(id: string) {
-    if (!window.confirm(t('invoices.confirmDeleteProfile'))) return
-    setErr(null)
-    const { error } = await api.DELETE('/issuer-profiles/{profile_id}', {
-      params: { header: workspaceHeader(), path: { profile_id: id } },
-    })
-    if (error) {
-      setErr(errMessage(error))
-      return
-    }
-    await loadList()
-  }
+  // Issuer profiles are managed in Settings (read-only here for the
+  // issuer picker + the no-issuer guard).
 
   // --- invoices ---
 
@@ -259,7 +164,9 @@ export function InvoicesRoute() {
       body: {
         client_tag_id: niClient,
         issuer_profile_id: niIssuer || defaultIssuer || null,
-        series: niSeries,
+        // Series defaults to 'A'; it's editable in the draft editor.
+        // (FatturaPA numbering is legally sequential per series+year.)
+        series: 'A',
       },
     })
     if (error || !data) {
@@ -440,147 +347,41 @@ export function InvoicesRoute() {
       {err && <p className="err">{err}</p>}
       {msg && <p className="ok">{msg}</p>}
 
-      <h2>{t('invoices.profiles')}</h2>
-      <p className="hint">{t('invoices.profilesHint')}</p>
+      <h2>{t('invoices.create')}</h2>
       {profiles.length === 0 ? (
-        <p className="hint">{t('invoices.noProfiles')}</p>
+        <p className="banner">
+          {t('invoices.noIssuerGuard')}{' '}
+          <Link to="/settings">{t('invoices.goSettings')}</Link>
+        </p>
       ) : (
-        <ul className="list">
-          {profiles.map((p) => (
-            <li key={p.id}>
-              <strong>{p.label}</strong> · {p.denominazione}
-              {p.piva ? ` · ${p.piva}` : ''}{' '}
-              {p.is_default && <span className="muted">[{t('invoices.isDefault')}]</span>}
-              <button
-                type="button"
-                className="btn--sm btn--ghost"
-                onClick={() => startProfile(p)}
-              >
-                {t('invoices.edit')}
-              </button>
-              {!p.is_default && (
-                <button
-                  type="button"
-                  className="btn--sm btn--ghost"
-                  onClick={() => void setDefaultProfile(p.id)}
-                >
-                  {t('invoices.setDefault')}
-                </button>
-              )}
-              {!p.is_default && (
-                <button
-                  type="button"
-                  className="btn--sm btn--danger"
-                  onClick={() => void deleteProfile(p.id)}
-                >
-                  {t('invoices.delete')}
-                </button>
-              )}
-            </li>
-          ))}
-        </ul>
-      )}
-      {pEdit === null ? (
-        <button type="button" className="btn--sm" onClick={() => startProfile(null)}>
-          {t('invoices.newProfile')}
-        </button>
-      ) : (
-        <form onSubmit={(e) => void saveProfile(e)} className="card card--running">
-          <h3>{pEdit === 'new' ? t('invoices.newProfile') : t('invoices.editProfile')}</h3>
-          <div className="row">
-            <input
-              required
-              placeholder={t('invoices.label')}
-              value={pForm.label}
-              onChange={(e) => setPForm({ ...pForm, label: e.target.value })}
-            />
-            <input
-              required
-              placeholder={t('invoices.denom')}
-              value={pForm.denominazione}
-              onChange={(e) => setPForm({ ...pForm, denominazione: e.target.value })}
-            />
-            <input
-              placeholder={t('invoices.piva')}
-              value={pForm.piva}
-              onChange={(e) => setPForm({ ...pForm, piva: e.target.value })}
-            />
-            <input
-              placeholder={t('invoices.cf')}
-              value={pForm.codice_fiscale}
-              onChange={(e) => setPForm({ ...pForm, codice_fiscale: e.target.value })}
-            />
-          </div>
-          <div className="row">
-            <input
-              placeholder={t('invoices.address')}
-              value={pForm.indirizzo}
-              onChange={(e) => setPForm({ ...pForm, indirizzo: e.target.value })}
-            />
-            <input
-              placeholder={t('invoices.cap')}
-              value={pForm.cap}
-              onChange={(e) => setPForm({ ...pForm, cap: e.target.value })}
-            />
-            <input
-              placeholder={t('invoices.comune')}
-              value={pForm.comune}
-              onChange={(e) => setPForm({ ...pForm, comune: e.target.value })}
-            />
-            <input
-              placeholder={t('invoices.provincia')}
-              value={pForm.provincia}
-              onChange={(e) => setPForm({ ...pForm, provincia: e.target.value })}
-            />
-          </div>
-          <label className="row">
-            <input
-              type="checkbox"
-              checked={pForm.is_default}
-              onChange={(e) => setPForm({ ...pForm, is_default: e.target.checked })}
-            />
-            {t('invoices.isDefault')}
-          </label>
-          <div className="row">
-            <button type="submit">{t('invoices.saveProfile')}</button>
-            <button type="button" className="btn--ghost" onClick={() => setPEdit(null)}>
-              {t('invoices.cancel')}
-            </button>
-          </div>
+        <form onSubmit={(e) => void createDraft(e)} className="row">
+          <select value={niClient} onChange={(e) => setNiClient(e.target.value)}>
+            <option value="">{t('invoices.client')}</option>
+            {clients.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+          </select>
+          <select value={niIssuer} onChange={(e) => setNiIssuer(e.target.value)}>
+            <option value="">
+              {t('invoices.issuer')}
+              {defaultIssuer
+                ? ` · ${profiles.find((p) => p.id === defaultIssuer)?.label}`
+                : ''}
+            </option>
+            {profiles.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.label}
+              </option>
+            ))}
+          </select>
+          <button type="submit" disabled={!niClient}>
+            {t('invoices.create')}
+          </button>
         </form>
       )}
-
-      <h2>{t('invoices.create')}</h2>
-      <form onSubmit={(e) => void createDraft(e)} className="row">
-        <select value={niClient} onChange={(e) => setNiClient(e.target.value)}>
-          <option value="">{t('invoices.client')}</option>
-          {clients.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.name}
-            </option>
-          ))}
-        </select>
-        <select value={niIssuer} onChange={(e) => setNiIssuer(e.target.value)}>
-          <option value="">
-            {t('invoices.issuer')}
-            {defaultIssuer ? ` · ${profiles.find((p) => p.id === defaultIssuer)?.label}` : ''}
-          </option>
-          {profiles.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.label}
-            </option>
-          ))}
-        </select>
-        <input
-          value={niSeries}
-          onChange={(e) => setNiSeries(e.target.value)}
-          style={{ width: '3rem' }}
-          aria-label={t('invoices.series')}
-        />
-        <button type="submit" disabled={!niClient || profiles.length === 0}>
-          {t('invoices.create')}
-        </button>
-      </form>
+      <p className="hint">{t('invoices.seriesLegalHint')}</p>
 
       <h2>{t('invoices.list')}</h2>
       {list.length === 0 ? (

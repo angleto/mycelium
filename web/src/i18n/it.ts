@@ -612,6 +612,11 @@ export const it: Catalog = {
     saveProfile: 'Salva profilo',
     delete: 'Elimina',
     noProfiles: 'Nessun profilo emittente. Creane uno per emettere fatture.',
+    noIssuerGuard:
+      'Configura un profilo emittente prima di emettere fatture.',
+    goSettings: 'Impostazioni → Profili emittente',
+    seriesLegalHint:
+      'Le nuove bozze usano la serie A; cambiala nell editor della bozza. Il numero progressivo e per legge sequenziale per serie e anno (FatturaPA), quindi non puo essere casuale; usa una serie separata se vuoi compartimentare.',
     client: 'Cliente',
     issuer: 'Emittente',
     series: 'Serie',
