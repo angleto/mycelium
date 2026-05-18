@@ -70,6 +70,8 @@ class MessageCode(enum.StrEnum):
     INVOICE_NOT_DRAFT = "invoice.not_draft"
     INVOICE_INVALID = "invoice.invalid"
     FISCAL_PROFILE_REQUIRED = "invoice.fiscal_profile_required"
+    ISSUER_PROFILE_IN_USE = "invoice.issuer_profile_in_use"
+    ISSUER_PROFILE_SOLE_DEFAULT = "invoice.issuer_profile_sole_default"
     NOTIFICATION_NOT_FOUND = "notification.not_found"
     RECURRENCE_WITH_DEPS = "recurrence.with_dependencies"
     WORKSPACE_NOT_OWNER = "workspace.not_owner"
@@ -144,7 +146,14 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
         ),
         MessageCode.INVOICE_INVALID: ("Invalid invoice: {detail}"),
         MessageCode.FISCAL_PROFILE_REQUIRED: (
-            "The workspace fiscal profile is incomplete: {detail}"
+            "The issuer profile is missing or incomplete: {detail}"
+        ),
+        MessageCode.ISSUER_PROFILE_IN_USE: (
+            "This issuer profile is used by one or more invoices and "
+            "cannot be deleted"
+        ),
+        MessageCode.ISSUER_PROFILE_SOLE_DEFAULT: (
+            "Set another profile as default before deleting this one"
         ),
         MessageCode.NOTIFICATION_NOT_FOUND: "Notification not found",
         MessageCode.RECURRENCE_WITH_DEPS: (

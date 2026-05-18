@@ -1,7 +1,12 @@
-"""Invoicing + fiscal-profile router. Thin adapter (docs/adr/0001,
+"""Invoicing + issuer-profile router. Thin adapter (docs/adr/0001,
 0009, 0010, 0011, FR-9). Immutability, numbering and conservation are
 enforced in the service; the SdI channel is injected (manual export by
-default, fake SdICoop in tests)."""
+default, fake SdICoop in tests).
+
+A draft is fully editable (invoice-level fields + lines); the chosen
+issuer profile (the "intestazione") is one of the org's profiles, the
+default pre-selected. After transmission the document is append-only:
+the only correction is a TD04 credit note."""
 
 from __future__ import annotations
 
@@ -14,19 +19,21 @@ from flow_api.deps import TenantCtx, tenant_ctx
 from flow_api.schemas import (
     ConservationAdhesionIn,
     CreditNoteIn,
-    FiscalProfileIn,
-    FiscalProfileOut,
     InvoiceCreateIn,
     InvoiceLineIn,
     InvoiceLineOut,
     InvoiceOut,
+    InvoicePatchIn,
     InvoiceXmlOut,
+    IssuerProfileIn,
+    IssuerProfileOut,
+    IssuerProfilePatchIn,
     ReceiptIn,
     TransmitIn,
 )
 from flow_core.errors import NotFoundError
 from flow_core.i18n import MessageCode
-from flow_core.models.invoice import Invoice, InvoiceLine, OrgFiscalProfile
+from flow_core.models.invoice import Invoice, InvoiceLine, IssuerProfile
 from flow_core.services import invoice as svc
 
 router = APIRouter(tags=["invoices"])
@@ -36,6 +43,7 @@ def _inv_out(i: Invoice) -> InvoiceOut:
     return InvoiceOut(
         id=i.id,
         client_tag_id=i.client_tag_id,
+        issuer_profile_id=i.issuer_profile_id,
         kind=i.kind,
         document_type=i.document_type,
         parent_invoice_id=i.parent_invoice_id,
@@ -44,6 +52,10 @@ def _inv_out(i: Invoice) -> InvoiceOut:
         number=i.number,
         state=i.state,
         currency=i.currency,
+        causale=i.causale,
+        notes=i.notes,
+        payment_iban=i.payment_iban,
+        payment_due_date=i.payment_due_date,
         taxable=i.taxable,
         vat=i.vat,
         total=i.total,
@@ -67,26 +79,48 @@ def _line_out(ln: InvoiceLine) -> InvoiceLineOut:
     )
 
 
-def _fp_out(p: OrgFiscalProfile) -> FiscalProfileOut:
-    return FiscalProfileOut(
+def _ip_out(p: IssuerProfile) -> IssuerProfileOut:
+    return IssuerProfileOut(
+        id=p.id,
+        label=p.label,
         denominazione=p.denominazione,
         piva=p.piva,
         codice_fiscale=p.codice_fiscale,
         regime_fiscale=p.regime_fiscale,
+        paese=p.paese,
+        indirizzo=p.indirizzo,
+        cap=p.cap,
+        comune=p.comune,
+        provincia=p.provincia,
+        nazione=p.nazione,
+        rea=p.rea,
+        is_default=p.is_default,
         conservation_adhesion=p.conservation_adhesion.value,
         version=p.version,
     )
 
 
-@router.put("/fiscal-profile", response_model=FiscalProfileOut)
-async def set_fiscal_profile(
-    body: FiscalProfileIn,
+# --- issuer profiles (the invoice "intestazione") ---
+
+
+@router.get("/issuer-profiles", response_model=list[IssuerProfileOut])
+async def list_issuer_profiles(
     ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
-) -> FiscalProfileOut:
-    p = await svc.upsert_fiscal_profile(
+) -> list[IssuerProfileOut]:
+    rows = await svc.list_issuer_profiles(ctx.session, org_id=ctx.org_id)
+    return [_ip_out(p) for p in rows]
+
+
+@router.post("/issuer-profiles", response_model=IssuerProfileOut)
+async def create_issuer_profile(
+    body: IssuerProfileIn,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+) -> IssuerProfileOut:
+    p = await svc.create_issuer_profile(
         ctx.session,
         org_id=ctx.org_id,
         actor_id=ctx.user_id,
+        label=body.label,
         denominazione=body.denominazione,
         piva=body.piva,
         codice_fiscale=body.codice_fiscale,
@@ -97,32 +131,78 @@ async def set_fiscal_profile(
         comune=body.comune,
         provincia=body.provincia,
         nazione=body.nazione,
+        rea=body.rea,
+        is_default=body.is_default,
     )
-    return _fp_out(p)
+    return _ip_out(p)
 
 
-@router.get("/fiscal-profile", response_model=FiscalProfileOut)
-async def get_fiscal_profile(
+@router.get("/issuer-profiles/{profile_id}", response_model=IssuerProfileOut)
+async def get_issuer_profile(
+    profile_id: uuid.UUID,
     ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
-) -> FiscalProfileOut:
-    p = await svc.get_fiscal_profile(ctx.session, org_id=ctx.org_id)
-    if p is None:
-        raise NotFoundError(MessageCode.FISCAL_PROFILE_REQUIRED, detail="missing")
-    return _fp_out(p)
+) -> IssuerProfileOut:
+    return _ip_out(
+        await svc.get_issuer_profile(ctx.session, org_id=ctx.org_id, profile_id=profile_id)
+    )
 
 
-@router.put("/fiscal-profile/conservation", response_model=FiscalProfileOut)
+@router.patch("/issuer-profiles/{profile_id}", response_model=IssuerProfileOut)
+async def update_issuer_profile(
+    profile_id: uuid.UUID,
+    body: IssuerProfilePatchIn,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+) -> IssuerProfileOut:
+    values = body.model_dump(exclude_unset=True, exclude={"is_default"})
+    p = await svc.update_issuer_profile(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        profile_id=profile_id,
+        values=values,
+        is_default=body.is_default,
+    )
+    return _ip_out(p)
+
+
+@router.post("/issuer-profiles/{profile_id}/default", response_model=IssuerProfileOut)
+async def set_default_issuer_profile(
+    profile_id: uuid.UUID,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+) -> IssuerProfileOut:
+    p = await svc.set_default_issuer_profile(
+        ctx.session, org_id=ctx.org_id, actor_id=ctx.user_id, profile_id=profile_id
+    )
+    return _ip_out(p)
+
+
+@router.put("/issuer-profiles/{profile_id}/conservation", response_model=IssuerProfileOut)
 async def set_conservation(
+    profile_id: uuid.UUID,
     body: ConservationAdhesionIn,
     ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
-) -> FiscalProfileOut:
+) -> IssuerProfileOut:
     p = await svc.set_conservation_adhesion(
         ctx.session,
         org_id=ctx.org_id,
         actor_id=ctx.user_id,
+        profile_id=profile_id,
         adhesion=body.adhesion,
     )
-    return _fp_out(p)
+    return _ip_out(p)
+
+
+@router.delete("/issuer-profiles/{profile_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_issuer_profile(
+    profile_id: uuid.UUID,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+) -> None:
+    await svc.delete_issuer_profile(
+        ctx.session, org_id=ctx.org_id, actor_id=ctx.user_id, profile_id=profile_id
+    )
+
+
+# --- invoices ---
 
 
 @router.post("/invoices", response_model=InvoiceOut)
@@ -135,9 +215,27 @@ async def create_invoice(
         org_id=ctx.org_id,
         actor_id=ctx.user_id,
         client_tag_id=body.client_tag_id,
+        issuer_profile_id=body.issuer_profile_id,
         year=body.year,
         series=body.series,
         causale=body.causale,
+    )
+    return _inv_out(inv)
+
+
+@router.patch("/invoices/{invoice_id}", response_model=InvoiceOut)
+async def update_invoice(
+    invoice_id: uuid.UUID,
+    body: InvoicePatchIn,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+) -> InvoiceOut:
+    values = body.model_dump(exclude_unset=True)
+    inv = await svc.update_draft(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        invoice_id=invoice_id,
+        values=values,
     )
     return _inv_out(inv)
 
@@ -160,6 +258,46 @@ async def add_line(
         natura=body.natura,
     )
     return _line_out(ln)
+
+
+@router.put("/invoices/{invoice_id}/lines/{line_id}", response_model=InvoiceLineOut)
+async def update_line(
+    invoice_id: uuid.UUID,
+    line_id: uuid.UUID,
+    body: InvoiceLineIn,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+) -> InvoiceLineOut:
+    ln = await svc.update_line(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        invoice_id=invoice_id,
+        line_id=line_id,
+        description=body.description,
+        unit_price=body.unit_price,
+        quantity=body.quantity,
+        vat_rate=body.vat_rate,
+        natura=body.natura,
+    )
+    return _line_out(ln)
+
+
+@router.delete(
+    "/invoices/{invoice_id}/lines/{line_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def delete_line(
+    invoice_id: uuid.UUID,
+    line_id: uuid.UUID,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+) -> None:
+    await svc.delete_line(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        invoice_id=invoice_id,
+        line_id=line_id,
+    )
 
 
 @router.get("/invoices/{invoice_id}/lines", response_model=list[InvoiceLineOut])

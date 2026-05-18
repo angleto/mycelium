@@ -37,15 +37,17 @@ async def _org() -> tuple[uuid.UUID, uuid.UUID]:
 
 
 async def _setup(s, org: uuid.UUID, user: uuid.UUID) -> uuid.UUID:
-    await inv.upsert_fiscal_profile(
+    await inv.create_issuer_profile(
         s,
         org_id=org,
         actor_id=user,
+        label="Principale",
         denominazione="Acme Srl",
         piva="01234567890",
         indirizzo="Via Roma 1",
         cap="00100",
         comune="Roma",
+        is_default=True,
     )
     client = await create_client(
         s,

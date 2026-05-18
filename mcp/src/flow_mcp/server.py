@@ -1393,30 +1393,59 @@ def _invoice(i: Invoice) -> dict[str, Any]:
 
 
 @mcp.tool()
-async def set_fiscal_profile(
+async def set_issuer_profile(
     token: str,
     org_id: str,
     denominazione: str,
+    label: str = "Principale",
     piva: str | None = None,
     codice_fiscale: str | None = None,
     indirizzo: str = "",
     cap: str = "",
     comune: str = "",
 ) -> dict[str, Any]:
-    """Set the issuer fiscal profile (admin)."""
+    """Create-or-update the default issuer profile, the invoice
+    "intestazione" (admin). Idempotent on the org default: updates it if
+    one exists, else creates it (and flags it default)."""
     async with _tenant(token, org_id) as (s, org, user):
-        p = await invoice_svc.upsert_fiscal_profile(
-            s,
-            org_id=org,
-            actor_id=user,
-            denominazione=denominazione,
-            piva=piva,
-            codice_fiscale=codice_fiscale,
-            indirizzo=indirizzo,
-            cap=cap,
-            comune=comune,
-        )
-        return {"denominazione": p.denominazione, "version": p.version}
+        current = await invoice_svc.get_default_issuer_profile(s, org_id=org)
+        if current is None:
+            p = await invoice_svc.create_issuer_profile(
+                s,
+                org_id=org,
+                actor_id=user,
+                label=label,
+                denominazione=denominazione,
+                piva=piva,
+                codice_fiscale=codice_fiscale,
+                indirizzo=indirizzo,
+                cap=cap,
+                comune=comune,
+                is_default=True,
+            )
+        else:
+            p = await invoice_svc.update_issuer_profile(
+                s,
+                org_id=org,
+                actor_id=user,
+                profile_id=current.id,
+                values={
+                    "label": label,
+                    "denominazione": denominazione,
+                    "piva": piva,
+                    "codice_fiscale": codice_fiscale,
+                    "indirizzo": indirizzo,
+                    "cap": cap,
+                    "comune": comune,
+                },
+            )
+        return {
+            "id": str(p.id),
+            "label": p.label,
+            "denominazione": p.denominazione,
+            "is_default": p.is_default,
+            "version": p.version,
+        }
 
 
 @mcp.tool()

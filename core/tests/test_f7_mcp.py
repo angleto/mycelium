@@ -12,7 +12,7 @@ from flow_mcp.server import (
     add_invoice_line,
     create_invoice,
     invoice_credit_note,
-    set_fiscal_profile,
+    set_issuer_profile,
     transmit_invoice,
 )
 
@@ -41,7 +41,7 @@ async def test_mcp_invoicing() -> None:
         client_id = client.id
     token, org = r.token, str(r.org_id)
 
-    await set_fiscal_profile(
+    await set_issuer_profile(
         token=token,
         org_id=org,
         denominazione="Acme",

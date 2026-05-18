@@ -23,7 +23,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -39,7 +39,7 @@ from flow_core.models.invoice import (
     InvoiceKind,
     InvoiceLine,
     InvoiceState,
-    OrgFiscalProfile,
+    IssuerProfile,
     PaymentStatus,
     SdiStatus,
 )
@@ -66,22 +66,81 @@ class Totals:
     total: Decimal
 
 
-# --- fiscal profile ---
+# --- issuer profiles (the invoice "intestazione") ---
+
+_PROFILE_FIELDS = frozenset(
+    {
+        "label",
+        "denominazione",
+        "piva",
+        "codice_fiscale",
+        "regime_fiscale",
+        "paese",
+        "indirizzo",
+        "cap",
+        "comune",
+        "provincia",
+        "nazione",
+        "rea",
+    }
+)
 
 
-async def get_fiscal_profile(
+async def list_issuer_profiles(
     session: AsyncSession, *, org_id: uuid.UUID
-) -> OrgFiscalProfile | None:
+) -> list[IssuerProfile]:
+    return list(
+        (
+            await session.execute(
+                select(IssuerProfile).order_by(
+                    IssuerProfile.is_default.desc(), IssuerProfile.label
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+
+async def get_issuer_profile(
+    session: AsyncSession, *, org_id: uuid.UUID, profile_id: uuid.UUID
+) -> IssuerProfile:
+    p = (
+        await session.execute(select(IssuerProfile).where(IssuerProfile.id == profile_id))
+    ).scalar_one_or_none()
+    if p is None:
+        raise NotFoundError(MessageCode.FISCAL_PROFILE_REQUIRED, detail="profile")
+    return p
+
+
+async def get_default_issuer_profile(
+    session: AsyncSession, *, org_id: uuid.UUID
+) -> IssuerProfile | None:
     return (
-        await session.execute(select(OrgFiscalProfile).where(OrgFiscalProfile.org_id == org_id))
+        await session.execute(select(IssuerProfile).where(IssuerProfile.is_default.is_(True)))
     ).scalar_one_or_none()
 
 
-async def upsert_fiscal_profile(
+async def _clear_default(
+    session: AsyncSession, *, except_id: uuid.UUID | None = None
+) -> None:
+    rows = (
+        (await session.execute(select(IssuerProfile).where(IssuerProfile.is_default.is_(True))))
+        .scalars()
+        .all()
+    )
+    for r in rows:
+        if except_id is None or r.id != except_id:
+            r.is_default = False
+    await session.flush()
+
+
+async def create_issuer_profile(
     session: AsyncSession,
     *,
     org_id: uuid.UUID,
     actor_id: uuid.UUID,
+    label: str,
     denominazione: str,
     piva: str | None = None,
     codice_fiscale: str | None = None,
@@ -92,36 +151,136 @@ async def upsert_fiscal_profile(
     comune: str = "",
     provincia: str | None = None,
     nazione: str = "IT",
-) -> OrgFiscalProfile:
+    rea: str | None = None,
+    is_default: bool = False,
+) -> IssuerProfile:
     await require_role(session, org_id, actor_id, Role.admin)
-    prof = await get_fiscal_profile(session, org_id=org_id)
-    creating = prof is None
-    if prof is None:
-        prof = OrgFiscalProfile(org_id=org_id, denominazione=denominazione)
-        session.add(prof)
-    prof.denominazione = denominazione
-    prof.piva = piva
-    prof.codice_fiscale = codice_fiscale
-    prof.regime_fiscale = regime_fiscale
-    prof.paese = paese
-    prof.indirizzo = indirizzo
-    prof.cap = cap
-    prof.comune = comune
-    prof.provincia = provincia
-    prof.nazione = nazione
-    if not creating:
-        # version is a flush/server default; only bump an existing row.
-        prof.version += 1
+    # The first profile is always the default; an explicit default
+    # demotes the others (partial unique index: one default per org).
+    existing = await list_issuer_profiles(session, org_id=org_id)
+    make_default = is_default or not existing
+    if make_default:
+        await _clear_default(session)
+    p = IssuerProfile(
+        org_id=org_id,
+        label=label,
+        denominazione=denominazione,
+        piva=piva,
+        codice_fiscale=codice_fiscale,
+        regime_fiscale=regime_fiscale,
+        paese=paese,
+        indirizzo=indirizzo,
+        cap=cap,
+        comune=comune,
+        provincia=provincia,
+        nazione=nazione,
+        rea=rea,
+        is_default=make_default,
+    )
+    session.add(p)
     await session.flush()
     await audit.log(
         session,
         org_id=org_id,
         actor_id=actor_id,
-        entity="fiscal_profile",
-        entity_id=None,
-        action="upsert",
+        entity="issuer_profile",
+        entity_id=p.id,
+        action="create",
     )
-    return prof
+    return p
+
+
+async def update_issuer_profile(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    profile_id: uuid.UUID,
+    values: dict[str, object],
+    is_default: bool | None = None,
+) -> IssuerProfile:
+    await require_role(session, org_id, actor_id, Role.admin)
+    p = await get_issuer_profile(session, org_id=org_id, profile_id=profile_id)
+    unknown = set(values) - _PROFILE_FIELDS
+    if unknown:
+        raise DomainError(MessageCode.DOMAIN_ERROR, detail=", ".join(sorted(unknown)))
+    for field, value in values.items():
+        setattr(p, field, value)
+    # Promoting to default demotes the rest; the default is moved away
+    # only via set_default_issuer_profile (an org keeps exactly one).
+    if is_default is True and not p.is_default:
+        await _clear_default(session, except_id=p.id)
+        p.is_default = True
+    p.version += 1
+    await session.flush()
+    await audit.log(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        entity="issuer_profile",
+        entity_id=p.id,
+        action="update",
+    )
+    return p
+
+
+async def set_default_issuer_profile(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    profile_id: uuid.UUID,
+) -> IssuerProfile:
+    await require_role(session, org_id, actor_id, Role.admin)
+    p = await get_issuer_profile(session, org_id=org_id, profile_id=profile_id)
+    await _clear_default(session, except_id=p.id)
+    p.is_default = True
+    p.version += 1
+    await session.flush()
+    await audit.log(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        entity="issuer_profile",
+        entity_id=p.id,
+        action="set_default",
+    )
+    return p
+
+
+async def delete_issuer_profile(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    profile_id: uuid.UUID,
+) -> None:
+    await require_role(session, org_id, actor_id, Role.admin)
+    p = await get_issuer_profile(session, org_id=org_id, profile_id=profile_id)
+    used = (
+        await session.execute(
+            select(func.count())
+            .select_from(Invoice)
+            .where(Invoice.issuer_profile_id == profile_id)
+        )
+    ).scalar_one()
+    if used:
+        # FK is ON DELETE RESTRICT; surface a friendly domain error
+        # instead of a raw IntegrityError. Drafts keep their issuer.
+        raise ConflictError(MessageCode.ISSUER_PROFILE_IN_USE)
+    profiles = await list_issuer_profiles(session, org_id=org_id)
+    if p.is_default and len(profiles) > 1:
+        raise ConflictError(MessageCode.ISSUER_PROFILE_SOLE_DEFAULT)
+    await session.execute(delete(IssuerProfile).where(IssuerProfile.id == profile_id))
+    await session.flush()
+    await audit.log(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        entity="issuer_profile",
+        entity_id=profile_id,
+        action="delete",
+    )
 
 
 async def set_conservation_adhesion(
@@ -129,27 +288,27 @@ async def set_conservation_adhesion(
     *,
     org_id: uuid.UUID,
     actor_id: uuid.UUID,
+    profile_id: uuid.UUID,
     adhesion: str,
-) -> OrgFiscalProfile:
-    """Track the per-tenant AdE free-conservation adhesion (ADR-0010);
-    Flow guides it, it cannot adhere on the tenant's behalf."""
+) -> IssuerProfile:
+    """Track the AdE free-conservation adhesion (ADR-0010), per issuer
+    identity (it is per P.IVA); Flow guides it, it cannot adhere on the
+    tenant's behalf."""
     await require_role(session, org_id, actor_id, Role.admin)
-    prof = await get_fiscal_profile(session, org_id=org_id)
-    if prof is None:
-        raise NotFoundError(MessageCode.FISCAL_PROFILE_REQUIRED, detail="missing")
-    prof.conservation_adhesion = ConservationAdhesion(adhesion)
-    prof.version += 1
+    p = await get_issuer_profile(session, org_id=org_id, profile_id=profile_id)
+    p.conservation_adhesion = ConservationAdhesion(adhesion)
+    p.version += 1
     await session.flush()
     await audit.log(
         session,
         org_id=org_id,
         actor_id=actor_id,
-        entity="fiscal_profile",
-        entity_id=None,
+        entity="issuer_profile",
+        entity_id=p.id,
         action="conservation_adhesion",
         diff={"adhesion": adhesion},
     )
-    return prof
+    return p
 
 
 # --- invoice draft lifecycle ---
@@ -180,14 +339,22 @@ async def create_draft(
     year: int | None = None,
     series: str = "A",
     causale: str | None = None,
+    issuer_profile_id: uuid.UUID | None = None,
     document_type: DocumentType = DocumentType.TD01,
     kind: InvoiceKind = InvoiceKind.invoice,
     parent_invoice_id: uuid.UUID | None = None,
 ) -> Invoice:
     await require_role(session, org_id, actor_id, Role.member)
+    if issuer_profile_id is not None:
+        # validate it belongs to this org (RLS-scoped lookup)
+        await get_issuer_profile(session, org_id=org_id, profile_id=issuer_profile_id)
+    else:
+        default = await get_default_issuer_profile(session, org_id=org_id)
+        issuer_profile_id = default.id if default is not None else None
     inv = Invoice(
         org_id=org_id,
         client_tag_id=client_tag_id,
+        issuer_profile_id=issuer_profile_id,
         kind=kind,
         document_type=document_type,
         parent_invoice_id=parent_invoice_id,
@@ -209,6 +376,55 @@ async def create_draft(
     return inv
 
 
+_DRAFT_UPDATABLE = frozenset(
+    {
+        "client_tag_id",
+        "issuer_profile_id",
+        "series",
+        "currency",
+        "causale",
+        "notes",
+        "payment_iban",
+        "payment_due_date",
+    }
+)
+
+
+async def update_draft(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    invoice_id: uuid.UUID,
+    values: dict[str, object],
+) -> Invoice:
+    """Edit invoice-level fields while the document is still a draft.
+
+    After transmission the document is append-only (ADR-0009): the only
+    correction is a TD04 credit note. Mirrors ``transmit``/``mark_paid``
+    (direct mutation + version bump) rather than optimistic_update,
+    keeping parity with this module's conventions."""
+    inv = await get_invoice(session, org_id=org_id, invoice_id=invoice_id)
+    _require_draft(inv)
+    await require_role(session, org_id, actor_id, Role.member)
+    unknown = set(values) - _DRAFT_UPDATABLE
+    if unknown:
+        raise DomainError(MessageCode.DOMAIN_ERROR, detail=", ".join(sorted(unknown)))
+    for field, value in values.items():
+        setattr(inv, field, value)
+    inv.version += 1
+    await session.flush()
+    await audit.log(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        entity="invoice",
+        entity_id=inv.id,
+        action="update_draft",
+    )
+    return inv
+
+
 async def add_line(
     session: AsyncSession,
     *,
@@ -224,15 +440,19 @@ async def add_line(
     inv = await get_invoice(session, org_id=org_id, invoice_id=invoice_id)
     _require_draft(inv)
     await require_role(session, org_id, actor_id, Role.member)
-    existing = list(
-        (await session.execute(select(InvoiceLine).where(InvoiceLine.invoice_id == invoice_id)))
-        .scalars()
-        .all()
-    )
+    # max(line_no)+1, not count+1: deletions leave gaps and count+1
+    # would collide with the uq_invoice_lines (invoice_id, line_no).
+    next_no = (
+        await session.execute(
+            select(func.coalesce(func.max(InvoiceLine.line_no), 0)).where(
+                InvoiceLine.invoice_id == invoice_id
+            )
+        )
+    ).scalar_one() + 1
     line = InvoiceLine(
         org_id=org_id,
         invoice_id=invoice_id,
-        line_no=len(existing) + 1,
+        line_no=next_no,
         description=description,
         quantity=quantity,
         unit_price=unit_price,
@@ -242,6 +462,82 @@ async def add_line(
     session.add(line)
     await session.flush()
     return line
+
+
+async def update_line(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    invoice_id: uuid.UUID,
+    line_id: uuid.UUID,
+    description: str,
+    unit_price: Decimal,
+    quantity: Decimal,
+    vat_rate: Decimal,
+    natura: str | None = None,
+) -> InvoiceLine:
+    inv = await get_invoice(session, org_id=org_id, invoice_id=invoice_id)
+    _require_draft(inv)
+    await require_role(session, org_id, actor_id, Role.member)
+    line = (
+        await session.execute(
+            select(InvoiceLine).where(
+                InvoiceLine.id == line_id, InvoiceLine.invoice_id == invoice_id
+            )
+        )
+    ).scalar_one_or_none()
+    if line is None:
+        raise NotFoundError(MessageCode.INVOICE_NOT_FOUND, detail="line")
+    line.description = description
+    line.unit_price = unit_price
+    line.quantity = quantity
+    line.vat_rate = vat_rate
+    line.natura = natura
+    await session.flush()
+    return line
+
+
+async def delete_line(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    invoice_id: uuid.UUID,
+    line_id: uuid.UUID,
+) -> None:
+    inv = await get_invoice(session, org_id=org_id, invoice_id=invoice_id)
+    _require_draft(inv)
+    await require_role(session, org_id, actor_id, Role.member)
+    line = (
+        await session.execute(
+            select(InvoiceLine).where(
+                InvoiceLine.id == line_id, InvoiceLine.invoice_id == invoice_id
+            )
+        )
+    ).scalar_one_or_none()
+    if line is None:
+        raise NotFoundError(MessageCode.INVOICE_NOT_FOUND, detail="line")
+    await session.execute(delete(InvoiceLine).where(InvoiceLine.id == line_id))
+    await session.flush()
+    # Re-sequence the survivors to 1..n so line numbers stay contiguous.
+    # Ascending assignment with monotonically non-increasing targets
+    # never transiently violates uq_invoice_lines (invoice_id, line_no).
+    rest = list(
+        (
+            await session.execute(
+                select(InvoiceLine)
+                .where(InvoiceLine.invoice_id == invoice_id)
+                .order_by(InvoiceLine.line_no)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    for idx, ln in enumerate(rest, start=1):
+        if ln.line_no != idx:
+            ln.line_no = idx
+    await session.flush()
 
 
 async def list_lines(
@@ -307,7 +603,7 @@ async def _client(session: AsyncSession, client_tag_id: uuid.UUID) -> ClientProf
 
 
 def _validate(
-    fiscal: OrgFiscalProfile | None,
+    fiscal: IssuerProfile | None,
     client: ClientProfile,
     lines: Sequence[InvoiceLine],
 ) -> None:
@@ -344,7 +640,7 @@ def _sub(parent: ET.Element, tag: str, text: str | None = None) -> ET.Element:
 
 def _build_xml(
     inv: Invoice,
-    fiscal: OrgFiscalProfile,
+    fiscal: IssuerProfile,
     client: ClientProfile,
     lines: Sequence[InvoiceLine],
     progressivo: str,
@@ -408,6 +704,11 @@ def _build_xml(
     _sub(dgd, "ImportoTotaleDocumento", _money(inv.total))
     if inv.causale:
         _sub(dgd, "Causale", inv.causale)
+    # Free notes ride along as additional Causale lines (FatturaPA
+    # Causale is repeatable, max 200 chars each).
+    if inv.notes:
+        for i in range(0, len(inv.notes), 200):
+            _sub(dgd, "Causale", inv.notes[i : i + 200])
     dbs = _sub(body, "DatiBeniServizi")
     by_rate: dict[Decimal, Decimal] = {}
     for ln in lines:
@@ -428,6 +729,17 @@ def _build_xml(
         _sub(rie, "AliquotaIVA", f"{rate:.2f}")
         _sub(rie, "ImponibileImporto", _money(imp))
         _sub(rie, "Imposta", _money(_q2(imp * rate / Decimal(100))))
+    if inv.payment_iban or inv.payment_due_date:
+        # MP05 = bonifico; TP02 = pagamento completo (single payment).
+        pay = _sub(body, "DatiPagamento")
+        _sub(pay, "CondizioniPagamento", "TP02")
+        det = _sub(pay, "DettaglioPagamento")
+        _sub(det, "ModalitaPagamento", "MP05")
+        if inv.payment_due_date is not None:
+            _sub(det, "DataScadenzaPagamento", inv.payment_due_date.isoformat())
+        _sub(det, "ImportoPagamento", _money(inv.total))
+        if inv.payment_iban:
+            _sub(det, "IBAN", inv.payment_iban)
     if inv.parent_invoice_id is not None:
         # TD04: link the corrected invoice.
         fc = ET.SubElement(dg, "DatiFattureCollegate")
@@ -487,7 +799,15 @@ async def transmit(
     inv = await get_invoice(session, org_id=org_id, invoice_id=invoice_id)
     _require_draft(inv)
     await require_role(session, org_id, actor_id, Role.member)
-    fiscal = await get_fiscal_profile(session, org_id=org_id)
+    # The chosen issuer identity (default if none); its header is frozen
+    # into inv.xml below, so later edits never touch this document.
+    fiscal: IssuerProfile | None
+    if inv.issuer_profile_id is not None:
+        fiscal = await get_issuer_profile(
+            session, org_id=org_id, profile_id=inv.issuer_profile_id
+        )
+    else:
+        fiscal = await get_default_issuer_profile(session, org_id=org_id)
     client = await _client(session, inv.client_tag_id)
     lines = await list_lines(session, org_id=org_id, invoice_id=invoice_id)
     _validate(fiscal, client, lines)

@@ -16,6 +16,7 @@ import uuid
 from decimal import Decimal
 
 from sqlalchemy import (
+    Date,
     DateTime,
     ForeignKey,
     Integer,
@@ -82,10 +83,19 @@ class ConservationStatus(enum.StrEnum):
     ade_covered = "ade_covered"
 
 
-class OrgFiscalProfile(TimestampMixin, VersionMixin, Base):
-    __tablename__ = "org_fiscal_profile"
+class IssuerProfile(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, Base):
+    """A billing identity the org issues invoices under (the invoice
+    "intestazione"). An org can hold several (e.g. ditta individuale vs
+    a controlled SRL); exactly one is the default (partial unique index
+    ``uq_issuer_profiles_default``), pre-selected at draft creation. AdE
+    free-conservation adhesion is per identity (it is per P.IVA), so it
+    lives here, not org-wide. An emitted invoice's header is frozen in
+    ``Invoice.xml`` at transmit, so editing/removing a profile later
+    never mutates an already-emitted document (ADR-0009)."""
 
-    org_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
+    __tablename__ = "issuer_profiles"
+
+    label: Mapped[str] = mapped_column(String(120), nullable=False, server_default="Principale")
     regime_fiscale: Mapped[str] = mapped_column(String(4), nullable=False, server_default="RF01")
     paese: Mapped[str] = mapped_column(String(2), nullable=False, server_default="IT")
     piva: Mapped[str | None] = mapped_column(String(28), nullable=True)
@@ -97,6 +107,7 @@ class OrgFiscalProfile(TimestampMixin, VersionMixin, Base):
     provincia: Mapped[str | None] = mapped_column(String(4), nullable=True)
     nazione: Mapped[str] = mapped_column(String(2), nullable=False, server_default="IT")
     rea: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    is_default: Mapped[bool] = mapped_column(nullable=False, server_default="false")
     conservation_adhesion: Mapped[ConservationAdhesion] = mapped_column(
         SAEnum(
             ConservationAdhesion,
@@ -126,6 +137,11 @@ class Invoice(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, Base):
     )
 
     client_tag_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    issuer_profile_id: Mapped[uuid.UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("issuer_profiles.id", ondelete="RESTRICT"),
+        nullable=True,
+    )
     kind: Mapped[InvoiceKind] = mapped_column(
         SAEnum(InvoiceKind, name="invoice_kind", native_enum=True, create_type=False),
         nullable=False,
@@ -151,6 +167,9 @@ class Invoice(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, Base):
     )
     currency: Mapped[str] = mapped_column(String(3), nullable=False, server_default="EUR")
     causale: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    payment_iban: Mapped[str | None] = mapped_column(String(34), nullable=True)
+    payment_due_date: Mapped[datetime.date | None] = mapped_column(Date, nullable=True)
     taxable: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False, server_default="0")
     vat: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False, server_default="0")
     total: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False, server_default="0")

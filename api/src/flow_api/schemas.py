@@ -1025,7 +1025,8 @@ class NoteEraseOut(BaseModel):
 # --- F7: electronic invoicing (FR-9, docs/adr/0009, 0010, 0011) ---
 
 
-class FiscalProfileIn(BaseModel):
+class IssuerProfileIn(BaseModel):
+    label: str = Field(min_length=1, max_length=120)
     denominazione: str = Field(min_length=1, max_length=200)
     piva: str | None = Field(default=None, max_length=28)
     codice_fiscale: str | None = Field(default=None, max_length=16)
@@ -1036,13 +1037,41 @@ class FiscalProfileIn(BaseModel):
     comune: str = Field(default="", max_length=120)
     provincia: str | None = Field(default=None, max_length=4)
     nazione: str = Field(default="IT", max_length=2)
+    rea: str | None = Field(default=None, max_length=40)
+    is_default: bool = False
 
 
-class FiscalProfileOut(BaseModel):
+class IssuerProfilePatchIn(BaseModel):
+    label: str | None = Field(default=None, min_length=1, max_length=120)
+    denominazione: str | None = Field(default=None, min_length=1, max_length=200)
+    piva: str | None = Field(default=None, max_length=28)
+    codice_fiscale: str | None = Field(default=None, max_length=16)
+    regime_fiscale: str | None = Field(default=None, max_length=4)
+    paese: str | None = Field(default=None, max_length=2)
+    indirizzo: str | None = Field(default=None, max_length=200)
+    cap: str | None = Field(default=None, max_length=10)
+    comune: str | None = Field(default=None, max_length=120)
+    provincia: str | None = Field(default=None, max_length=4)
+    nazione: str | None = Field(default=None, max_length=2)
+    rea: str | None = Field(default=None, max_length=40)
+    is_default: bool | None = None
+
+
+class IssuerProfileOut(BaseModel):
+    id: uuid.UUID
+    label: str
     denominazione: str
     piva: str | None
     codice_fiscale: str | None
     regime_fiscale: str
+    paese: str
+    indirizzo: str
+    cap: str
+    comune: str
+    provincia: str | None
+    nazione: str
+    rea: str | None
+    is_default: bool
     conservation_adhesion: str
     version: int
 
@@ -1053,9 +1082,21 @@ class ConservationAdhesionIn(BaseModel):
 
 class InvoiceCreateIn(BaseModel):
     client_tag_id: uuid.UUID
+    issuer_profile_id: uuid.UUID | None = None
     year: int | None = None
     series: str = Field(default="A", max_length=20)
     causale: str | None = Field(default=None, max_length=200)
+
+
+class InvoicePatchIn(BaseModel):
+    client_tag_id: uuid.UUID | None = None
+    issuer_profile_id: uuid.UUID | None = None
+    series: str | None = Field(default=None, max_length=20)
+    currency: str | None = Field(default=None, max_length=3)
+    causale: str | None = Field(default=None, max_length=200)
+    notes: str | None = None
+    payment_iban: str | None = Field(default=None, max_length=34)
+    payment_due_date: datetime.date | None = None
 
 
 class InvoiceLineIn(BaseModel):
@@ -1079,6 +1120,7 @@ class InvoiceLineOut(BaseModel):
 class InvoiceOut(BaseModel):
     id: uuid.UUID
     client_tag_id: uuid.UUID
+    issuer_profile_id: uuid.UUID | None
     kind: InvoiceKind
     document_type: DocumentType
     parent_invoice_id: uuid.UUID | None
@@ -1087,6 +1129,10 @@ class InvoiceOut(BaseModel):
     number: int | None
     state: InvoiceState
     currency: str
+    causale: str | None
+    notes: str | None
+    payment_iban: str | None
+    payment_due_date: datetime.date | None
     taxable: Decimal
     vat: Decimal
     total: Decimal
