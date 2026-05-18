@@ -17,6 +17,13 @@ dependencies = [
     "pgvector>=0.3",
 ]
 
+# Opt-in local embedder (ADR-0012): the privacy-first default runs a
+# local sentence-transformers model. Heavy (pulls torch); kept optional
+# so CI/dev without it inject a fake embedder. Enable with:
+#   uv sync --extra local-embedder
+[project.optional-dependencies]
+local-embedder = ["sentence-transformers>=3"]
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
