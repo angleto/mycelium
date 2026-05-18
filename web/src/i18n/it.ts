@@ -469,6 +469,14 @@ export const it: Catalog = {
     usage: 'Consumo',
     none: 'Niente ancora.',
     loading: 'Caricamento...',
+    intro:
+      'I tuoi crediti AI: ricariche e quanto hanno consumato le operazioni dell\'assistente. Non sono le fatture ai clienti (vedi Fatture). Non puoi mai andare in negativo: senza crediti, le operazioni che li consumano vengono rifiutate.',
+    ledgerHint:
+      'Storico, dal piu recente. Ricarica = crediti aggiunti; Consumo = crediti spesi da un\'operazione a consumo.',
+    kindGrant: 'Ricarica',
+    kindDebit: 'Consumo',
+    balanceAfter: 'saldo',
+    end: 'Fine dello storico.',
   },
   memory: {
     nav: 'Memoria',

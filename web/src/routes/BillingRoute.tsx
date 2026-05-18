@@ -4,6 +4,8 @@ import { api, errMessage, workspaceHeader } from '../api/client'
 import { useSession } from '../auth/useSession'
 import type { components } from '../api/schema'
 
+const LED_PAGE = 50
+
 type Ledger = components['schemas']['LedgerOut']
 type Rate = components['schemas']['RateCardOut']
 type Usage = components['schemas']['UsageOut']
@@ -14,6 +16,9 @@ export function BillingRoute() {
   const activeId = session?.workspaceId
   const [balance, setBalance] = useState<string>('')
   const [ledger, setLedger] = useState<Ledger[]>([])
+  const [ledOffset, setLedOffset] = useState(0)
+  const [ledMore, setLedMore] = useState(false)
+  const [ledLoading, setLedLoading] = useState(false)
   const [rates, setRates] = useState<Rate[]>([])
   const [usage, setUsage] = useState<Usage[]>([])
   const [amount, setAmount] = useState(0)
@@ -22,38 +27,65 @@ export function BillingRoute() {
   const [err, setErr] = useState<string | null>(null)
   const isAdmin = role === 'owner' || role === 'admin'
 
+  const resetLedger = useCallback(async () => {
+    const { data } = await api.GET('/billing/ledger', {
+      params: {
+        header: workspaceHeader(),
+        query: { limit: LED_PAGE, offset: 0 },
+      },
+    })
+    if (!data) return
+    setLedger(data)
+    setLedOffset(data.length)
+    setLedMore(data.length === LED_PAGE)
+  }, [])
+
+  const moreLedger = useCallback(async () => {
+    if (ledLoading || !ledMore) return
+    setLedLoading(true)
+    const { data } = await api.GET('/billing/ledger', {
+      params: {
+        header: workspaceHeader(),
+        query: { limit: LED_PAGE, offset: ledOffset },
+      },
+    })
+    setLedLoading(false)
+    if (!data) return
+    setLedger((p) => [...p, ...data])
+    setLedOffset((o) => o + data.length)
+    setLedMore(data.length === LED_PAGE)
+  }, [ledLoading, ledMore, ledOffset])
+
   const reload = useCallback(async () => {
     const h = workspaceHeader()
-    const [b, l, r, u] = await Promise.all([
+    const [b, r, u] = await Promise.all([
       api.GET('/billing/balance', { params: { header: h } }),
-      api.GET('/billing/ledger', { params: { header: h } }),
       api.GET('/billing/rate-cards', { params: { header: h } }),
       api.GET('/billing/usage', { params: { header: h } }),
     ])
     if (b.data) setBalance(b.data.balance)
-    if (l.data) setLedger(l.data)
     if (r.data) setRates(r.data)
     if (u.data) setUsage(u.data)
+    await resetLedger()
     const ws = await api.GET('/workspaces')
     const me = ws.data?.find((w) => w.id === activeId)
     if (me) setRole(me.role)
-  }, [activeId])
+  }, [activeId, resetLedger])
 
   useEffect(() => {
     let active = true
     void (async () => {
       const h = workspaceHeader()
-      const [b, l, r, u] = await Promise.all([
+      const [b, r, u] = await Promise.all([
         api.GET('/billing/balance', { params: { header: h } }),
-        api.GET('/billing/ledger', { params: { header: h } }),
         api.GET('/billing/rate-cards', { params: { header: h } }),
         api.GET('/billing/usage', { params: { header: h } }),
       ])
       if (!active) return
       if (b.data) setBalance(b.data.balance)
-      if (l.data) setLedger(l.data)
       if (r.data) setRates(r.data)
       if (u.data) setUsage(u.data)
+      await resetLedger()
       const ws = await api.GET('/workspaces')
       if (active) {
         const me = ws.data?.find((w) => w.id === activeId)
@@ -63,7 +95,7 @@ export function BillingRoute() {
     return () => {
       active = false
     }
-  }, [activeId])
+  }, [activeId, resetLedger])
 
   async function onGrant(e: FormEvent) {
     e.preventDefault()
@@ -84,6 +116,7 @@ export function BillingRoute() {
   return (
     <section className="card">
       <h1>{t('billing.title')}</h1>
+      <p className="hint">{t('billing.intro')}</p>
       {err && <p className="err">{err}</p>}
       <p>
         <strong>{t('billing.balance')}:</strong> {balance || '0'}
@@ -109,19 +142,45 @@ export function BillingRoute() {
       )}
 
       <h2>{t('billing.ledger')}</h2>
+      <p className="hint">{t('billing.ledgerHint')}</p>
       {ledger.length === 0 ? (
         <p className="hint">{t('billing.none')}</p>
       ) : (
-        <ul className="list">
-          {ledger.map((x) => (
-            <li key={x.id}>
-              {x.kind} {x.amount}{' '}
-              <span className="muted">
-                · {x.reason ?? ''} · = {x.balance_after}
-              </span>
-            </li>
-          ))}
-        </ul>
+        <div
+          className="scrollbox"
+          onScroll={(e) => {
+            const el = e.currentTarget
+            if (
+              el.scrollHeight - el.scrollTop - el.clientHeight < 80 &&
+              ledMore &&
+              !ledLoading
+            ) {
+              void moreLedger()
+            }
+          }}
+        >
+          <ul className="list">
+            {ledger.map((x) => (
+              <li key={x.id}>
+                <strong>
+                  {x.kind === 'grant'
+                    ? t('billing.kindGrant')
+                    : t('billing.kindDebit')}
+                </strong>{' '}
+                {x.kind === 'grant' ? '+' : '−'}
+                {x.amount}{' '}
+                <span className="muted">
+                  · {x.reason ?? ''} · {t('billing.balanceAfter')}{' '}
+                  {x.balance_after}
+                </span>
+              </li>
+            ))}
+          </ul>
+          {ledLoading && <p className="hint">{t('billing.loading')}</p>}
+          {!ledMore && !ledLoading && (
+            <p className="hint">{t('billing.end')}</p>
+          )}
+        </div>
       )}
 
       <h2>{t('billing.rateCards')}</h2>

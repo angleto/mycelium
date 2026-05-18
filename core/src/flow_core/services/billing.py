@@ -391,12 +391,19 @@ async def set_byok_factor(
 
 
 async def list_ledger(
-    session: AsyncSession, *, org_id: uuid.UUID, limit: int = 100
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    limit: int = 100,
+    offset: int = 0,
 ) -> list[CreditLedger]:
     return list(
         (
             await session.execute(
-                select(CreditLedger).order_by(CreditLedger.created_at.desc()).limit(limit)
+                select(CreditLedger)
+                .order_by(CreditLedger.created_at.desc())
+                .offset(offset)
+                .limit(limit)
             )
         )
         .scalars()

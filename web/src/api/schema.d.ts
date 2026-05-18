@@ -8222,6 +8222,7 @@ export interface operations {
         parameters: {
             query?: {
                 limit?: number;
+                offset?: number;
             };
             header: {
                 "x-workspace-id": string;

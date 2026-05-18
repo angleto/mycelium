@@ -470,6 +470,14 @@ export const en = {
     usage: 'Usage',
     none: 'Nothing yet.',
     loading: 'Loading...',
+    intro:
+      'Your AI credits: top-ups and what assistant operations consumed. Not your client invoices (see Invoices). You can never go negative: with no credits, credit-using operations are simply refused.',
+    ledgerHint:
+      'History, newest first. Top-up = credits added; Usage = credits spent by a metered operation.',
+    kindGrant: 'Top-up',
+    kindDebit: 'Usage',
+    balanceAfter: 'balance',
+    end: 'End of history.',
   },
   memory: {
     nav: 'Memory',
