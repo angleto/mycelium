@@ -548,6 +548,8 @@ export const it: Catalog = {
     saveNote: 'Salva',
     cancel: 'Annulla',
     saved: 'Salvato.',
+    saving: 'Salvataggio…',
+    autosaved: 'Salvato automaticamente',
     archive: 'Archivia',
     delete: 'Elimina',
     confirmDelete: 'Eliminare questa nota? (recuperabile dal Cestino)',

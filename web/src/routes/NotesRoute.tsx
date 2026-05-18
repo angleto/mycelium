@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useState, type FormEvent } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type FormEvent,
+} from 'react'
 import { Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { mentionLink } from '../lib/mentions'
@@ -39,6 +45,13 @@ export function NotesRoute() {
   // spawn N duplicate tasks.
   const [converting, setConverting] = useState<string | null>(null)
   const [convertedIds, setConvertedIds] = useState<Set<string>>(new Set())
+  // Autosave for long edits: debounced; the last-saved snapshot guards
+  // against re-saving unchanged content (and autosave loops).
+  const [noteSaving, setNoteSaving] = useState(false)
+  const savedSnap = useRef<{ title: string; text: string }>({
+    title: '',
+    text: '',
+  })
 
   const loadNotes = useCallback(async () => {
     const { data } = await api.GET('/notes', {
@@ -108,6 +121,7 @@ export function NotesRoute() {
     setSel(n)
     setMsg(null)
     setErr(null)
+    savedSnap.current = { title: n.title ?? '', text: n.transcript ?? '' }
     setETitle(n.title ?? '')
     setEText(n.transcript ?? '')
     const { data } = await api.GET('/notes/{note_id}/turns', {
@@ -140,6 +154,45 @@ export function NotesRoute() {
     setSel(null)
     await loadNotes()
   }
+
+  const autoSaveNote = useCallback(async () => {
+    if (!sel || sel.kind === 'conversation') return
+    if (
+      eTitle === savedSnap.current.title &&
+      eText === savedSnap.current.text
+    )
+      return
+    setNoteSaving(true)
+    const { data, error, response } = await api.PATCH('/notes/{note_id}', {
+      params: { header: workspaceHeader(), path: { note_id: sel.id } },
+      body: { expected_version: sel.version, title: eTitle, text: eText },
+    })
+    setNoteSaving(false)
+    if (response.status === 409) {
+      setErr(t('tasks.conflict'))
+      await loadNotes()
+      return
+    }
+    if (error || !data) {
+      setErr(errMessage(error))
+      return
+    }
+    savedSnap.current = { title: eTitle, text: eText }
+    setSel((p) => (p ? { ...p, version: data.version, title: eTitle } : p))
+  }, [sel, eTitle, eText, t, loadNotes])
+
+  // Debounced autosave while editing a note (long edits don't need the
+  // Save button). Each keystroke resets the 1.2s timer.
+  useEffect(() => {
+    if (!sel || sel.kind === 'conversation') return
+    if (
+      eTitle === savedSnap.current.title &&
+      eText === savedSnap.current.text
+    )
+      return
+    const h = setTimeout(() => void autoSaveNote(), 1200)
+    return () => clearTimeout(h)
+  }, [eTitle, eText, sel, autoSaveNote])
 
   async function archiveNote(n: Note) {
     setErr(null)
@@ -257,7 +310,7 @@ export function NotesRoute() {
         </div>
         <label>
           {t('notes.text')}
-          <RichEditor value={text} onChange={setText} />
+          <RichEditor value={text} onChange={setText} large />
         </label>
         <div className="row">
           <button type="submit">{t('notes.create')}</button>
@@ -345,7 +398,7 @@ export function NotesRoute() {
           />
           <label>
             {t('notes.text')}
-            <RichEditor value={eText} onChange={setEText} />
+            <RichEditor value={eText} onChange={setEText} large />
           </label>
           <div className="row">
             <button type="button" onClick={() => void saveNote()}>
@@ -358,6 +411,9 @@ export function NotesRoute() {
             >
               {t('notes.cancel')}
             </button>
+            <span className="muted">
+              {noteSaving ? t('notes.saving') : t('notes.autosaved')}
+            </span>
           </div>
         </div>
       )}

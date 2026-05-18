@@ -163,10 +163,12 @@ export function RichEditor({
   value,
   onChange,
   placeholder,
+  large,
 }: {
   value: string
   onChange: (v: string) => void
   placeholder?: string
+  large?: boolean
 }) {
   const { t } = useTranslation()
   // Drop to a plain markdown textarea (paste long blocks, fix a bad
@@ -222,7 +224,10 @@ export function RichEditor({
   )
 
   return (
-    <div className="rte" data-placeholder={placeholder}>
+    <div
+      className={'rte' + (large ? ' rte--lg' : '')}
+      data-placeholder={placeholder}
+    >
       <div className="rte__bar">
         <span className="rte__tools">
           {tb('B', 'editor.bold', () =>

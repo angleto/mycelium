@@ -549,6 +549,8 @@ export const en = {
     saveNote: 'Save',
     cancel: 'Cancel',
     saved: 'Saved.',
+    saving: 'Saving…',
+    autosaved: 'Autosaved',
     archive: 'Archive',
     delete: 'Delete',
     confirmDelete: 'Delete this note? (recoverable from Trash)',
