@@ -364,9 +364,13 @@ async def report(
     start_to: dt.datetime | None = None,
     billable: bool | None = None,
     executor_kind: ExecKind | None = None,
+    client_tag_id: uuid.UUID | None = None,
+    project_tag_id: uuid.UUID | None = None,
 ) -> list[ReportRow]:
     """Aggregate completed entries (running timers excluded). Amount
-    sums only billable entries that carry a rate snapshot."""
+    sums only billable entries that carry a rate snapshot. ``client_tag_id``
+    / ``project_tag_id`` scope the report to entries whose task carries the
+    given client / project tag."""
     await require_role(session, org_id, actor_id, Role.member)
     entries = await list_entries(
         session,
@@ -378,6 +382,23 @@ async def report(
     entries = [e for e in entries if e.duration_seconds is not None]
     if executor_kind is not None:
         entries = [e for e in entries if e.executor_kind is executor_kind]
+    for tag_id in (client_tag_id, project_tag_id):
+        if tag_id is None:
+            continue
+        task_ids = [e.task_id for e in entries]
+        if not task_ids:
+            break
+        keep = {
+            tid
+            for (tid,) in (
+                await session.execute(
+                    select(TaskTag.task_id).where(
+                        TaskTag.task_id.in_(task_ids), TaskTag.tag_id == tag_id
+                    )
+                )
+            ).all()
+        }
+        entries = [e for e in entries if e.task_id in keep]
 
     # acc key -> [label, seconds, billable_seconds, amount, currency]
     acc: dict[str | None, list[Any]] = {}

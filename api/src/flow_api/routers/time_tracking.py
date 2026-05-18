@@ -175,6 +175,8 @@ async def _report(
     start_to: datetime.datetime | None,
     billable: bool | None,
     executor_kind: ExecKind | None,
+    client_tag_id: uuid.UUID | None,
+    project_tag_id: uuid.UUID | None,
 ) -> list[svc.ReportRow]:
     return await svc.report(
         ctx.session,
@@ -185,6 +187,8 @@ async def _report(
         start_to=start_to,
         billable=billable,
         executor_kind=executor_kind,
+        client_tag_id=client_tag_id,
+        project_tag_id=project_tag_id,
     )
 
 
@@ -196,9 +200,18 @@ async def report(
     start_to: datetime.datetime | None = None,
     billable: bool | None = None,
     executor_kind: ExecKind | None = None,
+    client_tag_id: uuid.UUID | None = None,
+    project_tag_id: uuid.UUID | None = None,
 ) -> list[ReportRowOut]:
     rows = await _report(
-        ctx, group_by, start_from, start_to, billable, executor_kind
+        ctx,
+        group_by,
+        start_from,
+        start_to,
+        billable,
+        executor_kind,
+        client_tag_id,
+        project_tag_id,
     )
     return [
         ReportRowOut(
@@ -221,9 +234,18 @@ async def report_csv(
     start_to: datetime.datetime | None = None,
     billable: bool | None = None,
     executor_kind: ExecKind | None = None,
+    client_tag_id: uuid.UUID | None = None,
+    project_tag_id: uuid.UUID | None = None,
 ) -> Response:
     rows = await _report(
-        ctx, group_by, start_from, start_to, billable, executor_kind
+        ctx,
+        group_by,
+        start_from,
+        start_to,
+        billable,
+        executor_kind,
+        client_tag_id,
+        project_tag_id,
     )
     buf = io.StringIO()
     w = csv.writer(buf)

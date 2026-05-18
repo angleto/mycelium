@@ -8,6 +8,9 @@ type Task = components['schemas']['TaskOut']
 type Entry = components['schemas']['TimeEntryOut']
 type Row = components['schemas']['ReportRowOut']
 type Group = components['schemas']['ReportGroup']
+type Tag = components['schemas']['TagOut']
+type Scope = 'all' | 'mine' | 'ai'
+type BillableF = 'all' | 'yes' | 'no'
 
 const GROUPS: Group[] = ['project', 'client', 'generic', 'user', 'task']
 
@@ -27,21 +30,46 @@ export function TimeRoute() {
   const [entries, setEntries] = useState<Entry[]>([])
   const [report, setReport] = useState<Row[]>([])
   const [group, setGroup] = useState<Group>('project')
+  const [scope, setScope] = useState<Scope>('all')
+  const [from, setFrom] = useState('')
+  const [to, setTo] = useState('')
+  const [billableF, setBillableF] = useState<BillableF>('all')
+  const [clientId, setClientId] = useState('')
+  const [projectId, setProjectId] = useState('')
+  const [clients, setClients] = useState<Tag[]>([])
+  const [projects, setProjects] = useState<Tag[]>([])
   const [pick, setPick] = useState('')
   const [now, setNow] = useState<number>(() => Date.now())
   const [err, setErr] = useState<string | null>(null)
 
   const titleOf = (id: string) => tasks.find((x) => x.id === id)?.title ?? id.slice(0, 8)
 
-  const reloadEntries = useCallback(async () => {
-    const h = workspaceHeader()
-    const [e, r] = await Promise.all([
-      api.GET('/time/entries', { params: { header: h } }),
-      api.GET('/time/report', { params: { header: h, query: { group_by: group } } }),
-    ])
-    if (e.data) setEntries(e.data)
+  const reportQuery = useCallback(() => {
+    const q: Record<string, string | boolean> = { group_by: group }
+    if (scope === 'mine') q.executor_kind = 'human'
+    if (scope === 'ai') q.executor_kind = 'llm_agent'
+    if (from) q.start_from = `${from}T00:00:00`
+    if (to) q.start_to = `${to}T23:59:59`
+    if (billableF !== 'all') q.billable = billableF === 'yes'
+    if (clientId) q.client_tag_id = clientId
+    if (projectId) q.project_tag_id = projectId
+    return q
+  }, [group, scope, from, to, billableF, clientId, projectId])
+
+  const loadReport = useCallback(async () => {
+    const r = await api.GET('/time/report', {
+      params: { header: workspaceHeader(), query: reportQuery() },
+    })
     if (r.data) setReport(r.data)
-  }, [group])
+  }, [reportQuery])
+
+  const reloadEntries = useCallback(async () => {
+    const e = await api.GET('/time/entries', {
+      params: { header: workspaceHeader() },
+    })
+    if (e.data) setEntries(e.data)
+    await loadReport()
+  }, [loadReport])
 
   // Realtime-ish: poll the running timer (no WS endpoint in v1). State
   // is only set inside the async tick, never sync in the effect body.
@@ -67,20 +95,35 @@ export function TimeRoute() {
     let active = true
     void (async () => {
       const h = workspaceHeader()
-      const [tk, e, r] = await Promise.all([
+      const [tk, e, cl, pr] = await Promise.all([
         api.GET('/tasks', { params: { header: h } }),
         api.GET('/time/entries', { params: { header: h } }),
-        api.GET('/time/report', { params: { header: h, query: { group_by: group } } }),
+        api.GET('/tags', { params: { header: h, query: { kind: 'client' } } }),
+        api.GET('/tags', { params: { header: h, query: { kind: 'project' } } }),
       ])
       if (!active) return
       if (tk.data) setTasks(tk.data)
       if (e.data) setEntries(e.data)
-      if (r.data) setReport(r.data)
+      if (cl.data) setClients(cl.data)
+      if (pr.data) setProjects(pr.data)
     })()
     return () => {
       active = false
     }
-  }, [activeId, group])
+  }, [activeId])
+
+  useEffect(() => {
+    let active = true
+    void (async () => {
+      const r = await api.GET('/time/report', {
+        params: { header: workspaceHeader(), query: reportQuery() },
+      })
+      if (active && r.data) setReport(r.data)
+    })()
+    return () => {
+      active = false
+    }
+  }, [activeId, reportQuery])
 
   async function onStart(e: FormEvent) {
     e.preventDefault()
@@ -161,6 +204,11 @@ export function TimeRoute() {
           {entries.map((en) => (
             <li key={en.id}>
               {titleOf(en.task_id)}{' '}
+              {en.executor_kind === 'llm_agent' && (
+                <span className="aibadge" title={t('tasks.aiTitle')}>
+                  {t('tasks.aiBadge')}
+                </span>
+              )}{' '}
               <span className="muted">
                 · {en.duration_seconds != null ? hhmmss(en.duration_seconds) : '...'}
                 {en.billable ? ` · ${t('time.billable')}` : ''}
@@ -170,16 +218,88 @@ export function TimeRoute() {
         </ul>
       )}
 
-      <h2>
-        {t('time.report')}{' '}
-        <select value={group} onChange={(e) => setGroup(e.target.value as Group)}>
-          {GROUPS.map((g) => (
-            <option key={g} value={g}>
-              {g}
-            </option>
-          ))}
-        </select>
-      </h2>
+      <h2>{t('time.report')}</h2>
+      <div className="row">
+        <label>
+          {t('time.groupBy')}
+          <select
+            value={group}
+            onChange={(e) => setGroup(e.target.value as Group)}
+          >
+            {GROUPS.map((g) => (
+              <option key={g} value={g}>
+                {t(`time.group.${g}`)}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          {t('time.scope')}
+          <select
+            value={scope}
+            onChange={(e) => setScope(e.target.value as Scope)}
+          >
+            <option value="all">{t('graph.scopeAll')}</option>
+            <option value="mine">{t('graph.scopeMine')}</option>
+            <option value="ai">{t('graph.scopeAi')}</option>
+          </select>
+        </label>
+        <label>
+          {t('time.client')}
+          <select
+            value={clientId}
+            onChange={(e) => setClientId(e.target.value)}
+          >
+            <option value="">{t('graph.scopeAll')}</option>
+            {clients.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          {t('time.project')}
+          <select
+            value={projectId}
+            onChange={(e) => setProjectId(e.target.value)}
+          >
+            <option value="">{t('graph.scopeAll')}</option>
+            {projects.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          {t('time.from')}
+          <input
+            type="date"
+            value={from}
+            onChange={(e) => setFrom(e.target.value)}
+          />
+        </label>
+        <label>
+          {t('time.to')}
+          <input
+            type="date"
+            value={to}
+            onChange={(e) => setTo(e.target.value)}
+          />
+        </label>
+        <label>
+          {t('time.billableFilter')}
+          <select
+            value={billableF}
+            onChange={(e) => setBillableF(e.target.value as BillableF)}
+          >
+            <option value="all">{t('graph.scopeAll')}</option>
+            <option value="yes">{t('time.billableOnly')}</option>
+            <option value="no">{t('time.nonBillable')}</option>
+          </select>
+        </label>
+      </div>
       <dl className="kv">
         {report.map((r, i) => (
           <div key={i} style={{ display: 'contents' }}>

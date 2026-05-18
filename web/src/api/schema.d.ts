@@ -6160,6 +6160,8 @@ export interface operations {
                 start_to?: string | null;
                 billable?: boolean | null;
                 executor_kind?: components["schemas"]["ExecKind"] | null;
+                client_tag_id?: string | null;
+                project_tag_id?: string | null;
             };
             header: {
                 "x-workspace-id": string;
@@ -6198,6 +6200,8 @@ export interface operations {
                 start_to?: string | null;
                 billable?: boolean | null;
                 executor_kind?: components["schemas"]["ExecKind"] | null;
+                client_tag_id?: string | null;
+                project_tag_id?: string | null;
             };
             header: {
                 "x-workspace-id": string;
