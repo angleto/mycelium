@@ -175,6 +175,34 @@ export function TaskDetailRoute() {
     navigate('/tasks')
   }
 
+  async function onRestore() {
+    if (!task) return
+    setErr(null)
+    const { error } = await api.POST('/tasks/{task_id}/restore', {
+      params: { header: workspaceHeader(), path: { task_id: id } },
+      body: { expected_version: task.version },
+    })
+    if (error) {
+      setErr(errMessage(error))
+      return
+    }
+    await reload()
+  }
+
+  async function onUnarchive() {
+    if (!task) return
+    setErr(null)
+    const { error } = await api.POST('/tasks/{task_id}/unarchive', {
+      params: { header: workspaceHeader(), path: { task_id: id } },
+      body: { expected_version: task.version },
+    })
+    if (error) {
+      setErr(errMessage(error))
+      return
+    }
+    await reload()
+  }
+
   // Auto-save (no Save button) for the non-text fields: importance/
   // urgency (backend re-derives priority), estimate, due. On success
   // we only bump the local version — never reload(), which would
@@ -361,6 +389,22 @@ export function TaskDetailRoute() {
       <p className="hint">
         <Link to="/tasks">{t('tasks.back')}</Link>
       </p>
+      {task.deleted_at != null && (
+        <p className="banner">
+          {t('trash.deleted')}
+          <button type="button" className="btn--sm" onClick={() => void onRestore()}>
+            {t('trash.undelete')}
+          </button>
+        </p>
+      )}
+      {task.deleted_at == null && task.is_archived && (
+        <p className="banner">
+          {t('trash.archived')}
+          <button type="button" className="btn--sm" onClick={() => void onUnarchive()}>
+            {t('trash.unarchive')}
+          </button>
+        </p>
+      )}
       {task.executor_kind === 'llm_agent' && (
         <p>
           <span className="aibadge" title={t('tasks.aiTitle')}>

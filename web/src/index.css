@@ -402,6 +402,18 @@ button.btn--danger:hover {
 .switcher select {
   font-weight: 600;
 }
+.banner {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-2);
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
 .xml {
   background: var(--surface-2);
   border: 1px solid var(--border);

@@ -146,7 +146,12 @@ async def list_tasks(
 
 @router.get("/{task_id}", response_model=TaskOut)
 async def get_task(task_id: uuid.UUID, ctx: Annotated[TenantCtx, Depends(tenant_ctx)]) -> TaskOut:
-    task = await svc.get_task(ctx.session, org_id=ctx.org_id, task_id=task_id)
+    # include_deleted: a trashed/archived task must still open (read its
+    # detail before restoring it from the Trash view). TaskOut carries
+    # is_archived/deleted_at so the UI can render it read-only.
+    task = await svc.get_task(
+        ctx.session, org_id=ctx.org_id, task_id=task_id, include_deleted=True
+    )
     names = await _state_names(ctx, {task.state_id})
     tagmap = await svc.tags_by_task(ctx.session, task_ids=[task.id])
     return _out(task, names.get(task.state_id, ""), tagmap.get(task.id, []))
@@ -156,7 +161,9 @@ async def get_task(task_id: uuid.UUID, ctx: Annotated[TenantCtx, Depends(tenant_
 async def task_states(
     task_id: uuid.UUID, ctx: Annotated[TenantCtx, Depends(tenant_ctx)]
 ) -> list[StateOut]:
-    await svc.get_task(ctx.session, org_id=ctx.org_id, task_id=task_id)
+    await svc.get_task(
+        ctx.session, org_id=ctx.org_id, task_id=task_id, include_deleted=True
+    )
     workflow = await wf.effective_workflow_for_task(ctx.session, ctx.org_id, task_id)
     states = await wf.get_states(ctx.session, workflow.id)
     return [
