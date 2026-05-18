@@ -1,4 +1,5 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Editor as CoreEditor, Extension } from '@tiptap/core'
 import { EditorContent, useEditor } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
@@ -167,6 +168,11 @@ export function RichEditor({
   onChange: (v: string) => void
   placeholder?: string
 }) {
+  const { t } = useTranslation()
+  // Drop to a plain markdown textarea (paste long blocks, fix a bad
+  // round-trip). Both modes read/write the same `value` markdown
+  // string (bitvision EvidenceEditor pattern).
+  const [rawMode, setRawMode] = useState(false)
   const editor = useEditor({
     extensions: [
       StarterKit,
@@ -180,7 +186,9 @@ export function RichEditor({
     },
   })
 
-  // Reflect external value changes (e.g. loaded task) without looping.
+  // Reflect external value changes (loaded task, or raw-mode edits)
+  // without looping. This also keeps the hidden editor synced while in
+  // raw mode, so flipping back to WYSIWYG already shows the latest.
   useEffect(() => {
     if (!editor) return
     const current = getMd(editor)
@@ -191,7 +199,25 @@ export function RichEditor({
 
   return (
     <div className="rte" data-placeholder={placeholder}>
-      <EditorContent editor={editor} />
+      <div className="rte__bar">
+        <button
+          type="button"
+          className="btn--ghost btn--sm"
+          onClick={() => setRawMode((v) => !v)}
+        >
+          {rawMode ? t('editor.toWysiwyg') : t('editor.toRaw')}
+        </button>
+      </div>
+      {rawMode ? (
+        <textarea
+          className="rte__raw"
+          value={value}
+          placeholder={placeholder}
+          onChange={(e) => onChange(e.target.value)}
+        />
+      ) : (
+        <EditorContent editor={editor} />
+      )}
     </div>
   )
 }

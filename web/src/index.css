@@ -481,6 +481,26 @@ button.btn--ghost {
 }
 
 /* ---- WYSIWYG (TipTap) ---- */
+.rte__bar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 0.3rem;
+}
+.rte__raw {
+  width: 100%;
+  min-height: 7rem;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 0.55rem 0.7rem;
+  background: var(--surface);
+  color: var(--text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.85rem;
+  outline: none;
+}
+.rte__raw:focus {
+  border-color: var(--accent);
+}
 .rte .ProseMirror {
   border: 1px solid var(--border);
   border-radius: 7px;

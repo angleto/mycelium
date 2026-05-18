@@ -200,6 +200,10 @@ export const en = {
     addHours: 'Hours (e.g. 0.5)',
     remove: 'Remove',
   },
+  editor: {
+    toRaw: 'Edit as Markdown',
+    toWysiwyg: 'Rich editor',
+  },
   workflows: {
     nav: 'Workflows',
     title: 'Workflows',

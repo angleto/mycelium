@@ -199,6 +199,10 @@ export const it: Catalog = {
     addHours: 'Ore (es. 0.5)',
     remove: 'Rimuovi',
   },
+  editor: {
+    toRaw: 'Modifica come Markdown',
+    toWysiwyg: 'Editor ricco',
+  },
   workflows: {
     nav: 'Workflow',
     title: 'Workflow',
