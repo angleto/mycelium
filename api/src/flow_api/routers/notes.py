@@ -76,7 +76,10 @@ async def create_note(
         audio_ref=body.audio_ref,
         audio_seconds=body.audio_seconds,
     )
-    return _out(n)
+    # Return the note with its tags: create() enforces a client
+    # (default "Personal"), so the response must reflect it.
+    tagmap = await svc.tags_by_note(ctx.session, note_ids=[n.id])
+    return _out(n, tagmap.get(n.id, []))
 
 
 @router.get("", response_model=list[NoteOut])
