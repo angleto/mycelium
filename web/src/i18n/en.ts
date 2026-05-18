@@ -132,6 +132,7 @@ export const en = {
     create: 'Add task',
     filterTag: 'Filter by tag',
     all: 'All',
+    showDone: 'Show done',
     none: 'No tasks yet.',
     open: 'Open',
     back: 'Back to tasks',

@@ -54,6 +54,7 @@ export function TasksRoute() {
   const [bulkState, setBulkState] = useState('')
   const [bulkTag, setBulkTag] = useState('')
   const [bulkMsg, setBulkMsg] = useState<string | null>(null)
+  const [showDone, setShowDone] = useState(false)
 
   const stateById = new Map(wfStates.map((s) => [s.id, s]))
   const allowed = new Map<string, Set<string>>()
@@ -365,13 +366,21 @@ export function TasksRoute() {
 
   const activeTag = tags.find((x) => x.id === filter)
   const ql = q.trim().toLowerCase()
-  const shown = ql
+  // Terminal-state (done) tasks are hidden by default: a finished task
+  // shouldn't clutter the working list. The toggle reveals them.
+  const terminalIds = new Set(
+    wfStates.filter((s) => s.is_terminal).map((s) => s.id),
+  )
+  const matched = ql
     ? tasks.filter(
         (tk) =>
           tk.title.toLowerCase().includes(ql) ||
           (tk.tags ?? []).some((g) => g.name.toLowerCase().includes(ql)),
       )
     : tasks
+  const shown = showDone
+    ? matched
+    : matched.filter((tk) => !terminalIds.has(tk.state_id))
 
   return (
     <section className="card">
@@ -495,6 +504,14 @@ export function TasksRoute() {
         {activeTag && (
           <TagChip name={activeTag.name} color={activeTag.color} kind={activeTag.kind} />
         )}
+        <label className="row">
+          <input
+            type="checkbox"
+            checked={showDone}
+            onChange={(e) => setShowDone(e.target.checked)}
+          />{' '}
+          {t('tasks.showDone')}
+        </label>
       </div>
 
       {err && <p className="err">{err}</p>}

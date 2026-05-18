@@ -131,6 +131,7 @@ export const it: Catalog = {
     create: 'Aggiungi task',
     filterTag: 'Filtra per tag',
     all: 'Tutti',
+    showDone: 'Mostra completati',
     none: 'Nessun task.',
     open: 'Apri',
     back: 'Torna ai task',
