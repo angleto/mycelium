@@ -255,7 +255,7 @@ export function TimeRoute() {
             title={t('time.startParallel')}
             onClick={() => void startTask(pick, true)}
           >
-            ⏱⏩ {t('time.startParallel')}
+            ⏱▶▶ {t('time.startParallel')}
           </button>
         </form>
       </div>
@@ -320,7 +320,7 @@ export function TimeRoute() {
                       title={t('time.startParallel')}
                       onClick={() => void startTask(en.task_id, true)}
                     >
-                      ⏱⏩
+                      ⏱▶▶
                     </button>
                   </>
                 )}
