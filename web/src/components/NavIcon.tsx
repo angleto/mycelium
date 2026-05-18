@@ -20,6 +20,7 @@ export type IconName =
   | 'billing'
   | 'invoices'
   | 'settings'
+  | 'shield'
 
 const P: Record<IconName, string> = {
   home: 'M3 10.5 12 3l9 7.5M5 9.5V21h14V9.5',
@@ -42,6 +43,7 @@ const P: Record<IconName, string> = {
   invoices: 'M6 3h9l4 4v14H6zM14 3v5h5M9 12h6M9 16h6',
   settings:
     'M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6ZM19 12a7 7 0 0 0-.1-1l2-1.6-2-3.4-2.4 1a7 7 0 0 0-1.7-1l-.4-2.5h-4l-.4 2.5a7 7 0 0 0-1.7 1l-2.4-1-2 3.4 2 1.6a7 7 0 0 0 0 2l-2 1.6 2 3.4 2.4-1a7 7 0 0 0 1.7 1l.4 2.5h4l.4-2.5a7 7 0 0 0 1.7-1l2.4 1 2-3.4-2-1.6c.07-.33.1-.66.1-1Z',
+  shield: 'M12 3 5 6v6c0 4 3 7 7 9 4-2 7-5 7-9V6l-7-3ZM9.5 12l2 2 3.5-4',
 }
 
 export function Icon({ name }: { name: IconName }) {

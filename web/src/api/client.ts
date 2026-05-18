@@ -3,6 +3,7 @@ import type { paths } from './schema'
 import {
   clearSession,
   getSession,
+  isAdminMode,
   lastWorkspaceId,
   setSession,
 } from '../auth/session'
@@ -16,6 +17,9 @@ const authMiddleware: Middleware = {
   onRequest({ request }) {
     const s = getSession()
     if (s) request.headers.set('Authorization', `Bearer ${s.token}`)
+    // Sent only while elevated; the server still re-checks the
+    // capability, so this never escalates a non-admin.
+    if (s && isAdminMode()) request.headers.set('X-Admin-Mode', '1')
     request.headers.set('Accept-Language', i18n.language)
     return request
   },

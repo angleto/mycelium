@@ -2,8 +2,9 @@ import { useEffect, useState } from 'react'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { api, workspaceHeader } from '../api/client'
-import { clearSession } from '../auth/session'
-import { useSession } from '../auth/useSession'
+import { clearSession, setAdminMode } from '../auth/session'
+import { useSession, useAdminMode } from '../auth/useSession'
+import { useMe } from '../auth/useMe'
 import { Logo } from './Logo'
 import { Icon, type IconName } from './NavIcon'
 import { ThemeToggle } from './ThemeToggle'
@@ -193,6 +194,9 @@ function NavGroup({ title, items }: { title: string; items: Item[] }) {
 export function AppShell() {
   const { t } = useTranslation()
   const navigate = useNavigate()
+  const { me } = useMe()
+  const elevated = useAdminMode()
+  const canAdmin = !!me?.is_admin
 
   // Mention links (@kind:id) are stored as plain markdown. MarkdownView
   // renders them as router Links, but the tiptap editor renders a raw
@@ -268,6 +272,14 @@ export function AppShell() {
       ],
     },
   ]
+  // Admin nav appears only while elevated (sudo-style): a normal-mode
+  // admin sees exactly the normal app.
+  if (canAdmin && elevated) {
+    groups.push({
+      title: t('nav.groups.admin'),
+      items: [{ to: '/admin/users', label: t('admin.usersNav'), icon: 'shield' }],
+    })
+  }
 
   return (
     <div className="app">
@@ -277,6 +289,28 @@ export function AppShell() {
         </div>
         <div className="topbar__actions">
           <RunningIndicator />
+          {canAdmin &&
+            (elevated ? (
+              <button
+                type="button"
+                className="badge badge--admin"
+                title={t('admin.exitTitle')}
+                onClick={() => setAdminMode(false)}
+              >
+                <Icon name="shield" />
+                {t('admin.badge')}
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="btn btn--ghost btn--sm topbar__admin"
+                title={t('admin.enterTitle')}
+                onClick={() => setAdminMode(true)}
+              >
+                <Icon name="shield" />
+                {t('admin.enter')}
+              </button>
+            ))}
           <ThemeToggle />
           <select
             aria-label="language"

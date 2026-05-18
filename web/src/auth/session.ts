@@ -9,6 +9,11 @@ export type Session = { token: string; workspaceId: string }
 
 const KEY = 'flow.session'
 const LAST_WS = 'flow.lastWorkspace'
+// Sudo-style admin elevation: an admin account runs as a normal user
+// and only acts as admin while this is on (cleared on logout). It is
+// purely a client signal; the server re-checks the capability and the
+// X-Admin-Mode header on every admin call (costa_associati model).
+const ADMIN_MODE = 'flow.adminMode'
 type Listener = () => void
 const listeners = new Set<Listener>()
 
@@ -24,9 +29,21 @@ function read(): Session | null {
 }
 
 let cache: Session | null = read()
+let adminCache: boolean = localStorage.getItem(ADMIN_MODE) === '1'
 
 export function getSession(): Session | null {
   return cache
+}
+
+export function isAdminMode(): boolean {
+  return adminCache
+}
+
+export function setAdminMode(on: boolean): void {
+  adminCache = on
+  if (on) localStorage.setItem(ADMIN_MODE, '1')
+  else localStorage.removeItem(ADMIN_MODE)
+  emit()
 }
 
 export function lastWorkspaceId(): string | null {
@@ -54,7 +71,9 @@ export function setActiveWorkspace(workspaceId: string): void {
 
 export function clearSession(): void {
   cache = null
+  adminCache = false
   localStorage.removeItem(KEY)
+  localStorage.removeItem(ADMIN_MODE)
   emit()
 }
 

@@ -76,6 +76,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/auth/me": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Me Endpoint
+         * @description Canonical identity for the SPA. Server-checks is_admin (the JWT
+         *     claim is only a render hint and may lag a role change).
+         */
+        get: operations["me_endpoint_auth_me_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/auth/verify-email": {
         parameters: {
             query?: never;
@@ -163,6 +184,45 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/admin/users": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Users */
+        get: operations["list_users_admin_users_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/users/{user_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Patch User
+         * @description Toggle admin / activation. An admin cannot strip their own admin
+         *     role or deactivate themselves (lock-out / orphaned-admin guard);
+         *     another admin must do it.
+         */
+        patch: operations["patch_user_admin_users__user_id__patch"];
         trace?: never;
     };
     "/mfa/status": {
@@ -2321,6 +2381,38 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** AdminUserOut */
+        AdminUserOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Email */
+            email: string;
+            /** Display Name */
+            display_name?: string | null;
+            /** Is Admin */
+            is_admin: boolean;
+            /** Is Active */
+            is_active: boolean;
+            /** Email Verified */
+            email_verified: boolean;
+            /** Mfa Enabled */
+            mfa_enabled: boolean;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /** AdminUserPatchIn */
+        AdminUserPatchIn: {
+            /** Is Admin */
+            is_admin?: boolean | null;
+            /** Is Active */
+            is_active?: boolean | null;
+        };
         /** AppendMessageIn */
         AppendMessageIn: {
             /** Content */
@@ -3388,6 +3480,24 @@ export interface components {
             password: string;
             /** Totp Code */
             totp_code: string;
+        };
+        /**
+         * MeOut
+         * @description Canonical identity for the SPA (hydrated on load). is_admin is
+         *     server-checked here; the JWT claim is only a render hint.
+         */
+        MeOut: {
+            /**
+             * User Id
+             * Format: uuid
+             */
+            user_id: string;
+            /** Email */
+            email: string;
+            /** Display Name */
+            display_name?: string | null;
+            /** Is Admin */
+            is_admin: boolean;
         };
         /** MemoryBlobOut */
         MemoryBlobOut: {
@@ -4820,6 +4930,26 @@ export interface operations {
             };
         };
     };
+    me_endpoint_auth_me_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MeOut"];
+                };
+            };
+        };
+    };
     verify_email_endpoint_auth_verify_email_post: {
         parameters: {
             query?: never;
@@ -4963,6 +5093,74 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    list_users_admin_users_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminUserOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    patch_user_admin_users__user_id__patch: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminUserPatchIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminUserOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
             };
         };
     };
