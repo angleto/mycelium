@@ -1,14 +1,15 @@
 """Memory router: write, hybrid search (retrieval-as-tool), get, GDPR
-erase, consolidate, tier recompute. Thin adapter (docs/adr/0001, 0005,
-0007, 0016, FR-8). The (org, project) predicate is enforced in the
-service; the embedder is injected (fake in tests)."""
+erase, consolidate, tier recompute, tag curation. Thin adapter
+(docs/adr/0001, 0003, 0005, 0007, 0016, FR-8). The (org, project)
+predicate is enforced in the service; tags are an orthogonal facet
+inside that boundary; the embedder is injected (fake in tests)."""
 
 from __future__ import annotations
 
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, status
 
 from flow_api.deps import TenantCtx, tenant_ctx
 from flow_api.schemas import (
@@ -19,15 +20,18 @@ from flow_api.schemas import (
     MemoryHitOut,
     MemorySearchIn,
     MemoryWriteIn,
+    TagBrief,
+    TagRefIn,
     TierCountsOut,
 )
 from flow_core.models.memory_blob import MemoryBlob
+from flow_core.models.tag import Tag
 from flow_core.services import memory as svc
 
 router = APIRouter(prefix="/memory", tags=["memory"])
 
 
-def _blob_out(b: MemoryBlob) -> MemoryBlobOut:
+def _blob_out(b: MemoryBlob, tags: list[Tag] | None = None) -> MemoryBlobOut:
     return MemoryBlobOut(
         id=b.id,
         project_id=b.project_id,
@@ -39,6 +43,10 @@ def _blob_out(b: MemoryBlob) -> MemoryBlobOut:
         dim=b.dim,
         access_count=b.access_count,
         cluster_id=b.cluster_id,
+        tags=[
+            TagBrief(id=g.id, kind=g.kind, name=g.name, color=g.color)
+            for g in (tags or [])
+        ],
     )
 
 
@@ -57,8 +65,10 @@ async def write_blob(
         namespace=body.namespace,
         sources=body.sources,
         importance=body.importance,
+        tag_ids=body.tag_ids,
     )
-    return _blob_out(blob)
+    tagmap = await svc.tags_by_blob(ctx.session, blob_ids=[blob.id])
+    return _blob_out(blob, tagmap.get(blob.id))
 
 
 @router.post("/search", response_model=list[MemoryHitOut])
@@ -75,8 +85,15 @@ async def search(
         operation_id=body.operation_id,
         limit=body.limit,
         grader_min_rrf=body.grader_min_rrf,
+        tag_ids=body.tag_ids,
     )
-    return [MemoryHitOut(blob=_blob_out(h.blob), rrf=h.rrf) for h in hits]
+    tagmap = await svc.tags_by_blob(
+        ctx.session, blob_ids=[h.blob.id for h in hits]
+    )
+    return [
+        MemoryHitOut(blob=_blob_out(h.blob, tagmap.get(h.blob.id)), rrf=h.rrf)
+        for h in hits
+    ]
 
 
 @router.get("/blobs/{blob_id}", response_model=MemoryBlobOut)
@@ -84,7 +101,9 @@ async def get_blob(
     blob_id: uuid.UUID,
     ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
 ) -> MemoryBlobOut:
-    return _blob_out(await svc.get_blob(ctx.session, org_id=ctx.org_id, blob_id=blob_id))
+    blob = await svc.get_blob(ctx.session, org_id=ctx.org_id, blob_id=blob_id)
+    tagmap = await svc.tags_by_blob(ctx.session, blob_ids=[blob.id])
+    return _blob_out(blob, tagmap.get(blob.id))
 
 
 @router.post("/erase", response_model=ErasedOut)
@@ -115,7 +134,42 @@ async def consolidate(
         blob_ids=body.blob_ids,
         operation_id=body.operation_id,
     )
-    return _blob_out(blob)
+    tagmap = await svc.tags_by_blob(ctx.session, blob_ids=[blob.id])
+    return _blob_out(blob, tagmap.get(blob.id))
+
+
+@router.post(
+    "/blobs/{blob_id}/tags", status_code=status.HTTP_204_NO_CONTENT
+)
+async def attach_blob_tag(
+    blob_id: uuid.UUID,
+    body: TagRefIn,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+) -> None:
+    await svc.attach_blob_tag(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        blob_id=blob_id,
+        tag_id=body.tag_id,
+    )
+
+
+@router.delete(
+    "/blobs/{blob_id}/tags/{tag_id}", status_code=status.HTTP_204_NO_CONTENT
+)
+async def detach_blob_tag(
+    blob_id: uuid.UUID,
+    tag_id: uuid.UUID,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+) -> None:
+    await svc.detach_blob_tag(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        blob_id=blob_id,
+        tag_id=tag_id,
+    )
 
 
 @router.post("/recompute-tier", response_model=TierCountsOut)

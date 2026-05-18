@@ -18,6 +18,7 @@ from decimal import Decimal
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
     DateTime,
+    ForeignKey,
     ForeignKeyConstraint,
     Integer,
     Numeric,
@@ -91,6 +92,36 @@ class BlobSource(Base):
     org_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False, index=True)
     source_kind: Mapped[str] = mapped_column(String(40), nullable=False)
     source_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class MemoryBlobTag(Base):
+    """Structured facet on a memory blob (docs/adr/0003, 0005). Tags
+    narrow retrieval inside the (org, project) boundary, never across
+    it. Composite FK to the hash-partitioned blob (like ``blob_sources``)
+    so erasing a blob cascades here."""
+
+    __tablename__ = "memory_blob_tags"
+    __table_args__ = (
+        PrimaryKeyConstraint("blob_id", "tag_id", name="pk_memory_blob_tags"),
+        ForeignKeyConstraint(
+            ["blob_id", "org_id"],
+            ["memory_blobs.id", "memory_blobs.org_id"],
+            ondelete="CASCADE",
+            name="fk_memory_blob_tags_blob_id_memory_blobs",
+        ),
+    )
+
+    blob_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    org_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False, index=True)
+    tag_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("tags.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

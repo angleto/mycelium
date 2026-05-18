@@ -376,6 +376,9 @@ export const it: Catalog = {
     erase: 'Cancella',
     erased: 'Cancellati {{n}} blob.',
     meteredNote: 'Scrittura e ricerca sono a consumo; assicurati che il workspace abbia crediti.',
+    tags: 'Tag',
+    filterTags: 'Filtra per tag',
+    addTag: 'Aggiungi tag',
   },
   notes: {
     nav: 'Note',

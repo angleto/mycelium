@@ -377,6 +377,9 @@ export const en = {
     erase: 'Erase',
     erased: 'Erased {{n}} blob(s).',
     meteredNote: 'Write and search are metered; ensure the workspace has credits.',
+    tags: 'Tags',
+    filterTags: 'Filter by tags',
+    addTag: 'Add tag',
   },
   notes: {
     nav: 'Notes',

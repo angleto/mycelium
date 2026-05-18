@@ -782,6 +782,7 @@ class MemoryWriteIn(BaseModel):
     namespace: str = Field(default="note", max_length=40)
     sources: list[tuple[str, str]] = Field(default_factory=list)
     importance: Decimal = Decimal(0)
+    tag_ids: list[uuid.UUID] = Field(default_factory=list)
 
 
 class MemorySearchIn(BaseModel):
@@ -790,6 +791,7 @@ class MemorySearchIn(BaseModel):
     operation_id: str = Field(min_length=1, max_length=128)
     limit: int = Field(default=10, gt=0, le=100)
     grader_min_rrf: float | None = None
+    tag_ids: list[uuid.UUID] = Field(default_factory=list)
 
 
 class MemoryBlobOut(BaseModel):
@@ -803,6 +805,7 @@ class MemoryBlobOut(BaseModel):
     dim: int
     access_count: int
     cluster_id: uuid.UUID | None
+    tags: list[TagBrief] = Field(default_factory=list)
 
 
 class MemoryHitOut(BaseModel):

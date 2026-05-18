@@ -18,7 +18,8 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from decimal import Decimal
 
-from sqlalchemy import Select, delete, func, select, text, update
+from sqlalchemy import ColumnElement, Select, delete, func, select, text, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from flow_core.config import get_settings
@@ -27,7 +28,9 @@ from flow_core.errors import DomainError, NotFoundError
 from flow_core.i18n import MessageCode
 from flow_core.models.billing import CostBasis
 from flow_core.models.membership import Role
-from flow_core.models.memory_blob import BlobSource, MemoryBlob
+from flow_core.models.memory_blob import BlobSource, MemoryBlob, MemoryBlobTag
+from flow_core.models.tag import Tag
+from flow_core.models.task_tag import TaskTag
 from flow_core.services import audit, billing
 from flow_core.services.rbac import require_role
 
@@ -47,6 +50,71 @@ def _project_pred(project_id: uuid.UUID | None):  # type: ignore[no-untyped-def]
     return MemoryBlob.project_id == project_id
 
 
+async def _visible_tag_ids(
+    session: AsyncSession, ids: Sequence[uuid.UUID]
+) -> set[uuid.UUID]:
+    """Subset of ``ids`` that are tags visible in the current tenant
+    (RLS scopes ``tags`` to the org): guards explicit tags so a caller
+    cannot link a blob to another workspace's tag."""
+    if not ids:
+        return set()
+    rows = await session.execute(select(Tag.id).where(Tag.id.in_(list(ids))))
+    return set(rows.scalars().all())
+
+
+async def _inherited_tag_ids(
+    session: AsyncSession, sources: Sequence[tuple[str, str]]
+) -> set[uuid.UUID]:
+    """Tags inherited from the provenance: a blob derived from tagged
+    sources keeps their tags. Only kinds that actually carry tags in
+    the schema contribute (today: ``task`` via ``task_tags``)."""
+    task_ids: list[uuid.UUID] = []
+    for kind, sid in sources:
+        if kind != "task":
+            continue
+        try:
+            task_ids.append(uuid.UUID(sid))
+        except ValueError:
+            continue
+    if not task_ids:
+        return set()
+    rows = await session.execute(
+        select(TaskTag.tag_id).where(TaskTag.task_id.in_(task_ids))
+    )
+    return set(rows.scalars().all())
+
+
+async def _attach_blob_tags(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    blob_id: uuid.UUID,
+    tag_ids: set[uuid.UUID],
+) -> None:
+    """Link a freshly written blob to a deduplicated tag set."""
+    for tid in tag_ids:
+        session.add(MemoryBlobTag(blob_id=blob_id, org_id=org_id, tag_id=tid))
+    if tag_ids:
+        await session.flush()
+
+
+async def tags_by_blob(
+    session: AsyncSession, *, blob_ids: Sequence[uuid.UUID]
+) -> dict[uuid.UUID, list[Tag]]:
+    """Batched blob -> tags (chips in search results, no N+1)."""
+    out: dict[uuid.UUID, list[Tag]] = {}
+    if not blob_ids:
+        return out
+    rows = await session.execute(
+        select(MemoryBlobTag.blob_id, Tag)
+        .join(Tag, Tag.id == MemoryBlobTag.tag_id)
+        .where(MemoryBlobTag.blob_id.in_(list(blob_ids)))
+    )
+    for bid, tag in rows.all():
+        out.setdefault(bid, []).append(tag)
+    return out
+
+
 async def write_blob(
     session: AsyncSession,
     *,
@@ -58,6 +126,7 @@ async def write_blob(
     namespace: str = "note",
     sources: Sequence[tuple[str, str]] = (),
     importance: Decimal = Decimal(0),
+    tag_ids: Sequence[uuid.UUID] = (),
     embedder: Embedder | None = None,
 ) -> MemoryBlob:
     await require_role(session, org_id, actor_id, Role.member)
@@ -97,6 +166,13 @@ async def write_blob(
     for kind, sid in sources:
         session.add(BlobSource(blob_id=blob.id, org_id=org_id, source_kind=kind, source_id=sid))
     await session.flush()
+    # Tags = explicit (validated to the tenant) plus inherited from the
+    # provenance, so a blob derived from tagged sources keeps the facet.
+    explicit = await _visible_tag_ids(session, tag_ids)
+    inherited = await _inherited_tag_ids(session, sources)
+    await _attach_blob_tags(
+        session, org_id=org_id, blob_id=blob.id, tag_ids=explicit | inherited
+    )
     await audit.log(
         session,
         org_id=org_id,
@@ -125,6 +201,7 @@ async def retrieve(
     operation_id: str,
     limit: int = 10,
     grader_min_rrf: float | None = None,
+    tag_ids: Sequence[uuid.UUID] | None = None,
     embedder: Embedder | None = None,
 ) -> list[Hit]:
     await require_role(session, org_id, actor_id, Role.member)
@@ -143,12 +220,29 @@ async def retrieve(
     )
 
     pred = _project_pred(project_id)
+    # Tags are a facet *inside* the (org, project) boundary, never a
+    # way past it: ANDed into both branches, never replacing the hard
+    # predicate. A blob must carry every requested tag (faceted AND).
+    wanted = set(tag_ids or ())
+    tag_clauses: tuple[ColumnElement[bool], ...] = ()
+    if wanted:
+        tagged = (
+            select(MemoryBlobTag.blob_id)
+            .where(
+                MemoryBlobTag.org_id == org_id,
+                MemoryBlobTag.tag_id.in_(wanted),
+            )
+            .group_by(MemoryBlobTag.blob_id)
+            .having(func.count(func.distinct(MemoryBlobTag.tag_id)) == len(wanted))
+        )
+        tag_clauses = (MemoryBlob.id.in_(tagged),)
     semantic = (
         select(MemoryBlob.id)
         .where(
             MemoryBlob.org_id == org_id,
             pred,
             MemoryBlob.embedding.is_not(None),
+            *tag_clauses,
         )
         .order_by(MemoryBlob.embedding.cosine_distance(qres.vector))
         .limit(_OVERSAMPLE)
@@ -159,6 +253,7 @@ async def retrieve(
             MemoryBlob.org_id == org_id,
             pred,
             text("fts @@ plainto_tsquery('simple', :q)"),
+            *tag_clauses,
         )
         .order_by(text("ts_rank(fts, plainto_tsquery('simple', :q)) DESC"))
         .limit(_OVERSAMPLE)
@@ -354,6 +449,23 @@ async def consolidate(
             )
         )
     await session.flush()
+    # The concept inherits the union of its members' tags (same spirit
+    # as the provenance union above; deterministic, never cross-subject
+    # since all members share (org, project)).
+    member_tags = set(
+        (
+            await session.execute(
+                select(MemoryBlobTag.tag_id)
+                .where(MemoryBlobTag.blob_id.in_(member_ids))
+                .distinct()
+            )
+        )
+        .scalars()
+        .all()
+    )
+    await _attach_blob_tags(
+        session, org_id=org_id, blob_id=consolidated.id, tag_ids=member_tags
+    )
     await audit.log(
         session,
         org_id=org_id,
@@ -373,3 +485,57 @@ async def get_blob(session: AsyncSession, *, org_id: uuid.UUID, blob_id: uuid.UU
     if b is None:
         raise NotFoundError(MessageCode.MEMORY_NOT_FOUND)
     return b
+
+
+async def attach_blob_tag(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    blob_id: uuid.UUID,
+    tag_id: uuid.UUID,
+) -> None:
+    """Curate memory by hand / by the AI: add an explicit tag to an
+    existing blob. Idempotent (re-adding is a no-op)."""
+    await require_role(session, org_id, actor_id, Role.member)
+    await get_blob(session, org_id=org_id, blob_id=blob_id)
+    if not await _visible_tag_ids(session, [tag_id]):
+        raise NotFoundError(MessageCode.TAG_NOT_FOUND)
+    try:
+        async with session.begin_nested():
+            session.add(MemoryBlobTag(blob_id=blob_id, org_id=org_id, tag_id=tag_id))
+            await session.flush()
+    except IntegrityError:
+        return
+    await audit.log(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        entity="memory_blob",
+        entity_id=blob_id,
+        action="attach_tag",
+    )
+
+
+async def detach_blob_tag(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    blob_id: uuid.UUID,
+    tag_id: uuid.UUID,
+) -> None:
+    await require_role(session, org_id, actor_id, Role.member)
+    await session.execute(
+        delete(MemoryBlobTag).where(
+            MemoryBlobTag.blob_id == blob_id, MemoryBlobTag.tag_id == tag_id
+        )
+    )
+    await audit.log(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        entity="memory_blob",
+        entity_id=blob_id,
+        action="detach_tag",
+    )

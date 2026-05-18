@@ -1482,6 +1482,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/memory/blobs/{blob_id}/tags": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Attach Blob Tag */
+        post: operations["attach_blob_tag_memory_blobs__blob_id__tags_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/memory/blobs/{blob_id}/tags/{tag_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Detach Blob Tag */
+        delete: operations["detach_blob_tag_memory_blobs__blob_id__tags__tag_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/memory/recompute-tier": {
         parameters: {
             query?: never;
@@ -2842,6 +2876,8 @@ export interface components {
             access_count: number;
             /** Cluster Id */
             cluster_id: string | null;
+            /** Tags */
+            tags?: components["schemas"]["TagBrief"][];
         };
         /** MemoryConsolidateIn */
         MemoryConsolidateIn: {
@@ -2880,6 +2916,8 @@ export interface components {
             limit: number;
             /** Grader Min Rrf */
             grader_min_rrf?: number | null;
+            /** Tag Ids */
+            tag_ids?: string[];
         };
         /** MemoryWriteIn */
         MemoryWriteIn: {
@@ -2904,6 +2942,8 @@ export interface components {
              * @default 0
              */
             importance: number | string;
+            /** Tag Ids */
+            tag_ids?: string[];
         };
         /** MeterIn */
         MeterIn: {
@@ -7603,6 +7643,75 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["MemoryBlobOut"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    attach_blob_tag_memory_blobs__blob_id__tags_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+            };
+            path: {
+                blob_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TagRefIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    detach_blob_tag_memory_blobs__blob_id__tags__tag_id__delete: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+            };
+            path: {
+                blob_id: string;
+                tag_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {
