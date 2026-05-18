@@ -632,3 +632,8 @@ button.btn--danger:hover {
   background: var(--border);
   margin: 0 0.2rem;
 }
+.est__sel {
+  width: auto;
+  min-width: 7rem;
+  max-width: 10rem;
+}

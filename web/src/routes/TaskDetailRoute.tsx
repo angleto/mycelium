@@ -35,6 +35,7 @@ export function TaskDetailRoute() {
   const [importance, setImportance] = useState(2)
   const [urgency, setUrgency] = useState(2)
   const [estimate, setEstimate] = useState('')
+  const [due, setDue] = useState('')
   const [estCustom, setEstCustom] = useState(false)
   const [presets, setPresets] = useState<string[]>([])
   const [stateId, setStateId] = useState('')
@@ -54,6 +55,7 @@ export function TaskDetailRoute() {
     setImportance(tk.importance ?? 2)
     setUrgency(tk.urgency ?? 2)
     setEstimate(tk.estimate_effort_h ?? '')
+    setDue(tk.due_date ?? '')
     setStateId(tk.state_id)
   }, [])
 
@@ -117,6 +119,7 @@ export function TaskDetailRoute() {
         title,
         description: description || null,
         estimate_effort_h: estimate.trim() ? estimate.trim() : null,
+        due_date: due || null,
       },
     })
     setBusy(false)
@@ -308,47 +311,65 @@ export function TaskDetailRoute() {
           />
         </div>
         <label>
-          {t('tasks.estimate')}
-          <select
-            value={
-              estimate.trim() === ''
-                ? ''
-                : estCustom ||
-                    !presets.some((p) => Number(p) === Number(estimate))
-                  ? 'custom'
-                  : String(Number(estimate))
-            }
-            onChange={(e) => {
-              const v = e.target.value
-              if (v === '') {
-                setEstimate('')
-                setEstCustom(false)
-              } else if (v === 'custom') {
-                setEstCustom(true)
-              } else {
-                setEstimate(v)
-                setEstCustom(false)
-              }
-            }}
-          >
-            <option value="">{t('tasks.estNone')}</option>
-            {presets.map((p) => (
-              <option key={p} value={String(Number(p))}>
-                {formatHours(Number(p))}
-              </option>
-            ))}
-            <option value="custom">{t('tasks.estCustom')}</option>
-          </select>
-          {estCustom && (
-            <input
-              type="number"
-              min={0}
-              step="0.25"
-              value={estimate}
-              onChange={(e) => setEstimate(e.target.value)}
-            />
-          )}
+          {t('tasks.due')}
+          <input
+            type="date"
+            value={due}
+            onChange={(e) => setDue(e.target.value)}
+          />
         </label>
+        {(() => {
+          const isPreset =
+            estimate.trim() !== '' &&
+            !estCustom &&
+            presets.some((p) => Number(p) === Number(estimate))
+          const selVal = isPreset
+            ? String(Number(estimate))
+            : estCustom
+              ? 'custom'
+              : ''
+          return (
+            <label>
+              {t('tasks.estimate')}
+              <span className="row">
+                <select
+                  className="est__sel"
+                  value={selVal}
+                  onChange={(e) => {
+                    const v = e.target.value
+                    if (v === '') {
+                      setEstimate('')
+                      setEstCustom(false)
+                    } else if (v === 'custom') {
+                      setEstCustom(true)
+                    } else {
+                      setEstimate(v)
+                      setEstCustom(false)
+                    }
+                  }}
+                >
+                  <option value="">{t('tasks.estPick')}</option>
+                  {presets.map((p) => (
+                    <option key={p} value={String(Number(p))}>
+                      {formatHours(Number(p))}
+                    </option>
+                  ))}
+                  <option value="custom">{t('tasks.estCustom')}</option>
+                </select>
+                {!isPreset && (
+                  <input
+                    type="number"
+                    min={0}
+                    step="0.25"
+                    placeholder={t('tasks.estPlaceholder')}
+                    value={estimate}
+                    onChange={(e) => setEstimate(e.target.value)}
+                  />
+                )}
+              </span>
+            </label>
+          )
+        })()}
         {msg && <p className="ok">{msg}</p>}
         {err && <p className="err">{err}</p>}
         <div className="row">

@@ -198,6 +198,9 @@ export const it: Catalog = {
     estimate: 'Stima (h)',
     estNone: '— nessuna —',
     estCustom: 'Personalizzato...',
+    estPick: 'Preset…',
+    estPlaceholder: 'Stima',
+    due: 'Scadenza',
   },
   estpre: {
     title: 'Preset di stima',

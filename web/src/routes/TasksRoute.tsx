@@ -33,6 +33,7 @@ export function TasksRoute() {
   const [title, setTitle] = useState('')
   const [importance, setImportance] = useState(2)
   const [urgency, setUrgency] = useState(2)
+  const [due, setDue] = useState('')
   const [q, setQ] = useState('')
   const [clientId, setClientId] = useState('')
   const [projectId, setProjectId] = useState('')
@@ -169,6 +170,7 @@ export function TasksRoute() {
         executor_kind: 'human',
         necessity: 'should',
         tag_ids: projectId ? [projectId] : [],
+        ...(due ? { due_date: due } : {}),
       },
     })
     setBusy(false)
@@ -177,6 +179,7 @@ export function TasksRoute() {
       return
     }
     setTitle('')
+    setDue('')
     await loadTasks()
   }
 
@@ -388,6 +391,14 @@ export function TasksRoute() {
             value={urgency}
             onChange={setUrgency}
             labelsKey="tasks.urgLabels"
+          />
+        </label>
+        <label>
+          {t('tasks.due')}
+          <input
+            type="date"
+            value={due}
+            onChange={(e) => setDue(e.target.value)}
           />
         </label>
         <label>
@@ -620,6 +631,11 @@ export function TasksRoute() {
                 </span>
                 <span className="taskrow__meta">
                   <span className="taskrow__sep" aria-hidden="true" />
+                  {tk.due_date && (
+                    <span className="muted" title={t('tasks.due')}>
+                      📅 {tk.due_date}
+                    </span>
+                  )}
                   <PriorityChip priority={tk.priority} score={score} />
                   {stateById.has(tk.state_id) ? (
                     <select

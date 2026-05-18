@@ -199,6 +199,9 @@ export const en = {
     estimate: 'Estimate (h)',
     estNone: '— none —',
     estCustom: 'Custom...',
+    estPick: 'Preset…',
+    estPlaceholder: 'Estimation',
+    due: 'Due date',
   },
   estpre: {
     title: 'Estimate presets',
