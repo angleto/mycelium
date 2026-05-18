@@ -8,6 +8,7 @@ type Invoice = components['schemas']['InvoiceOut']
 type Line = components['schemas']['InvoiceLineOut']
 type Profile = components['schemas']['IssuerProfileOut']
 type Tag = components['schemas']['TagOut']
+type ReportRow = components['schemas']['ReportRowOut']
 
 const EMPTY_PROFILE = {
   label: '',
@@ -82,6 +83,13 @@ export function InvoicesRoute() {
   const [lEditId, setLEditId] = useState<string | null>(null)
   const [lEdit, setLEdit] = useState<LineForm>(EMPTY_LINE)
 
+  // time-report -> lines
+  const [triFrom, setTriFrom] = useState('')
+  const [triTo, setTriTo] = useState('')
+  const [triRows, setTriRows] = useState<ReportRow[]>([])
+  const [triSel, setTriSel] = useState<Set<string>>(new Set())
+  const [triLoaded, setTriLoaded] = useState(false)
+
   const isDraft = sel?.state === 'draft'
   const defaultIssuer = useMemo(
     () => profiles.find((p) => p.is_default)?.id ?? profiles[0]?.id ?? '',
@@ -148,6 +156,9 @@ export function InvoicesRoute() {
     setDirty(false)
     setLEditId(null)
     setLAdd(EMPTY_LINE)
+    setTriRows([])
+    setTriSel(new Set())
+    setTriLoaded(false)
   }, [])
 
   async function reloadSel() {
@@ -334,6 +345,59 @@ export function InvoicesRoute() {
       setErr(errMessage(error))
       return
     }
+    await reloadSel()
+  }
+
+  async function loadReport() {
+    if (!sel) return
+    setErr(null)
+    const { data, error } = await api.GET('/time/report', {
+      params: {
+        header: workspaceHeader(),
+        query: {
+          group_by: 'task',
+          billable: true,
+          client_tag_id: dClient,
+          ...(triFrom ? { start_from: `${triFrom}T00:00:00Z` } : {}),
+          ...(triTo ? { start_to: `${triTo}T23:59:59Z` } : {}),
+        },
+      },
+    })
+    if (error) {
+      setErr(errMessage(error))
+      return
+    }
+    // Only rows with billable time are invoiceable.
+    setTriRows((data ?? []).filter((r) => r.billable_seconds > 0))
+    setTriSel(new Set())
+    setTriLoaded(true)
+  }
+
+  async function addSelectedLines() {
+    if (!sel) return
+    setErr(null)
+    const picked = triRows.filter((r) => r.key && triSel.has(r.key))
+    for (const r of picked) {
+      const hours = Math.round((r.billable_seconds / 3600) * 100) / 100
+      if (hours <= 0) continue
+      const rate = Math.round((Number(r.amount) / hours) * 100) / 100
+      const { error } = await api.POST('/invoices/{invoice_id}/lines', {
+        params: { header: workspaceHeader(), path: { invoice_id: sel.id } },
+        body: {
+          description: r.label ?? 'Time',
+          quantity: hours,
+          unit_price: rate,
+          vat_rate: 22,
+        },
+      })
+      if (error) {
+        setErr(errMessage(error))
+        return
+      }
+    }
+    setTriRows([])
+    setTriSel(new Set())
+    setTriLoaded(false)
     await reloadSel()
   }
 
@@ -746,6 +810,83 @@ export function InvoicesRoute() {
               />
               <button type="submit">{t('invoices.addLine')}</button>
             </form>
+          )}
+
+          {isDraft && (
+            <div className="card">
+              <h3>{t('invoices.fromTime')}</h3>
+              <p className="hint">{t('invoices.fromTimeHint')}</p>
+              <div className="row">
+                <label>
+                  {t('invoices.periodFrom')}
+                  <input
+                    type="date"
+                    value={triFrom}
+                    onChange={(e) => setTriFrom(e.target.value)}
+                  />
+                </label>
+                <label>
+                  {t('invoices.periodTo')}
+                  <input
+                    type="date"
+                    value={triTo}
+                    onChange={(e) => setTriTo(e.target.value)}
+                  />
+                </label>
+                <button type="button" className="btn--sm" onClick={() => void loadReport()}>
+                  {t('invoices.loadReport')}
+                </button>
+              </div>
+              {triLoaded && triRows.length === 0 && (
+                <p className="hint">{t('invoices.noReport')}</p>
+              )}
+              {triRows.length > 0 && (
+                <>
+                  <table className="tbl">
+                    <thead>
+                      <tr>
+                        <th />
+                        <th>{t('invoices.lineDesc')}</th>
+                        <th>{t('invoices.hours')}</th>
+                        <th>{t('invoices.amount')}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {triRows.map((r) => (
+                        <tr key={r.key ?? r.label}>
+                          <td>
+                            <input
+                              type="checkbox"
+                              checked={!!r.key && triSel.has(r.key)}
+                              disabled={!r.key}
+                              onChange={(e) => {
+                                if (!r.key) return
+                                const n = new Set(triSel)
+                                if (e.target.checked) n.add(r.key)
+                                else n.delete(r.key)
+                                setTriSel(n)
+                              }}
+                            />
+                          </td>
+                          <td>{r.label ?? '–'}</td>
+                          <td>{(r.billable_seconds / 3600).toFixed(2)}</td>
+                          <td>
+                            {Number(r.amount).toFixed(2)} {r.currency}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  <button
+                    type="button"
+                    disabled={triSel.size === 0}
+                    onClick={() => void addSelectedLines()}
+                  >
+                    {t('invoices.addSelected')}
+                  </button>
+                </>
+              )}
+            </div>
           )}
 
           <p>

@@ -619,6 +619,16 @@ export const it: Catalog = {
     loading: 'Caricamento...',
     confirmDeleteDraft: 'Eliminare questa bozza di fattura?',
     confirmDeleteProfile: 'Eliminare questo profilo emittente?',
+    fromTime: 'Fattura dal tempo tracciato',
+    fromTimeHint:
+      'Ore fatturabili per questo cliente nel periodo, per task. Scegli cosa fatturare; ognuna diventa una riga.',
+    periodFrom: 'Da',
+    periodTo: 'A',
+    loadReport: 'Carica report',
+    hours: 'Ore',
+    amount: 'Importo',
+    addSelected: 'Aggiungi selezionati come righe',
+    noReport: 'Nessun tempo fatturabile per questo cliente nel periodo.',
   },
   notif: {
     nav: 'Notifiche',

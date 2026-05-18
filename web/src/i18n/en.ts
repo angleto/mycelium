@@ -620,6 +620,16 @@ export const en = {
     loading: 'Loading...',
     confirmDeleteDraft: 'Delete this draft invoice?',
     confirmDeleteProfile: 'Delete this issuer profile?',
+    fromTime: 'Bill from tracked time',
+    fromTimeHint:
+      'Billable hours for this client in the period, per task. Pick what to invoice; each becomes a line.',
+    periodFrom: 'From',
+    periodTo: 'To',
+    loadReport: 'Load report',
+    hours: 'Hours',
+    amount: 'Amount',
+    addSelected: 'Add selected as lines',
+    noReport: 'No billable time for this client in this period.',
   },
   notif: {
     nav: 'Notifications',
