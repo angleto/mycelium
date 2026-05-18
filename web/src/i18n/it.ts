@@ -207,6 +207,11 @@ export const it: Catalog = {
     billInherit: 'Eredita dal progetto',
     billYes: 'Fatturabile',
     billNo: 'Non fatturabile',
+    reminders: 'Promemoria',
+    remHint: '(prima della scadenza; serve un canale notifiche abilitato e te assegnato)',
+    remAtDue: 'Alla scadenza',
+    remBefore: '{{v}} prima',
+    remAdd: 'Aggiungi promemoria',
   },
   estpre: {
     title: 'Preset di stima',
@@ -348,6 +353,8 @@ export const it: Catalog = {
     del: 'Elimina',
     none: 'Nessun evento.',
     overlapHint: 'Appuntamenti sovrapposti per la stessa persona sono rifiutati.',
+    agenda: 'Agenda',
+    agendaHint: 'Eventi del calendario e task con scadenza, dai piu vicini.',
     loading: 'Caricamento...',
   },
   time: {

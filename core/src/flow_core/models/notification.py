@@ -135,3 +135,29 @@ class TaskRecurrence(TimestampMixin, VersionMixin, Base):
     last_spawned_at: Mapped[datetime.datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+
+
+class TaskReminder(UUIDPKMixin, TimestampMixin, Base):
+    """A reminder N minutes before a task's due_date (0 = at due).
+    Multiple per task (Google-Calendar style). The scanner enqueues
+    one notification per reminder to the task's assignees."""
+
+    __tablename__ = "task_reminders"
+    __table_args__ = (
+        UniqueConstraint(
+            "task_id", "offset_minutes", name="uq_task_reminders_task_offset"
+        ),
+    )
+
+    org_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), nullable=False, index=True
+    )
+    task_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("tasks.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    offset_minutes: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default="0"
+    )

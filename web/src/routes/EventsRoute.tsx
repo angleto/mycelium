@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
+import { Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { api, errMessage, workspaceHeader } from '../api/client'
 import { useSession } from '../auth/useSession'
@@ -6,6 +7,7 @@ import type { components } from '../api/schema'
 
 type Calendar = components['schemas']['CalendarOut']
 type Ev = components['schemas']['EventOut']
+type Task = components['schemas']['TaskOut']
 
 const WEEK = ['mon', 'tue', 'wed', 'thu', 'fri']
 
@@ -15,6 +17,7 @@ export function EventsRoute() {
   const activeId = session?.workspaceId
   const [cals, setCals] = useState<Calendar[]>([])
   const [events, setEvents] = useState<Ev[]>([])
+  const [dueTasks, setDueTasks] = useState<Task[]>([])
   const [calName, setCalName] = useState('')
   const [holCal, setHolCal] = useState('')
   const [holDay, setHolDay] = useState('')
@@ -25,25 +28,29 @@ export function EventsRoute() {
 
   const reload = useCallback(async () => {
     const h = workspaceHeader()
-    const [c, e] = await Promise.all([
+    const [c, e, tk] = await Promise.all([
       api.GET('/calendars', { params: { header: h } }),
       api.GET('/events', { params: { header: h } }),
+      api.GET('/tasks', { params: { header: h } }),
     ])
     if (c.data) setCals(c.data)
     if (e.data) setEvents(e.data)
+    if (tk.data) setDueTasks(tk.data.filter((x) => x.due_date != null))
   }, [])
 
   useEffect(() => {
     let active = true
     void (async () => {
       const h = workspaceHeader()
-      const [c, e] = await Promise.all([
+      const [c, e, tk] = await Promise.all([
         api.GET('/calendars', { params: { header: h } }),
         api.GET('/events', { params: { header: h } }),
+        api.GET('/tasks', { params: { header: h } }),
       ])
       if (!active) return
       if (c.data) setCals(c.data)
       if (e.data) setEvents(e.data)
+      if (tk.data) setDueTasks(tk.data.filter((x) => x.due_date != null))
     })()
     return () => {
       active = false
@@ -189,6 +196,41 @@ export function EventsRoute() {
           ))}
         </ul>
       )}
+
+      <h2>{t('events.agenda')}</h2>
+      <p className="hint">{t('events.agendaHint')}</p>
+      {(() => {
+        const items = [
+          ...events.map((ev) => ({
+            key: `e${ev.id}`,
+            when: ev.start_at,
+            label: ev.title,
+            to: null as string | null,
+          })),
+          ...dueTasks.map((tk) => ({
+            key: `t${tk.id}`,
+            when: `${tk.due_date}T00:00`,
+            label: tk.title,
+            to: `/tasks/${tk.id}`,
+          })),
+        ].sort((a, b) => a.when.localeCompare(b.when))
+        return items.length === 0 ? (
+          <p className="hint">{t('events.none')}</p>
+        ) : (
+          <ul className="list">
+            {items.map((it) => (
+              <li key={it.key}>
+                <span className="muted">{it.when.slice(0, 16)}</span>{' '}
+                {it.to ? (
+                  <Link to={it.to}>📋 {it.label}</Link>
+                ) : (
+                  <>📅 {it.label}</>
+                )}
+              </li>
+            ))}
+          </ul>
+        )
+      })()}
     </section>
   )
 }

@@ -1166,3 +1166,14 @@ class RecurrenceOut(BaseModel):
 
 class CountOut(BaseModel):
     count: int
+
+
+class ReminderIn(BaseModel):
+    # Minutes before the task due date (0 = at due).
+    offset_minutes: int = Field(ge=0, le=525600)
+
+
+class ReminderOut(BaseModel):
+    id: uuid.UUID
+    task_id: uuid.UUID
+    offset_minutes: int

@@ -208,6 +208,11 @@ export const en = {
     billInherit: 'Inherit from project',
     billYes: 'Billable',
     billNo: 'Non-billable',
+    reminders: 'Reminders',
+    remHint: '(before the due date; needs an enabled notification channel + you assigned)',
+    remAtDue: 'At due',
+    remBefore: '{{v}} before',
+    remAdd: 'Add reminder',
   },
   estpre: {
     title: 'Estimate presets',
@@ -349,6 +354,8 @@ export const en = {
     del: 'Delete',
     none: 'No events.',
     overlapHint: 'Overlapping appointments for the same person are rejected.',
+    agenda: 'Agenda',
+    agendaHint: 'Calendar events and tasks with a due date, soonest first.',
     loading: 'Loading...',
   },
   time: {

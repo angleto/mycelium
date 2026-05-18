@@ -14,6 +14,8 @@ from flow_api.schemas import (
     CommentCreateIn,
     CommentOut,
     ExpectedVersionIn,
+    ReminderIn,
+    ReminderOut,
     StateOut,
     TagBrief,
     TagRefIn,
@@ -27,6 +29,7 @@ from flow_core.models.comment import Comment
 from flow_core.models.tag import Tag
 from flow_core.models.task import Task
 from flow_core.models.workflow import WorkflowState
+from flow_core.services import notifications as notif_svc
 from flow_core.services import tasks as svc
 from flow_core.services import workflow as wf
 
@@ -267,6 +270,54 @@ async def unarchive(
         archived=False,
     )
     return VersionOut(id=task_id, version=version)
+
+
+@router.get("/{task_id}/reminders", response_model=list[ReminderOut])
+async def list_reminders(
+    task_id: uuid.UUID,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+) -> list[ReminderOut]:
+    rows = await notif_svc.list_reminders(
+        ctx.session, org_id=ctx.org_id, task_id=task_id
+    )
+    return [
+        ReminderOut(id=r.id, task_id=r.task_id, offset_minutes=r.offset_minutes)
+        for r in rows
+    ]
+
+
+@router.post("/{task_id}/reminders", response_model=ReminderOut)
+async def add_reminder(
+    task_id: uuid.UUID,
+    body: ReminderIn,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+) -> ReminderOut:
+    r = await notif_svc.add_reminder(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        task_id=task_id,
+        offset_minutes=body.offset_minutes,
+    )
+    return ReminderOut(id=r.id, task_id=r.task_id, offset_minutes=r.offset_minutes)
+
+
+@router.delete(
+    "/{task_id}/reminders/{reminder_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def remove_reminder(
+    task_id: uuid.UUID,
+    reminder_id: uuid.UUID,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+) -> None:
+    await notif_svc.remove_reminder(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        task_id=task_id,
+        reminder_id=reminder_id,
+    )
 
 
 @router.post("/{task_id}/tags", status_code=status.HTTP_204_NO_CONTENT)

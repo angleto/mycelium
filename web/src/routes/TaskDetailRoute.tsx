@@ -42,6 +42,10 @@ export function TaskDetailRoute() {
   const [stateId, setStateId] = useState('')
   const [tagId, setTagId] = useState('')
   const [allTasks, setAllTasks] = useState<Task[]>([])
+  const [reminders, setReminders] = useState<
+    components['schemas']['ReminderOut'][]
+  >([])
+  const [remOff, setRemOff] = useState('1440')
   const [deps, setDeps] = useState<Dep[]>([])
   const [depOther, setDepOther] = useState('')
   const [depQuery, setDepQuery] = useState('')
@@ -86,7 +90,7 @@ export function TaskDetailRoute() {
     let active = true
     void (async () => {
       const h = workspaceHeader()
-      const [tk, st, tg, all, dp, ws] = await Promise.all([
+      const [tk, st, tg, all, dp, ws, rm] = await Promise.all([
         api.GET('/tasks/{task_id}', { params: { header: h, path: { task_id: id } } }),
         api.GET('/tasks/{task_id}/states', {
           params: { header: h, path: { task_id: id } },
@@ -95,6 +99,9 @@ export function TaskDetailRoute() {
         api.GET('/tasks', { params: { header: h } }),
         api.GET('/dependencies', { params: { header: h } }),
         api.GET('/workspaces/me', { params: { header: h } }),
+        api.GET('/tasks/{task_id}/reminders', {
+          params: { header: h, path: { task_id: id } },
+        }),
       ])
       if (!active) return
       if (tk.data) apply(tk.data)
@@ -104,6 +111,7 @@ export function TaskDetailRoute() {
       if (all.data) setAllTasks(all.data)
       if (dp.data) setDeps(dp.data)
       if (ws.data) setPresets(ws.data.settings?.estimate_presets ?? [])
+      if (rm.data) setReminders(rm.data)
     })()
     return () => {
       active = false
@@ -208,6 +216,52 @@ export function TaskDetailRoute() {
   function onBill(v: '' | 'yes' | 'no') {
     setBill(v)
     void autosave({ billable: v === '' ? null : v === 'yes' })
+  }
+
+  async function reloadReminders() {
+    const { data } = await api.GET('/tasks/{task_id}/reminders', {
+      params: { header: workspaceHeader(), path: { task_id: id } },
+    })
+    if (data) setReminders(data)
+  }
+
+  async function addReminder() {
+    setErr(null)
+    const { error } = await api.POST('/tasks/{task_id}/reminders', {
+      params: { header: workspaceHeader(), path: { task_id: id } },
+      body: { offset_minutes: Number(remOff) },
+    })
+    if (error) {
+      setErr(errMessage(error))
+      return
+    }
+    await reloadReminders()
+  }
+
+  async function removeReminder(rid: string) {
+    setErr(null)
+    const { error } = await api.DELETE(
+      '/tasks/{task_id}/reminders/{reminder_id}',
+      {
+        params: {
+          header: workspaceHeader(),
+          path: { task_id: id, reminder_id: rid },
+        },
+      },
+    )
+    if (error) {
+      setErr(errMessage(error))
+      return
+    }
+    await reloadReminders()
+  }
+
+  function fmtOffset(m: number): string {
+    if (m === 0) return t('tasks.remAtDue')
+    if (m % 10080 === 0) return t('tasks.remBefore', { v: `${m / 10080}w` })
+    if (m % 1440 === 0) return t('tasks.remBefore', { v: `${m / 1440}d` })
+    if (m % 60 === 0) return t('tasks.remBefore', { v: `${m / 60}h` })
+    return t('tasks.remBefore', { v: `${m}m` })
   }
 
   async function onChangeState(sid: string) {
@@ -366,6 +420,44 @@ export function TaskDetailRoute() {
             <option value="no">{t('tasks.billNo')}</option>
           </select>
         </label>
+        <div>
+          <strong>{t('tasks.reminders')}</strong>{' '}
+          <span className="hint">{t('tasks.remHint')}</span>
+          <div className="row" style={{ flexWrap: 'wrap' }}>
+            {reminders.map((r) => (
+              <span key={r.id} className="chip">
+                {fmtOffset(r.offset_minutes)}
+                <button
+                  type="button"
+                  className="btn--ghost btn--sm"
+                  onClick={() => void removeReminder(r.id)}
+                >
+                  ✕
+                </button>
+              </span>
+            ))}
+          </div>
+          <div className="row">
+            <select
+              value={remOff}
+              onChange={(e) => setRemOff(e.target.value)}
+            >
+              <option value="0">{t('tasks.remAtDue')}</option>
+              <option value="60">{t('tasks.remBefore', { v: '1h' })}</option>
+              <option value="240">{t('tasks.remBefore', { v: '4h' })}</option>
+              <option value="1440">{t('tasks.remBefore', { v: '1d' })}</option>
+              <option value="2880">{t('tasks.remBefore', { v: '2d' })}</option>
+              <option value="10080">{t('tasks.remBefore', { v: '1w' })}</option>
+            </select>
+            <button
+              type="button"
+              className="btn--sm"
+              onClick={() => void addReminder()}
+            >
+              {t('tasks.remAdd')}
+            </button>
+          </div>
+        </div>
         {(() => {
           const isPreset =
             estimate.trim() !== '' &&

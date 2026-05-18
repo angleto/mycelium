@@ -15,7 +15,7 @@ import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -30,6 +30,7 @@ from flow_core.models.notification import (
     NotificationStatus,
     RecurrenceFreq,
     TaskRecurrence,
+    TaskReminder,
 )
 from flow_core.models.task import Task
 from flow_core.models.task_assignee import TaskAssignee
@@ -358,11 +359,15 @@ async def scan_reminders(
     within_days: int = 1,
     now: dt.datetime | None = None,
 ) -> int:
-    """Enqueue (idempotent) due-date reminders for assignees who have
-    any enabled channel."""
+    """Enqueue (idempotent) reminders for assignees with an enabled
+    channel. Each task fires its configured ``task_reminders`` (N
+    offsets before due_date, Google-Calendar style); a task with a
+    due_date but no reminders gets one implicit reminder at due."""
     ref = now or dt.datetime.now(tz=dt.UTC)
     horizon = (ref + dt.timedelta(days=within_days)).date()
-    tasks = list(
+    # Consider tasks due far enough out that an early reminder could
+    # already be in-window (cap the lead we look back at ~120 days).
+    candidates = list(
         (
             await session.execute(
                 select(Task)
@@ -372,7 +377,7 @@ async def scan_reminders(
                     Task.is_archived.is_(False),
                     WorkflowState.is_terminal.is_(False),
                     Task.due_date.is_not(None),
-                    Task.due_date <= horizon,
+                    Task.due_date <= horizon + dt.timedelta(days=120),
                 )
             )
         )
@@ -381,7 +386,21 @@ async def scan_reminders(
         .all()
     )
     enqueued = 0
-    for t in tasks:
+    for t in candidates:
+        offsets = list(
+            (
+                await session.execute(
+                    select(TaskReminder.offset_minutes).where(
+                        TaskReminder.task_id == t.id
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        ) or [0]
+        due = t.due_date
+        if due is None:
+            continue
         assignees = (
             (
                 await session.execute(
@@ -391,24 +410,108 @@ async def scan_reminders(
             .scalars()
             .all()
         )
-        for uid in assignees:
-            prefs = await list_prefs(session, org_id=org_id, user_id=uid)
-            for p in prefs:
-                if not p.enabled or not p.target:
-                    continue
-                await enqueue(
-                    session,
-                    org_id=org_id,
-                    actor_id=actor_id,
-                    user_id=uid,
-                    channel=p.channel,
-                    kind="reminder",
-                    title=f"Task due: {t.title}",
-                    body=f"'{t.title}' is due on {t.due_date}.",
-                    dedupe_key=f"reminder:{t.id}:{uid}:{p.channel.value}:{t.due_date}",
-                )
-                enqueued += 1
+        for off in offsets:
+            fire_date = due - dt.timedelta(days=-(-off // 1440))
+            if fire_date > horizon:
+                continue
+            when = "at due" if off == 0 else f"{off} min before"
+            for uid in assignees:
+                prefs = await list_prefs(session, org_id=org_id, user_id=uid)
+                for p in prefs:
+                    if not p.enabled or not p.target:
+                        continue
+                    await enqueue(
+                        session,
+                        org_id=org_id,
+                        actor_id=actor_id,
+                        user_id=uid,
+                        channel=p.channel,
+                        kind="reminder",
+                        title=f"Task due: {t.title}",
+                        body=f"'{t.title}' is due on {due} ({when}).",
+                        dedupe_key=(
+                            f"reminder:{t.id}:{uid}:{p.channel.value}:"
+                            f"{due}:{off}"
+                        ),
+                    )
+                    enqueued += 1
     return enqueued
+
+
+async def list_reminders(
+    session: AsyncSession, *, org_id: uuid.UUID, task_id: uuid.UUID
+) -> list[TaskReminder]:
+    return list(
+        (
+            await session.execute(
+                select(TaskReminder)
+                .where(TaskReminder.task_id == task_id)
+                .order_by(TaskReminder.offset_minutes)
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+
+async def add_reminder(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    task_id: uuid.UUID,
+    offset_minutes: int,
+) -> TaskReminder:
+    await require_role(session, org_id, actor_id, Role.member)
+    await tasks_svc.get_task(session, org_id=org_id, task_id=task_id)
+    existing = (
+        await session.execute(
+            select(TaskReminder).where(
+                TaskReminder.task_id == task_id,
+                TaskReminder.offset_minutes == offset_minutes,
+            )
+        )
+    ).scalar_one_or_none()
+    if existing is not None:
+        return existing
+    r = TaskReminder(
+        org_id=org_id, task_id=task_id, offset_minutes=max(0, offset_minutes)
+    )
+    session.add(r)
+    await session.flush()
+    await audit.log(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        entity="task",
+        entity_id=task_id,
+        action="add_reminder",
+    )
+    return r
+
+
+async def remove_reminder(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    task_id: uuid.UUID,
+    reminder_id: uuid.UUID,
+) -> None:
+    await require_role(session, org_id, actor_id, Role.member)
+    await session.execute(
+        delete(TaskReminder).where(
+            TaskReminder.id == reminder_id, TaskReminder.task_id == task_id
+        )
+    )
+    await audit.log(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        entity="task",
+        entity_id=task_id,
+        action="remove_reminder",
+    )
 
 
 async def list_notifications(
