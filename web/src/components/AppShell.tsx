@@ -136,11 +136,9 @@ function RunningIndicator() {
   }, [runs.length])
 
   // Cycle through the running entries every 5s when there is >1.
+  // (idx is bounded at render via safeIdx, so no reset needed here.)
   useEffect(() => {
-    if (runs.length <= 1) {
-      setIdx(0)
-      return
-    }
+    if (runs.length <= 1) return
     const c = setInterval(
       () => setIdx((i) => (i + 1) % runs.length),
       5000,
