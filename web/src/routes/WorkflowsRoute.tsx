@@ -5,6 +5,9 @@ import { useSession } from '../auth/useSession'
 import type { components } from '../api/schema'
 
 type Workflow = components['schemas']['WorkflowOut']
+type State = components['schemas']['StateOut']
+type Edge = components['schemas']['TransitionOut']
+type WfMeta = { states: State[]; edges: Edge[] }
 type StateRow = { name: string; is_initial: boolean; is_terminal: boolean }
 type Transition = { from_state: string; to_state: string }
 
@@ -16,16 +19,41 @@ export function WorkflowsRoute() {
   const session = useSession()
   const activeId = session?.workspaceId
   const [list, setList] = useState<Workflow[]>([])
+  const [meta, setMeta] = useState<Record<string, WfMeta>>({})
   const [name, setName] = useState('')
+  // New-workflow template mirrors the system default
+  // (todo -> in_progress -> done) so it is not misleading.
   const [states, setStates] = useState<StateRow[]>([
     { name: 'todo', is_initial: true, is_terminal: false },
+    { name: 'in_progress', is_initial: false, is_terminal: false },
     { name: 'done', is_initial: false, is_terminal: true },
   ])
   const [transitions, setTransitions] = useState<Transition[]>([
-    { from_state: 'todo', to_state: 'done' },
+    { from_state: 'todo', to_state: 'in_progress' },
+    { from_state: 'in_progress', to_state: 'done' },
+    { from_state: 'in_progress', to_state: 'todo' },
+    { from_state: 'done', to_state: 'in_progress' },
   ])
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
+
+  const loadMeta = useCallback(async (wfs: Workflow[]) => {
+    const h = workspaceHeader()
+    const entries = await Promise.all(
+      wfs.map(async (w) => {
+        const [st, tr] = await Promise.all([
+          api.GET('/workflows/{workflow_id}/states', {
+            params: { header: h, path: { workflow_id: w.id } },
+          }),
+          api.GET('/workflows/{workflow_id}/transitions', {
+            params: { header: h, path: { workflow_id: w.id } },
+          }),
+        ])
+        return [w.id, { states: st.data ?? [], edges: tr.data ?? [] }] as const
+      }),
+    )
+    setMeta(Object.fromEntries(entries))
+  }, [])
 
   const load = useCallback(async () => {
     const { data, error } = await api.GET('/workflows', {
@@ -36,7 +64,8 @@ export function WorkflowsRoute() {
       return
     }
     setList(data)
-  }, [])
+    await loadMeta(data)
+  }, [loadMeta])
 
   useEffect(() => {
     let active = true
@@ -44,12 +73,14 @@ export function WorkflowsRoute() {
       const { data } = await api.GET('/workflows', {
         params: { header: workspaceHeader() },
       })
-      if (active && data) setList(data)
+      if (!active || !data) return
+      setList(data)
+      await loadMeta(data)
     })()
     return () => {
       active = false
     }
-  }, [activeId])
+  }, [activeId, loadMeta])
 
   function moveState(i: number, dir: -1 | 1) {
     setStates((rs) => {
@@ -100,12 +131,40 @@ export function WorkflowsRoute() {
         <p className="hint">{t('workflows.none')}</p>
       ) : (
         <ul className="list">
-          {list.map((w) => (
-            <li key={w.id}>
-              {w.name}
-              {w.is_default && <span className="muted"> · {t('workflows.isDefault')}</span>}
-            </li>
-          ))}
+          {list.map((w) => {
+            const m = meta[w.id]
+            const nameOf = (id: string) =>
+              m?.states.find((s) => s.id === id)?.name ?? id.slice(0, 6)
+            return (
+              <li key={w.id}>
+                <strong>{w.name}</strong>
+                {w.is_default && (
+                  <span className="muted"> · {t('workflows.isDefault')}</span>
+                )}
+                {m && (
+                  <div className="row" style={{ flexWrap: 'wrap' }}>
+                    {m.states.map((s) => (
+                      <span key={s.id} className="chip">
+                        {s.name}
+                        {s.is_initial ? ` · ${t('workflows.initial')}` : ''}
+                        {s.is_terminal ? ` · ${t('workflows.terminal')}` : ''}
+                      </span>
+                    ))}
+                  </div>
+                )}
+                {m && m.edges.length > 0 && (
+                  <div className="muted" style={{ fontSize: '0.8rem' }}>
+                    {m.edges
+                      .map(
+                        (e) =>
+                          `${nameOf(e.from_state_id)} → ${nameOf(e.to_state_id)}`,
+                      )
+                      .join(' , ')}
+                  </div>
+                )}
+              </li>
+            )
+          })}
         </ul>
       )}
 
