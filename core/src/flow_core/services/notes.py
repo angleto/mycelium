@@ -38,8 +38,9 @@ from flow_core.models.billing import CostBasis
 from flow_core.models.membership import Role
 from flow_core.models.note import Note, NoteKind, NoteStatus, NoteTurn, TurnRole
 from flow_core.models.note_tag import NoteTag
+from flow_core.models.project_profile import ProjectProfile
 from flow_core.models.tag import Tag, TagKind
-from flow_core.services import audit, billing
+from flow_core.services import audit, billing, taxonomy
 from flow_core.services import memory as memory_svc
 from flow_core.services.rbac import require_role
 
@@ -152,9 +153,7 @@ async def list_notes(
     if project_id is not None:
         stmt = stmt.where(Note.project_id == project_id)
     if tag_id is not None:
-        stmt = stmt.where(
-            Note.id.in_(select(NoteTag.note_id).where(NoteTag.tag_id == tag_id))
-        )
+        stmt = stmt.where(Note.id.in_(select(NoteTag.note_id).where(NoteTag.tag_id == tag_id)))
     stmt = stmt.order_by(Note.created_at.desc()).limit(limit)
     return list((await session.execute(stmt)).scalars().all())
 
@@ -199,9 +198,7 @@ async def attach_tag(
 ) -> None:
     await require_role(session, org_id, actor_id, Role.member)
     await get_note(session, org_id=org_id, note_id=note_id)
-    tag = (
-        await session.execute(select(Tag.id).where(Tag.id == tag_id))
-    ).scalar_one_or_none()
+    tag = (await session.execute(select(Tag.id).where(Tag.id == tag_id))).scalar_one_or_none()
     if tag is None:
         raise NotFoundError(MessageCode.TAG_NOT_FOUND)
     try:
@@ -395,6 +392,22 @@ async def create_note(
         audio_seconds=audio_seconds,
     )
     session.add(note)
+    await session.flush()
+    # Every note must belong to a client: the project's client when a
+    # project is set, otherwise the "Personal" default. Stored as a
+    # NoteTag so notes stay queryable/filterable by client.
+    client_tag_id: uuid.UUID | None = None
+    if project_id is not None:
+        client_tag_id = (
+            await session.execute(
+                select(ProjectProfile.client_tag_id).where(ProjectProfile.tag_id == project_id)
+            )
+        ).scalar_one_or_none()
+    if client_tag_id is None:
+        client_tag_id = await taxonomy.ensure_default_client(
+            session, org_id=org_id, actor_id=actor_id
+        )
+    session.add(NoteTag(org_id=org_id, note_id=note.id, tag_id=client_tag_id))
     await session.flush()
     await audit.log(
         session,

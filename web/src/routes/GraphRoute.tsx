@@ -10,6 +10,7 @@ type Task = components['schemas']['TaskOut']
 type Graph = components['schemas']['GraphOut']
 type Dep = components['schemas']['DependencyOut']
 type DepType = components['schemas']['DependencyType']
+type Tag = components['schemas']['TagOut']
 
 const ORDER: DepType[] = ['FS', 'SS', 'FF', 'SF']
 const NW = 170
@@ -50,6 +51,7 @@ export function GraphRoute() {
   const activeId = session?.workspaceId
   const { focusIds, active: focusActive } = useFocus()
   const [tasks, setTasks] = useState<Task[]>([])
+  const [tags, setTags] = useState<Tag[]>([])
   const [graph, setGraph] = useState<Graph | null>(null)
   const [deps, setDeps] = useState<Dep[]>([])
   const [scope, setScope] = useState<'all' | 'mine' | 'ai'>('all')
@@ -59,29 +61,33 @@ export function GraphRoute() {
 
   const reload = useCallback(async () => {
     const h = workspaceHeader()
-    const [tk, g, d] = await Promise.all([
+    const [tk, g, d, tg] = await Promise.all([
       api.GET('/tasks', { params: { header: h } }),
       api.GET('/graph', { params: { header: h } }),
       api.GET('/dependencies', { params: { header: h } }),
+      api.GET('/tags', { params: { header: h } }),
     ])
     if (tk.data) setTasks(tk.data)
     if (g.data) setGraph(g.data)
     if (d.data) setDeps(d.data)
+    if (tg.data) setTags(tg.data)
   }, [])
 
   useEffect(() => {
     let active = true
     void (async () => {
       const h = workspaceHeader()
-      const [tk, g, d] = await Promise.all([
+      const [tk, g, d, tg] = await Promise.all([
         api.GET('/tasks', { params: { header: h } }),
         api.GET('/graph', { params: { header: h } }),
         api.GET('/dependencies', { params: { header: h } }),
+        api.GET('/tags', { params: { header: h } }),
       ])
       if (!active) return
       if (tk.data) setTasks(tk.data)
       if (g.data) setGraph(g.data)
       if (d.data) setDeps(d.data)
+      if (tg.data) setTags(tg.data)
     })()
     return () => {
       active = false
@@ -90,11 +96,10 @@ export function GraphRoute() {
 
   const taskById = new Map(tasks.map((x) => [x.id, x]))
   const titleOf = (id: string) => taskById.get(id)?.title ?? id.slice(0, 8)
-  const allTags = [
-    ...new Map(
-      tasks.flatMap((x) => (x.tags ?? []).map((g) => [g.id, g] as const)),
-    ).values(),
-  ]
+  // Filter chips come from the tag catalog (authoritative + complete),
+  // not from whatever tags happen to be on the loaded tasks (that was
+  // empty/wrong, especially with a focus or an empty task list).
+  const allTags = tags.filter((g) => g.status !== 'archived')
 
   function visible(id: string): boolean {
     const tk = taskById.get(id)
