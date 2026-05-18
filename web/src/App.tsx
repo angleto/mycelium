@@ -17,6 +17,7 @@ import { TimeRoute } from './routes/TimeRoute'
 import { AdvisoryRoute } from './routes/AdvisoryRoute'
 import { BudgetsRoute } from './routes/BudgetsRoute'
 import { EmailRoute } from './routes/EmailRoute'
+import { BillingRoute } from './routes/BillingRoute'
 import { SettingsRoute } from './routes/SettingsRoute'
 
 function App() {
@@ -41,6 +42,7 @@ function App() {
             <Route path="/advisory" element={<AdvisoryRoute />} />
             <Route path="/budgets" element={<BudgetsRoute />} />
             <Route path="/email" element={<EmailRoute />} />
+            <Route path="/billing" element={<BillingRoute />} />
             <Route path="/settings" element={<SettingsRoute />} />
           </Route>
         </Route>

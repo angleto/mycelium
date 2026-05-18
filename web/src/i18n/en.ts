@@ -250,6 +250,20 @@ export const en = {
     none: 'No messages. Add an account and sync.',
     loading: 'Loading...',
   },
+  billing: {
+    nav: 'Billing',
+    title: 'Billing & credits',
+    balance: 'Credit balance',
+    grant: 'Grant credits',
+    amount: 'Amount',
+    reason: 'Reason (optional)',
+    grantBtn: 'Add credits',
+    ledger: 'Ledger',
+    rateCards: 'Rate cards',
+    usage: 'Usage',
+    none: 'Nothing yet.',
+    loading: 'Loading...',
+  },
   error: { generic: 'Something went wrong.', network: 'Network error.' },
 }
 
