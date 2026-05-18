@@ -1,8 +1,8 @@
-"""Utente globale (non org-scoped).
+"""Global user (not org-scoped).
 
-L'appartenenza a una org e in ``Membership``. La tabella non e soggetta
-a RLS tenant: il login deve poter risolvere l'email prima di avere un
-contesto org.
+Org membership is in ``Membership``. This table is not subject to
+tenant RLS: login must be able to resolve the email before having an
+org context.
 """
 
 from __future__ import annotations

@@ -1,9 +1,9 @@
-"""Ambiente Alembic.
+"""Alembic environment.
 
-Disaccoppiato dalle Settings dell'app: l'URL (sync, psycopg) e letto
-direttamente da FLOW_DATABASE_URL_SYNC, cosi le migrazioni non
-richiedono il segreto JWT. Le migrazioni girano come ruolo owner
-(`flow`), non come `flow_app` (vedi docs/adr/0015).
+Decoupled from the app Settings: the URL (sync, psycopg) is read
+directly from FLOW_DATABASE_URL_SYNC, so migrations do not require the
+JWT secret. Migrations run as the owner role (`flow`), not as
+`flow_app` (see docs/adr/0015).
 """
 
 from __future__ import annotations

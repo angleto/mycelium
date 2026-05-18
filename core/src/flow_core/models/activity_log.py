@@ -1,7 +1,7 @@
-"""Activity log append-only (audit).
+"""Append-only activity log (audit).
 
-Nessun update/delete dal codice. L'append-only e irrobustito a livello
-DB da una policy/trigger nella migrazione baseline (docs/adr/0002).
+No update/delete from code. Append-only is hardened at the DB level by
+a policy/trigger in the baseline migration (docs/adr/0002).
 """
 
 from __future__ import annotations

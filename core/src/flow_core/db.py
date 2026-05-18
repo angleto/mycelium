@@ -1,14 +1,14 @@
-"""Accesso al database e contesto tenant per la RLS.
+"""Database access and tenant context for RLS.
 
-L'isolamento multi-tenant e una difesa primaria (docs/adr/0002, 0007):
-ogni transazione applicativa imposta GUC di sessione che le policy RLS
-leggono via ``current_setting(...)``. Le query non possono vedere dati
-di un'altra org/progetto anche se dimenticano il predicato.
+Multi-tenant isolation is a primary defense (docs/adr/0002, 0007):
+every application transaction sets session GUCs that the RLS policies
+read via ``current_setting(...)``. Queries cannot see another
+org/project's data even if they forget the predicate.
 
-GUC usati:
-- ``app.current_org``     uuid dell'organizzazione corrente
-- ``app.current_user``    uuid dell'utente autenticato
-- ``app.current_project`` uuid del progetto corrente (memoria), opzionale
+GUCs used:
+- ``app.current_org``     uuid of the current organization
+- ``app.current_user``    uuid of the authenticated user
+- ``app.current_project`` uuid of the current project (memory), optional
 """
 
 from __future__ import annotations
@@ -58,10 +58,10 @@ async def tenant_session(
     user_id: str,
     project_id: str | None = None,
 ) -> AsyncIterator[AsyncSession]:
-    """Sessione in transazione con i GUC di tenant impostati per la RLS.
+    """A transactional session with the tenant GUCs set for RLS.
 
-    I GUC sono ``set_config(..., is_local => true)``: valgono solo per la
-    transazione corrente, niente leak tra connessioni del pool.
+    The GUCs are ``set_config(..., is_local => true)``: they apply only
+    to the current transaction, no leak across pool connections.
     """
     sm = get_sessionmaker()
     async with sm() as session:
@@ -79,10 +79,10 @@ async def tenant_session(
 
 @asynccontextmanager
 async def admin_session() -> AsyncIterator[AsyncSession]:
-    """Sessione senza contesto tenant. Solo per bootstrap/migrazioni/test.
+    """A session with no tenant context. Bootstrap/migrations/tests only.
 
-    Non usare nei path applicativi: la RLS resta attiva e senza GUC non
-    vede righe org-scoped (fail-closed).
+    Do not use in application paths: RLS stays active and, without
+    GUCs, sees no org-scoped rows (fail-closed).
     """
     sm = get_sessionmaker()
     async with sm() as session:

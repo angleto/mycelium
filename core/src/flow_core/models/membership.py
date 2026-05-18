@@ -1,4 +1,4 @@
-"""Membership: appartenenza utente-org con ruolo (RBAC)."""
+"""Membership: user-org membership with a role (RBAC)."""
 
 from __future__ import annotations
 

@@ -1,8 +1,9 @@
-"""Flow core: dominio e service layer.
+"""Flow core: domain and service layer.
 
-Unico punto di verita per business logic, RBAC, isolamento (org, progetto),
-optimistic concurrency, macchina a stati, scheduler, memoria, SDI.
-api/ e mcp/ sono adapter sottili su questo pacchetto (vedi docs/adr/0001).
+The single source of truth for business logic, RBAC, (org, project)
+isolation, optimistic concurrency, the state machine, the scheduler,
+memory and SDI. api/ and mcp/ are thin adapters over this package
+(see docs/adr/0001).
 """
 
 __version__ = "0.0.0"

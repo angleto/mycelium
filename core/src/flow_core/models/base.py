@@ -1,11 +1,11 @@
-"""Declarative base e mixin comuni.
+"""Declarative base and common mixins.
 
-- naming convention stabile (migrazioni Alembic deterministiche)
-- uuid pk, timestamp, org scope, ``version`` per optimistic concurrency
+- a stable naming convention (deterministic Alembic migrations)
+- uuid pk, timestamps, org scope, ``version`` for optimistic concurrency
 
-L'optimistic concurrency e applicata in modo esplicito dal service
-layer (UPDATE ... WHERE id AND version; 0 righe -> ConflictError),
-come da docs/adr/0002: niente magia ORM implicita.
+Optimistic concurrency is enforced explicitly by the service layer
+(UPDATE ... WHERE id AND version; 0 rows -> ConflictError), per
+docs/adr/0002: no implicit ORM magic.
 """
 
 from __future__ import annotations
@@ -49,13 +49,13 @@ class TimestampMixin:
 
 
 class OrgScopedMixin:
-    """Ogni riga appartiene a una org. La RLS filtra su questa colonna."""
+    """Every row belongs to an org. RLS filters on this column."""
 
     org_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False, index=True)
 
 
 class VersionMixin:
-    """Contatore di versione per optimistic concurrency (incrementato
-    esplicitamente dal service layer ad ogni update)."""
+    """Version counter for optimistic concurrency (incremented
+    explicitly by the service layer on every update)."""
 
     version: Mapped[int] = mapped_column(BigInteger, nullable=False, default=1, server_default="1")

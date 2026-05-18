@@ -1,7 +1,7 @@
--- Bootstrap del ruolo runtime. Idempotente. Eseguito come superuser
--- (flow) PRIMA delle migrazioni applicative. Tiene la password fuori
--- dal version control: arriva da una variabile psql (:app_pw) fornita
--- dall'ambiente. Vedi docs/adr/0015 e il target `make db-bootstrap`.
+-- Bootstrap of the runtime role. Idempotent. Run as superuser
+-- (flow) BEFORE the application migrations. Keeps the password out of
+-- version control: it comes from a psql variable (:app_pw) provided by
+-- the environment. See docs/adr/0015 and the `make db-bootstrap` target.
 
 DO $$
 BEGIN

@@ -1,7 +1,7 @@
-"""Configurazione applicativa.
+"""Application configuration.
 
-Tutte le variabili sono prefissate ``FLOW_`` (12-factor, vedi
-docs/non-functional-requirements.md). Nessun segreto hardcoded.
+All variables are prefixed ``FLOW_`` (12-factor, see
+docs/non-functional-requirements.md). No hardcoded secrets.
 """
 
 from __future__ import annotations
@@ -23,20 +23,20 @@ class Settings(BaseSettings):
     # Database
     database_url: str = Field(
         default="postgresql+asyncpg://flow_app:flow_app@localhost:5432/flow",
-        description="URL async (asyncpg). Ruolo runtime flow_app (RLS).",
+        description="Async URL (asyncpg). Runtime role flow_app (RLS).",
     )
     database_url_sync: str = Field(
         default="postgresql+psycopg://flow:flow@localhost:5432/flow",
-        description="URL sync (psycopg) per Alembic. Ruolo owner flow.",
+        description="Sync URL (psycopg) for Alembic. Owner role flow.",
     )
 
     # Redis
     redis_url: str = "redis://localhost:6379/0"
 
-    # Auth / JWT. Nessun default per il segreto: deve essere fornito via
-    # FLOW_JWT_SECRET (fail-closed). In dev arriva da .env.
-    # >=32 byte: requisito RFC 7518 per HMAC-SHA256.
-    jwt_secret: str = Field(min_length=32, description="Segreto firma JWT.")
+    # Auth / JWT. No default for the secret: it must be provided via
+    # FLOW_JWT_SECRET (fail-closed). In dev it comes from .env.
+    # >=32 bytes: RFC 7518 requirement for HMAC-SHA256.
+    jwt_secret: str = Field(min_length=32, description="JWT signing secret.")
     jwt_alg: str = "HS256"
     jwt_ttl_seconds: int = 3600
 
@@ -59,5 +59,5 @@ class Settings(BaseSettings):
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
-    """Settings come singleton (cached)."""
+    """Settings as a cached singleton."""
     return Settings()

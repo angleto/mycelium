@@ -1,7 +1,7 @@
-"""Organization: radice della tenancy.
+"""Organization: the tenancy root.
 
-Profilo fiscale emittente come JSONB nello scheletro F0 (la
-strutturazione tipizzata, ADR-0003, e raffinata nelle fasi fatturazione).
+Issuer fiscal profile as JSONB in the F0 skeleton (the typed
+structuring, ADR-0003, is refined in the invoicing phases).
 """
 
 from __future__ import annotations

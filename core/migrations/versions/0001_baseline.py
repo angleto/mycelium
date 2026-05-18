@@ -1,7 +1,7 @@
-"""F0 baseline: estensioni, entita, RLS+FORCE, partizione, append-only,
-ruolo runtime e provisioning SECURITY DEFINER.
+"""F0 baseline: extensions, entities, RLS+FORCE, partitioning,
+append-only, runtime role and SECURITY DEFINER provisioning.
 
-Vedi docs/adr/0002, 0005, 0007, 0015.
+See docs/adr/0002, 0005, 0007, 0015.
 
 Revision ID: 0001
 Revises:
@@ -23,8 +23,8 @@ depends_on: str | Sequence[str] | None = None
 UPGRADE: tuple[str, ...] = (
     "CREATE EXTENSION IF NOT EXISTS vector",
     "CREATE EXTENSION IF NOT EXISTS pg_trgm",
-    # Ruolo runtime, idempotente, SENZA password (la imposta il
-    # bootstrap da env: nessun segreto nel git). docs/adr/0015.
+    # Runtime role, idempotent, WITHOUT a password (set by the
+    # bootstrap from env: no secret in git). docs/adr/0015.
     """
     DO $$
     BEGIN
@@ -33,8 +33,8 @@ UPGRADE: tuple[str, ...] = (
       END IF;
     END $$
     """,
-    # users: globale, NESSUNA RLS (il login risolve l'email prima di
-    # avere un contesto org).
+    # users: global, NO RLS (login resolves the email before having an
+    # org context).
     """
     CREATE TABLE users (
       id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -84,7 +84,7 @@ UPGRADE: tuple[str, ...] = (
     )
     """,
     "CREATE INDEX ix_activity_log_org_id ON activity_log (org_id)",
-    # Append-only: nessun UPDATE/DELETE, irrobustito a livello DB.
+    # Append-only: no UPDATE/DELETE, hardened at the DB level.
     """
     CREATE FUNCTION forbid_mutation() RETURNS trigger
     LANGUAGE plpgsql AS $fn$
@@ -98,8 +98,8 @@ UPGRADE: tuple[str, ...] = (
     BEFORE UPDATE OR DELETE ON activity_log
     FOR EACH ROW EXECUTE FUNCTION forbid_mutation()
     """,
-    # memory_blobs: PARTITION BY HASH (org_id). La PK deve includere la
-    # chiave di partizione. docs/adr/0005, 0007.
+    # memory_blobs: PARTITION BY HASH (org_id). The PK must include the
+    # partition key. docs/adr/0005, 0007.
     """
     CREATE TABLE memory_blobs (
       id uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -126,7 +126,7 @@ UPGRADE: tuple[str, ...] = (
     """,
     "CREATE INDEX ix_memory_blobs_org_id ON memory_blobs (org_id)",
     "CREATE INDEX ix_memory_blobs_project_id ON memory_blobs (project_id)",
-    # RLS + FORCE su tutte le entita org-scoped.
+    # RLS + FORCE on every org-scoped entity.
     "ALTER TABLE organizations ENABLE ROW LEVEL SECURITY",
     "ALTER TABLE organizations FORCE ROW LEVEL SECURITY",
     "ALTER TABLE memberships ENABLE ROW LEVEL SECURITY",
@@ -135,7 +135,7 @@ UPGRADE: tuple[str, ...] = (
     "ALTER TABLE activity_log FORCE ROW LEVEL SECURITY",
     "ALTER TABLE memory_blobs ENABLE ROW LEVEL SECURITY",
     "ALTER TABLE memory_blobs FORCE ROW LEVEL SECURITY",
-    # Policy: GUC assente -> NULL -> nessuna riga (fail-closed).
+    # Policy: GUC absent -> NULL -> no rows (fail-closed).
     """
     CREATE POLICY p_organizations ON organizations
     USING (id = nullif(current_setting('app.current_org', true), '')::uuid)
@@ -163,8 +163,8 @@ UPGRADE: tuple[str, ...] = (
     )
     WITH CHECK (org_id = nullif(current_setting('app.current_org', true), '')::uuid)
     """,
-    # Provisioning del tenant: unico punto che crea org+membership,
-    # SECURITY DEFINER (owner), search_path fisso. docs/adr/0015.
+    # Tenant provisioning: the single point that creates org+membership,
+    # SECURITY DEFINER (owner), fixed search_path. docs/adr/0015.
     """
     CREATE FUNCTION provision_organization(p_name text, p_user_id uuid)
     RETURNS uuid
@@ -184,7 +184,7 @@ UPGRADE: tuple[str, ...] = (
     $fn$
     """,
     "REVOKE ALL ON FUNCTION provision_organization(text, uuid) FROM PUBLIC",
-    # Grant minimi al ruolo runtime.
+    # Minimal grants to the runtime role.
     "GRANT USAGE ON SCHEMA public TO flow_app",
     "GRANT SELECT, INSERT, UPDATE, DELETE ON users TO flow_app",
     "GRANT SELECT, INSERT, UPDATE, DELETE ON organizations TO flow_app",
