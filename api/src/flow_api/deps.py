@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from typing import Annotated
 
 from fastapi import Depends, Header
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from flow_core.db import tenant_session
@@ -22,13 +23,21 @@ from flow_core.models.membership import Role
 from flow_core.security import decode_token
 from flow_core.services.rbac import get_role
 
+# auto_error=False: the scheme is published to OpenAPI (so Swagger shows
+# "Authorize"), but absence/malformed credentials are reported via our
+# i18n AuthError (401, code auth.missing_bearer), not FastAPI's default
+# 403 {"detail": "Not authenticated"}. Keeps the error contract stable.
+_bearer_scheme = HTTPBearer(auto_error=False, bearerFormat="JWT")
+
 
 def _bearer_token(
-    authorization: Annotated[str | None, Header()] = None,
+    credentials: Annotated[
+        HTTPAuthorizationCredentials | None, Depends(_bearer_scheme)
+    ] = None,
 ) -> str:
-    if not authorization or not authorization.lower().startswith("bearer "):
+    if credentials is None or credentials.scheme.lower() != "bearer":
         raise AuthError(MessageCode.AUTH_MISSING_BEARER)
-    return authorization.split(" ", 1)[1].strip()
+    return credentials.credentials
 
 
 def current_user_id(
