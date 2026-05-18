@@ -3,8 +3,12 @@
 Conceptual entities. The physical schema is in
 [data-model.md](data-model.md).
 
-- **Organization**: the tenancy boundary. Owns an **issuer fiscal
-  profile** (RegimeFiscale RF01.., VAT/CF, structured address, REA,
+- **Workspace** (the user-facing name; internally **Organization**,
+  `org_id`, RLS unchanged, ADR-0024/ADR-0015): the tenancy boundary.
+  Personal-first: a personal workspace is auto-provisioned at signup;
+  a user may belong to several and switches in-app without re-auth.
+  Owns an **issuer fiscal profile** (RegimeFiscale RF01.., VAT/CF,
+  structured address, REA,
   cassa) needed for invoicing. Everything is org-scoped.
 - **User / Membership / Role**: users, membership in one or more Orgs,
   RBAC (owner, admin, member, read-only guest).

@@ -6,7 +6,8 @@ org-scoped entity. Memory is partitioned by `org_id`.
 
 ## Tenancy and taxonomy
 
-- `organizations(id, name, fiscal_profile: { regime RF.., p_iva, cf,
+- `organizations` (the tenant table; user-facing name "workspace",
+  ADR-0024) `(id, name, fiscal_profile: { regime RF.., p_iva, cf,
   structured address, rea, cassa })`
 - `users(id, email, password_hash, ...)` (global)
 - `memberships(org_id, user_id, role[owner|admin|member|guest])`

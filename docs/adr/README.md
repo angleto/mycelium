@@ -32,3 +32,4 @@ Format: Status, Context, Decision, Consequences, Alternatives rejected.
 - [0021 Command/intent layer (natural language to deterministic actions)](0021-command-intent-layer.md)
 - [0022 Hands-free activation (headphone button): native/OS-assistant](0022-handsfree-activation-native.md)
 - [0023 Email connector abstraction and idempotent sync](0023-email-connector-abstraction.md)
+- [0024 "Workspace": user-facing name of the tenant; personal-first](0024-workspace-user-facing-tenant-name.md)
