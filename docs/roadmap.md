@@ -61,6 +61,15 @@ fase.
   interoperabilita; da qui conservazione AdE effettiva.
 - **F7c SdICoop produzione**: Accordo di servizio + accreditamento +
   switch del canale in produzione (item pesante, risorsato come tale).
+  Stato implementazione (2026-05-18): F7a completo; il nucleo
+  deterministico di F7b (astrazione `SdiChannel`, assegnazione
+  `IdentificativoSdI`, correlazione ricevute RC/MC/NS/AT, copertura
+  conservazione) e implementato e testato con un canale SdICoop
+  iniettato (fake). Restano come passo esterno per F7c, non come
+  codice: l'Accordo di servizio AdE, l'accreditamento e l'endpoint
+  SOAP inbound mutua-TLS sempre attivo in produzione (ADR-0011: e
+  l'item piu pesante, deliberatamente fuori dal perimetro di codice
+  finche l'accreditamento non e ottenuto).
 - **Post-v1**: PA/B2G (firma CAdES/XAdES + certificato qualificato,
   NE/DT/EC/SE), ciclo passivo, reverse charge/autofattura TD16-TD19,
   clienti esteri, liquidazione trimestrale del bollo, leveling

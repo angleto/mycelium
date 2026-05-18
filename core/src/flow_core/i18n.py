@@ -55,6 +55,8 @@ class MessageCode(enum.StrEnum):
     INVOICE_NOT_DRAFT = "invoice.not_draft"
     INVOICE_INVALID = "invoice.invalid"
     FISCAL_PROFILE_REQUIRED = "invoice.fiscal_profile_required"
+    NOTIFICATION_NOT_FOUND = "notification.not_found"
+    RECURRENCE_WITH_DEPS = "recurrence.with_dependencies"
     DOMAIN_ERROR = "domain.error"
 
 
@@ -108,6 +110,10 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
         MessageCode.INVOICE_INVALID: ("Invalid invoice: {detail}"),
         MessageCode.FISCAL_PROFILE_REQUIRED: (
             "The organization fiscal profile is incomplete: {detail}"
+        ),
+        MessageCode.NOTIFICATION_NOT_FOUND: "Notification not found",
+        MessageCode.RECURRENCE_WITH_DEPS: (
+            "A recurring task cannot have dependencies (mutually exclusive in v1)"
         ),
         MessageCode.DOMAIN_ERROR: "Domain error",
     },

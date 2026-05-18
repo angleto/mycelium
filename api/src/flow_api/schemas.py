@@ -21,6 +21,11 @@ from flow_core.models.invoice import (
     SdiStatus,
 )
 from flow_core.models.note import NoteKind, NoteStatus, TurnRole
+from flow_core.models.notification import (
+    NotificationChannelKind,
+    NotificationStatus,
+    RecurrenceFreq,
+)
 from flow_core.models.tag import TagKind
 from flow_core.models.task import ConstraintKind, ExecKind, Necessity, ScheduleMode
 from flow_core.models.time_entry import TimeSource
@@ -897,3 +902,56 @@ class ReceiptIn(BaseModel):
 
 class InvoiceXmlOut(BaseModel):
     xml: str
+
+
+# --- F8: notifications, recurrence, reminders (FR-12) ---
+
+
+class NotificationPrefIn(BaseModel):
+    user_id: uuid.UUID
+    channel: NotificationChannelKind
+    enabled: bool = True
+    target: str = Field(default="", max_length=320)
+
+
+class NotificationPrefOut(BaseModel):
+    user_id: uuid.UUID
+    channel: NotificationChannelKind
+    enabled: bool
+    target: str
+
+
+class NotificationOut(BaseModel):
+    id: uuid.UUID
+    user_id: uuid.UUID
+    channel: NotificationChannelKind
+    kind: str
+    title: str
+    body: str
+    status: NotificationStatus
+
+
+class DispatchOut(BaseModel):
+    sent: int
+    failed: int
+
+
+class RecurrenceIn(BaseModel):
+    task_id: uuid.UUID
+    freq: RecurrenceFreq
+    next_run: datetime.datetime
+    interval: int = Field(default=1, ge=1)
+    until: datetime.datetime | None = None
+
+
+class RecurrenceOut(BaseModel):
+    task_id: uuid.UUID
+    freq: RecurrenceFreq
+    interval: int
+    next_run: datetime.datetime
+    until: datetime.datetime | None
+    active: bool
+
+
+class CountOut(BaseModel):
+    count: int

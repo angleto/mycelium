@@ -21,6 +21,7 @@ from flow_api.routers import (
     invoices,
     memory,
     notes,
+    notifications,
     org,
     schedule,
     tags,
@@ -92,4 +93,5 @@ def create_app() -> FastAPI:
     app.include_router(memory.router)
     app.include_router(notes.router)
     app.include_router(invoices.router)
+    app.include_router(notifications.router)
     return app

@@ -48,6 +48,14 @@ from flow_core.models.invoice import (
 from flow_core.models.membership import Membership, Role
 from flow_core.models.memory_blob import BlobSource, MemoryBlob, Tier
 from flow_core.models.note import Note, NoteKind, NoteStatus, NoteTurn, TurnRole
+from flow_core.models.notification import (
+    Notification,
+    NotificationChannelKind,
+    NotificationPref,
+    NotificationStatus,
+    RecurrenceFreq,
+    TaskRecurrence,
+)
 from flow_core.models.organization import Organization
 from flow_core.models.project_profile import ProjectProfile
 from flow_core.models.schedule import Schedule
@@ -106,12 +114,17 @@ __all__ = [
     "NoteKind",
     "NoteStatus",
     "NoteTurn",
+    "Notification",
+    "NotificationChannelKind",
+    "NotificationPref",
+    "NotificationStatus",
     "OrgFiscalProfile",
     "Organization",
     "PaymentStatus",
     "ProjectProfile",
     "RateCard",
     "RateUnit",
+    "RecurrenceFreq",
     "Role",
     "Schedule",
     "ScheduleMode",
@@ -123,6 +136,7 @@ __all__ = [
     "Task",
     "TaskAssignee",
     "TaskDependency",
+    "TaskRecurrence",
     "TaskTag",
     "Tier",
     "TimeEntry",

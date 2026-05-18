@@ -30,6 +30,7 @@ from flow_core.models.event import Event
 from flow_core.models.invoice import Invoice
 from flow_core.models.memory_blob import MemoryBlob
 from flow_core.models.note import Note, NoteKind, NoteTurn
+from flow_core.models.notification import NotificationChannelKind, RecurrenceFreq
 from flow_core.models.schedule import Schedule
 from flow_core.models.tag import Tag, TagKind
 from flow_core.models.task import ConstraintKind, Necessity, ScheduleMode, Task
@@ -45,6 +46,7 @@ from flow_core.services import events as events_svc
 from flow_core.services import invoice as invoice_svc
 from flow_core.services import memory as memory_svc
 from flow_core.services import notes as notes_svc
+from flow_core.services import notifications as notif_svc
 from flow_core.services import time_tracking as time_svc
 from flow_core.services.rbac import get_role
 from flow_core.services.taxonomy import ClientInput
@@ -1453,3 +1455,83 @@ async def ingest_sdi_receipt(
             outcome=outcome,
         )
         return _invoice(inv)
+
+
+# --- F8: notifications / recurrence / reminders (FR-12) ---
+
+
+@mcp.tool()
+async def set_notification_pref(
+    token: str,
+    org_id: str,
+    user_id: str,
+    channel: str,
+    target: str,
+    enabled: bool = True,
+) -> dict[str, Any]:
+    """Set a user's per-channel notification preference."""
+    async with _tenant(token, org_id) as (s, org, user):
+        p = await notif_svc.set_pref(
+            s,
+            org_id=org,
+            actor_id=user,
+            user_id=uuid.UUID(user_id),
+            channel=NotificationChannelKind(channel),
+            enabled=enabled,
+            target=target,
+        )
+        return {"channel": p.channel.value, "enabled": p.enabled}
+
+
+@mcp.tool()
+async def dispatch_notifications(token: str, org_id: str) -> dict[str, Any]:
+    """Send pending notifications (per-item fault isolation)."""
+    async with _tenant(token, org_id) as (s, org, user):
+        r = await notif_svc.dispatch_pending(s, org_id=org, actor_id=user)
+        return {"sent": r.sent, "failed": r.failed}
+
+
+@mcp.tool()
+async def create_recurrence(
+    token: str,
+    org_id: str,
+    task_id: str,
+    freq: str,
+    next_run: str,
+    interval: int = 1,
+) -> dict[str, Any]:
+    """Make a task recurring (mutually exclusive with dependencies)."""
+    async with _tenant(token, org_id) as (s, org, user):
+        rec = await notif_svc.create_recurrence(
+            s,
+            org_id=org,
+            actor_id=user,
+            task_id=uuid.UUID(task_id),
+            freq=RecurrenceFreq(freq),
+            next_run=dt.datetime.fromisoformat(next_run),
+            interval=interval,
+        )
+        return {"task_id": str(rec.task_id), "freq": rec.freq.value}
+
+
+@mcp.tool()
+async def spawn_due_recurrences(
+    token: str, org_id: str, as_of: str | None = None
+) -> dict[str, Any]:
+    """Materialize due recurrences as independent task rows."""
+    async with _tenant(token, org_id) as (s, org, user):
+        n = await notif_svc.spawn_due(
+            s,
+            org_id=org,
+            actor_id=user,
+            now=dt.datetime.fromisoformat(as_of) if as_of else None,
+        )
+        return {"count": n}
+
+
+@mcp.tool()
+async def scan_reminders(token: str, org_id: str, within_days: int = 1) -> dict[str, Any]:
+    """Enqueue idempotent due-date reminders for assignees."""
+    async with _tenant(token, org_id) as (s, org, user):
+        n = await notif_svc.scan_reminders(s, org_id=org, actor_id=user, within_days=within_days)
+        return {"count": n}
