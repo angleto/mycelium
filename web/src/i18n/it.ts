@@ -281,6 +281,9 @@ export const it: Catalog = {
     collapseAll: 'Comprimi tutto',
     projectsN: 'Progetti ({{n}})',
     noProjects: 'Nessun progetto',
+    clientLabel: 'Cliente',
+    addProject: 'Aggiungi progetto',
+    rateOnClient: 'Tariffa e fatturabilita si impostano sul cliente.',
     f: {
       ragione_sociale: 'Ragione sociale',
       codice_fiscale: 'Codice fiscale',

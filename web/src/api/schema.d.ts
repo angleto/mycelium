@@ -2525,6 +2525,13 @@ export interface components {
              * @default true
              */
             default_billable: boolean;
+            /** Tariffa */
+            tariffa?: number | string | null;
+            /**
+             * Valuta
+             * @default EUR
+             */
+            valuta: string;
         };
         /** ClientOut */
         ClientOut: {
@@ -2565,6 +2572,10 @@ export interface components {
             description: string | null;
             /** Default Billable */
             default_billable: boolean;
+            /** Tariffa */
+            tariffa: string | null;
+            /** Valuta */
+            valuta: string;
         };
         /** ClientPatchIn */
         ClientPatchIn: {
@@ -2596,6 +2607,10 @@ export interface components {
             description?: string | null;
             /** Default Billable */
             default_billable?: boolean | null;
+            /** Tariffa */
+            tariffa?: number | string | null;
+            /** Valuta */
+            valuta?: string | null;
         };
         /** CommandIn */
         CommandIn: {
@@ -3722,13 +3737,6 @@ export interface components {
             name: string;
             /** Client Tag Id */
             client_tag_id?: string | null;
-            /** Tariffa */
-            tariffa?: number | string | null;
-            /**
-             * Valuta
-             * @default EUR
-             */
-            valuta: string;
             /** Budget */
             budget?: number | string | null;
             /** Color */
@@ -3751,10 +3759,6 @@ export interface components {
             version: number;
             /** Client Tag Id */
             client_tag_id: string | null;
-            /** Tariffa */
-            tariffa: string | null;
-            /** Valuta */
-            valuta: string;
             /** Budget */
             budget: string | null;
             /** Color */
@@ -3768,10 +3772,6 @@ export interface components {
             name?: string | null;
             /** Client Tag Id */
             client_tag_id?: string | null;
-            /** Tariffa */
-            tariffa?: number | string | null;
-            /** Valuta */
-            valuta?: string | null;
             /** Budget */
             budget?: number | string | null;
             /** Color */

@@ -85,7 +85,12 @@ export function ClientsProjectsRoute() {
     setErr(null)
     const { error } = await api.POST('/clients', {
       params: { header: workspaceHeader() },
-      body: { name: cName, ragione_sociale: cRag, default_billable: true },
+      body: {
+        name: cName,
+        ragione_sociale: cRag,
+        default_billable: true,
+        valuta: 'EUR',
+      },
     })
     if (error) return setErr(errMessage(error))
     setCName('')
@@ -98,11 +103,7 @@ export function ClientsProjectsRoute() {
     setErr(null)
     const { error } = await api.POST('/projects', {
       params: { header: workspaceHeader() },
-      body: {
-        name: pName,
-        client_tag_id: pClient || null,
-        valuta: 'EUR',
-      },
+      body: { name: pName, client_tag_id: pClient || null },
     })
     if (error) return setErr(errMessage(error))
     setPName('')
@@ -185,93 +186,96 @@ export function ClientsProjectsRoute() {
   // One project row, reused inside each client's nested list (no dup).
   const renderProject = (p: Project) => (
     <li key={p.id}>
-      <strong>{p.name}</strong>{' '}
-      {p.color && (
-        <span
-          className="swatch"
-          style={{ background: p.color }}
-          title={p.color}
-        />
-      )}{' '}
-      <span className="muted">
-        · {p.tariffa ? `${p.tariffa} ${p.valuta}` : t('cp.noRate')}
-        {p.status === 'archived' ? ` · ${t('cp.archived')}` : ''}
-      </span>
-      <button
-        type="button"
-        className="btn--ghost btn--sm"
-        onClick={() => setEditP(editP === p.id ? null : p.id)}
-      >
-        {t('cp.edit')}
-      </button>
-      <button
-        type="button"
-        className="btn--ghost btn--sm"
-        onClick={() => void setArchive(p.id, p.version, p.status !== 'archived')}
-      >
-        {p.status === 'archived' ? t('cp.unarchive') : t('cp.archive')}
-      </button>
+      <div className="cprow">
+        {p.color && (
+          <span
+            className="swatch"
+            style={{ background: p.color }}
+            title={p.color}
+          />
+        )}
+        <strong>{p.name}</strong>
+        <span className="muted">
+          {p.budget ? `· ${t('cp.budget')} ${p.budget}` : ''}
+          {p.status === 'archived' ? ` · ${t('cp.archived')}` : ''}
+        </span>
+        <span className="cprow__sp" />
+        <button
+          type="button"
+          className="btn--ghost btn--sm"
+          onClick={() => setEditP(editP === p.id ? null : p.id)}
+        >
+          {t('cp.edit')}
+        </button>
+        <button
+          type="button"
+          className="btn--ghost btn--sm"
+          onClick={() =>
+            void setArchive(p.id, p.version, p.status !== 'archived')
+          }
+        >
+          {p.status === 'archived' ? t('cp.unarchive') : t('cp.archive')}
+        </button>
+      </div>
       {editP === p.id && (
         <form
-          className="row"
-          style={{ flexWrap: 'wrap', marginTop: '0.4rem' }}
+          className="cpform"
           onSubmit={(e) => {
             e.preventDefault()
             const fd = new FormData(e.currentTarget)
             void saveProject(p, {
               name: fd.get('name'),
               client_tag_id: (fd.get('client_tag_id') as string) || null,
-              tariffa: (fd.get('tariffa') as string) || null,
-              valuta: (fd.get('valuta') as string) || 'EUR',
               budget: (fd.get('budget') as string) || null,
               color: (fd.get('color') as string) || null,
               description: (fd.get('description') as string) || null,
             })
           }}
         >
-          <input name="name" defaultValue={p.name} placeholder={t('cp.name')} />
-          <select name="client_tag_id" defaultValue={p.client_tag_id ?? defClient}>
-            {clients.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </select>
-          <input
-            name="tariffa"
-            type="number"
-            step="0.01"
-            defaultValue={p.tariffa ?? ''}
-            placeholder={t('cp.rate')}
-          />
-          <input
-            name="valuta"
-            defaultValue={p.valuta}
-            placeholder={t('cp.currency')}
-            style={{ width: '4rem' }}
-          />
-          <input
-            name="budget"
-            type="number"
-            step="0.01"
-            defaultValue={p.budget ?? ''}
-            placeholder={t('cp.budget')}
-          />
-          <input
-            name="color"
-            type="color"
-            defaultValue={p.color ?? '#888888'}
-            title={t('cp.color')}
-            style={{ width: '3rem', padding: 0 }}
-          />
-          <input
-            name="description"
-            defaultValue={p.description ?? ''}
-            placeholder={t('cp.description')}
-          />
-          <button type="submit" className="btn--sm">
-            {t('cp.save')}
-          </button>
+          <label>
+            {t('cp.name')}
+            <input name="name" defaultValue={p.name} />
+          </label>
+          <label>
+            {t('cp.clientLabel')}
+            <select
+              name="client_tag_id"
+              defaultValue={p.client_tag_id ?? defClient}
+            >
+              {clients.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            {t('cp.budget')}
+            <input
+              name="budget"
+              type="number"
+              step="0.01"
+              defaultValue={p.budget ?? ''}
+            />
+          </label>
+          <label>
+            {t('cp.color')}
+            <input
+              name="color"
+              type="color"
+              defaultValue={p.color ?? '#888888'}
+            />
+          </label>
+          <label className="cpform__wide">
+            {t('cp.description')}
+            <input name="description" defaultValue={p.description ?? ''} />
+          </label>
+          <div className="cpform__actions">
+            <button type="submit" className="btn--sm">
+              {t('cp.save')}
+            </button>
+            <span className="muted">{t('cp.rateOnClient')}</span>
+          </div>
         </form>
       )}
     </li>
@@ -325,74 +329,100 @@ export function ClientsProjectsRoute() {
           const projs = projectsOf(c.id)
           return (
           <li key={c.id}>
-            <button
-              type="button"
-              className="btn--ghost btn--sm"
-              aria-expanded={open}
-              onClick={() => toggleClient(c.id)}
-            >
-              {open ? '▾' : '▸'}
-            </button>{' '}
-            <strong>{c.name}</strong>{' '}
-            <span className="muted">
-              · {c.ragione_sociale} ·{' '}
-              {c.default_billable ? t('cp.billable') : t('cp.nonBillable')}
-              {' · '}
-              {t('cp.projectsN', { n: projs.length })}
-              {c.status === 'archived' ? ` · ${t('cp.archived')}` : ''}
-            </span>
-            <button
-              type="button"
-              className="btn--ghost btn--sm"
-              onClick={() => setEditC(editC === c.id ? null : c.id)}
-            >
-              {t('cp.edit')}
-            </button>
-            <button
-              type="button"
-              className="btn--ghost btn--sm"
-              onClick={() =>
-                void setArchive(c.id, c.version, c.status !== 'archived')
-              }
-            >
-              {c.status === 'archived' ? t('cp.unarchive') : t('cp.archive')}
-            </button>
+            <div className="cprow">
+              <button
+                type="button"
+                className="btn--ghost btn--sm cprow__toggle"
+                aria-expanded={open}
+                onClick={() => toggleClient(c.id)}
+              >
+                {open ? '▾' : '▸'}
+              </button>
+              <strong>{c.name}</strong>
+              <span className="muted">
+                · {c.ragione_sociale} ·{' '}
+                {c.tariffa ? `${c.tariffa} ${c.valuta}/h` : t('cp.noRate')} ·{' '}
+                {c.default_billable ? t('cp.billable') : t('cp.nonBillable')} ·{' '}
+                {t('cp.projectsN', { n: projs.length })}
+                {c.status === 'archived' ? ` · ${t('cp.archived')}` : ''}
+              </span>
+              <span className="cprow__sp" />
+              <button
+                type="button"
+                className="btn--ghost btn--sm"
+                onClick={() => setEditC(editC === c.id ? null : c.id)}
+              >
+                {t('cp.edit')}
+              </button>
+              <button
+                type="button"
+                className="btn--ghost btn--sm"
+                onClick={() =>
+                  void setArchive(c.id, c.version, c.status !== 'archived')
+                }
+              >
+                {c.status === 'archived' ? t('cp.unarchive') : t('cp.archive')}
+              </button>
+            </div>
             {editC === c.id && (
               <form
-                className="row"
-                style={{ flexWrap: 'wrap', marginTop: '0.4rem' }}
+                className="cpform"
                 onSubmit={(e) => {
                   e.preventDefault()
                   const fd = new FormData(e.currentTarget)
                   const patch: Record<string, unknown> = {
                     name: fd.get('name'),
                     default_billable: fd.get('default_billable') === 'on',
+                    tariffa: (fd.get('tariffa') as string) || null,
+                    valuta: (fd.get('valuta') as string) || 'EUR',
                   }
                   for (const f of CLIENT_FIELDS)
                     patch[f] = (fd.get(f) as string) || null
                   void saveClient(c, patch)
                 }}
               >
-                <input name="name" defaultValue={c.name} placeholder={t('cp.name')} />
-                {CLIENT_FIELDS.map((f) => (
-                  <input
-                    key={f}
-                    name={f}
-                    defaultValue={(c[f] as string | null) ?? ''}
-                    placeholder={t(`cp.f.${f}`)}
-                  />
-                ))}
                 <label>
+                  {t('cp.name')}
+                  <input name="name" defaultValue={c.name} />
+                </label>
+                <label>
+                  {t('cp.rate')}
+                  <input
+                    name="tariffa"
+                    type="number"
+                    step="0.01"
+                    defaultValue={c.tariffa ?? ''}
+                  />
+                </label>
+                <label>
+                  {t('cp.currency')}
+                  <input name="valuta" defaultValue={c.valuta} />
+                </label>
+                <label className="cpform__chk">
                   <input
                     type="checkbox"
                     name="default_billable"
                     defaultChecked={c.default_billable}
-                  />{' '}
+                  />
                   {t('cp.defaultBillable')}
                 </label>
-                <button type="submit" className="btn--sm">
-                  {t('cp.save')}
-                </button>
+                {CLIENT_FIELDS.map((f) => (
+                  <label
+                    key={f}
+                    className={f === 'description' ? 'cpform__wide' : ''}
+                  >
+                    {t(`cp.f.${f}`)}
+                    <input
+                      name={f}
+                      defaultValue={(c[f] as string | null) ?? ''}
+                    />
+                  </label>
+                ))}
+                <div className="cpform__actions">
+                  <button type="submit" className="btn--sm">
+                    {t('cp.save')}
+                  </button>
+                </div>
               </form>
             )}
             {open && (
@@ -409,12 +439,13 @@ export function ClientsProjectsRoute() {
         })}
       </ul>
 
-      <h2>{t('cp.projects')}</h2>
-      <div className="row">
+      <h2>{t('cp.addProject')}</h2>
+      <div className="cprow">
         <input
           placeholder={t('cp.name')}
           value={pName}
           onChange={(e) => setPName(e.target.value)}
+          style={{ minWidth: '14rem' }}
         />
         <select value={pClient} onChange={(e) => setPClient(e.target.value)}>
           {clients.map((c) => (

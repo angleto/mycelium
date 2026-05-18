@@ -590,6 +590,66 @@ button.btn--danger:hover {
   margin-left: auto; /* group actions to the right of row 2 */
 }
 
+/* ---- clients & projects: aligned rows + a real form grid ---- */
+.cprow {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.cprow__toggle {
+  flex: 0 0 auto;
+  width: 1.6rem;
+}
+.cprow__sp {
+  flex: 1 1 auto;
+}
+.cpform {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+  gap: 0.6rem 0.9rem;
+  margin: 0.6rem 0 0.2rem;
+  padding: 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-2);
+}
+.cpform label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+.cpform label input,
+.cpform label select {
+  width: 100%;
+}
+.cpform input[type='color'] {
+  height: 2.1rem;
+  padding: 0.1rem;
+}
+.cpform__chk {
+  flex-direction: row !important;
+  align-items: center;
+  gap: 0.4rem;
+  align-self: end;
+  font-size: 0.85rem;
+  color: var(--text);
+}
+.cpform__chk input {
+  width: auto !important;
+}
+.cpform__wide {
+  grid-column: 1 / -1;
+}
+.cpform__actions {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
 .list.nested {
   margin: 0.35rem 0 0.5rem 1.3rem;
   padding-left: 0.7rem;

@@ -282,6 +282,9 @@ export const en = {
     collapseAll: 'Collapse all',
     projectsN: 'Projects ({{n}})',
     noProjects: 'No projects',
+    clientLabel: 'Client',
+    addProject: 'Add project',
+    rateOnClient: 'Rate & billable are set on the client.',
     f: {
       ragione_sociale: 'Legal name',
       codice_fiscale: 'Tax code',
