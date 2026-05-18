@@ -591,6 +591,8 @@ export const en = {
     convertedShort: 'Converted',
     converted: 'Task created from note',
     meteredNote: 'Conversation replies use the LLM (metered); transcription needs a provider.',
+    focusOn:
+      'Focus active (set in the sidebar): showing {{shown}} of {{total}} notes for the focused client/project.',
     newNote: 'New note',
     close: 'Close',
     allProjects: 'All projects',

@@ -416,6 +416,14 @@ export function NotesRoute() {
       </div>
 
       <h2>{t('notes.yours')}</h2>
+      {focusActive && (
+        <p className="banner">
+          {t('notes.focusOn', {
+            shown: shownNotes.length,
+            total: notes.length,
+          })}
+        </p>
+      )}
       {shownNotes.length === 0 ? (
         <p className="hint">{t('notes.none')}</p>
       ) : (

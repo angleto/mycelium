@@ -590,6 +590,8 @@ export const it: Catalog = {
     convertedShort: 'Convertito',
     converted: 'Task creato dalla nota',
     meteredNote: 'Le risposte di conversazione usano il LLM (a consumo); la trascrizione richiede un provider.',
+    focusOn:
+      'Focus attivo (impostato nella sidebar): mostro {{shown}} di {{total}} note del cliente/progetto in focus.',
     newNote: 'Nuova nota',
     close: 'Chiudi',
     allProjects: 'Tutti i progetti',
