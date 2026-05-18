@@ -462,3 +462,87 @@ button.btn--ghost {
 .md a.chip {
   text-decoration: none;
 }
+
+/* ---- WYSIWYG (TipTap) ---- */
+.rte .ProseMirror {
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 0.55rem 0.7rem;
+  min-height: 7rem;
+  background: var(--surface);
+  outline: none;
+}
+.rte .ProseMirror:focus-within {
+  border-color: var(--accent);
+}
+.rte .ProseMirror p {
+  margin: 0 0 0.5rem;
+}
+.rte .ProseMirror a {
+  color: var(--accent);
+}
+.rte .ProseMirror code {
+  font-family: var(--mono);
+  background: var(--surface-2);
+  padding: 0.1rem 0.3rem;
+  border-radius: 4px;
+}
+.mention-pop {
+  position: fixed;
+  z-index: 1000;
+  min-width: 14rem;
+  max-height: 15rem;
+  overflow: auto;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+  padding: 0.25rem;
+  font-size: 0.85rem;
+}
+.mention-pop__row {
+  padding: 0.35rem 0.5rem;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.mention-pop__row--sel,
+.mention-pop__row:hover {
+  background: var(--accent-weak);
+  color: var(--accent);
+}
+
+/* ---- quick add + task rows ---- */
+.quickadd {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin: 0.5rem 0 0.75rem;
+}
+.quickadd__title {
+  flex: 1;
+  min-width: 14rem;
+}
+.tasklist .taskrow {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+.taskrow__title {
+  flex: 1;
+  min-width: 0;
+  font-weight: 600;
+  color: var(--text-h);
+}
+.taskrow__title:hover {
+  color: var(--accent);
+}
+.taskrow__meta {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-left: auto;
+}
+.chip.prio {
+  font-variant-numeric: tabular-nums;
+}

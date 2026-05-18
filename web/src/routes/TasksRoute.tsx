@@ -4,21 +4,24 @@ import { useTranslation } from 'react-i18next'
 import { api, errMessage, workspaceHeader } from '../api/client'
 import { useSession } from '../auth/useSession'
 import { TagChip } from '../components/TagChip'
+import { PriorityChip } from '../components/PriorityChip'
 import type { components } from '../api/schema'
 
 type Task = components['schemas']['TaskOut']
 type Tag = components['schemas']['TagOut']
 type Running = components['schemas']['TimeEntryOut']
 
+const SCALE = [1, 2, 3, 4, 5]
+
 function hms(sec: number): string {
   const s = Math.max(0, Math.floor(sec))
   return `${Math.floor(s / 3600)}:${String(Math.floor((s % 3600) / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`
 }
 
-// Tasks as the central productivity surface (Todoist/Toggl-like):
-// quick add, colored tag filter, and an inline start/stop timer per
-// row so you never leave to track time. The running timer is polled
-// (no WS endpoint in v1) so a timer started elsewhere shows here too.
+// Tasks surface: quick-add with the Eisenhower inputs (importance/
+// urgency default 4 -> score 16 -> P1) and client/project pickers with
+// inline create; rows are title-left / actions-right with a colored
+// priority chip and a clock-play/clock-stop timer.
 export function TasksRoute() {
   const { t } = useTranslation()
   const session = useSession()
@@ -27,18 +30,27 @@ export function TasksRoute() {
   const [tags, setTags] = useState<Tag[]>([])
   const [filter, setFilter] = useState('')
   const [title, setTitle] = useState('')
+  const [importance, setImportance] = useState(4)
+  const [urgency, setUrgency] = useState(4)
+  const [clientId, setClientId] = useState('')
+  const [projectId, setProjectId] = useState('')
+  const [addCli, setAddCli] = useState(false)
+  const [addProj, setAddProj] = useState(false)
+  const [cName, setCName] = useState('')
+  const [cLegal, setCLegal] = useState('')
+  const [pName, setPName] = useState('')
   const [running, setRunning] = useState<Running | null>(null)
   const [now, setNow] = useState<number>(() => Date.now())
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
 
+  const clients = tags.filter((x) => x.kind === 'client')
+  const projects = tags.filter((x) => x.kind === 'project')
+
   const loadTasks = useCallback(async () => {
     setErr(null)
     const { data, error } = await api.GET('/tasks', {
-      params: {
-        header: workspaceHeader(),
-        query: filter ? { tag_id: filter } : {},
-      },
+      params: { header: workspaceHeader(), query: filter ? { tag_id: filter } : {} },
     })
     if (error || !data) {
       setErr(errMessage(error))
@@ -46,6 +58,11 @@ export function TasksRoute() {
     }
     setTasks(data)
   }, [filter])
+
+  const loadTags = useCallback(async () => {
+    const { data } = await api.GET('/tags', { params: { header: workspaceHeader() } })
+    if (data) setTags(data)
+  }, [])
 
   useEffect(() => {
     let active = true
@@ -91,7 +108,17 @@ export function TasksRoute() {
     setErr(null)
     const { error } = await api.POST('/tasks', {
       params: { header: workspaceHeader() },
-      body: { title, priority: 3, executor_kind: 'human', necessity: 'should' },
+      body: {
+        title,
+        // priority is required by the schema but the backend derives it
+        // from importance x urgency when both are provided.
+        priority: 3,
+        importance,
+        urgency,
+        executor_kind: 'human',
+        necessity: 'should',
+        tag_ids: projectId ? [projectId] : [],
+      },
     })
     setBusy(false)
     if (error) {
@@ -102,19 +129,50 @@ export function TasksRoute() {
     await loadTasks()
   }
 
+  async function onAddClient() {
+    if (!cName) return
+    setErr(null)
+    const { data, error } = await api.POST('/clients', {
+      params: { header: workspaceHeader() },
+      body: { name: cName, ragione_sociale: cLegal || cName },
+    })
+    if (error || !data) {
+      setErr(errMessage(error))
+      return
+    }
+    setCName('')
+    setCLegal('')
+    setAddCli(false)
+    await loadTags()
+    setClientId(data.id)
+  }
+
+  async function onAddProject() {
+    if (!pName) return
+    setErr(null)
+    const { data, error } = await api.POST('/projects', {
+      params: { header: workspaceHeader() },
+      body: { name: pName, client_tag_id: clientId || null, valuta: 'EUR' },
+    })
+    if (error || !data) {
+      setErr(errMessage(error))
+      return
+    }
+    setPName('')
+    setAddProj(false)
+    await loadTags()
+    setProjectId(data.id)
+  }
+
   async function toggleTimer(taskId: string) {
     setErr(null)
     const onThis = running?.task_id === taskId
-    const call = onThis
-      ? api.POST('/time/stop', {
-          params: { header: workspaceHeader() },
-          body: {},
-        })
-      : api.POST('/time/start', {
+    const { error } = onThis
+      ? await api.POST('/time/stop', { params: { header: workspaceHeader() }, body: {} })
+      : await api.POST('/time/start', {
           params: { header: workspaceHeader() },
           body: { task_id: taskId, billable: true },
         })
-    const { error } = await call
     if (error) {
       setErr(errMessage(error))
       return
@@ -131,18 +189,109 @@ export function TasksRoute() {
     <section className="card">
       <h1>{t('tasks.title')}</h1>
 
-      <form onSubmit={(e) => void onCreate(e)} className="row">
+      <form onSubmit={(e) => void onCreate(e)} className="quickadd">
         <input
           required
           placeholder={t('tasks.quickAdd')}
           value={title}
           onChange={(e) => setTitle(e.target.value)}
-          style={{ flex: 1, minWidth: '14rem' }}
+          className="quickadd__title"
         />
+        <label>
+          {t('tasks.importance')}
+          <select
+            value={importance}
+            onChange={(e) => setImportance(Number(e.target.value))}
+          >
+            {SCALE.map((n) => (
+              <option key={n} value={n}>
+                {n}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          {t('tasks.urgency')}
+          <select value={urgency} onChange={(e) => setUrgency(Number(e.target.value))}>
+            {SCALE.map((n) => (
+              <option key={n} value={n}>
+                {n}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          {t('tasks.client')}
+          <select value={clientId} onChange={(e) => setClientId(e.target.value)}>
+            <option value="">{t('tasks.noClient')}</option>
+            {clients.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <button
+          type="button"
+          className="btn--ghost btn--sm"
+          onClick={() => setAddCli((v) => !v)}
+          title={t('tasks.addClient')}
+        >
+          +
+        </button>
+        <label>
+          {t('tasks.project')}
+          <select value={projectId} onChange={(e) => setProjectId(e.target.value)}>
+            <option value="">{t('tasks.noProject')}</option>
+            {projects.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <button
+          type="button"
+          className="btn--ghost btn--sm"
+          onClick={() => setAddProj((v) => !v)}
+          title={t('tasks.addProject')}
+        >
+          +
+        </button>
         <button type="submit" disabled={busy}>
           {busy ? t('tasks.saving') : t('tasks.create')}
         </button>
       </form>
+
+      {addCli && (
+        <div className="row">
+          <input
+            placeholder={t('tasks.newClientName')}
+            value={cName}
+            onChange={(e) => setCName(e.target.value)}
+          />
+          <input
+            placeholder={t('tasks.legalName')}
+            value={cLegal}
+            onChange={(e) => setCLegal(e.target.value)}
+          />
+          <button type="button" className="btn--sm" onClick={() => void onAddClient()}>
+            {t('tasks.addInline')}
+          </button>
+        </div>
+      )}
+      {addProj && (
+        <div className="row">
+          <input
+            placeholder={t('tasks.newProjectName')}
+            value={pName}
+            onChange={(e) => setPName(e.target.value)}
+          />
+          <button type="button" className="btn--sm" onClick={() => void onAddProject()}>
+            {t('tasks.addInline')}
+          </button>
+        </div>
+      )}
 
       <div className="row">
         <label>
@@ -156,128 +305,47 @@ export function TasksRoute() {
             ))}
           </select>
         </label>
-        {activeTag && <TagChip name={activeTag.name} color={activeTag.color} kind={activeTag.kind} />}
+        {activeTag && (
+          <TagChip name={activeTag.name} color={activeTag.color} kind={activeTag.kind} />
+        )}
       </div>
 
       {err && <p className="err">{err}</p>}
       {tasks.length === 0 ? (
         <p className="hint">{t('tasks.none')}</p>
       ) : (
-        <ul className="list">
+        <ul className="list tasklist">
           {tasks.map((tk) => {
             const onThis = running?.task_id === tk.id
             const elapsed = onThis
               ? (now - new Date(running.started_at).getTime()) / 1000
               : 0
+            const score =
+              tk.importance != null && tk.urgency != null
+                ? tk.importance * tk.urgency
+                : null
             return (
-              <li key={tk.id}>
-                <button
-                  type="button"
-                  className={onThis ? 'btn--sm' : 'btn--ghost btn--sm'}
-                  onClick={() => void toggleTimer(tk.id)}
-                  title={onThis ? t('tasks.stop') : t('tasks.start')}
-                >
-                  {onThis ? `■ ${hms(elapsed)}` : '▶'}
-                </button>
-                <Link to={`/tasks/${tk.id}`} style={{ fontWeight: 600 }}>
+              <li key={tk.id} className="taskrow">
+                <Link to={`/tasks/${tk.id}`} className="taskrow__title">
                   {tk.title}
                 </Link>
-                <span className="muted">
-                  {tk.state} · P{tk.priority}
-                  {onThis ? ` · ${t('tasks.running')}` : ''}
+                <span className="taskrow__meta">
+                  <span className="muted">{tk.state}</span>
+                  <PriorityChip priority={tk.priority} score={score} />
+                  <button
+                    type="button"
+                    className={onThis ? 'btn--sm' : 'btn--ghost btn--sm'}
+                    onClick={() => void toggleTimer(tk.id)}
+                    title={onThis ? t('tasks.stop') : t('tasks.start')}
+                  >
+                    {onThis ? `⏱■ ${hms(elapsed)}` : '⏱▶'}
+                  </button>
                 </span>
               </li>
             )
           })}
         </ul>
       )}
-
-      <TaxonomyPanel tags={tags} onChanged={() => void loadTasks()} />
     </section>
-  )
-}
-
-function TaxonomyPanel({ tags, onChanged }: { tags: Tag[]; onChanged: () => void }) {
-  const { t } = useTranslation()
-  const [clientName, setClientName] = useState('')
-  const [ragione, setRagione] = useState('')
-  const [projName, setProjName] = useState('')
-  const [clientTag, setClientTag] = useState('')
-  const [err, setErr] = useState<string | null>(null)
-  const clients = tags.filter((x) => x.kind === 'client')
-
-  async function add<T>(p: Promise<{ error?: T }>, reset: () => void) {
-    const { error } = await p
-    if (error) {
-      setErr(errMessage(error))
-      return
-    }
-    setErr(null)
-    reset()
-    onChanged()
-  }
-
-  return (
-    <div className="taxonomy">
-      <h2>{t('tasks.taxonomy')}</h2>
-      {err && <p className="err">{err}</p>}
-      <form
-        onSubmit={(e) => {
-          e.preventDefault()
-          void add(
-            api.POST('/clients', {
-              params: { header: workspaceHeader() },
-              body: { name: clientName, ragione_sociale: ragione },
-            }),
-            () => {
-              setClientName('')
-              setRagione('')
-            },
-          )
-        }}
-      >
-        <input
-          required
-          placeholder={t('tasks.clientName')}
-          value={clientName}
-          onChange={(e) => setClientName(e.target.value)}
-        />
-        <input
-          required
-          placeholder={t('tasks.ragioneSociale')}
-          value={ragione}
-          onChange={(e) => setRagione(e.target.value)}
-        />
-        <button type="submit">{t('tasks.addClient')}</button>
-      </form>
-      <form
-        onSubmit={(e) => {
-          e.preventDefault()
-          void add(
-            api.POST('/projects', {
-              params: { header: workspaceHeader() },
-              body: { name: projName, client_tag_id: clientTag || null, valuta: 'EUR' },
-            }),
-            () => setProjName(''),
-          )
-        }}
-      >
-        <input
-          required
-          placeholder={t('tasks.projectName')}
-          value={projName}
-          onChange={(e) => setProjName(e.target.value)}
-        />
-        <select value={clientTag} onChange={(e) => setClientTag(e.target.value)}>
-          <option value="">{t('tasks.all')}</option>
-          {clients.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.name}
-            </option>
-          ))}
-        </select>
-        <button type="submit">{t('tasks.addProject')}</button>
-      </form>
-    </div>
   )
 }

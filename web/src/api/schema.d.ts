@@ -3434,6 +3434,10 @@ export interface components {
              * @default 3
              */
             priority: number;
+            /** Importance */
+            importance?: number | null;
+            /** Urgency */
+            urgency?: number | null;
             /** Start Date */
             start_date?: string | null;
             /** Due Date */
@@ -3487,6 +3491,10 @@ export interface components {
             state: string;
             /** Priority */
             priority: number;
+            /** Importance */
+            importance: number | null;
+            /** Urgency */
+            urgency: number | null;
             /** Start Date */
             start_date: string | null;
             /** Due Date */
@@ -3516,6 +3524,10 @@ export interface components {
             description?: string | null;
             /** Priority */
             priority?: number | null;
+            /** Importance */
+            importance?: number | null;
+            /** Urgency */
+            urgency?: number | null;
             /** Start Date */
             start_date?: string | null;
             /** Due Date */

@@ -3,6 +3,16 @@ import { Link, useParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { api, errMessage, workspaceHeader } from '../api/client'
 import { RichEditor } from '../components/RichEditor'
+import { PriorityChip } from '../components/PriorityChip'
+
+const SCALE = [1, 2, 3, 4, 5]
+function derivePriority(imp: number, urg: number): number {
+  const s = imp * urg
+  if (s >= 16) return 1
+  if (s >= 9) return 2
+  if (s >= 4) return 3
+  return 4
+}
 import type { components } from '../api/schema'
 
 type Task = components['schemas']['TaskOut']
@@ -20,7 +30,8 @@ export function TaskDetailRoute() {
   const [tags, setTags] = useState<Tag[]>([])
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
-  const [priority, setPriority] = useState(3)
+  const [importance, setImportance] = useState(4)
+  const [urgency, setUrgency] = useState(4)
   const [stateId, setStateId] = useState('')
   const [tagId, setTagId] = useState('')
   const [allTasks, setAllTasks] = useState<Task[]>([])
@@ -35,7 +46,8 @@ export function TaskDetailRoute() {
     setTask(tk)
     setTitle(tk.title)
     setDescription(tk.description ?? '')
-    setPriority(tk.priority)
+    setImportance(tk.importance ?? 4)
+    setUrgency(tk.urgency ?? 4)
     setStateId(tk.state_id)
   }, [])
 
@@ -96,7 +108,8 @@ export function TaskDetailRoute() {
         expected_version: task.version,
         title,
         description: description || null,
-        priority,
+        importance,
+        urgency,
       },
     })
     setBusy(false)
@@ -206,16 +219,38 @@ export function TaskDetailRoute() {
           {t('tasks.description')}
           <RichEditor value={description} onChange={setDescription} />
         </label>
-        <label>
-          {t('tasks.priority')}
-          <input
-            type="number"
-            min={1}
-            max={5}
-            value={priority}
-            onChange={(e) => setPriority(Number(e.target.value))}
+        <div className="row">
+          <label>
+            {t('tasks.importance')}
+            <select
+              value={importance}
+              onChange={(e) => setImportance(Number(e.target.value))}
+            >
+              {SCALE.map((n) => (
+                <option key={n} value={n}>
+                  {n}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            {t('tasks.urgency')}
+            <select
+              value={urgency}
+              onChange={(e) => setUrgency(Number(e.target.value))}
+            >
+              {SCALE.map((n) => (
+                <option key={n} value={n}>
+                  {n}
+                </option>
+              ))}
+            </select>
+          </label>
+          <PriorityChip
+            priority={derivePriority(importance, urgency)}
+            score={importance * urgency}
           />
-        </label>
+        </div>
         {msg && <p className="ok">{msg}</p>}
         {err && <p className="err">{err}</p>}
         <button type="submit" disabled={busy}>
