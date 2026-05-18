@@ -251,7 +251,7 @@ export const it: Catalog = {
     saved: 'Salvato.',
     noClient: '— nessun cliente —',
     noRate: 'nessuna tariffa',
-    rate: 'Tariffa',
+    rate: 'Tariffa oraria',
     currency: 'Val.',
     budget: 'Budget',
     billable: 'fatturabile',

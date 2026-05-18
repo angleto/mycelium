@@ -252,7 +252,7 @@ export const en = {
     saved: 'Saved.',
     noClient: '— no client —',
     noRate: 'no rate',
-    rate: 'Rate',
+    rate: 'Hourly rate',
     currency: 'Cur.',
     budget: 'Budget',
     billable: 'billable',

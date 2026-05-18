@@ -32,6 +32,8 @@ class ProjectProfile(OrgScopedMixin, TimestampMixin, VersionMixin, Base):
         nullable=True,
         index=True,
     )
+    # Hourly rate: billed amount = duration_seconds / 3600 * tariffa
+    # (see time_tracking._amount).
     tariffa: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
     valuta: Mapped[str] = mapped_column(String(3), nullable=False, server_default="EUR")
     # Automatic project property: its tasks are billable unless a task
