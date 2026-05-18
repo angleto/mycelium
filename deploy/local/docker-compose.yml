@@ -1,5 +1,5 @@
 # F0 development infra. Multi-arch images (arm64 supported).
-# `docker compose -f deploy/docker-compose.yml up -d`
+# `docker compose -f deploy/local/docker-compose.yml up -d`
 # pgvector and pg_trgm are enabled by the baseline Alembic migration.
 
 name: flow

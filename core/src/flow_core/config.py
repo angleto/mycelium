@@ -65,9 +65,19 @@ class Settings(BaseSettings):
     # Base URL the verification/reset links point at (the SPA).
     frontend_base_url: str = "http://localhost:5173"
 
+    # CORS. Comma-separated allowed origins for the browser SPA when it
+    # is served from a different origin than the API (production splits
+    # flow.leto.blue → SPA and api.flow.leto.blue → API). Empty disables
+    # the middleware (same-origin dev/proxy needs no CORS).
+    cors_origins: str = "http://localhost:5173"
+
     # App
     env: str = "dev"
     log_level: str = "INFO"
+
+    @property
+    def cors_origin_list(self) -> list[str]:
+        return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
 
 
 @lru_cache(maxsize=1)

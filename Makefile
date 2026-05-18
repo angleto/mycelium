@@ -17,19 +17,19 @@ test:
 	uv run pytest
 
 up:
-	docker compose -f deploy/docker-compose.yml up -d
+	docker compose -f deploy/local/docker-compose.yml up -d
 
 down:
-	docker compose -f deploy/docker-compose.yml down
+	docker compose -f deploy/local/docker-compose.yml down
 
 # Create/ensure the runtime role flow_app and set its password from
 # FLOW_DB_APP_PASSWORD (env). Run after `up`, before `migrate`.
 db-bootstrap:
-	docker compose -f deploy/docker-compose.yml exec -T \
+	docker compose -f deploy/local/docker-compose.yml exec -T \
 	  -e PGPASSWORD=$${POSTGRES_PASSWORD:-flow} db \
 	  psql -v ON_ERROR_STOP=1 -U $${POSTGRES_USER:-flow} -d $${POSTGRES_DB:-flow} \
 	  -v app_pw="$${FLOW_DB_APP_PASSWORD:?set FLOW_DB_APP_PASSWORD}" \
-	  -f - < deploy/bootstrap_roles.sql
+	  -f - < deploy/local/bootstrap_roles.sql
 
 migrate:
 	uv run alembic -c core/alembic.ini upgrade head

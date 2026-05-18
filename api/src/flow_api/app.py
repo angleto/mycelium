@@ -7,6 +7,7 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 
 from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
 from starlette.responses import JSONResponse, Response
 
 from flow_api.routers import (
@@ -30,6 +31,7 @@ from flow_api.routers import (
     workflows,
     workspace,
 )
+from flow_core.config import get_settings
 from flow_core.errors import (
     AuthError,
     ConflictError,
@@ -78,6 +80,19 @@ def create_app() -> FastAPI:
 
     for exc_type, status in _STATUS.items():
         app.add_exception_handler(exc_type, _make_handler(status))
+
+    # Cross-origin SPA (production serves the SPA and the API on
+    # different hosts: flow.leto.blue vs api.flow.leto.blue). Enabled
+    # only when origins are configured (FLOW_CORS_ORIGINS).
+    origins = get_settings().cors_origin_list
+    if origins:
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=origins,
+            allow_credentials=True,
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
 
     app.include_router(auth.router)
     app.include_router(mfa.router)

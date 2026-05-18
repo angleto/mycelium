@@ -29,7 +29,7 @@ make it non-trivial:
   org; no RLS bypass scattered through the code.
 - The role is created (without a password) by the baseline migration
   for schema idempotency; the `flow_app` password is set by a separate
-  bootstrap (`deploy/bootstrap_roles.sql`) from an environment
+  bootstrap (`deploy/local/bootstrap_roles.sql`) from an environment
   variable: no secret in git.
 
 ## Consequences
