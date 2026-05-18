@@ -7,6 +7,8 @@ import { VerifyEmailRoute } from './routes/VerifyEmailRoute'
 import { ForgotPasswordRoute } from './routes/ForgotPasswordRoute'
 import { ResetPasswordRoute } from './routes/ResetPasswordRoute'
 import { HomeRoute } from './routes/HomeRoute'
+import { TasksRoute } from './routes/TasksRoute'
+import { TaskDetailRoute } from './routes/TaskDetailRoute'
 import { SettingsRoute } from './routes/SettingsRoute'
 
 function App() {
@@ -21,6 +23,8 @@ function App() {
         <Route element={<RequireAuth />}>
           <Route element={<AppShell />}>
             <Route path="/" element={<HomeRoute />} />
+            <Route path="/tasks" element={<TasksRoute />} />
+            <Route path="/tasks/:id" element={<TaskDetailRoute />} />
             <Route path="/settings" element={<SettingsRoute />} />
           </Route>
         </Route>
