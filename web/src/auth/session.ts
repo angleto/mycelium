@@ -58,6 +58,22 @@ export function clearSession(): void {
   emit()
 }
 
+// The JWT 'sub' (user id). Read-only client decode (no verification:
+// the server enforces it); used where an endpoint needs the user id
+// and there is no /auth/me.
+export function currentUserId(): string | null {
+  const s = cache
+  if (!s) return null
+  try {
+    const part = s.token.split('.')[1]
+    const json = atob(part.replace(/-/g, '+').replace(/_/g, '/'))
+    const claims = JSON.parse(json) as { sub?: unknown }
+    return typeof claims.sub === 'string' ? claims.sub : null
+  } catch {
+    return null
+  }
+}
+
 export function subscribe(l: Listener): () => void {
   listeners.add(l)
   return () => {
