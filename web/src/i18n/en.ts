@@ -156,6 +156,7 @@ export const en = {
     save: 'Save',
     saving: 'Saving...',
     saved: 'Saved.',
+    unsaved: 'Unsaved changes',
     conflict: 'The task changed meanwhile; reloaded the current version.',
     tagsTitle: 'Tags',
     addTag: 'Add tag',

@@ -155,6 +155,7 @@ export const it: Catalog = {
     save: 'Salva',
     saving: 'Salvataggio...',
     saved: 'Salvato.',
+    unsaved: 'Modifiche non salvate',
     conflict: 'Il task e cambiato nel frattempo; ricaricata la versione corrente.',
     tagsTitle: 'Tag',
     addTag: 'Aggiungi tag',

@@ -118,8 +118,6 @@ export function TaskDetailRoute() {
         expected_version: task.version,
         title,
         description: description || null,
-        estimate_effort_h: estimate.trim() ? estimate.trim() : null,
-        due_date: due || null,
       },
     })
     setBusy(false)
@@ -165,34 +163,43 @@ export function TaskDetailRoute() {
     navigate('/tasks')
   }
 
-  // Auto-save (no Save button): importance/urgency changes patch
-  // immediately; the backend re-derives priority.
-  async function autosaveIU(body: { importance?: number; urgency?: number }) {
+  // Auto-save (no Save button) for the non-text fields: importance/
+  // urgency (backend re-derives priority), estimate, due. On success
+  // we only bump the local version — never reload(), which would
+  // clobber an unsaved title/description edit.
+  async function autosave(patch: Record<string, unknown>) {
     if (!task) return
     setErr(null)
-    const { error, response } = await api.PATCH('/tasks/{task_id}', {
+    const { data, error, response } = await api.PATCH('/tasks/{task_id}', {
       params: { header: workspaceHeader(), path: { task_id: id } },
-      body: { expected_version: task.version, ...body },
+      body: { expected_version: task.version, ...patch },
     })
     if (response.status === 409) {
       setErr(t('tasks.conflict'))
       await reload()
       return
     }
-    if (error) {
+    if (error || !data) {
       setErr(errMessage(error))
       return
     }
-    await reload()
+    setTask((p) => (p ? { ...p, version: data.version } : p))
   }
 
   function onImp(n: number) {
     setImportance(n)
-    void autosaveIU({ importance: n, urgency })
+    void autosave({ importance: n, urgency })
   }
   function onUrg(n: number) {
     setUrgency(n)
-    void autosaveIU({ importance, urgency: n })
+    void autosave({ importance, urgency: n })
+  }
+  function onDue(v: string) {
+    setDue(v)
+    void autosave({ due_date: v || null })
+  }
+  function commitEstimate(v: string) {
+    void autosave({ estimate_effort_h: v.trim() ? v.trim() : null })
   }
 
   async function onChangeState(sid: string) {
@@ -271,6 +278,10 @@ export function TaskDetailRoute() {
   if (err && !task) return <p className="err">{err}</p>
   if (!task) return <p>{t('tasks.loading')}</p>
 
+  // Only title/description go through Save; everything else autosaves.
+  const dirty =
+    title !== task.title || description !== (task.description ?? '')
+
   return (
     <section className="card">
       <p className="hint">
@@ -297,6 +308,12 @@ export function TaskDetailRoute() {
           <RichEditor value={description} onChange={setDescription} />
         </label>
         <div className="row">
+          <button type="submit" disabled={busy || !dirty}>
+            {busy ? t('tasks.saving') : t('tasks.save')}
+          </button>
+          {dirty && <span className="muted">{t('tasks.unsaved')}</span>}
+        </div>
+        <div className="row">
           <label>
             {t('tasks.importance')}
             <ScaleSelect value={importance} onChange={onImp} labelsKey="tasks.impLabels" />
@@ -315,7 +332,7 @@ export function TaskDetailRoute() {
           <input
             type="date"
             value={due}
-            onChange={(e) => setDue(e.target.value)}
+            onChange={(e) => onDue(e.target.value)}
           />
         </label>
         {(() => {
@@ -340,11 +357,13 @@ export function TaskDetailRoute() {
                     if (v === '') {
                       setEstimate('')
                       setEstCustom(false)
+                      commitEstimate('')
                     } else if (v === 'custom') {
                       setEstCustom(true)
                     } else {
                       setEstimate(v)
                       setEstCustom(false)
+                      commitEstimate(v)
                     }
                   }}
                 >
@@ -364,6 +383,7 @@ export function TaskDetailRoute() {
                     placeholder={t('tasks.estPlaceholder')}
                     value={estimate}
                     onChange={(e) => setEstimate(e.target.value)}
+                    onBlur={(e) => commitEstimate(e.target.value)}
                   />
                 )}
               </span>
@@ -373,9 +393,6 @@ export function TaskDetailRoute() {
         {msg && <p className="ok">{msg}</p>}
         {err && <p className="err">{err}</p>}
         <div className="row">
-          <button type="submit" disabled={busy}>
-            {busy ? t('tasks.saving') : t('tasks.save')}
-          </button>
           <button
             type="button"
             className="btn--ghost btn--sm"
