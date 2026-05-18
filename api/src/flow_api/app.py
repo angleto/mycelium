@@ -20,6 +20,7 @@ from flow_api.routers import (
     events,
     invoices,
     memory,
+    mfa,
     notes,
     notifications,
     schedule,
@@ -79,6 +80,7 @@ def create_app() -> FastAPI:
         app.add_exception_handler(exc_type, _make_handler(status))
 
     app.include_router(auth.router)
+    app.include_router(mfa.router)
     app.include_router(workspace.router)
     app.include_router(tags.router)
     app.include_router(tasks.router)

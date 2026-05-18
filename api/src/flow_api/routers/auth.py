@@ -16,6 +16,7 @@ from flow_api.deps import current_claims
 from flow_api.schemas import (
     EmailIn,
     LoginIn,
+    LoginMfaIn,
     ResetPasswordIn,
     SignupIn,
     SignupOut,
@@ -25,6 +26,7 @@ from flow_api.schemas import (
 from flow_core.db import admin_session
 from flow_core.services.auth import (
     login,
+    login_mfa,
     request_password_reset,
     resend_verification,
     reset_password,
@@ -60,6 +62,20 @@ async def signup_endpoint(body: SignupIn) -> SignupOut:
 async def login_endpoint(body: LoginIn) -> TokenOut:
     async with admin_session() as session:
         token = await login(session, email=body.email, password=body.password)
+    return TokenOut(token=token)
+
+
+@router.post("/login-mfa", response_model=TokenOut)
+async def login_mfa_endpoint(body: LoginMfaIn) -> TokenOut:
+    """Combined password + TOTP/backup-code login. Use once /auth/login
+    has answered 401 auth.mfa_required."""
+    async with admin_session() as session:
+        token = await login_mfa(
+            session,
+            email=body.email,
+            password=body.password,
+            totp_code=body.totp_code,
+        )
     return TokenOut(token=token)
 
 

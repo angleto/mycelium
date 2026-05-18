@@ -75,6 +75,38 @@ class ResetPasswordIn(BaseModel):
     new_password: str = Field(min_length=8, max_length=200)
 
 
+class LoginMfaIn(BaseModel):
+    email: str = Field(min_length=3, max_length=320)
+    password: str = Field(min_length=1, max_length=200)
+    totp_code: str = Field(min_length=6, max_length=12)
+
+
+class MfaSetupOut(BaseModel):
+    provisioning_uri: str
+    qr_png_base64: str
+    secret: str = Field(description="Base32 TOTP secret; shown once at setup.")
+
+
+class MfaActivateIn(BaseModel):
+    totp_code: str = Field(min_length=6, max_length=12)
+
+
+class MfaActivateOut(BaseModel):
+    backup_codes: list[str] = Field(description="Shown once; store securely.")
+    enabled_at: datetime.datetime
+
+
+class MfaDisableIn(BaseModel):
+    code: str = Field(min_length=6, max_length=12, description="TOTP or a backup code.")
+
+
+class MfaStatusOut(BaseModel):
+    enabled: bool
+    pending: bool
+    enabled_at: datetime.datetime | None
+    backup_codes_remaining: int
+
+
 class WorkspaceOut(BaseModel):
     id: uuid.UUID
     name: str

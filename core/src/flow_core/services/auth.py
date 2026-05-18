@@ -26,7 +26,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from flow_core.config import get_settings
-from flow_core.errors import AuthError, ForbiddenError
+from flow_core.errors import AuthError, DomainError, ForbiddenError
 from flow_core.i18n import MessageCode
 from flow_core.models.auth_tokens import (
     EmailVerificationToken,
@@ -133,15 +133,53 @@ async def list_user_orgs(
     ]
 
 
-async def login(session: AsyncSession, *, email: str, password: str) -> str:
-    result = await session.execute(select(User).where(User.email == email.lower()))
-    user = result.scalar_one_or_none()
+async def get_user(session: AsyncSession, *, user_id: uuid.UUID) -> User:
+    user = (
+        await session.execute(select(User).where(User.id == user_id))
+    ).scalar_one_or_none()
+    if user is None:
+        raise AuthError(MessageCode.AUTH_TOKEN_NO_SUB)
+    return user
+
+
+def _check_password(user: User | None, password: str) -> User:
     if user is None or not user.is_active or not verify_password(password, user.password_hash):
         raise AuthError(MessageCode.AUTH_INVALID_CREDENTIALS)
+    return user
+
+
+def _check_verified(user: User) -> None:
     if get_settings().require_email_verification and user.email_verified_at is None:
         # 403 (ForbiddenError), not 401: distinguish "verify your email"
         # from "wrong password" so the client can react correctly.
         raise ForbiddenError(MessageCode.AUTH_EMAIL_NOT_VERIFIED)
+
+
+async def login(session: AsyncSession, *, email: str, password: str) -> str:
+    result = await session.execute(select(User).where(User.email == email.lower()))
+    user = _check_password(result.scalar_one_or_none(), password)
+    _check_verified(user)
+    if user.mfa_enabled_at is not None:
+        # 401 mfa_required: the SPA pivots to /auth/login-mfa.
+        raise AuthError(MessageCode.AUTH_MFA_REQUIRED)
+    return create_access_token(user_id=str(user.id))
+
+
+async def login_mfa(
+    session: AsyncSession, *, email: str, password: str, totp_code: str
+) -> str:
+    """Combined password + TOTP/backup-code login (used once MFA is
+    active). Consuming a backup code is persisted."""
+    from flow_core.services.mfa import verify_mfa_code
+
+    result = await session.execute(select(User).where(User.email == email.lower()))
+    user = _check_password(result.scalar_one_or_none(), password)
+    _check_verified(user)
+    if user.mfa_enabled_at is None:
+        raise DomainError(MessageCode.AUTH_MFA_NOT_ENABLED)
+    if not verify_mfa_code(user, totp_code):
+        raise AuthError(MessageCode.AUTH_INVALID_TOTP)
+    await session.flush()  # persist backup-code consumption, if any
     return create_access_token(user_id=str(user.id))
 
 
