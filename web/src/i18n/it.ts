@@ -3,7 +3,30 @@ import type { Catalog } from './en'
 // Italian catalog. Same key shape as en (typed via Catalog).
 export const it: Catalog = {
   app: { title: 'Flow' },
-  nav: { logout: 'Esci', language: 'Lingua', settings: 'Impostazioni', home: 'Home' },
+  nav: {
+    logout: 'Esci',
+    language: 'Lingua',
+    settings: 'Impostazioni',
+    home: 'Home',
+    groups: {
+      productivity: 'Produttivita',
+      structure: 'Struttura',
+      planning: 'Pianificazione',
+      knowledge: 'Conoscenza',
+      comms: 'Comunicazione',
+      billing: 'Fatturazione',
+    },
+  },
+  tagmgr: {
+    nav: 'Tag',
+    title: 'Tag',
+    rename: 'Rinomina',
+    color: 'Colore',
+    archive: 'Archivia',
+    save: 'Salva',
+    none: 'Nessun tag.',
+    loading: 'Caricamento...',
+  },
   auth: {
     email: 'Email',
     password: 'Password',

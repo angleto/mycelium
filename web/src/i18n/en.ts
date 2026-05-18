@@ -4,7 +4,30 @@
 // (string values, not literals) so other locales must mirror it.
 export const en = {
   app: { title: 'Flow' },
-  nav: { logout: 'Sign out', language: 'Language', settings: 'Settings', home: 'Home' },
+  nav: {
+    logout: 'Sign out',
+    language: 'Language',
+    settings: 'Settings',
+    home: 'Home',
+    groups: {
+      productivity: 'Productivity',
+      structure: 'Structure',
+      planning: 'Planning',
+      knowledge: 'Knowledge',
+      comms: 'Communication',
+      billing: 'Billing',
+    },
+  },
+  tagmgr: {
+    nav: 'Tags',
+    title: 'Tags',
+    rename: 'Rename',
+    color: 'Color',
+    archive: 'Archive',
+    save: 'Save',
+    none: 'No tags yet.',
+    loading: 'Loading...',
+  },
   auth: {
     email: 'Email',
     password: 'Password',
