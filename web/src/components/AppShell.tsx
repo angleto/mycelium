@@ -52,6 +52,7 @@ export function AppShell() {
       items: [
         { to: '/workflows', label: t('workflows.nav') },
         { to: '/graph', label: t('graph.nav') },
+        { to: '/tags', label: t('tagmgr.nav') },
       ],
     },
     {
