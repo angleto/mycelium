@@ -1,5 +1,7 @@
 import { useState, type FormEvent } from 'react'
+import { Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
+import { mentionLink } from '../lib/mentions'
 import { api, errMessage, workspaceHeader } from '../api/client'
 import { MarkdownEditor } from '../components/MarkdownEditor'
 import { MarkdownView } from '../components/Markdown'
@@ -27,6 +29,7 @@ export function NotesRoute() {
   const [content, setContent] = useState('')
   const [msg, setMsg] = useState<string | null>(null)
   const [err, setErr] = useState<string | null>(null)
+  const [made, setMade] = useState<{ id: string; title: string } | null>(null)
 
   function remember(n: Note) {
     setCreated((xs) => [n, ...xs.filter((x) => x.id !== n.id)])
@@ -102,6 +105,29 @@ export function NotesRoute() {
     await openNote(sel)
   }
 
+  // No backend note->task: compose POST /tasks. The new task carries a
+  // resolved back-reference [label](@note:id) so the link is two-way in
+  // practice (the task points at the note; notes can @task the task).
+  async function onConvert(n: Note) {
+    setErr(null)
+    const label = n.title || n.kind
+    const { data, error } = await api.POST('/tasks', {
+      params: { header: workspaceHeader() },
+      body: {
+        title: label,
+        description: `From note: ${mentionLink('note', n.id, label)}`,
+        priority: 3,
+        executor_kind: 'human',
+        necessity: 'should',
+      },
+    })
+    if (error || !data) {
+      setErr(errMessage(error))
+      return
+    }
+    setMade({ id: data.id, title: label })
+  }
+
   async function onErase(n: Note) {
     setErr(null)
     const { error } = await api.POST('/notes/{note_id}/erase', {
@@ -122,6 +148,12 @@ export function NotesRoute() {
       <p className="hint">{t('notes.meteredNote')}</p>
       {err && <p className="err">{err}</p>}
       {msg && <p className="ok">{msg}</p>}
+      {made && (
+        <p className="ok">
+          {t('notes.converted')}:{' '}
+          <Link to={`/tasks/${made.id}`}>{made.title}</Link>
+        </p>
+      )}
 
       <form onSubmit={(e) => void onCreate(e)}>
         <div className="row">
@@ -169,10 +201,25 @@ export function NotesRoute() {
             <li key={n.id}>
               {n.title || n.kind}{' '}
               <span className="muted">· {n.kind} · {n.status}</span>
-              <button type="button" onClick={() => void openNote(n)}>
+              <button
+                type="button"
+                className="btn--ghost btn--sm"
+                onClick={() => void openNote(n)}
+              >
                 {t('notes.open')}
               </button>
-              <button type="button" onClick={() => void onErase(n)}>
+              <button
+                type="button"
+                className="btn--sm"
+                onClick={() => void onConvert(n)}
+              >
+                {t('notes.toTask')}
+              </button>
+              <button
+                type="button"
+                className="btn--ghost btn--sm"
+                onClick={() => void onErase(n)}
+              >
                 {t('notes.erase')}
               </button>
             </li>

@@ -339,6 +339,8 @@ export const it: Catalog = {
     send: 'Invia (LLM, a consumo)',
     erase: 'Cancella',
     erased: 'Cancellata.',
+    toTask: 'Trasforma in task',
+    converted: 'Task creato dalla nota',
     meteredNote: 'Le risposte di conversazione usano il LLM (a consumo); la trascrizione richiede un provider.',
   },
   invoices: {

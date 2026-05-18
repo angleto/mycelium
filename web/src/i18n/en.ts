@@ -340,6 +340,8 @@ export const en = {
     send: 'Send (LLM, metered)',
     erase: 'Erase',
     erased: 'Erased.',
+    toTask: 'Convert to task',
+    converted: 'Task created from note',
     meteredNote: 'Conversation replies use the LLM (metered); transcription needs a provider.',
   },
   invoices: {
