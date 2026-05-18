@@ -220,16 +220,72 @@ class ProjectCreateIn(BaseModel):
     tariffa: Decimal | None = None
     valuta: str = Field(default="EUR", max_length=3)
     budget: Decimal | None = None
+    default_billable: bool = True
+
+
+class ClientPatchIn(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    ragione_sociale: str | None = Field(default=None, min_length=1, max_length=200)
+    id_paese: str | None = Field(default=None, max_length=2)
+    id_codice: str | None = Field(default=None, max_length=30)
+    codice_fiscale: str | None = Field(default=None, max_length=30)
+    indirizzo: str | None = Field(default=None, max_length=200)
+    cap: str | None = Field(default=None, max_length=10)
+    comune: str | None = Field(default=None, max_length=120)
+    provincia: str | None = Field(default=None, max_length=4)
+    nazione: str | None = Field(default=None, max_length=2)
+    codice_destinatario: str | None = Field(default=None, max_length=7)
+    pec: str | None = Field(default=None, max_length=320)
+
+
+class ClientOut(BaseModel):
+    id: uuid.UUID
+    name: str
+    status: str
+    version: int
+    ragione_sociale: str
+    id_paese: str | None
+    id_codice: str | None
+    codice_fiscale: str | None
+    indirizzo: str | None
+    cap: str | None
+    comune: str | None
+    provincia: str | None
+    nazione: str | None
+    codice_destinatario: str | None
+    pec: str | None
+
+
+class ProjectPatchIn(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    client_tag_id: uuid.UUID | None = None
+    tariffa: Decimal | None = None
+    valuta: str | None = Field(default=None, max_length=3)
+    budget: Decimal | None = None
+    default_billable: bool | None = None
+
+
+class ProjectOut(BaseModel):
+    id: uuid.UUID
+    name: str
+    status: str
+    version: int
+    client_tag_id: uuid.UUID | None
+    tariffa: Decimal | None
+    valuta: str
+    budget: Decimal | None
+    default_billable: bool
 
 
 class TaskCreateIn(BaseModel):
     title: str = Field(min_length=1, max_length=300)
     description: str | None = None
-    priority: int = Field(default=3, ge=1, le=4)
+    priority: int = Field(default=3, ge=1, le=25)
     importance: int | None = Field(default=None, ge=1, le=5)
     urgency: int | None = Field(default=None, ge=1, le=5)
     start_date: datetime.date | None = None
     due_date: datetime.date | None = None
+    billable: bool | None = None
     parent_task_id: uuid.UUID | None = None
     executor_kind: ExecKind = ExecKind.human
     executor_user_id: uuid.UUID | None = None
@@ -246,11 +302,12 @@ class TaskPatchIn(BaseModel):
     expected_version: int = Field(ge=1)
     title: str | None = Field(default=None, min_length=1, max_length=300)
     description: str | None = None
-    priority: int | None = Field(default=None, ge=1, le=4)
+    priority: int | None = Field(default=None, ge=1, le=25)
     importance: int | None = Field(default=None, ge=1, le=5)
     urgency: int | None = Field(default=None, ge=1, le=5)
     start_date: datetime.date | None = None
     due_date: datetime.date | None = None
+    billable: bool | None = None
     estimate_effort_h: Decimal | None = None
     executor_kind: ExecKind | None = None
     executor_user_id: uuid.UUID | None = None
@@ -301,6 +358,7 @@ class TaskOut(BaseModel):
     location: str | None
     necessity: Necessity
     budget_id: uuid.UUID | None
+    billable: bool | None = None
     is_archived: bool
     deleted_at: datetime.datetime | None = None
     version: int
@@ -492,7 +550,8 @@ class ScheduleOut(BaseModel):
 
 class TimeStartIn(BaseModel):
     task_id: uuid.UUID
-    billable: bool = True
+    # None = inherit (task override -> project default -> billable).
+    billable: bool | None = None
     note: str | None = None
     # Double-play: run alongside other timers instead of replacing the
     # serial one (e.g. parallel LLM tasks).
@@ -510,7 +569,7 @@ class TimeManualIn(BaseModel):
     started_at: datetime.datetime
     ended_at: datetime.datetime | None = None
     duration_seconds: int | None = Field(default=None, gt=0)
-    billable: bool = True
+    billable: bool | None = None
     note: str | None = None
 
 

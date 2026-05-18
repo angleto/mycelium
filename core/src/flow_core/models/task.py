@@ -90,6 +90,9 @@ class Task(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, Base):
         ForeignKey("users.id", ondelete="SET NULL"),
         nullable=True,
     )
+    # NULL = inherit the project's default_billable (or true with no
+    # project); true/false = explicit per-task override.
+    billable: Mapped[bool | None] = mapped_column(nullable=True)
     is_archived: Mapped[bool] = mapped_column(nullable=False, server_default="false")
     deleted_at: Mapped[datetime.datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True

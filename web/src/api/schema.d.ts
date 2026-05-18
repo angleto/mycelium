@@ -385,7 +385,8 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /** List Clients */
+        get: operations["list_clients_clients_get"];
         put?: never;
         /** Create Client */
         post: operations["create_client_clients_post"];
@@ -402,7 +403,8 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /** List Projects */
+        get: operations["list_projects_projects_get"];
         put?: never;
         /** Create Project */
         post: operations["create_project_projects_post"];
@@ -410,6 +412,40 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/clients/{tag_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Patch Client */
+        patch: operations["patch_client_clients__tag_id__patch"];
+        trace?: never;
+    };
+    "/projects/{tag_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Patch Project */
+        patch: operations["patch_project_projects__tag_id__patch"];
         trace?: never;
     };
     "/tags/{tag_id}": {
@@ -2238,6 +2274,69 @@ export interface components {
             /** Pec */
             pec?: string | null;
         };
+        /** ClientOut */
+        ClientOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Name */
+            name: string;
+            /** Status */
+            status: string;
+            /** Version */
+            version: number;
+            /** Ragione Sociale */
+            ragione_sociale: string;
+            /** Id Paese */
+            id_paese: string | null;
+            /** Id Codice */
+            id_codice: string | null;
+            /** Codice Fiscale */
+            codice_fiscale: string | null;
+            /** Indirizzo */
+            indirizzo: string | null;
+            /** Cap */
+            cap: string | null;
+            /** Comune */
+            comune: string | null;
+            /** Provincia */
+            provincia: string | null;
+            /** Nazione */
+            nazione: string | null;
+            /** Codice Destinatario */
+            codice_destinatario: string | null;
+            /** Pec */
+            pec: string | null;
+        };
+        /** ClientPatchIn */
+        ClientPatchIn: {
+            /** Name */
+            name?: string | null;
+            /** Ragione Sociale */
+            ragione_sociale?: string | null;
+            /** Id Paese */
+            id_paese?: string | null;
+            /** Id Codice */
+            id_codice?: string | null;
+            /** Codice Fiscale */
+            codice_fiscale?: string | null;
+            /** Indirizzo */
+            indirizzo?: string | null;
+            /** Cap */
+            cap?: string | null;
+            /** Comune */
+            comune?: string | null;
+            /** Provincia */
+            provincia?: string | null;
+            /** Nazione */
+            nazione?: string | null;
+            /** Codice Destinatario */
+            codice_destinatario?: string | null;
+            /** Pec */
+            pec?: string | null;
+        };
         /** CommandIn */
         CommandIn: {
             /** Text */
@@ -3251,6 +3350,50 @@ export interface components {
             valuta: string;
             /** Budget */
             budget?: number | string | null;
+            /**
+             * Default Billable
+             * @default true
+             */
+            default_billable: boolean;
+        };
+        /** ProjectOut */
+        ProjectOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Name */
+            name: string;
+            /** Status */
+            status: string;
+            /** Version */
+            version: number;
+            /** Client Tag Id */
+            client_tag_id: string | null;
+            /** Tariffa */
+            tariffa: string | null;
+            /** Valuta */
+            valuta: string;
+            /** Budget */
+            budget: string | null;
+            /** Default Billable */
+            default_billable: boolean;
+        };
+        /** ProjectPatchIn */
+        ProjectPatchIn: {
+            /** Name */
+            name?: string | null;
+            /** Client Tag Id */
+            client_tag_id?: string | null;
+            /** Tariffa */
+            tariffa?: number | string | null;
+            /** Valuta */
+            valuta?: string | null;
+            /** Budget */
+            budget?: number | string | null;
+            /** Default Billable */
+            default_billable?: boolean | null;
         };
         /** ProjectWorkflowIn */
         ProjectWorkflowIn: {
@@ -3631,6 +3774,8 @@ export interface components {
             start_date?: string | null;
             /** Due Date */
             due_date?: string | null;
+            /** Billable */
+            billable?: boolean | null;
             /** Parent Task Id */
             parent_task_id?: string | null;
             /** @default human */
@@ -3700,6 +3845,8 @@ export interface components {
             necessity: components["schemas"]["Necessity"];
             /** Budget Id */
             budget_id: string | null;
+            /** Billable */
+            billable?: boolean | null;
             /** Is Archived */
             is_archived: boolean;
             /** Deleted At */
@@ -3727,6 +3874,8 @@ export interface components {
             start_date?: string | null;
             /** Due Date */
             due_date?: string | null;
+            /** Billable */
+            billable?: boolean | null;
             /** Estimate Effort H */
             estimate_effort_h?: number | string | null;
             executor_kind?: components["schemas"]["ExecKind"] | null;
@@ -3846,11 +3995,8 @@ export interface components {
             ended_at?: string | null;
             /** Duration Seconds */
             duration_seconds?: number | null;
-            /**
-             * Billable
-             * @default true
-             */
-            billable: boolean;
+            /** Billable */
+            billable?: boolean | null;
             /** Note */
             note?: string | null;
         };
@@ -3866,11 +4012,8 @@ export interface components {
              * Format: uuid
              */
             task_id: string;
-            /**
-             * Billable
-             * @default true
-             */
-            billable: boolean;
+            /** Billable */
+            billable?: boolean | null;
             /** Note */
             note?: string | null;
             /**
@@ -4791,6 +4934,38 @@ export interface operations {
             };
         };
     };
+    list_clients_clients_get: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClientOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     create_client_clients_post: {
         parameters: {
             query?: never;
@@ -4814,6 +4989,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TagOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_projects_projects_get: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectOut"][];
                 };
             };
             /** @description Validation Error */
@@ -4851,6 +5058,78 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["TagOut"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    patch_client_clients__tag_id__patch: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+            };
+            path: {
+                tag_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ClientPatchIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    patch_project_projects__tag_id__patch: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+            };
+            path: {
+                tag_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProjectPatchIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

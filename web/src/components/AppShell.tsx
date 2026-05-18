@@ -54,6 +54,7 @@ export function AppShell() {
         { to: '/workflows', label: t('workflows.nav') },
         { to: '/graph', label: t('graph.nav') },
         { to: '/tags', label: t('tagmgr.nav') },
+        { to: '/clients', label: t('cp.nav') },
       ],
     },
     {

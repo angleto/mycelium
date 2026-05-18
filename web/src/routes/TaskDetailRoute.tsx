@@ -35,6 +35,8 @@ export function TaskDetailRoute() {
   const [urgency, setUrgency] = useState(4)
   const [estimate, setEstimate] = useState('')
   const [due, setDue] = useState('')
+  // '' = inherit project default, 'yes' = billable, 'no' = not.
+  const [bill, setBill] = useState<'' | 'yes' | 'no'>('')
   const [estCustom, setEstCustom] = useState(false)
   const [presets, setPresets] = useState<string[]>([])
   const [stateId, setStateId] = useState('')
@@ -55,6 +57,7 @@ export function TaskDetailRoute() {
     setUrgency(tk.urgency ?? 4)
     setEstimate(tk.estimate_effort_h ?? '')
     setDue(tk.due_date ?? '')
+    setBill(tk.billable == null ? '' : tk.billable ? 'yes' : 'no')
     setStateId(tk.state_id)
   }, [])
 
@@ -200,6 +203,10 @@ export function TaskDetailRoute() {
   function commitEstimate(v: string) {
     void autosave({ estimate_effort_h: v.trim() ? v.trim() : null })
   }
+  function onBill(v: '' | 'yes' | 'no') {
+    setBill(v)
+    void autosave({ billable: v === '' ? null : v === 'yes' })
+  }
 
   async function onChangeState(sid: string) {
     if (!task) return
@@ -333,6 +340,17 @@ export function TaskDetailRoute() {
             value={due}
             onChange={(e) => onDue(e.target.value)}
           />
+        </label>
+        <label>
+          {t('tasks.billable')}
+          <select
+            value={bill}
+            onChange={(e) => onBill(e.target.value as '' | 'yes' | 'no')}
+          >
+            <option value="">{t('tasks.billInherit')}</option>
+            <option value="yes">{t('tasks.billYes')}</option>
+            <option value="no">{t('tasks.billNo')}</option>
+          </select>
         </label>
         {(() => {
           const isPreset =

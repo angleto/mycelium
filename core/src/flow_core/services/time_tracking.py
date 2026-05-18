@@ -64,8 +64,12 @@ def _now() -> dt.datetime:
     return dt.datetime.now(tz=dt.UTC)
 
 
-async def _rate(session: AsyncSession, task_id: uuid.UUID) -> tuple[Decimal | None, str]:
-    """Billing rate + currency snapshot from the task's project tag."""
+async def _rate(
+    session: AsyncSession, task_id: uuid.UUID
+) -> tuple[Decimal | None, str, bool]:
+    """Rate + currency + the project's default_billable, snapshotted
+    from the task's project tag. Defaults (no project): no rate, EUR,
+    billable."""
     project_tag_id = (
         await session.execute(
             select(Tag.id)
@@ -76,13 +80,25 @@ async def _rate(session: AsyncSession, task_id: uuid.UUID) -> tuple[Decimal | No
         )
     ).scalar_one_or_none()
     if project_tag_id is None:
-        return (None, "EUR")
+        return (None, "EUR", True)
     prof = (
         await session.execute(select(ProjectProfile).where(ProjectProfile.tag_id == project_tag_id))
     ).scalar_one_or_none()
     if prof is None:
-        return (None, "EUR")
-    return (prof.tariffa, prof.valuta)
+        return (None, "EUR", True)
+    return (prof.tariffa, prof.valuta, prof.default_billable)
+
+
+def _effective_billable(
+    explicit: bool | None, task: Task, project_default: bool
+) -> bool:
+    """Explicit arg wins; else the task override; else the project's
+    default_billable (true with no project)."""
+    if explicit is not None:
+        return explicit
+    if task.billable is not None:
+        return task.billable
+    return project_default
 
 
 async def _touch_actual_start(session: AsyncSession, task_id: uuid.UUID, ts: dt.datetime) -> None:
@@ -195,7 +211,7 @@ async def start_timer(
     org_id: uuid.UUID,
     actor_id: uuid.UUID,
     task_id: uuid.UUID,
-    billable: bool = True,
+    billable: bool | None = None,
     note: str | None = None,
     parallel: bool = False,
 ) -> TimeEntry:
@@ -211,7 +227,8 @@ async def start_timer(
             await _stop_entry(
                 session, org_id=org_id, actor_id=actor_id, entry=current
             )
-    rate, currency = await _rate(session, task_id)
+    rate, currency, proj_billable = await _rate(session, task_id)
+    eff_billable = _effective_billable(billable, task, proj_billable)
     started = _now()
     entry = TimeEntry(
         org_id=org_id,
@@ -222,7 +239,7 @@ async def start_timer(
         duration_seconds=None,
         source=TimeSource.timer,
         executor_kind=task.executor_kind,
-        billable=billable,
+        billable=eff_billable,
         rate_snapshot=rate,
         currency=currency,
         note=note,
@@ -279,7 +296,7 @@ async def add_manual_entry(
     started_at: dt.datetime,
     ended_at: dt.datetime | None = None,
     duration_seconds: int | None = None,
-    billable: bool = True,
+    billable: bool | None = None,
     note: str | None = None,
 ) -> TimeEntry:
     await require_role(session, org_id, actor_id, Role.member)
@@ -293,7 +310,8 @@ async def add_manual_entry(
         ended_at = started_at + dt.timedelta(seconds=seconds)
     else:
         raise DomainError(MessageCode.TIME_ENTRY_INVALID)
-    rate, currency = await _rate(session, task_id)
+    rate, currency, proj_billable = await _rate(session, task_id)
+    eff_billable = _effective_billable(billable, task, proj_billable)
     entry = TimeEntry(
         org_id=org_id,
         task_id=task_id,
@@ -303,7 +321,7 @@ async def add_manual_entry(
         duration_seconds=seconds,
         source=TimeSource.manual,
         executor_kind=task.executor_kind,
-        billable=billable,
+        billable=eff_billable,
         rate_snapshot=rate,
         currency=currency,
         note=note,

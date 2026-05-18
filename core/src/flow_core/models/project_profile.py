@@ -34,5 +34,8 @@ class ProjectProfile(OrgScopedMixin, TimestampMixin, VersionMixin, Base):
     )
     tariffa: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
     valuta: Mapped[str] = mapped_column(String(3), nullable=False, server_default="EUR")
+    # Automatic project property: its tasks are billable unless a task
+    # overrides via task.billable.
+    default_billable: Mapped[bool] = mapped_column(nullable=False, server_default="true")
     budget: Mapped[Decimal | None] = mapped_column(Numeric(14, 2), nullable=True)
     workflow_id: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)

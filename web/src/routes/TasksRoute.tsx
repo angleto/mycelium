@@ -207,7 +207,12 @@ export function TasksRoute() {
     setErr(null)
     const { data, error } = await api.POST('/projects', {
       params: { header: workspaceHeader() },
-      body: { name: pName, client_tag_id: clientId || null, valuta: 'EUR' },
+      body: {
+        name: pName,
+        client_tag_id: clientId || null,
+        valuta: 'EUR',
+        default_billable: true,
+      },
     })
     if (error || !data) {
       setErr(errMessage(error))
@@ -229,7 +234,7 @@ export function TasksRoute() {
         })
       : await api.POST('/time/start', {
           params: { header: workspaceHeader() },
-          body: { task_id: taskId, billable: true, parallel: false },
+          body: { task_id: taskId, parallel: false },
         })
     if (error) {
       setErr(errMessage(error))
@@ -245,7 +250,7 @@ export function TasksRoute() {
     setErr(null)
     const { error } = await api.POST('/time/start', {
       params: { header: workspaceHeader() },
-      body: { task_id: taskId, billable: true, parallel: true },
+      body: { task_id: taskId, parallel: true },
     })
     if (error) {
       setErr(errMessage(error))

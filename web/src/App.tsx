@@ -9,6 +9,7 @@ import { ResetPasswordRoute } from './routes/ResetPasswordRoute'
 import { HomeRoute } from './routes/HomeRoute'
 import { TasksRoute } from './routes/TasksRoute'
 import { TrashRoute } from './routes/TrashRoute'
+import { ClientsProjectsRoute } from './routes/ClientsProjectsRoute'
 import { TaskDetailRoute } from './routes/TaskDetailRoute'
 import { WorkflowsRoute } from './routes/WorkflowsRoute'
 import { GraphRoute } from './routes/GraphRoute'
@@ -41,6 +42,7 @@ function App() {
             <Route path="/tasks" element={<TasksRoute />} />
             <Route path="/tasks/:id" element={<TaskDetailRoute />} />
             <Route path="/trash" element={<TrashRoute />} />
+            <Route path="/clients" element={<ClientsProjectsRoute />} />
             <Route path="/workflows" element={<WorkflowsRoute />} />
             <Route path="/graph" element={<GraphRoute />} />
             <Route path="/schedule" element={<SchedulerRoute />} />

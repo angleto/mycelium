@@ -56,6 +56,7 @@ _UPDATABLE = frozenset(
         "location",
         "necessity",
         "budget_id",
+        "billable",
     }
 )
 
@@ -91,6 +92,7 @@ async def create_task(
     urgency: int | None = None,
     start_date: dt.date | None = None,
     due_date: dt.date | None = None,
+    billable: bool | None = None,
     parent_task_id: uuid.UUID | None = None,
     executor_kind: ExecKind = ExecKind.human,
     executor_user_id: uuid.UUID | None = None,
@@ -125,6 +127,7 @@ async def create_task(
         urgency=urgency,
         start_date=start_date,
         due_date=due_date,
+        billable=billable,
         state_id=initial.id,
         parent_task_id=parent_task_id,
         executor_kind=executor_kind,

@@ -127,6 +127,7 @@ async def create_project(
     tariffa: Decimal | None = None,
     valuta: str = "EUR",
     budget: Decimal | None = None,
+    default_billable: bool = True,
 ) -> Tag:
     await require_role(session, org_id, actor_id, Role.admin)
     if client_tag_id is not None:
@@ -144,6 +145,7 @@ async def create_project(
             tariffa=tariffa,
             valuta=valuta,
             budget=budget,
+            default_billable=default_billable,
         )
     )
     await session.flush()
@@ -172,6 +174,113 @@ async def get_tag(session: AsyncSession, *, org_id: uuid.UUID, tag_id: uuid.UUID
     if tag is None:
         raise NotFoundError(MessageCode.TAG_NOT_FOUND)
     return tag
+
+
+async def list_clients(
+    session: AsyncSession, *, org_id: uuid.UUID
+) -> list[tuple[Tag, ClientProfile]]:
+    rows = await session.execute(
+        select(Tag, ClientProfile)
+        .join(ClientProfile, ClientProfile.tag_id == Tag.id)
+        .where(Tag.kind == TagKind.client)
+        .order_by(Tag.name)
+    )
+    return [(t, p) for t, p in rows.all()]
+
+
+async def list_projects(
+    session: AsyncSession, *, org_id: uuid.UUID
+) -> list[tuple[Tag, ProjectProfile]]:
+    rows = await session.execute(
+        select(Tag, ProjectProfile)
+        .join(ProjectProfile, ProjectProfile.tag_id == Tag.id)
+        .where(Tag.kind == TagKind.project)
+        .order_by(Tag.name)
+    )
+    return [(t, p) for t, p in rows.all()]
+
+
+async def update_client(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    tag_id: uuid.UUID,
+    name: str | None = None,
+    fields: dict[str, str | None] | None = None,
+) -> None:
+    """Edit a client's name and its invoicing card (ClientProfile)."""
+    await require_role(session, org_id, actor_id, Role.admin)
+    tag = await get_tag(session, org_id=org_id, tag_id=tag_id)
+    if tag.kind is not TagKind.client:
+        raise DomainError(MessageCode.TAG_KIND_MISMATCH)
+    prof = (
+        await session.execute(
+            select(ClientProfile).where(ClientProfile.tag_id == tag_id)
+        )
+    ).scalar_one_or_none()
+    if prof is None:
+        raise NotFoundError(MessageCode.TAG_NOT_FOUND)
+    if name is not None:
+        tag.name = name
+        tag.version += 1
+    for k, v in (fields or {}).items():
+        setattr(prof, k, v)
+    await session.flush()
+    await audit.log(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        entity="tag",
+        entity_id=tag_id,
+        action="update_client",
+    )
+
+
+async def update_project(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    tag_id: uuid.UUID,
+    name: str | None = None,
+    fields: dict[str, object] | None = None,
+) -> None:
+    """Edit a project's name and its profile (rate/currency/budget/
+    default_billable/client link)."""
+    await require_role(session, org_id, actor_id, Role.admin)
+    tag = await get_tag(session, org_id=org_id, tag_id=tag_id)
+    if tag.kind is not TagKind.project:
+        raise DomainError(MessageCode.TAG_KIND_MISMATCH)
+    prof = (
+        await session.execute(
+            select(ProjectProfile).where(ProjectProfile.tag_id == tag_id)
+        )
+    ).scalar_one_or_none()
+    if prof is None:
+        raise NotFoundError(MessageCode.TAG_NOT_FOUND)
+    flds = fields or {}
+    ctid = flds.get("client_tag_id")
+    if ctid is not None:
+        ok = await session.execute(
+            select(Tag.id).where(Tag.id == ctid, Tag.kind == TagKind.client)
+        )
+        if ok.scalar_one_or_none() is None:
+            raise DomainError(MessageCode.TAG_KIND_MISMATCH)
+    if name is not None:
+        tag.name = name
+        tag.version += 1
+    for k, v in flds.items():
+        setattr(prof, k, v)
+    await session.flush()
+    await audit.log(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        entity="tag",
+        entity_id=tag_id,
+        action="update_project",
+    )
 
 
 async def find_tag_by_name(

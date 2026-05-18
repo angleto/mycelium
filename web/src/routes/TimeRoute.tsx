@@ -163,7 +163,7 @@ export function TimeRoute() {
     setErr(null)
     const { error } = await api.POST('/time/start', {
       params: { header: workspaceHeader() },
-      body: { task_id: taskId, billable: true, parallel },
+      body: { task_id: taskId, parallel },
     })
     if (error) {
       setErr(errMessage(error))

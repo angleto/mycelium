@@ -11,7 +11,11 @@ from fastapi import APIRouter, Depends
 from flow_api.deps import TenantCtx, tenant_ctx
 from flow_api.schemas import (
     ClientCreateIn,
+    ClientOut,
+    ClientPatchIn,
     ProjectCreateIn,
+    ProjectOut,
+    ProjectPatchIn,
     TagCreateIn,
     TagOut,
     TagPatchIn,
@@ -97,8 +101,95 @@ async def create_project(
         tariffa=body.tariffa,
         valuta=body.valuta,
         budget=body.budget,
+        default_billable=body.default_billable,
     )
     return _out(tag)
+
+
+def _client_out(t: Tag, p: object) -> ClientOut:
+    return ClientOut(
+        id=t.id,
+        name=t.name,
+        status=t.status,
+        version=t.version,
+        ragione_sociale=p.ragione_sociale,  # type: ignore[attr-defined]
+        id_paese=p.id_paese,  # type: ignore[attr-defined]
+        id_codice=p.id_codice,  # type: ignore[attr-defined]
+        codice_fiscale=p.codice_fiscale,  # type: ignore[attr-defined]
+        indirizzo=p.indirizzo,  # type: ignore[attr-defined]
+        cap=p.cap,  # type: ignore[attr-defined]
+        comune=p.comune,  # type: ignore[attr-defined]
+        provincia=p.provincia,  # type: ignore[attr-defined]
+        nazione=p.nazione,  # type: ignore[attr-defined]
+        codice_destinatario=p.codice_destinatario,  # type: ignore[attr-defined]
+        pec=p.pec,  # type: ignore[attr-defined]
+    )
+
+
+def _project_out(t: Tag, p: object) -> ProjectOut:
+    return ProjectOut(
+        id=t.id,
+        name=t.name,
+        status=t.status,
+        version=t.version,
+        client_tag_id=p.client_tag_id,  # type: ignore[attr-defined]
+        tariffa=p.tariffa,  # type: ignore[attr-defined]
+        valuta=p.valuta,  # type: ignore[attr-defined]
+        budget=p.budget,  # type: ignore[attr-defined]
+        default_billable=p.default_billable,  # type: ignore[attr-defined]
+    )
+
+
+@router.get("/clients", response_model=list[ClientOut])
+async def list_clients(
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+) -> list[ClientOut]:
+    rows = await taxonomy.list_clients(ctx.session, org_id=ctx.org_id)
+    return [_client_out(t, p) for t, p in rows]
+
+
+@router.get("/projects", response_model=list[ProjectOut])
+async def list_projects(
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+) -> list[ProjectOut]:
+    rows = await taxonomy.list_projects(ctx.session, org_id=ctx.org_id)
+    return [_project_out(t, p) for t, p in rows]
+
+
+@router.patch("/clients/{tag_id}", status_code=204)
+async def patch_client(
+    tag_id: uuid.UUID,
+    body: ClientPatchIn,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+) -> None:
+    data = body.model_dump(exclude_unset=True)
+    name = data.pop("name", None)
+    await taxonomy.update_client(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        tag_id=tag_id,
+        name=name,
+        fields=data,
+    )
+
+
+@router.patch("/projects/{tag_id}", status_code=204)
+async def patch_project(
+    tag_id: uuid.UUID,
+    body: ProjectPatchIn,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+) -> None:
+    data = body.model_dump(exclude_unset=True)
+    name = data.pop("name", None)
+    await taxonomy.update_project(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        tag_id=tag_id,
+        name=name,
+        fields=data,
+    )
 
 
 @router.patch("/tags/{tag_id}", response_model=VersionOut)

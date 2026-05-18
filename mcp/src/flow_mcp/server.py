@@ -569,7 +569,7 @@ async def start_timer(
     token: str,
     org_id: str,
     task_id: str,
-    billable: bool = True,
+    billable: bool | None = None,
     note: str | None = None,
     parallel: bool = False,
 ) -> dict[str, Any]:
@@ -618,7 +618,7 @@ async def add_time_entry(
     started_at: str,
     ended_at: str | None = None,
     duration_seconds: int | None = None,
-    billable: bool = True,
+    billable: bool | None = None,
     note: str | None = None,
 ) -> dict[str, Any]:
     """Add a manual time entry (provide ended_at or duration_seconds)."""
