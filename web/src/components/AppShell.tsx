@@ -27,6 +27,7 @@ export function AppShell() {
           <Link to="/graph">{t('graph.nav')}</Link>
           <Link to="/schedule">{t('scheduler.nav')}</Link>
           <Link to="/calendar">{t('events.nav')}</Link>
+          <Link to="/time">{t('time.nav')}</Link>
           <Link to="/settings">{t('nav.settings')}</Link>
           <label className="shell__lang">
             {t('nav.language')}{' '}

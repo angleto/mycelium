@@ -13,6 +13,7 @@ import { WorkflowsRoute } from './routes/WorkflowsRoute'
 import { GraphRoute } from './routes/GraphRoute'
 import { SchedulerRoute } from './routes/SchedulerRoute'
 import { EventsRoute } from './routes/EventsRoute'
+import { TimeRoute } from './routes/TimeRoute'
 import { SettingsRoute } from './routes/SettingsRoute'
 
 function App() {
@@ -33,6 +34,7 @@ function App() {
             <Route path="/graph" element={<GraphRoute />} />
             <Route path="/schedule" element={<SchedulerRoute />} />
             <Route path="/calendar" element={<EventsRoute />} />
+            <Route path="/time" element={<TimeRoute />} />
             <Route path="/settings" element={<SettingsRoute />} />
           </Route>
         </Route>
