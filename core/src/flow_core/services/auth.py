@@ -26,7 +26,8 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from flow_core.config import get_settings
-from flow_core.errors import AuthError, DomainError, ForbiddenError
+from flow_core.db import admin_session
+from flow_core.errors import AuthError, DomainError, ForbiddenError, LockedError
 from flow_core.i18n import MessageCode
 from flow_core.models.auth_tokens import (
     EmailVerificationToken,
@@ -142,12 +143,6 @@ async def get_user(session: AsyncSession, *, user_id: uuid.UUID) -> User:
     return user
 
 
-def _check_password(user: User | None, password: str) -> User:
-    if user is None or not user.is_active or not verify_password(password, user.password_hash):
-        raise AuthError(MessageCode.AUTH_INVALID_CREDENTIALS)
-    return user
-
-
 def _check_verified(user: User) -> None:
     if get_settings().require_email_verification and user.email_verified_at is None:
         # 403 (ForbiddenError), not 401: distinguish "verify your email"
@@ -155,10 +150,51 @@ def _check_verified(user: User) -> None:
         raise ForbiddenError(MessageCode.AUTH_EMAIL_NOT_VERIFIED)
 
 
-async def login(session: AsyncSession, *, email: str, password: str) -> str:
-    result = await session.execute(select(User).where(User.email == email.lower()))
-    user = _check_password(result.scalar_one_or_none(), password)
+def _is_locked(user: User) -> bool:
+    return user.locked_until is not None and user.locked_until > dt.datetime.now(dt.UTC)
+
+
+async def _record_login_failure(user_id: uuid.UUID) -> None:
+    """Persist a failed attempt in its OWN transaction so it survives
+    the rejected login's rollback (admin_session rolls back on the
+    raised AuthError). Locks the account past the threshold."""
+    s = get_settings()
+    async with admin_session() as session:
+        user = (
+            await session.execute(select(User).where(User.id == user_id))
+        ).scalar_one_or_none()
+        if user is None:
+            return
+        user.failed_login_count += 1
+        if user.failed_login_count >= s.login_max_failures:
+            user.locked_until = dt.datetime.now(dt.UTC) + dt.timedelta(
+                seconds=s.login_lockout_seconds
+            )
+            user.failed_login_count = 0
+
+
+async def _authenticate(session: AsyncSession, *, email: str, password: str) -> User:
+    """Password auth with DB-backed lockout. On success the failure
+    counters are reset (committed with the caller's session)."""
+    user = (
+        await session.execute(select(User).where(User.email == email.lower()))
+    ).scalar_one_or_none()
+    if user is None:
+        raise AuthError(MessageCode.AUTH_INVALID_CREDENTIALS)
+    if _is_locked(user):
+        raise LockedError(MessageCode.AUTH_ACCOUNT_LOCKED)
+    if not user.is_active or not verify_password(password, user.password_hash):
+        await _record_login_failure(user.id)
+        raise AuthError(MessageCode.AUTH_INVALID_CREDENTIALS)
+    if user.failed_login_count or user.locked_until is not None:
+        user.failed_login_count = 0
+        user.locked_until = None
     _check_verified(user)
+    return user
+
+
+async def login(session: AsyncSession, *, email: str, password: str) -> str:
+    user = await _authenticate(session, email=email, password=password)
     if user.mfa_enabled_at is not None:
         # 401 mfa_required: the SPA pivots to /auth/login-mfa.
         raise AuthError(MessageCode.AUTH_MFA_REQUIRED)
@@ -172,9 +208,7 @@ async def login_mfa(
     active). Consuming a backup code is persisted."""
     from flow_core.services.mfa import verify_mfa_code
 
-    result = await session.execute(select(User).where(User.email == email.lower()))
-    user = _check_password(result.scalar_one_or_none(), password)
-    _check_verified(user)
+    user = await _authenticate(session, email=email, password=password)
     if user.mfa_enabled_at is None:
         raise DomainError(MessageCode.AUTH_MFA_NOT_ENABLED)
     if not verify_mfa_code(user, totp_code):

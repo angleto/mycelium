@@ -39,3 +39,9 @@ class User(UUIDPKMixin, TimestampMixin, Base):
         DateTime(timezone=True), nullable=True
     )
     backup_codes_hash: Mapped[list[str] | None] = mapped_column(ARRAY(Text()), nullable=True)
+
+    # Login lockout (W1b): DB-backed shared state, not per-process.
+    failed_login_count: Mapped[int] = mapped_column(nullable=False, server_default=text("0"))
+    locked_until: Mapped[datetime.datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
