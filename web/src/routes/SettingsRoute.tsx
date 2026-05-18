@@ -81,8 +81,9 @@ export function SettingsRoute() {
 
   return (
     <>
+    <h1 className="page-title">{t('nav.settings')}</h1>
     <section className="card">
-      <h1>{t('mfa.title')}</h1>
+      <h2>{t('mfa.title')}</h2>
       {status === null ? (
         <p>{t('home.loading')}</p>
       ) : (

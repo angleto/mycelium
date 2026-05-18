@@ -77,7 +77,7 @@ export function EstimatePresets() {
 
   return (
     <section className="card">
-      <h1>{t('estpre.title')}</h1>
+      <h2>{t('estpre.title')}</h2>
       <p className="hint">{t('estpre.note')}</p>
       {err && <p className="err">{err}</p>}
       {msg && <p className="ok">{msg}</p>}

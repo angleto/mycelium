@@ -316,6 +316,12 @@ a:hover {
 }
 
 /* ---- cards / surfaces ---- */
+.page-title {
+  margin: 0 0 0.4rem;
+  font-size: 1.5rem;
+  color: var(--text-h);
+}
+
 .card {
   background: var(--surface);
   border: 1px solid var(--border);

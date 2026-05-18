@@ -94,7 +94,7 @@ export function WorkspaceManager() {
 
   return (
     <section className="card">
-      <h1>{t('wsmgr.title')}</h1>
+      <h2>{t('wsmgr.title')}</h2>
       {err && <p className="err">{err}</p>}
       {creating ? (
         <form onSubmit={(e) => void onCreate(e)} className="row">

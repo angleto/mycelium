@@ -129,7 +129,7 @@ export const en = {
       'Delete "{{name}}" and all its data? This cannot be undone.',
   },
   home: {
-    title: 'My workspace',
+    title: 'Workspaces',
     id: 'Workspace ID',
     name: 'Name',
     version: 'Version',

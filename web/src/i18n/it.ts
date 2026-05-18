@@ -128,7 +128,7 @@ export const it: Catalog = {
       'Eliminare "{{name}}" e tutti i suoi dati? Operazione irreversibile.',
   },
   home: {
-    title: 'Il mio workspace',
+    title: 'Workspace',
     id: 'ID workspace',
     name: 'Nome',
     version: 'Versione',

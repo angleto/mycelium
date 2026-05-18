@@ -133,7 +133,7 @@ export function IssuerProfiles() {
 
   return (
     <section className="card">
-      <h1>{t('invoices.profiles')}</h1>
+      <h2>{t('invoices.profiles')}</h2>
       <p className="hint">{t('invoices.profilesHint')}</p>
       {err && <p className="err">{err}</p>}
       {msg && <p className="ok">{msg}</p>}
