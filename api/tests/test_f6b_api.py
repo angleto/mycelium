@@ -40,16 +40,16 @@ async def test_f6b_api_flow(_providers: None) -> None:
         a = (
             await c.post(
                 "/auth/signup",
-                json={"email": _email(), "password": "pw-strong-123", "org_name": "A"},
+                json={"email": _email(), "password": "pw-strong-123", "workspace_name": "A"},
             )
         ).json()
         b = (
             await c.post(
                 "/auth/signup",
-                json={"email": _email(), "password": "pw-strong-123", "org_name": "B"},
+                json={"email": _email(), "password": "pw-strong-123", "workspace_name": "B"},
             )
         ).json()
-        h = {"Authorization": f"Bearer {a['token']}", "X-Org-Id": a["org_id"]}
+        h = {"Authorization": f"Bearer {a['token']}", "X-Workspace-Id": a["workspace_id"]}
 
         # Canonical command works before any billing (unmetered/offline).
         cmd = await c.post("/notes/command", headers=h, json={"text": "crea una nuova nota"})
@@ -97,7 +97,7 @@ async def test_f6b_api_flow(_providers: None) -> None:
 
         cross = await c.post(
             "/notes/command",
-            headers={"Authorization": f"Bearer {a['token']}", "X-Org-Id": b["org_id"]},
+            headers={"Authorization": f"Bearer {a['token']}", "X-Workspace-Id": b["workspace_id"]},
             json={"text": "crea una nuova nota"},
         )
         assert cross.status_code == 403

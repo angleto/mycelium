@@ -22,12 +22,12 @@ from flow_api.routers import (
     memory,
     notes,
     notifications,
-    org,
     schedule,
     tags,
     tasks,
     time_tracking,
     workflows,
+    workspace,
 )
 from flow_core.errors import (
     AuthError,
@@ -77,7 +77,7 @@ def create_app() -> FastAPI:
         app.add_exception_handler(exc_type, _make_handler(status))
 
     app.include_router(auth.router)
-    app.include_router(org.router)
+    app.include_router(workspace.router)
     app.include_router(tags.router)
     app.include_router(tasks.router)
     app.include_router(workflows.router)

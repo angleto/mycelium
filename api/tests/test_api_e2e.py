@@ -23,36 +23,38 @@ async def test_api_flow() -> None:
         a = (
             await c.post(
                 "/auth/signup",
-                json={"email": _email(), "password": "pw-strong-123", "org_name": "A"},
+                json={"email": _email(), "password": "pw-strong-123", "workspace_name": "A"},
             )
         ).json()
         b = (
             await c.post(
                 "/auth/signup",
-                json={"email": _email(), "password": "pw-strong-123", "org_name": "B"},
+                json={"email": _email(), "password": "pw-strong-123", "workspace_name": "B"},
             )
         ).json()
-        headers = {"Authorization": f"Bearer {a['token']}", "X-Org-Id": a["org_id"]}
+        headers = {"Authorization": f"Bearer {a['token']}", "X-Workspace-Id": a["workspace_id"]}
 
-        own = await c.get("/orgs/me", headers=headers)
+        own = await c.get("/workspaces/me", headers=headers)
         assert own.status_code == 200 and own.json()["name"] == "A"
 
         cross = await c.get(
-            "/orgs/me",
-            headers={"Authorization": f"Bearer {a['token']}", "X-Org-Id": b["org_id"]},
+            "/workspaces/me",
+            headers={"Authorization": f"Bearer {a['token']}", "X-Workspace-Id": b["workspace_id"]},
         )
         assert cross.status_code == 403
         assert cross.json()["code"] == "rbac.no_membership"
 
-        ok = await c.patch("/orgs/me", headers=headers, json={"name": "A2", "expected_version": 1})
+        ok = await c.patch(
+            "/workspaces/me", headers=headers, json={"name": "A2", "expected_version": 1}
+        )
         assert ok.status_code == 200 and ok.json()["version"] == 2
 
         stale = await c.patch(
-            "/orgs/me", headers=headers, json={"name": "X", "expected_version": 1}
+            "/workspaces/me", headers=headers, json={"name": "X", "expected_version": 1}
         )
         assert stale.status_code == 409
         assert stale.json()["code"] == "concurrency.stale_version"
 
-        noauth = await c.get("/orgs/me", headers={"X-Org-Id": a["org_id"]})
+        noauth = await c.get("/workspaces/me", headers={"X-Workspace-Id": a["workspace_id"]})
         assert noauth.status_code == 401
         assert noauth.json()["code"] == "auth.missing_bearer"

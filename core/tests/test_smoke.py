@@ -25,7 +25,7 @@ def test_render_basic_and_params() -> None:
 
 
 def test_render_locale_fallback() -> None:
-    assert render(MessageCode.ORG_NOT_FOUND, "xx") == "Organization not found"
+    assert render(MessageCode.ORG_NOT_FOUND, "xx") == "Workspace not found"
 
 
 def test_ensure_role_rank() -> None:

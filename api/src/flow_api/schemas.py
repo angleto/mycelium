@@ -32,14 +32,18 @@ from flow_core.models.time_entry import TimeSource
 
 
 class SignupIn(BaseModel):
+    # Personal-first: a personal workspace is auto-provisioned. Naming it
+    # is optional (defaults to a personal workspace); the user never has
+    # to "create an organization" to sign up.
     email: str = Field(min_length=3, max_length=320)
     password: str = Field(min_length=8, max_length=200)
-    org_name: str = Field(min_length=1, max_length=200)
+    display_name: str | None = Field(default=None, max_length=200)
+    workspace_name: str | None = Field(default=None, max_length=200)
 
 
 class SignupOut(BaseModel):
     user_id: uuid.UUID
-    org_id: uuid.UUID
+    workspace_id: uuid.UUID
     token: str
 
 
@@ -52,15 +56,28 @@ class TokenOut(BaseModel):
     token: str
 
 
-class OrgOut(BaseModel):
+class WorkspaceOut(BaseModel):
     id: uuid.UUID
     name: str
     version: int
 
 
-class OrgPatchIn(BaseModel):
+class WorkspacePatchIn(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     expected_version: int = Field(ge=1)
+
+
+class WorkspaceCreateIn(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+
+
+class WorkspaceSummaryOut(BaseModel):
+    """A workspace the authenticated user belongs to (pre-tenant
+    selection, for the in-app switcher)."""
+
+    id: uuid.UUID
+    name: str
+    role: str
 
 
 class VersionOut(BaseModel):
@@ -68,8 +85,8 @@ class VersionOut(BaseModel):
     version: int
 
 
-# Backward-compatible alias used by the org router.
-OrgVersionOut = VersionOut
+# Alias used by the workspace router PATCH response.
+WorkspaceVersionOut = VersionOut
 
 
 class TagCreateIn(BaseModel):

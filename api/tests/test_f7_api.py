@@ -21,16 +21,16 @@ async def test_f7_api_flow() -> None:
         a = (
             await c.post(
                 "/auth/signup",
-                json={"email": _email(), "password": "pw-strong-123", "org_name": "A"},
+                json={"email": _email(), "password": "pw-strong-123", "workspace_name": "A"},
             )
         ).json()
         b = (
             await c.post(
                 "/auth/signup",
-                json={"email": _email(), "password": "pw-strong-123", "org_name": "B"},
+                json={"email": _email(), "password": "pw-strong-123", "workspace_name": "B"},
             )
         ).json()
-        h = {"Authorization": f"Bearer {a['token']}", "X-Org-Id": a["org_id"]}
+        h = {"Authorization": f"Bearer {a['token']}", "X-Workspace-Id": a["workspace_id"]}
 
         fp = await c.put(
             "/fiscal-profile",
@@ -102,6 +102,6 @@ async def test_f7_api_flow() -> None:
 
         cross = await c.get(
             "/invoices",
-            headers={"Authorization": f"Bearer {a['token']}", "X-Org-Id": b["org_id"]},
+            headers={"Authorization": f"Bearer {a['token']}", "X-Workspace-Id": b["workspace_id"]},
         )
         assert cross.status_code == 403

@@ -61,10 +61,13 @@ class TenantCtx:
 
 async def tenant_ctx(
     user_id: Annotated[uuid.UUID, Depends(current_user_id)],
-    x_org_id: Annotated[str, Header()],
+    x_workspace_id: Annotated[str, Header()],
     x_project_id: Annotated[str | None, Header()] = None,
 ) -> AsyncIterator[TenantCtx]:
-    org_id = uuid.UUID(x_org_id)
+    # Header is X-Workspace-Id (user-facing). Internally the tenant is
+    # still org_id (RLS unchanged, ADR-0015); the rename lives here in
+    # the adapter, not in core.
+    org_id = uuid.UUID(x_workspace_id)
     project_id = uuid.UUID(x_project_id) if x_project_id else None
     async with tenant_session(
         str(org_id), str(user_id), str(project_id) if project_id else None

@@ -13,14 +13,21 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 @router.post("/signup", response_model=SignupOut)
 async def signup_endpoint(body: SignupIn) -> SignupOut:
+    # Personal-first: never force "create an organization". A personal
+    # workspace is auto-provisioned; naming it is optional.
+    workspace_name = body.workspace_name or body.display_name or "Personal"
     async with admin_session() as session:
         result = await signup(
             session,
             email=body.email,
             password=body.password,
-            org_name=body.org_name,
+            org_name=workspace_name,
         )
-    return SignupOut(user_id=result.user_id, org_id=result.org_id, token=result.token)
+    return SignupOut(
+        user_id=result.user_id,
+        workspace_id=result.org_id,
+        token=result.token,
+    )
 
 
 @router.post("/login", response_model=TokenOut)

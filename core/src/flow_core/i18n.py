@@ -67,11 +67,11 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
         MessageCode.AUTH_MISSING_BEARER: "Missing Authorization: Bearer header",
         MessageCode.AUTH_TOKEN_INVALID: "Invalid or expired token",
         MessageCode.AUTH_TOKEN_NO_SUB: "Token without subject",
-        MessageCode.RBAC_NO_MEMBERSHIP: "Not a member of this organization",
+        MessageCode.RBAC_NO_MEMBERSHIP: "Not a member of this workspace",
         MessageCode.RBAC_ROLE_INSUFFICIENT: (
             "Role {current} is insufficient, requires >= {minimum}"
         ),
-        MessageCode.ORG_NOT_FOUND: "Organization not found",
+        MessageCode.ORG_NOT_FOUND: "Workspace not found",
         MessageCode.CONFLICT_STALE_VERSION: "Stale version write",
         MessageCode.TASK_NOT_FOUND: "Task not found",
         MessageCode.TAG_NOT_FOUND: "Tag not found",
@@ -109,7 +109,7 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
         ),
         MessageCode.INVOICE_INVALID: ("Invalid invoice: {detail}"),
         MessageCode.FISCAL_PROFILE_REQUIRED: (
-            "The organization fiscal profile is incomplete: {detail}"
+            "The workspace fiscal profile is incomplete: {detail}"
         ),
         MessageCode.NOTIFICATION_NOT_FOUND: "Notification not found",
         MessageCode.RECURRENCE_WITH_DEPS: (
