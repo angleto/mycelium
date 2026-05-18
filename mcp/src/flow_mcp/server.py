@@ -28,6 +28,7 @@ from flow_core.models.dependency import DependencyType
 from flow_core.models.email import EmailAccount, EmailMessage, EmailProvider
 from flow_core.models.event import Event
 from flow_core.models.memory_blob import MemoryBlob
+from flow_core.models.note import Note, NoteKind, NoteTurn
 from flow_core.models.schedule import Schedule
 from flow_core.models.tag import Tag, TagKind
 from flow_core.models.task import ConstraintKind, Necessity, ScheduleMode, Task
@@ -41,6 +42,7 @@ from flow_core.services import dependencies, scheduler, tasks, taxonomy
 from flow_core.services import email as email_svc
 from flow_core.services import events as events_svc
 from flow_core.services import memory as memory_svc
+from flow_core.services import notes as notes_svc
 from flow_core.services import time_tracking as time_svc
 from flow_core.services.rbac import get_role
 from flow_core.services.taxonomy import ClientInput
@@ -1195,3 +1197,126 @@ async def memory_consolidate(
             operation_id=operation_id,
         )
         return _blob(blob)
+
+
+# --- F6b: notes / conversation / canonical intent (FR-16) ---
+
+
+def _note(n: Note) -> dict[str, Any]:
+    return {
+        "id": str(n.id),
+        "project_id": str(n.project_id) if n.project_id else None,
+        "kind": n.kind.value,
+        "status": n.status.value,
+        "title": n.title,
+        "transcript": n.transcript,
+        "version": n.version,
+    }
+
+
+def _turn(t: NoteTurn) -> dict[str, Any]:
+    return {
+        "id": str(t.id),
+        "role": t.role.value,
+        "content": t.content,
+        "ord": t.ord,
+    }
+
+
+@mcp.tool()
+async def create_note(
+    token: str,
+    org_id: str,
+    kind: str,
+    text: str | None = None,
+    title: str | None = None,
+    project_id: str | None = None,
+) -> dict[str, Any]:
+    """Capture a note (voice|text|conversation). Unmetered."""
+    async with _tenant(token, org_id) as (s, org, user):
+        n = await notes_svc.create_note(
+            s,
+            org_id=org,
+            actor_id=user,
+            kind=NoteKind(kind),
+            project_id=uuid.UUID(project_id) if project_id else None,
+            title=title,
+            text=text,
+        )
+        return _note(n)
+
+
+@mcp.tool()
+async def start_conversation_session(
+    token: str,
+    org_id: str,
+    title: str | None = None,
+    project_id: str | None = None,
+) -> dict[str, Any]:
+    """Start a new conversation session (a conversation Note)."""
+    async with _tenant(token, org_id) as (s, org, user):
+        n = await notes_svc.create_note(
+            s,
+            org_id=org,
+            actor_id=user,
+            kind=NoteKind.conversation,
+            project_id=uuid.UUID(project_id) if project_id else None,
+            title=title,
+        )
+        return _note(n)
+
+
+@mcp.tool()
+async def append_message(
+    token: str, org_id: str, note_id: str, content: str, operation_id: str
+) -> dict[str, Any]:
+    """Append a user message; returns the metered LLM reply turn."""
+    async with _tenant(token, org_id) as (s, org, user):
+        reply = await notes_svc.append_message(
+            s,
+            org_id=org,
+            actor_id=user,
+            note_id=uuid.UUID(note_id),
+            content=content,
+            operation_id=operation_id,
+        )
+        return _turn(reply)
+
+
+@mcp.tool()
+async def transcribe_note(
+    token: str, org_id: str, note_id: str, operation_id: str
+) -> dict[str, Any]:
+    """Run STT on a voice note (metered per audio-minute)."""
+    async with _tenant(token, org_id) as (s, org, user):
+        n = await notes_svc.transcribe(
+            s,
+            org_id=org,
+            actor_id=user,
+            note_id=uuid.UUID(note_id),
+            operation_id=operation_id,
+        )
+        return _note(n)
+
+
+@mcp.tool()
+async def run_command(token: str, org_id: str, text: str) -> dict[str, Any]:
+    """Deterministic canonical NL command (offline, unmetered)."""
+    async with _tenant(token, org_id) as (s, org, user):
+        n = await notes_svc.run_command(s, org_id=org, actor_id=user, text=text)
+        return _note(n)
+
+
+@mcp.tool()
+async def synthesize_speech(
+    token: str, org_id: str, text: str, operation_id: str
+) -> dict[str, Any]:
+    """TTS voice-out (metered per character)."""
+    async with _tenant(token, org_id) as (s, org, user):
+        return await notes_svc.synthesize(
+            s,
+            org_id=org,
+            actor_id=user,
+            text=text,
+            operation_id=operation_id,
+        )

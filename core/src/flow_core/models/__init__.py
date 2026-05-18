@@ -34,6 +34,7 @@ from flow_core.models.email import (
 from flow_core.models.event import Event, EventParticipant
 from flow_core.models.membership import Membership, Role
 from flow_core.models.memory_blob import BlobSource, MemoryBlob, Tier
+from flow_core.models.note import Note, NoteKind, NoteStatus, NoteTurn, TurnRole
 from flow_core.models.organization import Organization
 from flow_core.models.project_profile import ProjectProfile
 from flow_core.models.schedule import Schedule
@@ -80,6 +81,10 @@ __all__ = [
     "Membership",
     "MemoryBlob",
     "Necessity",
+    "Note",
+    "NoteKind",
+    "NoteStatus",
+    "NoteTurn",
     "Organization",
     "ProjectProfile",
     "RateCard",
@@ -98,6 +103,7 @@ __all__ = [
     "Tier",
     "TimeEntry",
     "TimeSource",
+    "TurnRole",
     "UsageRecord",
     "User",
     "UserCalendar",

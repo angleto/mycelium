@@ -12,6 +12,7 @@ from flow_core.models.billing import CostBasis, RateUnit, StorageKind
 from flow_core.models.budget import BudgetPeriod
 from flow_core.models.dependency import DependencyType
 from flow_core.models.email import EmailAccountStatus, EmailProvider
+from flow_core.models.note import NoteKind, NoteStatus, TurnRole
 from flow_core.models.tag import TagKind
 from flow_core.models.task import ConstraintKind, ExecKind, Necessity, ScheduleMode
 from flow_core.models.time_entry import TimeSource
@@ -730,3 +731,68 @@ class TierCountsOut(BaseModel):
 
 class ErasedOut(BaseModel):
     deleted: int
+
+
+# --- F6b: notes / conversation / intent (FR-16, docs/adr/0020, 0021) ---
+
+
+class NoteCreateIn(BaseModel):
+    kind: NoteKind
+    project_id: uuid.UUID | None = None
+    title: str | None = Field(default=None, max_length=300)
+    text: str | None = None
+    audio_ref: str | None = Field(default=None, max_length=512)
+    audio_seconds: int | None = None
+
+
+class NoteOut(BaseModel):
+    id: uuid.UUID
+    project_id: uuid.UUID | None
+    kind: NoteKind
+    status: NoteStatus
+    title: str | None
+    transcript: str | None
+    summary: str | None
+    audio_ref: str | None
+    version: int
+
+
+class NoteTranscribeIn(BaseModel):
+    operation_id: str = Field(min_length=1, max_length=128)
+    embed: bool = True
+
+
+class ConversationStartIn(BaseModel):
+    project_id: uuid.UUID | None = None
+    title: str | None = Field(default=None, max_length=300)
+
+
+class AppendMessageIn(BaseModel):
+    content: str = Field(min_length=1)
+    operation_id: str = Field(min_length=1, max_length=128)
+
+
+class NoteTurnOut(BaseModel):
+    id: uuid.UUID
+    role: TurnRole
+    content: str
+    ord: int
+
+
+class SynthesizeIn(BaseModel):
+    text: str = Field(min_length=1)
+    operation_id: str = Field(min_length=1, max_length=128)
+
+
+class SynthOut(BaseModel):
+    audio_ref: str
+    model_id: str
+
+
+class CommandIn(BaseModel):
+    text: str = Field(min_length=1)
+
+
+class NoteEraseOut(BaseModel):
+    audio_ref: str | None
+    memory_blobs_deleted: int

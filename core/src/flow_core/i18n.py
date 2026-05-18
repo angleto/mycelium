@@ -49,6 +49,8 @@ class MessageCode(enum.StrEnum):
     MEMORY_NOT_FOUND = "memory.not_found"
     MEMORY_DIM_MISMATCH = "memory.dim_mismatch"
     MEMORY_CROSS_SUBJECT = "memory.cross_subject"
+    NOTE_NOT_FOUND = "note.not_found"
+    INTENT_UNRECOGNIZED = "intent.unrecognized"
     DOMAIN_ERROR = "domain.error"
 
 
@@ -93,6 +95,8 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
         MessageCode.MEMORY_CROSS_SUBJECT: (
             "Consolidation cannot cross org/project (hard isolation)"
         ),
+        MessageCode.NOTE_NOT_FOUND: "Note not found",
+        MessageCode.INTENT_UNRECOGNIZED: ("Command not recognized: {raw}"),
         MessageCode.DOMAIN_ERROR: "Domain error",
     },
 }
