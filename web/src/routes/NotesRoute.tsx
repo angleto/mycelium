@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { mentionLink } from '../lib/mentions'
 import { api, errMessage, workspaceHeader } from '../api/client'
-import { MarkdownEditor } from '../components/MarkdownEditor'
+import { RichEditor } from '../components/RichEditor'
 import { MarkdownView } from '../components/Markdown'
 import type { components } from '../api/schema'
 
@@ -172,7 +172,7 @@ export function NotesRoute() {
         </div>
         <label>
           {t('notes.text')}
-          <MarkdownEditor value={text} onChange={setText} />
+          <RichEditor value={text} onChange={setText} />
         </label>
         <div className="row">
           <button type="submit">{t('notes.create')}</button>
