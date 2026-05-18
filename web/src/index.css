@@ -93,6 +93,9 @@ a:hover {
   overflow-y: auto;
 }
 .sidebar__brand {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
   font-weight: 800;
   font-size: 1.15rem;
   color: var(--text-h);

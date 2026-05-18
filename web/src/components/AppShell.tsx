@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { api } from '../api/client'
 import { clearSession } from '../auth/session'
 import { WorkspaceSwitcher } from './WorkspaceSwitcher'
+import { Logo } from './Logo'
 import i18n from '../i18n'
 
 type Item = { to: string; label: string }
@@ -90,7 +91,9 @@ export function AppShell() {
   return (
     <div className="layout">
       <aside className="sidebar">
-        <div className="sidebar__brand">{t('app.title')}</div>
+        <div className="sidebar__brand">
+          <Logo /> {t('app.title')}
+        </div>
         <div className="sidebar__ws">
           <WorkspaceSwitcher />
         </div>
