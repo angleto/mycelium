@@ -42,6 +42,7 @@ export function AppShell() {
       items: [
         { to: '/', label: t('home.title') },
         { to: '/tasks', label: t('tasks.nav') },
+        { to: '/trash', label: t('trash.nav') },
         { to: '/time', label: t('time.nav') },
         { to: '/schedule', label: t('scheduler.nav') },
         { to: '/calendar', label: t('events.nav') },

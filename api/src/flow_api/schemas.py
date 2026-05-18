@@ -302,6 +302,7 @@ class TaskOut(BaseModel):
     necessity: Necessity
     budget_id: uuid.UUID | None
     is_archived: bool
+    deleted_at: datetime.datetime | None = None
     version: int
     tags: list[TagBrief] = Field(default_factory=list)
 

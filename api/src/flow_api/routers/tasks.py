@@ -57,6 +57,7 @@ def _out(t: Task, state_name: str, tags: list[Tag] | None = None) -> TaskOut:
         necessity=t.necessity,
         budget_id=t.budget_id,
         is_archived=t.is_archived,
+        deleted_at=t.deleted_at,
         version=t.version,
     )
 
@@ -228,6 +229,40 @@ async def restore(
         actor_id=ctx.user_id,
         task_id=task_id,
         expected_version=body.expected_version,
+    )
+    return VersionOut(id=task_id, version=version)
+
+
+@router.post("/{task_id}/archive", response_model=VersionOut)
+async def archive(
+    task_id: uuid.UUID,
+    body: ExpectedVersionIn,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+) -> VersionOut:
+    version = await svc.archive_task(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        task_id=task_id,
+        expected_version=body.expected_version,
+        archived=True,
+    )
+    return VersionOut(id=task_id, version=version)
+
+
+@router.post("/{task_id}/unarchive", response_model=VersionOut)
+async def unarchive(
+    task_id: uuid.UUID,
+    body: ExpectedVersionIn,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+) -> VersionOut:
+    version = await svc.archive_task(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        task_id=task_id,
+        expected_version=body.expected_version,
+        archived=False,
     )
     return VersionOut(id=task_id, version=version)
 

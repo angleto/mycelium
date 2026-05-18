@@ -150,6 +150,8 @@ export const en = {
     bulkDelete: 'Delete',
     confirmDelete: 'Delete "{{title}}"?',
     confirmDeleteN: 'Delete {{n}} task(s)?',
+    archive: 'Archive task',
+    bulkArchive: 'Archive',
     save: 'Save',
     saving: 'Saving...',
     saved: 'Saved.',
@@ -207,6 +209,15 @@ export const en = {
   editor: {
     toRaw: 'Edit as Markdown',
     toWysiwyg: 'Rich editor',
+  },
+  trash: {
+    nav: 'Trash',
+    title: 'Trash & archive',
+    deleted: 'Deleted',
+    archived: 'Archived',
+    undelete: 'Restore',
+    unarchive: 'Unarchive',
+    none: 'Nothing here.',
   },
   workflows: {
     nav: 'Workflows',

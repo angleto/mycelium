@@ -149,6 +149,8 @@ export const it: Catalog = {
     bulkDelete: 'Elimina',
     confirmDelete: 'Eliminare "{{title}}"?',
     confirmDeleteN: 'Eliminare {{n}} task?',
+    archive: 'Archivia task',
+    bulkArchive: 'Archivia',
     save: 'Salva',
     saving: 'Salvataggio...',
     saved: 'Salvato.',
@@ -206,6 +208,15 @@ export const it: Catalog = {
   editor: {
     toRaw: 'Modifica come Markdown',
     toWysiwyg: 'Editor ricco',
+  },
+  trash: {
+    nav: 'Cestino',
+    title: 'Cestino e archivio',
+    deleted: 'Eliminati',
+    archived: 'Archiviati',
+    undelete: 'Ripristina',
+    unarchive: 'Dearchivia',
+    none: 'Niente qui.',
   },
   workflows: {
     nav: 'Workflow',

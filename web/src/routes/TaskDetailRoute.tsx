@@ -148,6 +148,20 @@ export function TaskDetailRoute() {
     navigate('/tasks')
   }
 
+  async function onArchive() {
+    if (!task) return
+    setErr(null)
+    const { error } = await api.POST('/tasks/{task_id}/archive', {
+      params: { header: workspaceHeader(), path: { task_id: id } },
+      body: { expected_version: task.version },
+    })
+    if (error) {
+      setErr(errMessage(error))
+      return
+    }
+    navigate('/tasks')
+  }
+
   // Auto-save (no Save button): importance/urgency changes patch
   // immediately; the backend re-derives priority.
   async function autosaveIU(body: { importance?: number; urgency?: number }) {
@@ -340,6 +354,13 @@ export function TaskDetailRoute() {
         <div className="row">
           <button type="submit" disabled={busy}>
             {busy ? t('tasks.saving') : t('tasks.save')}
+          </button>
+          <button
+            type="button"
+            className="btn--ghost btn--sm"
+            onClick={() => void onArchive()}
+          >
+            {t('tasks.archive')}
           </button>
           <button
             type="button"
