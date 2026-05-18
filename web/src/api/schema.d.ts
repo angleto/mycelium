@@ -6429,6 +6429,8 @@ export interface operations {
                 start_from?: string | null;
                 start_to?: string | null;
                 billable?: boolean | null;
+                limit?: number | null;
+                offset?: number;
             };
             header: {
                 "x-workspace-id": string;

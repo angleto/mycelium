@@ -343,6 +343,7 @@ export const it: Catalog = {
     amount: 'Importo',
     none: 'Nessuna voce.',
     loading: 'Caricamento...',
+    end: 'Fine delle voci.',
     realtimeNote: 'Il timer live si aggiorna entro ~5s (polling; nessun endpoint WS in v1).',
   },
   advisory: {

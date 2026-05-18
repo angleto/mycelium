@@ -121,6 +121,8 @@ async def list_entries(
     start_from: datetime.datetime | None = None,
     start_to: datetime.datetime | None = None,
     billable: bool | None = None,
+    limit: int | None = None,
+    offset: int = 0,
 ) -> list[TimeEntryOut]:
     rows = await svc.list_entries(
         ctx.session,
@@ -130,6 +132,8 @@ async def list_entries(
         start_from=start_from,
         start_to=start_to,
         billable=billable,
+        limit=limit,
+        offset=offset,
     )
     return [_out(e) for e in rows]
 

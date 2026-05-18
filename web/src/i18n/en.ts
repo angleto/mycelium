@@ -344,6 +344,7 @@ export const en = {
     amount: 'Amount',
     none: 'No entries.',
     loading: 'Loading...',
+    end: 'End of entries.',
     realtimeNote: 'Live timer reflects within ~5s (polled; no WS endpoint in v1).',
   },
   advisory: {

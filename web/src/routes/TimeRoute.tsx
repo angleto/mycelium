@@ -13,6 +13,7 @@ type Scope = 'all' | 'mine' | 'ai'
 type BillableF = 'all' | 'yes' | 'no'
 
 const GROUPS: Group[] = ['project', 'client', 'generic', 'user', 'task']
+const ENT_PAGE = 50
 
 function hhmmss(sec: number): string {
   const s = Math.max(0, Math.floor(sec))
@@ -28,6 +29,9 @@ export function TimeRoute() {
   const [tasks, setTasks] = useState<Task[]>([])
   const [running, setRunning] = useState<Entry[]>([])
   const [entries, setEntries] = useState<Entry[]>([])
+  const [entOffset, setEntOffset] = useState(0)
+  const [entMore, setEntMore] = useState(false)
+  const [entLoading, setEntLoading] = useState(false)
   const [report, setReport] = useState<Row[]>([])
   const [group, setGroup] = useState<Group>('project')
   const [scope, setScope] = useState<Scope>('all')
@@ -63,13 +67,36 @@ export function TimeRoute() {
     if (r.data) setReport(r.data)
   }, [reportQuery])
 
-  const reloadEntries = useCallback(async () => {
-    const e = await api.GET('/time/entries', {
-      params: { header: workspaceHeader() },
+  const resetEntries = useCallback(async () => {
+    const { data } = await api.GET('/time/entries', {
+      params: { header: workspaceHeader(), query: { limit: ENT_PAGE, offset: 0 } },
     })
-    if (e.data) setEntries(e.data)
+    if (!data) return
+    setEntries(data)
+    setEntOffset(data.length)
+    setEntMore(data.length === ENT_PAGE)
+  }, [])
+
+  const loadMore = useCallback(async () => {
+    if (entLoading || !entMore) return
+    setEntLoading(true)
+    const { data } = await api.GET('/time/entries', {
+      params: {
+        header: workspaceHeader(),
+        query: { limit: ENT_PAGE, offset: entOffset },
+      },
+    })
+    setEntLoading(false)
+    if (!data) return
+    setEntries((p) => [...p, ...data])
+    setEntOffset((o) => o + data.length)
+    setEntMore(data.length === ENT_PAGE)
+  }, [entLoading, entMore, entOffset])
+
+  const reloadEntries = useCallback(async () => {
+    await resetEntries()
     await loadReport()
-  }, [loadReport])
+  }, [resetEntries, loadReport])
 
   // Realtime-ish: poll the running timer (no WS endpoint in v1). State
   // is only set inside the async tick, never sync in the effect body.
@@ -95,22 +122,21 @@ export function TimeRoute() {
     let active = true
     void (async () => {
       const h = workspaceHeader()
-      const [tk, e, cl, pr] = await Promise.all([
+      const [tk, cl, pr] = await Promise.all([
         api.GET('/tasks', { params: { header: h } }),
-        api.GET('/time/entries', { params: { header: h } }),
         api.GET('/tags', { params: { header: h, query: { kind: 'client' } } }),
         api.GET('/tags', { params: { header: h, query: { kind: 'project' } } }),
       ])
       if (!active) return
       if (tk.data) setTasks(tk.data)
-      if (e.data) setEntries(e.data)
       if (cl.data) setClients(cl.data)
       if (pr.data) setProjects(pr.data)
+      await resetEntries()
     })()
     return () => {
       active = false
     }
-  }, [activeId])
+  }, [activeId, resetEntries])
 
   useEffect(() => {
     let active = true
@@ -238,8 +264,21 @@ export function TimeRoute() {
       {entries.length === 0 ? (
         <p className="hint">{t('time.none')}</p>
       ) : (
-        <ul className="list">
-          {entries.map((en) => (
+        <div
+          className="scrollbox"
+          onScroll={(e) => {
+            const el = e.currentTarget
+            if (
+              el.scrollHeight - el.scrollTop - el.clientHeight < 80 &&
+              entMore &&
+              !entLoading
+            ) {
+              void loadMore()
+            }
+          }}
+        >
+          <ul className="list">
+            {entries.map((en) => (
             <li key={en.id} className="taskrow">
               <span className="taskrow__title">
                 {titleOf(en.task_id)}{' '}
@@ -288,7 +327,12 @@ export function TimeRoute() {
               </span>
             </li>
           ))}
-        </ul>
+          </ul>
+          {entLoading && <p className="hint">{t('time.loading')}</p>}
+          {!entMore && !entLoading && (
+            <p className="hint">{t('time.end')}</p>
+          )}
+        </div>
       )}
 
       <h2>{t('time.report')}</h2>

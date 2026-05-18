@@ -331,7 +331,11 @@ async def list_entries(
     start_from: dt.datetime | None = None,
     start_to: dt.datetime | None = None,
     billable: bool | None = None,
+    limit: int | None = None,
+    offset: int = 0,
 ) -> list[TimeEntry]:
+    """Newest first. ``limit`` paginates the recency list; the report
+    aggregation calls without a limit (order is irrelevant there)."""
     stmt = select(TimeEntry)
     if task_id is not None:
         stmt = stmt.where(TimeEntry.task_id == task_id)
@@ -343,7 +347,9 @@ async def list_entries(
         stmt = stmt.where(TimeEntry.started_at < start_to)
     if billable is not None:
         stmt = stmt.where(TimeEntry.billable.is_(billable))
-    stmt = stmt.order_by(TimeEntry.started_at)
+    stmt = stmt.order_by(TimeEntry.started_at.desc(), TimeEntry.id.desc())
+    if limit is not None:
+        stmt = stmt.offset(offset).limit(limit)
     return list((await session.execute(stmt)).scalars().all())
 
 
