@@ -970,6 +970,10 @@ class NoteCreateIn(BaseModel):
     audio_seconds: int | None = None
 
 
+class NoteTagIn(BaseModel):
+    tag_id: uuid.UUID
+
+
 class NoteOut(BaseModel):
     id: uuid.UUID
     project_id: uuid.UUID | None
@@ -981,6 +985,7 @@ class NoteOut(BaseModel):
     audio_ref: str | None
     is_archived: bool = False
     deleted_at: datetime.datetime | None = None
+    tags: list[TagBrief] = []
     version: int
 
 

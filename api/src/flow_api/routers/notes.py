@@ -20,19 +20,26 @@ from flow_api.schemas import (
     NoteEraseOut,
     NoteOut,
     NotePatchIn,
+    NoteTagIn,
     NoteTranscribeIn,
     NoteTurnOut,
     SynthesizeIn,
     SynthOut,
+    TagBrief,
     VersionOut,
 )
 from flow_core.models.note import Note, NoteKind, NoteTurn
+from flow_core.models.tag import Tag
 from flow_core.services import notes as svc
 
 router = APIRouter(prefix="/notes", tags=["notes"])
 
 
-def _out(n: Note) -> NoteOut:
+def _brief(tag: Tag) -> TagBrief:
+    return TagBrief(id=tag.id, kind=tag.kind, name=tag.name, color=tag.color)
+
+
+def _out(n: Note, tags: list[Tag] | None = None) -> NoteOut:
     return NoteOut(
         id=n.id,
         project_id=n.project_id,
@@ -44,6 +51,7 @@ def _out(n: Note) -> NoteOut:
         audio_ref=n.audio_ref,
         is_archived=n.is_archived,
         deleted_at=n.deleted_at,
+        tags=[_brief(t) for t in (tags or [])],
         version=n.version,
     )
 
@@ -76,14 +84,19 @@ async def list_notes(
     ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
     include_archived: bool = False,
     include_deleted: bool = False,
+    project_id: uuid.UUID | None = None,
+    tag_id: uuid.UUID | None = None,
 ) -> list[NoteOut]:
     rows = await svc.list_notes(
         ctx.session,
         org_id=ctx.org_id,
         include_archived=include_archived,
         include_deleted=include_deleted,
+        project_id=project_id,
+        tag_id=tag_id,
     )
-    return [_out(n) for n in rows]
+    tagmap = await svc.tags_by_note(ctx.session, note_ids=[n.id for n in rows])
+    return [_out(n, tagmap.get(n.id, [])) for n in rows]
 
 
 @router.get("/{note_id}", response_model=NoteOut)
@@ -91,7 +104,39 @@ async def get_note(
     note_id: uuid.UUID,
     ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
 ) -> NoteOut:
-    return _out(await svc.get_note(ctx.session, org_id=ctx.org_id, note_id=note_id))
+    n = await svc.get_note(ctx.session, org_id=ctx.org_id, note_id=note_id)
+    tagmap = await svc.tags_by_note(ctx.session, note_ids=[n.id])
+    return _out(n, tagmap.get(n.id, []))
+
+
+@router.post("/{note_id}/tags", status_code=204)
+async def attach_note_tag(
+    note_id: uuid.UUID,
+    body: NoteTagIn,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+) -> None:
+    await svc.attach_tag(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        note_id=note_id,
+        tag_id=body.tag_id,
+    )
+
+
+@router.delete("/{note_id}/tags/{tag_id}", status_code=204)
+async def detach_note_tag(
+    note_id: uuid.UUID,
+    tag_id: uuid.UUID,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+) -> None:
+    await svc.detach_tag(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        note_id=note_id,
+        tag_id=tag_id,
+    )
 
 
 @router.patch("/{note_id}", response_model=VersionOut)

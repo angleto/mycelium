@@ -14,11 +14,13 @@ from __future__ import annotations
 import datetime as dt
 import re
 import uuid
+from collections.abc import Sequence
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from flow_core.ai_providers import (
@@ -35,6 +37,7 @@ from flow_core.i18n import MessageCode
 from flow_core.models.billing import CostBasis
 from flow_core.models.membership import Role
 from flow_core.models.note import Note, NoteKind, NoteStatus, NoteTurn, TurnRole
+from flow_core.models.note_tag import NoteTag
 from flow_core.models.tag import Tag, TagKind
 from flow_core.services import audit, billing
 from flow_core.services import memory as memory_svc
@@ -133,15 +136,25 @@ async def list_notes(
     limit: int = 200,
     include_archived: bool = False,
     include_deleted: bool = False,
+    project_id: uuid.UUID | None = None,
+    tag_id: uuid.UUID | None = None,
 ) -> list[Note]:
     """Notes in the workspace, newest first (for the @note picker and
     the notes list). RLS scopes to the org. Archived/deleted are
-    excluded unless explicitly requested (trash & archive view)."""
+    excluded unless explicitly requested (trash & archive view).
+    ``project_id`` / ``tag_id`` organize the list (project focus, tag
+    filter)."""
     stmt = select(Note)
     if not include_deleted:
         stmt = stmt.where(Note.deleted_at.is_(None))
     if not include_archived:
         stmt = stmt.where(Note.is_archived.is_(False))
+    if project_id is not None:
+        stmt = stmt.where(Note.project_id == project_id)
+    if tag_id is not None:
+        stmt = stmt.where(
+            Note.id.in_(select(NoteTag.note_id).where(NoteTag.tag_id == tag_id))
+        )
     stmt = stmt.order_by(Note.created_at.desc()).limit(limit)
     return list((await session.execute(stmt)).scalars().all())
 
@@ -157,6 +170,76 @@ async def get_note(
     if n is None or (n.deleted_at is not None and not include_deleted):
         raise NotFoundError(MessageCode.NOTE_NOT_FOUND)
     return n
+
+
+async def tags_by_note(
+    session: AsyncSession, *, note_ids: Sequence[uuid.UUID]
+) -> dict[uuid.UUID, list[Tag]]:
+    """Batched note -> tags (chips in the notes list without an N+1)."""
+    out: dict[uuid.UUID, list[Tag]] = {}
+    if not note_ids:
+        return out
+    rows = await session.execute(
+        select(NoteTag.note_id, Tag)
+        .join(Tag, Tag.id == NoteTag.tag_id)
+        .where(NoteTag.note_id.in_(note_ids))
+    )
+    for nid, tag in rows.all():
+        out.setdefault(nid, []).append(tag)
+    return out
+
+
+async def attach_tag(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    note_id: uuid.UUID,
+    tag_id: uuid.UUID,
+) -> None:
+    await require_role(session, org_id, actor_id, Role.member)
+    await get_note(session, org_id=org_id, note_id=note_id)
+    tag = (
+        await session.execute(select(Tag.id).where(Tag.id == tag_id))
+    ).scalar_one_or_none()
+    if tag is None:
+        raise NotFoundError(MessageCode.TAG_NOT_FOUND)
+    try:
+        async with session.begin_nested():
+            session.add(NoteTag(org_id=org_id, note_id=note_id, tag_id=tag_id))
+            await session.flush()
+    except IntegrityError:
+        return
+    await audit.log(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        entity="note",
+        entity_id=note_id,
+        action="attach_tag",
+    )
+
+
+async def detach_tag(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    note_id: uuid.UUID,
+    tag_id: uuid.UUID,
+) -> None:
+    await require_role(session, org_id, actor_id, Role.member)
+    await session.execute(
+        delete(NoteTag).where(NoteTag.note_id == note_id, NoteTag.tag_id == tag_id)
+    )
+    await audit.log(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        entity="note",
+        entity_id=note_id,
+        action="detach_tag",
+    )
 
 
 async def _note_set(

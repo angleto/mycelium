@@ -53,6 +53,7 @@ from flow_core.models.invoice import (
 from flow_core.models.membership import Membership, Role
 from flow_core.models.memory_blob import BlobSource, MemoryBlob, Tier
 from flow_core.models.note import Note, NoteKind, NoteStatus, NoteTurn, TurnRole
+from flow_core.models.note_tag import NoteTag
 from flow_core.models.notification import (
     Notification,
     NotificationChannelKind,
@@ -120,6 +121,7 @@ __all__ = [
     "Note",
     "NoteKind",
     "NoteStatus",
+    "NoteTag",
     "NoteTurn",
     "Notification",
     "NotificationChannelKind",
