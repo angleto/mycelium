@@ -7,10 +7,11 @@ import { PriorityChip } from '../components/PriorityChip'
 import { ScaleSelect } from '../components/ScaleSelect'
 import { formatHours } from '../lib/estimate'
 
-// Mirrors backend derive_priority: 26 - importance*urgency, so
-// priority is 1 (most prioritary, 5x5) .. 25 (least, 1x1).
+// Mirrors backend derive_priority. importance/urgency are 1..5 where
+// 1 = most pressing (Critical / Now); priority = importance*urgency,
+// 1 (Critical+Now) .. 25 (Trivial+Whenever).
 function derivePriority(imp: number, urg: number): number {
-  return Math.max(1, Math.min(25, 26 - imp * urg))
+  return Math.max(1, Math.min(25, imp * urg))
 }
 import type { components } from '../api/schema'
 
@@ -30,8 +31,8 @@ export function TaskDetailRoute() {
   const [tags, setTags] = useState<Tag[]>([])
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
-  const [importance, setImportance] = useState(2)
-  const [urgency, setUrgency] = useState(2)
+  const [importance, setImportance] = useState(4)
+  const [urgency, setUrgency] = useState(4)
   const [estimate, setEstimate] = useState('')
   const [due, setDue] = useState('')
   const [estCustom, setEstCustom] = useState(false)
@@ -50,8 +51,8 @@ export function TaskDetailRoute() {
     setTask(tk)
     setTitle(tk.title)
     setDescription(tk.description ?? '')
-    setImportance(tk.importance ?? 2)
-    setUrgency(tk.urgency ?? 2)
+    setImportance(tk.importance ?? 4)
+    setUrgency(tk.urgency ?? 4)
     setEstimate(tk.estimate_effort_h ?? '')
     setDue(tk.due_date ?? '')
     setStateId(tk.state_id)
@@ -338,11 +339,7 @@ export function TaskDetailRoute() {
             estimate.trim() !== '' &&
             !estCustom &&
             presets.some((p) => Number(p) === Number(estimate))
-          const selVal = isPreset
-            ? String(Number(estimate))
-            : estCustom
-              ? 'custom'
-              : ''
+          const selVal = isPreset ? String(Number(estimate)) : 'custom'
           return (
             <label>
               {t('tasks.estimate')}
@@ -352,11 +349,7 @@ export function TaskDetailRoute() {
                   value={selVal}
                   onChange={(e) => {
                     const v = e.target.value
-                    if (v === '') {
-                      setEstimate('')
-                      setEstCustom(false)
-                      commitEstimate('')
-                    } else if (v === 'custom') {
+                    if (v === 'custom') {
                       setEstCustom(true)
                     } else {
                       setEstimate(v)
@@ -365,7 +358,6 @@ export function TaskDetailRoute() {
                     }
                   }}
                 >
-                  <option value="">{t('tasks.estPick')}</option>
                   {presets.map((p) => (
                     <option key={p} value={String(Number(p))}>
                       {formatHours(Number(p))}

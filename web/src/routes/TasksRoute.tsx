@@ -31,8 +31,9 @@ export function TasksRoute() {
   const [tags, setTags] = useState<Tag[]>([])
   const [filter, setFilter] = useState('')
   const [title, setTitle] = useState('')
-  const [importance, setImportance] = useState(2)
-  const [urgency, setUrgency] = useState(2)
+  // Default Low/Low (value 4 on the 1=Critical..5=Trivial scale).
+  const [importance, setImportance] = useState(4)
+  const [urgency, setUrgency] = useState(4)
   const [due, setDue] = useState('')
   const [q, setQ] = useState('')
   const [clientId, setClientId] = useState('')

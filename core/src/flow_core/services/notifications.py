@@ -198,8 +198,10 @@ def _advance(when: dt.datetime, freq: RecurrenceFreq, interval: int) -> dt.datet
         return when + dt.timedelta(days=interval)
     if freq is RecurrenceFreq.weekly:
         return when + dt.timedelta(weeks=interval)
-    # monthly: add interval calendar months, clamp the day.
-    month0 = when.month - 1 + interval
+    # monthly / yearly: add N calendar months (yearly = interval*12),
+    # clamp the day to the target month length.
+    months = interval * 12 if freq is RecurrenceFreq.yearly else interval
+    month0 = when.month - 1 + months
     year = when.year + month0 // 12
     month = month0 % 12 + 1
     day = min(

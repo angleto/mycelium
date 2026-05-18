@@ -191,8 +191,8 @@ export const it: Catalog = {
     legalName: 'Ragione sociale',
     newProjectName: 'Nome nuovo progetto',
     addInline: 'Aggiungi',
-    impLabels: ['Banale', 'Bassa', 'Media', 'Alta', 'Critica'],
-    urgLabels: ['Quando capita', 'Bassa', 'Presto', 'Alta', 'Adesso'],
+    impLabels: ['Critica', 'Alta', 'Media', 'Bassa', 'Banale'],
+    urgLabels: ['Adesso', 'Alta', 'Presto', 'Bassa', 'Quando capita'],
     aiBadge: 'IA',
     aiTitle: "Creato/gestito dall'agente IA",
     search: 'Cerca per titolo o tag...',
@@ -512,6 +512,19 @@ export const it: Catalog = {
     scan: 'Scansiona promemoria',
     count: 'Conteggio: {{n}}',
     loading: 'Caricamento...',
+    configured: 'configurato',
+    notConfigured: 'non configurato',
+    needTarget: 'Imposta prima un target per abilitare questo canale',
+    hintPrefs:
+      'Promemoria/notifiche vengono inviati su un canale configurato e abilitato. Un canale richiede un target (chat id Telegram o email) prima di poter essere abilitato.',
+    hintActions:
+      'Invia spedisce le notifiche in sospeso. Genera dovute materializza i task ricorrenti. Scansiona promemoria accoda i promemoria di scadenza per i task assegnati a te.',
+    freqOpt: {
+      daily: 'Giornaliera',
+      weekly: 'Settimanale',
+      monthly: 'Mensile',
+      yearly: 'Annuale',
+    },
   },
   md: {
     write: 'Scrivi',

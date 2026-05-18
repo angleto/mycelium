@@ -48,6 +48,7 @@ class RecurrenceFreq(enum.StrEnum):
     daily = "daily"
     weekly = "weekly"
     monthly = "monthly"
+    yearly = "yearly"
 
 
 class Notification(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, Base):

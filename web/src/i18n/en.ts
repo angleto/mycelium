@@ -192,8 +192,8 @@ export const en = {
     legalName: 'Legal name',
     newProjectName: 'New project name',
     addInline: 'Add',
-    impLabels: ['Trivial', 'Low', 'Medium', 'High', 'Critical'],
-    urgLabels: ['Whenever', 'Low', 'Soon', 'High', 'Now'],
+    impLabels: ['Critical', 'High', 'Medium', 'Low', 'Trivial'],
+    urgLabels: ['Now', 'High', 'Soon', 'Low', 'Whenever'],
     aiBadge: 'AI',
     aiTitle: 'Created/owned by the AI agent',
     search: 'Search title or tag...',
@@ -513,6 +513,19 @@ export const en = {
     scan: 'Scan reminders',
     count: 'Count: {{n}}',
     loading: 'Loading...',
+    configured: 'configured',
+    notConfigured: 'not configured',
+    needTarget: 'Set a target first to enable this channel',
+    hintPrefs:
+      'Reminders/notifications are delivered on a configured + enabled channel. A channel needs a target (Telegram chat id or email) before it can be enabled.',
+    hintActions:
+      'Dispatch sends pending notifications. Spawn due materializes recurring tasks. Scan reminders enqueues due-date reminders for tasks assigned to you.',
+    freqOpt: {
+      daily: 'Daily',
+      weekly: 'Weekly',
+      monthly: 'Monthly',
+      yearly: 'Yearly',
+    },
   },
   md: {
     write: 'Write',

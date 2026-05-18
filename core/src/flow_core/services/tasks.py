@@ -29,12 +29,14 @@ from flow_core.services.rbac import require_role
 
 
 def derive_priority(importance: int, urgency: int) -> int:
-    """Eisenhower: priority = 26 - importance*urgency (each 1..5), so
-    priority runs 1 (most prioritary, 5x5) .. 25 (least, 1x1). 1 is
-    highest and the default task / scheduler ordering is ascending
-    (ADR-0004), so the smallest number is always done first.
-    importance/urgency are persisted so the matrix round-trips."""
-    return max(1, min(25, 26 - importance * urgency))
+    """Eisenhower: importance and urgency are 1..5 where 1 is the most
+    pressing (1 = Critical / Now, 5 = Trivial / Whenever). priority =
+    importance*urgency, so it runs 1 (most prioritary: Critical+Now)
+    .. 25 (least: Trivial+Whenever). 1 is highest and the default task
+    / scheduler ordering is ascending (ADR-0004), so the smallest
+    number is always done first. importance/urgency are persisted so
+    the matrix round-trips."""
+    return max(1, min(25, importance * urgency))
 
 
 _UPDATABLE = frozenset(

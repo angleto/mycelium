@@ -3347,7 +3347,7 @@ export interface components {
          * RecurrenceFreq
          * @enum {string}
          */
-        RecurrenceFreq: "daily" | "weekly" | "monthly";
+        RecurrenceFreq: "daily" | "weekly" | "monthly" | "yearly";
         /** RecurrenceIn */
         RecurrenceIn: {
             /**

@@ -25,29 +25,31 @@ async def test_priority_derived_from_importance_urgency() -> None:
         ).json()
         h = {"Authorization": f"Bearer {a['token']}", "X-Workspace-Id": a["workspace_id"]}
 
-        # 5 x 5 = 25 -> priority 1 (highest)
+        # importance/urgency: 1 = most pressing (Critical/Now),
+        # 5 = least (Trivial/Whenever). priority = importance*urgency.
+        # 5 x 5 = 25 -> least prioritary.
         t1 = (
             await c.post(
                 "/tasks",
                 headers=h,
-                json={"title": "crit", "importance": 5, "urgency": 5},
+                json={"title": "trivial", "importance": 5, "urgency": 5},
             )
         ).json()
-        assert t1["priority"] == 1
+        assert t1["priority"] == 25
         assert t1["importance"] == 5
         assert t1["urgency"] == 5
 
-        # 1 x 1 = 1 -> priority 25 (lowest); 26 - 1
+        # 1 x 1 = 1 -> most prioritary (Critical + Now)
         t2 = (
             await c.post(
                 "/tasks",
                 headers=h,
-                json={"title": "meh", "importance": 1, "urgency": 1},
+                json={"title": "crit", "importance": 1, "urgency": 1},
             )
         ).json()
-        assert t2["priority"] == 25
+        assert t2["priority"] == 1
 
-        # patch importance/urgency -> priority re-derived (3 x 3 = 9 -> 17)
+        # patch importance/urgency -> priority re-derived (3 x 3 = 9)
         r = await c.patch(
             f"/tasks/{t1['id']}",
             headers=h,
@@ -57,7 +59,7 @@ async def test_priority_derived_from_importance_urgency() -> None:
         got = (await c.get(f"/tasks/{t1['id']}", headers=h)).json()
         assert got["importance"] == 3
         assert got["urgency"] == 3
-        assert got["priority"] == 17
+        assert got["priority"] == 9
 
         # legacy path: explicit priority, no importance/urgency
         t3 = (

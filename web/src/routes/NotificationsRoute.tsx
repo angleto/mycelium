@@ -9,15 +9,17 @@ type Notif = components['schemas']['NotificationOut']
 type Task = components['schemas']['TaskOut']
 type Channel = components['schemas']['NotificationChannelKind']
 type Freq = components['schemas']['RecurrenceFreq']
+type Pref = components['schemas']['NotificationPrefOut']
 
 const CHANNELS: Channel[] = ['telegram', 'email']
-const FREQS: Freq[] = ['daily', 'weekly', 'monthly']
+const FREQS: Freq[] = ['daily', 'weekly', 'monthly', 'yearly']
 
 export function NotificationsRoute() {
   const { t } = useTranslation()
   const session = useSession()
   const activeId = session?.workspaceId
   const [list, setList] = useState<Notif[]>([])
+  const [prefs, setPrefs] = useState<Pref[]>([])
   const [tasks, setTasks] = useState<Task[]>([])
   const [channel, setChannel] = useState<Channel>('email')
   const [enabled, setEnabled] = useState(true)
@@ -31,25 +33,29 @@ export function NotificationsRoute() {
 
   const reload = useCallback(async () => {
     const h = workspaceHeader()
-    const [n, tk] = await Promise.all([
+    const [n, tk, pf] = await Promise.all([
       api.GET('/notifications', { params: { header: h } }),
       api.GET('/tasks', { params: { header: h } }),
+      api.GET('/notifications/prefs', { params: { header: h } }),
     ])
     if (n.data) setList(n.data)
     if (tk.data) setTasks(tk.data)
+    if (pf.data) setPrefs(pf.data)
   }, [])
 
   useEffect(() => {
     let active = true
     void (async () => {
       const h = workspaceHeader()
-      const [n, tk] = await Promise.all([
+      const [n, tk, pf] = await Promise.all([
         api.GET('/notifications', { params: { header: h } }),
         api.GET('/tasks', { params: { header: h } }),
+        api.GET('/notifications/prefs', { params: { header: h } }),
       ])
       if (!active) return
       if (n.data) setList(n.data)
       if (tk.data) setTasks(tk.data)
+      if (pf.data) setPrefs(pf.data)
     })()
     return () => {
       active = false
@@ -61,9 +67,15 @@ export function NotificationsRoute() {
     const uid = currentUserId()
     if (!uid) return
     setErr(null)
+    // A channel is usable only once configured: no target -> not enabled.
     const { error } = await api.PUT('/notifications/prefs', {
       params: { header: workspaceHeader() },
-      body: { user_id: uid, channel, enabled, target },
+      body: {
+        user_id: uid,
+        channel,
+        enabled: target.trim() !== '' && enabled,
+        target,
+      },
     })
     if (error) {
       setErr(errMessage(error))
@@ -124,8 +136,25 @@ export function NotificationsRoute() {
       {err && <p className="err">{err}</p>}
       {msg && <p className="ok">{msg}</p>}
 
+      <h2>{t('notif.prefs')}</h2>
+      <p className="hint">{t('notif.hintPrefs')}</p>
+      <ul className="list">
+        {CHANNELS.map((c) => {
+          const p = prefs.find((x) => x.channel === c)
+          const on = p && p.enabled && p.target
+          return (
+            <li key={c}>
+              <strong>{c}</strong>{' '}
+              <span className={on ? 'ok' : 'muted'}>
+                {on
+                  ? `${t('notif.configured')} (${p?.target})`
+                  : t('notif.notConfigured')}
+              </span>
+            </li>
+          )
+        })}
+      </ul>
       <form onSubmit={(e) => void onSavePref(e)} className="row">
-        <h2>{t('notif.prefs')}</h2>
         <select
           value={channel}
           onChange={(e) => setChannel(e.target.value as Channel)}
@@ -136,22 +165,24 @@ export function NotificationsRoute() {
             </option>
           ))}
         </select>
-        <label>
-          <input
-            type="checkbox"
-            checked={enabled}
-            onChange={(e) => setEnabled(e.target.checked)}
-          />{' '}
-          {t('notif.enabled')}
-        </label>
         <input
           placeholder={t('notif.target')}
           value={target}
           onChange={(e) => setTarget(e.target.value)}
         />
+        <label title={target.trim() === '' ? t('notif.needTarget') : undefined}>
+          <input
+            type="checkbox"
+            checked={enabled}
+            disabled={target.trim() === ''}
+            onChange={(e) => setEnabled(e.target.checked)}
+          />{' '}
+          {t('notif.enabled')}
+        </label>
         <button type="submit">{t('notif.savePref')}</button>
       </form>
 
+      <p className="hint">{t('notif.hintActions')}</p>
       <div className="row">
         <button type="button" onClick={() => void onDispatch()}>
           {t('notif.dispatch')}
@@ -195,7 +226,7 @@ export function NotificationsRoute() {
         <select value={freq} onChange={(e) => setFreq(e.target.value as Freq)}>
           {FREQS.map((f) => (
             <option key={f} value={f}>
-              {f}
+              {t(`notif.freqOpt.${f}`)}
             </option>
           ))}
         </select>
