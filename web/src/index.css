@@ -626,3 +626,9 @@ button.btn--danger:hover {
   font-size: 0.8rem;
   padding: 0.1rem 0.3rem;
 }
+.taskrow__sep {
+  align-self: stretch;
+  width: 1px;
+  background: var(--border);
+  margin: 0 0.2rem;
+}

@@ -619,6 +619,8 @@ export function TasksRoute() {
                   ))}
                 </span>
                 <span className="taskrow__meta">
+                  <span className="taskrow__sep" aria-hidden="true" />
+                  <PriorityChip priority={tk.priority} score={score} />
                   {stateById.has(tk.state_id) ? (
                     <select
                       className="taskrow__state"
@@ -639,7 +641,6 @@ export function TasksRoute() {
                   ) : (
                     <span className="muted">{tk.state}</span>
                   )}
-                  <PriorityChip priority={tk.priority} score={score} />
                   <button
                     type="button"
                     className={onThis ? 'btn--sm' : 'btn--ghost btn--sm'}
