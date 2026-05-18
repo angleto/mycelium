@@ -56,6 +56,12 @@ export const it: Catalog = {
     block: 'Blocca',
     unblock: 'Sblocca',
   },
+  tagpicker: {
+    none: 'Nessun tag',
+    search: 'Cerca tag…',
+    noMatch: 'Nessun tag corrispondente',
+    remove: 'Rimuovi tag',
+  },
   tagmgr: {
     nav: 'Tag',
     title: 'Tag',

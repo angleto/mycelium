@@ -57,6 +57,12 @@ export const en = {
     block: 'Block',
     unblock: 'Unblock',
   },
+  tagpicker: {
+    none: 'No tags',
+    search: 'Search tags…',
+    noMatch: 'No matching tags',
+    remove: 'Remove tag',
+  },
   tagmgr: {
     nav: 'Tags',
     title: 'Tags',

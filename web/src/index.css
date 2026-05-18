@@ -1277,3 +1277,46 @@ button.btn--danger:hover {
   flex: 1 1 auto;
   max-width: 22rem;
 }
+
+/* Reusable tag picker: assigned chips + searchable, scrollable list of
+   addable tags (the catalogue can be large). */
+.tagpick {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.tagpick__search {
+  max-width: 22rem;
+}
+.tagpick__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 13rem;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface);
+}
+.tagpick__list > li + li {
+  border-top: 1px solid var(--border);
+}
+.tagpick__empty {
+  padding: 0.5rem 0.6rem;
+}
+.tagpick__opt {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: 0;
+  color: var(--text-h);
+  padding: 0.4rem 0.6rem;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+.tagpick__opt:hover {
+  background: var(--accent-weak);
+}

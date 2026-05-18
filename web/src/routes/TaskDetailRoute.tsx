@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { api, errMessage, workspaceHeader } from '../api/client'
 import { RichEditor } from '../components/RichEditor'
+import { TagPicker } from '../components/TagPicker'
 import { PriorityChip } from '../components/PriorityChip'
 import { ScaleSelect } from '../components/ScaleSelect'
 import { formatHours } from '../lib/estimate'
@@ -40,7 +41,6 @@ export function TaskDetailRoute() {
   const [estCustom, setEstCustom] = useState(false)
   const [presets, setPresets] = useState<string[]>([])
   const [stateId, setStateId] = useState('')
-  const [tagId, setTagId] = useState('')
   const [allTasks, setAllTasks] = useState<Task[]>([])
   const [reminders, setReminders] = useState<
     components['schemas']['ReminderOut'][]
@@ -312,8 +312,7 @@ export function TaskDetailRoute() {
     await reload()
   }
 
-  async function onAddTag() {
-    if (!tagId) return
+  async function addTag(tagId: string) {
     setErr(null)
     const { error } = await api.POST('/tasks/{task_id}/tags', {
       params: { header: workspaceHeader(), path: { task_id: id } },
@@ -323,7 +322,22 @@ export function TaskDetailRoute() {
       setErr(errMessage(error))
       return
     }
-    setMsg(t('tasks.saved'))
+    await reload()
+  }
+
+  async function removeTag(tagId: string) {
+    setErr(null)
+    const { error } = await api.DELETE('/tasks/{task_id}/tags/{tag_id}', {
+      params: {
+        header: workspaceHeader(),
+        path: { task_id: id, tag_id: tagId },
+      },
+    })
+    if (error) {
+      setErr(errMessage(error))
+      return
+    }
+    await reload()
   }
 
   async function onAddDep() {
@@ -584,22 +598,13 @@ export function TaskDetailRoute() {
         </label>
       </div>
 
-      <div className="row">
-        <label>
-          {t('tasks.addTag')}
-          <select value={tagId} onChange={(e) => setTagId(e.target.value)}>
-            <option value="">{t('tasks.all')}</option>
-            {tags.map((tg) => (
-              <option key={tg.id} value={tg.id}>
-                {tg.kind}: {tg.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <button type="button" onClick={() => void onAddTag()}>
-          {t('tasks.addTag')}
-        </button>
-      </div>
+      <h2>{t('tasks.tagsTitle')}</h2>
+      <TagPicker
+        selected={task?.tags ?? []}
+        all={tags}
+        onAdd={(tid) => void addTag(tid)}
+        onRemove={(tid) => void removeTag(tid)}
+      />
 
       <h2>{t('tasks.deps')}</h2>
       {dependsOn.length === 0 && blocks.length === 0 ? (

@@ -13,6 +13,7 @@ import { useSession } from '../auth/useSession'
 import { RichEditor } from '../components/RichEditor'
 import { MarkdownView } from '../components/Markdown'
 import { NoteListItem } from '../components/NoteListItem'
+import { TagPicker } from '../components/TagPicker'
 import { useFocus } from '../lib/focus'
 import type { components } from '../api/schema'
 
@@ -449,12 +450,6 @@ export function NotesRoute() {
     sel.kind !== 'conversation' &&
     (eTitle !== savedSnap.current.title ||
       eText !== savedSnap.current.text)
-  // Notes are generic: any tag can be attached (a tag may belong to
-  // one/many projects or be global, but a note is not constrained to a
-  // project's scope — only tasks resolve to a project/client).
-  const addable = sel
-    ? tags.filter((g) => !(sel.tags ?? []).some((s) => s.id === g.id))
-    : []
 
   return (
     <section className="card">
@@ -611,30 +606,12 @@ export function NotesRoute() {
                   value={eTitle}
                   onChange={(e) => setETitle(e.target.value)}
                 />
-                <div className="chips">
-                  {(sel.tags ?? []).map((g) => (
-                    <button
-                      key={g.id}
-                      type="button"
-                      className="chip chip--rm"
-                      title={t('notes.tags')}
-                      onClick={() => void removeTag(g.id)}
-                    >
-                      {g.name} ✕
-                    </button>
-                  ))}
-                  <select
-                    value=""
-                    onChange={(e) => void addTag(e.target.value)}
-                  >
-                    <option value="">{t('notes.addTag')}</option>
-                    {addable.map((g) => (
-                      <option key={g.id} value={g.id}>
-                        {g.kind}: {g.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+                <TagPicker
+                  selected={sel.tags ?? []}
+                  all={tags}
+                  onAdd={(tid) => void addTag(tid)}
+                  onRemove={(tid) => void removeTag(tid)}
+                />
                 <label className="grow">
                   {t('notes.text')}
                   <RichEditor value={eText} onChange={setEText} large />
