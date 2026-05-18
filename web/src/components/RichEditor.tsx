@@ -177,8 +177,25 @@ export function RichEditor({
   const [rawMode, setRawMode] = useState(false)
   const editor = useEditor({
     extensions: [
-      StarterKit,
-      Link.configure({ openOnClick: false, autolink: false }),
+      // StarterKit v3 bundles its own Link mark; disable it so our
+      // single configured Link wins. With both registered the
+      // StarterKit one (openOnClick: true) took over and clicking a
+      // mention did window.open('@note:uuid') -> broken tab instead
+      // of letting the app-side interceptor route it (the reason a
+      // note opened from a converted task was unreachable).
+      StarterKit.configure({ link: false }),
+      Link.configure({
+        openOnClick: false,
+        autolink: false,
+        // Accept the @kind:uuid mention DSL hrefs in addition to
+        // regular links so [label](@note:uuid) survives the markdown
+        // round-trip as a clickable link (bitvision pattern).
+        validate: (url: string) => {
+          if (!url) return false
+          if (/^@(?:task|note|tag):/.test(url)) return true
+          return /^(https?:|mailto:|tel:)/i.test(url)
+        },
+      }),
       Markdown.configure({ html: false }),
       MentionExt,
     ],
