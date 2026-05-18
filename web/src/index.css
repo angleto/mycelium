@@ -654,12 +654,18 @@ button.btn--danger:hover {
   display: flex;
   align-items: center;
   gap: 0.6rem;
+  flex-wrap: nowrap;
 }
 .taskrow__title {
-  flex: 1;
+  flex: 1 1 auto;
   min-width: 0;
   font-weight: 600;
   color: var(--text-h);
+  /* Single line + ellipsis: a long title must never spill over the
+     tags / priority columns. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .taskrow__title:hover {
   color: var(--accent);
