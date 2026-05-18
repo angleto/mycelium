@@ -29,8 +29,9 @@ export function TasksRoute() {
   const [tags, setTags] = useState<Tag[]>([])
   const [filter, setFilter] = useState('')
   const [title, setTitle] = useState('')
-  const [importance, setImportance] = useState(4)
-  const [urgency, setUrgency] = useState(4)
+  const [importance, setImportance] = useState(2)
+  const [urgency, setUrgency] = useState(2)
+  const [q, setQ] = useState('')
   const [clientId, setClientId] = useState('')
   const [projectId, setProjectId] = useState('')
   const [addCli, setAddCli] = useState(false)
@@ -183,6 +184,14 @@ export function TasksRoute() {
   }
 
   const activeTag = tags.find((x) => x.id === filter)
+  const ql = q.trim().toLowerCase()
+  const shown = ql
+    ? tasks.filter(
+        (tk) =>
+          tk.title.toLowerCase().includes(ql) ||
+          (tk.tags ?? []).some((g) => g.name.toLowerCase().includes(ql)),
+      )
+    : tasks
 
   return (
     <section className="card">
@@ -286,6 +295,12 @@ export function TasksRoute() {
       )}
 
       <div className="row">
+        <input
+          placeholder={t('tasks.search')}
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          style={{ flex: 1, minWidth: '12rem' }}
+        />
         <label>
           {t('tasks.filterTag')}
           <select value={filter} onChange={(e) => setFilter(e.target.value)}>
@@ -303,11 +318,11 @@ export function TasksRoute() {
       </div>
 
       {err && <p className="err">{err}</p>}
-      {tasks.length === 0 ? (
+      {shown.length === 0 ? (
         <p className="hint">{t('tasks.none')}</p>
       ) : (
         <ul className="list tasklist">
-          {tasks.map((tk) => {
+          {shown.map((tk) => {
             const onThis = running?.task_id === tk.id
             const elapsed = onThis
               ? (now - new Date(running.started_at).getTime()) / 1000
@@ -319,8 +334,18 @@ export function TasksRoute() {
             return (
               <li key={tk.id} className="taskrow">
                 <Link to={`/tasks/${tk.id}`} className="taskrow__title">
+                  {tk.executor_kind === 'llm_agent' && (
+                    <span className="aibadge" title={t('tasks.aiTitle')}>
+                      {t('tasks.aiBadge')}
+                    </span>
+                  )}
                   {tk.title}
                 </Link>
+                <span className="taskrow__tags">
+                  {(tk.tags ?? []).map((g) => (
+                    <TagChip key={g.id} name={g.name} color={g.color} kind={g.kind} />
+                  ))}
+                </span>
                 <span className="taskrow__meta">
                   <span className="muted">{tk.state}</span>
                   <PriorityChip priority={tk.priority} score={score} />

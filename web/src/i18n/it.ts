@@ -159,6 +159,10 @@ export const it: Catalog = {
     addInline: 'Aggiungi',
     impLabels: ['Banale', 'Bassa', 'Media', 'Alta', 'Critica'],
     urgLabels: ['Quando capita', 'Bassa', 'Presto', 'Alta', 'Adesso'],
+    aiBadge: 'IA',
+    aiTitle: "Creato/gestito dall'agente IA",
+    search: 'Cerca per titolo o tag...',
+    estimate: 'Stima (h)',
   },
   workflows: {
     nav: 'Workflow',

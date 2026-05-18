@@ -546,3 +546,23 @@ button.btn--ghost {
 .chip.prio {
   font-variant-numeric: tabular-nums;
 }
+.aibadge {
+  display: inline-block;
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #fff;
+  background: #7c3aed;
+  border-radius: 4px;
+  padding: 0.05rem 0.32rem;
+  margin-right: 0.4rem;
+  vertical-align: middle;
+}
+.taskrow__tags {
+  display: flex;
+  gap: 0.3rem;
+  flex-wrap: wrap;
+  max-width: 40%;
+  overflow: hidden;
+}

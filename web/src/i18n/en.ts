@@ -160,6 +160,10 @@ export const en = {
     addInline: 'Add',
     impLabels: ['Trivial', 'Low', 'Medium', 'High', 'Critical'],
     urgLabels: ['Whenever', 'Low', 'Soon', 'High', 'Now'],
+    aiBadge: 'AI',
+    aiTitle: 'Created/owned by the AI agent',
+    search: 'Search title or tag...',
+    estimate: 'Estimate (h)',
   },
   workflows: {
     nav: 'Workflows',

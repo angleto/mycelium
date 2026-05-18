@@ -1,10 +1,12 @@
 // Derived priority 1..4 (1 = highest, ADR-0024). Color scale: 1 = red
 // (hot/immediate), ascending toward cool/light (per the user's rule).
+// Distinct hues (not a single warm ramp) so P1..P4 are clearly
+// separable: red, orange, teal, blue. 1 = hottest/immediate.
 const COLORS: Record<number, string> = {
-  1: '#e5484d',
-  2: '#f76808',
-  3: '#ffb224',
-  4: '#5b9dd9',
+  1: '#d11149',
+  2: '#e8590c',
+  3: '#0d9488',
+  4: '#3b6fb6',
 }
 
 export function PriorityChip({

@@ -30,8 +30,9 @@ export function TaskDetailRoute() {
   const [tags, setTags] = useState<Tag[]>([])
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
-  const [importance, setImportance] = useState(4)
-  const [urgency, setUrgency] = useState(4)
+  const [importance, setImportance] = useState(2)
+  const [urgency, setUrgency] = useState(2)
+  const [estimate, setEstimate] = useState('')
   const [stateId, setStateId] = useState('')
   const [tagId, setTagId] = useState('')
   const [allTasks, setAllTasks] = useState<Task[]>([])
@@ -46,8 +47,9 @@ export function TaskDetailRoute() {
     setTask(tk)
     setTitle(tk.title)
     setDescription(tk.description ?? '')
-    setImportance(tk.importance ?? 4)
-    setUrgency(tk.urgency ?? 4)
+    setImportance(tk.importance ?? 2)
+    setUrgency(tk.urgency ?? 2)
+    setEstimate(tk.estimate_effort_h ?? '')
     setStateId(tk.state_id)
   }, [])
 
@@ -108,8 +110,7 @@ export function TaskDetailRoute() {
         expected_version: task.version,
         title,
         description: description || null,
-        importance,
-        urgency,
+        estimate_effort_h: estimate.trim() ? estimate.trim() : null,
       },
     })
     setBusy(false)
@@ -126,12 +127,43 @@ export function TaskDetailRoute() {
     setMsg(t('tasks.saved'))
   }
 
-  async function onChangeState() {
+  // Auto-save (no Save button): importance/urgency changes patch
+  // immediately; the backend re-derives priority.
+  async function autosaveIU(body: { importance?: number; urgency?: number }) {
     if (!task) return
+    setErr(null)
+    const { error, response } = await api.PATCH('/tasks/{task_id}', {
+      params: { header: workspaceHeader(), path: { task_id: id } },
+      body: { expected_version: task.version, ...body },
+    })
+    if (response.status === 409) {
+      setErr(t('tasks.conflict'))
+      await reload()
+      return
+    }
+    if (error) {
+      setErr(errMessage(error))
+      return
+    }
+    await reload()
+  }
+
+  function onImp(n: number) {
+    setImportance(n)
+    void autosaveIU({ importance: n, urgency })
+  }
+  function onUrg(n: number) {
+    setUrgency(n)
+    void autosaveIU({ importance, urgency: n })
+  }
+
+  async function onChangeState(sid: string) {
+    if (!task) return
+    setStateId(sid)
     setErr(null)
     const { error, response } = await api.POST('/tasks/{task_id}/state', {
       params: { header: workspaceHeader(), path: { task_id: id } },
-      body: { expected_version: task.version, state_id: stateId },
+      body: { expected_version: task.version, state_id: sid },
     })
     if (response.status === 409) {
       setErr(t('tasks.conflict'))
@@ -206,6 +238,13 @@ export function TaskDetailRoute() {
       <p className="hint">
         <Link to="/tasks">{t('tasks.back')}</Link>
       </p>
+      {task.executor_kind === 'llm_agent' && (
+        <p>
+          <span className="aibadge" title={t('tasks.aiTitle')}>
+            {t('tasks.aiBadge')}
+          </span>
+        </p>
+      )}
       <form onSubmit={(e) => void onSave(e)}>
         <label>
           {t('tasks.newTitle')}
@@ -222,25 +261,27 @@ export function TaskDetailRoute() {
         <div className="row">
           <label>
             {t('tasks.importance')}
-            <ScaleSelect
-              value={importance}
-              onChange={setImportance}
-              labelsKey="tasks.impLabels"
-            />
+            <ScaleSelect value={importance} onChange={onImp} labelsKey="tasks.impLabels" />
           </label>
           <label>
             {t('tasks.urgency')}
-            <ScaleSelect
-              value={urgency}
-              onChange={setUrgency}
-              labelsKey="tasks.urgLabels"
-            />
+            <ScaleSelect value={urgency} onChange={onUrg} labelsKey="tasks.urgLabels" />
           </label>
           <PriorityChip
             priority={derivePriority(importance, urgency)}
             score={importance * urgency}
           />
         </div>
+        <label>
+          {t('tasks.estimate')}
+          <input
+            type="number"
+            min={0}
+            step="0.25"
+            value={estimate}
+            onChange={(e) => setEstimate(e.target.value)}
+          />
+        </label>
         {msg && <p className="ok">{msg}</p>}
         {err && <p className="err">{err}</p>}
         <button type="submit" disabled={busy}>
@@ -251,7 +292,10 @@ export function TaskDetailRoute() {
       <div className="row">
         <label>
           {t('tasks.state')}
-          <select value={stateId} onChange={(e) => setStateId(e.target.value)}>
+          <select
+            value={stateId}
+            onChange={(e) => void onChangeState(e.target.value)}
+          >
             {states.map((s) => (
               <option key={s.id} value={s.id}>
                 {s.name}
@@ -259,9 +303,6 @@ export function TaskDetailRoute() {
             ))}
           </select>
         </label>
-        <button type="button" onClick={() => void onChangeState()}>
-          {t('tasks.save')}
-        </button>
       </div>
 
       <div className="row">

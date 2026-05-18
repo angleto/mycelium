@@ -3516,6 +3516,8 @@ export interface components {
             /** Parent Task Id */
             parent_task_id: string | null;
             executor_kind: components["schemas"]["ExecKind"];
+            /** Estimate Effort H */
+            estimate_effort_h: string | null;
             /** Monetary Cost */
             monetary_cost: string | null;
             /** Location */
@@ -3628,6 +3630,7 @@ export interface components {
             /** Duration Seconds */
             duration_seconds: number | null;
             source: components["schemas"]["TimeSource"];
+            executor_kind: components["schemas"]["ExecKind"];
             /** Billable */
             billable: boolean;
             /** Rate Snapshot */
@@ -6156,6 +6159,7 @@ export interface operations {
                 start_from?: string | null;
                 start_to?: string | null;
                 billable?: boolean | null;
+                executor_kind?: components["schemas"]["ExecKind"] | null;
             };
             header: {
                 "x-workspace-id": string;
@@ -6193,6 +6197,7 @@ export interface operations {
                 start_from?: string | null;
                 start_to?: string | null;
                 billable?: boolean | null;
+                executor_kind?: components["schemas"]["ExecKind"] | null;
             };
             header: {
                 "x-workspace-id": string;
