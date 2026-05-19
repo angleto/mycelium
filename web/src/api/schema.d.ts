@@ -481,7 +481,14 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List Tags */
+        /**
+         * List Tags
+         * @description Archived tags are excluded by default so they vanish from every
+         *     selection/filter surface; the Tag manager passes
+         *     ``include_archived=true`` to still un-archive one. ``for_project`` /
+         *     ``for_client`` scope the list to the SPA's current focus (global +
+         *     in-scope tags only).
+         */
         get: operations["list_tags_tags_get"];
         put?: never;
         /** Create Tag */
@@ -1849,7 +1856,13 @@ export interface paths {
         get: operations["get_blob_memory_blobs__blob_id__get"];
         put?: never;
         post?: never;
-        delete?: never;
+        /**
+         * Delete Blob
+         * @description Delete a single memory entry (member-level, RLS-scoped). Hard
+         *     delete; cascades to the blob's tags/sources/vector. 404 if the blob
+         *     is absent or belongs to another workspace.
+         */
+        delete: operations["delete_blob_memory_blobs__blob_id__delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -2480,6 +2493,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/invoices/{invoice_id}/pdf": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Pdf */
+        get: operations["get_pdf_invoices__invoice_id__pdf_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/invoices/{invoice_id}/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Preview */
+        get: operations["get_preview_invoices__invoice_id__preview_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/invoices/credit-note": {
         parameters: {
             query?: never;
@@ -2900,6 +2947,8 @@ export interface components {
             codice_destinatario?: string | null;
             /** Pec */
             pec?: string | null;
+            /** Payment Iban */
+            payment_iban?: string | null;
             /** Description */
             description?: string | null;
             /**
@@ -2952,6 +3001,8 @@ export interface components {
             codice_destinatario: string | null;
             /** Pec */
             pec: string | null;
+            /** Payment Iban */
+            payment_iban: string | null;
             /** Description */
             description: string | null;
             /** Default Billable */
@@ -2989,6 +3040,8 @@ export interface components {
             codice_destinatario?: string | null;
             /** Pec */
             pec?: string | null;
+            /** Payment Iban */
+            payment_iban?: string | null;
             /** Description */
             description?: string | null;
             /** Default Billable */
@@ -3520,11 +3573,8 @@ export interface components {
              * @default 1
              */
             quantity: number | string;
-            /**
-             * Vat Rate
-             * @default 22
-             */
-            vat_rate: number | string;
+            /** Vat Rate */
+            vat_rate?: number | string | null;
             /** Natura */
             natura?: string | null;
         };
@@ -3587,6 +3637,8 @@ export interface components {
             taxable: string;
             /** Vat */
             vat: string;
+            /** Bollo */
+            bollo: string;
             /** Total */
             total: string;
             /** Identificativo Sdi */
@@ -3615,6 +3667,105 @@ export interface components {
             payment_iban?: string | null;
             /** Payment Due Date */
             payment_due_date?: string | null;
+        };
+        /** InvoicePreviewLine */
+        InvoicePreviewLine: {
+            /** Line No */
+            line_no: number;
+            /** Description */
+            description: string;
+            /** Quantity */
+            quantity: string;
+            /** Unit Price */
+            unit_price: string;
+            /** Line Total */
+            line_total: string;
+            /** Vat Rate */
+            vat_rate: string;
+            /** Natura */
+            natura?: string | null;
+        };
+        /**
+         * InvoicePreviewOut
+         * @description Full resolved document for the SPA: it renders this without
+         *     re-deriving anything. Tolerant of an incomplete draft (issuer/client
+         *     may be null).
+         */
+        InvoicePreviewOut: {
+            /** Number */
+            number: string;
+            /** Series */
+            series: string;
+            /** Year */
+            year: number;
+            document_type: components["schemas"]["DocumentType"];
+            /**
+             * Date
+             * Format: date
+             */
+            date: string;
+            /** Payment Due Date */
+            payment_due_date: string | null;
+            issuer: components["schemas"]["InvoicePreviewParty"] | null;
+            client: components["schemas"]["InvoicePreviewParty"] | null;
+            /** Lines */
+            lines: components["schemas"]["InvoicePreviewLine"][];
+            totals: components["schemas"]["InvoicePreviewTotals"];
+            /** Effective Iban */
+            effective_iban: string | null;
+            /** Iban Source */
+            iban_source: string | null;
+            /** Causale */
+            causale: string | null;
+            /** Notes */
+            notes: string | null;
+            /** Is Forfettario */
+            is_forfettario: boolean;
+            state: components["schemas"]["InvoiceState"];
+            /** Identificativo Sdi */
+            identificativo_sdi: string | null;
+            sdi_status: components["schemas"]["SdiStatus"];
+            conservation_status: components["schemas"]["ConservationStatus"];
+        };
+        /**
+         * InvoicePreviewParty
+         * @description Resolved issuer or client identity for the preview. None when the
+         *     draft has no profile resolved yet.
+         */
+        InvoicePreviewParty: {
+            /** Denominazione */
+            denominazione: string;
+            /** Piva */
+            piva?: string | null;
+            /** Codice Fiscale */
+            codice_fiscale?: string | null;
+            /** Regime Fiscale */
+            regime_fiscale?: string | null;
+            /** Indirizzo */
+            indirizzo?: string | null;
+            /** Cap */
+            cap?: string | null;
+            /** Comune */
+            comune?: string | null;
+            /** Provincia */
+            provincia?: string | null;
+            /** Nazione */
+            nazione?: string | null;
+            /** Codice Destinatario */
+            codice_destinatario?: string | null;
+            /** Pec */
+            pec?: string | null;
+        };
+        /** InvoicePreviewTotals */
+        InvoicePreviewTotals: {
+            /** Taxable */
+            taxable: string;
+            /** Vat */
+            vat: string;
+            /** Bollo */
+            bollo: string;
+            /** Total */
+            total: string;
         };
         /**
          * InvoiceState
@@ -3670,6 +3821,8 @@ export interface components {
             nazione: string;
             /** Rea */
             rea?: string | null;
+            /** Default Iban */
+            default_iban?: string | null;
             /**
              * Is Default
              * @default false
@@ -3707,6 +3860,8 @@ export interface components {
             nazione: string;
             /** Rea */
             rea: string | null;
+            /** Default Iban */
+            default_iban: string | null;
             /** Is Default */
             is_default: boolean;
             /** Conservation Adhesion */
@@ -3740,6 +3895,8 @@ export interface components {
             nazione?: string | null;
             /** Rea */
             rea?: string | null;
+            /** Default Iban */
+            default_iban?: string | null;
             /** Is Default */
             is_default?: boolean | null;
         };
@@ -3876,6 +4033,8 @@ export interface components {
             enabled: boolean;
             /** Seeded */
             seeded: boolean;
+            /** Description */
+            description?: string | null;
             /** Version */
             version: number;
         };
@@ -6107,6 +6266,8 @@ export interface operations {
             query?: {
                 kind?: components["schemas"]["TagKind"] | null;
                 for_project?: string | null;
+                for_client?: string | null;
+                include_archived?: boolean;
             };
             header: {
                 "x-workspace-id": string;
@@ -10021,6 +10182,40 @@ export interface operations {
             };
         };
     };
+    delete_blob_memory_blobs__blob_id__delete: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                blob_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     erase_memory_erase_post: {
         parameters: {
             query?: never;
@@ -11803,6 +11998,78 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["InvoiceXmlOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_pdf_invoices__invoice_id__pdf_get: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                invoice_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_preview_invoices__invoice_id__preview_get: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                invoice_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvoicePreviewOut"];
                 };
             };
             /** @description Validation Error */
