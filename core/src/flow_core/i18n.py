@@ -87,6 +87,10 @@ class MessageCode(enum.StrEnum):
     NOTIFICATION_NOT_FOUND = "notification.not_found"
     EXECUTOR_NOT_FOUND = "executor.not_found"
     EXECUTOR_INVALID = "executor.invalid"
+    AGENT_RUN_NOT_FOUND = "agent_run.not_found"
+    AGENT_RUN_NOT_DISPATCHABLE = "agent_run.not_dispatchable"
+    AGENT_RUN_ALREADY_ACTIVE = "agent_run.already_active"
+    AGENT_RUN_TERMINAL = "agent_run.terminal"
     RECURRENCE_WITH_DEPS = "recurrence.with_dependencies"
     WORKSPACE_NOT_OWNER = "workspace.not_owner"
     WORKSPACE_SOLE = "workspace.sole"
@@ -195,6 +199,13 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
         MessageCode.NOTIFICATION_NOT_FOUND: "Notification not found",
         MessageCode.EXECUTOR_NOT_FOUND: "Executor not found",
         MessageCode.EXECUTOR_INVALID: "Invalid executor: {detail}",
+        MessageCode.AGENT_RUN_NOT_FOUND: "Agent run not found",
+        MessageCode.AGENT_RUN_NOT_DISPATCHABLE: (
+            "Task is not dispatchable to an agent: it must be an llm_agent "
+            "task with an assigned, dispatchable executor"
+        ),
+        MessageCode.AGENT_RUN_ALREADY_ACTIVE: ("An agent run for this task is already active"),
+        MessageCode.AGENT_RUN_TERMINAL: ("Agent run has already finished and cannot be cancelled"),
         MessageCode.RECURRENCE_WITH_DEPS: (
             "A recurring task cannot have dependencies (mutually exclusive in v1)"
         ),

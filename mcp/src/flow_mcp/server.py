@@ -24,6 +24,7 @@ from flow_core.db import admin_session, tenant_session
 from flow_core.embedder import embedder_available
 from flow_core.errors import AuthError, ForbiddenError
 from flow_core.i18n import MessageCode
+from flow_core.models.agent_run import AgentRun
 from flow_core.models.billing import CostBasis, RateCard, UsageRecord
 from flow_core.models.budget import Budget, BudgetPeriod
 from flow_core.models.client_profile import ClientProfile
@@ -50,6 +51,7 @@ from flow_core.models.user import User
 from flow_core.models.workflow import WorkflowDefinition, WorkflowState, WorkflowTransition
 from flow_core.security import decode_token
 from flow_core.services import advisory as advisory_svc
+from flow_core.services import agent_runtime as agent_runtime_svc
 from flow_core.services import attachments as attachments_svc
 from flow_core.services import billing as billing_svc
 from flow_core.services import budgets as budgets_svc
@@ -1223,6 +1225,90 @@ async def executor_delete(token: str, org_id: str, executor_id: str) -> dict[str
             executor_id=uuid.UUID(executor_id),
         )
         return {"deleted": True}
+
+
+# --- Agent execution runtime (docs/adr/0025, P3) ---
+# Co-equal to the REST surface. Reads are member-level; start/cancel
+# are owner-gated INSIDE the service (the RBAC choke point +
+# effective-role sudo), because running an agent spends credits -- same
+# gate model as the billing-grant tools. The governance (hard tool
+# allowlist, step/budget caps, cooperative kill switch) is in
+# flow_core.services.agent_runtime; this is a thin wrapper.
+
+
+def _agent_run(r: AgentRun) -> dict[str, Any]:
+    return {
+        "id": str(r.id),
+        "task_id": str(r.task_id),
+        "executor_id": str(r.executor_id) if r.executor_id else None,
+        "status": r.status.value,
+        "steps": r.steps,
+        "credits_spent": str(r.credits_spent),
+        "started_at": r.started_at.isoformat() if r.started_at else None,
+        "ended_at": r.ended_at.isoformat() if r.ended_at else None,
+        "error": r.error,
+        "artifact_note_id": (str(r.artifact_note_id) if r.artifact_note_id else None),
+        "cancel_requested": r.cancel_requested,
+        "blocked_reason": r.blocked_reason,
+        "version": r.version,
+    }
+
+
+@mcp.tool()
+async def agent_run_start(token: str, org_id: str, task_id: str) -> dict[str, Any]:
+    """Owner: run the agent on an already-dispatched ``llm_agent`` task
+    end-to-end (spawn -> work -> artifact -> complete) and return the
+    TERMINAL run (succeeded|failed|cancelled|blocked). On-demand, not an
+    autonomous loop. Bounded (step/budget caps), killable, every tool
+    call confined to the actor's effective RBAC. Owner-gated in the
+    service (running an agent spends credits; effective-role sudo
+    enforced)."""
+    async with _tenant(token, org_id) as (s, org, user):
+        run = await agent_runtime_svc.start_run(
+            s,
+            org_id=org,
+            actor_id=user,
+            task_id=uuid.UUID(task_id),
+        )
+        return _agent_run(run)
+
+
+@mcp.tool()
+async def agent_run_get(token: str, org_id: str, run_id: str) -> dict[str, Any]:
+    """Read one agent run (member-level, RLS-scoped)."""
+    async with _tenant(token, org_id) as (s, org, _user):
+        run = await agent_runtime_svc.get_run(s, org_id=org, run_id=uuid.UUID(run_id))
+        return _agent_run(run)
+
+
+@mcp.tool()
+async def agent_runs_list(
+    token: str, org_id: str, task_id: str | None = None
+) -> list[dict[str, Any]]:
+    """List agent runs (member-level), newest first, optionally filtered
+    to one task."""
+    async with _tenant(token, org_id) as (s, org, _user):
+        rows = await agent_runtime_svc.list_runs(
+            s,
+            org_id=org,
+            task_id=uuid.UUID(task_id) if task_id else None,
+        )
+        return [_agent_run(r) for r in rows]
+
+
+@mcp.tool()
+async def agent_run_cancel(token: str, org_id: str, run_id: str) -> dict[str, Any]:
+    """Owner: request cancellation (cooperative kill switch the loop
+    observes). Idempotent; a terminal run is an error. Owner-gated in
+    the service."""
+    async with _tenant(token, org_id) as (s, org, user):
+        run = await agent_runtime_svc.cancel_run(
+            s,
+            org_id=org,
+            actor_id=user,
+            run_id=uuid.UUID(run_id),
+        )
+        return _agent_run(run)
 
 
 # --- F4: time tracking (FR-5) ---

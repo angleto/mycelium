@@ -8,6 +8,7 @@ from decimal import Decimal
 
 from pydantic import BaseModel, Field, field_validator
 
+from flow_core.models.agent_run import AgentRunStatus
 from flow_core.models.billing import CostBasis, RateUnit, StorageKind
 from flow_core.models.budget import BudgetPeriod
 from flow_core.models.dependency import DependencyType
@@ -710,6 +711,28 @@ class ExecutorPatchIn(BaseModel):
     credit_rate_per_hour: Decimal | None = Field(default=None, ge=0)
     enabled: bool | None = None
     capability_tags: list[str] | None = None
+
+
+# --- Agent execution runtime (docs/adr/0025, P3) ---
+# Reads are member-level; start/cancel are owner-gated in the service
+# (running an agent spends credits -> mirrors the billing-grant gate;
+# effective-role sudo enforced).
+
+
+class AgentRunOut(BaseModel):
+    id: uuid.UUID
+    task_id: uuid.UUID
+    executor_id: uuid.UUID | None
+    status: AgentRunStatus
+    steps: int
+    credits_spent: Decimal
+    started_at: datetime.datetime | None
+    ended_at: datetime.datetime | None
+    error: str | None
+    artifact_note_id: uuid.UUID | None
+    cancel_requested: bool
+    blocked_reason: str | None
+    version: int
 
 
 # --- F4: time tracking (FR-5, docs/adr/0002) ---
