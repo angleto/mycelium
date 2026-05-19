@@ -1348,3 +1348,21 @@ button.btn--danger:hover {
   font-size: 0.76rem;
   margin-top: 0.1rem;
 }
+
+/* Topbar workspace-role switcher (sudo-style; only for owner/admin). */
+.rolesw {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+.rolesw__lbl {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.rolesw select {
+  padding: 0.2rem 0.4rem;
+  font-size: 0.78rem;
+}

@@ -9,6 +9,7 @@ import { ForgotPasswordRoute } from './routes/ForgotPasswordRoute'
 import { ResetPasswordRoute } from './routes/ResetPasswordRoute'
 import { TasksRoute } from './routes/TasksRoute'
 import { AdminUsersRoute } from './routes/AdminUsersRoute'
+import { WorkspaceRoute } from './routes/WorkspaceRoute'
 import { AuthLayout } from './components/AuthLayout'
 import { TrashRoute } from './routes/TrashRoute'
 import { ClientsProjectsRoute } from './routes/ClientsProjectsRoute'
@@ -63,6 +64,7 @@ function App() {
             <Route path="/notifications" element={<NotificationsRoute />} />
             <Route path="/tags" element={<TagManagerRoute />} />
             <Route path="/settings" element={<SettingsRoute />} />
+            <Route path="/workspace" element={<WorkspaceRoute />} />
             <Route path="/admin/users" element={<AdminUsersRoute />} />
           </Route>
         </Route>

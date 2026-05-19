@@ -2,9 +2,14 @@ import { useEffect, useState } from 'react'
 import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { api, workspaceHeader } from '../api/client'
-import { clearSession, setAdminMode } from '../auth/session'
-import { useSession, useAdminMode } from '../auth/useSession'
+import { clearSession, setAdminMode, setWorkspaceRole } from '../auth/session'
+import {
+  useSession,
+  useAdminMode,
+  useWorkspaceRole,
+} from '../auth/useSession'
 import { useMe } from '../auth/useMe'
+import { useMyWorkspace } from '../auth/useMyWorkspace'
 import { Logo } from './Logo'
 import { Icon, type IconName } from './NavIcon'
 import { ThemeToggle } from './ThemeToggle'
@@ -202,6 +207,12 @@ export function AppShell() {
   const { me } = useMe()
   const elevated = useAdminMode()
   const canAdmin = !!me?.is_admin
+  // Workspace role switcher: only meaningful if the entitlement
+  // ceiling is above member (an owner/admin can act down as a user).
+  const { ws } = useMyWorkspace()
+  const wsRole = useWorkspaceRole()
+  const ceiling = ws?.my_role ?? 'member'
+  const canSwitchRole = ceiling === 'admin' || ceiling === 'owner'
 
   // Mention links (@kind:id) are stored as plain markdown. MarkdownView
   // renders them as router Links, but the tiptap editor renders a raw
@@ -253,6 +264,7 @@ export function AppShell() {
         { to: '/graph', label: t('graph.nav'), icon: 'graph' },
         { to: '/tags', label: t('tagmgr.nav'), icon: 'tags' },
         { to: '/clients', label: t('cp.nav'), icon: 'clients' },
+        { to: '/workspace', label: t('members.nav'), icon: 'home' },
       ],
     },
     {
@@ -294,6 +306,22 @@ export function AppShell() {
         </div>
         <div className="topbar__actions">
           <RunningIndicator />
+          {canSwitchRole && (
+            <label className="rolesw" title={t('rolesw.acting')}>
+              <span className="rolesw__lbl">{t('rolesw.acting')}</span>
+              <select
+                value={wsRole || 'member'}
+                onChange={(e) =>
+                  setWorkspaceRole(
+                    e.target.value === 'member' ? '' : e.target.value,
+                  )
+                }
+              >
+                <option value="member">{t('rolesw.user')}</option>
+                <option value={ceiling}>{t(`roles.${ceiling}`)}</option>
+              </select>
+            </label>
+          )}
           {canAdmin &&
             (elevated ? (
               <button

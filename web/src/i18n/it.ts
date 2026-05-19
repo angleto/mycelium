@@ -179,6 +179,31 @@ export const it: Catalog = {
     loading: 'Caricamento...',
     conflict: 'Il workspace e cambiato nel frattempo; ricaricata la versione corrente.',
   },
+  members: {
+    title: 'Membri',
+    nav: 'Workspace',
+    email: 'Email',
+    role: 'Ruolo',
+    add: 'Aggiungi membro',
+    adding: 'Aggiunta…',
+    remove: 'Rimuovi',
+    confirmRemove: 'Rimuovere {{email}} da questo workspace?',
+    none: 'Nessun membro.',
+    you: 'tu',
+    create: 'Crea workspace',
+    manageHint:
+      'Passa al ruolo owner/admin (barra in alto) per gestire il workspace e i membri.',
+  },
+  roles: {
+    owner: 'Owner',
+    admin: 'Admin',
+    member: 'Membro',
+    guest: 'Guest',
+  },
+  rolesw: {
+    acting: 'Agisci come',
+    user: 'Utente',
+  },
   tasks: {
     nav: 'Task',
     title: 'Task',

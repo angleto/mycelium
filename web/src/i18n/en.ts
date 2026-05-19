@@ -180,6 +180,31 @@ export const en = {
     loading: 'Loading...',
     conflict: 'The workspace changed meanwhile; reloaded the current version.',
   },
+  members: {
+    title: 'Members',
+    nav: 'Workspace',
+    email: 'Email',
+    role: 'Role',
+    add: 'Add member',
+    adding: 'Adding…',
+    remove: 'Remove',
+    confirmRemove: 'Remove {{email}} from this workspace?',
+    none: 'No members.',
+    you: 'you',
+    create: 'Create workspace',
+    manageHint:
+      'Switch to the owner/admin role (top bar) to manage the workspace and its members.',
+  },
+  roles: {
+    owner: 'Owner',
+    admin: 'Admin',
+    member: 'Member',
+    guest: 'Guest',
+  },
+  rolesw: {
+    acting: 'Acting as',
+    user: 'User',
+  },
   tasks: {
     nav: 'Tasks',
     title: 'Tasks',
