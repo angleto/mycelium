@@ -140,6 +140,35 @@ export const en = {
       cancelled: 'cancelled',
     },
   },
+  dispatch: {
+    title: 'Autonomous dispatch',
+    intro:
+      'The closed loop: it recomputes the resource-aware plan, admits the eligible LLM tasks within each agent’s parallelism and credit budget, and per the workspace mode either queues them for your approval or dispatches them. Approving spends credits and starts a bounded agent run; the plan then recomputes on completion. Mode, approve/deny and run-now are owner-only.',
+    mode: 'Mode',
+    modeOff: 'Off (no autonomous dispatch)',
+    modeApproval: 'Approval required (default)',
+    modeAuto: 'Automatic (still budget/WIP-bounded)',
+    runNow: 'Run a tick now',
+    ticking: 'Running…',
+    lastTick:
+      'created {{created}} · approved {{approved}} · dispatched {{dispatched}} · skipped {{skipped}} · failed {{failed}} · makespan {{makespan}} min · {{cost}} cr',
+    disabled: 'Autonomous dispatch is off for this workspace.',
+    queueEmpty: 'No dispatch requests.',
+    colTask: 'Task',
+    colExecutor: 'Agent',
+    colCost: 'Proj. cost',
+    colStatus: 'Status',
+    approve: 'Approve',
+    deny: 'Deny',
+    status: {
+      pending: 'pending',
+      approved: 'approved',
+      dispatched: 'dispatched',
+      denied: 'denied',
+      skipped: 'skipped',
+      failed: 'failed',
+    },
+  },
   mch: {
     title: 'Memory channels',
     intro:

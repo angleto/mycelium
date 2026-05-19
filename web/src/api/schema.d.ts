@@ -1454,6 +1454,98 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/dispatch/requests": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Requests
+         * @description Member: the dispatch queue (RLS-scoped), newest first. Each row
+         *     carries the task title, the assigned executor name, the projected
+         *     credit cost and the status for the approval UI.
+         */
+        get: operations["list_requests_dispatch_requests_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/dispatch/requests/{request_id}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Approve Request
+         * @description Owner: approve a pending request, then immediately attempt the
+         *     dispatch inline (approve-then-inline-dispatch -- the caller can
+         *     assert the run started in this call; the worker tick dispatches any
+         *     leftover ``approved`` row identically). Owner-gated in the service
+         *     (a dispatch spends credits; effective-role sudo enforced).
+         *     Optimistic concurrency on ``expected_version``.
+         */
+        post: operations["approve_request_dispatch_requests__request_id__approve_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/dispatch/requests/{request_id}/deny": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Deny Request
+         * @description Owner: deny an active request (never starts a run), with an
+         *     optional short reason. Owner-gated in the service; optimistic
+         *     concurrency.
+         */
+        post: operations["deny_request_dispatch_requests__request_id__deny_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/dispatch/tick": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Tick
+         * @description Owner: run one closed-loop tick now (recompute -> admit -> gate
+         *     -> dispatch). The worker calls the same service on a timer; this
+         *     endpoint makes it testable and gives the UI a "run now". Owner-gated
+         *     in the service (a tick can spend credits via P3).
+         */
+        post: operations["tick_dispatch_tick_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/time/start": {
         parameters: {
             query?: never;
@@ -3003,6 +3095,16 @@ export interface components {
              */
             created_at: string;
         };
+        /**
+         * AutonomousDispatch
+         * @description The per-workspace autonomous-dispatch policy (docs/adr/0025 P5,
+         *     §Governance). Stored in ``organizations.settings.autonomous_dispatch``;
+         *     the default when unset resolves to ``approval_required`` -- the
+         *     governance default is human-in-the-loop, never auto-spend without an
+         *     explicit opt-in.
+         * @enum {string}
+         */
+        AutonomousDispatch: "off" | "approval_required" | "auto";
         /** BalanceOut */
         BalanceOut: {
             /** Balance */
@@ -3437,12 +3539,93 @@ export interface components {
          * @enum {string}
          */
         DependencyType: "FS" | "SS" | "FF" | "SF";
+        /** DispatchDecisionIn */
+        DispatchDecisionIn: {
+            /** Expected Version */
+            expected_version: number;
+            /** Reason */
+            reason?: string | null;
+        };
         /** DispatchOut */
         DispatchOut: {
             /** Sent */
             sent: number;
             /** Failed */
             failed: number;
+        };
+        /** DispatchRequestOut */
+        DispatchRequestOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Task Id
+             * Format: uuid
+             */
+            task_id: string;
+            /**
+             * Task Title
+             * @default
+             */
+            task_title: string;
+            /** Executor Id */
+            executor_id?: string | null;
+            /** Executor Name */
+            executor_name?: string | null;
+            status: components["schemas"]["DispatchStatus"];
+            /** Projected Credit Cost */
+            projected_credit_cost: string;
+            /** Agent Run Id */
+            agent_run_id?: string | null;
+            /**
+             * Requested At
+             * Format: date-time
+             */
+            requested_at: string;
+            /** Decided At */
+            decided_at?: string | null;
+            /** Decided By */
+            decided_by?: string | null;
+            /** Reason */
+            reason?: string | null;
+            /** Version */
+            version: number;
+        };
+        /**
+         * DispatchStatus
+         * @enum {string}
+         */
+        DispatchStatus: "pending" | "approved" | "dispatched" | "denied" | "skipped" | "failed";
+        /** DispatchTickIn */
+        DispatchTickIn: {
+            /** @default balanced */
+            policy: components["schemas"]["SchedulePolicy"];
+        };
+        /**
+         * DispatchTickOut
+         * @description The "last tick" summary the UI shows (counts of requests touched
+         *     + the scheduler projections so the loop and schedule view agree).
+         */
+        DispatchTickOut: {
+            policy: components["schemas"]["AutonomousDispatch"];
+            /** Enabled */
+            enabled: boolean;
+            /** Created */
+            created: number;
+            /** Approved */
+            approved: number;
+            /** Dispatched */
+            dispatched: number;
+            /** Skipped */
+            skipped: number;
+            /** Failed */
+            failed: number;
+            /** Projected Makespan Minutes */
+            projected_makespan_minutes: number;
+            /** Projected Credit Cost */
+            projected_credit_cost: string;
         };
         /**
          * DocumentType
@@ -5799,6 +5982,8 @@ export interface components {
             estimate_presets?: string[];
             /** Default Client Tag Id */
             default_client_tag_id?: string | null;
+            /** @default approval_required */
+            autonomous_dispatch: components["schemas"]["AutonomousDispatch"];
         };
         /** WorkspaceSettingsIn */
         WorkspaceSettingsIn: {
@@ -5806,6 +5991,7 @@ export interface components {
             expected_version: number;
             /** Estimate Presets */
             estimate_presets: (number | string)[];
+            autonomous_dispatch?: components["schemas"]["AutonomousDispatch"] | null;
         };
         /**
          * WorkspaceSummaryOut
@@ -9350,6 +9536,158 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AgentRunOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_requests_dispatch_requests_get: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DispatchRequestOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    approve_request_dispatch_requests__request_id__approve_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                request_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DispatchDecisionIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DispatchRequestOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    deny_request_dispatch_requests__request_id__deny_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                request_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DispatchDecisionIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DispatchRequestOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    tick_dispatch_tick_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DispatchTickIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DispatchTickOut"];
                 };
             };
             /** @description Validation Error */

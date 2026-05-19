@@ -139,6 +139,35 @@ export const it: Catalog = {
       cancelled: 'annullato',
     },
   },
+  dispatch: {
+    title: 'Dispatch autonomo',
+    intro:
+      'Il loop chiuso: ricalcola il piano resource-aware, ammette i task LLM idonei entro il parallelismo e il budget crediti di ogni agente e, secondo la modalità del workspace, li mette in coda per la tua approvazione o li dispaccia. Approvare spende crediti e avvia una run agente limitata; il piano viene poi ricalcolato al completamento. Modalità, approva/rifiuta ed esegui-ora sono solo owner.',
+    mode: 'Modalità',
+    modeOff: 'Off (nessun dispatch autonomo)',
+    modeApproval: 'Approvazione richiesta (default)',
+    modeAuto: 'Automatico (sempre entro budget/WIP)',
+    runNow: 'Esegui un tick ora',
+    ticking: 'In corso…',
+    lastTick:
+      'creati {{created}} · approvati {{approved}} · dispacciati {{dispatched}} · saltati {{skipped}} · falliti {{failed}} · makespan {{makespan}} min · {{cost}} cr',
+    disabled: 'Il dispatch autonomo è disattivato per questo workspace.',
+    queueEmpty: 'Nessuna richiesta di dispatch.',
+    colTask: 'Task',
+    colExecutor: 'Agente',
+    colCost: 'Costo prev.',
+    colStatus: 'Stato',
+    approve: 'Approva',
+    deny: 'Rifiuta',
+    status: {
+      pending: 'in attesa',
+      approved: 'approvato',
+      dispatched: 'dispacciato',
+      denied: 'rifiutato',
+      skipped: 'saltato',
+      failed: 'fallito',
+    },
+  },
   mch: {
     title: 'Canali memoria',
     intro:

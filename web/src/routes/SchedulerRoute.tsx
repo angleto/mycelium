@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { api, errMessage, workspaceHeader } from '../api/client'
 import { useSession } from '../auth/useSession'
 import { fmtDateTime } from '../lib/tz'
+import { DispatchPanel } from '../components/DispatchPanel'
 import type { components } from '../api/schema'
 
 type Task = components['schemas']['TaskOut']
@@ -188,6 +189,9 @@ export function SchedulerRoute() {
           )}
         </p>
       )}
+
+      <h2>{t('dispatch.title')}</h2>
+      <DispatchPanel policy={policy} onChanged={() => void reload()} />
 
       <div className="row">
         <label>
