@@ -73,8 +73,12 @@ async def download_attachment(
         org_id=ctx.org_id,
         attachment_id=attachment_id,
     )
+    # Backend-agnostic: pg => the row's ``data`` column; s3 => the
+    # object store. The response (bytes, media type, disposition) is
+    # byte-identical either way, so the SPA / E2E need no change.
+    body = await svc.read_attachment_bytes(att)
     return Response(
-        content=att.data,
+        content=body,
         media_type=att.mime_type,
         headers={
             "Content-Disposition": _content_disposition(att.filename, att.mime_type),

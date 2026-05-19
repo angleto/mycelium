@@ -52,7 +52,9 @@ mypy_path = "core/src:api/src:mcp/src:worker/src:sdi-inbound/src"
 
 # Untyped third-party libs: pgvector ships no py.typed;
 # sentence-transformers is an optional extra (lazily imported);
-# reportlab (invoice PDF generator) ships no py.typed.
+# reportlab (invoice PDF generator) ships no py.typed; boto3 (S3
+# attachment backend, lazily imported) ships no inline types and the
+# repo convention is ignore_missing_imports, not a stubs dep.
 [[tool.mypy.overrides]]
 module = [
     "pgvector.*",
@@ -60,6 +62,7 @@ module = [
     "pyotp.*",
     "qrcode.*",
     "reportlab.*",
+    "boto3.*",
 ]
 ignore_missing_imports = true
 

@@ -7,8 +7,9 @@ docs/non-functional-requirements.md). No hardcoded secrets.
 from __future__ import annotations
 
 from functools import lru_cache
+from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -58,6 +59,31 @@ class Settings(BaseSettings):
     # before the bytes are persisted. Override via FLOW_ATTACHMENT_MAX_BYTES.
     attachment_max_bytes: int = 10 * 1024 * 1024
 
+    # Pluggable attachment storage backend (mirrors the LLM/embedder
+    # seam). "pg" (default) keeps today's behaviour exactly: bytes live
+    # in the attachments.data BYTEA column, atomic with the row, no
+    # external dependency. "s3" offloads the bytes to an S3-compatible
+    # object store (Scaleway Object Storage) and keeps only metadata +
+    # a storage_key in the DB. Selected via FLOW_ATTACHMENT_STORE.
+    attachment_store: Literal["pg", "s3"] = "pg"
+    # S3 (Scaleway is S3-compatible) target. Only consulted/required when
+    # attachment_store == "s3" (a model validator fails closed below so a
+    # half-configured prod is rejected at startup; "pg" needs none).
+    attachment_s3_endpoint_url: str = ""
+    attachment_s3_region: str = ""
+    attachment_s3_bucket: str = ""
+    attachment_s3_access_key_id: str = ""
+    attachment_s3_secret_access_key: str = ""
+    # Optional key namespace inside the bucket (e.g. "flow/attachments").
+    attachment_s3_prefix: str = ""
+
+    # Public self-service signup. Default True so OSS self-hosters and
+    # the existing test-suite are unaffected; set FLOW_ALLOW_SIGNUP=false
+    # for a single-user prod (the admin is provisioned out-of-band by
+    # `python -m flow_core.bootstrap_admin`, which calls the service
+    # layer, not the gated HTTP endpoint).
+    allow_signup: bool = True
+
     # Auth hardening (W1b, ported from bitvision_phoenix; ADR-0024).
     require_email_verification: bool = False
     email_verification_ttl_seconds: int = 86400
@@ -86,6 +112,31 @@ class Settings(BaseSettings):
     # App
     env: str = "dev"
     log_level: str = "INFO"
+
+    @model_validator(mode="after")
+    def _validate_attachment_store(self) -> Settings:
+        """Fail closed: if the S3 backend is selected, every credential /
+        target must be present. A half-configured prod is rejected at
+        startup rather than failing on the first upload (same spirit as
+        the no-default jwt_secret / secret_key fields)."""
+        if self.attachment_store == "s3":
+            missing = [
+                name
+                for name, value in (
+                    ("FLOW_ATTACHMENT_S3_ENDPOINT_URL", self.attachment_s3_endpoint_url),
+                    ("FLOW_ATTACHMENT_S3_REGION", self.attachment_s3_region),
+                    ("FLOW_ATTACHMENT_S3_BUCKET", self.attachment_s3_bucket),
+                    ("FLOW_ATTACHMENT_S3_ACCESS_KEY_ID", self.attachment_s3_access_key_id),
+                    (
+                        "FLOW_ATTACHMENT_S3_SECRET_ACCESS_KEY",
+                        self.attachment_s3_secret_access_key,
+                    ),
+                )
+                if not value
+            ]
+            if missing:
+                raise ValueError("attachment_store='s3' requires: " + ", ".join(sorted(missing)))
+        return self
 
     @property
     def cors_origin_list(self) -> list[str]:

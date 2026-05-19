@@ -24,7 +24,10 @@ from flow_api.schemas import (
     TokenOut,
     VerifyEmailIn,
 )
+from flow_core.config import get_settings
 from flow_core.db import admin_session
+from flow_core.errors import ForbiddenError
+from flow_core.i18n import MessageCode
 from flow_core.models.user import User
 from flow_core.services.auth import (
     login,
@@ -42,6 +45,12 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 @router.post("/signup", response_model=SignupOut)
 async def signup_endpoint(body: SignupIn) -> SignupOut:
+    # Single-user prod can disable public self-service signup
+    # (FLOW_ALLOW_SIGNUP=false). The gate is HTTP-only: the bootstrap
+    # (`python -m flow_core.bootstrap_admin`) and tests call the
+    # `signup` service directly and are intentionally unaffected.
+    if not get_settings().allow_signup:
+        raise ForbiddenError(MessageCode.AUTH_SIGNUP_DISABLED)
     # Personal-first: never force "create an organization". A personal
     # workspace is auto-provisioned; naming it is optional.
     workspace_name = body.workspace_name or body.display_name or "Personal"

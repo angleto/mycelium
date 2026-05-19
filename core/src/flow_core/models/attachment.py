@@ -1,11 +1,14 @@
 """Binary attachment on a note OR a task (FR-16 adjacency).
 
-Stored as DB ``BYTEA`` (the ``data`` column): no filesystem / object
-store, which fits the single-node co-tenant deploy and keeps erasure /
-backup atomic with the row. A per-file cap (``attachment_max_bytes``)
-is enforced in the service. One row per file, with the parent FK,
-filename, mime type and size; the original is served back as-is and
-the browser scales image previews (no server thumbnail).
+Storage is pluggable (``attachment_store.py``). DEFAULT ``pg``: the
+bytes live in the DB ``BYTEA`` (the ``data`` column), atomic with the
+row, no external store -- the original single-node co-tenant design.
+``s3``: the bytes go to an S3-compatible object store and the row keeps
+``data NULL`` + ``storage_key`` set instead. A per-file cap
+(``attachment_max_bytes``) is enforced in the service. One row per
+file, with the parent FK, filename, mime type and size; the original
+is served back as-is and the browser scales image previews (no server
+thumbnail). ``storage_key`` is internal, never surfaced to the client.
 
 Exactly one of ``note_id`` / ``task_id`` is non-null (a table CHECK
 constraint enforces it): an attachment belongs to a single parent.
@@ -57,10 +60,16 @@ class Attachment(UUIDPKMixin, OrgScopedMixin, TimestampMixin, Base):
     filename: Mapped[str] = mapped_column(String(255), nullable=False)
     mime_type: Mapped[str] = mapped_column(String(160), nullable=False)
     size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
-    # BYTEA: the file content lives in the DB (ADR co-tenant deploy).
+    # BYTEA: the file content lives in the DB on the ``pg`` backend
+    # (legacy rows always do). NULL on the ``s3`` backend, where the
+    # bytes are in the object store and ``storage_key`` locates them.
     # NOT loaded by the metadata list query (deferred at the query
     # level, not here, so a single mapping serves both list and read).
-    data: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    data: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    # Object-store key when the bytes are off-DB (``s3`` backend); NULL
+    # for legacy / ``pg``-backend rows. Internal: never serialised to
+    # the client (not a field of AttachmentOut).
+    storage_key: Mapped[str | None] = mapped_column(String(512), nullable=True)
     uploaded_by: Mapped[uuid.UUID] = mapped_column(
         PG_UUID(as_uuid=True),
         ForeignKey("users.id", ondelete="RESTRICT"),

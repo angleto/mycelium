@@ -1,14 +1,18 @@
 """Attachments on notes / tasks: upload, list (metadata), read, delete.
 
-DB-BYTEA storage (no object store; co-tenant deploy). RBAC is
-member-level (notes/tasks are member-level, ADR-0001/0017), the parent
-must exist in the current org (RLS), the size is capped server-side
-before the bytes are persisted, and the filename is sanitised to a
-safe basename. The MIME type is taken from the client content-type and
-normalised; an OPTIONAL ``python-magic`` sniff refines it ONLY if the
-library is importable (same lesson as the embedder: never hard-require
-an optional dependency, fall back to the client mime + an extension
-allowlist when libmagic is unavailable). All mutations are audited.
+Pluggable storage (``attachment_store.py``): the DEFAULT ``pg`` backend
+keeps the bytes in the ``attachments.data`` BYTEA column (atomic with
+the row, no object store -- the original co-tenant design, byte-for-
+byte unchanged); the ``s3`` backend offloads the bytes to an object
+store and the row carries only ``storage_key``. RBAC is member-level
+(notes/tasks are member-level, ADR-0001/0017), the parent must exist in
+the current org (RLS), the size is capped server-side before the bytes
+are persisted, and the filename is sanitised to a safe basename. The
+MIME type is taken from the client content-type and normalised; an
+OPTIONAL ``python-magic`` sniff refines it ONLY if the library is
+importable (same lesson as the embedder: never hard-require an optional
+dependency, fall back to the client mime + an extension allowlist when
+libmagic is unavailable). All mutations are audited.
 """
 
 from __future__ import annotations
@@ -22,6 +26,7 @@ from datetime import datetime
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from flow_core.attachment_store import PgAttachmentStore, get_attachment_store
 from flow_core.config import get_settings
 from flow_core.errors import DomainError, NotFoundError
 from flow_core.i18n import MessageCode
@@ -163,6 +168,8 @@ async def add_attachment(
         raise DomainError(MessageCode.ATTACHMENT_TOO_LARGE)
     safe_name = _sanitize_filename(filename)
     resolved_mime = _resolve_mime(filename=safe_name, client_mime=mime_type, data=data)
+    store = get_attachment_store(get_settings())
+    is_pg = isinstance(store, PgAttachmentStore)
     att = Attachment(
         org_id=org_id,
         note_id=note_id,
@@ -170,11 +177,19 @@ async def add_attachment(
         filename=safe_name,
         mime_type=resolved_mime,
         size_bytes=len(data),
-        data=data,
+        # pg backend: bytes in the row, exactly as before this seam.
+        # s3 backend: data stays NULL; storage_key is set after flush
+        # (the key is the attachment id, only known once generated).
+        data=data if is_pg else None,
         uploaded_by=actor_id,
     )
     session.add(att)
     await session.flush()
+    if not is_pg:
+        key = str(att.id)
+        await store.put(key, data, resolved_mime)
+        att.storage_key = key
+        await session.flush()
     await audit.log(
         session,
         org_id=org_id,
@@ -233,14 +248,29 @@ async def get_attachment(
     org_id: uuid.UUID,
     attachment_id: uuid.UUID,
 ) -> Attachment:
-    """Full row including ``data`` (for download). Org-scoped via RLS:
-    an attachment in another org is invisible -> NotFoundError."""
+    """Full row (for download). Org-scoped via RLS: an attachment in
+    another org is invisible -> NotFoundError. The bytes are fetched via
+    ``read_attachment_bytes`` (legacy/pg: the ``data`` column; s3: the
+    object store), so the HTTP download is byte-identical either way."""
     att = (
         await session.execute(select(Attachment).where(Attachment.id == attachment_id))
     ).scalar_one_or_none()
     if att is None:
         raise NotFoundError(MessageCode.ATTACHMENT_NOT_FOUND)
     return att
+
+
+async def read_attachment_bytes(att: Attachment) -> bytes:
+    """The file bytes for download, backend-agnostic. Legacy / ``pg``
+    rows have them inline in ``data``; ``s3`` rows have ``storage_key``
+    set and the bytes in the object store. Returns exactly the bytes
+    that were uploaded so the HTTP response is unchanged."""
+    if att.storage_key is not None:
+        store = get_attachment_store(get_settings())
+        return await store.get(att.storage_key)
+    if att.data is None:  # pragma: no cover - defensive: a row with neither
+        raise NotFoundError(MessageCode.ATTACHMENT_NOT_FOUND)
+    return att.data
 
 
 async def delete_attachment(
@@ -258,6 +288,13 @@ async def delete_attachment(
     ).scalar_one_or_none()
     if att is None:
         raise NotFoundError(MessageCode.ATTACHMENT_NOT_FOUND)
+    # s3 backend: drop the object too, else the row goes but the bytes
+    # leak in the bucket. Done before the row delete so a store failure
+    # aborts the whole unit of work (no orphaned object, no lost row).
+    # pg backend: the bytes are in the row and go with it (no-op here).
+    if att.storage_key is not None:
+        store = get_attachment_store(get_settings())
+        await store.delete(att.storage_key)
     await session.delete(att)
     await session.flush()
     await audit.log(
@@ -276,4 +313,5 @@ __all__: Sequence[str] = (
     "delete_attachment",
     "get_attachment",
     "list_attachments",
+    "read_attachment_bytes",
 )

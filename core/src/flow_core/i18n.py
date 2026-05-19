@@ -31,6 +31,7 @@ class MessageCode(enum.StrEnum):
     AUTH_TOKEN_REVOKED = "auth.token_revoked"  # noqa: S105 (message code, not a secret)
     AUTH_RESET_TOKEN_INVALID = "auth.reset_token_invalid"  # noqa: S105 (code, not a secret)
     AUTH_VERIFICATION_TOKEN_INVALID = "auth.verification_token_invalid"  # noqa: S105 (code, not a secret)
+    AUTH_SIGNUP_DISABLED = "auth.signup_disabled"
     RBAC_NO_MEMBERSHIP = "rbac.no_membership"
     RBAC_ROLE_INSUFFICIENT = "rbac.role_insufficient"
     MEMBER_NOT_FOUND = "member.not_found"
@@ -126,6 +127,7 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
         MessageCode.AUTH_TOKEN_REVOKED: "Token has been revoked",
         MessageCode.AUTH_RESET_TOKEN_INVALID: "Invalid or expired reset token",
         MessageCode.AUTH_VERIFICATION_TOKEN_INVALID: "Invalid or expired token",
+        MessageCode.AUTH_SIGNUP_DISABLED: "Public sign-up is disabled on this instance",
         MessageCode.RBAC_NO_MEMBERSHIP: "Not a member of this workspace",
         MessageCode.RBAC_ROLE_INSUFFICIENT: (
             "Role {current} is insufficient, requires >= {minimum}"

@@ -16,6 +16,7 @@ dependencies = [
     "cryptography>=43",
     "pgvector>=0.3",
     "reportlab>=4",
+    "boto3>=1.34",
 ]
 
 # Opt-in local embedder (ADR-0012): the privacy-first default runs a
