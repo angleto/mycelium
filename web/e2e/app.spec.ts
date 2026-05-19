@@ -37,6 +37,21 @@ async function login(page: Page) {
   await page.waitForURL('**/notes', { timeout: 15_000 })
 }
 
+// Drive the mode chip to a target mode deterministically. The chip
+// cycles user → owner → admin → user; tests must not assume the
+// incoming state (serial-suite/persisted state makes a single click
+// fragile — this reaches the intended mode regardless).
+async function ensureMode(page: Page, target: 'user' | 'owner' | 'admin') {
+  const chip = page.locator('.modechip')
+  await expect(chip).toBeVisible()
+  for (let i = 0; i < 4; i++) {
+    if (await chip.evaluate((el, t) => el.classList.contains(`modechip--${t}`), target))
+      return
+    await chip.click()
+  }
+  await expect(chip).toHaveClass(new RegExp(`modechip--${target}`))
+}
+
 const ROUTES = [
   '/notes',
   '/tasks',
@@ -144,9 +159,7 @@ test('clients: create a client and add a project inline', async ({
   // Creating clients/projects is an owner-only privileged write under
   // the hardened model: elevate via the mode chip first (what an
   // owner does in the real UI).
-  const chip = page.locator('.modechip')
-  await chip.click()
-  await expect(chip).toHaveClass(/modechip--owner/)
+  await ensureMode(page, 'owner')
   await page.goto('/clients')
 
   // Unique names per run: client/project tag names are unique per org,
@@ -244,6 +257,7 @@ test('effective role: privileged write needs Owner mode', async ({
 
   // Default User mode: creating a client is rejected (owner-only),
   // surfaced as an in-app error, not a crash.
+  await ensureMode(page, 'user')
   await page.goto('/clients')
   const form = page.locator('form.cpform').first()
   const stamp = Date.now()
@@ -253,9 +267,7 @@ test('effective role: privileged write needs Owner mode', async ({
   await expect(page.locator('main.content .err')).toBeVisible()
 
   // Switch to Owner via the chip, retry → succeeds.
-  const chip = page.locator('.modechip')
-  await chip.click()
-  await expect(chip).toHaveClass(/modechip--owner/)
+  await ensureMode(page, 'owner')
   await page.goto('/clients')
   const form2 = page.locator('form.cpform').first()
   await form2.locator('input[name=name]').fill(`RBAC ${stamp}`)
@@ -327,9 +339,11 @@ test('task work note: open from task + billable timer in the note', async ({
   const tdTimer = page.locator('.tasktimer').first()
   await expect(tdTimer.locator('.tasktimer__on')).toBeVisible()
   await tdTimer.getByRole('button', { name: /^stop$|^ferma$/i }).click()
-  await expect(
-    tdTimer.getByRole('button', { name: /^start$|^avvia$/i }),
-  ).toBeVisible()
+  // Server-truth signal: the shared running source reflects the stop,
+  // so the top-bar running indicator disappears (robust across the
+  // note-editor vs task-detail timer instances + the reload — a
+  // per-instance button re-render races in the serial suite).
+  await expect(page.locator('.running')).toHaveCount(0)
   await expect(page.locator('main.content .err')).toHaveCount(0)
   expect(errors, errors.join('\n')).toEqual([])
 })
