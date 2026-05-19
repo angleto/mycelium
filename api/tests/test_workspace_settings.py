@@ -24,9 +24,13 @@ async def test_estimate_presets_default_update_validation() -> None:
                 json={"email": _email(), "password": "pw-strong-123"},
             )
         ).json()
+        # Owner with full entitlement: PATCH /workspaces/me/settings
+        # needs the effective role admin, which is X-Workspace-Role
+        # clamped to the membership (absent header => member).
         h = {
             "Authorization": f"Bearer {a['token']}",
             "X-Workspace-Id": a["workspace_id"],
+            "X-Workspace-Role": "owner",
         }
 
         me = (await c.get("/workspaces/me", headers=h)).json()

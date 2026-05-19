@@ -24,7 +24,7 @@ from flow_core.models.membership import Role
 from flow_core.models.user import User
 from flow_core.security import decode_token
 from flow_core.services.auth import assert_token_not_revoked
-from flow_core.services.rbac import get_role
+from flow_core.services.rbac import _RANK, get_role
 
 # auto_error=False: the scheme is published to OpenAPI (so Swagger shows
 # "Authorize"), but absence/malformed credentials are reported via our
@@ -98,6 +98,43 @@ def admin_mode_active(
     return user.is_admin and (x_admin_mode is not None and x_admin_mode.strip().lower() in _TRUTHY)
 
 
+def effective_role(
+    *,
+    membership: Role | None,
+    user: User,
+    x_workspace_role: str | None,
+    x_admin_mode: str | None,
+) -> Role:
+    """The role the request actually runs with.
+
+    Two-step, same trust model as ``admin_mode_active`` (a header is
+    honoured only up to the entitlement; a forged header can never
+    escalate):
+
+    - *ceiling* = the most this caller is entitled to. A global admin
+      in admin-mode acts as ``owner`` of ANY workspace (even with no
+      membership: that is the sudo escape hatch). Otherwise it is the
+      caller's actual membership role; a non-admin without membership
+      has no ceiling and is rejected by the caller.
+    - *requested* = ``X-Workspace-Role`` parsed to a valid Role;
+      absent/invalid defaults to ``member`` (least privilege: "by
+      default I act as a plain user").
+
+    The effective role is the requested role clamped DOWN to the
+    ceiling: a member asking for ``owner`` stays a member."""
+    if admin_mode_active(user, x_admin_mode):
+        ceiling = Role.owner
+    elif membership is None:
+        raise ForbiddenError(MessageCode.RBAC_NO_MEMBERSHIP)
+    else:
+        ceiling = membership
+    try:
+        requested = Role(x_workspace_role) if x_workspace_role else Role.member
+    except ValueError:
+        requested = Role.member
+    return requested if _RANK[requested] <= _RANK[ceiling] else ceiling
+
+
 async def require_admin(
     user: Annotated[User, Depends(current_user)],
     x_admin_mode: Annotated[str | None, Header()] = None,
@@ -120,9 +157,11 @@ class TenantCtx:
 
 
 async def tenant_ctx(
-    user_id: Annotated[uuid.UUID, Depends(current_user_id)],
+    user: Annotated[User, Depends(current_user)],
     x_workspace_id: Annotated[str, Header()],
     x_project_id: Annotated[str | None, Header()] = None,
+    x_workspace_role: Annotated[str | None, Header()] = None,
+    x_admin_mode: Annotated[str | None, Header()] = None,
 ) -> AsyncIterator[TenantCtx]:
     # Header is X-Workspace-Id (user-facing). Internally the tenant is
     # still org_id (RLS unchanged, ADR-0015); the rename lives here in
@@ -130,15 +169,26 @@ async def tenant_ctx(
     org_id = uuid.UUID(x_workspace_id)
     project_id = uuid.UUID(x_project_id) if x_project_id else None
     async with tenant_session(
-        str(org_id), str(user_id), str(project_id) if project_id else None
+        str(org_id), str(user.id), str(project_id) if project_id else None
     ) as session:
         try:
-            role = await get_role(session, org_id, user_id)
-        except NotFoundError as exc:
-            raise ForbiddenError(MessageCode.RBAC_NO_MEMBERSHIP) from exc
+            membership: Role | None = await get_role(session, org_id, user.id)
+        except NotFoundError:
+            membership = None
+        # X-Workspace-Role is a *downgrade* lever (the SPA's per-tab
+        # "act as" switch): the effective role is the requested role
+        # clamped to the caller's entitlement. A global admin in
+        # admin-mode is entitled to owner on any workspace; a non-admin
+        # with no membership is rejected here (behaviour preserved).
+        role = effective_role(
+            membership=membership,
+            user=user,
+            x_workspace_role=x_workspace_role,
+            x_admin_mode=x_admin_mode,
+        )
         yield TenantCtx(
             session=session,
-            user_id=user_id,
+            user_id=user.id,
             org_id=org_id,
             project_id=project_id,
             role=role,

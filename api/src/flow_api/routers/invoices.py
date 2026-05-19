@@ -34,7 +34,9 @@ from flow_api.schemas import (
 from flow_core.errors import NotFoundError
 from flow_core.i18n import MessageCode
 from flow_core.models.invoice import Invoice, InvoiceLine, IssuerProfile
+from flow_core.models.membership import Role
 from flow_core.services import invoice as svc
+from flow_core.services.rbac import ensure_role
 
 router = APIRouter(tags=["invoices"])
 
@@ -116,6 +118,7 @@ async def create_issuer_profile(
     body: IssuerProfileIn,
     ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
 ) -> IssuerProfileOut:
+    ensure_role(ctx.role, Role.admin)
     p = await svc.create_issuer_profile(
         ctx.session,
         org_id=ctx.org_id,
@@ -153,6 +156,7 @@ async def update_issuer_profile(
     body: IssuerProfilePatchIn,
     ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
 ) -> IssuerProfileOut:
+    ensure_role(ctx.role, Role.admin)
     values = body.model_dump(exclude_unset=True, exclude={"is_default"})
     p = await svc.update_issuer_profile(
         ctx.session,
@@ -170,6 +174,7 @@ async def set_default_issuer_profile(
     profile_id: uuid.UUID,
     ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
 ) -> IssuerProfileOut:
+    ensure_role(ctx.role, Role.admin)
     p = await svc.set_default_issuer_profile(
         ctx.session, org_id=ctx.org_id, actor_id=ctx.user_id, profile_id=profile_id
     )
@@ -197,6 +202,7 @@ async def delete_issuer_profile(
     profile_id: uuid.UUID,
     ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
 ) -> None:
+    ensure_role(ctx.role, Role.admin)
     await svc.delete_issuer_profile(
         ctx.session, org_id=ctx.org_id, actor_id=ctx.user_id, profile_id=profile_id
     )

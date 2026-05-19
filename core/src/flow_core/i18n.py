@@ -33,6 +33,9 @@ class MessageCode(enum.StrEnum):
     AUTH_VERIFICATION_TOKEN_INVALID = "auth.verification_token_invalid"  # noqa: S105 (code, not a secret)
     RBAC_NO_MEMBERSHIP = "rbac.no_membership"
     RBAC_ROLE_INSUFFICIENT = "rbac.role_insufficient"
+    MEMBER_NOT_FOUND = "member.not_found"
+    MEMBER_LAST_OWNER = "member.last_owner"
+    MEMBER_ROLE_INVALID = "member.role_invalid"
     ADMIN_REQUIRED = "admin.required"
     ADMIN_SELF_GUARD = "admin.self_guard"
     USER_NOT_FOUND = "user.not_found"
@@ -105,6 +108,9 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
         MessageCode.RBAC_ROLE_INSUFFICIENT: (
             "Role {current} is insufficient, requires >= {minimum}"
         ),
+        MessageCode.MEMBER_NOT_FOUND: "No user with that email",
+        MessageCode.MEMBER_LAST_OWNER: ("Cannot remove or demote the only owner"),
+        MessageCode.MEMBER_ROLE_INVALID: "Invalid role",
         MessageCode.ADMIN_REQUIRED: "Administrator privileges required",
         MessageCode.ADMIN_SELF_GUARD: (
             "You cannot remove your own admin role or deactivate "

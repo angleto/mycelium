@@ -29,7 +29,16 @@ async def test_f2_api_flow() -> None:
                 json={"email": _email(), "password": "pw-strong-123", "workspace_name": "B"},
             )
         ).json()
-        h = {"Authorization": f"Bearer {a['token']}", "X-Workspace-Id": a["workspace_id"]}
+        # Owner acting with full entitlement (the SPA's "act as owner"):
+        # taxonomy/workflow writes require the effective role admin, and
+        # the effective role is the requested role (X-Workspace-Role)
+        # clamped to the membership; without the header it defaults to
+        # member (least privilege).
+        h = {
+            "Authorization": f"Bearer {a['token']}",
+            "X-Workspace-Id": a["workspace_id"],
+            "X-Workspace-Role": "owner",
+        }
 
         w = (
             await c.post(

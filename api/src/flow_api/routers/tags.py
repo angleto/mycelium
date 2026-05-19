@@ -22,8 +22,10 @@ from flow_api.schemas import (
     TagScopeIn,
     VersionOut,
 )
+from flow_core.models.membership import Role
 from flow_core.models.tag import Tag, TagKind
 from flow_core.services import taxonomy
+from flow_core.services.rbac import ensure_role
 from flow_core.services.taxonomy import ClientInput
 
 router = APIRouter(tags=["taxonomy"])
@@ -73,6 +75,7 @@ async def set_tag_scope(
     body: TagScopeIn,
     ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
 ) -> None:
+    ensure_role(ctx.role, Role.admin)
     await taxonomy.set_tag_scope(
         ctx.session,
         org_id=ctx.org_id,
@@ -86,6 +89,7 @@ async def set_tag_scope(
 async def create_client(
     body: ClientCreateIn, ctx: Annotated[TenantCtx, Depends(tenant_ctx)]
 ) -> TagOut:
+    ensure_role(ctx.role, Role.admin)
     profile = ClientInput(
         ragione_sociale=body.ragione_sociale,
         id_paese=body.id_paese,
@@ -117,6 +121,7 @@ async def create_client(
 async def create_project(
     body: ProjectCreateIn, ctx: Annotated[TenantCtx, Depends(tenant_ctx)]
 ) -> TagOut:
+    ensure_role(ctx.role, Role.admin)
     tag = await taxonomy.create_project(
         ctx.session,
         org_id=ctx.org_id,
@@ -191,6 +196,7 @@ async def patch_client(
     body: ClientPatchIn,
     ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
 ) -> None:
+    ensure_role(ctx.role, Role.admin)
     data = body.model_dump(exclude_unset=True)
     name = data.pop("name", None)
     await taxonomy.update_client(
@@ -209,6 +215,7 @@ async def patch_project(
     body: ProjectPatchIn,
     ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
 ) -> None:
+    ensure_role(ctx.role, Role.admin)
     data = body.model_dump(exclude_unset=True)
     name = data.pop("name", None)
     await taxonomy.update_project(

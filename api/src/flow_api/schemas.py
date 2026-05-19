@@ -153,6 +153,29 @@ class WorkspaceOut(BaseModel):
     name: str
     version: int
     settings: WorkspaceSettings = Field(default_factory=WorkspaceSettings)
+    # The caller's *raw* membership role (the entitlement ceiling): the
+    # SPA uses it to know which roles its "act as" switch may offer. A
+    # freshly created workspace's caller is always its owner; /me sets
+    # this explicitly from the membership (or "owner" for a global
+    # admin acting without one).
+    my_role: str = "owner"
+
+
+class MemberOut(BaseModel):
+    user_id: uuid.UUID
+    email: str
+    display_name: str | None = None
+    role: str
+    created_at: datetime.datetime
+
+
+class MemberAddIn(BaseModel):
+    email: str = Field(min_length=3, max_length=320)
+    role: str = Field(min_length=1, max_length=16)
+
+
+class MemberRoleIn(BaseModel):
+    role: str = Field(min_length=1, max_length=16)
 
 
 class WorkspacePatchIn(BaseModel):

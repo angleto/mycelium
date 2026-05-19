@@ -32,7 +32,14 @@ async def test_api_flow() -> None:
                 json={"email": _email(), "password": "pw-strong-123", "workspace_name": "B"},
             )
         ).json()
-        headers = {"Authorization": f"Bearer {a['token']}", "X-Workspace-Id": a["workspace_id"]}
+        # Owner with full entitlement: PATCH /workspaces/me needs the
+        # effective role admin, which is X-Workspace-Role clamped to
+        # the membership (absent header => member, least privilege).
+        headers = {
+            "Authorization": f"Bearer {a['token']}",
+            "X-Workspace-Id": a["workspace_id"],
+            "X-Workspace-Role": "owner",
+        }
 
         own = await c.get("/workspaces/me", headers=headers)
         assert own.status_code == 200 and own.json()["name"] == "A"

@@ -17,6 +17,9 @@ from sqlalchemy import select
 
 from flow_api.deps import TenantCtx, current_user_id, tenant_ctx
 from flow_api.schemas import (
+    MemberAddIn,
+    MemberOut,
+    MemberRoleIn,
     WorkspaceCreateIn,
     WorkspaceOut,
     WorkspacePatchIn,
@@ -31,13 +34,14 @@ from flow_core.errors import NotFoundError
 from flow_core.i18n import MessageCode
 from flow_core.models.membership import Role
 from flow_core.models.organization import Organization
+from flow_core.services import memberships
 from flow_core.services.auth import (
     create_org_for_user,
     delete_org_for_user,
     list_user_orgs,
     set_workspace_status,
 )
-from flow_core.services.rbac import ensure_role
+from flow_core.services.rbac import ensure_role, get_role
 
 router = APIRouter(prefix="/workspaces", tags=["workspaces"])
 
@@ -72,12 +76,97 @@ async def get_my_workspace(
     org = result.scalar_one_or_none()
     if org is None:
         raise NotFoundError(MessageCode.ORG_NOT_FOUND)
+    # my_role is the *raw* membership role (the entitlement ceiling),
+    # not ctx.role (which is the possibly-downgraded effective role):
+    # the SPA needs the ceiling to populate its "act as" switch. A
+    # global admin acting on a workspace with no membership (sudo) is
+    # reported as "owner".
+    try:
+        my_role = (await get_role(ctx.session, ctx.org_id, ctx.user_id)).value
+    except NotFoundError:
+        my_role = Role.owner.value
     return WorkspaceOut(
         id=org.id,
         name=org.name,
         version=org.version,
         settings=WorkspaceSettings.model_validate(org.settings or {}),
+        my_role=my_role,
     )
+
+
+@router.get("/me/members", response_model=list[MemberOut])
+async def list_workspace_members(
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+) -> list[MemberOut]:
+    """The workspace roster (any member). Powers the collaborators
+    list and the SPA's "act as" switch."""
+    rows = await memberships.list_members(ctx.session, org_id=ctx.org_id, actor_id=ctx.user_id)
+    return [
+        MemberOut(
+            user_id=m.user_id,
+            email=m.email,
+            display_name=m.display_name,
+            role=m.role,
+            created_at=m.created_at,
+        )
+        for m in rows
+    ]
+
+
+@router.post("/me/members", response_model=list[MemberOut])
+async def add_workspace_member(
+    body: MemberAddIn,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+) -> list[MemberOut]:
+    """Add (or re-role) a collaborator by email. Requires the effective
+    role admin; the SQL re-checks (actor_id) atomically too."""
+    ensure_role(ctx.role, Role.admin)
+    await memberships.add_member(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        email=body.email,
+        role=body.role,
+    )
+    return await list_workspace_members(ctx)
+
+
+@router.patch("/me/members/{user_id}", response_model=list[MemberOut])
+async def set_workspace_member_role(
+    user_id: uuid.UUID,
+    body: MemberRoleIn,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+) -> list[MemberOut]:
+    """Change a collaborator's role (effective role admin; SQL
+    re-checks). Cannot demote the sole owner."""
+    ensure_role(ctx.role, Role.admin)
+    await memberships.set_member_role(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        target_user_id=user_id,
+        role=body.role,
+    )
+    return await list_workspace_members(ctx)
+
+
+@router.delete(
+    "/me/members/{user_id}", status_code=status.HTTP_204_NO_CONTENT, response_class=Response
+)
+async def remove_workspace_member(
+    user_id: uuid.UUID,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+) -> Response:
+    """Remove a collaborator (effective role admin; SQL re-checks).
+    Cannot remove the sole owner."""
+    ensure_role(ctx.role, Role.admin)
+    await memberships.remove_member(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        target_user_id=user_id,
+    )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.patch("/me/settings", response_model=WorkspaceVersionOut)

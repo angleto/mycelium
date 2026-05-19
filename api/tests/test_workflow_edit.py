@@ -22,9 +22,13 @@ async def test_workflow_edit_default_delete() -> None:
                 json={"email": _email(), "password": "pw-strong-123"},
             )
         ).json()
+        # Owner with full entitlement: workflow writes need the
+        # effective role admin, which is X-Workspace-Role clamped to
+        # the membership (absent header => member, least privilege).
         h = {
             "Authorization": f"Bearer {a['token']}",
             "X-Workspace-Id": a["workspace_id"],
+            "X-Workspace-Role": "owner",
         }
 
         wfs = (await c.get("/workflows", headers=h)).json()
