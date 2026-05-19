@@ -5,9 +5,10 @@
 Please report security issues **privately**, not via public issues or
 pull requests.
 
-- Email: **angelo@leto.blue** (subject prefix `SECURITY:`).
-- Optionally use GitHub's **private vulnerability reporting**
-  (repository → Security → *Report a vulnerability*).
+- Use GitHub's **private vulnerability reporting**: repository →
+  **Security** → *Report a vulnerability*. This opens a private
+  security advisory visible only to the maintainers — no public
+  disclosure and no need to share a personal contact.
 
 Include enough to reproduce: affected component (API, web, MCP,
 worker, deploy), version/commit, impact, and steps or a proof of
