@@ -39,3 +39,11 @@ class Tag(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, Base):
     name: Mapped[str] = mapped_column(String(120), nullable=False)
     color: Mapped[str | None] = mapped_column(String(16), nullable=True)
     status: Mapped[str] = mapped_column(String(16), nullable=False, server_default="active")
+    # Stable slug for a ``memory_channel`` tag (e.g. "email", "telegram",
+    # "manual", "agent"): the DETERMINISTIC target an integration writes
+    # into. NULL for every non-channel tag and for an admin-added custom
+    # channel with no integration binding. A partial unique index keeps
+    # it unique per (org_id, system_key) only where it is set
+    # (migration 0042). Enable/disable reuses ``status`` (active vs
+    # archived), no separate flag.
+    system_key: Mapped[str | None] = mapped_column(String(64), nullable=True, default=None)

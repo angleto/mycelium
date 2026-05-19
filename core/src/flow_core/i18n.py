@@ -46,6 +46,11 @@ class MessageCode(enum.StrEnum):
     TAG_DUPLICATE = "tag.duplicate"
     TAG_AMBIGUOUS = "tag.ambiguous"
     TAG_KIND_MISMATCH = "tag.kind_mismatch"
+    CHANNEL_NOT_TAG_CREATABLE = "channel.not_tag_creatable"
+    CHANNEL_ADMIN_ONLY = "channel.admin_only"
+    CHANNEL_KEY_IMMUTABLE = "channel.key_immutable"
+    CHANNEL_SEEDED_UNDELETABLE = "channel.seeded_undeletable"
+    CHANNEL_NOT_FOUND = "channel.not_found"
     WORKFLOW_NOT_FOUND = "workflow.not_found"
     WORKFLOW_INVALID = "workflow.invalid"
     WORKFLOW_IN_USE = "workflow.in_use"
@@ -127,6 +132,19 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
         MessageCode.TAG_DUPLICATE: "A tag with this name already exists",
         MessageCode.TAG_AMBIGUOUS: "Ambiguous tag name: {name}",
         MessageCode.TAG_KIND_MISMATCH: "Tag is not of the expected kind",
+        MessageCode.CHANNEL_NOT_TAG_CREATABLE: (
+            "Memory channels are managed in settings, not created as tags"
+        ),
+        MessageCode.CHANNEL_ADMIN_ONLY: (
+            "Only a platform administrator can manage memory channels"
+        ),
+        MessageCode.CHANNEL_KEY_IMMUTABLE: (
+            "The system key of a seeded memory channel cannot be changed"
+        ),
+        MessageCode.CHANNEL_SEEDED_UNDELETABLE: (
+            "A seeded memory channel cannot be deleted; disable it instead"
+        ),
+        MessageCode.CHANNEL_NOT_FOUND: "Memory channel not found",
         MessageCode.WORKFLOW_NOT_FOUND: "Workflow not found",
         MessageCode.WORKFLOW_INVALID: ("Invalid workflow: exactly one initial state is required"),
         MessageCode.WORKFLOW_IN_USE: (

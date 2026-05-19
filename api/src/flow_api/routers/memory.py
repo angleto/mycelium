@@ -66,6 +66,7 @@ async def write_blob(
         importance=body.importance,
         tag_ids=body.tag_ids,
         channel_tag_id=body.channel_tag_id,
+        channel_key=body.channel_key,
     )
     tagmap = await svc.tags_by_blob(ctx.session, blob_ids=[blob.id])
     return _blob_out(blob, tagmap.get(blob.id))
@@ -87,6 +88,7 @@ async def search(
         grader_min_rrf=body.grader_min_rrf,
         tag_ids=body.tag_ids,
         channel_tag_id=body.channel_tag_id,
+        channel_key=body.channel_key,
     )
     tagmap = await svc.tags_by_blob(ctx.session, blob_ids=[h.blob.id for h in hits])
     return [MemoryHitOut(blob=_blob_out(h.blob, tagmap.get(h.blob.id)), rrf=h.rrf) for h in hits]

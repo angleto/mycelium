@@ -16,12 +16,13 @@ from decimal import Decimal
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from flow_core import __version__
-from flow_core.db import tenant_session
+from flow_core.db import admin_session, tenant_session
 from flow_core.embedder import embedder_available
-from flow_core.errors import AuthError
+from flow_core.errors import AuthError, ForbiddenError
 from flow_core.i18n import MessageCode
 from flow_core.models.billing import CostBasis, RateCard, UsageRecord
 from flow_core.models.budget import Budget, BudgetPeriod
@@ -38,6 +39,7 @@ from flow_core.models.schedule import Schedule
 from flow_core.models.tag import Tag, TagKind
 from flow_core.models.task import ConstraintKind, Necessity, ScheduleMode, Task
 from flow_core.models.time_entry import TimeEntry
+from flow_core.models.user import User
 from flow_core.models.workflow import WorkflowDefinition, WorkflowState, WorkflowTransition
 from flow_core.security import decode_token
 from flow_core.services import advisory as advisory_svc
@@ -1875,13 +1877,17 @@ async def memory_write(
     source_id: str | None = None,
     tag_ids: list[str] | None = None,
     channel_tag_id: str | None = None,
+    channel_key: str | None = None,
 ) -> dict[str, Any]:
     """Write a memory blob. The embedding is metered *when produced*;
     if the embedding model is unavailable the blob is stored
     keyword-only (still FTS-searchable, never an error). Optional
     provenance for GDPR erasure. Tags = explicit ``tag_ids`` plus an
-    optional ``channel_tag_id`` (a ``memory_channel`` tag) plus those
-    inherited from tagged sources. The (org, project) boundary is
+    optional memory channel plus those inherited from tagged sources.
+    The channel may be addressed by ``channel_tag_id`` (a
+    ``memory_channel`` tag id) or, deterministically, by ``channel_key``
+    (its stable slug, what integrations use); if both are given they
+    must resolve to the same channel. The (org, project) boundary is
     hard."""
     async with _tenant(token, org_id) as (s, org, user):
         sources = (
@@ -1898,6 +1904,7 @@ async def memory_write(
             sources=sources,
             tag_ids=[uuid.UUID(t) for t in (tag_ids or [])],
             channel_tag_id=uuid.UUID(channel_tag_id) if channel_tag_id else None,
+            channel_key=channel_key,
         )
         tagmap = await memory_svc.tags_by_blob(s, blob_ids=[blob.id])
         return _blob(blob, tagmap.get(blob.id))
@@ -1913,13 +1920,16 @@ async def memory_search(
     limit: int = 10,
     tag_ids: list[str] | None = None,
     channel_tag_id: str | None = None,
+    channel_key: str | None = None,
 ) -> list[dict[str, Any]]:
     """Hybrid RRF retrieval within the (org, project) boundary
     (retrieval-as-tool, ADR-0016). Degrades to keyword-only when the
     embedding model is unavailable. Optional ``tag_ids`` /
-    ``channel_tag_id`` narrow to blobs carrying every given tag (and
-    the channel), a facet that never crosses the boundary.
-    Deterministic order."""
+    ``channel_tag_id`` / ``channel_key`` narrow to blobs carrying every
+    given tag (and the channel), a facet that never crosses the
+    boundary. The channel may be given by id or, deterministically, by
+    its stable ``channel_key`` slug; if both are given they must
+    resolve to the same channel. Deterministic order."""
     async with _tenant(token, org_id) as (s, org, user):
         hits = await memory_svc.retrieve(
             s,
@@ -1931,6 +1941,7 @@ async def memory_search(
             limit=limit,
             tag_ids=[uuid.UUID(t) for t in (tag_ids or [])],
             channel_tag_id=uuid.UUID(channel_tag_id) if channel_tag_id else None,
+            channel_key=channel_key,
         )
         tagmap = await memory_svc.tags_by_blob(s, blob_ids=[h.blob.id for h in hits])
         return [{"blob": _blob(h.blob, tagmap.get(h.blob.id)), "rrf": h.rrf} for h in hits]
@@ -1980,6 +1991,108 @@ async def memory_status(token: str, org_id: str) -> dict[str, Any]:
     installed. Member-level."""
     async with _tenant(token, org_id) as (_s, _org, _user):
         return {"semantic": embedder_available()}
+
+
+# --- Memory channels (controlled, seeded vocabulary; FR-8) ---------
+#
+# Listing is member-level (the agent needs it to pick a channel);
+# create/rename/enable-disable is PLATFORM-ADMIN only. The REST surface
+# gates this with the sudo rule "capability (is_admin) AND active
+# X-Admin-Mode elevation". MCP is a tool protocol with no per-call
+# elevation header, so the equivalent gate here is the capability
+# itself (``users.is_admin``); a non-admin caller is rejected exactly
+# like the REST 403. (Mirrors the REST gating note in
+# api/src/flow_api/routers/memory_channels.py.)
+_CANONICAL_CHANNEL_KEYS = frozenset(k for k, _ in taxonomy.CANONICAL_MEMORY_CHANNELS)
+
+
+def _channel(t: Tag) -> dict[str, Any]:
+    return {
+        "id": str(t.id),
+        "name": t.name,
+        "system_key": t.system_key,
+        "enabled": t.status == "active",
+        "seeded": t.system_key in _CANONICAL_CHANNEL_KEYS,
+        "version": t.version,
+    }
+
+
+async def _require_platform_admin(user_id: uuid.UUID) -> None:
+    """Platform-admin capability gate for channel management. ``users``
+    is global (not RLS-scoped), so it is read via an admin session,
+    exactly like the REST admin surface. Raises the same code the REST
+    layer maps to 403 for a non-admin."""
+    async with admin_session() as s:
+        u = (await s.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
+    if u is None or not u.is_admin:
+        raise ForbiddenError(MessageCode.CHANNEL_ADMIN_ONLY)
+
+
+@mcp.tool()
+async def memory_channels_list(token: str, org_id: str) -> list[dict[str, Any]]:
+    """List the tenant's configured memory channels (seeds the
+    canonical four on first call). Any authenticated member may list --
+    the agent needs it to pick a channel by ``system_key``. RLS-scoped."""
+    async with _tenant(token, org_id) as (s, org, _user):
+        channels = await taxonomy.list_memory_channels(s, org_id=org)
+        return [_channel(t) for t in channels]
+
+
+@mcp.tool()
+async def memory_channel_create(
+    token: str,
+    org_id: str,
+    name: str,
+    system_key: str | None = None,
+) -> dict[str, Any]:
+    """Create a custom memory channel. PLATFORM-ADMIN only (see the
+    module note: REST also requires an active X-Admin-Mode elevation;
+    MCP gates on the is_admin capability)."""
+    async with _tenant(token, org_id) as (s, org, user):
+        await _require_platform_admin(user)
+        tag = await taxonomy.create_memory_channel(
+            s, org_id=org, actor_id=user, name=name, system_key=system_key
+        )
+        return _channel(tag)
+
+
+@mcp.tool()
+async def memory_channel_update(
+    token: str,
+    org_id: str,
+    channel_id: str,
+    name: str | None = None,
+    enabled: bool | None = None,
+    system_key: str | None = None,
+) -> dict[str, Any]:
+    """Rename and/or enable/disable a memory channel. PLATFORM-ADMIN
+    only. A seeded channel may be renamed and disabled but its
+    ``system_key`` is immutable (channel.key_immutable)."""
+    async with _tenant(token, org_id) as (s, org, user):
+        await _require_platform_admin(user)
+        tag = await taxonomy.update_memory_channel(
+            s,
+            org_id=org,
+            actor_id=user,
+            tag_id=uuid.UUID(channel_id),
+            name=name,
+            enabled=enabled,
+            system_key=system_key,
+        )
+        return _channel(tag)
+
+
+@mcp.tool()
+async def memory_channel_delete(token: str, org_id: str, channel_id: str) -> dict[str, Any]:
+    """Delete a custom memory channel. PLATFORM-ADMIN only. A seeded
+    channel is not deletable -- disable it instead
+    (channel.seeded_undeletable)."""
+    async with _tenant(token, org_id) as (s, org, user):
+        await _require_platform_admin(user)
+        await taxonomy.delete_memory_channel(
+            s, org_id=org, actor_id=user, tag_id=uuid.UUID(channel_id)
+        )
+        return {"deleted": channel_id}
 
 
 # --- F6b: notes / conversation / canonical intent (FR-16) ---

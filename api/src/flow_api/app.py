@@ -23,6 +23,7 @@ from flow_api.routers import (
     events,
     invoices,
     memory,
+    memory_channels,
     mfa,
     notes,
     notifications,
@@ -113,6 +114,7 @@ def create_app() -> FastAPI:
     app.include_router(email.router)
     app.include_router(billing.router)
     app.include_router(memory.router)
+    app.include_router(memory_channels.router)
     app.include_router(notes.router)
     app.include_router(attachments.router)
     app.include_router(invoices.router)

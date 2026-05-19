@@ -78,6 +78,13 @@ async def create_tag(
     name: str,
     color: str | None = None,
 ) -> Tag:
+    if kind is TagKind.memory_channel:
+        # Channels are a controlled, seeded vocabulary managed by the
+        # platform admin via /memory/channels, never created ad-hoc from
+        # arbitrary user input through the generic tag endpoint: an
+        # integration needs a deterministic, well-known target, not a
+        # free-form tag (docs/adr/0005, FR-8).
+        raise DomainError(MessageCode.CHANNEL_NOT_TAG_CREATABLE)
     minimum = Role.member if kind in _MEMBER_TAG_KINDS else Role.admin
     await require_role(session, org_id, actor_id, minimum)
     tag = await _insert_tag(session, org_id, kind, name, color)
@@ -515,3 +522,214 @@ async def update_tag(
         diff=values,
     )
     return new_version
+
+
+# --- Memory channels (controlled, seeded vocabulary; FR-8) ---------
+#
+# A memory channel is a ``memory_channel`` tag whose ``system_key`` is a
+# stable slug. Integrations (email ingest, Telegram) resolve their
+# target channel by this key, never by a user-chosen name. The four
+# canonical channels are seeded idempotently per tenant; the platform
+# admin may add custom (keyless or keyed) channels via /memory/channels.
+# Enable/disable reuses the pre-existing tag ``status`` soft-state
+# ('active' vs 'archived'); a disabled channel is not a valid write/
+# search target. Seeded channels are renamable but their key is
+# immutable and they are not deletable (disable instead).
+_CHANNEL_ACTIVE = "active"
+_CHANNEL_DISABLED = "archived"
+
+# slug -> human (English) name. Order is the seed/list order.
+CANONICAL_MEMORY_CHANNELS: tuple[tuple[str, str], ...] = (
+    ("email", "Email"),
+    ("telegram", "Telegram"),
+    ("manual", "Manual"),
+    ("agent", "Agent"),
+)
+_CANONICAL_KEYS: frozenset[str] = frozenset(k for k, _ in CANONICAL_MEMORY_CHANNELS)
+
+
+async def ensure_default_memory_channels(session: AsyncSession, *, org_id: uuid.UUID) -> None:
+    """Seed the four canonical memory channels for a tenant, idempotent.
+
+    Mirrors the lazy ``ensure_default_*`` bootstrap shape (called from
+    the same surfaces that need them, e.g. ``GET /memory/channels`` and
+    the memory write/search entry points), so a fresh tenant always has
+    them regardless of call order. System action (no role gate) so any
+    member listing channels triggers the one-time seed.
+
+    Idempotency is guarded by an existence query on
+    ``(org_id, system_key, kind=memory_channel)`` per channel -- NOT via
+    ``organizations.settings`` -- so it never collides with the
+    client/project default-tag settings keys and is safe to call
+    repeatedly and from any order (it is a distinct ``kind`` with its
+    own unique surface, the 0042 partial index on
+    ``(org_id, system_key)``). Re-seeding is a no-op and never raises
+    ``tag.duplicate``.
+    """
+    for key, display in CANONICAL_MEMORY_CHANNELS:
+        existing = (
+            await session.execute(
+                select(Tag.id).where(
+                    Tag.kind == TagKind.memory_channel,
+                    Tag.system_key == key,
+                )
+            )
+        ).scalar_one_or_none()
+        if existing is not None:
+            continue
+        tag = Tag(
+            org_id=org_id,
+            kind=TagKind.memory_channel,
+            name=display,
+            system_key=key,
+            status=_CHANNEL_ACTIVE,
+        )
+        try:
+            async with session.begin_nested():
+                session.add(tag)
+                await session.flush()
+        except IntegrityError:
+            # A concurrent seed (or a pre-existing same-name channel)
+            # already created it: idempotent, swallow and move on.
+            continue
+
+
+async def list_memory_channels(session: AsyncSession, *, org_id: uuid.UUID) -> list[Tag]:
+    """Configured channels for the tenant (RLS-scoped). Seeds the
+    canonical set first so a fresh tenant always lists the four."""
+    await ensure_default_memory_channels(session, org_id=org_id)
+    rows = await session.execute(
+        select(Tag).where(Tag.kind == TagKind.memory_channel).order_by(Tag.name)
+    )
+    return list(rows.scalars().all())
+
+
+async def _get_channel(session: AsyncSession, *, tag_id: uuid.UUID) -> Tag:
+    tag = (await session.execute(select(Tag).where(Tag.id == tag_id))).scalar_one_or_none()
+    if tag is None or tag.kind is not TagKind.memory_channel:
+        raise NotFoundError(MessageCode.CHANNEL_NOT_FOUND)
+    return tag
+
+
+async def create_memory_channel(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    name: str,
+    system_key: str | None = None,
+) -> Tag:
+    """Create a custom memory channel (platform-admin only; the gate is
+    enforced in the adapter, same as the admin surface). A custom
+    channel may be keyless (``system_key`` None) or carry an
+    admin-chosen key; the 0042 partial unique index rejects a duplicate
+    key as ``tag.duplicate``."""
+    tag = Tag(
+        org_id=org_id,
+        kind=TagKind.memory_channel,
+        name=name,
+        system_key=system_key,
+        status=_CHANNEL_ACTIVE,
+    )
+    try:
+        async with session.begin_nested():
+            session.add(tag)
+            await session.flush()
+    except IntegrityError as exc:
+        raise DomainError(MessageCode.TAG_DUPLICATE) from exc
+    await audit.log(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        entity="tag",
+        entity_id=tag.id,
+        action="create_memory_channel",
+    )
+    return tag
+
+
+async def update_memory_channel(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    tag_id: uuid.UUID,
+    name: str | None = None,
+    enabled: bool | None = None,
+    system_key: str | None = None,
+) -> Tag:
+    """Rename and/or enable/disable a channel (platform-admin only).
+
+    A seeded (canonical-key) channel may be renamed and disabled, but
+    its ``system_key`` is IMMUTABLE: any attempt to change it (to a
+    different value) is rejected. ``enabled`` maps to the pre-existing
+    tag ``status`` soft-state ('active' / 'archived'); a disabled
+    channel is not a valid write/search target. Custom channels are
+    fully editable.
+    """
+    tag = await _get_channel(session, tag_id=tag_id)
+    is_seeded = tag.system_key in _CANONICAL_KEYS
+    if system_key is not None and system_key != tag.system_key:
+        if is_seeded:
+            raise DomainError(MessageCode.CHANNEL_KEY_IMMUTABLE)
+        tag.system_key = system_key
+    if name is not None:
+        tag.name = name
+    if enabled is not None:
+        tag.status = _CHANNEL_ACTIVE if enabled else _CHANNEL_DISABLED
+    tag.version += 1
+    await session.flush()
+    await audit.log(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        entity="tag",
+        entity_id=tag.id,
+        action="update_memory_channel",
+    )
+    return tag
+
+
+async def delete_memory_channel(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    tag_id: uuid.UUID,
+) -> None:
+    """Delete a custom channel (platform-admin only). A seeded
+    (canonical-key) channel is NOT deletable -- disable it instead --
+    so historical blobs keep a stable, well-known facet."""
+    tag = await _get_channel(session, tag_id=tag_id)
+    if tag.system_key in _CANONICAL_KEYS:
+        raise DomainError(MessageCode.CHANNEL_SEEDED_UNDELETABLE)
+    await session.execute(delete(Tag).where(Tag.id == tag_id))
+    await session.flush()
+    await audit.log(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        entity="tag",
+        entity_id=tag_id,
+        action="delete_memory_channel",
+    )
+
+
+async def resolve_channel_by_key(
+    session: AsyncSession, *, org_id: uuid.UUID, channel_key: str
+) -> Tag:
+    """Resolve a tenant's enabled ``memory_channel`` tag by its stable
+    ``system_key`` (RLS scopes ``tags`` to the org, so a foreign org's
+    channel is invisible -> not found). A disabled channel is treated
+    as absent (not a valid write/search target)."""
+    tag = (
+        await session.execute(
+            select(Tag).where(
+                Tag.kind == TagKind.memory_channel,
+                Tag.system_key == channel_key,
+            )
+        )
+    ).scalar_one_or_none()
+    if tag is None or tag.status != _CHANNEL_ACTIVE:
+        raise NotFoundError(MessageCode.CHANNEL_NOT_FOUND)
+    return tag

@@ -1012,6 +1012,11 @@ class MemoryWriteIn(BaseModel):
     # Optional memory channel: a tag of kind ``memory_channel`` this
     # blob is filed under. Folded into the attached tag set.
     channel_tag_id: uuid.UUID | None = None
+    # Deterministic alternative: the channel's stable ``system_key``
+    # (e.g. "email", "telegram"). What integrations use. If both this
+    # and ``channel_tag_id`` are given they must resolve to the same
+    # channel. Manual writes stay channel-optional (omit both).
+    channel_key: str | None = Field(default=None, max_length=64)
 
 
 class MemorySearchIn(BaseModel):
@@ -1024,6 +1029,10 @@ class MemorySearchIn(BaseModel):
     # Optional memory channel: narrows to blobs filed under this
     # ``memory_channel`` tag (ANDed into the tag facet).
     channel_tag_id: uuid.UUID | None = None
+    # Deterministic alternative: narrow by the channel's stable
+    # ``system_key``. If both are given they must resolve to the same
+    # channel.
+    channel_key: str | None = Field(default=None, max_length=64)
 
 
 class MemoryStatusOut(BaseModel):
@@ -1070,6 +1079,38 @@ class TierCountsOut(BaseModel):
 
 class ErasedOut(BaseModel):
     deleted: int
+
+
+# --- Memory channels (controlled, seeded vocabulary; FR-8) ---------
+
+
+class MemoryChannelOut(BaseModel):
+    id: uuid.UUID
+    name: str
+    # Stable slug; None for a keyless custom channel. Integrations use
+    # this, never the name.
+    system_key: str | None
+    # Enable/disable maps to the tag soft-state; False = disabled (not a
+    # valid write/search target).
+    enabled: bool
+    # True for a canonical seeded channel: renamable and disable-able
+    # but its key is immutable and it is not deletable.
+    seeded: bool
+    version: int
+
+
+class MemoryChannelCreateIn(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    system_key: str | None = Field(default=None, min_length=1, max_length=64)
+
+
+class MemoryChannelPatchIn(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    # Enable/disable the channel (maps to the tag soft-state).
+    enabled: bool | None = None
+    # Only meaningful for a custom channel; changing a seeded channel's
+    # key is rejected (channel.key_immutable).
+    system_key: str | None = Field(default=None, min_length=1, max_length=64)
 
 
 # --- F6b: notes / conversation / intent (FR-16, docs/adr/0020, 0021) ---

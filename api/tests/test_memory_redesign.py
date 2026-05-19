@@ -148,28 +148,29 @@ async def test_embedder_present_semantic_recall(_fake_embedder: None) -> None:
 
 
 async def test_memory_channel_filtering(_fake_embedder: None) -> None:
-    """A memory_channel tag is created via the generic tag endpoint
-    (member-level), folded into a blob on write, and used as an AND
-    facet on search: the right channel matches, a different one does
-    not, and a non-channel tag id is rejected with a 4xx code."""
+    """A seeded memory_channel tag (controlled vocabulary, obtained from
+    GET /memory/channels -- NOT created ad-hoc via the generic tag
+    endpoint, which now rejects kind=memory_channel) is folded into a
+    blob on write and used as an AND facet on search: the right channel
+    matches, a different one does not, and a non-channel tag id is
+    rejected with a 4xx code."""
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://t") as c:
         h = await _signup(c)
         await _grant_and_rate(c, h)
 
-        ch = await c.post(
+        # Channels are a seeded, controlled vocabulary now: the generic
+        # tag endpoint refuses kind=memory_channel; the tenant's
+        # canonical channels come from GET /memory/channels instead.
+        rejected = await c.post(
             "/tags", headers=h, json={"kind": "memory_channel", "name": "agent-scratch"}
         )
-        assert ch.status_code == 200, ch.text
-        ch_body = ch.json()
-        assert ch_body["kind"] == "memory_channel"
-        channel_id = ch_body["id"]
+        assert rejected.status_code == 400, rejected.text
+        assert rejected.json()["code"] == "channel.not_tag_creatable"
 
-        other_ch = await c.post(
-            "/tags", headers=h, json={"kind": "memory_channel", "name": "other-channel"}
-        )
-        assert other_ch.status_code == 200, other_ch.text
-        other_channel_id = other_ch.json()["id"]
+        channels = (await c.get("/memory/channels", headers=h)).json()
+        channel_id = next(ch["id"] for ch in channels if ch["system_key"] == "agent")
+        other_channel_id = next(ch["id"] for ch in channels if ch["system_key"] == "manual")
 
         # A generic tag id is NOT a valid channel.
         generic = await c.post("/tags", headers=h, json={"kind": "generic", "name": "g1"})

@@ -193,3 +193,22 @@ async def tenant_ctx(
             project_id=project_id,
             role=role,
         )
+
+
+async def tenant_admin_ctx(
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    user: Annotated[User, Depends(current_user)],
+    x_admin_mode: Annotated[str | None, Header()] = None,
+) -> TenantCtx:
+    """Platform-admin surface *inside* a tenant: an RLS-scoped tenant
+    session (so the write still lands in the caller's workspace, ADR
+    isolation preserved) gated by the SAME sudo rule as the global
+    admin surface (``require_admin``): the account must have the
+    capability (``is_admin``) AND an active elevation (``X-Admin-Mode``).
+    A workspace owner who is not a platform admin -- even with the
+    header -- is rejected with the channel-specific code. ``current_user``
+    is shared (cached) with ``tenant_ctx`` so the identity is consistent.
+    """
+    if not admin_mode_active(user, x_admin_mode):
+        raise ForbiddenError(MessageCode.CHANNEL_ADMIN_ONLY)
+    return ctx

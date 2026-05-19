@@ -31,7 +31,7 @@ from flow_core.models.membership import Role
 from flow_core.models.memory_blob import BlobSource, MemoryBlob, MemoryBlobTag
 from flow_core.models.tag import Tag, TagKind
 from flow_core.models.task_tag import TaskTag
-from flow_core.services import audit, billing
+from flow_core.services import audit, billing, taxonomy
 from flow_core.services.rbac import require_role
 
 _RRF_K = 60
@@ -68,19 +68,47 @@ async def _safe_embed(emb: Embedder, text: str) -> EmbedResult | None:
 
 
 async def _resolve_channel_tag_id(
-    session: AsyncSession, *, org_id: uuid.UUID, channel_tag_id: uuid.UUID | None
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    channel_tag_id: uuid.UUID | None,
+    channel_key: str | None = None,
 ) -> uuid.UUID | None:
-    """Validate an optional memory-channel tag: it must be a tag visible
-    in this tenant (RLS scopes ``tags`` to the org) AND of kind
-    ``memory_channel``. Mirrors the kind-check style used in taxonomy
-    (NotFound when absent, TAG_KIND_MISMATCH when the wrong kind)."""
+    """Resolve the optional memory channel for a write/search.
+
+    Two ways to address a channel, both RLS-scoped to the tenant:
+
+    - ``channel_tag_id``: an explicit tag id. It must be a tag visible
+      in this tenant (RLS scopes ``tags`` to the org) AND of kind
+      ``memory_channel`` (NotFound when absent, TAG_KIND_MISMATCH when
+      the wrong kind -- behaviour preserved for existing callers).
+    - ``channel_key``: the DETERMINISTIC stable slug an integration
+      writes into. Resolved to the tenant's *enabled* ``memory_channel``
+      tag with that ``system_key`` (CHANNEL_NOT_FOUND if absent or
+      disabled, or it belongs to another org -- RLS makes it invisible).
+
+    If BOTH are given they must resolve to the SAME tag, else a domain
+    error (an integration must not be ambiguous about its target).
+    Manual writes stay channel-OPTIONAL: both None -> None (no forced
+    default)."""
+    by_key: uuid.UUID | None = None
+    if channel_key is not None:
+        key_tag = await taxonomy.resolve_channel_by_key(
+            session, org_id=org_id, channel_key=channel_key
+        )
+        by_key = key_tag.id
     if channel_tag_id is None:
-        return None
+        return by_key
     tag = (await session.execute(select(Tag).where(Tag.id == channel_tag_id))).scalar_one_or_none()
     if tag is None:
         raise NotFoundError(MessageCode.TAG_NOT_FOUND)
     if tag.kind is not TagKind.memory_channel:
         raise DomainError(MessageCode.TAG_KIND_MISMATCH)
+    if by_key is not None and by_key != tag.id:
+        # An explicit id and a key that point at different channels: the
+        # caller is ambiguous about its target, refuse rather than guess
+        # (docs/adr/0021: confirm, never guess).
+        raise DomainError(MessageCode.DOMAIN_ERROR)
     return tag.id
 
 
@@ -164,11 +192,12 @@ async def write_blob(
     importance: Decimal = Decimal(0),
     tag_ids: Sequence[uuid.UUID] = (),
     channel_tag_id: uuid.UUID | None = None,
+    channel_key: str | None = None,
     embedder: Embedder | None = None,
 ) -> MemoryBlob:
     await require_role(session, org_id, actor_id, Role.member)
     channel_id = await _resolve_channel_tag_id(
-        session, org_id=org_id, channel_tag_id=channel_tag_id
+        session, org_id=org_id, channel_tag_id=channel_tag_id, channel_key=channel_key
     )
     emb = embedder or get_embedder()
     result = await _safe_embed(emb, text_body)
@@ -258,11 +287,12 @@ async def retrieve(
     grader_min_rrf: float | None = None,
     tag_ids: Sequence[uuid.UUID] | None = None,
     channel_tag_id: uuid.UUID | None = None,
+    channel_key: str | None = None,
     embedder: Embedder | None = None,
 ) -> list[Hit]:
     await require_role(session, org_id, actor_id, Role.member)
     channel_id = await _resolve_channel_tag_id(
-        session, org_id=org_id, channel_tag_id=channel_tag_id
+        session, org_id=org_id, channel_tag_id=channel_tag_id, channel_key=channel_key
     )
     emb = embedder or get_embedder()
     qres = await _safe_embed(emb, query)
