@@ -46,16 +46,41 @@ export function workspaceHeader(): { 'x-workspace-id': string } {
   return { 'x-workspace-id': s.workspaceId }
 }
 
-/** Backend domain error envelope ({code, detail}); see api/app.py. */
-export type ApiError = { code?: string; detail?: string }
+/** Backend domain error envelope ({code, detail}); see api/app.py.
+ * `detail` is a string for our domain errors but a FastAPI 422 sends
+ * an ARRAY of {loc,msg,type,...} validation objects — never render it
+ * raw (it white-screens React: "Objects are not valid as a child"). */
+export type ApiError = { code?: string; detail?: unknown }
 
 export function errCode(e: unknown): string | undefined {
   return (e as ApiError | undefined)?.code
 }
 
+function validationLine(x: unknown): string | null {
+  if (x && typeof x === 'object' && 'msg' in x) {
+    const o = x as { msg?: unknown; loc?: unknown }
+    const msg = typeof o.msg === 'string' ? o.msg : ''
+    const loc = Array.isArray(o.loc)
+      ? o.loc.filter((p) => p !== 'body').join('.')
+      : ''
+    return loc && msg ? `${loc}: ${msg}` : msg || null
+  }
+  return typeof x === 'string' ? x : null
+}
+
+// Always returns a string (a non-string detail must never reach JSX).
 export function errMessage(e: unknown): string {
-  const v = e as ApiError | undefined
-  return v?.detail ?? v?.code ?? i18n.t('error.generic')
+  const d = (e as ApiError | undefined)?.detail
+  if (typeof d === 'string' && d) return d
+  if (Array.isArray(d)) {
+    const msgs = d.map(validationLine).filter((m): m is string => !!m)
+    if (msgs.length) return msgs.join('; ')
+  }
+  if (d && typeof d === 'object') {
+    const m = (d as { msg?: unknown }).msg
+    if (typeof m === 'string' && m) return m
+  }
+  return (e as ApiError | undefined)?.code ?? i18n.t('error.generic')
 }
 
 // After auth we hold a token but no workspace context yet: fetch the

@@ -87,15 +87,19 @@ export function IssuerProfiles() {
       provincia: form.provincia || null,
       is_default: form.is_default,
     }
+    // regime_fiscale/paese/nazione are required by IssuerProfileIn (not
+    // user-editable here, IT-fiscal constants). They must be sent on
+    // PATCH too, otherwise the update 422s ("field required").
+    const body = { regime_fiscale: 'RF01', paese: 'IT', nazione: 'IT', ...common }
     const res =
       edit === 'new'
         ? await api.POST('/issuer-profiles', {
             params: { header: h },
-            body: { regime_fiscale: 'RF01', paese: 'IT', nazione: 'IT', ...common },
+            body,
           })
         : await api.PATCH('/issuer-profiles/{profile_id}', {
             params: { header: h, path: { profile_id: edit as string } },
-            body: common,
+            body,
           })
     if (res.error) {
       setErr(errMessage(res.error))
