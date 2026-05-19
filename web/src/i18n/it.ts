@@ -815,6 +815,12 @@ export const it: Catalog = {
     provincia: 'Provincia',
     isDefault: 'Default',
     setDefault: 'Imposta come default',
+    regime: 'Regime fiscale',
+    regimeRF01: 'RF01 — ordinario',
+    regimeRF19: 'RF19 — forfettario',
+    regimeRF19Hint:
+      'Forfettario: le fatture sono emesse con IVA 0% + Natura N2.2 e la dicitura obbligatoria L.190/2014, più il bollo virtuale da €2 oltre €77,47. Obbligatorio per una partita IVA forfettaria.',
+    defaultIban: 'IBAN pagamento predefinito',
     saveProfile: 'Salva profilo',
     delete: 'Elimina',
     noProfiles: 'Nessun profilo emittente. Creane uno per emettere fatture.',

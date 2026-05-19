@@ -814,6 +814,12 @@ export const en = {
     provincia: 'Province',
     isDefault: 'Default',
     setDefault: 'Set as default',
+    regime: 'Tax regime',
+    regimeRF01: 'RF01 — ordinary',
+    regimeRF19: 'RF19 — flat-rate (forfettario)',
+    regimeRF19Hint:
+      'Flat-rate: invoices are issued with 0% VAT + Natura N2.2 and the mandatory L.190/2014 causale, plus the €2 virtual stamp duty over €77.47. Required for a forfettario VAT number.',
+    defaultIban: 'Default payment IBAN',
     saveProfile: 'Save profile',
     delete: 'Delete',
     noProfiles: 'No issuer profile yet. Create one to issue invoices.',

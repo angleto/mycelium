@@ -22,6 +22,15 @@ const EMPTY_LINE = {
 }
 type LineForm = typeof EMPTY_LINE
 
+// Forfettario invoices must default lines to 0% + Natura N2.2 (the
+// backend resolves the same when vat is unset, but the form must
+// SHOW the compliant values, not a misleading 22%).
+function blankLine(forfettario: boolean): LineForm {
+  return forfettario
+    ? { ...EMPTY_LINE, vat_rate: 0, natura: 'N2.2' }
+    : EMPTY_LINE
+}
+
 function totals(lines: Line[]): { taxable: number; vat: number; total: number } {
   const byRate = new Map<number, number>()
   for (const ln of lines) {
@@ -151,7 +160,7 @@ export function InvoicesRoute() {
     setDDue(inv.payment_due_date ?? '')
     setDirty(false)
     setLEditId(null)
-    setLAdd(EMPTY_LINE)
+    setLAdd(blankLine(!!pv.data?.is_forfettario))
     setTriRows([])
     setTriSel(new Set())
     setTriLoaded(false)
@@ -231,7 +240,7 @@ export function InvoicesRoute() {
       setErr(errMessage(error))
       return
     }
-    setLAdd(EMPTY_LINE)
+    setLAdd(blankLine(!!preview?.is_forfettario))
     await reloadSel()
   }
 

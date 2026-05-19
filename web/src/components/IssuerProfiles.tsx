@@ -15,6 +15,8 @@ const EMPTY = {
   cap: '',
   comune: '',
   provincia: '',
+  regime_fiscale: 'RF01',
+  default_iban: '',
   is_default: false,
 }
 type Form = typeof EMPTY
@@ -64,6 +66,8 @@ export function IssuerProfiles() {
         cap: p.cap,
         comune: p.comune,
         provincia: p.provincia ?? '',
+        regime_fiscale: p.regime_fiscale ?? 'RF01',
+        default_iban: p.default_iban ?? '',
         is_default: p.is_default,
       })
     } else {
@@ -85,12 +89,20 @@ export function IssuerProfiles() {
       cap: form.cap,
       comune: form.comune,
       provincia: form.provincia || null,
+      default_iban: form.default_iban || null,
       is_default: form.is_default,
     }
-    // regime_fiscale/paese/nazione are required by IssuerProfileIn (not
-    // user-editable here, IT-fiscal constants). They must be sent on
-    // PATCH too, otherwise the update 422s ("field required").
-    const body = { regime_fiscale: 'RF01', paese: 'IT', nazione: 'IT', ...common }
+    // regime_fiscale drives forfettario (RF19) invoicing — it is a
+    // hard fiscal/legal fact, NOT a constant: a flat-rate (forfettario)
+    // issuer MUST be RF19 or the invoice is non-compliant (no L.190
+    // causale, wrong VAT). paese/nazione stay IT constants; all are
+    // required by IssuerProfileIn and must ride PATCH too (else 422).
+    const body = {
+      regime_fiscale: form.regime_fiscale,
+      paese: 'IT',
+      nazione: 'IT',
+      ...common,
+    }
     const res =
       edit === 'new'
         ? await api.POST('/issuer-profiles', {
@@ -242,6 +254,30 @@ export function IssuerProfiles() {
               onChange={(e) => setForm({ ...form, provincia: e.target.value })}
             />
           </div>
+          <div className="row">
+            <label>
+              {t('invoices.regime')}
+              <select
+                value={form.regime_fiscale}
+                onChange={(e) =>
+                  setForm({ ...form, regime_fiscale: e.target.value })
+                }
+              >
+                <option value="RF01">{t('invoices.regimeRF01')}</option>
+                <option value="RF19">{t('invoices.regimeRF19')}</option>
+              </select>
+            </label>
+            <input
+              placeholder={t('invoices.defaultIban')}
+              value={form.default_iban}
+              onChange={(e) =>
+                setForm({ ...form, default_iban: e.target.value })
+              }
+            />
+          </div>
+          {form.regime_fiscale === 'RF19' && (
+            <p className="hint">{t('invoices.regimeRF19Hint')}</p>
+          )}
           <label className="row">
             <input
               type="checkbox"
