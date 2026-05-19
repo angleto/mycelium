@@ -300,19 +300,35 @@ test('task work note: open from task + billable timer in the note', async ({
   await page.goto(href ?? '/tasks')
   await expect(page).toHaveURL(/\/tasks\/[0-9a-f-]+/)
 
-  // Work note → opens the linked note with the billable timer.
-  await page.getByRole('button', { name: /work note|nota di lavoro/i }).click()
+  // New work note (Proposal A: a note is the work log of the task) →
+  // opens the linked note with the billable timer.
+  await page
+    .getByRole('button', { name: /new work note|nuova nota di lavoro/i })
+    .click()
   await expect(page).toHaveURL(/\/notes\?open=/)
   const banner = page.locator('.notebanner')
   await expect(banner).toBeVisible()
   const timer = banner.locator('.tasktimer')
   await expect(timer).toBeVisible()
-  // Start the timer → running readout + Stop; then stop.
+  // Start the timer → running readout.
   await timer.getByRole('button', { name: /^start$|^avvia$/i }).click()
   await expect(timer.locator('.tasktimer__on')).toBeVisible()
-  await timer.getByRole('button', { name: /^stop$|^ferma$/i }).click()
+  // Robustness (Toggl-like): a running timer is server state, not a
+  // JS counter. Reloading drops every client-side timer; the top-bar
+  // running indicator must come back from /time/running with its
+  // elapsed derived from the server started_at — proving it survives
+  // lid-close / reconnect / a fresh JS context.
+  await page.reload()
+  const chip = page.locator('.running')
+  await expect(chip).toBeVisible()
+  await expect(chip).toContainText(/\d:\d\d/)
+  // Stop from the task's own timer; duration is computed server-side.
+  await page.goto(href ?? '/tasks')
+  const tdTimer = page.locator('.tasktimer').first()
+  await expect(tdTimer.locator('.tasktimer__on')).toBeVisible()
+  await tdTimer.getByRole('button', { name: /^stop$|^ferma$/i }).click()
   await expect(
-    timer.getByRole('button', { name: /^start$|^avvia$/i }),
+    tdTimer.getByRole('button', { name: /^start$|^avvia$/i }),
   ).toBeVisible()
   await expect(page.locator('main.content .err')).toHaveCount(0)
   expect(errors, errors.join('\n')).toEqual([])
@@ -334,7 +350,9 @@ test('memory: write a snippet and recall it (keyword fallback works)', async ({
   // Reliable success signal: onWrite clears the textarea only on a
   // successful (free) write. ('.ok' also matches the always-present
   // "semantic on" hint, so it can't gate the write completing.)
-  await expect(ta).toHaveValue('')
+  // Generous timeout: the first write loads the embedding model
+  // (cold start), which can exceed the default expect timeout.
+  await expect(ta).toHaveValue('', { timeout: 30_000 })
 
   // Recall it by its unique word (semantic when an embedder is
   // available, else graceful keyword/full-text fallback).
@@ -343,7 +361,7 @@ test('memory: write a snippet and recall it (keyword fallback works)', async ({
   await search.getByRole('button', { name: /^search$|^cerca$/i }).click()
   await expect(
     search.locator('ul.list li', { hasText: token }).first(),
-  ).toBeVisible()
+  ).toBeVisible({ timeout: 30_000 })
   await expect(page.locator('main.content .err')).toHaveCount(0)
   expect(errors, errors.join('\n')).toEqual([])
 })
