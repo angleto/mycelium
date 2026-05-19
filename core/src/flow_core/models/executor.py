@@ -21,7 +21,8 @@ import uuid
 from decimal import Decimal
 
 from sqlalchemy import Enum as SAEnum
-from sqlalchemy import ForeignKey, Integer, Numeric, String
+from sqlalchemy import ForeignKey, Integer, Numeric, String, Text, text
+from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -74,3 +75,14 @@ class Executor(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, Base):
         Numeric(14, 4), nullable=False, server_default="0"
     )
     enabled: Mapped[bool] = mapped_column(nullable=False, server_default="true")
+    # Capabilities this executor advertises (P2 admission control): an
+    # llm task is eligible for this agent iff its
+    # ``Task.required_capabilities`` are a subset of these tags. ``text[]``
+    # (the flat-string-list norm, like users.backup_codes_hash); matching
+    # is set containment done in Python, not a DB array operator. Empty =
+    # the agent advertises no specific capability (only routes tasks that
+    # require none). Humans may also carry tags but are routed by
+    # assignee/calendar (P1), not capability.
+    capability_tags: Mapped[list[str]] = mapped_column(
+        ARRAY(Text()), nullable=False, server_default=text("'{}'")
+    )

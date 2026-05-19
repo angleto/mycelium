@@ -55,6 +55,15 @@ from flow_core.services import executors as executors_svc
 from flow_core.services.calendar import WorkCalendar, build_work_calendar
 from flow_core.services.rbac import require_role
 
+# Fixed, stable set of ``Schedule.unassignable_reason`` strings (English,
+# enum-ish; documented in docs/adr/0025 P2). Never free-form prose.
+#  - no_capable_agent: no enabled llm_agent advertises every capability
+#    the task requires (or there is no enabled llm_agent at all).
+#  - budget_exhausted: every eligible enabled agent would exceed its
+#    credit_budget if this task were placed on it within the horizon.
+_UNASSIGNABLE_NO_CAPABLE_AGENT = "no_capable_agent"
+_UNASSIGNABLE_BUDGET_EXHAUSTED = "budget_exhausted"
+
 
 @dataclass
 class _Node:
@@ -73,17 +82,25 @@ class _Node:
     ss: dt.datetime = field(default=dt.datetime.min)
     se: dt.datetime = field(default=dt.datetime.min)
     llf: dt.datetime = field(default=dt.datetime.min)
+    # Admission-control dispatch result (P2). ``assigned`` is the chosen
+    # llm_agent (None for human/off-timeline/unassignable rows);
+    # ``unassignable_reason`` is set (from the fixed set) iff this llm
+    # task could not be dispatched.
+    assigned: uuid.UUID | None = None
+    unassignable_reason: str | None = None
 
 
 @dataclass
 class RecomputeSummary:
     """What a recompute produced: row count + the comparable projections
-    (makespan, credit cost) and the policy that produced them."""
+    (makespan, credit cost), the policy that produced them, and the
+    count of llm tasks with no admissible executor (P2 dispatch gaps)."""
 
     count: int
     makespan_minutes: int
     projected_credit_cost: Decimal
     policy: SchedulePolicy
+    unassignable_count: int = 0
 
 
 def _logical_slack_min(n: _Node) -> int:
@@ -153,6 +170,23 @@ def _effort_minutes(task: Task) -> int:
     if hours is None:
         return 0
     return round(float(hours) * 60)
+
+
+def _earliest_free_slot(free: list[dt.datetime]) -> int:
+    """Index of the slot that frees earliest (deterministic: smallest
+    free time, lowest slot index on a tie)."""
+    return min(range(len(free)), key=lambda i: (free[i], i))
+
+
+def _agent_rank(
+    agent: Executor, free: list[dt.datetime], earliest: dt.datetime
+) -> tuple[Decimal, dt.datetime, str]:
+    """Deterministic admission rank for an eligible+admissible agent:
+    lowest ``credit_rate_per_hour``, then the agent's earliest effective
+    free time (most free capacity / earliest-free), then
+    ``str(agent.id)`` as the final stable tie-break."""
+    slot_free = min(max(earliest, f) for f in free)
+    return (agent.credit_rate_per_hour, slot_free, str(agent.id))
 
 
 def _manual_pin_start(task: Task, prev: dict[uuid.UUID, Schedule]) -> dt.datetime | None:
@@ -229,6 +263,7 @@ class Scheduler:
                 makespan_minutes=0,
                 projected_credit_cost=Decimal(0),
                 policy=policy,
+                unassignable_count=0,
             )
         ids = [t.id for t in tasks]
         id_set = set(ids)
@@ -350,9 +385,10 @@ class Scheduler:
         # --- Stage 2: resource-constrained list scheduling (ADR-0025) ---
         # Executors were just ensured. Index humans by user (the row
         # carries only the switch penalty; the calendar is still
-        # resolved by user via build_work_calendar) and pick the single
-        # default enabled llm_agent pool (P1: one pool; capability
-        # routing across agents is P2).
+        # resolved by user via build_work_calendar) and resolve the SET
+        # of enabled llm_agent executors (P2: capability-matched
+        # admission control across multiple agents, replacing P1's single
+        # default pool). Deterministic order: (kind, name, id).
         exec_rows = list(
             (
                 await self._s.execute(
@@ -366,13 +402,15 @@ class Scheduler:
         for e in exec_rows:
             if e.kind is ExecutorKind.human and e.user_id is not None:
                 human_exec.setdefault(e.user_id, e)
-        agent = next(
-            (e for e in exec_rows if e.kind is ExecutorKind.llm_agent and e.enabled),
-            None,
-        )
-        agent_rate = agent.credit_rate_per_hour if agent is not None else Decimal(0)
-        agent_max_parallel = agent.max_parallel if agent is not None else 4
-        agent_budget = agent.credit_budget if agent is not None else None
+        # Enabled llm_agent executors, deterministically ordered. Each is
+        # an admission target: K=max_parallel concurrent slots (24/7, no
+        # calendar) + an optional credit_budget.
+        agents: list[Executor] = [
+            e for e in exec_rows if e.kind is ExecutorKind.llm_agent and e.enabled
+        ]
+        agent_caps: dict[uuid.UUID, set[str]] = {a.id: set(a.capability_tags or []) for a in agents}
+        # Per-agent rate, for the projected cost of a task assigned to it.
+        agent_rate_by_id: dict[uuid.UUID, Decimal] = {a.id: a.credit_rate_per_hour for a in agents}
 
         def _effort_hours(n: _Node) -> Decimal:
             h = n.task.remaining_effort_h
@@ -380,10 +418,22 @@ class Scheduler:
                 h = n.task.estimate_effort_h
             return Decimal(0) if h is None else Decimal(h)
 
+        def _eligible_agents(n: _Node) -> list[Executor]:
+            """Enabled agents whose capability_tags ⊇ the task's
+            required_capabilities (empty required = any enabled agent)."""
+            req = set(n.task.required_capabilities or [])
+            return [a for a in agents if req <= agent_caps[a.id]]
+
         def _node_rate(n: _Node) -> Decimal:
-            # Cost is only projected for llm_agent work (the assigned
-            # default agent's rate); human work is rate 0.
-            return agent_rate if n.task.executor_kind is ExecKind.llm_agent else Decimal(0)
+            # Policy-key rate proxy: an llm task's projected rate is the
+            # cheapest eligible agent's rate (the dispatcher prefers the
+            # lowest rate); 0 for human work or no eligible agent.
+            if n.task.executor_kind is not ExecKind.llm_agent:
+                return Decimal(0)
+            elig = _eligible_agents(n)
+            if not elig:
+                return Decimal(0)
+            return min(a.credit_rate_per_hour for a in elig)
 
         key = _policy_key(policy, _node_rate)
 
@@ -476,58 +526,105 @@ class Scheduler:
                 placed_first = True
                 prev_node_id = n.task.id
 
-        # LLM agents: a single K-parallel pool (per the default agent's
-        # max_parallel), 24/7 (no working calendar, no daily cap). A
-        # task starts at max(its precedence-driven earliest, the
-        # earliest freed pool slot). Process in topo order so a
-        # predecessor's leveled finish gates its successor even when the
-        # pool delayed the predecessor. Cost is projected as placed; a
-        # task that would exceed the agent's credit_budget is still
-        # scheduled and flagged (budget admission is P2 -- P1 never
-        # silently drops). Deterministic: policy key, id final tie-break.
-        llm_by_id = {n.task.id: n for n in llm_nodes}
-        n_slots = max(1, agent_max_parallel)
-        pool_free: list[dt.datetime] = [now] * n_slots
-        pool_last: list[uuid.UUID | None] = [None] * n_slots
-        cumulative_cost = Decimal(0)
-        budget_exceeded = False
-        for nid in order:
-            ln = llm_by_id.get(nid)
-            if ln is None:
-                continue
+        # LLM agents (P2 admission-control dispatch, replacing P1's
+        # single default pool). Each enabled agent is a K-parallel
+        # resource (max_parallel slots, 24/7 -- no working calendar, no
+        # daily cap) with an optional credit_budget. For each llm task,
+        # in deterministic policy order, among its CAPABILITY-ELIGIBLE
+        # enabled agents pick the admissible one (a slot free at the
+        # earliest time AND projected cumulative spend on that agent +
+        # this task's cost <= its credit_budget if set). Assign it, place
+        # it on that agent's pool timeline, accumulate that agent's
+        # spend. A task with no admissible eligible agent is FLAGGED
+        # ``unassignable`` (it is NOT silently scheduled as in P1) and
+        # keeps its logical ES/EF as a visible dispatch gap.
+        #
+        # Processed in topo order so a predecessor's leveled finish gates
+        # its successor; within that, ties broken by the policy key then
+        # str(id) (deterministic). Per-agent slot state:
+        agent_state: dict[uuid.UUID, tuple[list[dt.datetime], list[uuid.UUID | None], Decimal]] = {}
+        for a in agents:
+            k = max(1, a.max_parallel)
+            agent_state[a.id] = ([now] * k, [None] * k, Decimal(0))
+        unassignable_ids: set[uuid.UUID] = set()
+        # Topo order tie-broken by the policy key (then str(id) inside
+        # the key): a fully deterministic dispatch sequence.
+        order_pos = {nid: i for i, nid in enumerate(order)}
+        llm_seq = sorted(
+            llm_nodes,
+            key=lambda n: (order_pos[n.task.id], key(n)),
+        )
+        for ln in llm_seq:
+            nid = ln.task.id
             pin = _manual_pin_start(ln.task, prev)
-            if pin is not None:
-                end = pin + dt.timedelta(minutes=ln.duration_min)
-                sched[ln.task.id] = (pin, end)
-                ln.ss, ln.se = pin, end
-                cumulative_cost += _effort_hours(ln) * agent_rate
+            elig = _eligible_agents(ln)
+            if not elig:
+                # No enabled agent advertises every required capability
+                # (or no enabled agent at all). Flagged dispatch gap.
+                ln.assigned = None
+                ln.unassignable_reason = _UNASSIGNABLE_NO_CAPABLE_AGENT
+                unassignable_ids.add(nid)
+                sched[nid] = (ln.es, ln.ef)
                 continue
+            eff_h = _effort_hours(ln)
             earliest = max(ln.es, now)
-            for d in incoming[nid]:
-                p = nodes[d.predecessor_id]
-                if p.se != dt.datetime.min and d.type in (
-                    DependencyType.FS,
-                    DependencyType.FF,
-                ):
-                    earliest = max(earliest, p.se)
-                elif p.ss != dt.datetime.min:
-                    earliest = max(earliest, p.ss)
-            # Earliest freed slot (deterministic: smallest free time,
-            # ties broken by the lowest slot index).
-            slot = min(range(n_slots), key=lambda i: (pool_free[i], i))
-            prev_in_slot = pool_last[slot]
-            start = max(earliest, pool_free[slot])
+            if pin is not None:
+                earliest = pin
+            else:
+                for d in incoming[nid]:
+                    p = nodes[d.predecessor_id]
+                    if p.se != dt.datetime.min and d.type in (
+                        DependencyType.FS,
+                        DependencyType.FF,
+                    ):
+                        earliest = max(earliest, p.se)
+                    elif p.ss != dt.datetime.min:
+                        earliest = max(earliest, p.ss)
+            # Among eligible agents, those that ADMIT this task on budget
+            # (no budget set = unlimited; budget set = cumulative + this
+            # task's cost on that agent must not exceed it).
+            admissible: list[Executor] = []
+            for a in elig:
+                free, _last, spent = agent_state[a.id]
+                cost_on_a = eff_h * agent_rate_by_id[a.id]
+                if a.credit_budget is not None and spent + cost_on_a > a.credit_budget:
+                    continue
+                admissible.append(a)
+            if not admissible:
+                # Eligible agents exist but every one would exceed budget.
+                ln.assigned = None
+                ln.unassignable_reason = _UNASSIGNABLE_BUDGET_EXHAUSTED
+                unassignable_ids.add(nid)
+                sched[nid] = (ln.es, ln.ef)
+                continue
+            # Deterministic executor pick: lowest credit_rate_per_hour,
+            # then earliest-free / most free capacity (the smallest
+            # earliest-free slot time across the agent's slots), then
+            # str(executor.id) as the final stable tie-break.
+            chosen = min(
+                admissible,
+                key=lambda a: _agent_rank(a, agent_state[a.id][0], earliest),
+            )
+            free, last, spent = agent_state[chosen.id]
+            # Earliest freed slot on the chosen agent (deterministic:
+            # smallest free time, lowest slot index on a tie).
+            slot = _earliest_free_slot(free)
+            prev_in_slot = last[slot]
+            start = max(earliest, free[slot])
             end = start + dt.timedelta(minutes=ln.duration_min)
-            pool_free[slot] = end
-            pool_last[slot] = nid
-            sched[ln.task.id] = (start, end)
+            free[slot] = end
+            last[slot] = nid
+            agent_state[chosen.id] = (
+                free,
+                last,
+                spent + eff_h * agent_rate_by_id[chosen.id],
+            )
+            ln.assigned = chosen.id
+            ln.unassignable_reason = None
+            sched[nid] = (start, end)
             ln.ss, ln.se = start, end
             if prev_in_slot is not None:
                 res_succ[prev_in_slot].add(nid)
-            cost = _effort_hours(ln) * agent_rate
-            cumulative_cost += cost
-            if agent_budget is not None and cumulative_cost > agent_budget:
-                budget_exceeded = True
 
         # Resource-aware critical chain (ADR-0025). Definition: a task
         # is on the critical chain iff it has ZERO float in the LEVELED
@@ -540,38 +637,72 @@ class Scheduler:
         # leveled_lf(n) - scheduled_end(n) <= 0. This is distinct from
         # on_logical_critical_path (infinite-resource CPM) and is a
         # superset of it under resource contention. Fully deterministic.
+        #
+        # P2: an UNASSIGNABLE llm task is a dispatch gap, not a placed
+        # task -- it has no scheduled_start/end, does not drive the
+        # makespan, and is excluded from the leveled graph (it cannot be
+        # on the critical chain). Its logical ES/EF/LS/LF still emit.
         for nid in ids:
             n = nodes[nid]
             if nid not in sched:
                 sched[nid] = (n.es, n.ef)
             n.ss, n.se = sched[nid]
-        makespan_end = max((n.se for n in nodes.values()), default=now)
-        leveled_succ: dict[uuid.UUID, set[uuid.UUID]] = {i: set(res_succ[i]) for i in ids}
+        makespan_end = max(
+            (n.se for nid, n in nodes.items() if nid not in unassignable_ids),
+            default=now,
+        )
+        leveled_succ: dict[uuid.UUID, set[uuid.UUID]] = {
+            i: set(res_succ[i]) for i in ids if i not in unassignable_ids
+        }
         for d in deps:
+            if d.predecessor_id in unassignable_ids or d.successor_id in unassignable_ids:
+                continue
             leveled_succ[d.predecessor_id].add(d.successor_id)
         for nid in reversed(order):
+            if nid in unassignable_ids:
+                continue
             n = nodes[nid]
             succs = leveled_succ[nid]
             n.llf = makespan_end if not succs else min(nodes[s].ss for s in succs)
         on_chain: dict[uuid.UUID, bool] = {
-            nid: int((nodes[nid].llf - nodes[nid].se).total_seconds()) <= 0 for nid in ids
+            nid: (
+                False
+                if nid in unassignable_ids
+                else int((nodes[nid].llf - nodes[nid].se).total_seconds()) <= 0
+            )
+            for nid in ids
         }
 
         await self._s.execute(delete(Schedule).where(Schedule.task_id.in_(ids)))
+        # Fingerprint folds the policy AND the executor set
+        # (id:version, deterministically ordered): a registry change
+        # (a new agent, an edited budget/capability, an enable toggle)
+        # reschedules even when no task changed.
+        exec_fp = "|".join(
+            f"{e.id}:{e.version}" for e in sorted(exec_rows, key=lambda x: str(x.id))
+        )
         fp = hashlib.sha256(
             (
                 f"{policy.value}|"
                 + "|".join(f"{t.id}:{t.version}" for t in sorted(tasks, key=lambda x: str(x.id)))
+                + f"|exec:{exec_fp}"
             ).encode()
         ).hexdigest()
         total_cost = Decimal(0)
         for nid, n in nodes.items():
             ss, se = sched[nid]
-            pcost = (
-                _effort_hours(n) * agent_rate
-                if n.task.executor_kind is ExecKind.llm_agent
-                else Decimal(0)
-            )
+            is_unassignable = nid in unassignable_ids
+            # Projected cost = effort_h * the ASSIGNED agent's rate
+            # (0 for human work or an unassignable llm task -- no
+            # executor, no cost).
+            if (
+                n.task.executor_kind is ExecKind.llm_agent
+                and n.assigned is not None
+                and not is_unassignable
+            ):
+                pcost = _effort_hours(n) * agent_rate_by_id.get(n.assigned, Decimal(0))
+            else:
+                pcost = Decimal(0)
             total_cost += pcost
             self._s.add(
                 Schedule(
@@ -588,8 +719,13 @@ class Scheduler:
                     on_logical_critical_path=(int((n.ls - n.es).total_seconds()) <= 0),
                     on_critical_chain=on_chain[nid],
                     projected_cost=pcost,
-                    scheduled_start=ss,
-                    scheduled_end=se,
+                    # Unassignable llm tasks have no placement: NULL
+                    # scheduled_start/end (a visible dispatch gap).
+                    scheduled_start=None if is_unassignable else ss,
+                    scheduled_end=None if is_unassignable else se,
+                    assigned_executor_id=n.assigned,
+                    unassignable=is_unassignable,
+                    unassignable_reason=n.unassignable_reason,
                     computed_at=now,
                     input_fingerprint=fp,
                 )
@@ -604,23 +740,25 @@ class Scheduler:
             action="recompute",
         )
         makespan_minutes = max(0, int((makespan_end - now).total_seconds() // 60))
-        # budget_exceeded is surfaced via audit detail only in P1
-        # (admission/enforcement is P2); the projection itself is the
-        # reported signal. Keep the flag referenced to avoid dead code.
-        if budget_exceeded:
+        unassignable_count = len(unassignable_ids)
+        if unassignable_count:
+            # Surface the dispatch gaps in the audit trail (the count is
+            # also returned in the summary and per-row on the schedule).
             await audit.log(
                 self._s,
                 org_id=self._org,
                 actor_id=actor_id,
                 entity="schedule",
                 entity_id=None,
-                action="budget_projection_exceeded",
+                action="dispatch_unassignable",
+                diff={"count": str(unassignable_count)},
             )
         return RecomputeSummary(
             count=len(tasks),
             makespan_minutes=makespan_minutes,
             projected_credit_cost=total_cost,
             policy=policy,
+            unassignable_count=unassignable_count,
         )
 
 

@@ -14,6 +14,7 @@ from sqlalchemy import (
     Integer,
     Numeric,
     PrimaryKeyConstraint,
+    String,
     Text,
     func,
     text,
@@ -57,6 +58,24 @@ class Schedule(OrgScopedMixin, Base):
     scheduled_end: Mapped[datetime.datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # Admission-control dispatch result (docs/adr/0025, P2). The executor
+    # the scheduler placed this task on (NULL for human tasks routed by
+    # calendar, off-timeline rows, or an unassignable llm task). FK SET
+    # NULL: deleting an executor leaves prior schedule rows readable; the
+    # next recompute re-dispatches.
+    assigned_executor_id: Mapped[uuid.UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("executors.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    # True iff no admissible executor exists for this llm task (no
+    # capable enabled agent, or all eligible agents would exceed budget
+    # within the horizon). A flagged dispatch gap, not silently
+    # scheduled. ``unassignable_reason`` is a stable short string from a
+    # fixed set (see scheduler ``_UNASSIGNABLE_*``).
+    unassignable: Mapped[bool] = mapped_column(nullable=False, server_default=text("false"))
+    unassignable_reason: Mapped[str | None] = mapped_column(String(200), nullable=True)
     computed_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

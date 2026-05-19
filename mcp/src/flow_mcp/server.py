@@ -30,6 +30,7 @@ from flow_core.models.client_profile import ClientProfile
 from flow_core.models.dependency import DependencyType, TaskDependency
 from flow_core.models.email import EmailAccount, EmailMessage, EmailProvider
 from flow_core.models.event import Event
+from flow_core.models.executor import Executor, ExecutorKind
 from flow_core.models.invoice import Invoice
 from flow_core.models.memory_blob import MemoryBlob
 from flow_core.models.note import Note, NoteKind, NoteTurn
@@ -56,6 +57,7 @@ from flow_core.services import calendar as calendars
 from flow_core.services import dependencies, scheduler, tasks, taxonomy
 from flow_core.services import email as email_svc
 from flow_core.services import events as events_svc
+from flow_core.services import executors as executors_svc
 from flow_core.services import invoice as invoice_svc
 from flow_core.services import memory as memory_svc
 from flow_core.services import notes as notes_svc
@@ -379,6 +381,7 @@ async def create_task(
     urgency: int | None = None,
     tag_ids: list[str] | None = None,
     estimate_effort_h: float | None = None,
+    required_capabilities: list[str] | None = None,
     monetary_cost: float | None = None,
     location: str | None = None,
     necessity: str | None = None,
@@ -386,7 +389,9 @@ async def create_task(
     assignee_ids: list[str] | None = None,
 ) -> dict[str, Any]:
     """Create a task, optionally tagged. Supports personal-domain
-    attributes (cost/location/necessity/budget) for the advisory layer."""
+    attributes (cost/location/necessity/budget) for the advisory layer.
+    ``required_capabilities`` (docs/adr/0025 P2) are the capabilities the
+    task needs from its executor (empty = any enabled agent)."""
     async with _tenant(token, org_id) as (s, org, user):
         task = await tasks.create_task(
             s,
@@ -400,6 +405,7 @@ async def create_task(
             estimate_effort_h=(
                 Decimal(str(estimate_effort_h)) if estimate_effort_h is not None else None
             ),
+            required_capabilities=list(required_capabilities or []),
             monetary_cost=(Decimal(str(monetary_cost)) if monetary_cost is not None else None),
             location=location,
             necessity=Necessity(necessity) if necessity is not None else Necessity.should,
@@ -507,6 +513,7 @@ def _task_full(t: Task) -> dict[str, Any]:
         "estimate_effort_h": (
             str(t.estimate_effort_h) if t.estimate_effort_h is not None else None
         ),
+        "required_capabilities": list(t.required_capabilities or []),
         "monetary_cost": (str(t.monetary_cost) if t.monetary_cost is not None else None),
         "location": t.location,
         "necessity": t.necessity.value,
@@ -540,6 +547,7 @@ async def update_task(
     due_date: str | None = None,
     billable: bool | None = None,
     estimate_effort_h: float | None = None,
+    required_capabilities: list[str] | None = None,
     parent_task_id: str | None = None,
     monetary_cost: float | None = None,
     location: str | None = None,
@@ -547,7 +555,9 @@ async def update_task(
     budget_id: str | None = None,
 ) -> dict[str, Any]:
     """Edit task fields (only the given ones). Priority is re-derived
-    when both importance and urgency are present (Eisenhower)."""
+    when both importance and urgency are present (Eisenhower).
+    ``required_capabilities`` is the P2 executor capability requirement
+    (docs/adr/0025); pass [] to clear it."""
     values: dict[str, Any] = {}
     if title is not None:
         values["title"] = title
@@ -567,6 +577,8 @@ async def update_task(
         values["billable"] = billable
     if estimate_effort_h is not None:
         values["estimate_effort_h"] = Decimal(str(estimate_effort_h))
+    if required_capabilities is not None:
+        values["required_capabilities"] = list(required_capabilities)
     if parent_task_id is not None:
         values["parent_task_id"] = uuid.UUID(parent_task_id)
     if monetary_cost is not None:
@@ -812,6 +824,9 @@ def _schedule(s: Schedule) -> dict[str, Any]:
         "projected_cost": str(s.projected_cost),
         "scheduled_start": (s.scheduled_start.isoformat() if s.scheduled_start else None),
         "scheduled_end": (s.scheduled_end.isoformat() if s.scheduled_end else None),
+        "assigned_executor_id": (str(s.assigned_executor_id) if s.assigned_executor_id else None),
+        "unassignable": s.unassignable,
+        "unassignable_reason": s.unassignable_reason,
         "input_fingerprint": s.input_fingerprint,
     }
 
@@ -1031,7 +1046,9 @@ async def recompute_schedule(
     """Deterministically recompute the schedule for a scope under a
     resource-leveling ``policy`` (fastest|cheapest|balanced|throughput,
     default balanced). Returns the row count plus the projected makespan
-    and projected credit cost so policies are comparable (ADR-0025)."""
+    and projected credit cost so policies are comparable, and the count
+    of llm tasks with no admissible executor (P2 dispatch gaps;
+    ADR-0025)."""
     async with _tenant(token, org_id) as (s, org, user):
         summary = await scheduler.recompute(
             s,
@@ -1046,6 +1063,7 @@ async def recompute_schedule(
             "makespan_minutes": summary.makespan_minutes,
             "projected_credit_cost": str(summary.projected_credit_cost),
             "policy": summary.policy.value,
+            "unassignable_count": summary.unassignable_count,
         }
 
 
@@ -1069,6 +1087,142 @@ async def list_schedule(
             project_tag_id=(uuid.UUID(project_tag_id) if project_tag_id else None),
         )
         return [_schedule(r) for r in rows]
+
+
+# --- Executor registry (docs/adr/0025, P2) ---
+# Co-equal to the REST surface. Reads are member-level; mutations are
+# owner-gated inside the service (the RBAC choke point + effective-role
+# sudo), mirroring the rate-card / issuer-profile tools.
+
+
+def _executor(e: Executor) -> dict[str, Any]:
+    return {
+        "id": str(e.id),
+        "kind": e.kind.value,
+        "name": e.name,
+        "user_id": str(e.user_id) if e.user_id else None,
+        "context_switch_cost_minutes": e.context_switch_cost_minutes,
+        "provider": e.provider,
+        "model_id": e.model_id,
+        "max_parallel": e.max_parallel,
+        "credit_budget": (str(e.credit_budget) if e.credit_budget is not None else None),
+        "credit_rate_per_hour": str(e.credit_rate_per_hour),
+        "enabled": e.enabled,
+        "capability_tags": list(e.capability_tags or []),
+        "version": e.version,
+    }
+
+
+@mcp.tool()
+async def executors_list(token: str, org_id: str) -> list[dict[str, Any]]:
+    """List the workspace executors (humans + llm agents). Member-level
+    (the schedule plan must show its assignments)."""
+    async with _tenant(token, org_id) as (s, org, _user):
+        return [_executor(e) for e in await executors_svc.list_executors(s, org_id=org)]
+
+
+@mcp.tool()
+async def executor_create(
+    token: str,
+    org_id: str,
+    name: str,
+    kind: str = "llm_agent",
+    user_id: str | None = None,
+    context_switch_cost_minutes: int = 0,
+    provider: str | None = None,
+    model_id: str | None = None,
+    max_parallel: int = 4,
+    credit_budget: float | None = None,
+    credit_rate_per_hour: float = 0.0,
+    enabled: bool = True,
+    capability_tags: list[str] | None = None,
+) -> dict[str, Any]:
+    """Owner: create an executor (docs/adr/0025 P2). An ``llm_agent``
+    needs a name + max_parallel>=1 + credit_rate_per_hour>=0; a ``human``
+    must be bound to a workspace member (user_id). Owner-gated in the
+    service (effective-role sudo enforced)."""
+    async with _tenant(token, org_id) as (s, org, user):
+        row = await executors_svc.create_executor(
+            s,
+            org_id=org,
+            actor_id=user,
+            kind=ExecutorKind(kind),
+            name=name,
+            user_id=uuid.UUID(user_id) if user_id else None,
+            context_switch_cost_minutes=context_switch_cost_minutes,
+            provider=provider,
+            model_id=model_id,
+            max_parallel=max_parallel,
+            credit_budget=(Decimal(str(credit_budget)) if credit_budget is not None else None),
+            credit_rate_per_hour=Decimal(str(credit_rate_per_hour)),
+            enabled=enabled,
+            capability_tags=list(capability_tags or []),
+        )
+        return _executor(row)
+
+
+@mcp.tool()
+async def executor_update(
+    token: str,
+    org_id: str,
+    executor_id: str,
+    expected_version: int,
+    name: str | None = None,
+    context_switch_cost_minutes: int | None = None,
+    provider: str | None = None,
+    model_id: str | None = None,
+    max_parallel: int | None = None,
+    credit_budget: float | None = None,
+    credit_rate_per_hour: float | None = None,
+    enabled: bool | None = None,
+    capability_tags: list[str] | None = None,
+) -> dict[str, Any]:
+    """Owner: patch an executor (optimistic concurrency). ``kind`` and
+    ``user_id`` are immutable identity. Owner-gated in the service."""
+    values: dict[str, Any] = {}
+    if name is not None:
+        values["name"] = name
+    if context_switch_cost_minutes is not None:
+        values["context_switch_cost_minutes"] = context_switch_cost_minutes
+    if provider is not None:
+        values["provider"] = provider
+    if model_id is not None:
+        values["model_id"] = model_id
+    if max_parallel is not None:
+        values["max_parallel"] = max_parallel
+    if credit_budget is not None:
+        values["credit_budget"] = Decimal(str(credit_budget))
+    if credit_rate_per_hour is not None:
+        values["credit_rate_per_hour"] = Decimal(str(credit_rate_per_hour))
+    if enabled is not None:
+        values["enabled"] = enabled
+    if capability_tags is not None:
+        values["capability_tags"] = list(capability_tags)
+    async with _tenant(token, org_id) as (s, org, user):
+        version = await executors_svc.update_executor(
+            s,
+            org_id=org,
+            actor_id=user,
+            executor_id=uuid.UUID(executor_id),
+            expected_version=expected_version,
+            values=values,
+        )
+        return {"executor_id": executor_id, "version": version}
+
+
+@mcp.tool()
+async def executor_delete(token: str, org_id: str, executor_id: str) -> dict[str, Any]:
+    """Owner: delete an executor. Always allowed (including the seeded
+    default agent): the scheduler marks affected llm tasks unassignable
+    rather than silently rerouting. Owner-gated in the service."""
+    async with _tenant(token, org_id) as (s, org, user):
+        await executors_svc.delete_executor(
+            s,
+            org_id=org,
+            actor_id=user,
+            executor_id=uuid.UUID(executor_id),
+        )
+        return {"deleted": True}
 
 
 # --- F4: time tracking (FR-5) ---

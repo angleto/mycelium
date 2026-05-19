@@ -17,8 +17,10 @@ from sqlalchemy import (
     SmallInteger,
     String,
     Text,
+    text,
 )
 from sqlalchemy import Enum as SAEnum
+from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -102,6 +104,14 @@ class Task(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, Base):
         PG_UUID(as_uuid=True),
         ForeignKey("users.id", ondelete="SET NULL"),
         nullable=True,
+    )
+    # Capabilities this task needs from its executor (docs/adr/0025 P2
+    # admission control). An llm task is eligible for an ``llm_agent``
+    # executor iff this set is a subset of the executor's
+    # ``capability_tags`` (empty = any enabled agent). ``text[]`` (the
+    # flat-string-list norm); matching is Python set containment.
+    required_capabilities: Mapped[list[str]] = mapped_column(
+        ARRAY(Text()), nullable=False, server_default=text("'{}'")
     )
     # NULL = inherit the project's default_billable (or true with no
     # project); true/false = explicit per-task override.

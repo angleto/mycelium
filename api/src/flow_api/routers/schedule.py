@@ -40,6 +40,9 @@ def _out(s: Schedule) -> ScheduleOut:
         projected_cost=s.projected_cost,
         scheduled_start=s.scheduled_start,
         scheduled_end=s.scheduled_end,
+        assigned_executor_id=s.assigned_executor_id,
+        unassignable=s.unassignable,
+        unassignable_reason=s.unassignable_reason,
         computed_at=s.computed_at,
         input_fingerprint=s.input_fingerprint,
     )
@@ -63,6 +66,7 @@ async def recompute(
         makespan_minutes=summary.makespan_minutes,
         projected_credit_cost=summary.projected_credit_cost,
         policy=summary.policy,
+        unassignable_count=summary.unassignable_count,
     )
 
 

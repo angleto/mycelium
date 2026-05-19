@@ -12,6 +12,7 @@ from flow_core.models.billing import CostBasis, RateUnit, StorageKind
 from flow_core.models.budget import BudgetPeriod
 from flow_core.models.dependency import DependencyType
 from flow_core.models.email import EmailAccountStatus, EmailProvider
+from flow_core.models.executor import ExecutorKind
 from flow_core.models.invoice import (
     ConservationStatus,
     DocumentType,
@@ -369,6 +370,9 @@ class TaskCreateIn(BaseModel):
     executor_kind: ExecKind = ExecKind.human
     executor_user_id: uuid.UUID | None = None
     estimate_effort_h: Decimal | None = None
+    # Capabilities the task needs from its executor (docs/adr/0025 P2).
+    # Empty = any enabled agent. Additive, default [].
+    required_capabilities: list[str] = Field(default_factory=list)
     monetary_cost: Decimal | None = None
     location: str | None = Field(default=None, max_length=200)
     necessity: Necessity = Necessity.should
@@ -390,6 +394,7 @@ class TaskPatchIn(BaseModel):
     estimate_effort_h: Decimal | None = None
     executor_kind: ExecKind | None = None
     executor_user_id: uuid.UUID | None = None
+    required_capabilities: list[str] | None = None
     parent_task_id: uuid.UUID | None = None
     monetary_cost: Decimal | None = None
     location: str | None = Field(default=None, max_length=200)
@@ -433,6 +438,7 @@ class TaskOut(BaseModel):
     parent_task_id: uuid.UUID | None
     executor_kind: ExecKind
     estimate_effort_h: Decimal | None
+    required_capabilities: list[str] = Field(default_factory=list)
     monetary_cost: Decimal | None
     location: str | None
     necessity: Necessity
@@ -628,6 +634,8 @@ class RecomputeOut(BaseModel):
     makespan_minutes: int
     projected_credit_cost: Decimal
     policy: SchedulePolicy
+    # Count of llm tasks with no admissible executor (P2 dispatch gaps).
+    unassignable_count: int = 0
 
 
 class ScheduleOut(BaseModel):
@@ -644,8 +652,64 @@ class ScheduleOut(BaseModel):
     projected_cost: Decimal
     scheduled_start: datetime.datetime | None
     scheduled_end: datetime.datetime | None
+    # Admission-control dispatch result (docs/adr/0025, P2): the chosen
+    # executor, or a flagged dispatch gap with a short stable reason.
+    assigned_executor_id: uuid.UUID | None = None
+    unassignable: bool = False
+    unassignable_reason: str | None = None
     computed_at: datetime.datetime
     input_fingerprint: str | None
+
+
+# --- Executor registry (docs/adr/0025, P2) ---
+# Reads are member-level; mutations are owner-gated in the service
+# (mirrors the rate-card / issuer-profile precedent).
+
+
+class ExecutorOut(BaseModel):
+    id: uuid.UUID
+    kind: ExecutorKind
+    name: str
+    user_id: uuid.UUID | None
+    context_switch_cost_minutes: int
+    provider: str | None
+    model_id: str | None
+    max_parallel: int
+    credit_budget: Decimal | None
+    credit_rate_per_hour: Decimal
+    enabled: bool
+    capability_tags: list[str] = Field(default_factory=list)
+    version: int
+
+
+class ExecutorCreateIn(BaseModel):
+    kind: ExecutorKind = ExecutorKind.llm_agent
+    name: str = Field(min_length=1, max_length=120)
+    # Required + must be a workspace member iff kind == human (the
+    # service rejects an unbound human executor).
+    user_id: uuid.UUID | None = None
+    context_switch_cost_minutes: int = Field(default=0, ge=0)
+    provider: str | None = Field(default=None, max_length=60)
+    model_id: str | None = Field(default=None, max_length=120)
+    max_parallel: int = Field(default=4, ge=1)
+    credit_budget: Decimal | None = None
+    credit_rate_per_hour: Decimal = Field(default=Decimal(0), ge=0)
+    enabled: bool = True
+    capability_tags: list[str] = Field(default_factory=list)
+
+
+class ExecutorPatchIn(BaseModel):
+    expected_version: int = Field(ge=1)
+    # kind / user_id are immutable identity (not patchable).
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    context_switch_cost_minutes: int | None = Field(default=None, ge=0)
+    provider: str | None = Field(default=None, max_length=60)
+    model_id: str | None = Field(default=None, max_length=120)
+    max_parallel: int | None = Field(default=None, ge=1)
+    credit_budget: Decimal | None = None
+    credit_rate_per_hour: Decimal | None = Field(default=None, ge=0)
+    enabled: bool | None = None
+    capability_tags: list[str] | None = None
 
 
 # --- F4: time tracking (FR-5, docs/adr/0002) ---

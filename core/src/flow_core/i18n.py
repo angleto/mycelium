@@ -85,6 +85,8 @@ class MessageCode(enum.StrEnum):
     ISSUER_PROFILE_IN_USE = "invoice.issuer_profile_in_use"
     ISSUER_PROFILE_SOLE_DEFAULT = "invoice.issuer_profile_sole_default"
     NOTIFICATION_NOT_FOUND = "notification.not_found"
+    EXECUTOR_NOT_FOUND = "executor.not_found"
+    EXECUTOR_INVALID = "executor.invalid"
     RECURRENCE_WITH_DEPS = "recurrence.with_dependencies"
     WORKSPACE_NOT_OWNER = "workspace.not_owner"
     WORKSPACE_SOLE = "workspace.sole"
@@ -191,6 +193,8 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
             "Set another profile as default before deleting this one"
         ),
         MessageCode.NOTIFICATION_NOT_FOUND: "Notification not found",
+        MessageCode.EXECUTOR_NOT_FOUND: "Executor not found",
+        MessageCode.EXECUTOR_INVALID: "Invalid executor: {detail}",
         MessageCode.RECURRENCE_WITH_DEPS: (
             "A recurring task cannot have dependencies (mutually exclusive in v1)"
         ),
