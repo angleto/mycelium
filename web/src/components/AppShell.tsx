@@ -51,6 +51,26 @@ function ProjectFocus() {
     }
   }, [session?.workspaceId])
 
+  // The client list loads async; without this the controlled select
+  // falls back to "All clients" for a beat on every reload (looks
+  // unremembered). Cache the chosen client's name and render it as a
+  // stand-in option until the real list arrives.
+  const NAMEK = 'flow-focus-client-name'
+  const clientKnown = clients.some((c) => c.id === clientId)
+  const cachedName =
+    typeof localStorage !== 'undefined'
+      ? (localStorage.getItem(NAMEK) ?? '')
+      : ''
+  const onPickClient = (id: string) => {
+    if (id) {
+      const c = clients.find((x) => x.id === id)
+      if (c) localStorage.setItem(NAMEK, c.name)
+    } else {
+      localStorage.removeItem(NAMEK)
+    }
+    setClient(id)
+  }
+
   const ofClient = projects.filter((p) => p.client_tag_id === clientId)
   // Keep the provider's effective allow-list in sync with the data.
   useEffect(() => {
@@ -66,8 +86,11 @@ function ProjectFocus() {
   return (
     <div className="focus">
       <span className="focus__lbl">{t('focus.label')}</span>
-      <select value={clientId} onChange={(e) => setClient(e.target.value)}>
+      <select value={clientId} onChange={(e) => onPickClient(e.target.value)}>
         <option value="">{t('focus.allClients')}</option>
+        {clientId && !clientKnown && (
+          <option value={clientId}>{cachedName || '…'}</option>
+        )}
         {clients.map((c) => (
           <option key={c.id} value={c.id}>
             {c.name}

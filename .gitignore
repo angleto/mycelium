@@ -27,9 +27,6 @@ web/.vite/
 .DS_Store
 *.swp
 
-# Reference locale, non versionato (richiesta utente)
-docs/rag-architectures.txt
-
 # Production deploy is an independent git repository (own history,
 # its own remote). Flow tracks only deploy/local/ (dev infra, used by CI).
 /deploy/prod/
