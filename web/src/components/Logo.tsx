@@ -13,8 +13,8 @@ export function Logo({ size = 22 }: { size?: number }) {
       <rect width="32" height="32" rx="7" fill="var(--accent)" />
       {/* Crescent moon, top-right: white disc minus an offset
           tile-coloured disc. */}
-      <circle cx="23" cy="10" r="6" fill="#fff" />
-      <circle cx="26.5" cy="7.5" r="6" fill="var(--accent)" />
+      <circle cx="23" cy="8" r="6" fill="#fff" />
+      <circle cx="26.5" cy="5.5" r="6" fill="var(--accent)" />
       {/* Two wave lines = the sea / flow. */}
       <path
         d="M5 20q3-3.4 6 0t6 0 6 0 6 0"
