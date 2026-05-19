@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { NavLink, Outlet, useNavigate } from 'react-router-dom'
+import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { api, workspaceHeader } from '../api/client'
 import { clearSession, setAdminMode } from '../auth/session'
@@ -157,7 +157,12 @@ function RunningIndicator() {
   const cur = ordered[safeIdx]
   const title = titles[cur.task_id] ?? cur.task_id.slice(0, 8)
   return (
-    <div className="running" title={t('time.runningNow')}>
+    <Link
+      to="/time"
+      className="running"
+      title={t('time.runningNow')}
+      aria-label={t('time.runningNow')}
+    >
       <span className="running__spin" aria-hidden="true" />
       <span className="running__n">
         {safeIdx + 1}/{ordered.length}
@@ -166,7 +171,7 @@ function RunningIndicator() {
         <span>{title}</span>
       </span>
       <span className="running__t">{hms(elapsedSec(cur.started_at, now))}</span>
-    </div>
+    </Link>
   )
 }
 
