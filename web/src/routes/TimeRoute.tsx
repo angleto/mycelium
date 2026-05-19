@@ -22,6 +22,17 @@ function hhmmss(sec: number): string {
   return `${h}h ${String(m).padStart(2, '0')}m ${String(s % 60).padStart(2, '0')}s`
 }
 
+function fmtDate(iso: string): string {
+  return new Date(iso).toLocaleDateString()
+}
+function fmtClock(iso: string | null | undefined): string {
+  if (!iso) return '…'
+  return new Date(iso).toLocaleTimeString([], {
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+
 export function TimeRoute() {
   const { t } = useTranslation()
   const session = useSession()
@@ -293,6 +304,10 @@ export function TimeRoute() {
                     ? hhmmss(en.duration_seconds)
                     : '...'}
                   {en.billable ? ` · ${t('time.billable')}` : ''}
+                </span>
+                <span className="muted timewhen">
+                  {fmtDate(en.started_at)} · {fmtClock(en.started_at)}–
+                  {fmtClock(en.ended_at)}
                 </span>
               </span>
               <span className="taskrow__meta">

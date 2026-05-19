@@ -1325,3 +1325,9 @@ button.btn--danger:hover {
 .tagpick__opt:hover {
   background: var(--accent-weak);
 }
+
+.timewhen {
+  display: block;
+  font-size: 0.76rem;
+  margin-top: 0.1rem;
+}

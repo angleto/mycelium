@@ -1,5 +1,6 @@
-// Flow mark: a flowing curve linking two nodes (input -> output),
-// the through-line of the assistant. currentColor-friendly.
+// Flow mark: a crescent moon over a tide wave — the moon pulls the
+// tide, the assistant keeps your work flowing. Accent app-tile with
+// white marks (reads on light/dark since the tile is the accent).
 export function Logo({ size = 22 }: { size?: number }) {
   return (
     <svg
@@ -10,15 +11,20 @@ export function Logo({ size = 22 }: { size?: number }) {
       aria-label="Flow"
     >
       <rect width="32" height="32" rx="7" fill="var(--accent)" />
+      {/* Crescent: outer disc minus an offset disc. */}
       <path
-        d="M6 21c5 0 5-10 10-10s5 10 10 10"
+        d="M17 4a9 9 0 1 0 0 18 7 7 0 1 1 0-18z"
+        fill="#fff"
+      />
+      {/* Tide: a calm two-crest wave under the moon. */}
+      <path
+        d="M5 25q3.25-4.5 6.5 0t6.5 0 6.5 0"
         fill="none"
         stroke="#fff"
-        strokeWidth="3"
+        strokeWidth="2.6"
         strokeLinecap="round"
+        strokeLinejoin="round"
       />
-      <circle cx="6" cy="21" r="2.6" fill="#fff" />
-      <circle cx="26" cy="11" r="2.6" fill="#fff" />
     </svg>
   )
 }
