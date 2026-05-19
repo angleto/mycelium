@@ -807,11 +807,30 @@ button.btn--danger:hover {
 
 /* ---- dependency DAG / gantt ---- */
 .dag {
+  display: block;
+  background: var(--surface);
+}
+.dagbar {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  margin-top: 0.6rem;
+}
+.dag__legend {
+  font-size: 0.72rem;
+}
+.dagwrap {
+  overflow: auto;
+  max-height: 70vh;
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--surface);
-  margin: 0.75rem 0;
-  max-height: 60vh;
+  margin: 0.5rem 0;
+}
+.dag__lblbg {
+  fill: var(--surface);
+  stroke: var(--border);
 }
 .dag__node {
   fill: var(--surface-2);
@@ -827,8 +846,11 @@ button.btn--danger:hover {
   opacity: 0.55;
 }
 .dag__lbl {
-  fill: var(--muted);
+  fill: var(--text-h);
   font-size: 11px;
+  font-weight: 700;
+  text-anchor: middle;
+  dominant-baseline: middle;
 }
 .dag__title {
   fill: var(--text-h);

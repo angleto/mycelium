@@ -56,6 +56,7 @@ export function GraphRoute() {
   const [deps, setDeps] = useState<Dep[]>([])
   const [scope, setScope] = useState<'all' | 'mine' | 'ai'>('all')
   const [tagFilter, setTagFilter] = useState<Set<string>>(new Set())
+  const [zoom, setZoom] = useState(1)
   const [from, setFrom] = useState<string | null>(null)
   const [err, setErr] = useState<string | null>(null)
 
@@ -105,9 +106,14 @@ export function GraphRoute() {
     const tk = taskById.get(id)
     if (scope === 'mine' && tk?.executor_kind !== 'human') return false
     if (scope === 'ai' && tk?.executor_kind !== 'llm_agent') return false
-    // Multi-tag: AND — the task must carry every selected tag.
-    for (const tid of tagFilter) {
-      if (!(tk?.tags ?? []).some((g) => g.id === tid)) return false
+    // Multi-tag: OR — show a task if it carries ANY selected tag (no
+    // selection = all). AND made "select all tags" hide everything,
+    // since no single task has every tag.
+    if (
+      tagFilter.size > 0 &&
+      !(tk?.tags ?? []).some((g) => tagFilter.has(g.id))
+    ) {
+      return false
     }
     // Project/client focus (sidebar).
     if (
@@ -261,10 +267,40 @@ export function GraphRoute() {
       {nodes.length === 0 ? (
         <p className="hint">{t('graph.empty')}</p>
       ) : (
+        <>
+        <div className="dagbar">
+          <button
+            type="button"
+            className="btn--ghost btn--sm"
+            onClick={() => setZoom((z) => Math.max(0.4, z - 0.2))}
+          >
+            −
+          </button>
+          <button
+            type="button"
+            className="btn--ghost btn--sm"
+            onClick={() => setZoom(1)}
+          >
+            {Math.round(zoom * 100)}%
+          </button>
+          <button
+            type="button"
+            className="btn--ghost btn--sm"
+            onClick={() => setZoom((z) => Math.min(2.5, z + 0.2))}
+          >
+            +
+          </button>
+          <span className="muted dag__legend">
+            FS {t('graph.depFS')} · SS {t('graph.depSS')} · FF{' '}
+            {t('graph.depFF')} · SF {t('graph.depSF')}
+          </span>
+        </div>
+        <div className="dagwrap">
         <svg
           className="dag"
           viewBox={`0 0 ${maxX} ${maxY}`}
-          width="100%"
+          width={maxX * zoom}
+          height={maxY * zoom}
           role="img"
           aria-label={t('graph.title')}
         >
@@ -283,13 +319,29 @@ export function GraphRoute() {
                   y2={b.y + NH / 2}
                   className="dag__edge"
                 />
+                <rect
+                  x={mx - 15}
+                  y={my - 17}
+                  width={30}
+                  height={18}
+                  rx={4}
+                  className="dag__lblbg dag__lbl--btn"
+                  onClick={() =>
+                    void cycleType(e.predecessor, e.successor, e.type)
+                  }
+                >
+                  <title>{t(`graph.dep${e.type}`)}</title>
+                </rect>
                 <text
                   x={mx}
-                  y={my - 4}
+                  y={my - 8}
                   className="dag__lbl dag__lbl--btn"
-                  onClick={() => void cycleType(e.predecessor, e.successor, e.type)}
+                  onClick={() =>
+                    void cycleType(e.predecessor, e.successor, e.type)
+                  }
                 >
-                  {t(`graph.dep${e.type}`)}
+                  <title>{t(`graph.dep${e.type}`)}</title>
+                  {e.type}
                 </text>
               </g>
             )
@@ -328,6 +380,8 @@ export function GraphRoute() {
             )
           })}
         </svg>
+        </div>
+        </>
       )}
 
       <h2>{t('graph.edges')}</h2>
