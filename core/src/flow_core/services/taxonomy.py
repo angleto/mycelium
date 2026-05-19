@@ -9,7 +9,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from decimal import Decimal
 
-from sqlalchemy import delete, or_, select
+from sqlalchemy import and_, delete, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -394,11 +394,31 @@ async def list_tags(
         )
         targets.update(client_projects)
     if targets:
-        # Visible = global (no scope rows at all) OR scoped to any of
-        # the resolved targets.
+        tlist = list(targets)
+        # Generic/other tags: visible = global (no scope rows) OR
+        # explicitly scoped to a target.
         scoped = select(TagScope.tag_id).distinct()
-        in_scope = select(TagScope.tag_id).where(TagScope.target_tag_id.in_(list(targets)))
-        stmt = stmt.where(or_(Tag.id.not_in(scoped), Tag.id.in_(in_scope)))
+        in_scope = select(TagScope.tag_id).where(TagScope.target_tag_id.in_(tlist))
+        generic_ok = or_(Tag.id.not_in(scoped), Tag.id.in_(in_scope))
+        # Client/project tags are INTRINSICALLY owned (a client tag, a
+        # project tag belonging to a client) and almost never carry
+        # TagScope rows, so the rule above would always show them. Under
+        # a focus they must be constrained by ownership: only the
+        # focused client itself and the project tags whose
+        # ProjectProfile.client_tag_id is in the resolved targets (plus
+        # any target id directly). Other clients' client/project tags
+        # are hidden — this is the reported bug.
+        owned_projects = select(ProjectProfile.tag_id).where(
+            ProjectProfile.client_tag_id.in_(tlist)
+        )
+        structural = Tag.kind.in_([TagKind.client, TagKind.project])
+        structural_ok = or_(Tag.id.in_(tlist), Tag.id.in_(owned_projects))
+        stmt = stmt.where(
+            or_(
+                and_(structural, structural_ok),
+                and_(structural.is_(False), generic_ok),
+            )
+        )
     return list((await session.execute(stmt)).scalars().all())
 
 
