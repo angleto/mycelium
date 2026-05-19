@@ -291,11 +291,13 @@ test('task work note: open from task + billable timer in the note', async ({
   await dialog
     .getByRole('button', { name: /convert to task|trasforma in task/i })
     .click()
-  // Open the created task — the precise conversion-success link
-  // (p.ok a), not any /tasks/ anchor on the page.
+  // Open the created task. Read the href and navigate directly: the
+  // conversion success <p.ok> re-renders (the note is archived right
+  // after), so clicking the link races a detach in the serial suite.
   const madeLink = page.locator('p.ok a[href^="/tasks/"]').first()
   await expect(madeLink).toBeVisible()
-  await madeLink.click()
+  const href = await madeLink.getAttribute('href')
+  await page.goto(href ?? '/tasks')
   await expect(page).toHaveURL(/\/tasks\/[0-9a-f-]+/)
 
   // Work note → opens the linked note with the billable timer.
@@ -311,6 +313,36 @@ test('task work note: open from task + billable timer in the note', async ({
   await timer.getByRole('button', { name: /^stop$|^ferma$/i }).click()
   await expect(
     timer.getByRole('button', { name: /^start$|^avvia$/i }),
+  ).toBeVisible()
+  await expect(page.locator('main.content .err')).toHaveCount(0)
+  expect(errors, errors.join('\n')).toEqual([])
+})
+
+test('memory: write a snippet and recall it (keyword fallback works)', async ({
+  page,
+}) => {
+  const errors: string[] = []
+  watch(page, errors)
+  await login(page)
+  await page.goto('/memory')
+
+  const token = `zqx${Date.now()}`
+  const card = page.locator('section.card').first()
+  const ta = card.locator('textarea').first()
+  await ta.fill(`Remember the ${token} fact.`)
+  await card.getByRole('button', { name: /^write$|^salva$|^scrivi$/i }).click()
+  // Reliable success signal: onWrite clears the textarea only on a
+  // successful (free) write. ('.ok' also matches the always-present
+  // "semantic on" hint, so it can't gate the write completing.)
+  await expect(ta).toHaveValue('')
+
+  // Recall it by its unique word (semantic when an embedder is
+  // available, else graceful keyword/full-text fallback).
+  const search = page.locator('section.card').nth(1)
+  await search.locator('input').first().fill(token)
+  await search.getByRole('button', { name: /^search$|^cerca$/i }).click()
+  await expect(
+    search.locator('ul.list li', { hasText: token }).first(),
   ).toBeVisible()
   await expect(page.locator('main.content .err')).toHaveCount(0)
   expect(errors, errors.join('\n')).toEqual([])
