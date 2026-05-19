@@ -3,7 +3,6 @@ import { useTranslation } from 'react-i18next'
 import { api, errMessage } from '../api/client'
 import { EstimatePresets } from '../components/EstimatePresets'
 import { IssuerProfiles } from '../components/IssuerProfiles'
-import { WorkspaceManager } from '../components/WorkspaceManager'
 import { MemoryChannelsAdmin } from '../components/MemoryChannelsAdmin'
 import { useMe } from '../auth/useMe'
 import { isAdminMode } from '../auth/session'
@@ -154,7 +153,6 @@ export function SettingsRoute() {
         </form>
       )}
     </section>
-    <WorkspaceManager />
     {me?.is_admin && isAdminMode() && <MemoryChannelsAdmin />}
     <IssuerProfiles />
     <EstimatePresets />
