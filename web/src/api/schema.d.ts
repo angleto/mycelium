@@ -4511,11 +4511,18 @@ export interface components {
             project_tag_id?: string | null;
             /** As Of */
             as_of?: string | null;
+            /** @default balanced */
+            policy: components["schemas"]["SchedulePolicy"];
         };
         /** RecomputeOut */
         RecomputeOut: {
             /** Count */
             count: number;
+            /** Makespan Minutes */
+            makespan_minutes: number;
+            /** Projected Credit Cost */
+            projected_credit_cost: string;
+            policy: components["schemas"]["SchedulePolicy"];
         };
         /**
          * RecurrenceFreq
@@ -4634,6 +4641,10 @@ export interface components {
             slack_minutes: number | null;
             /** On Logical Critical Path */
             on_logical_critical_path: boolean;
+            /** On Critical Chain */
+            on_critical_chain: boolean;
+            /** Projected Cost */
+            projected_cost: string;
             /** Scheduled Start */
             scheduled_start: string | null;
             /** Scheduled End */
@@ -4646,6 +4657,16 @@ export interface components {
             /** Input Fingerprint */
             input_fingerprint: string | null;
         };
+        /**
+         * SchedulePolicy
+         * @description Resource-leveling objective, selected per recompute run
+         *     (docs/adr/0025, P1). Not persisted on the task: it is a knob of the
+         *     recompute call (like ``as_of``), so it lives with the task enums but
+         *     has no column. Every policy is fully deterministic (id final
+         *     tie-break) -- see ``scheduler._policy_key``.
+         * @enum {string}
+         */
+        SchedulePolicy: "fastest" | "cheapest" | "balanced" | "throughput";
         /**
          * SdiStatus
          * @enum {string}

@@ -478,6 +478,27 @@ export const en = {
     colLf: 'Latest finish',
     colCritical: 'Critical',
     criticalYes: 'critical',
+    policy: 'Policy',
+    policies: {
+      balanced: 'Balanced',
+      fastest: 'Fastest',
+      cheapest: 'Cheapest',
+      throughput: 'Throughput',
+    },
+    policyHint: {
+      balanced: 'Most important first (default).',
+      fastest: 'Compress makespan: least-slack/critical first.',
+      cheapest: 'Defer paid-LLM work; prefer zero-credit executors.',
+      throughput: 'Maximise concurrency: shortest effort first.',
+    },
+    makespan: 'Makespan',
+    projCost: 'Projected credit cost',
+    credits: 'cr',
+    colChain: 'Critical chain',
+    chainYes: 'chain',
+    colCost: 'Cost',
+    legendChain:
+      'Critical chain = no slack once resources (people/agents) are levelled — a superset of the logical critical path under contention.',
     pin: 'Pin start',
     pinHint:
       'Pin a task to start no earlier than a date. It switches to manual scheduling and the pin survives a recompute.',

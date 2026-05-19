@@ -478,6 +478,27 @@ export const it: Catalog = {
     colLf: 'Fine al più tardi',
     colCritical: 'Critico',
     criticalYes: 'critico',
+    policy: 'Policy',
+    policies: {
+      balanced: 'Bilanciata',
+      fastest: 'Più veloce',
+      cheapest: 'Più economica',
+      throughput: 'Throughput',
+    },
+    policyHint: {
+      balanced: 'Più importante prima (default).',
+      fastest: 'Comprimi il makespan: meno slack/critici prima.',
+      cheapest: 'Rimanda il lavoro LLM a pagamento; preferisci executor a costo zero.',
+      throughput: 'Massimizza la concorrenza: effort più breve prima.',
+    },
+    makespan: 'Makespan',
+    projCost: 'Costo credito proiettato',
+    credits: 'cr',
+    colChain: 'Catena critica',
+    chainYes: 'catena',
+    colCost: 'Costo',
+    legendChain:
+      'Catena critica = nessuno slack dopo il livellamento delle risorse (persone/agenti) — superset del percorso critico logico in caso di contesa.',
     pin: 'Fissa inizio',
     pinHint:
       'Fissa un task perché non inizi prima di una data. Passa a pianificazione manuale e il vincolo sopravvive al ricalcolo.',

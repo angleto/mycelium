@@ -7,6 +7,10 @@ import type { components } from '../api/schema'
 
 type Task = components['schemas']['TaskOut']
 type Row = components['schemas']['ScheduleOut']
+type Policy = components['schemas']['SchedulePolicy']
+type Summary = components['schemas']['RecomputeOut']
+
+const POLICIES: Policy[] = ['balanced', 'fastest', 'cheapest', 'throughput']
 
 const W = 760
 const RH = 30
@@ -34,6 +38,8 @@ export function SchedulerRoute() {
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState<string | null>(null)
   const [err, setErr] = useState<string | null>(null)
+  const [policy, setPolicy] = useState<Policy>('balanced')
+  const [summary, setSummary] = useState<Summary | null>(null)
 
   const reload = useCallback(async () => {
     const h = workspaceHeader()
@@ -70,13 +76,14 @@ export function SchedulerRoute() {
     setMsg(null)
     const { data, error } = await api.POST('/schedule/recompute', {
       params: { header: workspaceHeader() },
-      body: {},
+      body: { policy },
     })
     setBusy(false)
     if (error || !data) {
       setErr(errMessage(error))
       return
     }
+    setSummary(data)
     setMsg(t('scheduler.computed', { count: data.count }))
     await reload()
   }
@@ -131,13 +138,38 @@ export function SchedulerRoute() {
       <p className="hint">{t('scheduler.intro')}</p>
 
       <div className="row">
+        <label>
+          {t('scheduler.policy')}
+          <select
+            value={policy}
+            onChange={(e) => setPolicy(e.target.value as Policy)}
+          >
+            {POLICIES.map((p) => (
+              <option key={p} value={p}>
+                {t(`scheduler.policies.${p}`)}
+              </option>
+            ))}
+          </select>
+        </label>
         <button type="button" onClick={() => void onRecompute()} disabled={busy}>
           {busy ? t('scheduler.recomputing') : t('scheduler.recompute')}
         </button>
-        <span className="muted">{t('scheduler.recomputeHint')}</span>
+        <span className="muted">{t(`scheduler.policyHint.${policy}`)}</span>
         {msg && <span className="ok">{msg}</span>}
         {err && <span className="err">{err}</span>}
       </div>
+
+      {summary && (
+        <p className="hint">
+          <strong>{t('scheduler.makespan')}:</strong>{' '}
+          {humanSlack(summary.makespan_minutes)}
+          {' · '}
+          <strong>{t('scheduler.projCost')}:</strong>{' '}
+          {summary.projected_credit_cost} {t('scheduler.credits')}
+          {' · '}
+          {t(`scheduler.policies.${summary.policy}`)}
+        </p>
+      )}
 
       <div className="row">
         <label>
@@ -175,6 +207,7 @@ export function SchedulerRoute() {
             <span>
               <span className="sched__sw" /> {t('scheduler.legendSlack')}
             </span>
+            <span className="muted">{t('scheduler.legendChain')}</span>
             <span className="muted">
               {fmtDateTime(new Date(min).toISOString())} →{' '}
               {fmtDateTime(new Date(max).toISOString())}
@@ -230,6 +263,8 @@ export function SchedulerRoute() {
                 <th>{t('scheduler.colLf')}</th>
                 <th>{t('scheduler.slack')}</th>
                 <th>{t('scheduler.colCritical')}</th>
+                <th>{t('scheduler.colChain')}</th>
+                <th>{t('scheduler.colCost')}</th>
               </tr>
             </thead>
             <tbody>
@@ -246,6 +281,22 @@ export function SchedulerRoute() {
                       <span className="tag tag--danger">
                         {t('scheduler.criticalYes')}
                       </span>
+                    ) : (
+                      <span className="muted">—</span>
+                    )}
+                  </td>
+                  <td>
+                    {r.on_critical_chain ? (
+                      <span className="tag tag--danger">
+                        {t('scheduler.chainYes')}
+                      </span>
+                    ) : (
+                      <span className="muted">—</span>
+                    )}
+                  </td>
+                  <td>
+                    {Number(r.projected_cost) > 0 ? (
+                      `${r.projected_cost} ${t('scheduler.credits')}`
                     ) : (
                       <span className="muted">—</span>
                     )}
