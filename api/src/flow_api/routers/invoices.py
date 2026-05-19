@@ -118,7 +118,7 @@ async def create_issuer_profile(
     body: IssuerProfileIn,
     ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
 ) -> IssuerProfileOut:
-    ensure_role(ctx.role, Role.admin)
+    ensure_role(ctx.role, Role.owner)
     p = await svc.create_issuer_profile(
         ctx.session,
         org_id=ctx.org_id,
@@ -156,7 +156,7 @@ async def update_issuer_profile(
     body: IssuerProfilePatchIn,
     ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
 ) -> IssuerProfileOut:
-    ensure_role(ctx.role, Role.admin)
+    ensure_role(ctx.role, Role.owner)
     values = body.model_dump(exclude_unset=True, exclude={"is_default"})
     p = await svc.update_issuer_profile(
         ctx.session,
@@ -174,7 +174,7 @@ async def set_default_issuer_profile(
     profile_id: uuid.UUID,
     ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
 ) -> IssuerProfileOut:
-    ensure_role(ctx.role, Role.admin)
+    ensure_role(ctx.role, Role.owner)
     p = await svc.set_default_issuer_profile(
         ctx.session, org_id=ctx.org_id, actor_id=ctx.user_id, profile_id=profile_id
     )
@@ -202,7 +202,7 @@ async def delete_issuer_profile(
     profile_id: uuid.UUID,
     ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
 ) -> None:
-    ensure_role(ctx.role, Role.admin)
+    ensure_role(ctx.role, Role.owner)
     await svc.delete_issuer_profile(
         ctx.session, org_id=ctx.org_id, actor_id=ctx.user_id, profile_id=profile_id
     )

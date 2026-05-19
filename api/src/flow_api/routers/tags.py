@@ -75,7 +75,7 @@ async def set_tag_scope(
     body: TagScopeIn,
     ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
 ) -> None:
-    ensure_role(ctx.role, Role.admin)
+    ensure_role(ctx.role, Role.owner)
     await taxonomy.set_tag_scope(
         ctx.session,
         org_id=ctx.org_id,
@@ -89,7 +89,7 @@ async def set_tag_scope(
 async def create_client(
     body: ClientCreateIn, ctx: Annotated[TenantCtx, Depends(tenant_ctx)]
 ) -> TagOut:
-    ensure_role(ctx.role, Role.admin)
+    ensure_role(ctx.role, Role.owner)
     profile = ClientInput(
         ragione_sociale=body.ragione_sociale,
         id_paese=body.id_paese,
@@ -121,7 +121,7 @@ async def create_client(
 async def create_project(
     body: ProjectCreateIn, ctx: Annotated[TenantCtx, Depends(tenant_ctx)]
 ) -> TagOut:
-    ensure_role(ctx.role, Role.admin)
+    ensure_role(ctx.role, Role.owner)
     tag = await taxonomy.create_project(
         ctx.session,
         org_id=ctx.org_id,
@@ -196,7 +196,7 @@ async def patch_client(
     body: ClientPatchIn,
     ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
 ) -> None:
-    ensure_role(ctx.role, Role.admin)
+    ensure_role(ctx.role, Role.owner)
     data = body.model_dump(exclude_unset=True)
     name = data.pop("name", None)
     await taxonomy.update_client(
@@ -215,7 +215,7 @@ async def patch_project(
     body: ProjectPatchIn,
     ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
 ) -> None:
-    ensure_role(ctx.role, Role.admin)
+    ensure_role(ctx.role, Role.owner)
     data = body.model_dump(exclude_unset=True)
     name = data.pop("name", None)
     await taxonomy.update_project(

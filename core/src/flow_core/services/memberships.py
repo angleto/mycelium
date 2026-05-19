@@ -3,14 +3,22 @@
 The user-facing concept is "workspace"; internally the tenant is still
 ``org`` (RLS unchanged, ADR-0015). This mirrors
 ``auth.delete_org_for_user`` exactly: the RLS boundary is crossed only
-through SECURITY DEFINER functions (migration 0035); the precondition
-(actor membership, actor role floor, sole-owner, target existence) is
-pre-checked here in Python so the caller gets a typed ``DomainError``
-with a stable ``MessageCode``, and the same guard is re-checked
-atomically inside the SQL function (defense in depth, identical to the
-workspace-lifecycle path).
+through SECURITY DEFINER functions (migrations 0035/0036); the
+precondition (actor membership, actor role, sole-owner, target
+existence) is pre-checked here in Python so the caller gets a typed
+``DomainError`` with a stable ``MessageCode``, and the same guard is
+re-checked atomically inside the SQL function (defense in depth,
+identical to the workspace-lifecycle path).
 
-Rank order matches ``rbac._RANK``: owner > admin > member > guest.
+Hardened role model (migration 0036, authoritative): only an
+**owner** manages members; a **member** is a normal user with no
+member-management capability. The actor's membership role must be
+*exactly* ``owner`` to add/re-role/remove a collaborator. The
+``admin``/``guest`` enum values are kept only for backward
+compatibility and are not part of this model (anything that is not
+``owner`` is treated as a normal user). The sole-owner guards are
+preserved so a namespace can never become unadministrable, and so a
+later-added member can never eject or demote the owner.
 """
 
 from __future__ import annotations
@@ -26,10 +34,8 @@ from flow_core.errors import DomainError, ForbiddenError, NotFoundError
 from flow_core.i18n import MessageCode
 from flow_core.models.membership import Role
 from flow_core.models.user import User
-from flow_core.services.rbac import _RANK
 
 _VALID_ROLES = {r.value for r in Role}
-_MANAGER_ROLES = {Role.owner.value, Role.admin.value}
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,35 +70,28 @@ async def list_members(
     ]
 
 
-def _require_manager(members: list[Member], actor_id: uuid.UUID) -> str:
-    """The actor must be a member and owner/admin to manage members.
-    Returns the actor's role (for the rank check)."""
+def _require_owner(members: list[Member], actor_id: uuid.UUID) -> None:
+    """Only an owner manages members (hardened model, migration 0036).
+    The actor must have a membership in the workspace AND that
+    membership role must be *exactly* ``owner``: a normal member (or a
+    legacy ``admin``/``guest``) can never add, re-role or remove a
+    collaborator, regardless of any forged ``X-Workspace-Role`` header
+    (the API also clamps the effective role; the SQL re-checks
+    atomically as defense in depth)."""
     actor = next((m for m in members if m.user_id == actor_id), None)
     if actor is None:
         raise ForbiddenError(MessageCode.RBAC_NO_MEMBERSHIP)
-    if actor.role not in _MANAGER_ROLES:
+    if actor.role != Role.owner.value:
         raise ForbiddenError(
             MessageCode.RBAC_ROLE_INSUFFICIENT,
             current=actor.role,
-            minimum=Role.admin.value,
+            minimum=Role.owner.value,
         )
-    return actor.role
 
 
 def _validate_role(role: str) -> None:
     if role not in _VALID_ROLES:
         raise DomainError(MessageCode.MEMBER_ROLE_INVALID)
-
-
-def _ensure_not_above(actor_role: str, target_role: str) -> None:
-    """An owner/admin cannot grant a role above their own rank (an admin
-    cannot mint an owner)."""
-    if _RANK[Role(actor_role)] < _RANK[Role(target_role)]:
-        raise ForbiddenError(
-            MessageCode.RBAC_ROLE_INSUFFICIENT,
-            current=actor_role,
-            minimum=target_role,
-        )
 
 
 def _is_sole_owner(members: list[Member], target_user_id: uuid.UUID) -> bool:
@@ -108,14 +107,15 @@ async def add_member(
     email: str,
     role: str,
 ) -> uuid.UUID:
-    """Add (or re-role) a collaborator by email. The actor must be
-    owner/admin and cannot grant above their own rank. Routed through
-    the SECURITY DEFINER ``add_org_member`` function (migration 0035),
-    which re-checks every precondition atomically."""
+    """Add (or re-role) a collaborator by email. The actor's
+    membership role must be *exactly* ``owner`` (hardened model,
+    migration 0036): only an owner manages members. An owner may grant
+    any valid role. Routed through the SECURITY DEFINER
+    ``add_org_member`` function, which re-checks every precondition
+    atomically."""
     _validate_role(role)
     members = await list_members(session, org_id=org_id, actor_id=actor_id)
-    actor_role = _require_manager(members, actor_id)
-    _ensure_not_above(actor_role, role)
+    _require_owner(members, actor_id)
     # Pre-resolve the target by email so the caller gets a typed
     # NotFoundError (the SQL re-resolves and RAISEs the same code as
     # defense in depth, exactly like auth.delete_org_for_user). users
@@ -141,13 +141,15 @@ async def set_member_role(
     target_user_id: uuid.UUID,
     role: str,
 ) -> None:
-    """Change a member's role (owner/admin; cannot grant above own rank;
-    cannot demote the sole owner). Routed through the SECURITY DEFINER
-    ``set_member_role`` function (migration 0035)."""
+    """Change a member's role. The actor must be *exactly* ``owner``
+    (hardened model, migration 0036); an owner may set any valid role.
+    Refuses to demote the sole owner (a later-added member can never
+    reach this code, so the owner is also protected from being demoted
+    by anyone else). Routed through the SECURITY DEFINER
+    ``set_member_role`` function."""
     _validate_role(role)
     members = await list_members(session, org_id=org_id, actor_id=actor_id)
-    actor_role = _require_manager(members, actor_id)
-    _ensure_not_above(actor_role, role)
+    _require_owner(members, actor_id)
     target = next((m for m in members if m.user_id == target_user_id), None)
     if target is None:
         raise NotFoundError(MessageCode.MEMBER_NOT_FOUND)
@@ -171,11 +173,14 @@ async def remove_member(
     actor_id: uuid.UUID,
     target_user_id: uuid.UUID,
 ) -> None:
-    """Remove a collaborator (owner/admin; cannot remove the sole
-    owner). Routed through the SECURITY DEFINER ``remove_org_member``
-    function (migration 0035)."""
+    """Remove a collaborator. The actor must be *exactly* ``owner``
+    (hardened model, migration 0036); cannot remove the sole owner.
+    Net effect: a non-owner can never remove anyone and the last owner
+    is irremovable, so a later-added member can never eject the owner.
+    Routed through the SECURITY DEFINER ``remove_org_member``
+    function."""
     members = await list_members(session, org_id=org_id, actor_id=actor_id)
-    _require_manager(members, actor_id)
+    _require_owner(members, actor_id)
     target = next((m for m in members if m.user_id == target_user_id), None)
     if target is None:
         raise NotFoundError(MessageCode.MEMBER_NOT_FOUND)

@@ -30,7 +30,7 @@ router = APIRouter(tags=["workflows"])
 async def create_workflow(
     body: WorkflowCreateIn, ctx: Annotated[TenantCtx, Depends(tenant_ctx)]
 ) -> WorkflowOut:
-    ensure_role(ctx.role, Role.admin)
+    ensure_role(ctx.role, Role.owner)
     w = await wf.create_workflow(
         ctx.session,
         org_id=ctx.org_id,
@@ -56,7 +56,7 @@ async def update_workflow(
     body: WorkflowPatchIn,
     ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
 ) -> None:
-    ensure_role(ctx.role, Role.admin)
+    ensure_role(ctx.role, Role.owner)
     await wf.update_workflow(
         ctx.session,
         org_id=ctx.org_id,
@@ -82,7 +82,7 @@ async def delete_workflow(
     workflow_id: uuid.UUID,
     ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
 ) -> None:
-    ensure_role(ctx.role, Role.admin)
+    ensure_role(ctx.role, Role.owner)
     await wf.delete_workflow(
         ctx.session,
         org_id=ctx.org_id,
@@ -96,7 +96,7 @@ async def set_default_workflow(
     workflow_id: uuid.UUID,
     ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
 ) -> None:
-    ensure_role(ctx.role, Role.admin)
+    ensure_role(ctx.role, Role.owner)
     await wf.set_default_workflow(
         ctx.session,
         org_id=ctx.org_id,
@@ -157,7 +157,7 @@ async def set_project_workflow(
     body: ProjectWorkflowIn,
     ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
 ) -> VersionOut:
-    ensure_role(ctx.role, Role.admin)
+    ensure_role(ctx.role, Role.owner)
     version = await wf.set_project_workflow(
         ctx.session,
         org_id=ctx.org_id,

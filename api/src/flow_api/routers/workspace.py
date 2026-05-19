@@ -119,8 +119,9 @@ async def add_workspace_member(
     ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
 ) -> list[MemberOut]:
     """Add (or re-role) a collaborator by email. Requires the effective
-    role admin; the SQL re-checks (actor_id) atomically too."""
-    ensure_role(ctx.role, Role.admin)
+    role owner (hardened model: only an owner manages members); the SQL
+    re-checks (actor_id) atomically too."""
+    ensure_role(ctx.role, Role.owner)
     await memberships.add_member(
         ctx.session,
         org_id=ctx.org_id,
@@ -137,9 +138,9 @@ async def set_workspace_member_role(
     body: MemberRoleIn,
     ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
 ) -> list[MemberOut]:
-    """Change a collaborator's role (effective role admin; SQL
+    """Change a collaborator's role (effective role owner; SQL
     re-checks). Cannot demote the sole owner."""
-    ensure_role(ctx.role, Role.admin)
+    ensure_role(ctx.role, Role.owner)
     await memberships.set_member_role(
         ctx.session,
         org_id=ctx.org_id,
@@ -157,9 +158,9 @@ async def remove_workspace_member(
     user_id: uuid.UUID,
     ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
 ) -> Response:
-    """Remove a collaborator (effective role admin; SQL re-checks).
+    """Remove a collaborator (effective role owner; SQL re-checks).
     Cannot remove the sole owner."""
-    ensure_role(ctx.role, Role.admin)
+    ensure_role(ctx.role, Role.owner)
     await memberships.remove_member(
         ctx.session,
         org_id=ctx.org_id,
@@ -174,9 +175,10 @@ async def patch_my_workspace_settings(
     body: WorkspaceSettingsIn,
     ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
 ) -> WorkspaceVersionOut:
-    """Per-workspace config (admin). Merges into the settings bag so a
-    future key is not clobbered by an estimate-presets save."""
-    ensure_role(ctx.role, Role.admin)
+    """Per-workspace config (owner: privileged namespace write under
+    the hardened model). Merges into the settings bag so a future key
+    is not clobbered by an estimate-presets save."""
+    ensure_role(ctx.role, Role.owner)
     result = await ctx.session.execute(select(Organization).where(Organization.id == ctx.org_id))
     org = result.scalar_one_or_none()
     if org is None:
@@ -202,7 +204,9 @@ async def patch_my_workspace(
     body: WorkspacePatchIn,
     ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
 ) -> WorkspaceVersionOut:
-    ensure_role(ctx.role, Role.admin)
+    # Renaming the namespace is a privileged write: owner only under
+    # the hardened model.
+    ensure_role(ctx.role, Role.owner)
     new_version = await optimistic_update(
         ctx.session,
         Organization,

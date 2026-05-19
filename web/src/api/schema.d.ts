@@ -336,6 +336,58 @@ export interface paths {
         patch: operations["patch_my_workspace_workspaces_me_patch"];
         trace?: never;
     };
+    "/workspaces/me/members": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Workspace Members
+         * @description The workspace roster (any member). Powers the collaborators
+         *     list and the SPA's "act as" switch.
+         */
+        get: operations["list_workspace_members_workspaces_me_members_get"];
+        put?: never;
+        /**
+         * Add Workspace Member
+         * @description Add (or re-role) a collaborator by email. Requires the effective
+         *     role admin; the SQL re-checks (actor_id) atomically too.
+         */
+        post: operations["add_workspace_member_workspaces_me_members_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workspaces/me/members/{user_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Remove Workspace Member
+         * @description Remove a collaborator (effective role admin; SQL re-checks).
+         *     Cannot remove the sole owner.
+         */
+        delete: operations["remove_workspace_member_workspaces_me_members__user_id__delete"];
+        options?: never;
+        head?: never;
+        /**
+         * Set Workspace Member Role
+         * @description Change a collaborator's role (effective role admin; SQL
+         *     re-checks). Cannot demote the sole owner.
+         */
+        patch: operations["set_workspace_member_role_workspaces_me_members__user_id__patch"];
+        trace?: never;
+    };
     "/workspaces/me/settings": {
         parameters: {
             query?: never;
@@ -3499,6 +3551,37 @@ export interface components {
             /** Is Admin */
             is_admin: boolean;
         };
+        /** MemberAddIn */
+        MemberAddIn: {
+            /** Email */
+            email: string;
+            /** Role */
+            role: string;
+        };
+        /** MemberOut */
+        MemberOut: {
+            /**
+             * User Id
+             * Format: uuid
+             */
+            user_id: string;
+            /** Email */
+            email: string;
+            /** Display Name */
+            display_name?: string | null;
+            /** Role */
+            role: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /** MemberRoleIn */
+        MemberRoleIn: {
+            /** Role */
+            role: string;
+        };
         /** MemoryBlobOut */
         MemoryBlobOut: {
             /**
@@ -4760,6 +4843,11 @@ export interface components {
             /** Version */
             version: number;
             settings?: components["schemas"]["WorkspaceSettings"];
+            /**
+             * My Role
+             * @default owner
+             */
+            my_role: string;
         };
         /** WorkspacePatchIn */
         WorkspacePatchIn: {
@@ -5327,6 +5415,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path?: never;
             cookie?: never;
@@ -5359,6 +5449,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path?: never;
             cookie?: never;
@@ -5389,12 +5481,160 @@ export interface operations {
             };
         };
     };
+    list_workspace_members_workspaces_me_members_get: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemberOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    add_workspace_member_workspaces_me_members_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MemberAddIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemberOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    remove_workspace_member_workspaces_me_members__user_id__delete: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_workspace_member_role_workspaces_me_members__user_id__patch: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MemberRoleIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemberOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     patch_my_workspace_settings_workspaces_me_settings_patch: {
         parameters: {
             query?: never;
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path?: never;
             cookie?: never;
@@ -5521,6 +5761,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path?: never;
             cookie?: never;
@@ -5553,6 +5795,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path?: never;
             cookie?: never;
@@ -5589,6 +5833,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path: {
                 tag_id: string;
@@ -5625,6 +5871,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path?: never;
             cookie?: never;
@@ -5657,6 +5905,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path?: never;
             cookie?: never;
@@ -5693,6 +5943,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path?: never;
             cookie?: never;
@@ -5725,6 +5977,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path?: never;
             cookie?: never;
@@ -5761,6 +6015,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path: {
                 tag_id: string;
@@ -5797,6 +6053,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path: {
                 tag_id: string;
@@ -5833,6 +6091,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path: {
                 tag_id: string;
@@ -5878,6 +6138,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path?: never;
             cookie?: never;
@@ -5910,6 +6172,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path?: never;
             cookie?: never;
@@ -5946,6 +6210,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path: {
                 task_id: string;
@@ -5980,6 +6246,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path: {
                 task_id: string;
@@ -6018,6 +6286,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path: {
                 task_id: string;
@@ -6052,6 +6322,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path: {
                 task_id: string;
@@ -6090,6 +6362,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path: {
                 task_id: string;
@@ -6128,6 +6402,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path: {
                 task_id: string;
@@ -6166,6 +6442,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path: {
                 task_id: string;
@@ -6204,6 +6482,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path: {
                 task_id: string;
@@ -6242,6 +6522,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path: {
                 task_id: string;
@@ -6276,6 +6558,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path: {
                 task_id: string;
@@ -6314,6 +6598,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path: {
                 task_id: string;
@@ -6347,6 +6633,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path: {
                 task_id: string;
@@ -6383,6 +6671,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path: {
                 task_id: string;
@@ -6416,6 +6706,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path: {
                 task_id: string;
@@ -6452,6 +6744,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path: {
                 task_id: string;
@@ -6485,6 +6779,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path: {
                 task_id: string;
@@ -6519,6 +6815,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path: {
                 task_id: string;
@@ -6557,6 +6855,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path?: never;
             cookie?: never;
@@ -6589,6 +6889,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path?: never;
             cookie?: never;
@@ -6625,6 +6927,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path: {
                 workflow_id: string;
@@ -6657,6 +6961,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path: {
                 workflow_id: string;
@@ -6693,6 +6999,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path: {
                 workflow_id: string;
@@ -6725,6 +7033,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path: {
                 workflow_id: string;
@@ -6759,6 +7069,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path: {
                 workflow_id: string;
@@ -6793,6 +7105,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path: {
                 project_tag_id: string;
@@ -6833,6 +7147,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path?: never;
             cookie?: never;
@@ -6865,6 +7181,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path?: never;
             cookie?: never;
@@ -6901,6 +7219,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path: {
                 dependency_id: string;
@@ -6935,6 +7255,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path?: never;
             cookie?: never;
@@ -6967,6 +7289,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path?: never;
             cookie?: never;
@@ -6999,6 +7323,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path?: never;
             cookie?: never;
@@ -7035,6 +7361,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path: {
                 calendar_id: string;
@@ -7069,6 +7397,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path: {
                 calendar_id: string;
@@ -7105,6 +7435,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path: {
                 calendar_id: string;
@@ -7138,6 +7470,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path: {
                 user_id: string;
@@ -7178,6 +7512,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path?: never;
             cookie?: never;
@@ -7210,6 +7546,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path?: never;
             cookie?: never;
@@ -7246,6 +7584,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path: {
                 event_id: string;
@@ -7280,6 +7620,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path: {
                 event_id: string;
@@ -7312,6 +7654,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path: {
                 event_id: string;
@@ -7350,6 +7694,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path?: never;
             cookie?: never;
@@ -7388,6 +7734,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path?: never;
             cookie?: never;
@@ -7420,6 +7768,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path: {
                 task_id: string;
@@ -7454,6 +7804,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path: {
                 task_id: string;
@@ -7492,6 +7844,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path?: never;
             cookie?: never;
@@ -7528,6 +7882,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path?: never;
             cookie?: never;
@@ -7564,6 +7920,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path?: never;
             cookie?: never;
@@ -7604,6 +7962,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path?: never;
             cookie?: never;
@@ -7636,6 +7996,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path?: never;
             cookie?: never;
@@ -7672,6 +8034,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path: {
                 entry_id: string;
@@ -7706,6 +8070,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path: {
                 entry_id: string;
@@ -7738,6 +8104,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path: {
                 entry_id: string;
@@ -7784,6 +8152,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path?: never;
             cookie?: never;
@@ -7824,6 +8194,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path?: never;
             cookie?: never;
@@ -7856,6 +8228,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path?: never;
             cookie?: never;
@@ -7888,6 +8262,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path?: never;
             cookie?: never;
@@ -7924,6 +8300,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path: {
                 budget_id: string;
@@ -7958,6 +8336,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path: {
                 budget_id: string;
@@ -7990,6 +8370,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path: {
                 budget_id: string;
@@ -8028,6 +8410,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path: {
                 budget_id: string;
@@ -8062,6 +8446,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path?: never;
             cookie?: never;
@@ -8098,6 +8484,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path?: never;
             cookie?: never;
@@ -8134,6 +8522,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path: {
                 budget_id: string;
@@ -8168,6 +8558,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path?: never;
             cookie?: never;
@@ -8200,6 +8592,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path?: never;
             cookie?: never;
@@ -8236,6 +8630,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path: {
                 account_id: string;
@@ -8270,6 +8666,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path: {
                 account_id: string;
@@ -8302,6 +8700,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path: {
                 account_id: string;
@@ -8340,6 +8740,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path: {
                 account_id: string;
@@ -8380,6 +8782,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path: {
                 account_id: string;
@@ -8417,6 +8821,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path?: never;
             cookie?: never;
@@ -8449,6 +8855,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path: {
                 message_id: string;
@@ -8483,6 +8891,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path: {
                 message_id: string;
@@ -8521,6 +8931,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path: {
                 account_id: string;
@@ -8559,6 +8971,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path: {
                 message_id: string;
@@ -8597,6 +9011,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path?: never;
             cookie?: never;
@@ -8629,6 +9045,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path?: never;
             cookie?: never;
@@ -8665,6 +9083,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path?: never;
             cookie?: never;
@@ -8704,6 +9124,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path?: never;
             cookie?: never;
@@ -8738,6 +9160,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path?: never;
             cookie?: never;
@@ -8770,6 +9194,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path?: never;
             cookie?: never;
@@ -8802,6 +9228,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path?: never;
             cookie?: never;
@@ -8838,6 +9266,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path?: never;
             cookie?: never;
@@ -8874,6 +9304,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path?: never;
             cookie?: never;
@@ -8910,6 +9342,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path?: never;
             cookie?: never;
@@ -8946,6 +9380,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path?: never;
             cookie?: never;
@@ -8982,6 +9418,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path: {
                 blob_id: string;
@@ -9016,6 +9454,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path?: never;
             cookie?: never;
@@ -9052,6 +9492,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path?: never;
             cookie?: never;
@@ -9088,6 +9530,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path: {
                 blob_id: string;
@@ -9124,6 +9568,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path: {
                 blob_id: string;
@@ -9157,6 +9603,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path?: never;
             cookie?: never;
@@ -9194,6 +9642,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path?: never;
             cookie?: never;
@@ -9226,6 +9676,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path?: never;
             cookie?: never;
@@ -9262,6 +9714,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path: {
                 note_id: string;
@@ -9296,6 +9750,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path: {
                 note_id: string;
@@ -9334,6 +9790,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path: {
                 note_id: string;
@@ -9370,6 +9828,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path: {
                 note_id: string;
@@ -9403,6 +9863,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path: {
                 note_id: string;
@@ -9441,6 +9903,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path: {
                 note_id: string;
@@ -9479,6 +9943,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path: {
                 note_id: string;
@@ -9517,6 +9983,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path: {
                 note_id: string;
@@ -9555,6 +10023,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path: {
                 note_id: string;
@@ -9593,6 +10063,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path?: never;
             cookie?: never;
@@ -9629,6 +10101,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path: {
                 note_id: string;
@@ -9667,6 +10141,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path: {
                 note_id: string;
@@ -9701,6 +10177,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path?: never;
             cookie?: never;
@@ -9737,6 +10215,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path?: never;
             cookie?: never;
@@ -9773,6 +10253,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path: {
                 note_id: string;
@@ -9807,6 +10289,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path?: never;
             cookie?: never;
@@ -9839,6 +10323,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path?: never;
             cookie?: never;
@@ -9875,6 +10361,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path: {
                 profile_id: string;
@@ -9909,6 +10397,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path: {
                 profile_id: string;
@@ -9941,6 +10431,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path: {
                 profile_id: string;
@@ -9979,6 +10471,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path: {
                 profile_id: string;
@@ -10013,6 +10507,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path: {
                 profile_id: string;
@@ -10051,6 +10547,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path?: never;
             cookie?: never;
@@ -10083,6 +10581,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path?: never;
             cookie?: never;
@@ -10119,6 +10619,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path: {
                 invoice_id: string;
@@ -10153,6 +10655,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path: {
                 invoice_id: string;
@@ -10185,6 +10689,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path: {
                 invoice_id: string;
@@ -10223,6 +10729,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path: {
                 invoice_id: string;
@@ -10257,6 +10765,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path: {
                 invoice_id: string;
@@ -10295,6 +10805,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path: {
                 invoice_id: string;
@@ -10334,6 +10846,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path: {
                 invoice_id: string;
@@ -10367,6 +10881,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path: {
                 invoice_id: string;
@@ -10405,6 +10921,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path: {
                 invoice_id: string;
@@ -10439,6 +10957,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path?: never;
             cookie?: never;
@@ -10475,6 +10995,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path: {
                 invoice_id: string;
@@ -10509,6 +11031,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path?: never;
             cookie?: never;
@@ -10545,6 +11069,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path?: never;
             cookie?: never;
@@ -10577,6 +11103,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path?: never;
             cookie?: never;
@@ -10613,6 +11141,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path?: never;
             cookie?: never;
@@ -10645,6 +11175,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path?: never;
             cookie?: never;
@@ -10677,6 +11209,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path?: never;
             cookie?: never;
@@ -10713,6 +11247,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path?: never;
             cookie?: never;
@@ -10747,6 +11283,8 @@ export interface operations {
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
             };
             path?: never;
             cookie?: never;
