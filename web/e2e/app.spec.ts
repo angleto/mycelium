@@ -1,7 +1,7 @@
 import { test, expect, type Page } from '@playwright/test'
-
-const EMAIL = 'angelo@leto.blue'
-const PASSWORD = 'testp4ssw0rd'
+// Single source of truth: the neutral admin the globalSetup bootstraps
+// (no personal data in the repo; decoupled from external seeding).
+import { E2E_EMAIL as EMAIL, E2E_PASSWORD as PASSWORD } from './global-setup'
 
 // Console / uncaught-error capture. Uncaught exceptions (pageerror)
 // are always a real bug. console.error is collected minus known
