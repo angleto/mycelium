@@ -36,6 +36,7 @@ from flow_core.models.task import (
     ScheduleMode,
     SchedulePolicy,
 )
+from flow_core.models.task_handoff import HandoffStatus
 from flow_core.models.time_entry import TimeSource
 
 
@@ -446,6 +447,9 @@ class TaskOut(BaseModel):
     budget_id: uuid.UUID | None
     billable: bool | None = None
     is_archived: bool
+    # Contract-net (docs/adr/0025, P4): the task is announced and
+    # awaiting a member ``claim`` (cleared on claim).
+    offered: bool = False
     deleted_at: datetime.datetime | None = None
     version: int
     tags: list[TagBrief] = Field(default_factory=list)
@@ -732,6 +736,23 @@ class AgentRunOut(BaseModel):
     artifact_note_id: uuid.UUID | None
     cancel_requested: bool
     blocked_reason: str | None
+    version: int
+
+
+# --- P4: coordination handoffs (docs/adr/0025) ---
+
+
+class HandoffOut(BaseModel):
+    id: uuid.UUID
+    predecessor_task_id: uuid.UUID
+    successor_task_id: uuid.UUID
+    from_executor_id: uuid.UUID | None
+    to_executor_id: uuid.UUID | None
+    message: str
+    artifact_note_id: uuid.UUID | None
+    status: HandoffStatus
+    delivered_at: datetime.datetime | None
+    consumed_at: datetime.datetime | None
     version: int
 
 

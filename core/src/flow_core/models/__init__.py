@@ -78,6 +78,7 @@ from flow_core.models.task import (
     Task,
 )
 from flow_core.models.task_assignee import TaskAssignee
+from flow_core.models.task_handoff import HandoffStatus, TaskHandoff
 from flow_core.models.task_tag import TaskTag
 from flow_core.models.time_entry import TimeEntry, TimeSource
 from flow_core.models.user import User
@@ -117,6 +118,7 @@ __all__ = [
     "ExecKind",
     "Executor",
     "ExecutorKind",
+    "HandoffStatus",
     "Invoice",
     "InvoiceCounter",
     "InvoiceKind",
@@ -156,6 +158,7 @@ __all__ = [
     "Task",
     "TaskAssignee",
     "TaskDependency",
+    "TaskHandoff",
     "TaskRecurrence",
     "TaskTag",
     "Tier",

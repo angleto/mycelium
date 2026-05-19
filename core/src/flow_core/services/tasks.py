@@ -23,6 +23,7 @@ from flow_core.models.tag import Tag, TagKind
 from flow_core.models.task import ExecKind, Necessity, Task
 from flow_core.models.task_assignee import TaskAssignee
 from flow_core.models.task_tag import TaskTag
+from flow_core.models.workflow import WorkflowState
 from flow_core.services import audit, taxonomy
 from flow_core.services import workflow as wf
 from flow_core.services.rbac import require_role
@@ -321,8 +322,23 @@ async def set_state(
     workflow = await wf.effective_workflow_for_task(session, org_id, task_id)
     if not await wf.state_in_workflow(session, workflow.id, state_id):
         raise DomainError(MessageCode.TRANSITION_NOT_ALLOWED)
-    if task.state_id != state_id:
-        await wf.assert_transition(session, workflow.id, task.state_id, state_id)
+    old_state_id = task.state_id
+    if old_state_id != state_id:
+        await wf.assert_transition(session, workflow.id, old_state_id, state_id)
+    # Terminal detection reuses the SAME notion the scheduler uses
+    # (``WorkflowState.is_terminal``), never a hardcoded state name.
+    term_rows: dict[uuid.UUID, bool] = {
+        sid: is_term
+        for sid, is_term in (
+            await session.execute(
+                select(WorkflowState.id, WorkflowState.is_terminal).where(
+                    WorkflowState.id.in_({old_state_id, state_id})
+                )
+            )
+        ).all()
+    }
+    was_terminal = bool(term_rows.get(old_state_id, False))
+    now_terminal = bool(term_rows.get(state_id, False))
     new_version = await optimistic_update(
         session,
         Task,
@@ -338,6 +354,18 @@ async def set_state(
         entity_id=task_id,
         action="set_state",
     )
+    # Coordination handoff fan-out (docs/adr/0025, P4): fire ONLY when
+    # the transition crosses INTO a terminal state from a non-terminal
+    # one (re-entering the same terminal state is a no-op -- idempotent
+    # by construction). ADDITIVE + NON-FATAL: a coordination failure is
+    # swallowed inside the hook; the state transition above is the
+    # source of truth and is never rolled back by it. Imported lazily
+    # to avoid a tasks<->notifications<->coordination import cycle.
+    if now_terminal and not was_terminal:
+        from flow_core.services import coordination as _coord
+
+        await session.refresh(task)
+        await _coord.on_task_completed(session, org_id=org_id, actor_id=actor_id, task=task)
     return new_version
 
 

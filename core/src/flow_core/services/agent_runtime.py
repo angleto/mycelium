@@ -62,6 +62,7 @@ from flow_core.models.note import Note
 from flow_core.models.schedule import Schedule
 from flow_core.models.task import ExecKind, Task
 from flow_core.services import audit, billing
+from flow_core.services import coordination as coordination_svc
 from flow_core.services import memory as memory_svc
 from flow_core.services import notes as notes_svc
 from flow_core.services import tasks as tasks_svc
@@ -145,13 +146,25 @@ async def _assigned_executor(session: AsyncSession, *, task_id: uuid.UUID) -> Ex
 
 
 async def _build_context(session: AsyncSession, *, task: Task) -> list[tuple[str, str]]:
-    """Small, deterministic context: the task title/description plus the
-    titles/bodies of the notes already linked to it. Kept compact and
-    order-stable (notes by created_at, id) so a scripted provider yields
-    a reproducible run."""
+    """Small, deterministic context: the task title/description, the
+    titles/bodies of the notes already linked to it, and (docs/adr/0025
+    P4 -- the LLM-recipient handoff delivery path) the PENDING incoming
+    handoffs for the task: each predecessor's title + the handoff
+    message + the artifact note title/body. Kept compact and
+    order-stable (notes by created_at,id; handoffs by created_at,id) so
+    a scripted provider yields a reproducible run."""
     lines = [f"Task: {task.title}"]
     if task.description:
         lines.append(f"Description: {task.description}")
+    # Incoming coordination handoffs (P4): the same artifact+message
+    # primitive a human would receive as a notification, injected here
+    # for an llm_agent recipient. Deterministic order (created_at, id).
+    incoming = await coordination_svc.incoming_for_context(session, task_id=task.id)
+    for ho, pred, note in incoming:
+        lines.append(f"Handoff from [{pred.title}]: {ho.message}")
+        if note is not None:
+            body = (note.transcript or "").strip()[:500]
+            lines.append(f"Handoff artifact[{note.title or 'untitled'}]: {body}")
     linked = list(
         (
             await session.execute(
@@ -386,6 +399,26 @@ async def start_run(
         executor=executor,
         provider=provider or get_llm(),
     )
+    # The run has begun and its context was built from the task's
+    # PENDING incoming handoffs (the P4 LLM-recipient delivery path):
+    # mark them consumed so a later run does not re-inject them
+    # (idempotent -- a second start finds none). Non-fatal: a
+    # bookkeeping failure here is logged (audit boundary, like
+    # coordination.on_task_completed) and must not undo a finished run.
+    try:
+        await coordination_svc.mark_incoming_consumed(
+            session, org_id=org_id, actor_id=actor_id, task_id=task_id
+        )
+    except Exception as exc:  # coordination boundary: never fail the run
+        await audit.log(
+            session,
+            org_id=org_id,
+            actor_id=actor_id,
+            entity="task_handoff",
+            entity_id=task_id,
+            action="consume_failed",
+            diff={"error": str(exc)[:200]},
+        )
     await _audit_run(session, org_id=org_id, actor_id=actor_id, run=run)
     return run
 

@@ -117,6 +117,13 @@ class Task(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, Base):
     # project); true/false = explicit per-task override.
     billable: Mapped[bool | None] = mapped_column(nullable=True)
     is_archived: Mapped[bool] = mapped_column(nullable=False, server_default="false")
+    # Contract-net (docs/adr/0025, P4): the lightweight "announced /
+    # awaiting claim" flag. Set by ``POST /tasks/{id}/offer`` (owner),
+    # cleared on ``claim`` (the claimant becomes a TaskAssignee) -- a
+    # single transient per-task boolean, no bid table (full bidding is
+    # beyond P4's minimal contract-net; the llm_agent "award" is the P2
+    # admission dispatch, not re-implemented here).
+    offered: Mapped[bool] = mapped_column(nullable=False, server_default="false")
     deleted_at: Mapped[datetime.datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )

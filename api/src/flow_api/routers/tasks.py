@@ -16,6 +16,7 @@ from flow_api.schemas import (
     CommentCreateIn,
     CommentOut,
     ExpectedVersionIn,
+    HandoffOut,
     NoteOut,
     ReminderIn,
     ReminderOut,
@@ -33,8 +34,10 @@ from flow_core.models.comment import Comment
 from flow_core.models.note import Note
 from flow_core.models.tag import Tag
 from flow_core.models.task import Task
+from flow_core.models.task_handoff import TaskHandoff
 from flow_core.models.workflow import WorkflowState
 from flow_core.services import attachments as att_svc
+from flow_core.services import coordination as coord_svc
 from flow_core.services import notes as notes_svc
 from flow_core.services import notifications as notif_svc
 from flow_core.services import tasks as svc
@@ -66,6 +69,7 @@ def _out(t: Task, state_name: str, tags: list[Tag] | None = None) -> TaskOut:
         budget_id=t.budget_id,
         billable=t.billable,
         is_archived=t.is_archived,
+        offered=t.offered,
         deleted_at=t.deleted_at,
         version=t.version,
     )
@@ -499,3 +503,81 @@ async def create_task_note(
     )
     tagmap = await notes_svc.tags_by_note(ctx.session, note_ids=[n.id])
     return _note_out(n, tagmap.get(n.id, []))
+
+
+# --- P4: coordination handoffs + contract-net (docs/adr/0025) ---
+
+
+def _handoff_out(h: TaskHandoff) -> HandoffOut:
+    return HandoffOut(
+        id=h.id,
+        predecessor_task_id=h.predecessor_task_id,
+        successor_task_id=h.successor_task_id,
+        from_executor_id=h.from_executor_id,
+        to_executor_id=h.to_executor_id,
+        message=h.message,
+        artifact_note_id=h.artifact_note_id,
+        status=h.status,
+        delivered_at=h.delivered_at,
+        consumed_at=h.consumed_at,
+        version=h.version,
+    )
+
+
+async def _task_out(ctx: TenantCtx, task: Task) -> TaskOut:
+    names = await _state_names(ctx, {task.state_id})
+    tagmap = await svc.tags_by_task(ctx.session, task_ids=[task.id])
+    return _out(task, names.get(task.state_id, ""), tagmap.get(task.id, []))
+
+
+@router.get("/{task_id}/handoffs", response_model=list[HandoffOut])
+async def list_handoffs(
+    task_id: uuid.UUID,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+) -> list[HandoffOut]:
+    """Member: incoming + outgoing coordination handoffs for the task
+    (the on-completion creation is automatic -- no create endpoint).
+    RLS-scoped; a foreign task simply yields none."""
+    rows = await coord_svc.list_handoffs(ctx.session, org_id=ctx.org_id, task_id=task_id)
+    return [_handoff_out(h) for h in rows]
+
+
+@router.post("/{task_id}/offer", response_model=TaskOut)
+async def offer_task(
+    task_id: uuid.UUID,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+) -> TaskOut:
+    """Owner: announce the task to eligible members (contract-net
+    call-for-proposals). Owner-gated in the service (effective-role
+    sudo enforced)."""
+    task = await coord_svc.offer_task(
+        ctx.session, org_id=ctx.org_id, actor_id=ctx.user_id, task_id=task_id
+    )
+    return await _task_out(ctx, task)
+
+
+@router.post("/{task_id}/claim", response_model=TaskOut)
+async def claim_task(
+    task_id: uuid.UUID,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+) -> TaskOut:
+    """Member: claim an offered task (contract-net award) -> the caller
+    becomes an assignee, ``offered`` is cleared. 400 if not offered /
+    already claimed."""
+    task = await coord_svc.claim_task(
+        ctx.session, org_id=ctx.org_id, actor_id=ctx.user_id, task_id=task_id
+    )
+    return await _task_out(ctx, task)
+
+
+@router.post("/{task_id}/decline", response_model=TaskOut)
+async def decline_task(
+    task_id: uuid.UUID,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+) -> TaskOut:
+    """Member: decline an offered task (lightweight: notify the offerer
+    + audit; no assignment). 400 if not offered."""
+    task = await coord_svc.decline_task(
+        ctx.session, org_id=ctx.org_id, actor_id=ctx.user_id, task_id=task_id
+    )
+    return await _task_out(ctx, task)

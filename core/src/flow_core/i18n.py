@@ -91,6 +91,9 @@ class MessageCode(enum.StrEnum):
     AGENT_RUN_NOT_DISPATCHABLE = "agent_run.not_dispatchable"
     AGENT_RUN_ALREADY_ACTIVE = "agent_run.already_active"
     AGENT_RUN_TERMINAL = "agent_run.terminal"
+    HANDOFF_NOT_FOUND = "handoff.not_found"
+    TASK_NOT_OFFERED = "task.not_offered"
+    TASK_ALREADY_CLAIMED = "task.already_claimed"
     RECURRENCE_WITH_DEPS = "recurrence.with_dependencies"
     WORKSPACE_NOT_OWNER = "workspace.not_owner"
     WORKSPACE_SOLE = "workspace.sole"
@@ -206,6 +209,9 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
         ),
         MessageCode.AGENT_RUN_ALREADY_ACTIVE: ("An agent run for this task is already active"),
         MessageCode.AGENT_RUN_TERMINAL: ("Agent run has already finished and cannot be cancelled"),
+        MessageCode.HANDOFF_NOT_FOUND: "Handoff not found",
+        MessageCode.TASK_NOT_OFFERED: ("Task is not offered (nothing to claim or decline)"),
+        MessageCode.TASK_ALREADY_CLAIMED: ("Task has already been claimed by a member"),
         MessageCode.RECURRENCE_WITH_DEPS: (
             "A recurring task cannot have dependencies (mutually exclusive in v1)"
         ),

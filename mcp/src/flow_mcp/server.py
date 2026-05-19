@@ -46,6 +46,7 @@ from flow_core.models.task import (
     SchedulePolicy,
     Task,
 )
+from flow_core.models.task_handoff import TaskHandoff
 from flow_core.models.time_entry import TimeEntry
 from flow_core.models.user import User
 from flow_core.models.workflow import WorkflowDefinition, WorkflowState, WorkflowTransition
@@ -56,6 +57,7 @@ from flow_core.services import attachments as attachments_svc
 from flow_core.services import billing as billing_svc
 from flow_core.services import budgets as budgets_svc
 from flow_core.services import calendar as calendars
+from flow_core.services import coordination as coordination_svc
 from flow_core.services import dependencies, scheduler, tasks, taxonomy
 from flow_core.services import email as email_svc
 from flow_core.services import events as events_svc
@@ -521,6 +523,7 @@ def _task_full(t: Task) -> dict[str, Any]:
         "necessity": t.necessity.value,
         "budget_id": str(t.budget_id) if t.budget_id else None,
         "is_archived": t.is_archived,
+        "offered": t.offered,
         "deleted_at": t.deleted_at.isoformat() if t.deleted_at else None,
         "version": t.version,
     }
@@ -1309,6 +1312,72 @@ async def agent_run_cancel(token: str, org_id: str, run_id: str) -> dict[str, An
             run_id=uuid.UUID(run_id),
         )
         return _agent_run(run)
+
+
+# --- P4: coordination handoffs + contract-net (docs/adr/0025) ---
+
+
+def _handoff(h: TaskHandoff) -> dict[str, Any]:
+    return {
+        "id": str(h.id),
+        "predecessor_task_id": str(h.predecessor_task_id),
+        "successor_task_id": str(h.successor_task_id),
+        "from_executor_id": (str(h.from_executor_id) if h.from_executor_id else None),
+        "to_executor_id": str(h.to_executor_id) if h.to_executor_id else None,
+        "message": h.message,
+        "artifact_note_id": (str(h.artifact_note_id) if h.artifact_note_id else None),
+        "status": h.status.value,
+        "delivered_at": h.delivered_at.isoformat() if h.delivered_at else None,
+        "consumed_at": h.consumed_at.isoformat() if h.consumed_at else None,
+        "version": h.version,
+    }
+
+
+@mcp.tool()
+async def task_handoffs_list(token: str, org_id: str, task_id: str) -> list[dict[str, Any]]:
+    """List the coordination handoffs touching a task (incoming +
+    outgoing). The on-completion creation is automatic (no create
+    tool). Member-level, RLS-scoped (a foreign task yields none)."""
+    async with _tenant(token, org_id) as (s, org, _user):
+        rows = await coordination_svc.list_handoffs(s, org_id=org, task_id=uuid.UUID(task_id))
+        return [_handoff(h) for h in rows]
+
+
+@mcp.tool()
+async def task_offer(token: str, org_id: str, task_id: str) -> dict[str, Any]:
+    """Owner: announce a task to eligible members (contract-net call-
+    for-proposals); marks it offered + notifies. Owner-gated in the
+    service (effective-role sudo enforced). The llm_agent 'award' is
+    the P2 admission dispatch, not this tool."""
+    async with _tenant(token, org_id) as (s, org, user):
+        task = await coordination_svc.offer_task(
+            s, org_id=org, actor_id=user, task_id=uuid.UUID(task_id)
+        )
+        return _task_full(task)
+
+
+@mcp.tool()
+async def task_claim(token: str, org_id: str, task_id: str) -> dict[str, Any]:
+    """Member: claim an offered task (contract-net award) -> the caller
+    becomes an assignee, ``offered`` is cleared, the offerer is
+    notified. Errors if not offered / already claimed."""
+    async with _tenant(token, org_id) as (s, org, user):
+        task = await coordination_svc.claim_task(
+            s, org_id=org, actor_id=user, task_id=uuid.UUID(task_id)
+        )
+        return _task_full(task)
+
+
+@mcp.tool()
+async def task_decline(token: str, org_id: str, task_id: str) -> dict[str, Any]:
+    """Member: decline an offered task (lightweight: notify the offerer
+    + audit, no assignment, ``offered`` left set for others). Errors if
+    not offered."""
+    async with _tenant(token, org_id) as (s, org, user):
+        task = await coordination_svc.decline_task(
+            s, org_id=org, actor_id=user, task_id=uuid.UUID(task_id)
+        )
+        return _task_full(task)
 
 
 # --- F4: time tracking (FR-5) ---
