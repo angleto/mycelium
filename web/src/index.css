@@ -1604,3 +1604,33 @@ button.btn--danger:hover {
   background: #dc2626;
   opacity: 1;
 }
+
+/* Invoice document preview panel + labelled line form. */
+.docpanel {
+  border: 1px solid var(--border, #ccc);
+  border-radius: 6px;
+  padding: 0.7rem 0.9rem;
+  margin: 0.6rem 0;
+}
+.docpanel__head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+.docpanel__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+  gap: 0.8rem;
+  font-size: 0.86rem;
+}
+.docpanel__causale {
+  margin-top: 0.5rem;
+  font-style: italic;
+}
+.lineform label {
+  display: flex;
+  flex-direction: column;
+  font-size: 0.78rem;
+  gap: 0.15rem;
+}

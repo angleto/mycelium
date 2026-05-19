@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { api, errMessage, workspaceHeader } from '../api/client'
+import { api, authFetch, errMessage, workspaceHeader } from '../api/client'
 import { useSession } from '../auth/useSession'
 import type { components } from '../api/schema'
 
@@ -10,9 +10,16 @@ type Line = components['schemas']['InvoiceLineOut']
 type Profile = components['schemas']['IssuerProfileOut']
 type Tag = components['schemas']['TagOut']
 type ReportRow = components['schemas']['ReportRowOut']
+type Preview = components['schemas']['InvoicePreviewOut']
 
 
-const EMPTY_LINE = { description: '', unit_price: 0, quantity: 1, vat_rate: 22 }
+const EMPTY_LINE = {
+  description: '',
+  unit_price: 0,
+  quantity: 1,
+  vat_rate: 22,
+  natura: '',
+}
 type LineForm = typeof EMPTY_LINE
 
 function totals(lines: Line[]): { taxable: number; vat: number; total: number } {
@@ -51,6 +58,7 @@ export function InvoicesRoute() {
   const [sel, setSel] = useState<Invoice | null>(null)
   const [lines, setLines] = useState<Line[]>([])
   const [xml, setXml] = useState<string | null>(null)
+  const [preview, setPreview] = useState<Preview | null>(null)
 
   // draft invoice fields (dirty-gated Save)
   const [dIssuer, setDIssuer] = useState('')
@@ -115,11 +123,14 @@ export function InvoicesRoute() {
     setErr(null)
     setXml(null)
     const h = workspaceHeader()
-    const [iv, ln] = await Promise.all([
+    const [iv, ln, pv] = await Promise.all([
       api.GET('/invoices/{invoice_id}', {
         params: { header: h, path: { invoice_id: id } },
       }),
       api.GET('/invoices/{invoice_id}/lines', {
+        params: { header: h, path: { invoice_id: id } },
+      }),
+      api.GET('/invoices/{invoice_id}/preview', {
         params: { header: h, path: { invoice_id: id } },
       }),
     ])
@@ -130,6 +141,7 @@ export function InvoicesRoute() {
     const inv = iv.data
     setSel(inv)
     setLines(ln.data ?? [])
+    setPreview(pv.data ?? null)
     setDIssuer(inv.issuer_profile_id ?? '')
     setDClient(inv.client_tag_id)
     setDSeries(inv.series)
@@ -212,6 +224,7 @@ export function InvoicesRoute() {
         unit_price: lAdd.unit_price,
         quantity: lAdd.quantity,
         vat_rate: lAdd.vat_rate,
+        natura: lAdd.natura || null,
       },
     })
     if (error) {
@@ -232,6 +245,7 @@ export function InvoicesRoute() {
         unit_price: lEdit.unit_price,
         quantity: lEdit.quantity,
         vat_rate: lEdit.vat_rate,
+        natura: lEdit.natura || null,
       },
     })
     if (error) {
@@ -333,6 +347,18 @@ export function InvoicesRoute() {
     setXml(String(data))
   }
 
+  async function openPdf(id: string) {
+    setErr(null)
+    const res = await authFetch(`/invoices/${id}/pdf`)
+    if (!res.ok) {
+      setErr(errMessage(await res.json().catch(() => null)))
+      return
+    }
+    const u = URL.createObjectURL(await res.blob())
+    window.open(u, '_blank', 'noopener')
+    window.setTimeout(() => URL.revokeObjectURL(u), 60000)
+  }
+
   const tv = totals(lines)
   const clientName = (id: string) => clients.find((c) => c.id === id)?.name ?? id
   const dField = <T,>(setter: (v: T) => void) => (v: T) => {
@@ -416,6 +442,145 @@ export function InvoicesRoute() {
             {isDraft ? t('invoices.draftEditable') : t('invoices.emitted')}
           </p>
 
+          {preview && (
+            <div className="docpanel">
+              <div className="docpanel__head">
+                <strong>{t('invoices.doc.title')}</strong>
+                <span className="modal__sp" />
+                <button
+                  type="button"
+                  className="btn--sm"
+                  onClick={() => void openPdf(sel.id)}
+                >
+                  {t('invoices.doc.pdf')}
+                </button>
+                <button
+                  type="button"
+                  className="btn--sm btn--ghost"
+                  onClick={() => void showXml(sel.id)}
+                >
+                  {t('invoices.doc.xml')}
+                </button>
+                {preview.is_forfettario && (
+                  <span className="tag tag--muted">
+                    {t('invoices.doc.forfettario')}
+                  </span>
+                )}
+              </div>
+              <div className="docpanel__grid">
+                <div>
+                  <div className="muted">{t('invoices.doc.cedente')}</div>
+                  {preview.issuer ? (
+                    <>
+                      <div>{preview.issuer.denominazione}</div>
+                      <div className="muted">
+                        {preview.issuer.piva
+                          ? `P.IVA ${preview.issuer.piva}`
+                          : ''}
+                        {preview.issuer.codice_fiscale
+                          ? ` · CF ${preview.issuer.codice_fiscale}`
+                          : ''}
+                        {preview.issuer.regime_fiscale
+                          ? ` · ${preview.issuer.regime_fiscale}`
+                          : ''}
+                      </div>
+                      <div className="muted">
+                        {[
+                          preview.issuer.indirizzo,
+                          preview.issuer.cap,
+                          preview.issuer.comune,
+                          preview.issuer.provincia,
+                        ]
+                          .filter(Boolean)
+                          .join(' ')}
+                      </div>
+                    </>
+                  ) : (
+                    <div className="err">{t('invoices.doc.missing')}</div>
+                  )}
+                </div>
+                <div>
+                  <div className="muted">{t('invoices.doc.cessionario')}</div>
+                  {preview.client ? (
+                    <>
+                      <div>{preview.client.denominazione}</div>
+                      <div className="muted">
+                        {preview.client.piva
+                          ? `P.IVA ${preview.client.piva}`
+                          : ''}
+                        {preview.client.codice_fiscale
+                          ? ` · CF ${preview.client.codice_fiscale}`
+                          : ''}
+                      </div>
+                      <div className="muted">
+                        {[
+                          preview.client.indirizzo,
+                          preview.client.cap,
+                          preview.client.comune,
+                          preview.client.provincia,
+                        ]
+                          .filter(Boolean)
+                          .join(' ')}
+                      </div>
+                      <div className="muted">
+                        {t('invoices.doc.sdi')}:{' '}
+                        {preview.client.codice_destinatario ||
+                          preview.client.pec ||
+                          t('invoices.doc.none')}
+                      </div>
+                    </>
+                  ) : (
+                    <div className="err">{t('invoices.doc.missing')}</div>
+                  )}
+                </div>
+                <div>
+                  <div className="muted">{t('invoices.doc.totals')}</div>
+                  <div>
+                    {t('invoices.doc.taxable')}: {preview.totals.taxable} €
+                  </div>
+                  <div>
+                    {t('invoices.doc.vat')}: {preview.totals.vat} €
+                  </div>
+                  {Number(preview.totals.bollo) > 0 && (
+                    <div>
+                      {t('invoices.doc.bollo')}: {preview.totals.bollo} €
+                    </div>
+                  )}
+                  <div>
+                    <strong>
+                      {t('invoices.doc.total')}: {preview.totals.total} €
+                    </strong>
+                  </div>
+                  <div className="muted">
+                    {t('invoices.doc.iban')}:{' '}
+                    {preview.effective_iban || t('invoices.doc.none')}
+                    {preview.iban_source
+                      ? ` (${t(`invoices.doc.ibanSrc.${preview.iban_source}`)})`
+                      : ''}
+                  </div>
+                </div>
+                <div>
+                  <div className="muted">{t('invoices.doc.sdiState')}</div>
+                  <div>
+                    {t('invoices.state')} {preview.state} · sdi{' '}
+                    {preview.sdi_status}
+                  </div>
+                  <div className="muted">
+                    {t('invoices.doc.sdiId')}:{' '}
+                    {preview.identificativo_sdi || t('invoices.doc.none')}
+                  </div>
+                  <div className="muted">
+                    {t('invoices.doc.conservation')}:{' '}
+                    {preview.conservation_status}
+                  </div>
+                </div>
+              </div>
+              {preview.is_forfettario && preview.causale && (
+                <p className="hint docpanel__causale">{preview.causale}</p>
+              )}
+            </div>
+          )}
+
           <div className="row">
             <label>
               {t('invoices.issuer')}
@@ -468,6 +633,7 @@ export function InvoicesRoute() {
                   <th>{t('invoices.qty')}</th>
                   <th>{t('invoices.price')}</th>
                   <th>{t('invoices.vat')}</th>
+                  <th>{t('invoices.natura')}</th>
                   <th>{t('invoices.lineTotal')}</th>
                   <th />
                 </tr>
@@ -516,6 +682,16 @@ export function InvoicesRoute() {
                         />
                       </td>
                       <td>
+                        <input
+                          value={lEdit.natura}
+                          placeholder="N2.2"
+                          style={{ width: '4.5rem' }}
+                          onChange={(e) =>
+                            setLEdit({ ...lEdit, natura: e.target.value })
+                          }
+                        />
+                      </td>
+                      <td>
                         {(Number(lEdit.quantity) * Number(lEdit.unit_price)).toFixed(2)}
                       </td>
                       <td>
@@ -542,6 +718,7 @@ export function InvoicesRoute() {
                       <td>{Number(ln.quantity)}</td>
                       <td>{Number(ln.unit_price).toFixed(2)}</td>
                       <td>{Number(ln.vat_rate)}%</td>
+                      <td>{ln.natura ?? '—'}</td>
                       <td>
                         {(Number(ln.quantity) * Number(ln.unit_price)).toFixed(2)}
                       </td>
@@ -558,6 +735,7 @@ export function InvoicesRoute() {
                                   unit_price: Number(ln.unit_price),
                                   quantity: Number(ln.quantity),
                                   vat_rate: Number(ln.vat_rate),
+                                  natura: ln.natura ?? '',
                                 })
                               }}
                             >
@@ -581,34 +759,61 @@ export function InvoicesRoute() {
           )}
 
           {isDraft && (
-            <form onSubmit={(e) => void addLine(e)} className="row">
-              <input
-                required
-                placeholder={t('invoices.lineDesc')}
-                value={lAdd.description}
-                onChange={(e) => setLAdd({ ...lAdd, description: e.target.value })}
-              />
-              <input
-                type="number"
-                placeholder={t('invoices.qty')}
-                value={lAdd.quantity}
-                style={{ width: '4rem' }}
-                onChange={(e) => setLAdd({ ...lAdd, quantity: Number(e.target.value) })}
-              />
-              <input
-                type="number"
-                placeholder={t('invoices.price')}
-                value={lAdd.unit_price}
-                style={{ width: '6rem' }}
-                onChange={(e) => setLAdd({ ...lAdd, unit_price: Number(e.target.value) })}
-              />
-              <input
-                type="number"
-                placeholder={t('invoices.vat')}
-                value={lAdd.vat_rate}
-                style={{ width: '4rem' }}
-                onChange={(e) => setLAdd({ ...lAdd, vat_rate: Number(e.target.value) })}
-              />
+            <form onSubmit={(e) => void addLine(e)} className="row lineform">
+              <label>
+                {t('invoices.lineDesc')}
+                <input
+                  required
+                  value={lAdd.description}
+                  onChange={(e) =>
+                    setLAdd({ ...lAdd, description: e.target.value })
+                  }
+                />
+              </label>
+              <label>
+                {t('invoices.qty')}
+                <input
+                  type="number"
+                  value={lAdd.quantity}
+                  style={{ width: '5rem' }}
+                  onChange={(e) =>
+                    setLAdd({ ...lAdd, quantity: Number(e.target.value) })
+                  }
+                />
+              </label>
+              <label>
+                {t('invoices.price')}
+                <input
+                  type="number"
+                  value={lAdd.unit_price}
+                  style={{ width: '7rem' }}
+                  onChange={(e) =>
+                    setLAdd({ ...lAdd, unit_price: Number(e.target.value) })
+                  }
+                />
+              </label>
+              <label>
+                {t('invoices.vat')}
+                <input
+                  type="number"
+                  value={lAdd.vat_rate}
+                  style={{ width: '4.5rem' }}
+                  onChange={(e) =>
+                    setLAdd({ ...lAdd, vat_rate: Number(e.target.value) })
+                  }
+                />
+              </label>
+              <label>
+                {t('invoices.natura')}
+                <input
+                  placeholder="N2.2"
+                  value={lAdd.natura}
+                  style={{ width: '5rem' }}
+                  onChange={(e) =>
+                    setLAdd({ ...lAdd, natura: e.target.value })
+                  }
+                />
+              </label>
               <button type="submit">{t('invoices.addLine')}</button>
             </form>
           )}
