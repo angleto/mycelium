@@ -5,12 +5,14 @@ most recent recompute wins)."""
 from __future__ import annotations
 
 import datetime
+import decimal
 import uuid
 
 from sqlalchemy import (
     DateTime,
     ForeignKey,
     Integer,
+    Numeric,
     PrimaryKeyConstraint,
     Text,
     func,
@@ -38,6 +40,16 @@ class Schedule(OrgScopedMixin, Base):
     slack_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
     on_logical_critical_path: Mapped[bool] = mapped_column(
         nullable=False, server_default=text("false")
+    )
+    # Resource-aware critical chain (docs/adr/0025, P1): zero float in
+    # the *leveled* plan (after resource contention), distinct from the
+    # logical critical path which assumes infinite resources.
+    on_critical_chain: Mapped[bool] = mapped_column(nullable=False, server_default=text("false"))
+    # Projected LLM credit cost = effort_hours * executor.credit_rate
+    # (0 for human tasks). Work is not run yet -> projection only, no
+    # billing meter (ADR-0019).
+    projected_cost: Mapped[decimal.Decimal] = mapped_column(
+        Numeric(14, 4), nullable=False, server_default=text("0")
     )
     scheduled_start: Mapped[datetime.datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True

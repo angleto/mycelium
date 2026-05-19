@@ -36,6 +36,8 @@ def _out(s: Schedule) -> ScheduleOut:
         lf=s.lf,
         slack_minutes=s.slack_minutes,
         on_logical_critical_path=s.on_logical_critical_path,
+        on_critical_chain=s.on_critical_chain,
+        projected_cost=s.projected_cost,
         scheduled_start=s.scheduled_start,
         scheduled_end=s.scheduled_end,
         computed_at=s.computed_at,
@@ -48,14 +50,20 @@ async def recompute(
     body: RecomputeIn,
     ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
 ) -> RecomputeOut:
-    count = await svc.recompute(
+    summary = await svc.recompute(
         ctx.session,
         org_id=ctx.org_id,
         actor_id=ctx.user_id,
         project_tag_id=body.project_tag_id,
         as_of=body.as_of,
+        policy=body.policy,
     )
-    return RecomputeOut(count=count)
+    return RecomputeOut(
+        count=summary.count,
+        makespan_minutes=summary.makespan_minutes,
+        projected_credit_cost=summary.projected_credit_cost,
+        policy=summary.policy,
+    )
 
 
 @router.get("/schedule", response_model=list[ScheduleOut])

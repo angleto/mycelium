@@ -41,6 +41,19 @@ class ScheduleMode(enum.StrEnum):
     manual = "manual"
 
 
+class SchedulePolicy(enum.StrEnum):
+    """Resource-leveling objective, selected per recompute run
+    (docs/adr/0025, P1). Not persisted on the task: it is a knob of the
+    recompute call (like ``as_of``), so it lives with the task enums but
+    has no column. Every policy is fully deterministic (id final
+    tie-break) -- see ``scheduler._policy_key``."""
+
+    fastest = "fastest"
+    cheapest = "cheapest"
+    balanced = "balanced"
+    throughput = "throughput"
+
+
 class ConstraintKind(enum.StrEnum):
     none = "none"
     SNET = "SNET"  # start no earlier than

@@ -27,7 +27,13 @@ from flow_core.models.notification import (
     RecurrenceFreq,
 )
 from flow_core.models.tag import TagKind
-from flow_core.models.task import ConstraintKind, ExecKind, Necessity, ScheduleMode
+from flow_core.models.task import (
+    ConstraintKind,
+    ExecKind,
+    Necessity,
+    ScheduleMode,
+    SchedulePolicy,
+)
 from flow_core.models.time_entry import TimeSource
 
 
@@ -612,10 +618,16 @@ class TaskScheduleIn(BaseModel):
 class RecomputeIn(BaseModel):
     project_tag_id: uuid.UUID | None = None
     as_of: datetime.datetime | None = None
+    # Resource-leveling objective (docs/adr/0025, P1).
+    policy: SchedulePolicy = SchedulePolicy.balanced
 
 
 class RecomputeOut(BaseModel):
     count: int
+    # Projections so policies are comparable (docs/adr/0025).
+    makespan_minutes: int
+    projected_credit_cost: Decimal
+    policy: SchedulePolicy
 
 
 class ScheduleOut(BaseModel):
@@ -626,6 +638,10 @@ class ScheduleOut(BaseModel):
     lf: datetime.datetime | None
     slack_minutes: int | None
     on_logical_critical_path: bool
+    # Resource-aware critical chain + projected LLM credit cost
+    # (docs/adr/0025, P1).
+    on_critical_chain: bool
+    projected_cost: Decimal
     scheduled_start: datetime.datetime | None
     scheduled_end: datetime.datetime | None
     computed_at: datetime.datetime

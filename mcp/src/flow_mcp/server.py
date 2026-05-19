@@ -37,7 +37,13 @@ from flow_core.models.notification import NotificationChannelKind, RecurrenceFre
 from flow_core.models.project_profile import ProjectProfile
 from flow_core.models.schedule import Schedule
 from flow_core.models.tag import Tag, TagKind
-from flow_core.models.task import ConstraintKind, Necessity, ScheduleMode, Task
+from flow_core.models.task import (
+    ConstraintKind,
+    Necessity,
+    ScheduleMode,
+    SchedulePolicy,
+    Task,
+)
 from flow_core.models.time_entry import TimeEntry
 from flow_core.models.user import User
 from flow_core.models.workflow import WorkflowDefinition, WorkflowState, WorkflowTransition
@@ -802,6 +808,8 @@ def _schedule(s: Schedule) -> dict[str, Any]:
         "lf": s.lf.isoformat() if s.lf else None,
         "slack_minutes": s.slack_minutes,
         "on_logical_critical_path": s.on_logical_critical_path,
+        "on_critical_chain": s.on_critical_chain,
+        "projected_cost": str(s.projected_cost),
         "scheduled_start": (s.scheduled_start.isoformat() if s.scheduled_start else None),
         "scheduled_end": (s.scheduled_end.isoformat() if s.scheduled_end else None),
         "input_fingerprint": s.input_fingerprint,
@@ -1018,17 +1026,27 @@ async def recompute_schedule(
     org_id: str,
     project_tag_id: str | None = None,
     as_of: str | None = None,
+    policy: str | None = None,
 ) -> dict[str, Any]:
-    """Deterministically recompute the schedule for a scope."""
+    """Deterministically recompute the schedule for a scope under a
+    resource-leveling ``policy`` (fastest|cheapest|balanced|throughput,
+    default balanced). Returns the row count plus the projected makespan
+    and projected credit cost so policies are comparable (ADR-0025)."""
     async with _tenant(token, org_id) as (s, org, user):
-        count = await scheduler.recompute(
+        summary = await scheduler.recompute(
             s,
             org_id=org,
             actor_id=user,
             project_tag_id=(uuid.UUID(project_tag_id) if project_tag_id else None),
             as_of=dt.datetime.fromisoformat(as_of) if as_of else None,
+            policy=(SchedulePolicy(policy) if policy else SchedulePolicy.balanced),
         )
-        return {"count": count}
+        return {
+            "count": summary.count,
+            "makespan_minutes": summary.makespan_minutes,
+            "projected_credit_cost": str(summary.projected_credit_cost),
+            "policy": summary.policy.value,
+        }
 
 
 @mcp.tool()

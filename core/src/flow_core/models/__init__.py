@@ -38,6 +38,7 @@ from flow_core.models.email import (
     EmailProvider,
 )
 from flow_core.models.event import Event, EventParticipant
+from flow_core.models.executor import Executor, ExecutorKind
 from flow_core.models.invoice import (
     ConservationAdhesion,
     ConservationStatus,
@@ -111,6 +112,8 @@ __all__ = [
     "Event",
     "EventParticipant",
     "ExecKind",
+    "Executor",
+    "ExecutorKind",
     "Invoice",
     "InvoiceCounter",
     "InvoiceKind",
