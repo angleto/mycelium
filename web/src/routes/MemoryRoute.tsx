@@ -35,6 +35,12 @@ export function MemoryRoute() {
   const [sId, setSId] = useState('')
   const [msg, setMsg] = useState<string | null>(null)
   const [err, setErr] = useState<string | null>(null)
+  // Long ops (embedding cold-start, hybrid search) need a visible
+  // working state; tag curation is per-blob so it doesn't freeze the
+  // whole list.
+  const [searching, setSearching] = useState(false)
+  const [writing, setWriting] = useState(false)
+  const [busyBlob, setBusyBlob] = useState<string | null>(null)
 
   useEffect(() => {
     let active = true
@@ -49,7 +55,14 @@ export function MemoryRoute() {
         }),
       ])
       if (!active) return
-      if (tg.data) setTags(tg.data.filter((g) => g.kind === 'generic'))
+      // Assignable tags: any active tag except channels (channels are
+      // a separate facet). Archived tags must not be offered.
+      if (tg.data)
+        setTags(
+          tg.data.filter(
+            (g) => g.kind !== 'memory_channel' && g.status === 'active',
+          ),
+        )
       setSem(st.data ? st.data.semantic : null)
       if (ch.data) setChannels(ch.data)
     })()
@@ -65,22 +78,27 @@ export function MemoryRoute() {
   const runSearch = useCallback(
     async (q: string) => {
       setErr(null)
-      const { data, error } = await api.POST('/memory/search', {
-        params: { header: workspaceHeader() },
-        body: {
-          query: q,
-          operation_id: crypto.randomUUID(),
-          limit: 10,
-          channel_tag_id: fCh || undefined,
-          tag_ids: fTags,
-        },
-      })
-      if (error || !data) {
-        setErr(errMessage(error))
-        return
+      setSearching(true)
+      try {
+        const { data, error } = await api.POST('/memory/search', {
+          params: { header: workspaceHeader() },
+          body: {
+            query: q,
+            operation_id: crypto.randomUUID(),
+            limit: 10,
+            channel_tag_id: fCh || undefined,
+            tag_ids: fTags,
+          },
+        })
+        if (error || !data) {
+          setErr(errMessage(error))
+          return
+        }
+        setRan(q)
+        setHits(data)
+      } finally {
+        setSearching(false)
       }
-      setRan(q)
-      setHits(data)
     },
     [fCh, fTags],
   )
@@ -89,6 +107,7 @@ export function MemoryRoute() {
     e.preventDefault()
     setErr(null)
     setMsg(null)
+    setWriting(true)
     const { error } = await api.POST('/memory/blobs', {
       params: { header: workspaceHeader() },
       body: {
@@ -102,41 +121,70 @@ export function MemoryRoute() {
         tag_ids: wTags,
       },
     })
+    setWriting(false)
     if (error) {
       setErr(errMessage(error))
       return
     }
     setText('')
     setWTags([])
-    setMsg(t('memory.write'))
+    setMsg(t('memory.saved'))
+  }
+
+  // Optimistic: the slow part was re-running the whole hybrid search
+  // after every tag change. Mutate the local result instead and only
+  // resync (re-search) if the server rejects it.
+  function patchHitTags(
+    blobId: string,
+    fn: (tags: NonNullable<Hit['blob']['tags']>) => NonNullable<Hit['blob']['tags']>,
+  ) {
+    setHits((hs) =>
+      hs
+        ? hs.map((h) =>
+            h.blob.id === blobId
+              ? { ...h, blob: { ...h.blob, tags: fn(h.blob.tags ?? []) } }
+              : h,
+          )
+        : hs,
+    )
   }
 
   async function attach(blobId: string, tagId: string) {
+    const g = tags.find((x) => x.id === tagId)
+    if (!g) return
     setErr(null)
+    setBusyBlob(blobId)
+    patchHitTags(blobId, (ts) =>
+      ts.some((x) => x.id === g.id)
+        ? ts
+        : [...ts, { id: g.id, kind: g.kind, name: g.name, color: g.color }],
+    )
     const { error } = await api.POST('/memory/blobs/{blob_id}/tags', {
       params: { header: workspaceHeader(), path: { blob_id: blobId } },
       body: { tag_id: tagId },
     })
+    setBusyBlob(null)
     if (error) {
       setErr(errMessage(error))
-      return
+      if (ran !== null) await runSearch(ran)
     }
-    if (ran !== null) await runSearch(ran)
   }
 
   async function detach(blobId: string, tagId: string) {
     setErr(null)
+    setBusyBlob(blobId)
+    patchHitTags(blobId, (ts) => ts.filter((x) => x.id !== tagId))
     const { error } = await api.DELETE('/memory/blobs/{blob_id}/tags/{tag_id}', {
       params: {
         header: workspaceHeader(),
         path: { blob_id: blobId, tag_id: tagId },
       },
     })
+    setBusyBlob(null)
     if (error) {
       setErr(errMessage(error))
-      return
+      if (ran !== null) await runSearch(ran)
     }
-    if (ran !== null) await runSearch(ran)
   }
 
   async function onErase(e: FormEvent) {
@@ -224,7 +272,9 @@ export function MemoryRoute() {
             </div>
           )}
           <div>
-            <button type="submit">{t('memory.write')}</button>
+            <button type="submit" disabled={writing}>
+              {writing ? t('memory.saving') : t('memory.write')}
+            </button>
           </div>
         </form>
       </section>
@@ -249,7 +299,9 @@ export function MemoryRoute() {
               {t('memory.ch.channel')}
               {chanSelect(fCh, setFCh, true)}
             </label>
-            <button type="submit">{t('memory.search')}</button>
+            <button type="submit" disabled={searching}>
+              {searching ? t('memory.searching') : t('memory.search')}
+            </button>
           </div>
           {tags.length > 0 && (
             <div className="row">
@@ -270,6 +322,8 @@ export function MemoryRoute() {
           )}
         </form>
 
+        {searching && <p className="hint">{t('memory.searching')}…</p>}
+
         {hits && (
           <>
             <h3>{t('memory.results')}</h3>
@@ -282,6 +336,7 @@ export function MemoryRoute() {
                   const own = new Set(blobTags.map((g) => g.id))
                   const indexed =
                     !!h.blob.model_id && h.blob.model_id !== 'none'
+                  const rowBusy = busyBlob === h.blob.id
                   return (
                     <li key={h.blob.id}>
                       <div>{h.blob.text ?? ''}</div>
@@ -292,6 +347,7 @@ export function MemoryRoute() {
                             type="button"
                             className="btn--sm btn--ghost"
                             title={t('graph.remove')}
+                            disabled={rowBusy}
                             onClick={() => void detach(h.blob.id, g.id)}
                           >
                             <TagChip
@@ -305,6 +361,7 @@ export function MemoryRoute() {
                         <select
                           value=""
                           aria-label={t('memory.addTag')}
+                          disabled={rowBusy}
                           onChange={(e) =>
                             e.target.value &&
                             void attach(h.blob.id, e.target.value)
@@ -319,6 +376,9 @@ export function MemoryRoute() {
                               </option>
                             ))}
                         </select>
+                        {rowBusy && (
+                          <span className="muted">{t('memory.working')}…</span>
+                        )}
                         <span className="muted">
                           {' · '}
                           {t('memory.tier')} {h.blob.tier}
