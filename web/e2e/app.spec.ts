@@ -12,6 +12,11 @@ const BENIGN = [
   /ResizeObserver loop/i,
   /\[vite\]/i,
   /Download the React DevTools/i,
+  // A handled 4xx (auth / RBAC denial / validation / optimistic
+  // concurrency) makes the browser auto-log "Failed to load
+  // resource"; the app surfaces it via the .err banner. Not a bug.
+  // 5xx is NOT filtered — a server crash must still fail the gate.
+  /Failed to load resource: the server responded with a status of 4\d\d/i,
 ]
 
 function watch(page: Page, errors: string[]) {
@@ -50,6 +55,7 @@ const ROUTES = [
   '/invoices',
   '/notifications',
   '/tags',
+  '/workspace',
   '/settings',
 ]
 
@@ -135,6 +141,12 @@ test('clients: create a client and add a project inline', async ({
   const errors: string[] = []
   watch(page, errors)
   await login(page)
+  // Creating clients/projects is an owner-only privileged write under
+  // the hardened model: elevate via the mode chip first (what an
+  // owner does in the real UI).
+  const chip = page.locator('.modechip')
+  await chip.click()
+  await expect(chip).toHaveClass(/modechip--owner/)
   await page.goto('/clients')
 
   // Unique names per run: client/project tag names are unique per org,
@@ -177,28 +189,83 @@ test('graph: catalog tag filter + proper scope label', async ({ page }) => {
   expect(errors, errors.join('\n')).toEqual([])
 })
 
-test('admin: sudo elevation reveals user administration', async ({
+test('mode chip cycles User → Owner → Admin and gates accordingly', async ({
+  page,
+}) => {
+  const errors: string[] = []
+  watch(page, errors)
+  await login(page) // angelo: owner of Personal AND platform admin
+
+  const chip = page.locator('.modechip')
+  await expect(chip).toBeVisible()
+  // Least privilege by default.
+  await expect(chip).toHaveClass(/modechip--user/)
+
+  // Workspace page: the owner is listed as a member, but in user mode
+  // the management controls are gated. The rename field is purely
+  // canManage-gated (the Add-member button also depends on the email
+  // field, so it is not a clean signal).
+  await page.goto('/workspace')
+  await expect(
+    page.locator('table.tbl tbody tr', { hasText: EMAIL }).first(),
+  ).toBeVisible()
+  const rename = page
+    .locator('.card input:not([readonly])')
+    .first()
+  await expect(rename).toBeDisabled()
+
+  // Cycle → Owner: management enabled.
+  await chip.click()
+  await expect(chip).toHaveClass(/modechip--owner/)
+  await expect(rename).toBeEnabled()
+
+  // Cycle → Admin: platform admin surface reachable.
+  await chip.click()
+  await expect(chip).toHaveClass(/modechip--admin/)
+  await page.goto('/admin/users')
+  const arow = page
+    .locator('table.tbl tbody tr', { hasText: EMAIL })
+    .first()
+  await expect(arow).toBeVisible()
+  await expect(arow).toContainText(/admin/i)
+
+  // Cycle → back to User.
+  await page.locator('.modechip').click()
+  await expect(page.locator('.modechip')).toHaveClass(/modechip--user/)
+  expect(errors, errors.join('\n')).toEqual([])
+})
+
+test('effective role: privileged write needs Owner mode', async ({
   page,
 }) => {
   const errors: string[] = []
   watch(page, errors)
   await login(page)
 
-  // Not elevated by default: a ghost "Admin" entry control, no badge.
-  const enter = page.locator('.topbar__admin')
-  await expect(enter).toBeVisible()
-  await expect(page.locator('.badge--admin')).toHaveCount(0)
+  // Default User mode: creating a client is rejected (owner-only),
+  // surfaced as an in-app error, not a crash.
+  await page.goto('/clients')
+  const form = page.locator('form.cpform').first()
+  const stamp = Date.now()
+  await form.locator('input[name=name]').fill(`RBAC ${stamp}`)
+  await form.locator('input[name=ragione_sociale]').fill(`RBAC ${stamp} srl`)
+  await form.getByRole('button', { name: /^add$|^aggiungi$/i }).click()
+  await expect(page.locator('main.content .err')).toBeVisible()
 
-  await enter.click()
-  // Elevated: badge appears, admin nav appears.
-  await expect(page.locator('.badge--admin')).toBeVisible()
-  await page.goto('/admin/users')
-  const row = page.locator('table.tbl tbody tr', { hasText: EMAIL }).first()
-  await expect(row).toBeVisible()
-  await expect(row).toContainText(/admin/i)
-
-  // Exit elevation.
-  await page.locator('.badge--admin').click()
-  await expect(page.locator('.topbar__admin')).toBeVisible()
+  // Switch to Owner via the chip, retry → succeeds.
+  const chip = page.locator('.modechip')
+  await chip.click()
+  await expect(chip).toHaveClass(/modechip--owner/)
+  await page.goto('/clients')
+  const form2 = page.locator('form.cpform').first()
+  await form2.locator('input[name=name]').fill(`RBAC ${stamp}`)
+  await form2
+    .locator('input[name=ragione_sociale]')
+    .fill(`RBAC ${stamp} srl`)
+  await form2.getByRole('button', { name: /^add$|^aggiungi$/i }).click()
+  await expect(
+    page.locator('.cpitem', { hasText: `RBAC ${stamp}` }).first(),
+  ).toBeVisible()
+  await expect(page.locator('main.content .err')).toHaveCount(0)
   expect(errors, errors.join('\n')).toEqual([])
 })
