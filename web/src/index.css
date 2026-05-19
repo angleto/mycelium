@@ -1214,18 +1214,35 @@ button.btn--danger:hover {
   font-size: 0.82rem;
   color: var(--muted);
 }
-.cpitem {
-  padding: 0.55rem 0.2rem;
-  border-bottom: 1px solid var(--border);
+/* .cpitem is a `.list li`, which is display:flex — that laid the head,
+   the edit form and the children side by side (the edit form became a
+   thin floating column). Force a vertical block card and neutralise
+   the inherited `.list li button { margin-left:auto }`. */
+.list li.cpitem {
+  display: block;
+  padding: 0.7rem 0.9rem;
 }
-.cpitem:last-child {
-  border-bottom: 0;
+.list li.cpitem button {
+  margin-left: 0;
 }
 .cpitem__head {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.5rem 0.6rem;
   flex-wrap: wrap;
+}
+.cpitem__head .btn--sm {
+  flex: 0 0 auto;
+}
+/* Nested project rows: lighter than the client card. */
+.cpchildren .list.nested {
+  margin: 0.45rem 0 0;
+  border-left: 0;
+  padding-left: 0;
+}
+.cpchildren .list.nested li.cpitem {
+  padding: 0.5rem 0.7rem;
+  background: var(--surface-2);
 }
 .cpcaret {
   background: none;
