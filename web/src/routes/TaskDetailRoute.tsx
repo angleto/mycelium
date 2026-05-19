@@ -6,6 +6,8 @@ import { RichEditor } from '../components/RichEditor'
 import { TagPicker } from '../components/TagPicker'
 import { PriorityChip } from '../components/PriorityChip'
 import { ScaleSelect } from '../components/ScaleSelect'
+import { Attachments } from '../components/Attachments'
+import { TaskTimer } from '../components/TaskTimer'
 import { formatHours } from '../lib/estimate'
 
 // Mirrors backend derive_priority. importance/urgency are 1..5 where
@@ -54,6 +56,9 @@ export function TaskDetailRoute() {
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState<string | null>(null)
   const [err, setErr] = useState<string | null>(null)
+  const [workNotes, setWorkNotes] = useState<
+    { id: string; title: string | null }[]
+  >([])
 
   const apply = useCallback((tk: Task) => {
     setTask(tk)
@@ -90,7 +95,7 @@ export function TaskDetailRoute() {
     let active = true
     void (async () => {
       const h = workspaceHeader()
-      const [tk, st, tg, all, dp, ws, rm] = await Promise.all([
+      const [tk, st, tg, all, dp, ws, rm, nt] = await Promise.all([
         api.GET('/tasks/{task_id}', { params: { header: h, path: { task_id: id } } }),
         api.GET('/tasks/{task_id}/states', {
           params: { header: h, path: { task_id: id } },
@@ -102,6 +107,7 @@ export function TaskDetailRoute() {
         api.GET('/tasks/{task_id}/reminders', {
           params: { header: h, path: { task_id: id } },
         }),
+        api.GET('/notes', { params: { header: h } }),
       ])
       if (!active) return
       if (tk.data) apply(tk.data)
@@ -112,6 +118,12 @@ export function TaskDetailRoute() {
       if (dp.data) setDeps(dp.data)
       if (ws.data) setPresets(ws.data.settings?.estimate_presets ?? [])
       if (rm.data) setReminders(rm.data)
+      if (nt.data)
+        setWorkNotes(
+          nt.data
+            .filter((n) => n.task_id === id)
+            .map((n) => ({ id: n.id, title: n.title })),
+        )
     })()
     return () => {
       active = false
@@ -282,6 +294,20 @@ export function TaskDetailRoute() {
       return
     }
     await reloadReminders()
+  }
+
+  // Create a fresh work note already linked to this task and jump
+  // into it (time logged there is billed to this task).
+  async function newWorkNote() {
+    const { data, error } = await api.POST('/tasks/{task_id}/notes', {
+      params: { header: workspaceHeader(), path: { task_id: id } },
+      body: { title: title || t('notes.untitled') },
+    })
+    if (error || !data) {
+      setErr(errMessage(error))
+      return
+    }
+    navigate(`/notes?open=${data.id}`)
   }
 
   function fmtOffset(m: number): string {
@@ -711,6 +737,31 @@ export function TaskDetailRoute() {
         </button>
       </div>
       <p className="hint">{t('tasks.relatedTo')}</p>
+
+      <h2>{t('tasks.workNotes')}</h2>
+      <div className="row">
+        <TaskTimer taskId={id} />
+        <span className="modal__sp" />
+        <button type="button" onClick={() => void newWorkNote()}>
+          {t('tasks.newWorkNote')}
+        </button>
+      </div>
+      {workNotes.length === 0 ? (
+        <p className="hint">{t('tasks.noWorkNotes')}</p>
+      ) : (
+        <ul className="list">
+          {workNotes.map((n) => (
+            <li key={n.id}>
+              <Link to={`/notes?open=${n.id}`}>
+                {n.title || t('notes.untitled')}
+              </Link>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <h2>{t('attach.title')}</h2>
+      <Attachments taskId={id} />
     </section>
   )
 }

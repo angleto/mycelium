@@ -46,6 +46,31 @@ export function workspaceHeader(): { 'x-workspace-id': string } {
   return { 'x-workspace-id': s.workspaceId }
 }
 
+/** Raw authenticated fetch for binary endpoints (multipart upload,
+ * file download) where the typed JSON client does not fit. Mirrors
+ * authMiddleware exactly: same bearer, tenant, elevation and locale
+ * headers, and the same 401 → clearSession behaviour, so it never
+ * escalates and stays consistent with the typed client. Do NOT set
+ * Content-Type for FormData bodies — the browser adds the multipart
+ * boundary. `path` is relative to the `/api` base. */
+export async function authFetch(
+  path: string,
+  init: RequestInit = {},
+): Promise<Response> {
+  const s = getSession()
+  if (!s) throw new Error('no session')
+  const h = new Headers(init.headers)
+  h.set('Authorization', `Bearer ${s.token}`)
+  h.set('x-workspace-id', s.workspaceId)
+  if (isAdminMode()) h.set('X-Admin-Mode', '1')
+  const wr = getWorkspaceRole()
+  if (wr) h.set('X-Workspace-Role', wr)
+  h.set('Accept-Language', i18n.language)
+  const res = await fetch(`/api${path}`, { ...init, headers: h })
+  if (res.status === 401 && getSession()) clearSession()
+  return res
+}
+
 /** Backend domain error envelope ({code, detail}); see api/app.py.
  * `detail` is a string for our domain errors but a FastAPI 422 sends
  * an ARRAY of {loc,msg,type,...} validation objects — never render it

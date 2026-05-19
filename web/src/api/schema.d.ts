@@ -855,6 +855,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/tasks/{task_id}/attachments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Task Attachments */
+        get: operations["list_task_attachments_tasks__task_id__attachments_get"];
+        put?: never;
+        /** Upload Task Attachment */
+        post: operations["upload_task_attachment_tasks__task_id__attachments_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/tasks/{task_id}/note": {
         parameters: {
             query?: never;
@@ -866,6 +884,23 @@ export interface paths {
         put?: never;
         /** Get Or Create Task Note */
         post: operations["get_or_create_task_note_tasks__task_id__note_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tasks/{task_id}/notes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create Task Note */
+        post: operations["create_task_note_tasks__task_id__notes_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1905,6 +1940,59 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/memory/channels": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Channels
+         * @description List the tenant's configured channels (seeds the canonical four
+         *     on first call). Any authenticated member may list -- the memory UI
+         *     needs it to select a channel. RLS-scoped.
+         */
+        get: operations["list_channels_memory_channels_get"];
+        put?: never;
+        /**
+         * Create Channel
+         * @description Create a custom channel (platform-admin only).
+         */
+        post: operations["create_channel_memory_channels_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/memory/channels/{channel_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Channel
+         * @description Delete a custom channel (platform-admin only). A seeded channel
+         *     is not deletable -- disable it instead (channel.seeded_undeletable).
+         */
+        delete: operations["delete_channel_memory_channels__channel_id__delete"];
+        options?: never;
+        head?: never;
+        /**
+         * Patch Channel
+         * @description Rename and/or enable/disable a channel (platform-admin only). A
+         *     seeded channel may be renamed and disabled but its key is immutable
+         *     (channel.key_immutable).
+         */
+        patch: operations["patch_channel_memory_channels__channel_id__patch"];
+        trace?: never;
+    };
     "/notes": {
         parameters: {
             query?: never;
@@ -1970,6 +2058,24 @@ export interface paths {
         post?: never;
         /** Detach Note Tag */
         delete: operations["detach_note_tag_notes__note_id__tags__tag_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/notes/{note_id}/attachments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Note Attachments */
+        get: operations["list_note_attachments_notes__note_id__attachments_get"];
+        put?: never;
+        /** Upload Note Attachment */
+        post: operations["upload_note_attachment_notes__note_id__attachments_post"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -2157,6 +2263,40 @@ export interface paths {
         /** Erase */
         post: operations["erase_notes__note_id__erase_post"];
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/attachments/{attachment_id}/download": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Download Attachment */
+        get: operations["download_attachment_attachments__attachment_id__download_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/attachments/{attachment_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete Attachment */
+        delete: operations["delete_attachment_attachments__attachment_id__delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -2545,10 +2685,43 @@ export interface components {
              */
             user_id: string;
         };
+        /** AttachmentOut */
+        AttachmentOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Note Id */
+            note_id?: string | null;
+            /** Task Id */
+            task_id?: string | null;
+            /** Filename */
+            filename: string;
+            /** Mime Type */
+            mime_type: string;
+            /** Size Bytes */
+            size_bytes: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
         /** BalanceOut */
         BalanceOut: {
             /** Balance */
             balance: string;
+        };
+        /** Body_upload_note_attachment_notes__note_id__attachments_post */
+        Body_upload_note_attachment_notes__note_id__attachments_post: {
+            /** File */
+            file: string;
+        };
+        /** Body_upload_task_attachment_tasks__task_id__attachments_post */
+        Body_upload_task_attachment_tasks__task_id__attachments_post: {
+            /** File */
+            file: string;
         };
         /** BudgetCreateIn */
         BudgetCreateIn: {
@@ -3681,6 +3854,40 @@ export interface components {
             /** Tags */
             tags?: components["schemas"]["TagBrief"][];
         };
+        /** MemoryChannelCreateIn */
+        MemoryChannelCreateIn: {
+            /** Name */
+            name: string;
+            /** System Key */
+            system_key?: string | null;
+        };
+        /** MemoryChannelOut */
+        MemoryChannelOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Name */
+            name: string;
+            /** System Key */
+            system_key: string | null;
+            /** Enabled */
+            enabled: boolean;
+            /** Seeded */
+            seeded: boolean;
+            /** Version */
+            version: number;
+        };
+        /** MemoryChannelPatchIn */
+        MemoryChannelPatchIn: {
+            /** Name */
+            name?: string | null;
+            /** Enabled */
+            enabled?: boolean | null;
+            /** System Key */
+            system_key?: string | null;
+        };
         /** MemoryConsolidateIn */
         MemoryConsolidateIn: {
             /** Project Id */
@@ -3722,6 +3929,8 @@ export interface components {
             tag_ids?: string[];
             /** Channel Tag Id */
             channel_tag_id?: string | null;
+            /** Channel Key */
+            channel_key?: string | null;
         };
         /** MemoryStatusOut */
         MemoryStatusOut: {
@@ -3755,6 +3964,8 @@ export interface components {
             tag_ids?: string[];
             /** Channel Tag Id */
             channel_tag_id?: string | null;
+            /** Channel Key */
+            channel_key?: string | null;
         };
         /** MeterIn */
         MeterIn: {
@@ -3901,6 +4112,8 @@ export interface components {
             title?: string | null;
             /** Text */
             text?: string | null;
+            /** Task Id */
+            task_id?: string | null;
         };
         /**
          * NoteStatus
@@ -4497,6 +4710,13 @@ export interface components {
              */
             task_id: string;
         };
+        /** TaskNoteCreateIn */
+        TaskNoteCreateIn: {
+            /** Title */
+            title?: string | null;
+            /** Text */
+            text?: string | null;
+        };
         /** TaskOut */
         TaskOut: {
             /**
@@ -4683,8 +4903,12 @@ export interface components {
             rate_snapshot: string | null;
             /** Currency */
             currency: string;
-            /** Note */
-            note: string | null;
+            /** Memo */
+            memo: string | null;
+            /** Note Id */
+            note_id?: string | null;
+            /** Note Title */
+            note_title?: string | null;
             /** Version */
             version: number;
             /** Task Title */
@@ -4704,12 +4928,14 @@ export interface components {
         TimeEntryPatchIn: {
             /** Expected Version */
             expected_version: number;
-            /** Note */
-            note?: string | null;
+            /** Memo */
+            memo?: string | null;
             /** Billable */
             billable?: boolean | null;
             /** Task Id */
             task_id?: string | null;
+            /** Note Id */
+            note_id?: string | null;
             /** Started At */
             started_at?: string | null;
             /** Ended At */
@@ -4717,11 +4943,8 @@ export interface components {
         };
         /** TimeManualIn */
         TimeManualIn: {
-            /**
-             * Task Id
-             * Format: uuid
-             */
-            task_id: string;
+            /** Task Id */
+            task_id?: string | null;
             /**
              * Started At
              * Format: date-time
@@ -4733,8 +4956,10 @@ export interface components {
             duration_seconds?: number | null;
             /** Billable */
             billable?: boolean | null;
-            /** Note */
-            note?: string | null;
+            /** Memo */
+            memo?: string | null;
+            /** Note Id */
+            note_id?: string | null;
         };
         /**
          * TimeSource
@@ -4743,15 +4968,14 @@ export interface components {
         TimeSource: "timer" | "manual";
         /** TimeStartIn */
         TimeStartIn: {
-            /**
-             * Task Id
-             * Format: uuid
-             */
-            task_id: string;
+            /** Task Id */
+            task_id?: string | null;
             /** Billable */
             billable?: boolean | null;
-            /** Note */
-            note?: string | null;
+            /** Memo */
+            memo?: string | null;
+            /** Note Id */
+            note_id?: string | null;
             /**
              * Parallel
              * @default false
@@ -4762,8 +4986,8 @@ export interface components {
         TimeStopIn: {
             /** Task Id */
             task_id?: string | null;
-            /** Note */
-            note?: string | null;
+            /** Memo */
+            memo?: string | null;
         };
         /** TokenOut */
         TokenOut: {
@@ -6975,6 +7199,82 @@ export interface operations {
             };
         };
     };
+    list_task_attachments_tasks__task_id__attachments_get: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AttachmentOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    upload_task_attachment_tasks__task_id__attachments_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_upload_task_attachment_tasks__task_id__attachments_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AttachmentOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_or_create_task_note_tasks__task_id__note_post: {
         parameters: {
             query?: never;
@@ -6990,6 +7290,46 @@ export interface operations {
             cookie?: never;
         };
         requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NoteOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_task_note_tasks__task_id__notes_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TaskNoteCreateIn"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {
@@ -9864,6 +10204,152 @@ export interface operations {
             };
         };
     };
+    list_channels_memory_channels_get: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemoryChannelOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_channel_memory_channels_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-admin-mode"?: string | null;
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MemoryChannelCreateIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemoryChannelOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_channel_memory_channels__channel_id__delete: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-admin-mode"?: string | null;
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+            };
+            path: {
+                channel_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    patch_channel_memory_channels__channel_id__patch: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-admin-mode"?: string | null;
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+            };
+            path: {
+                channel_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MemoryChannelPatchIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemoryChannelOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_notes_notes_get: {
         parameters: {
             query?: {
@@ -10078,6 +10564,82 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_note_attachments_notes__note_id__attachments_get: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                note_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AttachmentOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    upload_note_attachment_notes__note_id__attachments_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                note_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_upload_note_attachment_notes__note_id__attachments_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AttachmentOut"];
+                };
             };
             /** @description Validation Error */
             422: {
@@ -10504,6 +11066,76 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["NoteEraseOut"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    download_attachment_attachments__attachment_id__download_get: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                attachment_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_attachment_attachments__attachment_id__delete: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                attachment_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

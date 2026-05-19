@@ -4,6 +4,9 @@ import { api, errMessage } from '../api/client'
 import { EstimatePresets } from '../components/EstimatePresets'
 import { IssuerProfiles } from '../components/IssuerProfiles'
 import { WorkspaceManager } from '../components/WorkspaceManager'
+import { MemoryChannelsAdmin } from '../components/MemoryChannelsAdmin'
+import { useMe } from '../auth/useMe'
+import { isAdminMode } from '../auth/session'
 import type { components } from '../api/schema'
 
 type Status = components['schemas']['MfaStatusOut']
@@ -11,6 +14,7 @@ type Setup = components['schemas']['MfaSetupOut']
 
 export function SettingsRoute() {
   const { t } = useTranslation()
+  const { me } = useMe()
   const [status, setStatus] = useState<Status | null>(null)
   const [setup, setSetup] = useState<Setup | null>(null)
   const [totp, setTotp] = useState('')
@@ -151,6 +155,7 @@ export function SettingsRoute() {
       )}
     </section>
     <WorkspaceManager />
+    {me?.is_admin && isAdminMode() && <MemoryChannelsAdmin />}
     <IssuerProfiles />
     <EstimatePresets />
     </>

@@ -15,6 +15,7 @@ import { MarkdownView } from '../components/Markdown'
 import { NoteListItem } from '../components/NoteListItem'
 import { TagPicker } from '../components/TagPicker'
 import { TaskTimer } from '../components/TaskTimer'
+import { Attachments } from '../components/Attachments'
 import { useFocus } from '../lib/focus'
 import type { components } from '../api/schema'
 
@@ -54,6 +55,9 @@ export function NotesRoute() {
 
   // Modal: a note open for edit (or a fresh draft being created).
   const [sel, setSel] = useState<Note | null>(null)
+  const [linkTasks, setLinkTasks] = useState<
+    { id: string; title: string }[]
+  >([])
   const [eTitle, setETitle] = useState('')
   const [eText, setEText] = useState('')
   const [turns, setTurns] = useState<Turn[]>([])
@@ -85,7 +89,7 @@ export function NotesRoute() {
   useEffect(() => {
     let active = true
     void (async () => {
-      const [n, g] = await Promise.all([
+      const [n, g, tk] = await Promise.all([
         api.GET('/notes', {
           params: {
             header: workspaceHeader(),
@@ -93,10 +97,13 @@ export function NotesRoute() {
           },
         }),
         api.GET('/tags', { params: { header: workspaceHeader() } }),
+        api.GET('/tasks', { params: { header: workspaceHeader() } }),
       ])
       if (!active) return
       if (n.data) setNotes(n.data)
       if (g.data) setTags(g.data)
+      if (tk.data)
+        setLinkTasks(tk.data.map((x) => ({ id: x.id, title: x.title })))
     })()
     return () => {
       active = false
@@ -253,6 +260,28 @@ export function NotesRoute() {
     })
     if (data) setSel(data)
     await loadNotes()
+  }
+
+  // Link / unlink the task this note logs work against. task_id null
+  // unlinks; the server preserves the link when the field is absent
+  // (so plain title/text autosave never touches it).
+  async function linkTask(taskId: string | null) {
+    if (!sel) return
+    setErr(null)
+    const { error, response } = await api.PATCH('/notes/{note_id}', {
+      params: { header: workspaceHeader(), path: { note_id: sel.id } },
+      body: { expected_version: sel.version, task_id: taskId },
+    })
+    if (response.status === 409) {
+      setErr(t('tasks.conflict'))
+      await refreshSel()
+      return
+    }
+    if (error) {
+      setErr(errMessage(error))
+      return
+    }
+    await refreshSel()
   }
 
   async function addTag(tagId: string) {
@@ -602,16 +631,43 @@ export function NotesRoute() {
 
             {!creating && sel && sel.kind !== 'conversation' && (
               <div className="modal__body">
-                {sel.task_id && (
-                  <div className="notebanner">
-                    <span>{t('notes.linkedTask')}</span>
-                    <Link to={`/tasks/${sel.task_id}`}>
-                      {t('notes.openTask')}
-                    </Link>
-                    <span className="modal__sp" />
-                    <TaskTimer taskId={sel.task_id} />
-                  </div>
-                )}
+                <div className="notebanner">
+                  {sel.task_id ? (
+                    <>
+                      <span>{t('notes.linkedTask')}</span>
+                      <Link to={`/tasks/${sel.task_id}`}>
+                        {t('notes.openTask')}
+                      </Link>
+                      <button
+                        type="button"
+                        className="btn--sm btn--ghost"
+                        title={t('notes.unlinkTaskHint')}
+                        onClick={() => void linkTask(null)}
+                      >
+                        {t('notes.unlinkTask')}
+                      </button>
+                      <span className="modal__sp" />
+                      <TaskTimer taskId={sel.task_id} noteId={sel.id} />
+                    </>
+                  ) : (
+                    <>
+                      <span>{t('notes.linkTaskPrompt')}</span>
+                      <select
+                        value=""
+                        onChange={(e) =>
+                          e.target.value && void linkTask(e.target.value)
+                        }
+                      >
+                        <option value="">{t('notes.linkTaskPick')}</option>
+                        {linkTasks.map((tk) => (
+                          <option key={tk.id} value={tk.id}>
+                            {tk.title}
+                          </option>
+                        ))}
+                      </select>
+                    </>
+                  )}
+                </div>
                 <input
                   placeholder={t('notes.titlePlaceholder')}
                   value={eTitle}
@@ -627,6 +683,7 @@ export function NotesRoute() {
                   {t('notes.text')}
                   <RichEditor value={eText} onChange={setEText} large />
                 </label>
+                <Attachments noteId={sel.id} />
               </div>
             )}
             {!creating && sel && sel.kind !== 'conversation' && (

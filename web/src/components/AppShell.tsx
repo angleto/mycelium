@@ -14,13 +14,13 @@ import { Logo } from './Logo'
 import { Icon, type IconName } from './NavIcon'
 import { ThemeToggle } from './ThemeToggle'
 import { hms, elapsedSec } from '../lib/time'
+import { useRunningTimers } from '../lib/useRunningTimer'
 import { parseMentionHref, routeForMention } from '../lib/mentions'
 import { useFocus } from '../lib/focus'
 import type { components } from '../api/schema'
 import i18n from '../i18n'
 
 type Item = { to: string; label: string; icon: IconName }
-type Running = components['schemas']['TimeEntryOut']
 type Tag = components['schemas']['TagOut']
 type Project = components['schemas']['ProjectOut']
 
@@ -116,31 +116,15 @@ function ProjectFocus() {
 
 // Top-bar running indicator. One timer: spinner + title + live
 // elapsed. Several: cycles every 5s through them showing "i/n", the
-// task title (scrolling) and that timer's live elapsed. Polls
-// /time/running on the timer views' 5s cadence.
+// task title (scrolling) and that timer's live elapsed. State comes
+// from the shared server-authoritative source (useRunningTimers),
+// which resyncs on resume from lid-close / reconnect / tab-switch.
 function RunningIndicator() {
   const { t } = useTranslation()
   const session = useSession()
-  const [runs, setRuns] = useState<Running[]>([])
+  const { running: runs, now } = useRunningTimers()
   const [titles, setTitles] = useState<Record<string, string>>({})
-  const [now, setNow] = useState(() => Date.now())
   const [idx, setIdx] = useState(0)
-
-  useEffect(() => {
-    let active = true
-    const tick = async () => {
-      const { data } = await api.GET('/time/running', {
-        params: { header: workspaceHeader() },
-      })
-      if (active) setRuns(data ?? [])
-    }
-    void tick()
-    const poll = setInterval(() => void tick(), 5000)
-    return () => {
-      active = false
-      clearInterval(poll)
-    }
-  }, [session?.workspaceId])
 
   // Resolve task titles for the running entries (TimeEntryOut has only
   // task_id). One list fetch, cached by id.
@@ -158,12 +142,6 @@ function RunningIndicator() {
       active = false
     }
   }, [session?.workspaceId])
-
-  useEffect(() => {
-    if (runs.length === 0) return
-    const clock = setInterval(() => setNow(Date.now()), 1000)
-    return () => clearInterval(clock)
-  }, [runs.length])
 
   // Cycle through the running entries every 5s when there is >1.
   // (idx is bounded at render via safeIdx, so no reset needed here.)

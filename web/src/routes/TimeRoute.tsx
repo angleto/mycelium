@@ -584,6 +584,9 @@ export function TimeRoute() {
                                 {(e.client_name ?? '—') +
                                   ' / ' +
                                   (e.project_name ?? '—')}
+                                {e.note_title
+                                  ? ` · 📝 ${e.note_title}`
+                                  : ''}
                                 {' · '}
                                 {e.duration_seconds != null
                                   ? hhmmss(e.duration_seconds)

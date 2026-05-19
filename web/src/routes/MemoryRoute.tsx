@@ -7,13 +7,15 @@ import type { components } from '../api/schema'
 
 type Hit = components['schemas']['MemoryHitOut']
 type Tag = components['schemas']['TagOut']
+type Channel = components['schemas']['MemoryChannelOut']
 
 // Memory is hard-isolated within (workspace, project) and metered.
-// "Channels" are memory-only tags (kind=memory_channel) that organise
-// snippets and narrow recall; generic tags are an extra facet. Recall
-// is hybrid (semantic + keyword); if no embedding model is installed
-// it transparently degrades to keyword-only — snippets are still
-// saved and found by words.
+// "Channels" are a controlled, seeded vocabulary (email, telegram,
+// manual, agent, ...) so integrations have a deterministic target;
+// they are configured (Settings, platform admin), not created here.
+// Generic tags are an extra facet. Recall is hybrid (semantic +
+// keyword); with no embedding model it degrades to keyword-only —
+// snippets are still saved and found by words.
 export function MemoryRoute() {
   const { t } = useTranslation()
   const session = useSession()
@@ -23,43 +25,33 @@ export function MemoryRoute() {
   const [ran, setRan] = useState<string | null>(null)
   const [hits, setHits] = useState<Hit[] | null>(null)
   const [tags, setTags] = useState<Tag[]>([])
-  const [channels, setChannels] = useState<Tag[]>([])
+  const [channels, setChannels] = useState<Channel[]>([])
   const [sem, setSem] = useState<boolean | null>(null)
   const [wCh, setWCh] = useState('')
   const [fCh, setFCh] = useState('')
   const [wTags, setWTags] = useState<string[]>([])
   const [fTags, setFTags] = useState<string[]>([])
-  const [newCh, setNewCh] = useState('')
   const [sKind, setSKind] = useState('')
   const [sId, setSId] = useState('')
   const [msg, setMsg] = useState<string | null>(null)
   const [err, setErr] = useState<string | null>(null)
 
-  const loadTags = useCallback(async () => {
-    const { data } = await api.GET('/tags', {
-      params: { header: workspaceHeader() },
-    })
-    if (data) {
-      setTags(data.filter((g) => g.kind === 'generic'))
-      setChannels(data.filter((g) => g.kind === 'memory_channel'))
-    }
-  }, [])
-
   useEffect(() => {
     let active = true
     void (async () => {
-      const [tg, st] = await Promise.all([
+      const [tg, st, ch] = await Promise.all([
         api.GET('/tags', { params: { header: workspaceHeader() } }),
         api.GET('/memory/status', {
           params: { header: workspaceHeader() },
         }),
+        api.GET('/memory/channels', {
+          params: { header: workspaceHeader() },
+        }),
       ])
       if (!active) return
-      if (tg.data) {
-        setTags(tg.data.filter((g) => g.kind === 'generic'))
-        setChannels(tg.data.filter((g) => g.kind === 'memory_channel'))
-      }
+      if (tg.data) setTags(tg.data.filter((g) => g.kind === 'generic'))
       setSem(st.data ? st.data.semantic : null)
+      if (ch.data) setChannels(ch.data)
     })()
     return () => {
       active = false
@@ -68,23 +60,6 @@ export function MemoryRoute() {
 
   function toggle(list: string[], set: (v: string[]) => void, id: string) {
     set(list.includes(id) ? list.filter((x) => x !== id) : [...list, id])
-  }
-
-  async function createChannel() {
-    const name = newCh.trim()
-    if (!name) return
-    setErr(null)
-    const { data, error } = await api.POST('/tags', {
-      params: { header: workspaceHeader() },
-      body: { kind: 'memory_channel', name },
-    })
-    if (error || !data) {
-      setErr(errMessage(error))
-      return
-    }
-    setNewCh('')
-    await loadTags()
-    setWCh(data.id)
   }
 
   const runSearch = useCallback(
@@ -186,11 +161,13 @@ export function MemoryRoute() {
   ) => (
     <select value={value} onChange={(e) => set(e.target.value)}>
       {withNone && <option value="">{t('memory.ch.none')}</option>}
-      {channels.map((c) => (
-        <option key={c.id} value={c.id}>
-          {c.name}
-        </option>
-      ))}
+      {channels
+        .filter((c) => c.enabled)
+        .map((c) => (
+          <option key={c.id} value={c.id}>
+            {c.name}
+          </option>
+        ))}
     </select>
   )
 
@@ -225,24 +202,9 @@ export function MemoryRoute() {
               {t('memory.ch.channel')}
               {chanSelect(wCh, setWCh, true)}
             </label>
-            <label>
-              {t('memory.ch.create')}
-              <span className="row">
-                <input
-                  placeholder={t('memory.ch.newName')}
-                  value={newCh}
-                  onChange={(e) => setNewCh(e.target.value)}
-                />
-                <button
-                  type="button"
-                  className="btn--sm btn--ghost"
-                  disabled={!newCh.trim()}
-                  onClick={() => void createChannel()}
-                >
-                  +
-                </button>
-              </span>
-            </label>
+            {channels.filter((c) => c.enabled).length === 0 && (
+              <span className="hint">{t('memory.ch.noneConfigured')}</span>
+            )}
           </div>
           {tags.length > 0 && (
             <div className="row">
