@@ -4,7 +4,8 @@ messages via the i18n catalog (docs/adr/0017). No business logic here
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
+import contextlib
+from collections.abc import AsyncIterator, Awaitable, Callable
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -47,6 +48,7 @@ from flow_core.errors import (
     NotFoundError,
 )
 from flow_core.i18n import DEFAULT_LOCALE, render
+from flow_core.services.mailer import build_system_mailer, set_mailer
 
 _STATUS: dict[type[DomainError], int] = {
     AuthError: 401,
@@ -77,8 +79,29 @@ def _make_handler(
     return handler
 
 
+@contextlib.asynccontextmanager
+async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    """Process-global wiring for the *real* ASGI server.
+
+    Lifespan events fire only under an ASGI server (uvicorn) or a
+    ``with TestClient(...)`` block; the suite drives the app via
+    ``httpx.ASGITransport`` / bare ``TestClient(...)``, neither of
+    which emits lifespan, so this never runs in unit tests and a
+    test-injected fake mailer is never clobbered.
+
+    Defensive belt-and-braces even if it did run: only swap the
+    process-global when SMTP is actually configured. Unconfigured
+    (dev/OSS/tests) the module default is already ``LogMailer`` and we
+    leave the global untouched, so an explicit ``set_mailer(fake)``
+    always wins regardless of lifespan ordering."""
+    settings = get_settings()
+    if settings.smtp_configured:
+        set_mailer(build_system_mailer(settings))
+    yield
+
+
 def create_app() -> FastAPI:
-    app = FastAPI(title="Flow API", version="0.0.0")
+    app = FastAPI(title="Flow API", version="0.0.0", lifespan=_lifespan)
 
     @app.get("/healthz", tags=["meta"])
     async def healthz() -> dict[str, str]:

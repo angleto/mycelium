@@ -20,6 +20,7 @@ import pytest
 
 import flow_core.db as _db
 from flow_core.attachment_store import set_attachment_store_override
+from flow_core.services.mailer import LogMailer, set_mailer
 
 
 @pytest.fixture(autouse=True)
@@ -42,6 +43,21 @@ def _reset_attachment_store_override() -> Iterator[None]:
     every test, independent of any per-fixture finally ordering."""
     yield
     set_attachment_store_override(None)
+
+
+@pytest.fixture(autouse=True)
+def _reset_mailer() -> Iterator[None]:
+    """Safety net: the system mailer is a process-global (like the
+    engine and the attachment-store override). Auth/W1b tests inject a
+    capturing fake via ``set_mailer``; if an early assertion failure
+    skipped their ``finally``, the fake would leak into later tests
+    (a later auth flow would silently append to the wrong list / a
+    stale fake). Reset to the default ``LogMailer`` unconditionally
+    after every test, independent of per-test finally ordering. The
+    real app/worker wire SMTP outside pytest (lifespan / worker main),
+    so this never affects production."""
+    yield
+    set_mailer(LogMailer())
 
 
 @pytest.fixture(autouse=True)

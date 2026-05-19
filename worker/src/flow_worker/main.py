@@ -15,6 +15,7 @@ import asyncio
 import logging
 
 from flow_core.config import get_settings
+from flow_core.services.mailer import build_system_mailer, set_mailer
 from flow_worker import dispatch
 
 
@@ -26,6 +27,12 @@ async def _run() -> None:
 def main() -> None:
     settings = get_settings()
     logging.basicConfig(level=settings.log_level)
+    # Process-global mailer wiring for the real worker process (mirrors
+    # the API lifespan). Only swap when SMTP is configured; unconfigured
+    # the module default LogMailer stands. main() is the process entry,
+    # never imported by the test-suite, so no test mailer is clobbered.
+    if settings.smtp_configured:
+        set_mailer(build_system_mailer(settings))
     logging.getLogger("flow.worker").info(
         "worker started (env=%s); jobs: dispatch-loop",
         settings.env,

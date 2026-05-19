@@ -84,6 +84,23 @@ class Settings(BaseSettings):
     # layer, not the gated HTTP endpoint).
     allow_signup: bool = True
 
+    # System (transactional) mailer transport (W1b; ADR-0024). Pluggable
+    # like attachment_store: empty host (default) = the LogMailer, so
+    # OSS self-host + dev + the whole test-suite are unaffected (the
+    # verification/reset link is in the body and is logged). Setting
+    # FLOW_SMTP_HOST (+ FLOW_SMTP_FROM) switches to the real SmtpMailer
+    # (stdlib smtplib over STARTTLS for Scaleway TEM, port 587). The
+    # username/password are secret (k8s flow-smtp Secret) and may be
+    # legitimately empty for an unauthenticated relay, so they are NOT
+    # required; only host+from gate the SMTP transport (validated
+    # fail-closed below, same spirit as attachment_store='s3').
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_username: str = ""
+    smtp_password: str = ""
+    smtp_from: str = ""
+    smtp_starttls: bool = True
+
     # Auth hardening (W1b, ported from bitvision_phoenix; ADR-0024).
     require_email_verification: bool = False
     email_verification_ttl_seconds: int = 86400
@@ -137,6 +154,25 @@ class Settings(BaseSettings):
             if missing:
                 raise ValueError("attachment_store='s3' requires: " + ", ".join(sorted(missing)))
         return self
+
+    @model_validator(mode="after")
+    def _validate_smtp(self) -> Settings:
+        """Fail closed: configuring SMTP means configuring it fully. An
+        empty FLOW_SMTP_HOST is the safe dev/OSS default (LogMailer, no
+        requirements). A non-empty host means the real SmtpMailer, which
+        needs an envelope/From identity, so FLOW_SMTP_FROM is required;
+        a half-configured prod is rejected at startup rather than
+        emitting mail with no From. Username/password may be empty (an
+        unauthenticated relay is valid), so they are not required here."""
+        if self.smtp_host and not self.smtp_from:
+            raise ValueError("FLOW_SMTP_HOST is set but FLOW_SMTP_FROM is required to enable SMTP")
+        return self
+
+    @property
+    def smtp_configured(self) -> bool:
+        """SMTP transport is active iff host and From are both set
+        (the validator above guarantees from is present when host is)."""
+        return bool(self.smtp_host and self.smtp_from)
 
     @property
     def cors_origin_list(self) -> list[str]:
