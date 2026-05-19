@@ -477,6 +477,13 @@ export const it: Catalog = {
     duration: 'Durata',
     billable: 'fatturabile',
     report: 'Report',
+    editEntry: 'Modifica voce',
+    save: 'Salva',
+    startAt: 'Inizio',
+    endAt: 'Fine',
+    timezone: 'Fuso orario',
+    reassign: 'Task',
+    totalByTask: 'Per task',
     groupBy: 'Raggruppa per',
     group: {
       project: 'Progetto',

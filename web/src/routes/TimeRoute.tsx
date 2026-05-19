@@ -1,11 +1,24 @@
-import { useCallback, useEffect, useState, type FormEvent } from 'react'
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useState,
+  type FormEvent,
+} from 'react'
 import { useTranslation } from 'react-i18next'
 import { api, errMessage, workspaceHeader } from '../api/client'
 import { useSession } from '../auth/useSession'
+import {
+  fmtDateTime,
+  fmtClock as fmtClockTz,
+  toLocalInput,
+  fromLocalInput,
+} from '../lib/tz'
 import type { components } from '../api/schema'
 
 type Task = components['schemas']['TaskOut']
 type Entry = components['schemas']['TimeEntryOut']
+type TaskRep = components['schemas']['TaskTimeReportOut']
 type Row = components['schemas']['ReportRowOut']
 type Group = components['schemas']['ReportGroup']
 type Tag = components['schemas']['TagOut']
@@ -22,16 +35,6 @@ function hhmmss(sec: number): string {
   return `${h}h ${String(m).padStart(2, '0')}m ${String(s % 60).padStart(2, '0')}s`
 }
 
-function fmtDate(iso: string): string {
-  return new Date(iso).toLocaleDateString()
-}
-function fmtClock(iso: string | null | undefined): string {
-  if (!iso) return '…'
-  return new Date(iso).toLocaleTimeString([], {
-    hour: '2-digit',
-    minute: '2-digit',
-  })
-}
 
 export function TimeRoute() {
   const { t } = useTranslation()
@@ -56,6 +59,12 @@ export function TimeRoute() {
   const [pick, setPick] = useState('')
   const [now, setNow] = useState<number>(() => Date.now())
   const [err, setErr] = useState<string | null>(null)
+  const [byTask, setByTask] = useState<TaskRep[]>([])
+  const [openTask, setOpenTask] = useState<string | null>(null)
+  const [editId, setEditId] = useState<string | null>(null)
+  const [eTask, setETask] = useState('')
+  const [eStart, setEStart] = useState('')
+  const [eEnd, setEEnd] = useState('')
 
   const titleOf = (id: string) => tasks.find((x) => x.id === id)?.title ?? id.slice(0, 8)
 
@@ -76,7 +85,14 @@ export function TimeRoute() {
       params: { header: workspaceHeader(), query: reportQuery() },
     })
     if (r.data) setReport(r.data)
-  }, [reportQuery])
+    const q: Record<string, string> = {}
+    if (from) q.start_from = `${from}T00:00:00`
+    if (to) q.start_to = `${to}T23:59:59`
+    const bt = await api.GET('/time/report/by-task', {
+      params: { header: workspaceHeader(), query: q },
+    })
+    if (bt.data) setByTask(bt.data)
+  }, [reportQuery, from, to])
 
   const resetEntries = useCallback(async () => {
     const { data } = await api.GET('/time/entries', {
@@ -168,6 +184,34 @@ export function TimeRoute() {
     })
     setRunning(data ?? [])
   }, [])
+
+  async function beginEdit(en: Entry) {
+    setErr(null)
+    setEditId(en.id)
+    setETask(en.task_id)
+    setEStart(toLocalInput(en.started_at))
+    setEEnd(toLocalInput(en.ended_at))
+  }
+
+  async function saveEntry(en: Entry) {
+    setErr(null)
+    const { error } = await api.PATCH('/time/entries/{entry_id}', {
+      params: { header: workspaceHeader(), path: { entry_id: en.id } },
+      body: {
+        expected_version: en.version,
+        task_id: eTask || undefined,
+        started_at: eStart ? fromLocalInput(eStart) : undefined,
+        ended_at: eEnd ? fromLocalInput(eEnd) : null,
+      },
+    })
+    if (error) {
+      setErr(errMessage(error))
+      return
+    }
+    setEditId(null)
+    await resetEntries()
+    await loadReport()
+  }
 
   async function startTask(taskId: string, parallel: boolean) {
     if (!taskId) return
@@ -292,7 +336,7 @@ export function TimeRoute() {
             {entries.map((en) => (
             <li key={en.id} className="taskrow">
               <span className="taskrow__title">
-                {titleOf(en.task_id)}{' '}
+                {en.task_title ?? titleOf(en.task_id)}{' '}
                 {en.executor_kind === 'llm_agent' && (
                   <span className="aibadge" title={t('tasks.aiTitle')}>
                     {t('tasks.aiBadge')}
@@ -306,11 +350,59 @@ export function TimeRoute() {
                   {en.billable ? ` · ${t('time.billable')}` : ''}
                 </span>
                 <span className="muted timewhen">
-                  {fmtDate(en.started_at)} · {fmtClock(en.started_at)}–
-                  {fmtClock(en.ended_at)}
+                  {(en.client_name ?? '—') + ' / ' + (en.project_name ?? '—')}
+                  {' · '}
+                  {fmtDateTime(en.started_at, en.client_timezone)}–
+                  {fmtClockTz(en.ended_at, en.client_timezone)}
+                  {en.client_timezone ? ` (${en.client_timezone})` : ''}
                 </span>
+                {editId === en.id && (
+                  <span className="entryedit">
+                    <select
+                      value={eTask}
+                      onChange={(e) => setETask(e.target.value)}
+                    >
+                      {tasks.map((tk) => (
+                        <option key={tk.id} value={tk.id}>
+                          {tk.title}
+                        </option>
+                      ))}
+                    </select>
+                    <input
+                      type="datetime-local"
+                      value={eStart}
+                      onChange={(e) => setEStart(e.target.value)}
+                    />
+                    <input
+                      type="datetime-local"
+                      value={eEnd}
+                      onChange={(e) => setEEnd(e.target.value)}
+                    />
+                    <button
+                      type="button"
+                      className="btn--sm"
+                      onClick={() => void saveEntry(en)}
+                    >
+                      {t('time.save')}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn--ghost btn--sm"
+                      onClick={() => setEditId(null)}
+                    >
+                      {t('notes.close')}
+                    </button>
+                  </span>
+                )}
               </span>
               <span className="taskrow__meta">
+                <button
+                  type="button"
+                  className="btn--ghost btn--sm"
+                  onClick={() => void beginEdit(en)}
+                >
+                  {t('time.editEntry')}
+                </button>
                 {runningByTask.has(en.task_id) ? (
                   <button
                     type="button"
@@ -348,6 +440,79 @@ export function TimeRoute() {
             <p className="hint">{t('time.end')}</p>
           )}
         </div>
+      )}
+
+      <h2>{t('time.totalByTask')}</h2>
+      {byTask.length === 0 ? (
+        <p className="hint">{t('time.idle')}</p>
+      ) : (
+        <table className="tbl">
+          <thead>
+            <tr>
+              <th>{t('time.pick')}</th>
+              <th>{t('time.client')}</th>
+              <th>{t('time.project')}</th>
+              <th>{t('time.duration')}</th>
+              <th>{t('time.billable')}</th>
+              <th>#</th>
+            </tr>
+          </thead>
+          <tbody>
+            {byTask.map((r) => (
+              <Fragment key={r.task_id}>
+                <tr
+                  className="byrow"
+                  onClick={() =>
+                    setOpenTask(openTask === r.task_id ? null : r.task_id)
+                  }
+                >
+                  <td>
+                    {openTask === r.task_id ? '▾ ' : '▸ '}
+                    {r.task_title ?? r.task_id.slice(0, 8)}
+                  </td>
+                  <td>{r.client_name ?? '—'}</td>
+                  <td>{r.project_name ?? '—'}</td>
+                  <td>{hhmmss(r.total_seconds)}</td>
+                  <td>{hhmmss(r.billable_seconds)}</td>
+                  <td>{r.entry_count}</td>
+                </tr>
+                {openTask === r.task_id && (
+                  <tr key={r.task_id + '-d'}>
+                    <td colSpan={6}>
+                      <ul className="list">
+                        {entries
+                          .filter((e) => e.task_id === r.task_id)
+                          .map((e) => (
+                            <li key={e.id} className="taskrow">
+                              <span className="muted">
+                                {fmtDateTime(
+                                  e.started_at,
+                                  e.client_timezone,
+                                )}
+                                –
+                                {fmtClockTz(e.ended_at, e.client_timezone)}
+                                {' · '}
+                                {(e.client_name ?? '—') +
+                                  ' / ' +
+                                  (e.project_name ?? '—')}
+                                {' · '}
+                                {e.duration_seconds != null
+                                  ? hhmmss(e.duration_seconds)
+                                  : '…'}
+                                {e.billable
+                                  ? ` · ${t('time.billable')}`
+                                  : ''}
+                              </span>
+                            </li>
+                          ))}
+                      </ul>
+                    </td>
+                  </tr>
+                )}
+              </Fragment>
+            ))}
+          </tbody>
+        </table>
       )}
 
       <h2>{t('time.report')}</h2>

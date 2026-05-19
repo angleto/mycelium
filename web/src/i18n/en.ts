@@ -477,6 +477,13 @@ export const en = {
     duration: 'Duration',
     billable: 'billable',
     report: 'Report',
+    editEntry: 'Edit entry',
+    save: 'Save',
+    startAt: 'Start',
+    endAt: 'End',
+    timezone: 'Time zone',
+    reassign: 'Task',
+    totalByTask: 'By task',
     groupBy: 'Group by',
     group: {
       project: 'Project',

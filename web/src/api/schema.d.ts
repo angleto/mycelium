@@ -1308,6 +1308,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/time/report/by-task": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Report By Task
+         * @description Per-task aggregate (total/billable/count) over the caller's
+         *     entries, each row carrying resolved project/client/timezone so the
+         *     SPA's drill-down (entries of a task) is just ``GET /time/entries``
+         *     filtered client-side. Distinct path from the configurable
+         *     ``/time/report`` (which keeps its ReportRowOut contract).
+         */
+        get: operations["report_by_task_time_report_by_task_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/time/report.csv": {
         parameters: {
             query?: never;
@@ -2695,6 +2719,8 @@ export interface components {
              * @default EUR
              */
             valuta: string;
+            /** Timezone */
+            timezone?: string | null;
         };
         /** ClientOut */
         ClientOut: {
@@ -2739,6 +2765,8 @@ export interface components {
             tariffa: string | null;
             /** Valuta */
             valuta: string;
+            /** Timezone */
+            timezone: string | null;
         };
         /** ClientPatchIn */
         ClientPatchIn: {
@@ -2774,6 +2802,8 @@ export interface components {
             tariffa?: number | string | null;
             /** Valuta */
             valuta?: string | null;
+            /** Timezone */
+            timezone?: string | null;
         };
         /** CommandIn */
         CommandIn: {
@@ -4551,6 +4581,32 @@ export interface components {
              */
             state_id: string;
         };
+        /** TaskTimeReportOut */
+        TaskTimeReportOut: {
+            /**
+             * Task Id
+             * Format: uuid
+             */
+            task_id: string;
+            /** Task Title */
+            task_title: string | null;
+            /** Client Tag Id */
+            client_tag_id: string | null;
+            /** Client Name */
+            client_name: string | null;
+            /** Project Tag Id */
+            project_tag_id: string | null;
+            /** Project Name */
+            project_name: string | null;
+            /** Client Timezone */
+            client_timezone: string | null;
+            /** Total Seconds */
+            total_seconds: number;
+            /** Billable Seconds */
+            billable_seconds: number;
+            /** Entry Count */
+            entry_count: number;
+        };
         /** TierCountsOut */
         TierCountsOut: {
             /** Hot */
@@ -4600,6 +4656,18 @@ export interface components {
             note: string | null;
             /** Version */
             version: number;
+            /** Task Title */
+            task_title?: string | null;
+            /** Client Tag Id */
+            client_tag_id?: string | null;
+            /** Client Name */
+            client_name?: string | null;
+            /** Project Tag Id */
+            project_tag_id?: string | null;
+            /** Project Name */
+            project_name?: string | null;
+            /** Client Timezone */
+            client_timezone?: string | null;
         };
         /** TimeEntryPatchIn */
         TimeEntryPatchIn: {
@@ -4609,6 +4677,12 @@ export interface components {
             note?: string | null;
             /** Billable */
             billable?: boolean | null;
+            /** Task Id */
+            task_id?: string | null;
+            /** Started At */
+            started_at?: string | null;
+            /** Ended At */
+            ended_at?: string | null;
         };
         /** TimeManualIn */
         TimeManualIn: {
@@ -8224,6 +8298,43 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ReportRowOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    report_by_task_time_report_by_task_get: {
+        parameters: {
+            query?: {
+                start_from?: string | null;
+                start_to?: string | null;
+            };
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskTimeReportOut"][];
                 };
             };
             /** @description Validation Error */
