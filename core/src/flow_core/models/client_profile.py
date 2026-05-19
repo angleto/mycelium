@@ -47,3 +47,6 @@ class ClientProfile(OrgScopedMixin, TimestampMixin, VersionMixin, Base):
     # duration_seconds / 3600 * tariffa; see time_tracking._rate).
     tariffa: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
     valuta: Mapped[str] = mapped_column(String(3), nullable=False, server_default="EUR")
+    # Preferred IANA timezone name (e.g. "Europe/Rome"); lets the SPA
+    # render this client's time entries / report in its local time.
+    timezone: Mapped[str | None] = mapped_column(Text, nullable=True)

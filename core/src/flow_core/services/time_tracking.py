@@ -40,7 +40,7 @@ from flow_core.services import audit
 from flow_core.services.rbac import require_role
 from flow_core.services.tasks import get_task
 
-_UPDATABLE = frozenset({"note", "billable"})
+_UPDATABLE = frozenset({"note", "billable", "task_id", "started_at", "ended_at"})
 
 
 class ReportGroup(enum.StrEnum):
@@ -379,16 +379,48 @@ async def update_entry(
     expected_version: int,
     values: dict[str, Any],
 ) -> int:
+    """Correct an entry. Beyond note/billable a user can:
+
+    - ``task_id``: reassign the entry to another task (transitively
+      changing its project/client). The new task must exist in the
+      tenant, else NotFoundError TASK_NOT_FOUND.
+    - ``started_at`` / ``ended_at``: adjust the interval if the timer
+      was started late / never stopped. The final interval must be
+      open-ended (still running) or have ``ended_at > started_at``,
+      else DomainError TIME_ENTRY_INVALID. ``duration_seconds`` is
+      recomputed from the final start/end (None while running).
+
+    One cohesive write under the existing optimistic version guard."""
     if not values or set(values) - _UPDATABLE:
         raise DomainError(MessageCode.DOMAIN_ERROR)
     await require_role(session, org_id, actor_id, Role.member)
-    await get_entry(session, org_id=org_id, entry_id=entry_id)
+    entry = await get_entry(session, org_id=org_id, entry_id=entry_id)
+
+    patch = dict(values)
+    touches_interval = "started_at" in patch or "ended_at" in patch
+    if "task_id" in patch:
+        # Validates same-tenant existence (RLS scopes the lookup);
+        # raises NotFoundError(TASK_NOT_FOUND) if absent.
+        await get_task(session, org_id=org_id, task_id=patch["task_id"])
+    if touches_interval:
+        new_started = patch.get("started_at", entry.started_at)
+        # ended_at explicitly in the patch wins (including an explicit
+        # None to "un-stop"); otherwise the stored value is kept.
+        new_ended = patch["ended_at"] if "ended_at" in patch else entry.ended_at
+        if new_ended is not None and new_ended <= new_started:
+            raise DomainError(MessageCode.TIME_ENTRY_INVALID)
+        patch["started_at"] = new_started
+        patch["ended_at"] = new_ended
+        patch["duration_seconds"] = (
+            None if new_ended is None else int((new_ended - new_started).total_seconds())
+        )
+
     new_version = await optimistic_update(
         session,
         TimeEntry,
         pk=entry_id,
         expected_version=expected_version,
-        values=values,
+        values=patch,
     )
     await audit.log(
         session,
@@ -397,7 +429,7 @@ async def update_entry(
         entity="time_entry",
         entity_id=entry_id,
         action="update",
-        diff={k: str(v) for k, v in values.items()},
+        diff={k: str(v) for k, v in patch.items()},
     )
     return new_version
 
@@ -578,4 +610,173 @@ async def report(
         for k, v in acc.items()
     ]
     rows.sort(key=lambda r: (r.label or "", r.key or ""))
+    return rows
+
+
+@dataclass(frozen=True)
+class TaskContext:
+    """Resolved task -> project tag -> client tag -> client profile
+    chain, used to enrich TimeEntryOut and the per-task report without
+    per-row queries."""
+
+    task_title: str | None = None
+    project_tag_id: uuid.UUID | None = None
+    project_name: str | None = None
+    client_tag_id: uuid.UUID | None = None
+    client_name: str | None = None
+    client_timezone: str | None = None
+
+
+_EMPTY_CONTEXT = TaskContext()
+
+
+async def resolve_task_contexts(
+    session: AsyncSession, task_ids: Sequence[uuid.UUID]
+) -> dict[uuid.UUID, TaskContext]:
+    """Batched task -> context resolver: a fixed, small number of
+    queries regardless of how many tasks/entries (no N+1). The project
+    tag is the earliest-by-id project tag on the task (same selection
+    as ``_rate``), then ProjectProfile.client_tag_id, then the client
+    tag's name and ClientProfile.timezone."""
+    ids = list({t for t in task_ids})
+    if not ids:
+        return {}
+    titles: dict[uuid.UUID, str | None] = {
+        tid: title
+        for tid, title in (
+            await session.execute(select(Task.id, Task.title).where(Task.id.in_(ids)))
+        ).all()
+    }
+    # Earliest project tag per task (Tag.id order mirrors _rate()).
+    proj_by_task: dict[uuid.UUID, tuple[uuid.UUID, str]] = {}
+    for task_id, tag_id, name in (
+        await session.execute(
+            select(TaskTag.task_id, Tag.id, Tag.name)
+            .join(Tag, Tag.id == TaskTag.tag_id)
+            .where(TaskTag.task_id.in_(ids), Tag.kind == TagKind.project)
+            .order_by(Tag.id)
+        )
+    ).all():
+        proj_by_task.setdefault(task_id, (tag_id, name))
+
+    project_tag_ids = list({p[0] for p in proj_by_task.values()})
+    client_by_project: dict[uuid.UUID, uuid.UUID] = {}
+    if project_tag_ids:
+        for ptag, ctag in (
+            await session.execute(
+                select(ProjectProfile.tag_id, ProjectProfile.client_tag_id).where(
+                    ProjectProfile.tag_id.in_(project_tag_ids),
+                    ProjectProfile.client_tag_id.is_not(None),
+                )
+            )
+        ).all():
+            client_by_project[ptag] = ctag
+
+    client_tag_ids = list(set(client_by_project.values()))
+    client_name: dict[uuid.UUID, str] = {}
+    client_tz: dict[uuid.UUID, str | None] = {}
+    if client_tag_ids:
+        client_name = {
+            cid: name
+            for cid, name in (
+                await session.execute(select(Tag.id, Tag.name).where(Tag.id.in_(client_tag_ids)))
+            ).all()
+        }
+        client_tz = {
+            cid: tz
+            for cid, tz in (
+                await session.execute(
+                    select(ClientProfile.tag_id, ClientProfile.timezone).where(
+                        ClientProfile.tag_id.in_(client_tag_ids)
+                    )
+                )
+            ).all()
+        }
+
+    out: dict[uuid.UUID, TaskContext] = {}
+    for tid in ids:
+        proj = proj_by_task.get(tid)
+        ptag = proj[0] if proj else None
+        ctag = client_by_project.get(ptag) if ptag is not None else None
+        out[tid] = TaskContext(
+            task_title=titles.get(tid),
+            project_tag_id=ptag,
+            project_name=proj[1] if proj else None,
+            client_tag_id=ctag,
+            client_name=client_name.get(ctag) if ctag is not None else None,
+            client_timezone=client_tz.get(ctag) if ctag is not None else None,
+        )
+    return out
+
+
+async def context_for_entry(session: AsyncSession, entry: TimeEntry) -> TaskContext:
+    """Single-entry convenience over ``resolve_task_contexts`` (used by
+    the start/stop/get/patch endpoints, which return one entry)."""
+    ctxs = await resolve_task_contexts(session, [entry.task_id])
+    return ctxs.get(entry.task_id, _EMPTY_CONTEXT)
+
+
+@dataclass(frozen=True)
+class TaskTimeReportRow:
+    task_id: uuid.UUID
+    task_title: str | None
+    project_tag_id: uuid.UUID | None
+    project_name: str | None
+    client_tag_id: uuid.UUID | None
+    client_name: str | None
+    client_timezone: str | None
+    total_seconds: int
+    billable_seconds: int
+    entry_count: int
+
+
+async def task_report(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    start_from: dt.datetime | None = None,
+    start_to: dt.datetime | None = None,
+) -> list[TaskTimeReportRow]:
+    """Per-task aggregate over the *acting user's* completed entries
+    (running timers excluded, no duration yet). Honours the same
+    optional ``start_from``/``start_to`` window as ``list_entries``.
+    Ordered by total_seconds desc (ties: task title)."""
+    await require_role(session, org_id, actor_id, Role.member)
+    entries = await list_entries(
+        session,
+        org_id=org_id,
+        user_id=actor_id,
+        start_from=start_from,
+        start_to=start_to,
+    )
+    entries = [e for e in entries if e.duration_seconds is not None]
+    ctxs = await resolve_task_contexts(session, [e.task_id for e in entries])
+    # task_id -> [total, billable, count]
+    acc: dict[uuid.UUID, list[int]] = {}
+    for e in entries:
+        slot = acc.setdefault(e.task_id, [0, 0, 0])
+        secs = e.duration_seconds or 0
+        slot[0] += secs
+        if e.billable:
+            slot[1] += secs
+        slot[2] += 1
+    rows: list[TaskTimeReportRow] = []
+    for task_id, (total, billable_s, count) in acc.items():
+        ctx = ctxs.get(task_id, _EMPTY_CONTEXT)
+        rows.append(
+            TaskTimeReportRow(
+                task_id=task_id,
+                task_title=ctx.task_title,
+                project_tag_id=ctx.project_tag_id,
+                project_name=ctx.project_name,
+                client_tag_id=ctx.client_tag_id,
+                client_name=ctx.client_name,
+                client_timezone=ctx.client_timezone,
+                total_seconds=total,
+                billable_seconds=billable_s,
+                entry_count=count,
+            )
+        )
+    rows.sort(key=lambda r: (-r.total_seconds, r.task_title or ""))
     return rows

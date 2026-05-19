@@ -18,6 +18,7 @@ from starlette.responses import Response
 from flow_api.deps import TenantCtx, tenant_ctx
 from flow_api.schemas import (
     ReportRowOut,
+    TaskTimeReportOut,
     TimeEntryOut,
     TimeEntryPatchIn,
     TimeManualIn,
@@ -28,12 +29,14 @@ from flow_api.schemas import (
 from flow_core.models.task import ExecKind
 from flow_core.models.time_entry import TimeEntry
 from flow_core.services import time_tracking as svc
-from flow_core.services.time_tracking import ReportGroup
+from flow_core.services.time_tracking import ReportGroup, TaskContext
 
 router = APIRouter(tags=["time"])
 
+_EMPTY_CTX = TaskContext()
 
-def _out(e: TimeEntry) -> TimeEntryOut:
+
+def _out(e: TimeEntry, ctx: TaskContext = _EMPTY_CTX) -> TimeEntryOut:
     return TimeEntryOut(
         id=e.id,
         task_id=e.task_id,
@@ -49,7 +52,22 @@ def _out(e: TimeEntry) -> TimeEntryOut:
         currency=e.currency,
         note=e.note,
         version=e.version,
+        task_title=ctx.task_title,
+        client_tag_id=ctx.client_tag_id,
+        client_name=ctx.client_name,
+        project_tag_id=ctx.project_tag_id,
+        project_name=ctx.project_name,
+        client_timezone=ctx.client_timezone,
     )
+
+
+async def _out_one(ctx: TenantCtx, e: TimeEntry) -> TimeEntryOut:
+    return _out(e, await svc.context_for_entry(ctx.session, e))
+
+
+async def _out_many(ctx: TenantCtx, rows: list[TimeEntry]) -> list[TimeEntryOut]:
+    ctxs = await svc.resolve_task_contexts(ctx.session, [e.task_id for e in rows])
+    return [_out(e, ctxs.get(e.task_id, _EMPTY_CTX)) for e in rows]
 
 
 @router.post("/time/start", response_model=TimeEntryOut)
@@ -66,7 +84,7 @@ async def start_timer(
         note=body.note,
         parallel=body.parallel,
     )
-    return _out(e)
+    return await _out_one(ctx, e)
 
 
 @router.post("/time/stop", response_model=TimeEntryOut)
@@ -81,7 +99,7 @@ async def stop_timer(
         task_id=body.task_id,
         note=body.note,
     )
-    return _out(e)
+    return await _out_one(ctx, e)
 
 
 @router.get("/time/running", response_model=list[TimeEntryOut])
@@ -89,7 +107,7 @@ async def running(
     ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
 ) -> list[TimeEntryOut]:
     rows = await svc.running_entries(ctx.session, org_id=ctx.org_id, user_id=ctx.user_id)
-    return [_out(e) for e in rows]
+    return await _out_many(ctx, rows)
 
 
 @router.post("/time/entries", response_model=TimeEntryOut)
@@ -108,7 +126,7 @@ async def add_manual_entry(
         billable=body.billable,
         note=body.note,
     )
-    return _out(e)
+    return await _out_one(ctx, e)
 
 
 @router.get("/time/entries", response_model=list[TimeEntryOut])
@@ -133,7 +151,7 @@ async def list_entries(
         limit=limit,
         offset=offset,
     )
-    return [_out(e) for e in rows]
+    return await _out_many(ctx, rows)
 
 
 @router.get("/time/entries/{entry_id}", response_model=TimeEntryOut)
@@ -141,7 +159,8 @@ async def get_entry(
     entry_id: uuid.UUID,
     ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
 ) -> TimeEntryOut:
-    return _out(await svc.get_entry(ctx.session, org_id=ctx.org_id, entry_id=entry_id))
+    e = await svc.get_entry(ctx.session, org_id=ctx.org_id, entry_id=entry_id)
+    return await _out_one(ctx, e)
 
 
 @router.patch("/time/entries/{entry_id}", response_model=VersionOut)
@@ -228,6 +247,41 @@ async def report(
             billable_seconds=r.billable_seconds,
             amount=r.amount,
             currency=r.currency,
+        )
+        for r in rows
+    ]
+
+
+@router.get("/time/report/by-task", response_model=list[TaskTimeReportOut])
+async def report_by_task(
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    start_from: datetime.datetime | None = None,
+    start_to: datetime.datetime | None = None,
+) -> list[TaskTimeReportOut]:
+    """Per-task aggregate (total/billable/count) over the caller's
+    entries, each row carrying resolved project/client/timezone so the
+    SPA's drill-down (entries of a task) is just ``GET /time/entries``
+    filtered client-side. Distinct path from the configurable
+    ``/time/report`` (which keeps its ReportRowOut contract)."""
+    rows = await svc.task_report(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        start_from=start_from,
+        start_to=start_to,
+    )
+    return [
+        TaskTimeReportOut(
+            task_id=r.task_id,
+            task_title=r.task_title,
+            client_tag_id=r.client_tag_id,
+            client_name=r.client_name,
+            project_tag_id=r.project_tag_id,
+            project_name=r.project_name,
+            client_timezone=r.client_timezone,
+            total_seconds=r.total_seconds,
+            billable_seconds=r.billable_seconds,
+            entry_count=r.entry_count,
         )
         for r in rows
     ]

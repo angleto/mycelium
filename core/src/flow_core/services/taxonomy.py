@@ -43,6 +43,7 @@ class ClientInput:
     default_billable: bool = True
     tariffa: Decimal | None = None
     valuta: str = "EUR"
+    timezone: str | None = None
 
 
 async def _insert_tag(
@@ -114,6 +115,7 @@ async def create_client(
             default_billable=profile.default_billable,
             tariffa=profile.tariffa,
             valuta=profile.valuta,
+            timezone=profile.timezone,
         )
     )
     await session.flush()

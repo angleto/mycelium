@@ -106,6 +106,7 @@ async def create_client(
         default_billable=body.default_billable,
         tariffa=body.tariffa,
         valuta=body.valuta,
+        timezone=body.timezone,
     )
     tag = await taxonomy.create_client(
         ctx.session,
@@ -156,6 +157,7 @@ def _client_out(t: Tag, p: object) -> ClientOut:
         default_billable=p.default_billable,  # type: ignore[attr-defined]
         tariffa=p.tariffa,  # type: ignore[attr-defined]
         valuta=p.valuta,  # type: ignore[attr-defined]
+        timezone=p.timezone,  # type: ignore[attr-defined]
     )
 
 

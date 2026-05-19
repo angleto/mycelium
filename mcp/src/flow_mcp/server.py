@@ -1052,7 +1052,10 @@ async def list_schedule(
 # --- F4: time tracking (FR-5) ---
 
 
-def _time_entry(e: TimeEntry) -> dict[str, Any]:
+_EMPTY_TASK_CTX = time_svc.TaskContext()
+
+
+def _time_entry(e: TimeEntry, ctx: time_svc.TaskContext = _EMPTY_TASK_CTX) -> dict[str, Any]:
     return {
         "id": str(e.id),
         "task_id": str(e.task_id),
@@ -1068,7 +1071,22 @@ def _time_entry(e: TimeEntry) -> dict[str, Any]:
         "currency": e.currency,
         "note": e.note,
         "version": e.version,
+        "task_title": ctx.task_title,
+        "client_tag_id": (str(ctx.client_tag_id) if ctx.client_tag_id else None),
+        "client_name": ctx.client_name,
+        "project_tag_id": (str(ctx.project_tag_id) if ctx.project_tag_id else None),
+        "project_name": ctx.project_name,
+        "client_timezone": ctx.client_timezone,
     }
+
+
+async def _time_entry_one(s: Any, e: TimeEntry) -> dict[str, Any]:
+    return _time_entry(e, await time_svc.context_for_entry(s, e))
+
+
+async def _time_entries_many(s: Any, rows: list[TimeEntry]) -> list[dict[str, Any]]:
+    ctxs = await time_svc.resolve_task_contexts(s, [e.task_id for e in rows])
+    return [_time_entry(e, ctxs.get(e.task_id, _EMPTY_TASK_CTX)) for e in rows]
 
 
 @mcp.tool()
@@ -1094,7 +1112,7 @@ async def start_timer(
             note=note,
             parallel=parallel,
         )
-        return _time_entry(e)
+        return await _time_entry_one(s, e)
 
 
 @mcp.tool()
@@ -1114,7 +1132,7 @@ async def stop_timer(
             task_id=uuid.UUID(task_id) if task_id else None,
             note=note,
         )
-        return _time_entry(e)
+        return await _time_entry_one(s, e)
 
 
 @mcp.tool()
@@ -1141,7 +1159,7 @@ async def add_time_entry(
             billable=billable,
             note=note,
         )
-        return _time_entry(e)
+        return await _time_entry_one(s, e)
 
 
 @mcp.tool()
@@ -1159,7 +1177,7 @@ async def list_time_entries(
             task_id=uuid.UUID(task_id) if task_id else None,
             user_id=uuid.UUID(user_id) if user_id else None,
         )
-        return [_time_entry(e) for e in rows]
+        return await _time_entries_many(s, rows)
 
 
 @mcp.tool()
@@ -1167,7 +1185,7 @@ async def get_time_entry(token: str, org_id: str, entry_id: str) -> dict[str, An
     """Read one time entry."""
     async with _tenant(token, org_id) as (s, org, _user):
         e = await time_svc.get_entry(s, org_id=org, entry_id=uuid.UUID(entry_id))
-        return _time_entry(e)
+        return await _time_entry_one(s, e)
 
 
 @mcp.tool()
@@ -1175,7 +1193,7 @@ async def list_running_timers(token: str, org_id: str, user_id: str) -> list[dic
     """All live timers for a user (the serial one plus any parallel)."""
     async with _tenant(token, org_id) as (s, org, _user):
         rows = await time_svc.running_entries(s, org_id=org, user_id=uuid.UUID(user_id))
-        return [_time_entry(e) for e in rows]
+        return await _time_entries_many(s, rows)
 
 
 @mcp.tool()
@@ -1186,13 +1204,27 @@ async def update_time_entry(
     expected_version: int,
     note: str | None = None,
     billable: bool | None = None,
+    task_id: str | None = None,
+    started_at: str | None = None,
+    ended_at: str | None = None,
 ) -> dict[str, Any]:
-    """Edit a time entry's note and/or billable flag."""
+    """Correct a time entry. Beyond note/billable you can reassign it
+    to another task (``task_id``, transitively changing project/client)
+    and fix the recorded interval (``started_at``/``ended_at``,
+    ISO-8601); ``duration_seconds`` is recomputed server-side. Omit
+    ``ended_at`` to leave it unchanged; pass it explicitly to set or
+    clear the stop time."""
     values: dict[str, Any] = {}
     if note is not None:
         values["note"] = note
     if billable is not None:
         values["billable"] = billable
+    if task_id is not None:
+        values["task_id"] = uuid.UUID(task_id)
+    if started_at is not None:
+        values["started_at"] = dt.datetime.fromisoformat(started_at)
+    if ended_at is not None:
+        values["ended_at"] = dt.datetime.fromisoformat(ended_at)
     async with _tenant(token, org_id) as (s, org, user):
         version = await time_svc.update_entry(
             s,
@@ -1242,6 +1274,42 @@ async def time_report(
                 "billable_seconds": r.billable_seconds,
                 "amount": str(r.amount),
                 "currency": r.currency,
+            }
+            for r in rows
+        ]
+
+
+@mcp.tool()
+async def time_report_by_task(
+    token: str,
+    org_id: str,
+    start_from: str | None = None,
+    start_to: str | None = None,
+) -> list[dict[str, Any]]:
+    """Per-task time aggregate for the caller: total/billable seconds
+    and entry count per task, each row carrying the resolved
+    project/client and the client's IANA timezone. Ordered by total
+    time desc. Optional ISO-8601 ``start_from``/``start_to`` window."""
+    async with _tenant(token, org_id) as (s, org, user):
+        rows = await time_svc.task_report(
+            s,
+            org_id=org,
+            actor_id=user,
+            start_from=dt.datetime.fromisoformat(start_from) if start_from else None,
+            start_to=dt.datetime.fromisoformat(start_to) if start_to else None,
+        )
+        return [
+            {
+                "task_id": str(r.task_id),
+                "task_title": r.task_title,
+                "client_tag_id": (str(r.client_tag_id) if r.client_tag_id else None),
+                "client_name": r.client_name,
+                "project_tag_id": (str(r.project_tag_id) if r.project_tag_id else None),
+                "project_name": r.project_name,
+                "client_timezone": r.client_timezone,
+                "total_seconds": r.total_seconds,
+                "billable_seconds": r.billable_seconds,
+                "entry_count": r.entry_count,
             }
             for r in rows
         ]

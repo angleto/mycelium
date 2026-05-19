@@ -271,6 +271,8 @@ class ClientCreateIn(BaseModel):
     default_billable: bool = True
     tariffa: Decimal | None = None
     valuta: str = Field(default="EUR", max_length=3)
+    # IANA timezone name (e.g. "Europe/Rome"); optional.
+    timezone: str | None = Field(default=None, max_length=64)
 
 
 class ProjectCreateIn(BaseModel):
@@ -298,6 +300,7 @@ class ClientPatchIn(BaseModel):
     default_billable: bool | None = None
     tariffa: Decimal | None = None
     valuta: str | None = Field(default=None, max_length=3)
+    timezone: str | None = Field(default=None, max_length=64)
 
 
 class ClientOut(BaseModel):
@@ -320,6 +323,7 @@ class ClientOut(BaseModel):
     default_billable: bool
     tariffa: Decimal | None
     valuta: str
+    timezone: str | None
 
 
 class ProjectPatchIn(BaseModel):
@@ -655,6 +659,12 @@ class TimeEntryPatchIn(BaseModel):
     expected_version: int = Field(ge=1)
     note: str | None = None
     billable: bool | None = None
+    # Reassign the entry to another task (transitively changes its
+    # project/client). Adjust the recorded interval if the timer was
+    # started late / never stopped; duration is recomputed server-side.
+    task_id: uuid.UUID | None = None
+    started_at: datetime.datetime | None = None
+    ended_at: datetime.datetime | None = None
 
 
 class TimeEntryOut(BaseModel):
@@ -672,6 +682,14 @@ class TimeEntryOut(BaseModel):
     currency: str
     note: str | None
     version: int
+    # Resolved context (task -> project tag -> client tag -> client
+    # profile) so the list / report need no N+1 round-trips.
+    task_title: str | None = None
+    client_tag_id: uuid.UUID | None = None
+    client_name: str | None = None
+    project_tag_id: uuid.UUID | None = None
+    project_name: str | None = None
+    client_timezone: str | None = None
 
 
 class ReportRowOut(BaseModel):
@@ -681,6 +699,19 @@ class ReportRowOut(BaseModel):
     billable_seconds: int
     amount: Decimal
     currency: str
+
+
+class TaskTimeReportOut(BaseModel):
+    task_id: uuid.UUID
+    task_title: str | None
+    client_tag_id: uuid.UUID | None
+    client_name: str | None
+    project_tag_id: uuid.UUID | None
+    project_name: str | None
+    client_timezone: str | None
+    total_seconds: int
+    billable_seconds: int
+    entry_count: int
 
 
 # --- F4b: budgets + advisory (FR-13/FR-14, docs/adr/0013, 0014) ---
