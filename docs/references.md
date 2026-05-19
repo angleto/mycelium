@@ -46,30 +46,29 @@
   Coqui-XTTS or other open multilingual IT+EN, local default -> API;
   concrete choice at implementation
 
-## Internal: LLM/Embedding abstraction pattern to reuse
+## LLM / Embedding provider abstraction (pattern adopted)
 
-The `bitvision_phoenix` project (local path
-`/Users/angelo/data/WORK/bitvision/bitvision_phoenix`). Pattern: a
-provider via `typing.Protocol` (not an ABC), a DB-driven factory,
-neutral DTOs, pydantic settings with provider keys from env, a DB model
-registry with `is_active`.
+A pluggable AI-provider pattern Flow adopts (see ADR-0019):
 
-- `backend/src/bvphoenix/services/llm.py` (Protocol `LLMProvider` +
-  impl + prompt caching)
-- `backend/src/bvphoenix/services/llm_types.py` (neutral DTOs)
-- `backend/src/bvphoenix/services/llm_openai.py` (SDK adapter template)
-- `backend/src/bvphoenix/services/llm_factory.py` (DB-driven factory)
-- `backend/src/bvphoenix/config.py` (provider settings + env keys)
-- `backend/src/bvphoenix/db/models/llm_rate_cards.py` (model registry)
-- `backend/src/bvphoenix/db/models/embeddings.py` +
-  `workers/src/bvworkers/tasks/embed_series.py` (`model_id` versioning,
-  lazy load)
-- `backend/src/bvphoenix/services/billing.py`, `services/llm_cost.py`,
-  `services/embedding_cost.py`, `services/ai_tiers.py`,
-  `db/models/llm_rate_cards.py` (wallet/idempotent debits, rate cards,
-  tiers; reused for ADR-0019)
+- Provider as a `typing.Protocol` (structural typing, not an ABC), so
+  adapters need no shared base class.
+- DB-driven factory: the active provider/model is chosen from a
+  database registry row (an `is_active` flag on a model registry), not
+  hardcoded.
+- Neutral DTOs for requests/responses, decoupled from any vendor SDK
+  shape; one SDK adapter per provider implementing the Protocol.
+- Pydantic settings carrying per-provider credentials from environment
+  variables.
+- A model / rate-card registry table driving cost: wallet-style
+  idempotent debits, per-model rate cards, and usage tiers (reused for
+  ADR-0019).
+- Embedding models versioned by a stable `model_id` with lazy loading
+  of the weights.
 
-Note: bitvision has NO embedding abstraction (direct calls). Flow adds
-an `EmbedderProvider` mirroring `LLMProvider`. Do not copy: the
-Anthropic-specific `ephemeral` cache, clinical templates, DICOM
-handling, medical MCP token scoping.
+Flow adds an `EmbedderProvider` mirroring the `LLMProvider` Protocol:
+an embedding abstraction is not implied by the LLM one and must be
+designed explicitly (the source pattern called embedding models
+directly). Deliberately out of scope: vendor-specific prompt-cache
+mechanisms, any domain-specific prompt templates or data handling, and
+bespoke MCP token scoping; design those for Flow's own needs rather
+than porting them.
