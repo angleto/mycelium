@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from flow_core import __version__
 from flow_core.db import tenant_session
+from flow_core.embedder import embedder_available
 from flow_core.errors import AuthError
 from flow_core.i18n import MessageCode
 from flow_core.models.billing import CostBasis, RateCard, UsageRecord
@@ -1836,10 +1837,15 @@ async def memory_write(
     source_kind: str | None = None,
     source_id: str | None = None,
     tag_ids: list[str] | None = None,
+    channel_tag_id: str | None = None,
 ) -> dict[str, Any]:
-    """Write a memory blob (embedding is metered). Optional provenance
-    for GDPR erasure. Tags = explicit ``tag_ids`` plus those inherited
-    from tagged sources. The (org, project) boundary is hard."""
+    """Write a memory blob. The embedding is metered *when produced*;
+    if the embedding model is unavailable the blob is stored
+    keyword-only (still FTS-searchable, never an error). Optional
+    provenance for GDPR erasure. Tags = explicit ``tag_ids`` plus an
+    optional ``channel_tag_id`` (a ``memory_channel`` tag) plus those
+    inherited from tagged sources. The (org, project) boundary is
+    hard."""
     async with _tenant(token, org_id) as (s, org, user):
         sources = (
             [(source_kind, source_id)] if source_kind is not None and source_id is not None else []
@@ -1854,6 +1860,7 @@ async def memory_write(
             namespace=namespace,
             sources=sources,
             tag_ids=[uuid.UUID(t) for t in (tag_ids or [])],
+            channel_tag_id=uuid.UUID(channel_tag_id) if channel_tag_id else None,
         )
         tagmap = await memory_svc.tags_by_blob(s, blob_ids=[blob.id])
         return _blob(blob, tagmap.get(blob.id))
@@ -1868,11 +1875,14 @@ async def memory_search(
     project_id: str | None = None,
     limit: int = 10,
     tag_ids: list[str] | None = None,
+    channel_tag_id: str | None = None,
 ) -> list[dict[str, Any]]:
     """Hybrid RRF retrieval within the (org, project) boundary
-    (retrieval-as-tool, ADR-0016). Optional ``tag_ids`` narrows to
-    blobs carrying every given tag (facet, never crosses the
-    boundary). Deterministic order."""
+    (retrieval-as-tool, ADR-0016). Degrades to keyword-only when the
+    embedding model is unavailable. Optional ``tag_ids`` /
+    ``channel_tag_id`` narrow to blobs carrying every given tag (and
+    the channel), a facet that never crosses the boundary.
+    Deterministic order."""
     async with _tenant(token, org_id) as (s, org, user):
         hits = await memory_svc.retrieve(
             s,
@@ -1883,6 +1893,7 @@ async def memory_search(
             operation_id=operation_id,
             limit=limit,
             tag_ids=[uuid.UUID(t) for t in (tag_ids or [])],
+            channel_tag_id=uuid.UUID(channel_tag_id) if channel_tag_id else None,
         )
         tagmap = await memory_svc.tags_by_blob(s, blob_ids=[h.blob.id for h in hits])
         return [{"blob": _blob(h.blob, tagmap.get(h.blob.id)), "rrf": h.rrf} for h in hits]
@@ -1923,6 +1934,15 @@ async def memory_consolidate(
         )
         tagmap = await memory_svc.tags_by_blob(s, blob_ids=[blob.id])
         return _blob(blob, tagmap.get(blob.id))
+
+
+@mcp.tool()
+async def memory_status(token: str, org_id: str) -> dict[str, Any]:
+    """Whether semantic (vector) retrieval is available, or memory is
+    running keyword-only because the optional embedding model is not
+    installed. Member-level."""
+    async with _tenant(token, org_id) as (_s, _org, _user):
+        return {"semantic": embedder_available()}
 
 
 # --- F6b: notes / conversation / canonical intent (FR-16) ---

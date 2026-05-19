@@ -992,6 +992,9 @@ class MemoryWriteIn(BaseModel):
     sources: list[tuple[str, str]] = Field(default_factory=list)
     importance: Decimal = Decimal(0)
     tag_ids: list[uuid.UUID] = Field(default_factory=list)
+    # Optional memory channel: a tag of kind ``memory_channel`` this
+    # blob is filed under. Folded into the attached tag set.
+    channel_tag_id: uuid.UUID | None = None
 
 
 class MemorySearchIn(BaseModel):
@@ -1001,6 +1004,15 @@ class MemorySearchIn(BaseModel):
     limit: int = Field(default=10, gt=0, le=100)
     grader_min_rrf: float | None = None
     tag_ids: list[uuid.UUID] = Field(default_factory=list)
+    # Optional memory channel: narrows to blobs filed under this
+    # ``memory_channel`` tag (ANDed into the tag facet).
+    channel_tag_id: uuid.UUID | None = None
+
+
+class MemoryStatusOut(BaseModel):
+    # True when semantic (vector) retrieval is available; False when the
+    # optional embedding model is missing and memory is keyword-only.
+    semantic: bool
 
 
 class MemoryBlobOut(BaseModel):

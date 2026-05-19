@@ -10,6 +10,7 @@ change (ADR-0005).
 
 from __future__ import annotations
 
+import importlib.util
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
@@ -80,6 +81,21 @@ def get_embedder() -> Embedder:
     if _override is not None:
         return _override()
     return LocalEmbedder()
+
+
+def embedder_available() -> bool:
+    """Cheap probe for status reporting: can a usable embedder be
+    produced *without* loading the model? An injected override (CI, or
+    a future hosted provider) is always considered available; otherwise
+    the local model needs the optional ``sentence-transformers`` extra,
+    so we only check that it is importable (no model download/load).
+    Never raises."""
+    if _override is not None:
+        return True
+    try:
+        return importlib.util.find_spec("sentence_transformers") is not None
+    except (ImportError, ValueError):  # pragma: no cover - defensive
+        return False
 
 
 def embed_dim() -> int:

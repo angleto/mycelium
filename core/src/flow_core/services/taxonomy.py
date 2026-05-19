@@ -46,6 +46,12 @@ class ClientInput:
     timezone: str | None = None
 
 
+# Tag kinds any member may create/rename (free-form facets): the
+# generic label and the memory channel. Client/project carry typed
+# satellite profiles and stay owner/admin-gated.
+_MEMBER_TAG_KINDS: frozenset[TagKind] = frozenset({TagKind.generic, TagKind.memory_channel})
+
+
 async def _insert_tag(
     session: AsyncSession,
     org_id: uuid.UUID,
@@ -72,7 +78,7 @@ async def create_tag(
     name: str,
     color: str | None = None,
 ) -> Tag:
-    minimum = Role.admin if kind is not TagKind.generic else Role.member
+    minimum = Role.member if kind in _MEMBER_TAG_KINDS else Role.admin
     await require_role(session, org_id, actor_id, minimum)
     tag = await _insert_tag(session, org_id, kind, name, color)
     await audit.log(
@@ -483,7 +489,7 @@ async def update_tag(
     status: str | None = None,
 ) -> int:
     tag = await get_tag(session, org_id=org_id, tag_id=tag_id)
-    minimum = Role.admin if tag.kind is not TagKind.generic else Role.member
+    minimum = Role.member if tag.kind in _MEMBER_TAG_KINDS else Role.admin
     await require_role(session, org_id, actor_id, minimum)
     values: dict[str, str] = {}
     if name is not None:

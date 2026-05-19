@@ -22,6 +22,10 @@ class TagKind(enum.StrEnum):
     generic = "generic"
     client = "client"
     project = "project"
+    # A memory "channel": an orthogonal facet for grouping memory blobs
+    # (e.g. an agent's working set). Created/listed via the generic tag
+    # endpoints; member-level like ``generic`` (see taxonomy.create_tag).
+    memory_channel = "memory_channel"
 
 
 class Tag(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, Base):

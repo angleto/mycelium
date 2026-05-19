@@ -23,25 +23,65 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from flow_core.config import get_settings
-from flow_core.embedder import Embedder, get_embedder
+from flow_core.embedder import Embedder, EmbedResult, get_embedder
 from flow_core.errors import DomainError, NotFoundError
 from flow_core.i18n import MessageCode
 from flow_core.models.billing import CostBasis
 from flow_core.models.membership import Role
 from flow_core.models.memory_blob import BlobSource, MemoryBlob, MemoryBlobTag
-from flow_core.models.tag import Tag
+from flow_core.models.tag import Tag, TagKind
 from flow_core.models.task_tag import TaskTag
 from flow_core.services import audit, billing
 from flow_core.services.rbac import require_role
 
 _RRF_K = 60
 _OVERSAMPLE = 50
+# Sentinel model id recorded on a blob written while the embedder is
+# unavailable (missing optional extra / load failure): the row is kept
+# valid and FTS-searchable, just without a semantic vector. The SPA
+# uses this to show "keyword-only" provenance (see /memory/status).
+_NO_EMBED_MODEL = "none"
 
 
 @dataclass(frozen=True)
 class Hit:
     blob: MemoryBlob
     rrf: float
+
+
+async def _safe_embed(emb: Embedder, text: str) -> EmbedResult | None:
+    """Embed defensively. The local model depends on an optional extra
+    (``sentence-transformers``); if it is missing or fails to load,
+    ``embed`` raises (ImportError/RuntimeError/...). Memory must still
+    work in keyword-only mode, so any failure (or an empty vector) is
+    swallowed here and the caller degrades to FTS-only. Never raises
+    because the embedder is unavailable."""
+    try:
+        result = await emb.embed(text)
+    except Exception:
+        # Optional dependency / model load is best-effort: any failure
+        # degrades to keyword-only, never propagates to the caller.
+        return None
+    if not result.vector:
+        return None
+    return result
+
+
+async def _resolve_channel_tag_id(
+    session: AsyncSession, *, org_id: uuid.UUID, channel_tag_id: uuid.UUID | None
+) -> uuid.UUID | None:
+    """Validate an optional memory-channel tag: it must be a tag visible
+    in this tenant (RLS scopes ``tags`` to the org) AND of kind
+    ``memory_channel``. Mirrors the kind-check style used in taxonomy
+    (NotFound when absent, TAG_KIND_MISMATCH when the wrong kind)."""
+    if channel_tag_id is None:
+        return None
+    tag = (await session.execute(select(Tag).where(Tag.id == channel_tag_id))).scalar_one_or_none()
+    if tag is None:
+        raise NotFoundError(MessageCode.TAG_NOT_FOUND)
+    if tag.kind is not TagKind.memory_channel:
+        raise DomainError(MessageCode.TAG_KIND_MISMATCH)
+    return tag.id
 
 
 def _project_pred(project_id: uuid.UUID | None):  # type: ignore[no-untyped-def]
@@ -123,25 +163,36 @@ async def write_blob(
     sources: Sequence[tuple[str, str]] = (),
     importance: Decimal = Decimal(0),
     tag_ids: Sequence[uuid.UUID] = (),
+    channel_tag_id: uuid.UUID | None = None,
     embedder: Embedder | None = None,
 ) -> MemoryBlob:
     await require_role(session, org_id, actor_id, Role.member)
-    emb = embedder or get_embedder()
-    result = await emb.embed(text_body)
-    expected = get_settings().embed_dim
-    if len(result.vector) != expected:
-        raise DomainError(MessageCode.MEMORY_DIM_MISMATCH, expected=str(expected))
-    # Embedding is a cost-incurring op: gate + debit (ADR-0019).
-    await billing.meter(
-        session,
-        org_id=org_id,
-        actor_id=actor_id,
-        operation_id=operation_id,
-        op="embed",
-        model_id=result.model_id,
-        units_in=Decimal(result.tokens),
-        basis=CostBasis.local,
+    channel_id = await _resolve_channel_tag_id(
+        session, org_id=org_id, channel_tag_id=channel_tag_id
     )
+    emb = embedder or get_embedder()
+    result = await _safe_embed(emb, text_body)
+    expected = get_settings().embed_dim
+    if result is not None and len(result.vector) != expected:
+        # A dimension mismatch is a real misconfiguration of an embedder
+        # that *did* produce a vector, not the "extra missing" case:
+        # surface it. (When the embedder is unavailable, result is None
+        # and the blob is stored keyword-only instead.)
+        raise DomainError(MessageCode.MEMORY_DIM_MISMATCH, expected=str(expected))
+    if result is not None:
+        # Embedding is a cost-incurring op: gate + debit (ADR-0019).
+        # Metered only when an embedding was actually produced; the
+        # keyword-only fallback incurs no embedding cost.
+        await billing.meter(
+            session,
+            org_id=org_id,
+            actor_id=actor_id,
+            operation_id=operation_id,
+            op="embed",
+            model_id=result.model_id,
+            units_in=Decimal(result.tokens),
+            basis=CostBasis.local,
+        )
     now = dt.datetime.now(tz=dt.UTC)
     blob = MemoryBlob(
         org_id=org_id,
@@ -149,9 +200,13 @@ async def write_blob(
         namespace=namespace,
         tier="hot",
         text=text_body,
-        embedding=result.vector,
-        model_id=result.model_id,
-        dim=len(result.vector),
+        # Keyword-only fallback: a valid row with no vector. The FTS
+        # generated column still indexes ``text`` so it is retrievable
+        # via the lexical branch; ``dim`` stays the configured width so
+        # a later re-embedding is a value fill, not a schema change.
+        embedding=result.vector if result is not None else None,
+        model_id=result.model_id if result is not None else _NO_EMBED_MODEL,
+        dim=len(result.vector) if result is not None else expected,
         access_count=1,
         last_accessed_at=now,
         importance=importance,
@@ -162,11 +217,15 @@ async def write_blob(
     for kind, sid in sources:
         session.add(BlobSource(blob_id=blob.id, org_id=org_id, source_kind=kind, source_id=sid))
     await session.flush()
-    # Tags = explicit (validated to the tenant) plus inherited from the
-    # provenance, so a blob derived from tagged sources keeps the facet.
+    # Tags = explicit (validated to the tenant) plus the validated
+    # memory channel plus those inherited from the provenance, so a
+    # blob derived from tagged sources keeps the facet.
     explicit = await _visible_tag_ids(session, tag_ids)
     inherited = await _inherited_tag_ids(session, sources)
-    await _attach_blob_tags(session, org_id=org_id, blob_id=blob.id, tag_ids=explicit | inherited)
+    channel = {channel_id} if channel_id is not None else set()
+    await _attach_blob_tags(
+        session, org_id=org_id, blob_id=blob.id, tag_ids=explicit | inherited | channel
+    )
     await audit.log(
         session,
         org_id=org_id,
@@ -196,28 +255,39 @@ async def retrieve(
     limit: int = 10,
     grader_min_rrf: float | None = None,
     tag_ids: Sequence[uuid.UUID] | None = None,
+    channel_tag_id: uuid.UUID | None = None,
     embedder: Embedder | None = None,
 ) -> list[Hit]:
     await require_role(session, org_id, actor_id, Role.member)
-    emb = embedder or get_embedder()
-    qres = await emb.embed(query)
-    # The query embedding is also a metered cost op.
-    await billing.meter(
-        session,
-        org_id=org_id,
-        actor_id=actor_id,
-        operation_id=operation_id,
-        op="embed_query",
-        model_id=qres.model_id,
-        units_in=Decimal(qres.tokens),
-        basis=CostBasis.local,
+    channel_id = await _resolve_channel_tag_id(
+        session, org_id=org_id, channel_tag_id=channel_tag_id
     )
+    emb = embedder or get_embedder()
+    qres = await _safe_embed(emb, query)
+    if qres is not None:
+        # The query embedding is also a metered cost op. Skipped when
+        # the embedder is unavailable: there is no semantic branch and
+        # thus no embedding cost (keyword-only retrieval).
+        await billing.meter(
+            session,
+            org_id=org_id,
+            actor_id=actor_id,
+            operation_id=operation_id,
+            op="embed_query",
+            model_id=qres.model_id,
+            units_in=Decimal(qres.tokens),
+            basis=CostBasis.local,
+        )
 
     pred = _project_pred(project_id)
     # Tags are a facet *inside* the (org, project) boundary, never a
     # way past it: ANDed into both branches, never replacing the hard
     # predicate. A blob must carry every requested tag (faceted AND).
+    # The optional memory channel is just one more required tag (it does
+    # not get a special SQL path; it folds into the AND set).
     wanted = set(tag_ids or ())
+    if channel_id is not None:
+        wanted.add(channel_id)
     tag_clauses: tuple[ColumnElement[bool], ...] = ()
     if wanted:
         tagged = (
@@ -230,17 +300,6 @@ async def retrieve(
             .having(func.count(func.distinct(MemoryBlobTag.tag_id)) == len(wanted))
         )
         tag_clauses = (MemoryBlob.id.in_(tagged),)
-    semantic = (
-        select(MemoryBlob.id)
-        .where(
-            MemoryBlob.org_id == org_id,
-            pred,
-            MemoryBlob.embedding.is_not(None),
-            *tag_clauses,
-        )
-        .order_by(MemoryBlob.embedding.cosine_distance(qres.vector))
-        .limit(_OVERSAMPLE)
-    )
     lexical = (
         select(MemoryBlob.id)
         .where(
@@ -253,7 +312,25 @@ async def retrieve(
         .limit(_OVERSAMPLE)
     ).params(q=query)
 
-    sem = await _branch_ranks(session, semantic)
+    # Semantic branch only when the query was actually embedded. With no
+    # embedder (optional extra missing) retrieval degrades to the single
+    # lexical branch; the (org, project) + tag predicates and the RRF
+    # fusion below are unchanged (RRF over one branch is well-defined).
+    if qres is not None:
+        semantic = (
+            select(MemoryBlob.id)
+            .where(
+                MemoryBlob.org_id == org_id,
+                pred,
+                MemoryBlob.embedding.is_not(None),
+                *tag_clauses,
+            )
+            .order_by(MemoryBlob.embedding.cosine_distance(qres.vector))
+            .limit(_OVERSAMPLE)
+        )
+        sem = await _branch_ranks(session, semantic)
+    else:
+        sem = {}
     lex = await _branch_ranks(session, lexical)
     ids = set(sem) | set(lex)
     if not ids:
