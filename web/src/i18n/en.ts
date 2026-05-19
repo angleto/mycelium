@@ -204,6 +204,8 @@ export const en = {
   rolesw: {
     acting: 'Acting as',
     user: 'User',
+    admin: 'Admin',
+    switchHint: 'Click to switch how you are acting (least privilege by default)',
   },
   tasks: {
     nav: 'Tasks',

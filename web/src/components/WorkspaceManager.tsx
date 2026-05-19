@@ -15,7 +15,10 @@ const RANK: Record<string, number> = {
   admin: 2,
   owner: 3,
 }
-const ROLES = ['member', 'admin', 'owner', 'guest'] as const
+// The product model is two namespace roles: owner (privileged) and
+// member (normal user). Platform admin is global, not a workspace
+// role, so it is not offered here.
+const ROLES = ['member', 'owner'] as const
 
 // Settings → Workspace (also the /workspace route): the current
 // workspace (id + rename), switch, create, archive/delete, and member
@@ -32,7 +35,9 @@ export function WorkspaceManager() {
   const requested = chosen || 'member'
   const effective =
     RANK[requested] <= (RANK[ceiling] ?? 1) ? requested : ceiling
-  const canManage = (RANK[effective] ?? 1) >= RANK.admin
+  // Privileged namespace ops (members, clients, workflows, billing)
+  // are owner-only; a normal member can only use the workspace.
+  const canManage = (RANK[effective] ?? 1) >= RANK.owner
 
   const [list, setList] = useState<Summary[]>([])
   const [members, setMembers] = useState<Member[]>([])

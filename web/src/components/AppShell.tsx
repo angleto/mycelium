@@ -201,6 +201,60 @@ function NavGroup({ title, items }: { title: string; items: Item[] }) {
   )
 }
 
+// Single multi-state "acting as" chip (replaces the dropdown + the
+// separate admin badge). Click cycles through the modes the user is
+// entitled to: User -> [Owner] -> [Admin] -> User. Least-privilege
+// (User) is the default; the server re-checks every elevation.
+function ModeChip({
+  canOwner,
+  canAdmin,
+  wsRole,
+  adminOn,
+}: {
+  canOwner: boolean
+  canAdmin: boolean
+  wsRole: string
+  adminOn: boolean
+}) {
+  const { t } = useTranslation()
+  const modes = [
+    'user',
+    ...(canOwner ? ['owner'] : []),
+    ...(canAdmin ? ['admin'] : []),
+  ]
+  if (modes.length < 2) return null
+  const cur = adminOn ? 'admin' : wsRole === 'owner' ? 'owner' : 'user'
+  const apply = (m: string) => {
+    if (m === 'admin') {
+      setAdminMode(true)
+      setWorkspaceRole('')
+    } else if (m === 'owner') {
+      setAdminMode(false)
+      setWorkspaceRole('owner')
+    } else {
+      setAdminMode(false)
+      setWorkspaceRole('')
+    }
+  }
+  const label =
+    cur === 'admin'
+      ? t('rolesw.admin')
+      : cur === 'owner'
+        ? t('roles.owner')
+        : t('rolesw.user')
+  return (
+    <button
+      type="button"
+      className={`modechip modechip--${cur}`}
+      title={t('rolesw.switchHint')}
+      onClick={() => apply(modes[(modes.indexOf(cur) + 1) % modes.length])}
+    >
+      {cur === 'admin' && <Icon name="shield" />}
+      {label}
+    </button>
+  )
+}
+
 export function AppShell() {
   const { t } = useTranslation()
   const navigate = useNavigate()
@@ -211,8 +265,9 @@ export function AppShell() {
   // ceiling is above member (an owner/admin can act down as a user).
   const { ws } = useMyWorkspace()
   const wsRole = useWorkspaceRole()
-  const ceiling = ws?.my_role ?? 'member'
-  const canSwitchRole = ceiling === 'admin' || ceiling === 'owner'
+  // Owner is the only privileged namespace role to switch into;
+  // platform admin is a separate axis (handled by the same chip).
+  const canSwitchRole = (ws?.my_role ?? 'member') === 'owner'
 
   // Mention links (@kind:id) are stored as plain markdown. MarkdownView
   // renders them as router Links, but the tiptap editor renders a raw
@@ -306,44 +361,12 @@ export function AppShell() {
         </div>
         <div className="topbar__actions">
           <RunningIndicator />
-          {canSwitchRole && (
-            <label className="rolesw" title={t('rolesw.acting')}>
-              <span className="rolesw__lbl">{t('rolesw.acting')}</span>
-              <select
-                value={wsRole || 'member'}
-                onChange={(e) =>
-                  setWorkspaceRole(
-                    e.target.value === 'member' ? '' : e.target.value,
-                  )
-                }
-              >
-                <option value="member">{t('rolesw.user')}</option>
-                <option value={ceiling}>{t(`roles.${ceiling}`)}</option>
-              </select>
-            </label>
-          )}
-          {canAdmin &&
-            (elevated ? (
-              <button
-                type="button"
-                className="badge badge--admin"
-                title={t('admin.exitTitle')}
-                onClick={() => setAdminMode(false)}
-              >
-                <Icon name="shield" />
-                {t('admin.badge')}
-              </button>
-            ) : (
-              <button
-                type="button"
-                className="btn btn--ghost btn--sm topbar__admin"
-                title={t('admin.enterTitle')}
-                onClick={() => setAdminMode(true)}
-              >
-                <Icon name="shield" />
-                {t('admin.enter')}
-              </button>
-            ))}
+          <ModeChip
+            canOwner={canSwitchRole}
+            canAdmin={canAdmin}
+            wsRole={wsRole}
+            adminOn={elevated}
+          />
           <ThemeToggle />
           <select
             aria-label="language"

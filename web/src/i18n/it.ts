@@ -203,6 +203,9 @@ export const it: Catalog = {
   rolesw: {
     acting: 'Agisci come',
     user: 'Utente',
+    admin: 'Admin',
+    switchHint:
+      'Clicca per cambiare come stai agendo (minimo privilegio di default)',
   },
   tasks: {
     nav: 'Task',

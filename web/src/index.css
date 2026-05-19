@@ -1366,3 +1366,39 @@ button.btn--danger:hover {
   padding: 0.2rem 0.4rem;
   font-size: 0.78rem;
 }
+
+/* Acting-as mode chip (multi-state: User / Owner / Admin). */
+.modechip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.28rem 0.65rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  border: 1px solid var(--border);
+  cursor: pointer;
+}
+.modechip--user {
+  background: var(--surface-2);
+  color: var(--muted);
+}
+.modechip--owner {
+  background: var(--accent);
+  color: var(--accent-fg);
+  border-color: var(--accent);
+}
+.modechip--admin {
+  background: #fef3c7;
+  color: #b45309;
+  border-color: #fcd34d;
+}
+:root[data-theme='dark'] .modechip--admin {
+  background: #3a2c08;
+  color: #fbbf24;
+  border-color: #6b4e0f;
+}
+.modechip:hover {
+  filter: brightness(0.98);
+  border-color: var(--accent);
+}
