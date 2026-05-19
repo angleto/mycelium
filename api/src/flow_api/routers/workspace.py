@@ -34,7 +34,7 @@ from flow_core.errors import NotFoundError
 from flow_core.i18n import MessageCode
 from flow_core.models.membership import Role
 from flow_core.models.organization import Organization
-from flow_core.services import memberships
+from flow_core.services import dispatch_loop, memberships
 from flow_core.services.auth import (
     create_org_for_user,
     delete_org_for_user,
@@ -189,6 +189,13 @@ async def patch_my_workspace_settings(
         **(org.settings or {}),
         "estimate_presets": [str(x) for x in body.estimate_presets],
     }
+    # The autonomous-dispatch policy (docs/adr/0025 P5) is only written
+    # when present (an estimate-presets save must not clobber it). The
+    # service validates the enum (governance-default safe otherwise).
+    if body.autonomous_dispatch is not None:
+        merged[dispatch_loop.SETTINGS_KEY] = dispatch_loop.normalize_policy(
+            body.autonomous_dispatch
+        ).value
     new_version = await optimistic_update(
         ctx.session,
         Organization,

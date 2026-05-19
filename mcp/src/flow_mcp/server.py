@@ -29,6 +29,7 @@ from flow_core.models.billing import CostBasis, RateCard, UsageRecord
 from flow_core.models.budget import Budget, BudgetPeriod
 from flow_core.models.client_profile import ClientProfile
 from flow_core.models.dependency import DependencyType, TaskDependency
+from flow_core.models.dispatch_request import DispatchRequest
 from flow_core.models.email import EmailAccount, EmailMessage, EmailProvider
 from flow_core.models.event import Event
 from flow_core.models.executor import Executor, ExecutorKind
@@ -59,6 +60,7 @@ from flow_core.services import budgets as budgets_svc
 from flow_core.services import calendar as calendars
 from flow_core.services import coordination as coordination_svc
 from flow_core.services import dependencies, scheduler, tasks, taxonomy
+from flow_core.services import dispatch_loop as dispatch_loop_svc
 from flow_core.services import email as email_svc
 from flow_core.services import events as events_svc
 from flow_core.services import executors as executors_svc
@@ -1378,6 +1380,110 @@ async def task_decline(token: str, org_id: str, task_id: str) -> dict[str, Any]:
             s, org_id=org, actor_id=user, task_id=uuid.UUID(task_id)
         )
         return _task_full(task)
+
+
+# --- P5: closed-loop dispatch + approval gates (docs/adr/0025) ---
+# Co-equal to the REST surface. The queue read is member-level; approve
+# / deny / tick are owner-gated inside the service (a tick can spend
+# credits via the P3 metered path -> effective-role sudo enforced),
+# mirroring the agent-run-start / billing-grant tools.
+
+
+def _dispatch_request(r: DispatchRequest) -> dict[str, Any]:
+    return {
+        "id": str(r.id),
+        "task_id": str(r.task_id),
+        "executor_id": str(r.executor_id) if r.executor_id else None,
+        "status": r.status.value,
+        "projected_credit_cost": str(r.projected_credit_cost),
+        "agent_run_id": str(r.agent_run_id) if r.agent_run_id else None,
+        "requested_at": r.requested_at.isoformat() if r.requested_at else None,
+        "decided_at": r.decided_at.isoformat() if r.decided_at else None,
+        "decided_by": str(r.decided_by) if r.decided_by else None,
+        "reason": r.reason,
+        "version": r.version,
+    }
+
+
+@mcp.tool()
+async def dispatch_requests_list(token: str, org_id: str) -> list[dict[str, Any]]:
+    """List the closed-loop dispatch queue (member-level, RLS-scoped),
+    newest first. Each row is an approval gate for an admitted
+    ``llm_agent`` task: status, the assigned executor, the projected
+    credit cost, and the started ``agent_run_id`` once dispatched."""
+    async with _tenant(token, org_id) as (s, org, _user):
+        rows = await dispatch_loop_svc.list_requests(s, org_id=org)
+        return [_dispatch_request(r) for r in rows]
+
+
+@mcp.tool()
+async def dispatch_approve(
+    token: str, org_id: str, request_id: str, expected_version: int
+) -> dict[str, Any]:
+    """Owner: approve a pending dispatch request, then immediately
+    attempt the dispatch inline (approve-then-inline-dispatch: the run
+    starts via the P3 metered path in this call). Owner-gated in the
+    service (a dispatch spends credits; effective-role sudo enforced).
+    Optimistic concurrency on ``expected_version``."""
+    async with _tenant(token, org_id) as (s, org, user):
+        req = await dispatch_loop_svc.approve_request(
+            s,
+            org_id=org,
+            actor_id=user,
+            request_id=uuid.UUID(request_id),
+            expected_version=expected_version,
+        )
+        return _dispatch_request(req)
+
+
+@mcp.tool()
+async def dispatch_deny(
+    token: str,
+    org_id: str,
+    request_id: str,
+    expected_version: int,
+    reason: str | None = None,
+) -> dict[str, Any]:
+    """Owner: deny an active dispatch request (never starts a run), with
+    an optional short reason. Owner-gated in the service; optimistic
+    concurrency on ``expected_version``."""
+    async with _tenant(token, org_id) as (s, org, user):
+        req = await dispatch_loop_svc.deny_request(
+            s,
+            org_id=org,
+            actor_id=user,
+            request_id=uuid.UUID(request_id),
+            expected_version=expected_version,
+            reason=reason,
+        )
+        return _dispatch_request(req)
+
+
+@mcp.tool()
+async def dispatch_tick(token: str, org_id: str, policy: str | None = None) -> dict[str, Any]:
+    """Owner: run one closed-loop tick now (recompute -> admit -> gate
+    -> dispatch via P3). The worker calls the same service on a timer.
+    Owner-gated in the service (a tick can spend credits). ``policy`` is
+    the resource-leveling policy for the recompute
+    (fastest|cheapest|balanced|throughput, default balanced)."""
+    async with _tenant(token, org_id) as (s, org, user):
+        res = await dispatch_loop_svc.tick(
+            s,
+            org_id=org,
+            actor_id=user,
+            policy=(SchedulePolicy(policy) if policy else SchedulePolicy.balanced),
+        )
+        return {
+            "policy": res.policy.value,
+            "enabled": res.enabled,
+            "created": res.created,
+            "approved": res.approved,
+            "dispatched": res.dispatched,
+            "skipped": res.skipped,
+            "failed": res.failed,
+            "projected_makespan_minutes": res.projected_makespan_minutes,
+            "projected_credit_cost": str(res.projected_credit_cost),
+        }
 
 
 # --- F4: time tracking (FR-5) ---

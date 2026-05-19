@@ -32,6 +32,13 @@ from flow_core.models.calendar import (
 from flow_core.models.client_profile import ClientProfile
 from flow_core.models.comment import Comment
 from flow_core.models.dependency import DependencyType, TaskDependency
+from flow_core.models.dispatch_request import (
+    ACTIVE_DISPATCH_STATUSES,
+    DEFAULT_AUTONOMOUS_DISPATCH,
+    AutonomousDispatch,
+    DispatchRequest,
+    DispatchStatus,
+)
 from flow_core.models.email import (
     EmailAccount,
     EmailAccountStatus,
@@ -89,10 +96,13 @@ from flow_core.models.workflow import (
 )
 
 __all__ = [
+    "ACTIVE_DISPATCH_STATUSES",
+    "DEFAULT_AUTONOMOUS_DISPATCH",
     "ActivityLog",
     "AgentRun",
     "AgentRunStatus",
     "Attachment",
+    "AutonomousDispatch",
     "Base",
     "BillingConfig",
     "BlobSource",
@@ -107,6 +117,8 @@ __all__ = [
     "CostBasis",
     "CreditLedger",
     "DependencyType",
+    "DispatchRequest",
+    "DispatchStatus",
     "DocumentType",
     "EmailAccount",
     "EmailAccountStatus",

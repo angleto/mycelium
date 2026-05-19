@@ -12,6 +12,7 @@ from flow_core.models.agent_run import AgentRunStatus
 from flow_core.models.billing import CostBasis, RateUnit, StorageKind
 from flow_core.models.budget import BudgetPeriod
 from flow_core.models.dependency import DependencyType
+from flow_core.models.dispatch_request import AutonomousDispatch, DispatchStatus
 from flow_core.models.email import EmailAccountStatus, EmailProvider
 from flow_core.models.executor import ExecutorKind
 from flow_core.models.invoice import (
@@ -155,6 +156,11 @@ class WorkspaceSettings(BaseModel):
     # workspace; the task form adds a "custom value" beyond these.
     estimate_presets: list[Decimal] = Field(default_factory=lambda: list(DEFAULT_ESTIMATE_PRESETS))
     default_client_tag_id: uuid.UUID | None = None
+    # The autonomous-dispatch policy (docs/adr/0025 P5). Governance
+    # default is human-in-the-loop: an unset value is ``approval_required``
+    # (the loop creates pending requests a human must approve), never
+    # ``auto`` (no silent auto-spend).
+    autonomous_dispatch: AutonomousDispatch = AutonomousDispatch.approval_required
 
 
 class WorkspaceOut(BaseModel):
@@ -195,6 +201,10 @@ class WorkspacePatchIn(BaseModel):
 class WorkspaceSettingsIn(BaseModel):
     expected_version: int = Field(ge=1)
     estimate_presets: list[Decimal] = Field(min_length=1, max_length=20)
+    # The autonomous-dispatch policy (docs/adr/0025 P5). Optional so an
+    # estimate-presets save does not have to restate it; only written
+    # when present (owner-gated, like the rest of the namespace).
+    autonomous_dispatch: AutonomousDispatch | None = None
 
     @field_validator("estimate_presets")
     @classmethod
@@ -754,6 +764,61 @@ class HandoffOut(BaseModel):
     delivered_at: datetime.datetime | None
     consumed_at: datetime.datetime | None
     version: int
+
+
+# --- P5: closed-loop dispatch + approval gates (docs/adr/0025) ---
+# Reads are member-level (the queue is visible to the team); approve /
+# deny / tick / policy-set are owner-gated in the service (a tick can
+# spend credits via the P3 metered path -> mirrors the start_run /
+# billing-grant gate; effective-role sudo enforced).
+
+
+class DispatchRequestOut(BaseModel):
+    id: uuid.UUID
+    task_id: uuid.UUID
+    # Denormalized for the queue UI (no extra round-trip): the task
+    # title and the assigned executor's name. Defaults so the generated
+    # TS type marks them optional appropriately.
+    task_title: str = ""
+    executor_id: uuid.UUID | None = None
+    executor_name: str | None = None
+    status: DispatchStatus
+    projected_credit_cost: Decimal
+    agent_run_id: uuid.UUID | None = None
+    requested_at: datetime.datetime
+    decided_at: datetime.datetime | None = None
+    decided_by: uuid.UUID | None = None
+    reason: str | None = None
+    version: int
+
+
+class DispatchDecisionIn(BaseModel):
+    expected_version: int = Field(ge=1)
+    # Optional short cause recorded on deny/skip (never free-form prose
+    # to the user; trimmed/clamped server-side).
+    reason: str | None = Field(default=None, max_length=200)
+
+
+class DispatchTickIn(BaseModel):
+    # Optional resource-leveling policy for the recompute the tick runs
+    # (fastest|cheapest|balanced|throughput; default balanced), matching
+    # the /schedule/recompute contract.
+    policy: SchedulePolicy = SchedulePolicy.balanced
+
+
+class DispatchTickOut(BaseModel):
+    """The "last tick" summary the UI shows (counts of requests touched
+    + the scheduler projections so the loop and schedule view agree)."""
+
+    policy: AutonomousDispatch
+    enabled: bool
+    created: int
+    approved: int
+    dispatched: int
+    skipped: int
+    failed: int
+    projected_makespan_minutes: int
+    projected_credit_cost: Decimal
 
 
 # --- F4: time tracking (FR-5, docs/adr/0002) ---

@@ -77,6 +77,12 @@ class Settings(BaseSettings):
     # the middleware (same-origin dev/proxy needs no CORS).
     cors_origins: str = "http://localhost:5173"
 
+    # Closed-loop dispatch worker (docs/adr/0025 P5). The periodic tick
+    # interval, in seconds. Modest by default (do not hammer the
+    # scheduler); per-workspace and exception-isolated. Configurable via
+    # FLOW_DISPATCH_LOOP_INTERVAL_SECONDS like the other worker knobs.
+    dispatch_loop_interval_seconds: int = 60
+
     # App
     env: str = "dev"
     log_level: str = "INFO"

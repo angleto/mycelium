@@ -92,6 +92,11 @@ class MessageCode(enum.StrEnum):
     AGENT_RUN_ALREADY_ACTIVE = "agent_run.already_active"
     AGENT_RUN_TERMINAL = "agent_run.terminal"
     HANDOFF_NOT_FOUND = "handoff.not_found"
+    DISPATCH_NOT_FOUND = "dispatch.not_found"
+    DISPATCH_NOT_PENDING = "dispatch.not_pending"
+    DISPATCH_ALREADY_DECIDED = "dispatch.already_decided"
+    AUTONOMOUS_DISABLED = "dispatch.autonomous_disabled"
+    AUTONOMOUS_POLICY_INVALID = "dispatch.autonomous_policy_invalid"
     TASK_NOT_OFFERED = "task.not_offered"
     TASK_ALREADY_CLAIMED = "task.already_claimed"
     RECURRENCE_WITH_DEPS = "recurrence.with_dependencies"
@@ -210,6 +215,11 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
         MessageCode.AGENT_RUN_ALREADY_ACTIVE: ("An agent run for this task is already active"),
         MessageCode.AGENT_RUN_TERMINAL: ("Agent run has already finished and cannot be cancelled"),
         MessageCode.HANDOFF_NOT_FOUND: "Handoff not found",
+        MessageCode.DISPATCH_NOT_FOUND: "Dispatch request not found",
+        MessageCode.DISPATCH_NOT_PENDING: ("Dispatch request is not pending (cannot approve)"),
+        MessageCode.DISPATCH_ALREADY_DECIDED: ("Dispatch request has already been decided"),
+        MessageCode.AUTONOMOUS_DISABLED: ("Autonomous dispatch is disabled for this workspace"),
+        MessageCode.AUTONOMOUS_POLICY_INVALID: ("Invalid autonomous dispatch policy: {detail}"),
         MessageCode.TASK_NOT_OFFERED: ("Task is not offered (nothing to claim or decline)"),
         MessageCode.TASK_ALREADY_CLAIMED: ("Task has already been claimed by a member"),
         MessageCode.RECURRENCE_WITH_DEPS: (
