@@ -1,7 +1,14 @@
-import { useCallback, useEffect, useState, type FormEvent } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type FormEvent,
+} from 'react'
 import { useTranslation } from 'react-i18next'
 import { api, errMessage, workspaceHeader } from '../api/client'
 import { useSession } from '../auth/useSession'
+import { useFocus } from '../lib/focus'
 import { TagChip } from '../components/TagChip'
 import type { components } from '../api/schema'
 
@@ -20,6 +27,19 @@ export function MemoryRoute() {
   const { t } = useTranslation()
   const session = useSession()
   const activeId = session?.workspaceId
+  const { clientId, projectId } = useFocus()
+  // Scope the tag catalog to the active focus (server-side), so a
+  // focused client/project does not surface other clients' tags.
+  const tagQuery = useMemo(
+    () =>
+      clientId
+        ? {
+            for_client: clientId,
+            ...(projectId ? { for_project: projectId } : {}),
+          }
+        : undefined,
+    [clientId, projectId],
+  )
   const [text, setText] = useState('')
   const [query, setQuery] = useState('')
   const [ran, setRan] = useState<string | null>(null)
@@ -46,7 +66,9 @@ export function MemoryRoute() {
     let active = true
     void (async () => {
       const [tg, st, ch] = await Promise.all([
-        api.GET('/tags', { params: { header: workspaceHeader() } }),
+        api.GET('/tags', {
+          params: { header: workspaceHeader(), query: tagQuery },
+        }),
         api.GET('/memory/status', {
           params: { header: workspaceHeader() },
         }),
@@ -69,7 +91,7 @@ export function MemoryRoute() {
     return () => {
       active = false
     }
-  }, [activeId])
+  }, [activeId, tagQuery])
 
   function toggle(list: string[], set: (v: string[]) => void, id: string) {
     set(list.includes(id) ? list.filter((x) => x !== id) : [...list, id])

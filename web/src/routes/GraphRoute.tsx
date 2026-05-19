@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { api, errMessage, workspaceHeader } from '../api/client'
@@ -49,7 +49,20 @@ export function GraphRoute() {
   const navigate = useNavigate()
   const session = useSession()
   const activeId = session?.workspaceId
-  const { focusIds, active: focusActive } = useFocus()
+  const { focusIds, active: focusActive, clientId, projectId } = useFocus()
+  // When a client/project focus is set, the tag catalog must be
+  // scoped to it (the server filters by scope); otherwise tags from
+  // other clients/projects leak into the filter list.
+  const tagQuery = useMemo(
+    () =>
+      clientId
+        ? {
+            for_client: clientId,
+            ...(projectId ? { for_project: projectId } : {}),
+          }
+        : undefined,
+    [clientId, projectId],
+  )
   const [tasks, setTasks] = useState<Task[]>([])
   const [tags, setTags] = useState<Tag[]>([])
   const [graph, setGraph] = useState<Graph | null>(null)
@@ -66,13 +79,13 @@ export function GraphRoute() {
       api.GET('/tasks', { params: { header: h } }),
       api.GET('/graph', { params: { header: h } }),
       api.GET('/dependencies', { params: { header: h } }),
-      api.GET('/tags', { params: { header: h } }),
+      api.GET('/tags', { params: { header: h, query: tagQuery } }),
     ])
     if (tk.data) setTasks(tk.data)
     if (g.data) setGraph(g.data)
     if (d.data) setDeps(d.data)
     if (tg.data) setTags(tg.data)
-  }, [])
+  }, [tagQuery])
 
   useEffect(() => {
     let active = true
@@ -82,7 +95,7 @@ export function GraphRoute() {
         api.GET('/tasks', { params: { header: h } }),
         api.GET('/graph', { params: { header: h } }),
         api.GET('/dependencies', { params: { header: h } }),
-        api.GET('/tags', { params: { header: h } }),
+        api.GET('/tags', { params: { header: h, query: tagQuery } }),
       ])
       if (!active) return
       if (tk.data) setTasks(tk.data)
@@ -93,7 +106,7 @@ export function GraphRoute() {
     return () => {
       active = false
     }
-  }, [activeId])
+  }, [activeId, tagQuery])
 
   const taskById = new Map(tasks.map((x) => [x.id, x]))
   const titleOf = (id: string) => taskById.get(id)?.title ?? id.slice(0, 8)

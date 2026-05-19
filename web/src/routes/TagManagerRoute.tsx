@@ -1,8 +1,15 @@
-import { useCallback, useEffect, useState, type FormEvent } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type FormEvent,
+} from 'react'
 import { Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { api, errMessage, workspaceHeader } from '../api/client'
 import { useSession } from '../auth/useSession'
+import { useFocus } from '../lib/focus'
 import { TagChip } from '../components/TagChip'
 import type { components } from '../api/schema'
 
@@ -147,30 +154,46 @@ export function TagManagerRoute() {
   const [name, setName] = useState('')
   const [showArchived, setShowArchived] = useState(false)
   const [err, setErr] = useState<string | null>(null)
+  const { clientId, projectId } = useFocus()
+  // The manager always fetches archived too (the showArchived toggle
+  // filters display) so an archived tag can still be un-archived;
+  // and it honours the active focus scope like every other tag list.
+  const tagQuery = useMemo(
+    () => ({
+      include_archived: true,
+      ...(clientId
+        ? {
+            for_client: clientId,
+            ...(projectId ? { for_project: projectId } : {}),
+          }
+        : {}),
+    }),
+    [clientId, projectId],
+  )
 
   const load = useCallback(async () => {
     const { data, error } = await api.GET('/tags', {
-      params: { header: workspaceHeader() },
+      params: { header: workspaceHeader(), query: tagQuery },
     })
     if (error || !data) {
       setErr(errMessage(error))
       return
     }
     setTags(data)
-  }, [])
+  }, [tagQuery])
 
   useEffect(() => {
     let active = true
     void (async () => {
       const { data } = await api.GET('/tags', {
-        params: { header: workspaceHeader() },
+        params: { header: workspaceHeader(), query: tagQuery },
       })
       if (active && data) setTags(data)
     })()
     return () => {
       active = false
     }
-  }, [activeId])
+  }, [activeId, tagQuery])
 
   async function onCreate(e: FormEvent) {
     e.preventDefault()
