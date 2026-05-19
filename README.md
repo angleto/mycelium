@@ -10,6 +10,16 @@
   co-equal to the GUI.
 </p>
 
+<p align="center">
+  <a href="https://github.com/angleto/flow/actions/workflows/ci.yml"><img src="https://github.com/angleto/flow/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-AGPL%20v3%20or%20later-blue.svg" alt="License: AGPL-3.0-or-later" /></a>
+  <img src="https://img.shields.io/badge/python-3.12%2B-blue.svg" alt="Python 3.12+" />
+  <a href="https://github.com/astral-sh/ruff"><img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json" alt="Ruff" /></a>
+  <a href="https://mypy-lang.org/"><img src="https://www.mypy-lang.org/static/mypy_badge.svg" alt="Checked with mypy" /></a>
+  <img src="https://img.shields.io/badge/web-React%2019%20%2B%20TypeScript-61dafb.svg" alt="React 19 + TypeScript" />
+  <img src="https://img.shields.io/badge/MCP-control%20surface-8A2BE2.svg" alt="MCP control surface" />
+</p>
+
 ---
 
 Flow unifies a task manager, a time tracker, a scheduler, notes with a
