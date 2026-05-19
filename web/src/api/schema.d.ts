@@ -353,7 +353,8 @@ export interface paths {
         /**
          * Add Workspace Member
          * @description Add (or re-role) a collaborator by email. Requires the effective
-         *     role admin; the SQL re-checks (actor_id) atomically too.
+         *     role owner (hardened model: only an owner manages members); the SQL
+         *     re-checks (actor_id) atomically too.
          */
         post: operations["add_workspace_member_workspaces_me_members_post"];
         delete?: never;
@@ -374,7 +375,7 @@ export interface paths {
         post?: never;
         /**
          * Remove Workspace Member
-         * @description Remove a collaborator (effective role admin; SQL re-checks).
+         * @description Remove a collaborator (effective role owner; SQL re-checks).
          *     Cannot remove the sole owner.
          */
         delete: operations["remove_workspace_member_workspaces_me_members__user_id__delete"];
@@ -382,7 +383,7 @@ export interface paths {
         head?: never;
         /**
          * Set Workspace Member Role
-         * @description Change a collaborator's role (effective role admin; SQL
+         * @description Change a collaborator's role (effective role owner; SQL
          *     re-checks). Cannot demote the sole owner.
          */
         patch: operations["set_workspace_member_role_workspaces_me_members__user_id__patch"];
@@ -403,8 +404,9 @@ export interface paths {
         head?: never;
         /**
          * Patch My Workspace Settings
-         * @description Per-workspace config (admin). Merges into the settings bag so a
-         *     future key is not clobbered by an estimate-presets save.
+         * @description Per-workspace config (owner: privileged namespace write under
+         *     the hardened model). Merges into the settings bag so a future key
+         *     is not clobbered by an estimate-presets save.
          */
         patch: operations["patch_my_workspace_settings_workspaces_me_settings_patch"];
         trace?: never;
