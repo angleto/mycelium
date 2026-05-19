@@ -96,6 +96,30 @@ export const it: Catalog = {
     cancel: 'Annulla',
     confirmDelete: 'Eliminare questo executor?',
   },
+  agentrun: {
+    title: 'Esecuzioni agente',
+    intro:
+      'Esegui questo task LLM con l’agente assegnato. Limitato (step + budget crediti), interrompibile; l’agente può solo leggere task/note/memoria e scrivere una nota di lavoro — non supera mai i tuoi permessi. Solo owner.',
+    run: 'Esegui con agente',
+    running: 'In corso…',
+    cancel: 'Annulla',
+    none: 'Nessuna esecuzione.',
+    steps: 'step',
+    credits: 'cr',
+    artifact: 'nota artefatto',
+    status: {
+      queued: 'in coda',
+      running: 'in corso',
+      succeeded: 'completata',
+      failed: 'fallita',
+      cancelled: 'annullata',
+      blocked: 'bloccata',
+    },
+    blocked: {
+      budget_exhausted: 'budget esaurito',
+      tool_not_allowed: 'serve approvazione (tool non permesso)',
+    },
+  },
   mch: {
     title: 'Canali memoria',
     intro:

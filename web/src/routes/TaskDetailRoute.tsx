@@ -7,6 +7,7 @@ import { TagPicker } from '../components/TagPicker'
 import { PriorityChip } from '../components/PriorityChip'
 import { ScaleSelect } from '../components/ScaleSelect'
 import { Attachments } from '../components/Attachments'
+import { AgentRunPanel } from '../components/AgentRunPanel'
 import { TaskTimer } from '../components/TaskTimer'
 import { formatHours } from '../lib/estimate'
 
@@ -762,6 +763,13 @@ export function TaskDetailRoute() {
 
       <h2>{t('attach.title')}</h2>
       <Attachments taskId={id} />
+
+      {task.executor_kind === 'llm_agent' && (
+        <>
+          <h2>{t('agentrun.title')}</h2>
+          <AgentRunPanel taskId={id} />
+        </>
+      )}
     </section>
   )
 }

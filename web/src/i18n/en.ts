@@ -97,6 +97,30 @@ export const en = {
     cancel: 'Cancel',
     confirmDelete: 'Delete this executor?',
   },
+  agentrun: {
+    title: 'Agent runs',
+    intro:
+      'Run this LLM task with its assigned agent. Bounded (steps + credit budget), killable; the agent may only read the task/notes/memory and write a work note — it never exceeds your permissions. Owner-only.',
+    run: 'Run with agent',
+    running: 'Running…',
+    cancel: 'Cancel',
+    none: 'No runs yet.',
+    steps: 'steps',
+    credits: 'cr',
+    artifact: 'artifact note',
+    status: {
+      queued: 'queued',
+      running: 'running',
+      succeeded: 'succeeded',
+      failed: 'failed',
+      cancelled: 'cancelled',
+      blocked: 'blocked',
+    },
+    blocked: {
+      budget_exhausted: 'budget exhausted',
+      tool_not_allowed: 'needs approval (tool not allowed)',
+    },
+  },
   mch: {
     title: 'Memory channels',
     intro:
