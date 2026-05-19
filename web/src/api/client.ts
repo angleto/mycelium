@@ -3,6 +3,7 @@ import type { paths } from './schema'
 import {
   clearSession,
   getSession,
+  getWorkspaceRole,
   isAdminMode,
   lastWorkspaceId,
   setSession,
@@ -20,6 +21,10 @@ const authMiddleware: Middleware = {
     // Sent only while elevated; the server still re-checks the
     // capability, so this never escalates a non-admin.
     if (s && isAdminMode()) request.headers.set('X-Admin-Mode', '1')
+    // Effective workspace role ('' = default member). Server clamps it
+    // to the real membership role, so a forged value cannot escalate.
+    const wr = s ? getWorkspaceRole() : ''
+    if (wr) request.headers.set('X-Workspace-Role', wr)
     request.headers.set('Accept-Language', i18n.language)
     return request
   },

@@ -1,5 +1,10 @@
 import { useSyncExternalStore } from 'react'
-import { getSession, isAdminMode, subscribe } from './session'
+import {
+  getSession,
+  getWorkspaceRole,
+  isAdminMode,
+  subscribe,
+} from './session'
 
 export function useSession() {
   return useSyncExternalStore(subscribe, getSession)
@@ -10,4 +15,9 @@ export function useSession() {
 // useSession subscriber would not re-render).
 export function useAdminMode(): boolean {
   return useSyncExternalStore(subscribe, isAdminMode)
+}
+
+// Reactive effective workspace role ('' = default/member).
+export function useWorkspaceRole(): string {
+  return useSyncExternalStore(subscribe, getWorkspaceRole)
 }

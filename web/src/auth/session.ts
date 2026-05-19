@@ -14,6 +14,12 @@ const LAST_WS = 'flow.lastWorkspace'
 // purely a client signal; the server re-checks the capability and the
 // X-Admin-Mode header on every admin call (costa_associati model).
 const ADMIN_MODE = 'flow.adminMode'
+// Sudo-style WORKSPACE role: you operate at the least privilege
+// (member) by default and explicitly switch UP to owner/admin when you
+// need to mutate clients/workflows/billing. Client signal only; the
+// server clamps X-Workspace-Role to the real membership role (a forged
+// higher value cannot escalate). Cleared on logout.
+const WS_ROLE = 'flow.workspaceRole'
 type Listener = () => void
 const listeners = new Set<Listener>()
 
@@ -30,6 +36,8 @@ function read(): Session | null {
 
 let cache: Session | null = read()
 let adminCache: boolean = localStorage.getItem(ADMIN_MODE) === '1'
+// '' = default (member). Otherwise one of owner|admin|member|guest.
+let wsRoleCache: string = localStorage.getItem(WS_ROLE) ?? ''
 
 export function getSession(): Session | null {
   return cache
@@ -43,6 +51,18 @@ export function setAdminMode(on: boolean): void {
   adminCache = on
   if (on) localStorage.setItem(ADMIN_MODE, '1')
   else localStorage.removeItem(ADMIN_MODE)
+  emit()
+}
+
+// '' means "default" (the server treats absent/blank as member).
+export function getWorkspaceRole(): string {
+  return wsRoleCache
+}
+
+export function setWorkspaceRole(role: string): void {
+  wsRoleCache = role
+  if (role) localStorage.setItem(WS_ROLE, role)
+  else localStorage.removeItem(WS_ROLE)
   emit()
 }
 
@@ -72,8 +92,10 @@ export function setActiveWorkspace(workspaceId: string): void {
 export function clearSession(): void {
   cache = null
   adminCache = false
+  wsRoleCache = ''
   localStorage.removeItem(KEY)
   localStorage.removeItem(ADMIN_MODE)
+  localStorage.removeItem(WS_ROLE)
   emit()
 }
 
