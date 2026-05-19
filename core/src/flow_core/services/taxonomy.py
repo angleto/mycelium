@@ -144,46 +144,109 @@ async def create_client(
 
 
 _DEFAULT_CLIENT_NAME = "Personal"
+_DEFAULT_PROJECT_NAME = "General"
+
+
+async def _remember_default(
+    session: AsyncSession,
+    org: Organization | None,
+    settings: dict[str, object],
+    key: str,
+    tag_id: uuid.UUID,
+) -> None:
+    """Best-effort: cache the default tag id in organizations.settings
+    as a fast path. Only a cache — correctness no longer depends on it
+    (the natural key does), so an RLS-hidden Organization row (org is
+    None) or an already-current pointer is simply skipped."""
+    if org is None or settings.get(key) == str(tag_id):
+        return
+    org.settings = {**settings, key: str(tag_id)}
+    await session.flush()
+
+
+async def _ensure_default_tag(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    kind: TagKind,
+    name: str,
+    settings_key: str,
+) -> tuple[uuid.UUID, bool]:
+    """Get-or-create the singleton default tag, idempotent on the
+    natural key ``uq_tags(org_id, kind, name)``. The settings pointer
+    is only a fast-path cache: a path that creates the default without
+    persisting the pointer (or where the Organization row is RLS-hidden,
+    so ``org is None`` and the pointer is never written) can no longer
+    cause a duplicate-insert ``tag.duplicate``. Returns (tag_id,
+    created)."""
+    org = (
+        await session.execute(select(Organization).where(Organization.id == org_id))
+    ).scalar_one_or_none()
+    settings = dict(org.settings) if org and org.settings else {}
+    cur = settings.get(settings_key)
+    if cur is not None:
+        exists = (
+            await session.execute(
+                select(Tag.id).where(Tag.id == uuid.UUID(str(cur)), Tag.kind == kind)
+            )
+        ).scalar_one_or_none()
+        if exists is not None:
+            return uuid.UUID(str(cur)), False
+    # Authoritative: (org_id, kind, name) is unique, so an existing
+    # default tag — created by any sibling path, in any order — is THE
+    # default. Reuse it instead of colliding on insert.
+    existing = (
+        await session.execute(select(Tag.id).where(Tag.kind == kind, Tag.name == name))
+    ).scalar_one_or_none()
+    if existing is not None:
+        await _remember_default(session, org, settings, settings_key, existing)
+        return existing, False
+    try:
+        tag = await _insert_tag(session, org_id, kind, name, None)
+    except DomainError as exc:
+        # Lost a concurrent race: re-resolve the now-existing row.
+        if exc.code is not MessageCode.TAG_DUPLICATE:
+            raise
+        raced = (
+            await session.execute(select(Tag.id).where(Tag.kind == kind, Tag.name == name))
+        ).scalar_one_or_none()
+        if raced is None:
+            raise
+        await _remember_default(session, org, settings, settings_key, raced)
+        return raced, False
+    await _remember_default(session, org, settings, settings_key, tag.id)
+    return tag.id, True
 
 
 async def ensure_default_client(
     session: AsyncSession, *, org_id: uuid.UUID, actor_id: uuid.UUID
 ) -> uuid.UUID:
     """Every project belongs to a client; a workspace always has a
-    default ("Personal") for personal projects/tasks. Idempotent: the
-    id is remembered in organizations.settings.default_client_tag_id.
-    System action (no role gate) so a member can create a project."""
-    org = (
-        await session.execute(select(Organization).where(Organization.id == org_id))
-    ).scalar_one_or_none()
-    settings = dict(org.settings) if org and org.settings else {}
-    cur = settings.get("default_client_tag_id")
-    if cur is not None:
-        exists = (
-            await session.execute(
-                select(Tag.id).where(Tag.id == uuid.UUID(str(cur)), Tag.kind == TagKind.client)
-            )
-        ).scalar_one_or_none()
-        if exists is not None:
-            return uuid.UUID(str(cur))
-    tag = await _insert_tag(session, org_id, TagKind.client, _DEFAULT_CLIENT_NAME, None)
-    session.add(ClientProfile(tag_id=tag.id, org_id=org_id, ragione_sociale=_DEFAULT_CLIENT_NAME))
+    default ("Personal") for personal projects/tasks. Idempotent on the
+    natural key (not a denormalized pointer). System action (no role
+    gate) so a member can create a project."""
+    tag_id, created = await _ensure_default_tag(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        kind=TagKind.client,
+        name=_DEFAULT_CLIENT_NAME,
+        settings_key="default_client_tag_id",
+    )
+    if not created:
+        return tag_id
+    session.add(ClientProfile(tag_id=tag_id, org_id=org_id, ragione_sociale=_DEFAULT_CLIENT_NAME))
     await session.flush()
-    if org is not None:
-        org.settings = {**settings, "default_client_tag_id": str(tag.id)}
-        await session.flush()
     await audit.log(
         session,
         org_id=org_id,
         actor_id=actor_id,
         entity="tag",
-        entity_id=tag.id,
+        entity_id=tag_id,
         action="ensure_default_client",
     )
-    return tag.id
-
-
-_DEFAULT_PROJECT_NAME = "General"
+    return tag_id
 
 
 async def ensure_default_project(
@@ -192,36 +255,30 @@ async def ensure_default_project(
     """Every task belongs to a project (and thus, transitively, to a
     client). A workspace always has a default ("General") project under
     the default ("Personal") client for otherwise-orphan tasks.
-    Idempotent: id remembered in settings.default_project_tag_id."""
-    org = (
-        await session.execute(select(Organization).where(Organization.id == org_id))
-    ).scalar_one_or_none()
-    settings = dict(org.settings) if org and org.settings else {}
-    cur = settings.get("default_project_tag_id")
-    if cur is not None:
-        exists = (
-            await session.execute(
-                select(Tag.id).where(Tag.id == uuid.UUID(str(cur)), Tag.kind == TagKind.project)
-            )
-        ).scalar_one_or_none()
-        if exists is not None:
-            return uuid.UUID(str(cur))
+    Idempotent on the natural key. The default client is ensured first
+    so a fresh workspace gets the full chain in any call order."""
     client_id = await ensure_default_client(session, org_id=org_id, actor_id=actor_id)
-    tag = await _insert_tag(session, org_id, TagKind.project, _DEFAULT_PROJECT_NAME, None)
-    session.add(ProjectProfile(tag_id=tag.id, org_id=org_id, client_tag_id=client_id))
+    tag_id, created = await _ensure_default_tag(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        kind=TagKind.project,
+        name=_DEFAULT_PROJECT_NAME,
+        settings_key="default_project_tag_id",
+    )
+    if not created:
+        return tag_id
+    session.add(ProjectProfile(tag_id=tag_id, org_id=org_id, client_tag_id=client_id))
     await session.flush()
-    if org is not None:
-        org.settings = {**settings, "default_project_tag_id": str(tag.id)}
-        await session.flush()
     await audit.log(
         session,
         org_id=org_id,
         actor_id=actor_id,
         entity="tag",
-        entity_id=tag.id,
+        entity_id=tag_id,
         action="ensure_default_project",
     )
-    return tag.id
+    return tag_id
 
 
 async def create_project(
