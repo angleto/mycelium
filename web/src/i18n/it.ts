@@ -524,6 +524,8 @@ export const it: Catalog = {
     billable: 'fatturabile',
     report: 'Report',
     editEntry: 'Modifica voce',
+    deleteEntry: 'Elimina voce',
+    confirmDeleteEntry: 'Eliminare questa voce di tempo? Operazione irreversibile.',
     save: 'Salva',
     startAt: 'Inizio',
     endAt: 'Fine',

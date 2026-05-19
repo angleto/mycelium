@@ -285,6 +285,21 @@ export function TimeRoute() {
     await loadReport()
   }
 
+  async function deleteEntry(en: Entry) {
+    if (!window.confirm(t('time.confirmDeleteEntry'))) return
+    setErr(null)
+    const { error } = await api.DELETE('/time/entries/{entry_id}', {
+      params: { header: workspaceHeader(), path: { entry_id: en.id } },
+    })
+    if (error) {
+      setErr(errMessage(error))
+      return
+    }
+    if (editId === en.id) setEditId(null)
+    await resetEntries()
+    await loadReport()
+  }
+
   async function startTask(taskId: string, parallel: boolean) {
     if (!taskId) return
     setErr(null)
@@ -476,6 +491,14 @@ export function TimeRoute() {
                   onClick={() => void beginEdit(en)}
                 >
                   {t('time.editEntry')}
+                </button>
+                <button
+                  type="button"
+                  className="btn--ghost btn--sm btn--danger"
+                  title={t('time.deleteEntry')}
+                  onClick={() => void deleteEntry(en)}
+                >
+                  {t('time.deleteEntry')}
                 </button>
                 {runningByTask.has(en.task_id) ? (
                   <button

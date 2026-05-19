@@ -524,6 +524,8 @@ export const en = {
     billable: 'billable',
     report: 'Report',
     editEntry: 'Edit entry',
+    deleteEntry: 'Delete entry',
+    confirmDeleteEntry: 'Delete this time entry? This cannot be undone.',
     save: 'Save',
     startAt: 'Start',
     endAt: 'End',
