@@ -36,7 +36,11 @@ router = APIRouter(tags=["time"])
 _EMPTY_CTX = TaskContext()
 
 
-def _out(e: TimeEntry, ctx: TaskContext = _EMPTY_CTX) -> TimeEntryOut:
+def _out(
+    e: TimeEntry,
+    ctx: TaskContext = _EMPTY_CTX,
+    note_title: str | None = None,
+) -> TimeEntryOut:
     return TimeEntryOut(
         id=e.id,
         task_id=e.task_id,
@@ -50,7 +54,9 @@ def _out(e: TimeEntry, ctx: TaskContext = _EMPTY_CTX) -> TimeEntryOut:
         parallel=e.parallel,
         rate_snapshot=e.rate_snapshot,
         currency=e.currency,
-        note=e.note,
+        memo=e.memo,
+        note_id=e.note_id,
+        note_title=note_title,
         version=e.version,
         task_title=ctx.task_title,
         client_tag_id=ctx.client_tag_id,
@@ -62,12 +68,22 @@ def _out(e: TimeEntry, ctx: TaskContext = _EMPTY_CTX) -> TimeEntryOut:
 
 
 async def _out_one(ctx: TenantCtx, e: TimeEntry) -> TimeEntryOut:
-    return _out(e, await svc.context_for_entry(ctx.session, e))
+    titles = await svc.resolve_note_titles(ctx.session, [e.note_id])
+    note_title = titles.get(e.note_id) if e.note_id is not None else None
+    return _out(e, await svc.context_for_entry(ctx.session, e), note_title)
 
 
 async def _out_many(ctx: TenantCtx, rows: list[TimeEntry]) -> list[TimeEntryOut]:
     ctxs = await svc.resolve_task_contexts(ctx.session, [e.task_id for e in rows])
-    return [_out(e, ctxs.get(e.task_id, _EMPTY_CTX)) for e in rows]
+    titles = await svc.resolve_note_titles(ctx.session, [e.note_id for e in rows])
+    return [
+        _out(
+            e,
+            ctxs.get(e.task_id, _EMPTY_CTX),
+            titles.get(e.note_id) if e.note_id is not None else None,
+        )
+        for e in rows
+    ]
 
 
 @router.post("/time/start", response_model=TimeEntryOut)
@@ -81,7 +97,8 @@ async def start_timer(
         actor_id=ctx.user_id,
         task_id=body.task_id,
         billable=body.billable,
-        note=body.note,
+        memo=body.memo,
+        note_id=body.note_id,
         parallel=body.parallel,
     )
     return await _out_one(ctx, e)
@@ -97,7 +114,7 @@ async def stop_timer(
         org_id=ctx.org_id,
         actor_id=ctx.user_id,
         task_id=body.task_id,
-        note=body.note,
+        memo=body.memo,
     )
     return await _out_one(ctx, e)
 
@@ -124,7 +141,8 @@ async def add_manual_entry(
         ended_at=body.ended_at,
         duration_seconds=body.duration_seconds,
         billable=body.billable,
-        note=body.note,
+        memo=body.memo,
+        note_id=body.note_id,
     )
     return await _out_one(ctx, e)
 

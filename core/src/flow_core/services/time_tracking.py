@@ -30,6 +30,7 @@ from flow_core.errors import DomainError, NotFoundError
 from flow_core.i18n import MessageCode
 from flow_core.models.client_profile import ClientProfile
 from flow_core.models.membership import Role
+from flow_core.models.note import Note
 from flow_core.models.project_profile import ProjectProfile
 from flow_core.models.tag import Tag, TagKind
 from flow_core.models.task import ExecKind, Task
@@ -40,7 +41,50 @@ from flow_core.services import audit
 from flow_core.services.rbac import require_role
 from flow_core.services.tasks import get_task
 
-_UPDATABLE = frozenset({"note", "billable", "task_id", "started_at", "ended_at"})
+_UPDATABLE = frozenset({"memo", "billable", "task_id", "started_at", "ended_at", "note_id"})
+
+
+async def _task_id_for_note(
+    session: AsyncSession, *, org_id: uuid.UUID, note_id: uuid.UUID
+) -> uuid.UUID:
+    """Proposal A: a note is the work log of exactly one task. Load the
+    note RLS-scoped in-org (NOTE_NOT_FOUND if absent / cross-org). The
+    note MUST already be linked to a task, else NOTE_NOT_LINKED_TO_TASK
+    (you cannot bill time to a note that has no task to roll up to).
+    Returns the note's ``task_id`` so the entry's billing task can be
+    derived from it."""
+    note = (
+        await session.execute(select(Note).where(Note.id == note_id, Note.deleted_at.is_(None)))
+    ).scalar_one_or_none()
+    if note is None:
+        raise NotFoundError(MessageCode.NOTE_NOT_FOUND)
+    if note.task_id is None:
+        raise DomainError(MessageCode.NOTE_NOT_LINKED_TO_TASK)
+    return note.task_id
+
+
+async def _resolve_billing_task(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    task_id: uuid.UUID | None,
+    note_id: uuid.UUID | None,
+) -> uuid.UUID:
+    """The billing task for a new/edited entry. With a ``note_id`` the
+    task is derived from ``note.task_id`` (Proposal A); if ``task_id``
+    is also given the two MUST agree (DOMAIN_ERROR otherwise). Without a
+    note the explicit ``task_id`` is used as-is. The caller still
+    validates task existence (``get_task``) for the no-note path."""
+    if note_id is not None:
+        note_task = await _task_id_for_note(session, org_id=org_id, note_id=note_id)
+        if task_id is not None and task_id != note_task:
+            raise DomainError(MessageCode.DOMAIN_ERROR)
+        return note_task
+    if task_id is None:
+        # No note to derive a billing task from and no explicit task:
+        # there is nothing to roll the time up to.
+        raise DomainError(MessageCode.TIME_ENTRY_INVALID)
+    return task_id
 
 
 class ReportGroup(enum.StrEnum):
@@ -183,15 +227,15 @@ async def _stop_entry(
     org_id: uuid.UUID,
     actor_id: uuid.UUID,
     entry: TimeEntry,
-    note: str | None = None,
+    memo: str | None = None,
 ) -> TimeEntry:
     ended = _now()
     values: dict[str, Any] = {
         "ended_at": ended,
         "duration_seconds": int((ended - entry.started_at).total_seconds()),
     }
-    if note is not None:
-        values["note"] = note
+    if memo is not None:
+        values["memo"] = memo
     await optimistic_update(
         session,
         TimeEntry,
@@ -215,16 +259,24 @@ async def start_timer(
     *,
     org_id: uuid.UUID,
     actor_id: uuid.UUID,
-    task_id: uuid.UUID,
+    task_id: uuid.UUID | None = None,
     billable: bool | None = None,
-    note: str | None = None,
+    memo: str | None = None,
+    note_id: uuid.UUID | None = None,
     parallel: bool = False,
 ) -> TimeEntry:
     """Serial (default): one running timer at a time; starting it stops
     the previous serial one. Parallel: runs alongside others (e.g. LLM
     tasks), stops nothing. The same task is never double-tracked (DB
-    partial unique index -> TIMER_ALREADY_RUNNING)."""
+    partial unique index -> TIMER_ALREADY_RUNNING).
+
+    Proposal A: ``note_id`` (optional) records *in which work note* the
+    time was logged. The note must be linked to a task; the billing
+    task is derived from it (``task_id`` may be omitted, or must agree
+    if both are given). The entry stores both ``task_id`` (billing
+    rollup, NOT NULL) and ``note_id`` (provenance)."""
     await require_role(session, org_id, actor_id, Role.member)
+    task_id = await _resolve_billing_task(session, org_id=org_id, task_id=task_id, note_id=note_id)
     task = await get_task(session, org_id=org_id, task_id=task_id)
     if not parallel:
         current = await running_serial(session, org_id=org_id, user_id=actor_id)
@@ -245,7 +297,8 @@ async def start_timer(
         billable=eff_billable,
         rate_snapshot=rate,
         currency=currency,
-        note=note,
+        memo=memo,
+        note_id=note_id,
         parallel=parallel,
     )
     try:
@@ -272,7 +325,7 @@ async def stop_timer(
     org_id: uuid.UUID,
     actor_id: uuid.UUID,
     task_id: uuid.UUID | None = None,
-    note: str | None = None,
+    memo: str | None = None,
 ) -> TimeEntry:
     """Stop the running timer for ``task_id`` (a specific row), or the
     serial timer when ``task_id`` is omitted."""
@@ -283,7 +336,7 @@ async def stop_timer(
         entry = await running_serial(session, org_id=org_id, user_id=actor_id)
     if entry is None:
         raise DomainError(MessageCode.NO_RUNNING_TIMER)
-    return await _stop_entry(session, org_id=org_id, actor_id=actor_id, entry=entry, note=note)
+    return await _stop_entry(session, org_id=org_id, actor_id=actor_id, entry=entry, memo=memo)
 
 
 async def add_manual_entry(
@@ -291,14 +344,16 @@ async def add_manual_entry(
     *,
     org_id: uuid.UUID,
     actor_id: uuid.UUID,
-    task_id: uuid.UUID,
+    task_id: uuid.UUID | None = None,
     started_at: dt.datetime,
     ended_at: dt.datetime | None = None,
     duration_seconds: int | None = None,
     billable: bool | None = None,
-    note: str | None = None,
+    memo: str | None = None,
+    note_id: uuid.UUID | None = None,
 ) -> TimeEntry:
     await require_role(session, org_id, actor_id, Role.member)
+    task_id = await _resolve_billing_task(session, org_id=org_id, task_id=task_id, note_id=note_id)
     task = await get_task(session, org_id=org_id, task_id=task_id)
     if ended_at is not None:
         if ended_at <= started_at:
@@ -323,7 +378,8 @@ async def add_manual_entry(
         billable=eff_billable,
         rate_snapshot=rate,
         currency=currency,
-        note=note,
+        memo=memo,
+        note_id=note_id,
     )
     session.add(entry)
     await session.flush()
@@ -379,11 +435,17 @@ async def update_entry(
     expected_version: int,
     values: dict[str, Any],
 ) -> int:
-    """Correct an entry. Beyond note/billable a user can:
+    """Correct an entry. Beyond memo/billable a user can:
 
     - ``task_id``: reassign the entry to another task (transitively
       changing its project/client). The new task must exist in the
       tenant, else NotFoundError TASK_NOT_FOUND.
+    - ``note_id``: set / clear (explicit ``None``) the work note this
+      time was logged in. Preserved when the key is absent. When set,
+      the same Proposal A consistency rule as start/create applies: the
+      note must exist in-org (NOTE_NOT_FOUND) and be linked to a task,
+      and that task must agree with the entry's (final) billing task,
+      else DOMAIN_ERROR.
     - ``started_at`` / ``ended_at``: adjust the interval if the timer
       was started late / never stopped. The final interval must be
       open-ended (still running) or have ``ended_at > started_at``,
@@ -402,6 +464,20 @@ async def update_entry(
         # Validates same-tenant existence (RLS scopes the lookup);
         # raises NotFoundError(TASK_NOT_FOUND) if absent.
         await get_task(session, org_id=org_id, task_id=patch["task_id"])
+    # Proposal A invariant after the patch: the *effective* note_id
+    # (the new one if set, the stored one if untouched, none if cleared)
+    # must be linked to the *effective* billing task (the reassigned one
+    # if patched, else the stored task_id). This rejects both linking an
+    # inconsistent note AND reassigning the task out from under a note
+    # that is still attached. Clearing the note (explicit None) needs no
+    # check. Note existence/linkage (NOTE_NOT_FOUND /
+    # NOTE_NOT_LINKED_TO_TASK) is validated by _task_id_for_note.
+    final_task_id = patch.get("task_id", entry.task_id)
+    eff_note_id = patch["note_id"] if "note_id" in patch else entry.note_id
+    if eff_note_id is not None:
+        note_task = await _task_id_for_note(session, org_id=org_id, note_id=eff_note_id)
+        if note_task != final_task_id:
+            raise DomainError(MessageCode.DOMAIN_ERROR)
     if touches_interval:
         new_started = patch.get("started_at", entry.started_at)
         # ended_at explicitly in the patch wins (including an explicit
@@ -714,6 +790,25 @@ async def context_for_entry(session: AsyncSession, entry: TimeEntry) -> TaskCont
     the start/stop/get/patch endpoints, which return one entry)."""
     ctxs = await resolve_task_contexts(session, [entry.task_id])
     return ctxs.get(entry.task_id, _EMPTY_CONTEXT)
+
+
+async def resolve_note_titles(
+    session: AsyncSession, note_ids: Sequence[uuid.UUID | None]
+) -> dict[uuid.UUID, str | None]:
+    """Batched note-id -> title for the entries list / report drill-down
+    (Proposal A: show *in which work note* time was logged). One query
+    regardless of how many entries (no N+1); RLS scopes to the org so a
+    cross-org note id simply resolves to no title. Soft-deleted notes
+    still resolve their title (the entry's provenance is historical)."""
+    ids = list({i for i in note_ids if i is not None})
+    if not ids:
+        return {}
+    return {
+        nid: title
+        for nid, title in (
+            await session.execute(select(Note.id, Note.title).where(Note.id.in_(ids)))
+        ).all()
+    }
 
 
 @dataclass(frozen=True)

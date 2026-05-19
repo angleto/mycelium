@@ -23,6 +23,7 @@ from flow_api.schemas import (
     TagBrief,
     TagRefIn,
     TaskCreateIn,
+    TaskNoteCreateIn,
     TaskOut,
     TaskPatchIn,
     TaskStateIn,
@@ -471,6 +472,28 @@ async def get_or_create_task_note(
         org_id=ctx.org_id,
         actor_id=ctx.user_id,
         task_id=task_id,
+    )
+    tagmap = await notes_svc.tags_by_note(ctx.session, note_ids=[n.id])
+    return _note_out(n, tagmap.get(n.id, []))
+
+
+@router.post("/{task_id}/notes", response_model=NoteOut)
+async def create_task_note(
+    task_id: uuid.UUID,
+    body: TaskNoteCreateIn,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+) -> NoteOut:
+    # TASK-side of the bidirectional Proposal A link: create a *fresh*
+    # work note pre-linked to the task (NOT idempotent, unlike the
+    # singleton /note above). Member-level, org-scoped via RLS. Time
+    # logged in the note rolls up to the task.
+    n = await notes_svc.create_note_for_task(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        task_id=task_id,
+        title=body.title,
+        text=body.text,
     )
     tagmap = await notes_svc.tags_by_note(ctx.session, note_ids=[n.id])
     return _note_out(n, tagmap.get(n.id, []))

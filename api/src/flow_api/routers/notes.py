@@ -182,6 +182,12 @@ async def update_note(
     body: NotePatchIn,
     ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
 ) -> VersionOut:
+    # task_id is bidirectional Proposal A: pass it through only when the
+    # client actually sent the key (an explicit null unlinks; omitting
+    # it preserves the link). The service sentinel is "argument absent".
+    extra: dict[str, uuid.UUID | None] = {}
+    if "task_id" in body.model_fields_set:
+        extra["task_id"] = body.task_id
     v = await svc.update_note(
         ctx.session,
         org_id=ctx.org_id,
@@ -190,6 +196,7 @@ async def update_note(
         expected_version=body.expected_version,
         title=body.title,
         text=body.text,
+        **extra,
     )
     return VersionOut(id=note_id, version=v)
 

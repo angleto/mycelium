@@ -631,10 +631,16 @@ class ScheduleOut(BaseModel):
 
 
 class TimeStartIn(BaseModel):
-    task_id: uuid.UUID
+    # Proposal A: with ``note_id`` the billing task is derived from the
+    # note's task (the note must be linked to one); ``task_id`` may be
+    # omitted, or must agree if both are given.
+    task_id: uuid.UUID | None = None
     # None = inherit (task override -> project default -> billable).
     billable: bool | None = None
-    note: str | None = None
+    # Free-text memo on the entry (renamed from ``note``: it is NOT the
+    # Note entity; use ``note_id`` for the work-note link).
+    memo: str | None = None
+    note_id: uuid.UUID | None = None
     # Double-play: run alongside other timers instead of replacing the
     # serial one (e.g. parallel LLM tasks).
     parallel: bool = False
@@ -643,26 +649,32 @@ class TimeStartIn(BaseModel):
 class TimeStopIn(BaseModel):
     # Stop a specific task's running timer; omit to stop the serial one.
     task_id: uuid.UUID | None = None
-    note: str | None = None
+    memo: str | None = None
 
 
 class TimeManualIn(BaseModel):
-    task_id: uuid.UUID
+    # As TimeStartIn: a ``note_id`` derives the billing task.
+    task_id: uuid.UUID | None = None
     started_at: datetime.datetime
     ended_at: datetime.datetime | None = None
     duration_seconds: int | None = Field(default=None, gt=0)
     billable: bool | None = None
-    note: str | None = None
+    memo: str | None = None
+    note_id: uuid.UUID | None = None
 
 
 class TimeEntryPatchIn(BaseModel):
     expected_version: int = Field(ge=1)
-    note: str | None = None
+    memo: str | None = None
     billable: bool | None = None
     # Reassign the entry to another task (transitively changes its
     # project/client). Adjust the recorded interval if the timer was
     # started late / never stopped; duration is recomputed server-side.
     task_id: uuid.UUID | None = None
+    # Set/clear the work note this time was logged in. Sent only when
+    # present in the request body (model_fields_set): an explicit null
+    # clears the link, omitting it preserves the stored value.
+    note_id: uuid.UUID | None = None
     started_at: datetime.datetime | None = None
     ended_at: datetime.datetime | None = None
 
@@ -680,7 +692,12 @@ class TimeEntryOut(BaseModel):
     parallel: bool
     rate_snapshot: Decimal | None
     currency: str
-    note: str | None
+    memo: str | None
+    # Provenance: the work note this time was logged in (Proposal A),
+    # with its resolved title so the report can show *where* time was
+    # logged. Both null when the entry has no linked note.
+    note_id: uuid.UUID | None = None
+    note_title: str | None = None
     version: int
     # Resolved context (task -> project tag -> client tag -> client
     # profile) so the list / report need no N+1 round-trips.
@@ -1091,6 +1108,18 @@ class NoteOut(BaseModel):
 
 class NotePatchIn(BaseModel):
     expected_version: int = Field(ge=1)
+    title: str | None = Field(default=None, max_length=300)
+    text: str | None = None
+    # Bidirectional Proposal A link (NOTE side): set OR clear
+    # notes.task_id. Honoured only when the key is present in the
+    # request body (model_fields_set): an explicit null unlinks,
+    # omitting it preserves the existing link.
+    task_id: uuid.UUID | None = None
+
+
+class TaskNoteCreateIn(BaseModel):
+    # POST /tasks/{task_id}/notes: title optional (defaults to the task
+    # title); a fresh work note pre-linked to the task.
     title: str | None = Field(default=None, max_length=300)
     text: str | None = None
 

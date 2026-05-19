@@ -86,4 +86,16 @@ class TimeEntry(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, Base)
     billable: Mapped[bool] = mapped_column(nullable=False, server_default="true")
     rate_snapshot: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
     currency: Mapped[str] = mapped_column(String(3), nullable=False, server_default="EUR")
-    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Free-text memo on the entry. Renamed from ``note`` (migration
+    # 0041) so it no longer collides with the Note entity / ``note_id``.
+    memo: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Provenance: the work note this time was logged in (Proposal A).
+    # Billing still rolls up to ``task_id`` (NOT NULL); this is nullable
+    # and ``ON DELETE SET NULL`` so deleting the note never deletes
+    # billed time, the entry just loses the note link.
+    note_id: Mapped[uuid.UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("notes.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )

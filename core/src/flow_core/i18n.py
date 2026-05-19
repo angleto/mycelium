@@ -69,6 +69,7 @@ class MessageCode(enum.StrEnum):
     MEMORY_DIM_MISMATCH = "memory.dim_mismatch"
     MEMORY_CROSS_SUBJECT = "memory.cross_subject"
     NOTE_NOT_FOUND = "note.not_found"
+    NOTE_NOT_LINKED_TO_TASK = "note.not_linked_to_task"
     ATTACHMENT_NOT_FOUND = "attachment.not_found"
     ATTACHMENT_TOO_LARGE = "attachment.too_large"
     INTENT_UNRECOGNIZED = "intent.unrecognized"
@@ -153,6 +154,7 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
             "Consolidation cannot cross org/project (hard isolation)"
         ),
         MessageCode.NOTE_NOT_FOUND: "Note not found",
+        MessageCode.NOTE_NOT_LINKED_TO_TASK: ("Link a task to the note before billing time"),
         MessageCode.ATTACHMENT_NOT_FOUND: "Attachment not found",
         MessageCode.ATTACHMENT_TOO_LARGE: "Attachment exceeds the maximum size",
         MessageCode.INTENT_UNRECOGNIZED: ("Command not recognized: {raw}"),

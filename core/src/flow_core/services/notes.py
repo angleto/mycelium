@@ -47,6 +47,14 @@ from flow_core.services import memory as memory_svc
 from flow_core.services.rbac import require_role
 
 
+class _Unset:
+    """Sentinel: ``task_id`` not supplied to ``update_note`` (preserve)
+    vs an explicit ``None`` (clear the note<->task link)."""
+
+
+_UNSET = _Unset()
+
+
 @dataclass(frozen=True)
 class ParsedCommand:
     action: str  # create_note | start_conversation
@@ -280,14 +288,30 @@ async def update_note(
     expected_version: int,
     title: str | None = None,
     text: str | None = None,
+    task_id: uuid.UUID | None | _Unset = _UNSET,
 ) -> int:
     """Edit title/body. When the title is blank it is re-derived from
-    the first line of the body (Apple Notes style)."""
+    the first line of the body (Apple Notes style).
+
+    Bidirectional Proposal A link: ``task_id`` (when supplied) sets OR
+    clears ``notes.task_id`` (an explicit ``None`` unlinks). A target
+    task is validated in-org (RLS scopes the lookup); TASK_NOT_FOUND if
+    absent. Omitting the argument leaves the existing link untouched."""
     values: dict[str, Any] = {}
     if text is not None:
         values["transcript"] = text
     eff_title = title if (title and title.strip()) else _derive_title(text)
     values["title"] = eff_title
+    if not isinstance(task_id, _Unset):
+        if task_id is not None:
+            exists = (
+                await session.execute(
+                    select(Task.id).where(Task.id == task_id, Task.deleted_at.is_(None))
+                )
+            ).scalar_one_or_none()
+            if exists is None:
+                raise NotFoundError(MessageCode.TASK_NOT_FOUND)
+        values["task_id"] = task_id
     return await _note_set(
         session,
         org_id=org_id,
@@ -464,6 +488,51 @@ async def get_or_create_work_note(
         project_id=project_id,
         title=task.title or "Work note",
         text=None,
+    )
+    note.task_id = task_id
+    await session.flush()
+    return note
+
+
+async def create_note_for_task(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    task_id: uuid.UUID,
+    title: str | None = None,
+    text: str | None = None,
+) -> Note:
+    """Create a fresh work note pre-linked to ``task_id`` (the TASK-side
+    of the bidirectional Proposal A link). Unlike
+    ``get_or_create_work_note`` this is NOT idempotent: each call
+    creates a new note. The task must exist in-org (RLS scopes the
+    lookup; TASK_NOT_FOUND otherwise). The note is created via
+    ``create_note`` so the client/Personal enforcement runs, inheriting
+    the task's project (hence client) when one can be derived from its
+    tags; title defaults to the task title. ``notes.task_id`` is set so
+    time logged in the note rolls up to this task."""
+    task = (
+        await session.execute(select(Task).where(Task.id == task_id, Task.deleted_at.is_(None)))
+    ).scalar_one_or_none()
+    if task is None:
+        raise NotFoundError(MessageCode.TASK_NOT_FOUND)
+    project_id = (
+        await session.execute(
+            select(Tag.id)
+            .join(TaskTag, TaskTag.tag_id == Tag.id)
+            .where(TaskTag.task_id == task_id, Tag.kind == TagKind.project)
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    note = await create_note(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        kind=NoteKind.text,
+        project_id=project_id,
+        title=title if (title and title.strip()) else (task.title or "Work note"),
+        text=text,
     )
     note.task_id = task_id
     await session.flush()

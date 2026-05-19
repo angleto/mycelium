@@ -1057,7 +1057,11 @@ async def list_schedule(
 _EMPTY_TASK_CTX = time_svc.TaskContext()
 
 
-def _time_entry(e: TimeEntry, ctx: time_svc.TaskContext = _EMPTY_TASK_CTX) -> dict[str, Any]:
+def _time_entry(
+    e: TimeEntry,
+    ctx: time_svc.TaskContext = _EMPTY_TASK_CTX,
+    note_title: str | None = None,
+) -> dict[str, Any]:
     return {
         "id": str(e.id),
         "task_id": str(e.task_id),
@@ -1071,7 +1075,9 @@ def _time_entry(e: TimeEntry, ctx: time_svc.TaskContext = _EMPTY_TASK_CTX) -> di
         "parallel": e.parallel,
         "rate_snapshot": (str(e.rate_snapshot) if e.rate_snapshot is not None else None),
         "currency": e.currency,
-        "note": e.note,
+        "memo": e.memo,
+        "note_id": str(e.note_id) if e.note_id else None,
+        "note_title": note_title,
         "version": e.version,
         "task_title": ctx.task_title,
         "client_tag_id": (str(ctx.client_tag_id) if ctx.client_tag_id else None),
@@ -1083,35 +1089,50 @@ def _time_entry(e: TimeEntry, ctx: time_svc.TaskContext = _EMPTY_TASK_CTX) -> di
 
 
 async def _time_entry_one(s: Any, e: TimeEntry) -> dict[str, Any]:
-    return _time_entry(e, await time_svc.context_for_entry(s, e))
+    titles = await time_svc.resolve_note_titles(s, [e.note_id])
+    note_title = titles.get(e.note_id) if e.note_id is not None else None
+    return _time_entry(e, await time_svc.context_for_entry(s, e), note_title)
 
 
 async def _time_entries_many(s: Any, rows: list[TimeEntry]) -> list[dict[str, Any]]:
     ctxs = await time_svc.resolve_task_contexts(s, [e.task_id for e in rows])
-    return [_time_entry(e, ctxs.get(e.task_id, _EMPTY_TASK_CTX)) for e in rows]
+    titles = await time_svc.resolve_note_titles(s, [e.note_id for e in rows])
+    return [
+        _time_entry(
+            e,
+            ctxs.get(e.task_id, _EMPTY_TASK_CTX),
+            titles.get(e.note_id) if e.note_id is not None else None,
+        )
+        for e in rows
+    ]
 
 
 @mcp.tool()
 async def start_timer(
     token: str,
     org_id: str,
-    task_id: str,
+    task_id: str | None = None,
     billable: bool | None = None,
-    note: str | None = None,
+    memo: str | None = None,
+    note_id: str | None = None,
     parallel: bool = False,
 ) -> dict[str, Any]:
     """Start the live timer for a task. Serial (default) replaces the
     single running timer; ``parallel=True`` runs alongside others
     (e.g. concurrent LLM tasks). The same task is never
-    double-tracked."""
+    double-tracked. Proposal A: pass ``note_id`` to log time in a work
+    note (it must be linked to a task); the billing task is derived
+    from it, so ``task_id`` may be omitted (or must agree). ``memo`` is
+    the free-text note on the entry (not the Note entity)."""
     async with _tenant(token, org_id) as (s, org, user):
         e = await time_svc.start_timer(
             s,
             org_id=org,
             actor_id=user,
-            task_id=uuid.UUID(task_id),
+            task_id=uuid.UUID(task_id) if task_id else None,
             billable=billable,
-            note=note,
+            memo=memo,
+            note_id=uuid.UUID(note_id) if note_id else None,
             parallel=parallel,
         )
         return await _time_entry_one(s, e)
@@ -1122,17 +1143,18 @@ async def stop_timer(
     token: str,
     org_id: str,
     task_id: str | None = None,
-    note: str | None = None,
+    memo: str | None = None,
 ) -> dict[str, Any]:
     """Stop a running timer: the one for ``task_id`` if given, else the
-    serial timer. Computes the duration."""
+    serial timer. Computes the duration. ``memo`` overwrites the
+    entry's free-text note when given."""
     async with _tenant(token, org_id) as (s, org, user):
         e = await time_svc.stop_timer(
             s,
             org_id=org,
             actor_id=user,
             task_id=uuid.UUID(task_id) if task_id else None,
-            note=note,
+            memo=memo,
         )
         return await _time_entry_one(s, e)
 
@@ -1141,25 +1163,30 @@ async def stop_timer(
 async def add_time_entry(
     token: str,
     org_id: str,
-    task_id: str,
-    started_at: str,
+    task_id: str | None = None,
+    started_at: str = "",
     ended_at: str | None = None,
     duration_seconds: int | None = None,
     billable: bool | None = None,
-    note: str | None = None,
+    memo: str | None = None,
+    note_id: str | None = None,
 ) -> dict[str, Any]:
-    """Add a manual time entry (provide ended_at or duration_seconds)."""
+    """Add a manual time entry (provide ended_at or duration_seconds).
+    Proposal A: a ``note_id`` derives the billing task (the note must
+    be linked to a task; ``task_id`` may be omitted or must agree).
+    ``memo`` is the entry's free-text note (not the Note entity)."""
     async with _tenant(token, org_id) as (s, org, user):
         e = await time_svc.add_manual_entry(
             s,
             org_id=org,
             actor_id=user,
-            task_id=uuid.UUID(task_id),
+            task_id=uuid.UUID(task_id) if task_id else None,
             started_at=dt.datetime.fromisoformat(started_at),
             ended_at=dt.datetime.fromisoformat(ended_at) if ended_at else None,
             duration_seconds=duration_seconds,
             billable=billable,
-            note=note,
+            memo=memo,
+            note_id=uuid.UUID(note_id) if note_id else None,
         )
         return await _time_entry_one(s, e)
 
@@ -1204,25 +1231,34 @@ async def update_time_entry(
     org_id: str,
     entry_id: str,
     expected_version: int,
-    note: str | None = None,
+    memo: str | None = None,
     billable: bool | None = None,
     task_id: str | None = None,
+    note_id: str | None = None,
+    clear_note_id: bool = False,
     started_at: str | None = None,
     ended_at: str | None = None,
 ) -> dict[str, Any]:
-    """Correct a time entry. Beyond note/billable you can reassign it
+    """Correct a time entry. Beyond memo/billable you can reassign it
     to another task (``task_id``, transitively changing project/client)
     and fix the recorded interval (``started_at``/``ended_at``,
     ISO-8601); ``duration_seconds`` is recomputed server-side. Omit
     ``ended_at`` to leave it unchanged; pass it explicitly to set or
-    clear the stop time."""
+    clear the stop time. Proposal A work-note link: pass ``note_id`` to
+    set it (the note must be linked to the entry's task, else a domain
+    error), or ``clear_note_id=True`` to unlink; omitting both
+    preserves the stored value."""
     values: dict[str, Any] = {}
-    if note is not None:
-        values["note"] = note
+    if memo is not None:
+        values["memo"] = memo
     if billable is not None:
         values["billable"] = billable
     if task_id is not None:
         values["task_id"] = uuid.UUID(task_id)
+    if clear_note_id:
+        values["note_id"] = None
+    elif note_id is not None:
+        values["note_id"] = uuid.UUID(note_id)
     if started_at is not None:
         values["started_at"] = dt.datetime.fromisoformat(started_at)
     if ended_at is not None:
@@ -2041,6 +2077,30 @@ async def get_or_create_task_note(token: str, org_id: str, task_id: str) -> dict
 
 
 @mcp.tool()
+async def create_task_note(
+    token: str,
+    org_id: str,
+    task_id: str,
+    title: str | None = None,
+    text: str | None = None,
+) -> dict[str, Any]:
+    """TASK-side of the bidirectional Proposal A link: create a *fresh*
+    work note pre-linked to the task (NOT idempotent, unlike
+    get_or_create_task_note). Title defaults to the task title. Time
+    logged in the note rolls up to the task."""
+    async with _tenant(token, org_id) as (s, org, user):
+        n = await notes_svc.create_note_for_task(
+            s,
+            org_id=org,
+            actor_id=user,
+            task_id=uuid.UUID(task_id),
+            title=title,
+            text=text,
+        )
+        return _note(n)
+
+
+@mcp.tool()
 async def update_note(
     token: str,
     org_id: str,
@@ -2048,10 +2108,20 @@ async def update_note(
     expected_version: int,
     title: str | None = None,
     text: str | None = None,
+    task_id: str | None = None,
+    clear_task_id: bool = False,
 ) -> dict[str, Any]:
     """Edit a note's title/body. A blank title is re-derived from the
-    first line of the body."""
+    first line of the body. Bidirectional Proposal A link: pass
+    ``task_id`` to link the note to a task (validated in-org, else
+    TASK_NOT_FOUND), or ``clear_task_id=True`` to unlink; omitting both
+    leaves the existing link untouched."""
     async with _tenant(token, org_id) as (s, org, user):
+        extra: dict[str, Any] = {}
+        if clear_task_id:
+            extra["task_id"] = None
+        elif task_id is not None:
+            extra["task_id"] = uuid.UUID(task_id)
         version = await notes_svc.update_note(
             s,
             org_id=org,
@@ -2060,6 +2130,7 @@ async def update_note(
             expected_version=expected_version,
             title=title,
             text=text,
+            **extra,
         )
         return {"note_id": note_id, "version": version}
 
