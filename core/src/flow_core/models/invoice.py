@@ -107,6 +107,10 @@ class IssuerProfile(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, B
     provincia: Mapped[str | None] = mapped_column(String(4), nullable=True)
     nazione: Mapped[str] = mapped_column(String(2), nullable=False, server_default="IT")
     rea: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    # Fallback payment IBAN, used by an invoice when neither the invoice
+    # nor the client carries one (IBAN precedence: invoice > client >
+    # issuer). NULL until the issuer sets one.
+    default_iban: Mapped[str | None] = mapped_column(String(34), nullable=True)
     is_default: Mapped[bool] = mapped_column(nullable=False, server_default="false")
     conservation_adhesion: Mapped[ConservationAdhesion] = mapped_column(
         SAEnum(
@@ -172,6 +176,10 @@ class Invoice(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, Base):
     payment_due_date: Mapped[datetime.date | None] = mapped_column(Date, nullable=True)
     taxable: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False, server_default="0")
     vat: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False, server_default="0")
+    # Virtual stamp duty (imposta di bollo): EUR 2.00 on a forfettario
+    # invoice whose taxable >= 77.47, else 0. Persisted with the totals;
+    # included in ``total`` and in ImportoTotaleDocumento.
+    bollo: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False, server_default="0")
     total: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False, server_default="0")
     identificativo_sdi: Mapped[str | None] = mapped_column(String(40), nullable=True)
     sdi_status: Mapped[SdiStatus] = mapped_column(

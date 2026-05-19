@@ -267,6 +267,9 @@ class ClientCreateIn(BaseModel):
     nazione: str | None = Field(default=None, max_length=2)
     codice_destinatario: str | None = Field(default=None, max_length=7)
     pec: str | None = Field(default=None, max_length=320)
+    # Client-specific payment IBAN (precedence: invoice > client >
+    # issuer). Optional.
+    payment_iban: str | None = Field(default=None, max_length=34)
     description: str | None = None
     default_billable: bool = True
     tariffa: Decimal | None = None
@@ -296,6 +299,7 @@ class ClientPatchIn(BaseModel):
     nazione: str | None = Field(default=None, max_length=2)
     codice_destinatario: str | None = Field(default=None, max_length=7)
     pec: str | None = Field(default=None, max_length=320)
+    payment_iban: str | None = Field(default=None, max_length=34)
     description: str | None = None
     default_billable: bool | None = None
     tariffa: Decimal | None = None
@@ -319,6 +323,7 @@ class ClientOut(BaseModel):
     nazione: str | None
     codice_destinatario: str | None
     pec: str | None
+    payment_iban: str | None
     description: str | None
     default_billable: bool
     tariffa: Decimal | None
@@ -1235,6 +1240,8 @@ class IssuerProfileIn(BaseModel):
     provincia: str | None = Field(default=None, max_length=4)
     nazione: str = Field(default="IT", max_length=2)
     rea: str | None = Field(default=None, max_length=40)
+    # Fallback payment IBAN (precedence: invoice > client > issuer).
+    default_iban: str | None = Field(default=None, max_length=34)
     is_default: bool = False
 
 
@@ -1251,6 +1258,7 @@ class IssuerProfilePatchIn(BaseModel):
     provincia: str | None = Field(default=None, max_length=4)
     nazione: str | None = Field(default=None, max_length=2)
     rea: str | None = Field(default=None, max_length=40)
+    default_iban: str | None = Field(default=None, max_length=34)
     is_default: bool | None = None
 
 
@@ -1268,6 +1276,7 @@ class IssuerProfileOut(BaseModel):
     provincia: str | None
     nazione: str
     rea: str | None
+    default_iban: str | None
     is_default: bool
     conservation_adhesion: str
     version: int
@@ -1300,7 +1309,10 @@ class InvoiceLineIn(BaseModel):
     description: str = Field(min_length=1, max_length=1000)
     unit_price: Decimal
     quantity: Decimal = Decimal(1)
-    vat_rate: Decimal = Decimal(22)
+    # None = unset: the service resolves it from the issuer's regime
+    # (forfettario RF19 -> 0% + Natura N2.2; ordinary regime -> 22%).
+    # An explicit value is always honoured.
+    vat_rate: Decimal | None = None
     natura: str | None = Field(default=None, max_length=4)
 
 
@@ -1332,6 +1344,7 @@ class InvoiceOut(BaseModel):
     payment_due_date: datetime.date | None
     taxable: Decimal
     vat: Decimal
+    bollo: Decimal
     total: Decimal
     identificativo_sdi: str | None
     sdi_status: SdiStatus
@@ -1356,6 +1369,65 @@ class ReceiptIn(BaseModel):
 
 class InvoiceXmlOut(BaseModel):
     xml: str
+
+
+class InvoicePreviewParty(BaseModel):
+    """Resolved issuer or client identity for the preview. None when the
+    draft has no profile resolved yet."""
+
+    denominazione: str
+    piva: str | None = None
+    codice_fiscale: str | None = None
+    regime_fiscale: str | None = None
+    indirizzo: str | None = None
+    cap: str | None = None
+    comune: str | None = None
+    provincia: str | None = None
+    nazione: str | None = None
+    # Client only (the SdI recipient address); None on the issuer side.
+    codice_destinatario: str | None = None
+    pec: str | None = None
+
+
+class InvoicePreviewLine(BaseModel):
+    line_no: int
+    description: str
+    quantity: Decimal
+    unit_price: Decimal
+    line_total: Decimal
+    vat_rate: Decimal
+    natura: str | None = None
+
+
+class InvoicePreviewTotals(BaseModel):
+    taxable: Decimal
+    vat: Decimal
+    bollo: Decimal
+    total: Decimal
+
+
+class InvoicePreviewOut(BaseModel):
+    """Full resolved document for the SPA: it renders this without
+    re-deriving anything. Tolerant of an incomplete draft (issuer/client
+    may be null)."""
+
+    number: str
+    series: str
+    year: int
+    document_type: DocumentType
+    date: datetime.date
+    payment_due_date: datetime.date | None
+    issuer: InvoicePreviewParty | None
+    client: InvoicePreviewParty | None
+    lines: list[InvoicePreviewLine]
+    totals: InvoicePreviewTotals
+    effective_iban: str | None
+    # "invoice" | "client" | "issuer" | None.
+    iban_source: str | None
+    causale: str | None
+    notes: str | None
+    is_forfettario: bool
+    state: InvoiceState
 
 
 # --- F8: notifications, recurrence, reminders (FR-12) ---

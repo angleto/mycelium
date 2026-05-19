@@ -37,6 +37,10 @@ class ClientProfile(OrgScopedMixin, TimestampMixin, VersionMixin, Base):
     nazione: Mapped[str | None] = mapped_column(String(2), nullable=True)
     codice_destinatario: Mapped[str | None] = mapped_column(String(7), nullable=True)
     pec: Mapped[str | None] = mapped_column(String(320), nullable=True)
+    # Client-specific payment IBAN: overrides the issuer default, is
+    # itself overridden by an explicit per-invoice IBAN (precedence:
+    # invoice > client > issuer).
+    payment_iban: Mapped[str | None] = mapped_column(String(34), nullable=True)
     # Optional free description; useful as AI context (docs/adr/0005).
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Automatic billing default: a task is billable unless the task

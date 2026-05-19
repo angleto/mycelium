@@ -11,9 +11,10 @@ the only correction is a TD04 credit note."""
 from __future__ import annotations
 
 import uuid
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Response, status
 
 from flow_api.deps import TenantCtx, tenant_ctx
 from flow_api.schemas import (
@@ -24,6 +25,10 @@ from flow_api.schemas import (
     InvoiceLineOut,
     InvoiceOut,
     InvoicePatchIn,
+    InvoicePreviewLine,
+    InvoicePreviewOut,
+    InvoicePreviewParty,
+    InvoicePreviewTotals,
     InvoiceXmlOut,
     IssuerProfileIn,
     IssuerProfileOut,
@@ -31,8 +36,6 @@ from flow_api.schemas import (
     ReceiptIn,
     TransmitIn,
 )
-from flow_core.errors import NotFoundError
-from flow_core.i18n import MessageCode
 from flow_core.models.invoice import Invoice, InvoiceLine, IssuerProfile
 from flow_core.models.membership import Role
 from flow_core.services import invoice as svc
@@ -60,6 +63,7 @@ def _inv_out(i: Invoice) -> InvoiceOut:
         payment_due_date=i.payment_due_date,
         taxable=i.taxable,
         vat=i.vat,
+        bollo=i.bollo,
         total=i.total,
         identificativo_sdi=i.identificativo_sdi,
         sdi_status=i.sdi_status,
@@ -96,6 +100,7 @@ def _ip_out(p: IssuerProfile) -> IssuerProfileOut:
         provincia=p.provincia,
         nazione=p.nazione,
         rea=p.rea,
+        default_iban=p.default_iban,
         is_default=p.is_default,
         conservation_adhesion=p.conservation_adhesion.value,
         version=p.version,
@@ -135,6 +140,7 @@ async def create_issuer_profile(
         provincia=body.provincia,
         nazione=body.nazione,
         rea=body.rea,
+        default_iban=body.default_iban,
         is_default=body.is_default,
     )
     return _ip_out(p)
@@ -352,10 +358,131 @@ async def get_xml(
     invoice_id: uuid.UUID,
     ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
 ) -> InvoiceXmlOut:
-    inv = await svc.get_invoice(ctx.session, org_id=ctx.org_id, invoice_id=invoice_id)
-    if inv.xml is None:
-        raise NotFoundError(MessageCode.INVOICE_INVALID, detail="not transmitted")
-    return InvoiceXmlOut(xml=inv.xml)
+    # Transmitted -> the frozen transited XML; draft -> a LIVE preview
+    # built from the current draft (never 404 for a valid draft). The
+    # service validates first, so a draft missing fiscal data raises the
+    # domain error (the UI shows exactly what is missing).
+    xml = await svc.get_xml_preview(ctx.session, org_id=ctx.org_id, invoice_id=invoice_id)
+    return InvoiceXmlOut(xml=xml)
+
+
+@router.get("/invoices/{invoice_id}/pdf")
+async def get_pdf(
+    invoice_id: uuid.UUID,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+) -> Response:
+    number, pdf = await svc.render_pdf(ctx.session, org_id=ctx.org_id, invoice_id=invoice_id)
+    return Response(
+        content=pdf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{number}.pdf"'},
+    )
+
+
+def _party_out(
+    denominazione: str,
+    *,
+    piva: str | None = None,
+    codice_fiscale: str | None = None,
+    regime_fiscale: str | None = None,
+    indirizzo: str | None = None,
+    cap: str | None = None,
+    comune: str | None = None,
+    provincia: str | None = None,
+    nazione: str | None = None,
+    codice_destinatario: str | None = None,
+    pec: str | None = None,
+) -> InvoicePreviewParty:
+    return InvoicePreviewParty(
+        denominazione=denominazione,
+        piva=piva,
+        codice_fiscale=codice_fiscale,
+        regime_fiscale=regime_fiscale,
+        indirizzo=indirizzo,
+        cap=cap,
+        comune=comune,
+        provincia=provincia,
+        nazione=nazione,
+        codice_destinatario=codice_destinatario,
+        pec=pec,
+    )
+
+
+@router.get("/invoices/{invoice_id}/preview", response_model=InvoicePreviewOut)
+async def get_preview(
+    invoice_id: uuid.UUID,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+) -> InvoicePreviewOut:
+    import datetime as _dt
+
+    inv, p = await svc.get_preview(ctx.session, org_id=ctx.org_id, invoice_id=invoice_id)
+    issuer = (
+        _party_out(
+            p.issuer.denominazione,
+            piva=p.issuer.piva,
+            codice_fiscale=p.issuer.codice_fiscale,
+            regime_fiscale=p.issuer.regime_fiscale,
+            indirizzo=p.issuer.indirizzo,
+            cap=p.issuer.cap,
+            comune=p.issuer.comune,
+            provincia=p.issuer.provincia,
+            nazione=p.issuer.nazione,
+        )
+        if p.issuer is not None
+        else None
+    )
+    client = (
+        _party_out(
+            p.client.ragione_sociale,
+            piva=p.client.id_codice,
+            codice_fiscale=p.client.codice_fiscale,
+            indirizzo=p.client.indirizzo,
+            cap=p.client.cap,
+            comune=p.client.comune,
+            provincia=p.client.provincia,
+            nazione=p.client.nazione,
+            codice_destinatario=p.client.codice_destinatario,
+            pec=p.client.pec,
+        )
+        if p.client is not None
+        else None
+    )
+    return InvoicePreviewOut(
+        number=p.number,
+        series=inv.series,
+        year=inv.year,
+        document_type=inv.document_type,
+        date=(inv.issued_at or _dt.datetime.now(tz=_dt.UTC)).date(),
+        payment_due_date=inv.payment_due_date,
+        issuer=issuer,
+        client=client,
+        lines=[
+            InvoicePreviewLine(
+                line_no=ln.line_no,
+                description=ln.description,
+                quantity=ln.quantity,
+                unit_price=ln.unit_price,
+                line_total=(ln.quantity * ln.unit_price).quantize(
+                    Decimal("0.01"), rounding=ROUND_HALF_UP
+                ),
+                vat_rate=ln.vat_rate,
+                natura=ln.natura,
+            )
+            for ln in p.lines
+        ],
+        totals=InvoicePreviewTotals(
+            taxable=p.totals.taxable,
+            vat=p.totals.vat,
+            bollo=p.totals.bollo,
+            total=p.totals.total,
+        ),
+        effective_iban=p.effective_iban,
+        iban_source=p.iban_source,
+        causale=inv.causale,
+        notes=inv.notes,
+        is_forfettario=p.is_forfettario,
+        state=inv.state,
+    )
 
 
 @router.post("/invoices/credit-note", response_model=InvoiceOut)
