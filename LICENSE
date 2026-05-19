@@ -1,0 +1,36 @@
+Flow — a multi-tenant personal work hub.
+Copyright (C) 2026  Angelo Leto
+
+SPDX-License-Identifier: AGPL-3.0-or-later
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as
+published by the Free Software Foundation, either version 3 of the
+License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public
+License along with this program.  If not, see
+<https://www.gnu.org/licenses/>.
+
+If you modify this program, or any covered work, and run it as a
+network service, AGPL-3.0 section 13 requires you to offer the
+Corresponding Source of your modified version to its remote users.
+
+-------------------------------------------------------------------------------
+NOTE — full license text
+
+This file carries the binding AGPL-3.0-or-later grant and notice. The
+complete, verbatim GNU Affero General Public License v3.0 text must be
+distributed alongside it. The build environment used to prepare this
+release has no outbound network access, so the ~34 KB canonical FSF
+text was not vendored here automatically. Drop it in with:
+
+    curl -L https://www.gnu.org/licenses/agpl-3.0.txt -o LICENSE.AGPL-3.0.txt
+
+(or replace this file's body with that text, keeping the copyright
+line above). The canonical text is authoritative.
