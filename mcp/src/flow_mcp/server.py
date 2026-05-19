@@ -41,6 +41,7 @@ from flow_core.models.time_entry import TimeEntry
 from flow_core.models.workflow import WorkflowDefinition, WorkflowState, WorkflowTransition
 from flow_core.security import decode_token
 from flow_core.services import advisory as advisory_svc
+from flow_core.services import attachments as attachments_svc
 from flow_core.services import billing as billing_svc
 from flow_core.services import budgets as budgets_svc
 from flow_core.services import calendar as calendars
@@ -2227,6 +2228,59 @@ async def synthesize_speech(
             text=text,
             operation_id=operation_id,
         )
+
+
+# --- Attachments on notes / tasks (DB-BYTEA) ---
+#
+# Binary UPLOAD is intentionally NOT exposed over MCP: tools exchange
+# JSON, and base64-blob round-trips do not fit the protocol (and would
+# bypass the multipart size guard). Upload stays REST-only
+# (POST /notes|tasks/{id}/attachments). MCP gets read/curation parity
+# (list + delete), mirroring the other list_*/delete_* tools.
+
+
+@mcp.tool()
+async def list_attachments(
+    token: str,
+    org_id: str,
+    note_id: str | None = None,
+    task_id: str | None = None,
+) -> list[dict[str, Any]]:
+    """List a note's OR a task's attachments (metadata only; the binary
+    is never returned). Pass exactly one of note_id / task_id."""
+    async with _tenant(token, org_id) as (s, org, _user):
+        rows = await attachments_svc.list_attachments(
+            s,
+            org_id=org,
+            note_id=uuid.UUID(note_id) if note_id else None,
+            task_id=uuid.UUID(task_id) if task_id else None,
+        )
+        return [
+            {
+                "id": str(r.id),
+                "note_id": str(r.note_id) if r.note_id else None,
+                "task_id": str(r.task_id) if r.task_id else None,
+                "filename": r.filename,
+                "mime_type": r.mime_type,
+                "size_bytes": r.size_bytes,
+                "created_at": r.created_at.isoformat(),
+            }
+            for r in rows
+        ]
+
+
+@mcp.tool()
+async def delete_attachment(token: str, org_id: str, attachment_id: str) -> dict[str, Any]:
+    """Hard-delete an attachment (the stored blob goes with the row).
+    Member-level, org-scoped (RLS)."""
+    async with _tenant(token, org_id) as (s, org, user):
+        await attachments_svc.delete_attachment(
+            s,
+            org_id=org,
+            actor_id=user,
+            attachment_id=uuid.UUID(attachment_id),
+        )
+        return {"attachment_id": attachment_id, "deleted": True}
 
 
 # --- F7: electronic invoicing (FR-9) ---

@@ -52,6 +52,12 @@ class Settings(BaseSettings):
     # (migration 0010); re-embedding to a new dim = a new column.
     embed_dim: int = 384
 
+    # Max size of a single note/task attachment. Stored as BYTEA in the
+    # DB (no object store; co-tenant deploy), so the cap is deliberately
+    # conservative. Enforced server-side in the attachments service
+    # before the bytes are persisted. Override via FLOW_ATTACHMENT_MAX_BYTES.
+    attachment_max_bytes: int = 10 * 1024 * 1024
+
     # Auth hardening (W1b, ported from bitvision_phoenix; ADR-0024).
     require_email_verification: bool = False
     email_verification_ttl_seconds: int = 86400

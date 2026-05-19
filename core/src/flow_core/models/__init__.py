@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from flow_core.models.activity_log import ActivityLog
+from flow_core.models.attachment import Attachment
 from flow_core.models.auth_tokens import (
     EmailVerificationToken,
     PasswordResetToken,
@@ -86,6 +87,7 @@ from flow_core.models.workflow import (
 
 __all__ = [
     "ActivityLog",
+    "Attachment",
     "Base",
     "BillingConfig",
     "BlobSource",

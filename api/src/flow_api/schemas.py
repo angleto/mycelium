@@ -1136,6 +1136,19 @@ class NoteEraseOut(BaseModel):
     memory_blobs_deleted: int
 
 
+class AttachmentOut(BaseModel):
+    # Metadata only: the binary ``data`` is NEVER serialised here (it is
+    # streamed by GET /attachments/{id}/download). Exactly one of
+    # note_id / task_id is set (the file's single parent).
+    id: uuid.UUID
+    note_id: uuid.UUID | None = None
+    task_id: uuid.UUID | None = None
+    filename: str
+    mime_type: str
+    size_bytes: int
+    created_at: datetime.datetime
+
+
 # --- F7: electronic invoicing (FR-9, docs/adr/0009, 0010, 0011) ---
 
 

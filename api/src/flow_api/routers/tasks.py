@@ -9,8 +9,10 @@ from fastapi import APIRouter, Depends, status
 from sqlalchemy import select
 
 from flow_api.deps import TenantCtx, tenant_ctx
+from flow_api.routers.attachments import att_out, read_capped, upload_file_field
 from flow_api.schemas import (
     AssigneeIn,
+    AttachmentOut,
     CommentCreateIn,
     CommentOut,
     ExpectedVersionIn,
@@ -31,6 +33,7 @@ from flow_core.models.note import Note
 from flow_core.models.tag import Tag
 from flow_core.models.task import Task
 from flow_core.models.workflow import WorkflowState
+from flow_core.services import attachments as att_svc
 from flow_core.services import notes as notes_svc
 from flow_core.services import notifications as notif_svc
 from flow_core.services import tasks as svc
@@ -423,6 +426,36 @@ async def list_comments(
 ) -> list[CommentOut]:
     rows = await svc.list_comments(ctx.session, org_id=ctx.org_id, task_id=task_id)
     return [_comment_out(c) for c in rows]
+
+
+@router.post("/{task_id}/attachments", response_model=AttachmentOut)
+async def upload_task_attachment(
+    task_id: uuid.UUID,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    file: upload_file_field,
+) -> AttachmentOut:
+    # Size enforced BEFORE storing (guarded read + service re-check).
+    # Member-level (notes/tasks are member-level), org-scoped via RLS.
+    data = await read_capped(file)
+    att = await att_svc.add_attachment(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        task_id=task_id,
+        filename=file.filename or "file",
+        mime_type=file.content_type,
+        data=data,
+    )
+    return att_out(att)
+
+
+@router.get("/{task_id}/attachments", response_model=list[AttachmentOut])
+async def list_task_attachments(
+    task_id: uuid.UUID,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+) -> list[AttachmentOut]:
+    rows = await att_svc.list_attachments(ctx.session, org_id=ctx.org_id, task_id=task_id)
+    return [att_out(r) for r in rows]
 
 
 @router.post("/{task_id}/note", response_model=NoteOut)

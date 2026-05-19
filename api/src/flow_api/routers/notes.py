@@ -11,8 +11,10 @@ from typing import Annotated
 from fastapi import APIRouter, Depends
 
 from flow_api.deps import TenantCtx, tenant_ctx
+from flow_api.routers.attachments import att_out, read_capped, upload_file_field
 from flow_api.schemas import (
     AppendMessageIn,
+    AttachmentOut,
     CommandIn,
     ConversationStartIn,
     ExpectedVersionIn,
@@ -30,6 +32,7 @@ from flow_api.schemas import (
 )
 from flow_core.models.note import Note, NoteKind, NoteTurn
 from flow_core.models.tag import Tag
+from flow_core.services import attachments as att_svc
 from flow_core.services import notes as svc
 
 router = APIRouter(prefix="/notes", tags=["notes"])
@@ -141,6 +144,36 @@ async def detach_note_tag(
         note_id=note_id,
         tag_id=tag_id,
     )
+
+
+@router.post("/{note_id}/attachments", response_model=AttachmentOut)
+async def upload_note_attachment(
+    note_id: uuid.UUID,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    file: upload_file_field,
+) -> AttachmentOut:
+    # Size is enforced BEFORE the bytes are stored (guarded read here +
+    # a re-check in the service). Member-level, org-scoped (RLS).
+    data = await read_capped(file)
+    att = await att_svc.add_attachment(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        note_id=note_id,
+        filename=file.filename or "file",
+        mime_type=file.content_type,
+        data=data,
+    )
+    return att_out(att)
+
+
+@router.get("/{note_id}/attachments", response_model=list[AttachmentOut])
+async def list_note_attachments(
+    note_id: uuid.UUID,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+) -> list[AttachmentOut]:
+    rows = await att_svc.list_attachments(ctx.session, org_id=ctx.org_id, note_id=note_id)
+    return [att_out(r) for r in rows]
 
 
 @router.patch("/{note_id}", response_model=VersionOut)
