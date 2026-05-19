@@ -73,6 +73,29 @@ export const it: Catalog = {
     confirmDelete: 'Eliminare questo allegato?',
     zoom: 'Clic per ingrandire',
   },
+  exec: {
+    title: 'Executor',
+    intro:
+      'Chi esegue il lavoro. Gli umani sono creati automaticamente per membro (imposta costo di context-switch / capacità). Gli agenti LLM si configurano qui: provider/modello, parallelismo, budget+tariffa crediti, capacità. Le modifiche sono solo-owner e fanno ripianificare.',
+    newAgent: 'Nuovo executor',
+    editTitle: 'Modifica executor',
+    kind: 'Tipo',
+    name: 'Nome',
+    capabilities: 'Capacità (separate da virgola)',
+    provider: 'Provider',
+    model: 'Modello',
+    maxParallel: 'Max paralleli',
+    rate: 'Crediti/ora',
+    budget: 'Budget',
+    switch: 'Context-switch (min)',
+    enabled: 'Abilitato',
+    disabled: 'disabilitato',
+    edit: 'Modifica',
+    delete: 'Elimina',
+    saveBtn: 'Salva',
+    cancel: 'Annulla',
+    confirmDelete: 'Eliminare questo executor?',
+  },
   mch: {
     title: 'Canali memoria',
     intro:
@@ -497,6 +520,13 @@ export const it: Catalog = {
     colChain: 'Catena critica',
     chainYes: 'catena',
     colCost: 'Costo',
+    colExecutor: 'Executor',
+    unassignable: '{{n}} non assegnabili',
+    unreason: {
+      no_capable_agent: 'nessun agente idoneo',
+      budget_exhausted: 'budget esaurito',
+      none: 'non assegnabile',
+    },
     legendChain:
       'Catena critica = nessuno slack dopo il livellamento delle risorse (persone/agenti) — superset del percorso critico logico in caso di contesa.',
     pin: 'Fissa inizio',

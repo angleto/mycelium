@@ -74,6 +74,29 @@ export const en = {
     confirmDelete: 'Delete this attachment?',
     zoom: 'Click to enlarge',
   },
+  exec: {
+    title: 'Executors',
+    intro:
+      'Who does the work. Humans are auto-created per member (set their context-switch cost / capabilities). LLM agents are configured here: provider/model, parallelism, credit budget+rate, capabilities. Changes are owner-only and reschedule.',
+    newAgent: 'New executor',
+    editTitle: 'Edit executor',
+    kind: 'Kind',
+    name: 'Name',
+    capabilities: 'Capabilities (comma-sep)',
+    provider: 'Provider',
+    model: 'Model',
+    maxParallel: 'Max parallel',
+    rate: 'Credits/hour',
+    budget: 'Budget',
+    switch: 'Context-switch (min)',
+    enabled: 'Enabled',
+    disabled: 'disabled',
+    edit: 'Edit',
+    delete: 'Delete',
+    saveBtn: 'Save',
+    cancel: 'Cancel',
+    confirmDelete: 'Delete this executor?',
+  },
   mch: {
     title: 'Memory channels',
     intro:
@@ -497,6 +520,13 @@ export const en = {
     colChain: 'Critical chain',
     chainYes: 'chain',
     colCost: 'Cost',
+    colExecutor: 'Executor',
+    unassignable: '{{n}} unassignable',
+    unreason: {
+      no_capable_agent: 'no capable agent',
+      budget_exhausted: 'budget exhausted',
+      none: 'unassignable',
+    },
     legendChain:
       'Critical chain = no slack once resources (people/agents) are levelled — a superset of the logical critical path under contention.',
     pin: 'Pin start',

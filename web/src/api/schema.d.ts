@@ -1245,6 +1245,42 @@ export interface paths {
         patch: operations["set_task_schedule_tasks__task_id__schedule_patch"];
         trace?: never;
     };
+    "/executors": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Executors */
+        get: operations["list_executors_executors_get"];
+        put?: never;
+        /** Create Executor */
+        post: operations["create_executor_executors_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/executors/{executor_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete Executor */
+        delete: operations["delete_executor_executors__executor_id__delete"];
+        options?: never;
+        head?: never;
+        /** Update Executor */
+        patch: operations["update_executor_executors__executor_id__patch"];
+        trace?: never;
+    };
     "/time/start": {
         parameters: {
             query?: never;
@@ -3459,6 +3495,102 @@ export interface components {
          * @enum {string}
          */
         ExecKind: "human" | "llm_agent";
+        /** ExecutorCreateIn */
+        ExecutorCreateIn: {
+            /** @default llm_agent */
+            kind: components["schemas"]["ExecutorKind"];
+            /** Name */
+            name: string;
+            /** User Id */
+            user_id?: string | null;
+            /**
+             * Context Switch Cost Minutes
+             * @default 0
+             */
+            context_switch_cost_minutes: number;
+            /** Provider */
+            provider?: string | null;
+            /** Model Id */
+            model_id?: string | null;
+            /**
+             * Max Parallel
+             * @default 4
+             */
+            max_parallel: number;
+            /** Credit Budget */
+            credit_budget?: number | string | null;
+            /**
+             * Credit Rate Per Hour
+             * @default 0
+             */
+            credit_rate_per_hour: number | string;
+            /**
+             * Enabled
+             * @default true
+             */
+            enabled: boolean;
+            /** Capability Tags */
+            capability_tags?: string[];
+        };
+        /**
+         * ExecutorKind
+         * @enum {string}
+         */
+        ExecutorKind: "human" | "llm_agent";
+        /** ExecutorOut */
+        ExecutorOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            kind: components["schemas"]["ExecutorKind"];
+            /** Name */
+            name: string;
+            /** User Id */
+            user_id: string | null;
+            /** Context Switch Cost Minutes */
+            context_switch_cost_minutes: number;
+            /** Provider */
+            provider: string | null;
+            /** Model Id */
+            model_id: string | null;
+            /** Max Parallel */
+            max_parallel: number;
+            /** Credit Budget */
+            credit_budget: string | null;
+            /** Credit Rate Per Hour */
+            credit_rate_per_hour: string;
+            /** Enabled */
+            enabled: boolean;
+            /** Capability Tags */
+            capability_tags?: string[];
+            /** Version */
+            version: number;
+        };
+        /** ExecutorPatchIn */
+        ExecutorPatchIn: {
+            /** Expected Version */
+            expected_version: number;
+            /** Name */
+            name?: string | null;
+            /** Context Switch Cost Minutes */
+            context_switch_cost_minutes?: number | null;
+            /** Provider */
+            provider?: string | null;
+            /** Model Id */
+            model_id?: string | null;
+            /** Max Parallel */
+            max_parallel?: number | null;
+            /** Credit Budget */
+            credit_budget?: number | string | null;
+            /** Credit Rate Per Hour */
+            credit_rate_per_hour?: number | string | null;
+            /** Enabled */
+            enabled?: boolean | null;
+            /** Capability Tags */
+            capability_tags?: string[] | null;
+        };
         /** ExpectedVersionIn */
         ExpectedVersionIn: {
             /** Expected Version */
@@ -4523,6 +4655,11 @@ export interface components {
             /** Projected Credit Cost */
             projected_credit_cost: string;
             policy: components["schemas"]["SchedulePolicy"];
+            /**
+             * Unassignable Count
+             * @default 0
+             */
+            unassignable_count: number;
         };
         /**
          * RecurrenceFreq
@@ -4649,6 +4786,15 @@ export interface components {
             scheduled_start: string | null;
             /** Scheduled End */
             scheduled_end: string | null;
+            /** Assigned Executor Id */
+            assigned_executor_id?: string | null;
+            /**
+             * Unassignable
+             * @default false
+             */
+            unassignable: boolean;
+            /** Unassignable Reason */
+            unassignable_reason?: string | null;
             /**
              * Computed At
              * Format: date-time
@@ -4869,6 +5015,8 @@ export interface components {
             executor_user_id?: string | null;
             /** Estimate Effort H */
             estimate_effort_h?: number | string | null;
+            /** Required Capabilities */
+            required_capabilities?: string[];
             /** Monetary Cost */
             monetary_cost?: number | string | null;
             /** Location */
@@ -4930,6 +5078,8 @@ export interface components {
             executor_kind: components["schemas"]["ExecKind"];
             /** Estimate Effort H */
             estimate_effort_h: string | null;
+            /** Required Capabilities */
+            required_capabilities?: string[];
             /** Monetary Cost */
             monetary_cost: string | null;
             /** Location */
@@ -4973,6 +5123,8 @@ export interface components {
             executor_kind?: components["schemas"]["ExecKind"] | null;
             /** Executor User Id */
             executor_user_id?: string | null;
+            /** Required Capabilities */
+            required_capabilities?: string[] | null;
             /** Parent Task Id */
             parent_task_id?: string | null;
             /** Monetary Cost */
@@ -8499,6 +8651,152 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["TaskScheduleIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VersionOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_executors_executors_get: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExecutorOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_executor_executors_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExecutorCreateIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExecutorOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_executor_executors__executor_id__delete: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                executor_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_executor_executors__executor_id__patch: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                executor_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExecutorPatchIn"];
             };
         };
         responses: {

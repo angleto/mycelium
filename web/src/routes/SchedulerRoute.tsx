@@ -7,6 +7,7 @@ import type { components } from '../api/schema'
 
 type Task = components['schemas']['TaskOut']
 type Row = components['schemas']['ScheduleOut']
+type Exec = components['schemas']['ExecutorOut']
 type Policy = components['schemas']['SchedulePolicy']
 type Summary = components['schemas']['RecomputeOut']
 
@@ -31,6 +32,7 @@ export function SchedulerRoute() {
   const activeId = session?.workspaceId
   const [tasks, setTasks] = useState<Task[]>([])
   const [rows, setRows] = useState<Row[]>([])
+  const [executors, setExecutors] = useState<Exec[]>([])
   const [scope, setScope] = useState<'all' | 'mine' | 'ai'>('all')
   const [tagFilter, setTagFilter] = useState('')
   const [pinTask, setPinTask] = useState('')
@@ -43,25 +45,29 @@ export function SchedulerRoute() {
 
   const reload = useCallback(async () => {
     const h = workspaceHeader()
-    const [tk, sc] = await Promise.all([
+    const [tk, sc, ex] = await Promise.all([
       api.GET('/tasks', { params: { header: h } }),
       api.GET('/schedule', { params: { header: h } }),
+      api.GET('/executors', { params: { header: h } }),
     ])
     if (tk.data) setTasks(tk.data)
     if (sc.data) setRows(sc.data)
+    if (ex.data) setExecutors(ex.data)
   }, [])
 
   useEffect(() => {
     let active = true
     void (async () => {
       const h = workspaceHeader()
-      const [tk, sc] = await Promise.all([
+      const [tk, sc, ex] = await Promise.all([
         api.GET('/tasks', { params: { header: h } }),
         api.GET('/schedule', { params: { header: h } }),
+        api.GET('/executors', { params: { header: h } }),
       ])
       if (!active) return
       if (tk.data) setTasks(tk.data)
       if (sc.data) setRows(sc.data)
+      if (ex.data) setExecutors(ex.data)
     })()
     return () => {
       active = false
@@ -69,6 +75,8 @@ export function SchedulerRoute() {
   }, [activeId])
 
   const titleOf = (id: string) => tasks.find((x) => x.id === id)?.title ?? id.slice(0, 8)
+  const execName = (id: string | null | undefined) =>
+    id ? (executors.find((e) => e.id === id)?.name ?? '—') : '—'
 
   async function onRecompute() {
     setBusy(true)
@@ -168,6 +176,16 @@ export function SchedulerRoute() {
           {summary.projected_credit_cost} {t('scheduler.credits')}
           {' · '}
           {t(`scheduler.policies.${summary.policy}`)}
+          {summary.unassignable_count > 0 && (
+            <>
+              {' · '}
+              <span className="err">
+                {t('scheduler.unassignable', {
+                  n: summary.unassignable_count,
+                })}
+              </span>
+            </>
+          )}
         </p>
       )}
 
@@ -265,6 +283,7 @@ export function SchedulerRoute() {
                 <th>{t('scheduler.colCritical')}</th>
                 <th>{t('scheduler.colChain')}</th>
                 <th>{t('scheduler.colCost')}</th>
+                <th>{t('scheduler.colExecutor')}</th>
               </tr>
             </thead>
             <tbody>
@@ -299,6 +318,20 @@ export function SchedulerRoute() {
                       `${r.projected_cost} ${t('scheduler.credits')}`
                     ) : (
                       <span className="muted">—</span>
+                    )}
+                  </td>
+                  <td>
+                    {r.unassignable ? (
+                      <span
+                        className="tag tag--danger"
+                        title={r.unassignable_reason ?? ''}
+                      >
+                        {t(
+                          `scheduler.unreason.${r.unassignable_reason ?? 'none'}`,
+                        )}
+                      </span>
+                    ) : (
+                      execName(r.assigned_executor_id)
                     )}
                   </td>
                 </tr>
