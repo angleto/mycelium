@@ -209,6 +209,21 @@ export function MemoryRoute() {
     }
   }
 
+  async function deleteBlob(blobId: string) {
+    if (!window.confirm(t('memory.confirmDelete'))) return
+    setErr(null)
+    setBusyBlob(blobId)
+    const { error } = await api.DELETE('/memory/blobs/{blob_id}', {
+      params: { header: workspaceHeader(), path: { blob_id: blobId } },
+    })
+    setBusyBlob(null)
+    if (error) {
+      setErr(errMessage(error))
+      return
+    }
+    setHits((hs) => (hs ? hs.filter((h) => h.blob.id !== blobId) : hs))
+  }
+
   async function onErase(e: FormEvent) {
     e.preventDefault()
     setErr(null)
@@ -234,8 +249,9 @@ export function MemoryRoute() {
       {channels
         .filter((c) => c.enabled)
         .map((c) => (
-          <option key={c.id} value={c.id}>
+          <option key={c.id} value={c.id} title={c.description ?? undefined}>
             {c.name}
+            {c.description ? ` — ${c.description}` : ''}
           </option>
         ))}
     </select>
@@ -413,6 +429,14 @@ export function MemoryRoute() {
                               : t('memory.ch.keywordOnly')}
                           </span>
                         </span>
+                        <button
+                          type="button"
+                          className="btn--sm btn--danger"
+                          disabled={rowBusy}
+                          onClick={() => void deleteBlob(h.blob.id)}
+                        >
+                          {t('memory.delete')}
+                        </button>
                       </div>
                     </li>
                   )
@@ -424,23 +448,34 @@ export function MemoryRoute() {
       </section>
 
       <section className="card">
-        <h2>{t('memory.eraseTitle')}</h2>
-        <p className="hint">{t('memory.eraseHint')}</p>
-        <form onSubmit={(e) => void onErase(e)} className="row">
-          <input
-            required
-            placeholder={t('memory.sourceKind')}
-            value={sKind}
-            onChange={(e) => setSKind(e.target.value)}
-          />
-          <input
-            required
-            placeholder={t('memory.sourceId')}
-            value={sId}
-            onChange={(e) => setSId(e.target.value)}
-          />
-          <button type="submit">{t('memory.erase')}</button>
-        </form>
+        <details>
+          <summary>{t('memory.eraseTitle')}</summary>
+          <p className="hint">{t('memory.eraseHelp')}</p>
+          <form onSubmit={(e) => void onErase(e)} className="row">
+            <label>
+              {t('memory.sourceKind')}
+              <select
+                required
+                value={sKind}
+                onChange={(e) => setSKind(e.target.value)}
+              >
+                <option value="">—</option>
+                <option value="note">{t('memory.srcNote')}</option>
+                <option value="task">{t('memory.srcTask')}</option>
+              </select>
+            </label>
+            <label>
+              {t('memory.sourceId')}
+              <input
+                required
+                placeholder={t('memory.sourceIdHint')}
+                value={sId}
+                onChange={(e) => setSId(e.target.value)}
+              />
+            </label>
+            <button type="submit">{t('memory.erase')}</button>
+          </form>
+        </details>
       </section>
     </>
   )
