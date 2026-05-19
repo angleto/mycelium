@@ -63,6 +63,14 @@ export const en = {
     noMatch: 'No matching tags',
     remove: 'Remove tag',
   },
+  attach: {
+    title: 'Attachments',
+    add: 'Attach file',
+    uploading: 'Uploading…',
+    none: 'No attachments',
+    remove: 'Remove',
+    open: 'Open',
+  },
   tagmgr: {
     nav: 'Tags',
     title: 'Tags',

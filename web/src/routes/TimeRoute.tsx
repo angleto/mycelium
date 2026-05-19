@@ -35,6 +35,68 @@ function hhmmss(sec: number): string {
   return `${h}h ${String(m).padStart(2, '0')}m ${String(s % 60).padStart(2, '0')}s`
 }
 
+const PIE = [
+  '#6d28d9',
+  '#0ea5e9',
+  '#16a34a',
+  '#d97706',
+  '#dc2626',
+  '#0891b2',
+  '#9333ea',
+  '#65a30d',
+  '#e11d48',
+]
+
+// Dependency-free SVG donut (stroke-dasharray technique) of the
+// time distribution per slice, with a legend.
+function Donut({ data }: { data: { label: string; secs: number }[] }) {
+  const total = data.reduce((s, d) => s + d.secs, 0) || 1
+  const r = 42
+  const C = 2 * Math.PI * r
+  // Functional prefix-sums: each slice starts where the prior ones
+  // ended. No mutable accumulator (React Compiler forbids reassigning
+  // an outer variable across the map closure during render).
+  const fracs = data.map((d) => d.secs / total)
+  const offsets = fracs.map((_, i) =>
+    fracs.slice(0, i).reduce((s, x) => s + x, 0),
+  )
+  return (
+    <div className="timepie">
+      <svg viewBox="0 0 120 120" width="150" height="150" role="img">
+        <g transform="rotate(-90 60 60)">
+          {data.map((_, i) => (
+            <circle
+              key={i}
+              cx="60"
+              cy="60"
+              r={r}
+              fill="none"
+              stroke={PIE[i % PIE.length]}
+              strokeWidth="16"
+              strokeDasharray={`${fracs[i] * C} ${C}`}
+              strokeDashoffset={-offsets[i] * C}
+            />
+          ))}
+        </g>
+      </svg>
+      <ul className="pielegend">
+        {data.map((d, i) => (
+          <li key={i}>
+            <span
+              className="pieswatch"
+              style={{ background: PIE[i % PIE.length] }}
+            />
+            <span className="grow">{d.label}</span>
+            <span className="muted">
+              {hhmmss(d.secs)} · {Math.round((d.secs / total) * 100)}%
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
 
 export function TimeRoute() {
   const { t } = useTranslation()
@@ -168,15 +230,25 @@ export function TimeRoute() {
   useEffect(() => {
     let active = true
     void (async () => {
-      const r = await api.GET('/time/report', {
-        params: { header: workspaceHeader(), query: reportQuery() },
-      })
-      if (active && r.data) setReport(r.data)
+      const q: Record<string, string> = {}
+      if (from) q.start_from = `${from}T00:00:00`
+      if (to) q.start_to = `${to}T23:59:59`
+      const [r, bt] = await Promise.all([
+        api.GET('/time/report', {
+          params: { header: workspaceHeader(), query: reportQuery() },
+        }),
+        api.GET('/time/report/by-task', {
+          params: { header: workspaceHeader(), query: q },
+        }),
+      ])
+      if (!active) return
+      if (r.data) setReport(r.data)
+      if (bt.data) setByTask(bt.data)
     })()
     return () => {
       active = false
     }
-  }, [activeId, reportQuery])
+  }, [activeId, reportQuery, from, to])
 
   const refreshRunning = useCallback(async () => {
     const { data } = await api.GET('/time/running', {
@@ -249,6 +321,8 @@ export function TimeRoute() {
 
   const runningByTask = new Set(running.map((r) => r.task_id))
   const secs = (iso: string) => (now - new Date(iso).getTime()) / 1000
+  // Per-task view: drop tasks with no time logged (0% / unreported).
+  const shownByTask = byTask.filter((r) => r.total_seconds > 0)
 
   return (
     <section className="card">
@@ -440,9 +514,27 @@ export function TimeRoute() {
       )}
 
       <h2>{t('time.totalByTask')}</h2>
-      {byTask.length === 0 ? (
+      {shownByTask.length === 0 ? (
         <p className="hint">{t('time.idle')}</p>
       ) : (
+        <>
+        <Donut
+          data={(() => {
+            const s = [...shownByTask].sort(
+              (a, b) => b.total_seconds - a.total_seconds,
+            )
+            const top = s.slice(0, 8).map((r) => ({
+              label: r.task_title ?? r.task_id.slice(0, 8),
+              secs: r.total_seconds,
+            }))
+            const rest = s
+              .slice(8)
+              .reduce((x, r) => x + r.total_seconds, 0)
+            return rest > 0
+              ? [...top, { label: `+${s.length - 8}`, secs: rest }]
+              : top
+          })()}
+        />
         <table className="tbl">
           <thead>
             <tr>
@@ -455,7 +547,7 @@ export function TimeRoute() {
             </tr>
           </thead>
           <tbody>
-            {byTask.map((r) => (
+            {shownByTask.map((r) => (
               <Fragment key={r.task_id}>
                 <tr
                   className="byrow"
@@ -510,6 +602,7 @@ export function TimeRoute() {
             ))}
           </tbody>
         </table>
+        </>
       )}
 
       <h2>{t('time.report')}</h2>
@@ -566,22 +659,24 @@ export function TimeRoute() {
             ))}
           </select>
         </label>
-        <label>
-          {t('time.from')}
-          <input
-            type="date"
-            value={from}
-            onChange={(e) => setFrom(e.target.value)}
-          />
-        </label>
-        <label>
-          {t('time.to')}
-          <input
-            type="date"
-            value={to}
-            onChange={(e) => setTo(e.target.value)}
-          />
-        </label>
+        <div className="daterange">
+          <label>
+            {t('time.from')}
+            <input
+              type="date"
+              value={from}
+              onChange={(e) => setFrom(e.target.value)}
+            />
+          </label>
+          <label>
+            {t('time.to')}
+            <input
+              type="date"
+              value={to}
+              onChange={(e) => setTo(e.target.value)}
+            />
+          </label>
+        </div>
         <label>
           {t('time.billableFilter')}
           <select

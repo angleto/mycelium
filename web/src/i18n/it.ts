@@ -62,6 +62,14 @@ export const it: Catalog = {
     noMatch: 'Nessun tag corrispondente',
     remove: 'Rimuovi tag',
   },
+  attach: {
+    title: 'Allegati',
+    add: 'Allega file',
+    uploading: 'Caricamento…',
+    none: 'Nessun allegato',
+    remove: 'Rimuovi',
+    open: 'Apri',
+  },
   tagmgr: {
     nav: 'Tag',
     title: 'Tag',

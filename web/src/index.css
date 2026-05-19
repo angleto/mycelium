@@ -1468,3 +1468,40 @@ button.btn--danger:hover {
 .byrow:hover {
   background: var(--surface-2);
 }
+
+/* Time report: distribution donut + legend, grouped date range. */
+.timepie {
+  display: flex;
+  align-items: center;
+  gap: 1.2rem;
+  flex-wrap: wrap;
+  margin: 0.6rem 0 0.4rem;
+}
+.pielegend {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 16rem;
+  flex: 1 1 16rem;
+}
+.pielegend li {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.82rem;
+}
+.pieswatch {
+  width: 0.7rem;
+  height: 0.7rem;
+  border-radius: 2px;
+  flex: 0 0 auto;
+}
+.daterange {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 0.6rem;
+  flex: 0 0 auto;
+}
