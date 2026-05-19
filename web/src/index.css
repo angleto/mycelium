@@ -1582,3 +1582,25 @@ button.btn--danger:hover {
   align-items: center;
   gap: 0.45rem;
 }
+
+/* Scheduler legend: critical vs slack swatches. */
+.sched__legend {
+  align-items: center;
+  gap: 1rem;
+  font-size: 0.82rem;
+  margin: 0.4rem 0;
+}
+.sched__sw {
+  display: inline-block;
+  width: 0.8rem;
+  height: 0.8rem;
+  border-radius: 2px;
+  vertical-align: -1px;
+  margin-right: 0.3rem;
+  background: var(--accent, #6d28d9);
+  opacity: 0.55;
+}
+.sched__sw--crit {
+  background: #dc2626;
+  opacity: 1;
+}

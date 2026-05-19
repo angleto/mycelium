@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { api, errMessage, workspaceHeader } from '../api/client'
 import { useSession } from '../auth/useSession'
+import { fmtDateTime } from '../lib/tz'
 import type { components } from '../api/schema'
 
 type Task = components['schemas']['TaskOut']
@@ -9,6 +10,16 @@ type Row = components['schemas']['ScheduleOut']
 
 const W = 760
 const RH = 30
+
+// Slack in minutes → compact human ("0", "3h", "2d 4h").
+function humanSlack(m: number | null): string {
+  if (m == null) return '—'
+  if (m <= 0) return '0'
+  const d = Math.floor(m / 1440)
+  const h = Math.floor((m % 1440) / 60)
+  const mm = m % 60
+  return [d && `${d}d`, h && `${h}h`, !d && mm ? `${mm}m` : ''].filter(Boolean).join(' ')
+}
 
 export function SchedulerRoute() {
   const { t } = useTranslation()
@@ -117,10 +128,13 @@ export function SchedulerRoute() {
   return (
     <section className="card">
       <h1>{t('scheduler.title')}</h1>
+      <p className="hint">{t('scheduler.intro')}</p>
+
       <div className="row">
         <button type="button" onClick={() => void onRecompute()} disabled={busy}>
           {busy ? t('scheduler.recomputing') : t('scheduler.recompute')}
         </button>
+        <span className="muted">{t('scheduler.recomputeHint')}</span>
         {msg && <span className="ok">{msg}</span>}
         {err && <span className="err">{err}</span>}
       </div>
@@ -153,49 +167,101 @@ export function SchedulerRoute() {
       {dated.length === 0 ? (
         <p className="hint">{t('scheduler.empty')}</p>
       ) : (
-        <svg
-          className="dag"
-          viewBox={`0 0 ${W + 160} ${dated.length * RH + 20}`}
-          width="100%"
-          role="img"
-          aria-label={t('scheduler.title')}
-        >
-          {dated.map((r, i) => {
-            const s = new Date(r.es as string).getTime()
-            const e = new Date(r.ef as string).getTime()
-            const x = 150 + ((s - min) / span) * W
-            const w = Math.max(4, ((e - s) / span) * W)
-            const y = 10 + i * RH
-            return (
-              <g key={r.task_id}>
-                <text x={0} y={y + 16} className="dag__state">
-                  {titleOf(r.task_id).slice(0, 22)}
-                </text>
-                <rect
-                  x={x}
-                  y={y}
-                  width={w}
-                  height={18}
-                  rx={4}
-                  className={
-                    r.on_logical_critical_path
-                      ? 'dag__node dag__node--blocked'
-                      : 'dag__node'
-                  }
-                />
-                <text x={x + w + 6} y={y + 14} className="dag__lbl">
-                  {r.slack_minutes != null ? `${r.slack_minutes}m` : ''}
-                </text>
-              </g>
-            )
-          })}
-        </svg>
-      )}
-      <p className="hint">{t('scheduler.critical')}</p>
+        <>
+          <div className="row sched__legend">
+            <span>
+              <span className="sched__sw sched__sw--crit" /> {t('scheduler.legendCritical')}
+            </span>
+            <span>
+              <span className="sched__sw" /> {t('scheduler.legendSlack')}
+            </span>
+            <span className="muted">
+              {fmtDateTime(new Date(min).toISOString())} →{' '}
+              {fmtDateTime(new Date(max).toISOString())}
+            </span>
+          </div>
 
+          <svg
+            className="dag"
+            viewBox={`0 0 ${W + 160} ${dated.length * RH + 20}`}
+            width="100%"
+            role="img"
+            aria-label={t('scheduler.title')}
+          >
+            {dated.map((r, i) => {
+              const s = new Date(r.es as string).getTime()
+              const e = new Date(r.ef as string).getTime()
+              const x = 150 + ((s - min) / span) * W
+              const w = Math.max(4, ((e - s) / span) * W)
+              const y = 10 + i * RH
+              return (
+                <g key={r.task_id}>
+                  <text x={0} y={y + 16} className="dag__state">
+                    {titleOf(r.task_id).slice(0, 22)}
+                  </text>
+                  <rect
+                    x={x}
+                    y={y}
+                    width={w}
+                    height={18}
+                    rx={4}
+                    className={
+                      r.on_logical_critical_path
+                        ? 'dag__node dag__node--blocked'
+                        : 'dag__node'
+                    }
+                  >
+                    <title>
+                      {`${titleOf(r.task_id)}\n${t('scheduler.colEs')}: ${fmtDateTime(r.es as string)}\n${t('scheduler.colEf')}: ${fmtDateTime(r.ef as string)}\n${t('scheduler.slack')}: ${humanSlack(r.slack_minutes)}`}
+                    </title>
+                  </rect>
+                </g>
+              )
+            })}
+          </svg>
+
+          <table className="tbl">
+            <thead>
+              <tr>
+                <th>{t('scheduler.colTask')}</th>
+                <th>{t('scheduler.colEs')}</th>
+                <th>{t('scheduler.colEf')}</th>
+                <th>{t('scheduler.colLs')}</th>
+                <th>{t('scheduler.colLf')}</th>
+                <th>{t('scheduler.slack')}</th>
+                <th>{t('scheduler.colCritical')}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {dated.map((r) => (
+                <tr key={r.task_id}>
+                  <td>{titleOf(r.task_id)}</td>
+                  <td>{r.es ? fmtDateTime(r.es) : '—'}</td>
+                  <td>{r.ef ? fmtDateTime(r.ef) : '—'}</td>
+                  <td>{r.ls ? fmtDateTime(r.ls) : '—'}</td>
+                  <td>{r.lf ? fmtDateTime(r.lf) : '—'}</td>
+                  <td>{humanSlack(r.slack_minutes)}</td>
+                  <td>
+                    {r.on_logical_critical_path ? (
+                      <span className="tag tag--danger">
+                        {t('scheduler.criticalYes')}
+                      </span>
+                    ) : (
+                      <span className="muted">—</span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      )}
+
+      <h2>{t('scheduler.pin')}</h2>
+      <p className="hint">{t('scheduler.pinHint')}</p>
       <form onSubmit={(e) => void onPin(e)} className="row">
         <label>
-          {t('scheduler.pin')}
+          {t('scheduler.pinTask')}
           <select value={pinTask} onChange={(e) => setPinTask(e.target.value)}>
             <option value="">--</option>
             {tasks.map((x) => (
@@ -205,12 +271,17 @@ export function SchedulerRoute() {
             ))}
           </select>
         </label>
-        <input
-          type="date"
-          value={pinDate}
-          onChange={(e) => setPinDate(e.target.value)}
-        />
-        <button type="submit">{t('scheduler.pin')}</button>
+        <label>
+          {t('scheduler.pinDate')}
+          <input
+            type="date"
+            value={pinDate}
+            onChange={(e) => setPinDate(e.target.value)}
+          />
+        </label>
+        <button type="submit" disabled={!pinTask || !pinDate}>
+          {t('scheduler.pin')}
+        </button>
       </form>
     </section>
   )
