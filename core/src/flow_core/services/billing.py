@@ -179,6 +179,39 @@ def _compute_credits(
     return raw.quantize(Decimal("0.0001"))
 
 
+async def meter_if_billable(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    operation_id: str,
+    op: str,
+    model_id: str | None = None,
+    units_in: Decimal = Decimal(0),
+    units_out: Decimal = Decimal(0),
+    basis: CostBasis = CostBasis.local,
+) -> UsageRecord | None:
+    """Like ``meter`` but a missing rate card means the operation is
+    FREE (no charge, no ledger row) instead of an error. Used for
+    embeddings produced by the bundled self-hosted model: memory works
+    out of the box, yet is still metered if an org configures an
+    embedding rate card. Paid LLM generation must keep using
+    ``meter`` (strictly gated)."""
+    if basis is not CostBasis.byok and (await _active_rate_card(session, model_id) is None):
+        return None
+    return await meter(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        operation_id=operation_id,
+        op=op,
+        model_id=model_id,
+        units_in=units_in,
+        units_out=units_out,
+        basis=basis,
+    )
+
+
 async def meter(
     session: AsyncSession,
     *,

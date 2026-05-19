@@ -45,20 +45,25 @@ async def _seed_billing(s, org: uuid.UUID, user: uuid.UUID) -> None:
     )
 
 
-async def test_write_is_metered_and_gated() -> None:
+async def test_write_free_without_rate_card_metered_with() -> None:
     org, user = await _org()
     async with tenant_session(str(org), str(user)) as s:
-        # No rate card yet -> metering rejects the embedding op.
-        with pytest.raises(DomainError):
-            await mem.write_blob(
-                s,
-                org_id=org,
-                actor_id=user,
-                project_id=None,
-                text_body="hello world",
-                operation_id="w0",
-                embedder=_FAKE,
-            )
+        # No rate card: the bundled self-hosted embedder is FREE, so
+        # the write succeeds out of the box and nothing is debited
+        # (memory must work without any billing setup).
+        before0 = await billing.balance(s, org_id=org)
+        await mem.write_blob(
+            s,
+            org_id=org,
+            actor_id=user,
+            project_id=None,
+            text_body="hello world",
+            operation_id="w0",
+            embedder=_FAKE,
+        )
+        assert await billing.balance(s, org_id=org) == before0  # free
+
+        # With a rate card configured, the embedding IS metered.
         await _seed_billing(s, org, user)
         before = await billing.balance(s, org_id=org)
         await mem.write_blob(
@@ -71,7 +76,7 @@ async def test_write_is_metered_and_gated() -> None:
             embedder=_FAKE,
         )
         after = await billing.balance(s, org_id=org)
-    assert after < before  # embedding debited
+    assert after < before  # embedding debited when a rate card exists
 
 
 async def test_hybrid_retrieval_and_determinism() -> None:

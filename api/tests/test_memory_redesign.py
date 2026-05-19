@@ -271,3 +271,42 @@ async def test_memory_status_false_when_model_missing(
         r = await c.get("/memory/status", headers=h)
         assert r.status_code == 200, r.text
         assert r.json() == {"semantic": False}
+
+
+async def test_embedder_present_but_no_rate_card_is_free(
+    _fake_embedder: None,
+) -> None:
+    """The real out-of-the-box scenario: the embedder works but the
+    org has NO rate card for the embedding model. Embedding via the
+    bundled model is free, so write + recall must succeed (not 400
+    billing.rate_card_not_found). Regression for "memory does
+    nothing"."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as c:
+        h = await _signup(c)
+        # Deliberately NO _grant_and_rate: no wallet grant, no rate card.
+        proj = str(uuid.uuid4())
+        w = await c.post(
+            "/memory/blobs",
+            headers=h,
+            json={
+                "project_id": proj,
+                "text": "remember the zqx-token billing fact",
+                "operation_id": "w-free-1",
+            },
+        )
+        assert w.status_code == 200, w.text
+        assert w.json()["model_id"] == FakeEmbedder.model_id
+        blob_id = w.json()["id"]
+
+        found = await c.post(
+            "/memory/search",
+            headers=h,
+            json={
+                "project_id": proj,
+                "query": "zqx-token",
+                "operation_id": "q-free-1",
+            },
+        )
+        assert found.status_code == 200, found.text
+        assert blob_id in {x["blob"]["id"] for x in found.json()}

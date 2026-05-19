@@ -181,9 +181,11 @@ async def write_blob(
         raise DomainError(MessageCode.MEMORY_DIM_MISMATCH, expected=str(expected))
     if result is not None:
         # Embedding is a cost-incurring op: gate + debit (ADR-0019).
-        # Metered only when an embedding was actually produced; the
-        # keyword-only fallback incurs no embedding cost.
-        await billing.meter(
+        # Metered only when an embedding was produced AND the org has a
+        # rate card for that model: the bundled self-hosted embedder is
+        # free out of the box (no rate card => no charge), so memory
+        # works without billing setup; still metered if configured.
+        await billing.meter_if_billable(
             session,
             org_id=org_id,
             actor_id=actor_id,
@@ -268,7 +270,7 @@ async def retrieve(
         # The query embedding is also a metered cost op. Skipped when
         # the embedder is unavailable: there is no semantic branch and
         # thus no embedding cost (keyword-only retrieval).
-        await billing.meter(
+        await billing.meter_if_billable(
             session,
             org_id=org_id,
             actor_id=actor_id,
