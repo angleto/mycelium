@@ -340,6 +340,21 @@ export function TaskDetailRoute() {
     await reload()
   }
 
+  // Open (creating on first use) this task's work note. Writing in it
+  // is billable: the note is linked to the task, so its timer feeds
+  // the task → project → client.
+  async function openWorkNote() {
+    setErr(null)
+    const { data, error } = await api.POST('/tasks/{task_id}/note', {
+      params: { header: workspaceHeader(), path: { task_id: id } },
+    })
+    if (error || !data) {
+      setErr(errMessage(error))
+      return
+    }
+    navigate(`/notes?open=${data.id}`)
+  }
+
   async function onAddDep() {
     if (!depOther) return
     setErr(null)
@@ -596,6 +611,12 @@ export function TaskDetailRoute() {
             ))}
           </select>
         </label>
+      </div>
+
+      <div className="row">
+        <button type="button" onClick={() => void openWorkNote()}>
+          {t('tasks.workNote')}
+        </button>
       </div>
 
       <h2>{t('tasks.tagsTitle')}</h2>

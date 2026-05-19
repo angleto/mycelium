@@ -1424,3 +1424,27 @@ button.btn--danger:hover {
   filter: brightness(0.98);
   border-color: var(--accent);
 }
+
+/* In-context task timer (e.g. inside a task's work note). */
+.tasktimer {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+.tasktimer__on {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 0.82rem;
+  color: var(--accent);
+}
+.notebanner {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  padding: 0.5rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-2);
+  font-size: 0.84rem;
+}

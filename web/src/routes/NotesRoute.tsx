@@ -14,6 +14,7 @@ import { RichEditor } from '../components/RichEditor'
 import { MarkdownView } from '../components/Markdown'
 import { NoteListItem } from '../components/NoteListItem'
 import { TagPicker } from '../components/TagPicker'
+import { TaskTimer } from '../components/TaskTimer'
 import { useFocus } from '../lib/focus'
 import type { components } from '../api/schema'
 
@@ -601,6 +602,16 @@ export function NotesRoute() {
 
             {!creating && sel && sel.kind !== 'conversation' && (
               <div className="modal__body">
+                {sel.task_id && (
+                  <div className="notebanner">
+                    <span>{t('notes.linkedTask')}</span>
+                    <Link to={`/tasks/${sel.task_id}`}>
+                      {t('notes.openTask')}
+                    </Link>
+                    <span className="modal__sp" />
+                    <TaskTimer taskId={sel.task_id} />
+                  </div>
+                )}
                 <input
                   placeholder={t('notes.titlePlaceholder')}
                   value={eTitle}

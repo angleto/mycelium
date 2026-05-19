@@ -269,3 +269,49 @@ test('effective role: privileged write needs Owner mode', async ({
   await expect(page.locator('main.content .err')).toHaveCount(0)
   expect(errors, errors.join('\n')).toEqual([])
 })
+
+test('task work note: open from task + billable timer in the note', async ({
+  page,
+}) => {
+  const errors: string[] = []
+  watch(page, errors)
+  await login(page)
+
+  // Make a task via the note→task convert (member-level).
+  await page.goto('/notes')
+  const title = `WN ${Date.now()}`
+  await page.getByRole('button', { name: /new note|nuova nota/i }).click()
+  const dialog = page.locator('.modal__panel')
+  await dialog.locator('input').first().fill(title)
+  await dialog.locator('.ProseMirror').first().click()
+  await page.keyboard.type('seed')
+  await dialog
+    .getByRole('button', { name: /create note|crea nota/i })
+    .click()
+  await dialog
+    .getByRole('button', { name: /convert to task|trasforma in task/i })
+    .click()
+  // Open the created task — the precise conversion-success link
+  // (p.ok a), not any /tasks/ anchor on the page.
+  const madeLink = page.locator('p.ok a[href^="/tasks/"]').first()
+  await expect(madeLink).toBeVisible()
+  await madeLink.click()
+  await expect(page).toHaveURL(/\/tasks\/[0-9a-f-]+/)
+
+  // Work note → opens the linked note with the billable timer.
+  await page.getByRole('button', { name: /work note|nota di lavoro/i }).click()
+  await expect(page).toHaveURL(/\/notes\?open=/)
+  const banner = page.locator('.notebanner')
+  await expect(banner).toBeVisible()
+  const timer = banner.locator('.tasktimer')
+  await expect(timer).toBeVisible()
+  // Start the timer → running readout + Stop; then stop.
+  await timer.getByRole('button', { name: /^start$|^avvia$/i }).click()
+  await expect(timer.locator('.tasktimer__on')).toBeVisible()
+  await timer.getByRole('button', { name: /^stop$|^ferma$/i }).click()
+  await expect(
+    timer.getByRole('button', { name: /^start$|^avvia$/i }),
+  ).toBeVisible()
+  await expect(page.locator('main.content .err')).toHaveCount(0)
+  expect(errors, errors.join('\n')).toEqual([])
+})
