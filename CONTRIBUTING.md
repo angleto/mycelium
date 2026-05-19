@@ -32,5 +32,4 @@ make migrate                              # alembic upgrade head
 ## Commits
 
 Conventional, English, imperative mood (e.g.
-`feat(scheduler): add working-calendar CPM pass`). No
-`Co-Authored-By` trailer.
+`feat(scheduler): add working-calendar CPM pass`).
