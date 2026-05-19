@@ -1864,6 +1864,7 @@ def _note(n: Note) -> dict[str, Any]:
     return {
         "id": str(n.id),
         "project_id": str(n.project_id) if n.project_id else None,
+        "task_id": str(n.task_id) if n.task_id else None,
         "kind": n.kind.value,
         "status": n.status.value,
         "title": n.title,
@@ -1933,6 +1934,21 @@ async def get_note(token: str, org_id: str, note_id: str) -> dict[str, Any]:
     async with _tenant(token, org_id) as (s, org, _user):
         note = await notes_svc.get_note(s, org_id=org, note_id=uuid.UUID(note_id))
         return _note(note)
+
+
+@mcp.tool()
+async def get_or_create_task_note(token: str, org_id: str, task_id: str) -> dict[str, Any]:
+    """Open a task's "work note" (creating it on first call). Idempotent:
+    repeated calls return the same note. Time spent on the note is billed
+    to the task via the task-scoped timer."""
+    async with _tenant(token, org_id) as (s, org, user):
+        n = await notes_svc.get_or_create_work_note(
+            s,
+            org_id=org,
+            actor_id=user,
+            task_id=uuid.UUID(task_id),
+        )
+        return _note(n)
 
 
 @mcp.tool()

@@ -14,6 +14,7 @@ from flow_api.schemas import (
     CommentCreateIn,
     CommentOut,
     ExpectedVersionIn,
+    NoteOut,
     ReminderIn,
     ReminderOut,
     StateOut,
@@ -26,9 +27,11 @@ from flow_api.schemas import (
     VersionOut,
 )
 from flow_core.models.comment import Comment
+from flow_core.models.note import Note
 from flow_core.models.tag import Tag
 from flow_core.models.task import Task
 from flow_core.models.workflow import WorkflowState
+from flow_core.services import notes as notes_svc
 from flow_core.services import notifications as notif_svc
 from flow_core.services import tasks as svc
 from flow_core.services import workflow as wf
@@ -70,6 +73,26 @@ def _comment_out(c: Comment) -> CommentOut:
         user_id=c.user_id,
         body=c.body,
         version=c.version,
+    )
+
+
+def _note_out(n: Note, tags: list[Tag] | None = None) -> NoteOut:
+    # Built exactly like routers/notes.py::_out so the SPA gets the same
+    # NoteOut shape (incl. tags + task_id) from either entry point.
+    return NoteOut(
+        id=n.id,
+        project_id=n.project_id,
+        task_id=n.task_id,
+        kind=n.kind,
+        status=n.status,
+        title=n.title,
+        transcript=n.transcript,
+        summary=n.summary,
+        audio_ref=n.audio_ref,
+        is_archived=n.is_archived,
+        deleted_at=n.deleted_at,
+        tags=[TagBrief(id=t.id, kind=t.kind, name=t.name, color=t.color) for t in (tags or [])],
+        version=n.version,
     )
 
 
@@ -400,3 +423,21 @@ async def list_comments(
 ) -> list[CommentOut]:
     rows = await svc.list_comments(ctx.session, org_id=ctx.org_id, task_id=task_id)
     return [_comment_out(c) for c in rows]
+
+
+@router.post("/{task_id}/note", response_model=NoteOut)
+async def get_or_create_task_note(
+    task_id: uuid.UUID,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+) -> NoteOut:
+    # Member-level (notes/tasks are member-level): open the task's work
+    # note, creating it on first call. Idempotent. Time spent there is
+    # billed to the task via the task-scoped timer (no new model).
+    n = await notes_svc.get_or_create_work_note(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        task_id=task_id,
+    )
+    tagmap = await notes_svc.tags_by_note(ctx.session, note_ids=[n.id])
+    return _note_out(n, tagmap.get(n.id, []))

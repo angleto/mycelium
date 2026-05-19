@@ -1031,6 +1031,9 @@ class NoteTagIn(BaseModel):
 class NoteOut(BaseModel):
     id: uuid.UUID
     project_id: uuid.UUID | None
+    # Set when the note is a task's "work note" (the SPA detects it to
+    # open it from the task and bill its timer to the task).
+    task_id: uuid.UUID | None = None
     kind: NoteKind
     status: NoteStatus
     title: str | None

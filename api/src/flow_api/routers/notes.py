@@ -43,6 +43,7 @@ def _out(n: Note, tags: list[Tag] | None = None) -> NoteOut:
     return NoteOut(
         id=n.id,
         project_id=n.project_id,
+        task_id=n.task_id,
         kind=n.kind,
         status=n.status,
         title=n.title,

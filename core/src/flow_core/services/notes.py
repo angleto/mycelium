@@ -40,6 +40,8 @@ from flow_core.models.note import Note, NoteKind, NoteStatus, NoteTurn, TurnRole
 from flow_core.models.note_tag import NoteTag
 from flow_core.models.project_profile import ProjectProfile
 from flow_core.models.tag import Tag, TagKind
+from flow_core.models.task import Task
+from flow_core.models.task_tag import TaskTag
 from flow_core.services import audit, billing, taxonomy
 from flow_core.services import memory as memory_svc
 from flow_core.services.rbac import require_role
@@ -417,6 +419,54 @@ async def create_note(
         entity_id=note.id,
         action="create",
     )
+    return note
+
+
+async def get_or_create_work_note(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    task_id: uuid.UUID,
+) -> Note:
+    """The task's single "work note": open it, write in it; time spent
+    there is billed to the task (time entries stay task-scoped, no new
+    model). Idempotent: the second call returns the same note. The note
+    is created via ``create_note`` so the client/Personal enforcement
+    runs; it inherits the task's project (hence its client) when one
+    can be derived from the task's tags."""
+    task = (await session.execute(select(Task).where(Task.id == task_id))).scalar_one_or_none()
+    if task is None:
+        raise NotFoundError(MessageCode.TASK_NOT_FOUND)
+    existing = (
+        await session.execute(
+            select(Note).where(Note.task_id == task_id, Note.deleted_at.is_(None))
+        )
+    ).scalar_one_or_none()
+    if existing is not None:
+        return existing
+    # Derive the task's project tag the same way create_task does (its
+    # first project-kind tag), so the work note lands under the task's
+    # project/client; otherwise create_note attaches the Personal client.
+    project_id = (
+        await session.execute(
+            select(Tag.id)
+            .join(TaskTag, TaskTag.tag_id == Tag.id)
+            .where(TaskTag.task_id == task_id, Tag.kind == TagKind.project)
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    note = await create_note(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        kind=NoteKind.text,
+        project_id=project_id,
+        title=task.title or "Work note",
+        text=None,
+    )
+    note.task_id = task_id
+    await session.flush()
     return note
 
 
