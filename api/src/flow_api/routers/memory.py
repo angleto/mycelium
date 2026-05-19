@@ -114,6 +114,22 @@ async def get_blob(
     return _blob_out(blob, tagmap.get(blob.id))
 
 
+@router.delete("/blobs/{blob_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_blob(
+    blob_id: uuid.UUID,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+) -> None:
+    """Delete a single memory entry (member-level, RLS-scoped). Hard
+    delete; cascades to the blob's tags/sources/vector. 404 if the blob
+    is absent or belongs to another workspace."""
+    await svc.delete_blob(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        blob_id=blob_id,
+    )
+
+
 @router.post("/erase", response_model=ErasedOut)
 async def erase(
     body: MemoryEraseIn,

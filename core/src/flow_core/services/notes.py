@@ -604,6 +604,11 @@ async def transcribe(
             operation_id=f"{operation_id}:mem",
             namespace="note",
             sources=[("note", str(note.id))],
+            # Note-derived memory lands on the canonical "note" channel
+            # deterministically (resolved via the seeded channel_key
+            # path; the channel is guaranteed seeded by
+            # ensure_default_memory_channels).
+            channel_key="note",
         )
     await audit.log(
         session,

@@ -327,29 +327,77 @@ async def create_project(
     return tag
 
 
+_TAG_ACTIVE = "active"
+_TAG_ARCHIVED = "archived"
+
+
 async def list_tags(
     session: AsyncSession,
     *,
     org_id: uuid.UUID,
     kind: TagKind | None = None,
     for_project: uuid.UUID | None = None,
+    for_client: uuid.UUID | None = None,
+    include_archived: bool = False,
 ) -> list[Tag]:
+    """List tags (RLS-scoped to the tenant).
+
+    ``include_archived`` is False by default: an archived tag must not
+    appear on ANY selection/filter surface (task/note pickers, the
+    graph, memory) -- excluding it here is the single root fix, every
+    caller inherits it. The Tag manager passes ``include_archived=True``
+    so an archived tag can still be un-archived. (An already-attached
+    archived tag still renders via the owning entity's own serializer,
+    so it remains removable -- that path does not go through here.)
+
+    ``for_project`` / ``for_client`` are the focus scope: when the SPA
+    focus is a project (resp. a client) only tags that are GLOBAL (no
+    ``tag_scope`` rows) OR scoped to that project/client (or, for a
+    project, to its client; for a client, to any of its projects) are
+    returned, so /graph and /tags stop offering tags of other clients
+    and of projects not under the focused client. They are mutually
+    compatible (a tag visible under either is included); the SPA sends
+    at most one. With neither passed the behaviour is unchanged except
+    the archived exclusion above."""
     stmt = select(Tag).order_by(Tag.kind, Tag.name)
     if kind is not None:
         stmt = stmt.where(Tag.kind == kind)
+    if not include_archived:
+        stmt = stmt.where(Tag.status == _TAG_ACTIVE)
+    # The set of scope targets a tag may be scoped to for it to be
+    # "visible under the current focus": the project/client itself plus
+    # the transitively related client/projects. Empty when no focus is
+    # passed (the scope filter is then skipped entirely).
+    targets: set[uuid.UUID] = set()
     if for_project is not None:
-        # Visible for a project = global (no scope rows) OR scoped to
-        # that project or its client.
-        targets: list[uuid.UUID] = [for_project]
+        targets.add(for_project)
         prof = (
             await session.execute(
                 select(ProjectProfile.client_tag_id).where(ProjectProfile.tag_id == for_project)
             )
         ).scalar_one_or_none()
         if prof is not None:
-            targets.append(prof)
+            targets.add(prof)
+    if for_client is not None:
+        targets.add(for_client)
+        # Resolve client -> its projects (ProjectProfile.client_tag_id),
+        # mirroring how ``for_project`` resolves project -> its client:
+        # a tag scoped to any project of this client is visible too.
+        client_projects = (
+            (
+                await session.execute(
+                    select(ProjectProfile.tag_id).where(ProjectProfile.client_tag_id == for_client)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        targets.update(client_projects)
+    if targets:
+        # Visible = global (no scope rows at all) OR scoped to any of
+        # the resolved targets.
         scoped = select(TagScope.tag_id).distinct()
-        in_scope = select(TagScope.tag_id).where(TagScope.target_tag_id.in_(targets))
+        in_scope = select(TagScope.tag_id).where(TagScope.target_tag_id.in_(list(targets)))
         stmt = stmt.where(or_(Tag.id.not_in(scoped), Tag.id.in_(in_scope)))
     return list((await session.execute(stmt)).scalars().all())
 
@@ -587,28 +635,71 @@ async def update_tag(
 #
 # A memory channel is a ``memory_channel`` tag whose ``system_key`` is a
 # stable slug. Integrations (email ingest, Telegram) resolve their
-# target channel by this key, never by a user-chosen name. The four
+# target channel by this key, never by a user-chosen name. The
 # canonical channels are seeded idempotently per tenant; the platform
 # admin may add custom (keyless or keyed) channels via /memory/channels.
 # Enable/disable reuses the pre-existing tag ``status`` soft-state
-# ('active' vs 'archived'); a disabled channel is not a valid write/
-# search target. Seeded channels are renamable but their key is
-# immutable and they are not deletable (disable instead).
-_CHANNEL_ACTIVE = "active"
-_CHANNEL_DISABLED = "archived"
+# ('active' vs 'archived', the same one ``list_tags`` filters on); a
+# disabled channel is not a valid write/search target. Seeded channels
+# are renamable but their key is immutable and they are not deletable
+# (disable instead).
+_CHANNEL_ACTIVE = _TAG_ACTIVE
+_CHANNEL_DISABLED = _TAG_ARCHIVED
 
-# slug -> human (English) name. Order is the seed/list order.
+# slug -> human (English) name. Order is the seed/list order. ``email``
+# and ``telegram`` are seeded for determinism (a future ingest needs a
+# stable, well-known target) but are NOT yet usable channels: their
+# ingestion is not implemented, so ``_CONFIGURED_KEYS`` filters them out
+# of the list/select responses until the integration exists. ``note``
+# is the channel note-derived memory lands on (notes.transcribe writes
+# with channel_key="note").
 CANONICAL_MEMORY_CHANNELS: tuple[tuple[str, str], ...] = (
     ("email", "Email"),
     ("telegram", "Telegram"),
     ("manual", "Manual"),
     ("agent", "Agent"),
+    ("note", "Note"),
 )
 _CANONICAL_KEYS: frozenset[str] = frozenset(k for k, _ in CANONICAL_MEMORY_CHANNELS)
 
+# Channels actually usable today. ``manual``/``agent``/``note`` are
+# intrinsically usable; ``email``/``telegram`` are seeded but excluded
+# from the listing until their integration ships. A custom channel
+# added by a platform admin is not in this set but IS configured (it
+# was deliberately created), so the membership test is
+# "system_key in _CONFIGURED_KEYS OR not a canonical (seeded) key".
+_CONFIGURED_KEYS: frozenset[str] = frozenset({"manual", "agent", "note"})
+
+# Short English description per seeded channel (rendered read-only in
+# the channel picker). Custom channels have no description (None).
+_CHANNEL_DESCRIPTIONS: dict[str, str] = {
+    "manual": "Written by you in the app",
+    "agent": "Written by the assistant",
+    "note": "Captured from your notes",
+}
+
+
+def channel_description(system_key: str | None) -> str | None:
+    """Read-only description for a channel, keyed by ``system_key``;
+    None for a keyless/custom channel (no canned copy)."""
+    if system_key is None:
+        return None
+    return _CHANNEL_DESCRIPTIONS.get(system_key)
+
+
+def _channel_configured(system_key: str | None) -> bool:
+    """A channel is exposed in the list/select surface when it is one
+    of the intrinsically-usable seeded keys, OR it is not a canonical
+    (seeded) key at all -- i.e. a custom channel a platform admin
+    deliberately created. Seeded-but-not-yet-implemented channels
+    (email/telegram) are filtered out."""
+    if system_key in _CONFIGURED_KEYS:
+        return True
+    return system_key not in _CANONICAL_KEYS
+
 
 async def ensure_default_memory_channels(session: AsyncSession, *, org_id: uuid.UUID) -> None:
-    """Seed the four canonical memory channels for a tenant, idempotent.
+    """Seed the canonical memory channels for a tenant, idempotent.
 
     Mirrors the lazy ``ensure_default_*`` bootstrap shape (called from
     the same surfaces that need them, e.g. ``GET /memory/channels`` and
@@ -655,12 +746,17 @@ async def ensure_default_memory_channels(session: AsyncSession, *, org_id: uuid.
 
 async def list_memory_channels(session: AsyncSession, *, org_id: uuid.UUID) -> list[Tag]:
     """Configured channels for the tenant (RLS-scoped). Seeds the
-    canonical set first so a fresh tenant always lists the four."""
+    canonical set first (so a fresh tenant is deterministic) then
+    returns only the channels that are usable today: the intrinsically
+    usable seeded keys (manual/agent/note) plus any custom channel a
+    platform admin created. Seeded-but-not-yet-implemented channels
+    (email/telegram) stay in the DB for a future ingest but are filtered
+    out of this list/select response (``_channel_configured``)."""
     await ensure_default_memory_channels(session, org_id=org_id)
     rows = await session.execute(
         select(Tag).where(Tag.kind == TagKind.memory_channel).order_by(Tag.name)
     )
-    return list(rows.scalars().all())
+    return [t for t in rows.scalars().all() if _channel_configured(t.system_key)]
 
 
 async def _get_channel(session: AsyncSession, *, tag_id: uuid.UUID) -> Tag:
@@ -780,7 +876,18 @@ async def resolve_channel_by_key(
     """Resolve a tenant's enabled ``memory_channel`` tag by its stable
     ``system_key`` (RLS scopes ``tags`` to the org, so a foreign org's
     channel is invisible -> not found). A disabled channel is treated
-    as absent (not a valid write/search target)."""
+    as absent (not a valid write/search target).
+
+    This is the deterministic resolution entry point integrations and
+    note-derived memory write into, so it seeds the canonical channels
+    first (idempotent, system action): a fresh tenant that never opened
+    the channel list still resolves a canonical ``channel_key`` (e.g.
+    ``note``) instead of a spurious CHANNEL_NOT_FOUND. Seeding here does
+    NOT make email/telegram appear in the list -- that surface filters
+    via ``_channel_configured`` -- it only guarantees the row exists for
+    a key lookup."""
+    if channel_key in _CANONICAL_KEYS:
+        await ensure_default_memory_channels(session, org_id=org_id)
     tag = (
         await session.execute(
             select(Tag).where(

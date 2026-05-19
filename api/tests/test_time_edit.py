@@ -213,3 +213,54 @@ async def test_time_edit_reassign_interval_context_and_report() -> None:
         # Report is ordered by total_seconds desc: task B (10800) is
         # the only task with entries here, and leads.
         assert rep[0]["task_id"] == task_b["id"]
+
+
+async def test_delete_time_entry_stopped_running_and_isolation() -> None:
+    """DELETE /time/entries/{id} (member-level): a stopped entry is
+    removed (-> 404 on a later GET); deleting a STILL-RUNNING entry
+    cancels it (it is gone); a foreign entry id is 404 (cross-org)."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as c:
+        a = (
+            await c.post(
+                "/auth/signup",
+                json={"email": _email(), "password": "pw-strong-123", "workspace_name": "A"},
+            )
+        ).json()
+        b = (
+            await c.post(
+                "/auth/signup",
+                json={"email": _email(), "password": "pw-strong-123", "workspace_name": "B"},
+            )
+        ).json()
+        ha = {"Authorization": f"Bearer {a['token']}", "X-Workspace-Id": a["workspace_id"]}
+        hb = {"Authorization": f"Bearer {b['token']}", "X-Workspace-Id": b["workspace_id"]}
+
+        task = (await c.post("/tasks", headers=ha, json={"title": "T"})).json()
+
+        # Stopped entry -> delete -> 404 afterwards.
+        await c.post("/time/start", headers=ha, json={"task_id": task["id"]})
+        stopped = (await c.post("/time/stop", headers=ha, json={})).json()
+        eid = stopped["id"]
+        d = await c.delete(f"/time/entries/{eid}", headers=ha)
+        assert d.status_code == 204, d.text
+        gone = await c.get(f"/time/entries/{eid}", headers=ha)
+        assert gone.status_code == 404, gone.text
+        assert gone.json()["code"] == "time_entry.not_found"
+
+        # Still-running entry -> delete cancels it (gone, no running).
+        run = (await c.post("/time/start", headers=ha, json={"task_id": task["id"]})).json()
+        rid = run["id"]
+        assert run["ended_at"] is None
+        dr = await c.delete(f"/time/entries/{rid}", headers=ha)
+        assert dr.status_code == 204, dr.text
+        assert (await c.get(f"/time/entries/{rid}", headers=ha)).status_code == 404
+        assert (await c.get("/time/running", headers=ha)).json() == []
+
+        # Cross-org: org B cannot delete org A's entry (RLS -> 404).
+        await c.post("/time/start", headers=ha, json={"task_id": task["id"]})
+        a_entry = (await c.post("/time/stop", headers=ha, json={})).json()["id"]
+        foreign = await c.delete(f"/time/entries/{a_entry}", headers=hb)
+        assert foreign.status_code == 404, foreign.text
+        # Still intact for org A.
+        assert (await c.get(f"/time/entries/{a_entry}", headers=ha)).status_code == 200

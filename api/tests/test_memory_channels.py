@@ -14,8 +14,11 @@ Covered:
   idempotent and never raises ``tag.duplicate``.
 - generic ``POST /tags`` with kind=memory_channel -> 400
   ``channel.not_tag_creatable``.
-- ``GET /memory/channels`` lists the 4 seeded (with ``system_key``) for
-  a plain member.
+- ``GET /memory/channels`` lists only the CONFIGURED channels
+  (manual/agent/note, each with a description) for a plain member;
+  email/telegram are seeded in the DB (deterministic future ingest
+  target) but filtered out of the list/select surface until their
+  integration ships.
 - platform admin (admin-mode) lifecycle: create custom, rename,
   disable, delete; seeded rename OK; seeded key change ->
   ``channel.key_immutable``; seeded delete ->
@@ -43,7 +46,11 @@ from flow_api.main import app
 from flow_core.bootstrap_admin import ensure_admin
 from flow_core.embedder import set_embedder_override
 
-_CANONICAL = {"email", "telegram", "manual", "agent"}
+# Seeded in the DB (determinism for a future ingest): all five.
+_SEEDED = {"email", "telegram", "manual", "agent", "note"}
+# Exposed in the list/select surface: email/telegram are filtered out
+# until their ingestion exists.
+_CONFIGURED = {"manual", "agent", "note"}
 _ADMIN_PW = "Str0ng-Passw0rd!"
 _ELEVATE = {"X-Admin-Mode": "1"}
 
@@ -87,11 +94,14 @@ async def _admin_session(c: AsyncClient) -> tuple[dict[str, str], str]:
     return h, str(ws)
 
 
-async def test_bootstrap_seeds_exactly_four_idempotent() -> None:
-    """First touch seeds exactly the 4 canonical channels; listing again
-    (which re-runs the idempotent seed) does not duplicate and never
-    raises tag.duplicate, even after a plain POST /notes which exercises
-    the known ensure_default_client quirk path."""
+async def test_bootstrap_lists_only_configured_idempotent() -> None:
+    """First touch seeds the canonical channels but the LIST surface
+    exposes only the configured ones (manual/agent/note, each with a
+    description); email/telegram are seeded yet filtered out until their
+    ingest exists. Listing again (which re-runs the idempotent seed)
+    does not duplicate and never raises tag.duplicate, even after a
+    plain POST /notes which exercises the known ensure_default_client
+    quirk path."""
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://t") as c:
         h = await _signup(c)
@@ -99,10 +109,16 @@ async def test_bootstrap_seeds_exactly_four_idempotent() -> None:
         first = await c.get("/memory/channels", headers=h)
         assert first.status_code == 200, first.text
         body = first.json()
-        assert len(body) == 4, body
-        assert {ch["system_key"] for ch in body} == _CANONICAL
+        assert {ch["system_key"] for ch in body} == _CONFIGURED, body
+        assert "email" not in {ch["system_key"] for ch in body}
+        assert "telegram" not in {ch["system_key"] for ch in body}
         assert all(ch["enabled"] for ch in body)
         assert all(ch["seeded"] for ch in body)
+        # Each configured channel carries a short English description.
+        by_key = {ch["system_key"]: ch for ch in body}
+        assert by_key["manual"]["description"] == "Written by you in the app"
+        assert by_key["agent"]["description"] == "Written by the assistant"
+        assert by_key["note"]["description"] == "Captured from your notes"
         ids = {ch["id"] for ch in body}
 
         # A plain note exercises the ensure_default_client path (the
@@ -110,12 +126,12 @@ async def test_bootstrap_seeds_exactly_four_idempotent() -> None:
         note = await c.post("/notes", headers=h, json={"kind": "text", "text": "hi"})
         assert note.status_code == 200, note.text
 
-        # Re-list: idempotent seed, still exactly the same 4 (no dupes,
-        # no tag.duplicate).
+        # Re-list: idempotent seed, still exactly the same configured set
+        # (no dupes, no tag.duplicate).
         again = await c.get("/memory/channels", headers=h)
         assert again.status_code == 200, again.text
         assert {ch["id"] for ch in again.json()} == ids
-        assert len(again.json()) == 4
+        assert {ch["system_key"] for ch in again.json()} == _CONFIGURED
 
 
 async def test_generic_tag_endpoint_rejects_memory_channel() -> None:
@@ -139,7 +155,7 @@ async def test_member_can_list_channels() -> None:
         r = await c.get("/memory/channels", headers=h)
         assert r.status_code == 200, r.text
         keys = {ch["system_key"] for ch in r.json()}
-        assert keys == _CANONICAL
+        assert keys == _CONFIGURED
 
 
 async def test_platform_admin_channel_lifecycle() -> None:
@@ -148,9 +164,13 @@ async def test_platform_admin_channel_lifecycle() -> None:
         h, _ws = await _admin_session(c)
         el = {**h, **_ELEVATE}
 
-        # Seed first (any member surface).
+        # Seed first (any member surface). The seeded-channel
+        # protections apply to ANY canonical key; exercise them on
+        # ``note``, which is a CONFIGURED seeded channel (so it is
+        # listed) -- email is seeded but filtered out of the list now.
         seeded = (await c.get("/memory/channels", headers=h)).json()
-        email_ch = next(ch for ch in seeded if ch["system_key"] == "email")
+        note_ch = next(ch for ch in seeded if ch["system_key"] == "note")
+        assert note_ch["seeded"] is True
 
         # Create a custom channel (keyed).
         created = await c.post(
@@ -177,38 +197,73 @@ async def test_platform_admin_channel_lifecycle() -> None:
         deleted = await c.delete(f"/memory/channels/{cid}", headers=el)
         assert deleted.status_code == 204, deleted.text
 
-        # Seeded channel: rename OK.
+        # Seeded channel: rename OK (key preserved).
         sr = await c.patch(
-            f"/memory/channels/{email_ch['id']}",
+            f"/memory/channels/{note_ch['id']}",
             headers=el,
-            json={"name": "Inbox"},
+            json={"name": "Captured"},
         )
         assert sr.status_code == 200, sr.text
-        assert sr.json()["name"] == "Inbox"
-        assert sr.json()["system_key"] == "email"
+        assert sr.json()["name"] == "Captured"
+        assert sr.json()["system_key"] == "note"
 
         # Seeded channel: changing system_key is rejected.
         sk = await c.patch(
-            f"/memory/channels/{email_ch['id']}",
+            f"/memory/channels/{note_ch['id']}",
             headers=el,
-            json={"system_key": "email-2"},
+            json={"system_key": "note-2"},
         )
         assert sk.status_code == 400, sk.text
         assert sk.json()["code"] == "channel.key_immutable"
 
         # Seeded channel: delete is rejected.
-        sd = await c.delete(f"/memory/channels/{email_ch['id']}", headers=el)
+        sd = await c.delete(f"/memory/channels/{note_ch['id']}", headers=el)
         assert sd.status_code == 400, sd.text
         assert sd.json()["code"] == "channel.seeded_undeletable"
 
-        # Seeded channel: disable IS allowed.
+        # Seeded channel: disable IS allowed (still listed -- the list
+        # filters by key, not by status -- just enabled=false).
         sdis = await c.patch(
-            f"/memory/channels/{email_ch['id']}",
+            f"/memory/channels/{note_ch['id']}",
             headers=el,
             json={"enabled": False},
         )
         assert sdis.status_code == 200, sdis.text
         assert sdis.json()["enabled"] is False
+        relisted = (await c.get("/memory/channels", headers=h)).json()
+        note_relisted = next(ch for ch in relisted if ch["system_key"] == "note")
+        assert note_relisted["enabled"] is False
+
+
+async def test_custom_channel_is_listed_email_telegram_excluded() -> None:
+    """Item 5 contract: GET /memory/channels returns manual/agent/note
+    (each with a description) and NOT email/telegram (seeded but not yet
+    implemented); a platform-admin-created CUSTOM channel IS listed
+    (deliberately created => configured)."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as c:
+        h, _ws = await _admin_session(c)
+        el = {**h, **_ELEVATE}
+
+        base = (await c.get("/memory/channels", headers=h)).json()
+        assert {ch["system_key"] for ch in base} == _CONFIGURED
+        for ch in base:
+            assert ch["description"] is not None  # every seeded one has copy
+
+        created = await c.post(
+            "/memory/channels",
+            headers=el,
+            json={"name": "Slack import", "system_key": "slack"},
+        )
+        assert created.status_code == 200, created.text
+        # A custom channel has no canned description.
+        assert created.json()["description"] is None
+
+        after = (await c.get("/memory/channels", headers=h)).json()
+        keys = {ch["system_key"] for ch in after}
+        assert "slack" in keys  # custom => configured => listed
+        assert keys == _CONFIGURED | {"slack"}
+        assert "email" not in keys and "telegram" not in keys
 
 
 async def test_non_admin_owner_forbidden_on_management() -> None:
@@ -257,8 +312,12 @@ async def test_memory_write_search_by_channel_key(_fake_embedder: None) -> None:
                 "credits_per_input": "0.001",
             },
         )
+        # ``email`` is seeded but FILTERED OUT of the list now, yet it
+        # MUST stay resolvable by its stable key (that is exactly the
+        # determinism a future ingest needs). It is therefore absent
+        # from /memory/channels...
         channels = (await c.get("/memory/channels", headers=h)).json()
-        email_tag_id = next(ch["id"] for ch in channels if ch["system_key"] == "email")
+        assert "email" not in {ch["system_key"] for ch in channels}
 
         proj = str(uuid.uuid4())
         w = await c.post(
@@ -273,8 +332,13 @@ async def test_memory_write_search_by_channel_key(_fake_embedder: None) -> None:
         )
         assert w.status_code == 200, w.text
         blob_id = w.json()["id"]
-        # Resolved to the seeded email channel tag and attached.
-        assert email_tag_id in {t["id"] for t in w.json()["tags"]}
+        # ...but writing by ``channel_key="email"`` still resolves to the
+        # seeded email channel tag and attaches it. Recover its tag id
+        # from the blob's memory_channel tag (the list no longer exposes
+        # it).
+        chan_tags = [t for t in w.json()["tags"] if t["kind"] == "memory_channel"]
+        assert len(chan_tags) == 1
+        email_tag_id = chan_tags[0]["id"]
 
         # Search by the same key returns it.
         same = await c.post(
@@ -333,7 +397,22 @@ async def test_memory_write_search_by_channel_key(_fake_embedder: None) -> None:
         assert ok.status_code == 200, ok.text
 
         # channel_tag_id + MISMATCHING channel_key -> domain error.
-        tg_tag_id = next(ch["id"] for ch in channels if ch["system_key"] == "telegram")
+        # ``telegram`` is also filtered from the list; recover its tag id
+        # the same way (write by its key, read the memory_channel tag).
+        tgw = await c.post(
+            "/memory/blobs",
+            headers=h,
+            json={
+                "project_id": proj,
+                "text": "telegram ping",
+                "operation_id": "w-key-tg",
+                "channel_key": "telegram",
+            },
+        )
+        assert tgw.status_code == 200, tgw.text
+        tg_chan = [t for t in tgw.json()["tags"] if t["kind"] == "memory_channel"]
+        assert len(tg_chan) == 1
+        tg_tag_id = tg_chan[0]["id"]
         mism = await c.post(
             "/memory/blobs",
             headers=h,
@@ -392,21 +471,25 @@ async def test_channel_key_resolution_is_rls_scoped(_fake_embedder: None) -> Non
     async with AsyncClient(transport=transport, base_url="http://t") as c:
         ha = await _signup(c)
         hb = await _signup(c)
-
-        a_email = next(
-            ch["id"]
-            for ch in (await c.get("/memory/channels", headers=ha)).json()
-            if ch["system_key"] == "email"
-        )
-        b_email = next(
-            ch["id"]
-            for ch in (await c.get("/memory/channels", headers=hb)).json()
-            if ch["system_key"] == "email"
-        )
-        # Same slug, different tenants => different tag rows.
-        assert a_email != b_email
-
         proj = str(uuid.uuid4())
+
+        # ``email`` is filtered from the list but still resolvable by
+        # key per tenant. Materialise each org's seeded email channel by
+        # writing with channel_key="email" and read back its
+        # memory_channel tag id.
+        wa = await c.post(
+            "/memory/blobs",
+            headers=ha,
+            json={
+                "project_id": proj,
+                "text": "a-side memo",
+                "operation_id": "w-rls-a",
+                "channel_key": "email",
+            },
+        )
+        assert wa.status_code == 200, wa.text
+        a_email = next(t["id"] for t in wa.json()["tags"] if t["kind"] == "memory_channel")
+
         # Org B uses its OWN "email" key: resolves to B's tag, fine.
         w = await c.post(
             "/memory/blobs",
@@ -419,6 +502,9 @@ async def test_channel_key_resolution_is_rls_scoped(_fake_embedder: None) -> Non
             },
         )
         assert w.status_code == 200, w.text
+        b_email = next(t["id"] for t in w.json()["tags"] if t["kind"] == "memory_channel")
+        # Same slug, different tenants => different tag rows.
+        assert a_email != b_email
         assert b_email in {t["id"] for t in w.json()["tags"]}
         assert a_email not in {t["id"] for t in w.json()["tags"]}
 

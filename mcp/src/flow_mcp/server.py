@@ -1985,6 +1985,22 @@ async def memory_consolidate(
 
 
 @mcp.tool()
+async def memory_delete_blob(token: str, org_id: str, blob_id: str) -> dict[str, Any]:
+    """Delete a single memory entry (hard delete; cascades to its
+    tags/sources/vector). Member-level, RLS-scoped: a foreign/unknown
+    blob id is memory.not_found. Distinct from ``memory_erase`` (which
+    removes a provenance link and only deletes a blob left orphaned)."""
+    async with _tenant(token, org_id) as (s, org, user):
+        await memory_svc.delete_blob(
+            s,
+            org_id=org,
+            actor_id=user,
+            blob_id=uuid.UUID(blob_id),
+        )
+        return {"blob_id": blob_id, "deleted": True}
+
+
+@mcp.tool()
 async def memory_status(token: str, org_id: str) -> dict[str, Any]:
     """Whether semantic (vector) retrieval is available, or memory is
     running keyword-only because the optional embedding model is not
@@ -2013,6 +2029,7 @@ def _channel(t: Tag) -> dict[str, Any]:
         "system_key": t.system_key,
         "enabled": t.status == "active",
         "seeded": t.system_key in _CANONICAL_CHANNEL_KEYS,
+        "description": taxonomy.channel_description(t.system_key),
         "version": t.version,
     }
 

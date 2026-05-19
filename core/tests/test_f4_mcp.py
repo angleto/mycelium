@@ -8,11 +8,13 @@ import uuid
 import pytest
 
 from flow_core.db import admin_session
-from flow_core.errors import DomainError
+from flow_core.errors import DomainError, NotFoundError
 from flow_core.services.auth import signup
 from flow_mcp.server import (
     add_time_entry,
     create_task,
+    delete_time_entry,
+    get_time_entry,
     list_time_entries,
     start_timer,
     stop_timer,
@@ -52,3 +54,11 @@ async def test_mcp_time_tracking() -> None:
     rep = await time_report(token=token, org_id=org, group_by="task")
     trow = next(r for r in rep if r["key"] == t["id"])
     assert trow["seconds"] >= 1800
+
+    # MCP parity for DELETE /time/entries/{id}: delete the stopped
+    # entry; it is gone (get -> not found), one entry remains.
+    d = await delete_time_entry(token=token, org_id=org, entry_id=stopped["id"])
+    assert d == {"entry_id": stopped["id"], "deleted": True}
+    with pytest.raises(NotFoundError):
+        await get_time_entry(token=token, org_id=org, entry_id=stopped["id"])
+    assert len(await list_time_entries(token=token, org_id=org)) == 1

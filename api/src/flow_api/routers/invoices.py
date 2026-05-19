@@ -482,6 +482,9 @@ async def get_preview(
         notes=inv.notes,
         is_forfettario=p.is_forfettario,
         state=inv.state,
+        identificativo_sdi=inv.identificativo_sdi,
+        sdi_status=inv.sdi_status,
+        conservation_status=inv.conservation_status,
     )
 
 

@@ -26,7 +26,7 @@ from flow_api.schemas import (
     MemoryChannelPatchIn,
 )
 from flow_core.services import taxonomy
-from flow_core.services.taxonomy import CANONICAL_MEMORY_CHANNELS
+from flow_core.services.taxonomy import CANONICAL_MEMORY_CHANNELS, channel_description
 
 router = APIRouter(prefix="/memory/channels", tags=["memory"])
 
@@ -40,6 +40,7 @@ def _out(tag: object) -> MemoryChannelOut:
         system_key=tag.system_key,  # type: ignore[attr-defined]
         enabled=tag.status == "active",  # type: ignore[attr-defined]
         seeded=tag.system_key in _CANONICAL_KEYS,  # type: ignore[attr-defined]
+        description=channel_description(tag.system_key),  # type: ignore[attr-defined]
         version=tag.version,  # type: ignore[attr-defined]
     )
 

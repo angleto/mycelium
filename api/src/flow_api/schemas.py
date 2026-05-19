@@ -1101,6 +1101,9 @@ class MemoryChannelOut(BaseModel):
     # True for a canonical seeded channel: renamable and disable-able
     # but its key is immutable and it is not deletable.
     seeded: bool
+    # Short read-only English copy keyed by ``system_key`` (manual/
+    # agent/note); None for a keyless/custom channel.
+    description: str | None = None
     version: int
 
 
@@ -1428,6 +1431,16 @@ class InvoicePreviewOut(BaseModel):
     notes: str | None
     is_forfettario: bool
     state: InvoiceState
+    # SdI transmission lifecycle, read-only (ADR-0011). Scalar status
+    # fields on the invoice row -- there is no per-receipt history table
+    # yet; richer notifiche need the SdI cooperative channel (out of
+    # scope here, see the F7 report). ``identificativo_sdi`` is the
+    # correlation id assigned at transmit (None until then / for manual
+    # export); ``sdi_status`` is the latest outcome (none/RC/MC/NS/AT);
+    # ``conservation_status`` is the AdE free-conservation coverage.
+    identificativo_sdi: str | None
+    sdi_status: SdiStatus
+    conservation_status: ConservationStatus
 
 
 # --- F8: notifications, recurrence, reminders (FR-12) ---

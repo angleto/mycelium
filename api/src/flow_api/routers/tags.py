@@ -61,9 +61,21 @@ async def list_tags(
     ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
     kind: TagKind | None = None,
     for_project: uuid.UUID | None = None,
+    for_client: uuid.UUID | None = None,
+    include_archived: bool = False,
 ) -> list[TagOut]:
+    """Archived tags are excluded by default so they vanish from every
+    selection/filter surface; the Tag manager passes
+    ``include_archived=true`` to still un-archive one. ``for_project`` /
+    ``for_client`` scope the list to the SPA's current focus (global +
+    in-scope tags only)."""
     tags = await taxonomy.list_tags(
-        ctx.session, org_id=ctx.org_id, kind=kind, for_project=for_project
+        ctx.session,
+        org_id=ctx.org_id,
+        kind=kind,
+        for_project=for_project,
+        for_client=for_client,
+        include_archived=include_archived,
     )
     scopes = await taxonomy.scopes_by_tag(ctx.session, tag_ids=[t.id for t in tags])
     return [_out(t, scopes.get(t.id, [])) for t in tags]

@@ -586,6 +586,41 @@ async def get_blob(session: AsyncSession, *, org_id: uuid.UUID, blob_id: uuid.UU
     return b
 
 
+async def delete_blob(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    blob_id: uuid.UUID,
+) -> None:
+    """Hard-delete one memory entry and everything that hangs off it.
+
+    The blob is loaded org-scoped (RLS already constrains ``select`` to
+    the tenant; a foreign / unknown id is MEMORY_NOT_FOUND -- same guard
+    as ``get_blob``, so cross-org isolation is preserved). Deleting the
+    ``memory_blobs`` row cascades by FK ON DELETE CASCADE to its
+    ``blob_sources`` and ``memory_blob_tags`` (same composite-FK cascade
+    ``gdpr_erase`` relies on); the embedding vector and the generated
+    ``fts`` column live on the blob row itself and go with it. This is
+    the user deleting a single entry directly (distinct from
+    ``gdpr_erase``, which removes a provenance link and only deletes a
+    blob left with no provenance)."""
+    await require_role(session, org_id, actor_id, Role.member)
+    blob = await get_blob(session, org_id=org_id, blob_id=blob_id)
+    await session.execute(
+        delete(MemoryBlob).where(MemoryBlob.id == blob.id, MemoryBlob.org_id == org_id)
+    )
+    await session.flush()
+    await audit.log(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        entity="memory_blob",
+        entity_id=blob_id,
+        action="delete",
+    )
+
+
 async def attach_blob_tag(
     session: AsyncSession,
     *,
