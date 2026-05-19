@@ -436,9 +436,6 @@ export function TimeRoute() {
           ))}
           </ul>
           {entLoading && <p className="hint">{t('time.loading')}</p>}
-          {!entMore && !entLoading && (
-            <p className="hint">{t('time.end')}</p>
-          )}
         </div>
       )}
 
