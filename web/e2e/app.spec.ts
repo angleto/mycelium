@@ -137,7 +137,11 @@ test('clients: create a client and add a project inline', async ({
   await login(page)
   await page.goto('/clients')
 
-  const cname = `E2E client ${Date.now()}`
+  // Unique names per run: client/project tag names are unique per org,
+  // so reused fixed names would (correctly) be rejected on re-runs.
+  const stamp = Date.now()
+  const cname = `E2E client ${stamp}`
+  const pname = `E2E project ${stamp}`
   const form = page.locator('form.cpform').first()
   await form.locator('input[name=name]').fill(cname)
   await form.locator('input[name=ragione_sociale]').fill(`${cname} SRL`)
@@ -149,9 +153,11 @@ test('clients: create a client and add a project inline', async ({
   await item.locator('.cpcaret').click()
   const add = item.locator('form.cpadd')
   await expect(add).toBeVisible()
-  await add.locator('input').fill('E2E project')
+  await add.locator('input').fill(pname)
   await add.getByRole('button', { name: /^add$|^aggiungi$/i }).click()
-  await expect(item.getByText('E2E project').first()).toBeVisible()
+  await expect(item.getByText(pname).first()).toBeVisible()
+  // No in-app error banner (backend rejections don't hit the console).
+  await expect(page.locator('main.content .err')).toHaveCount(0)
   expect(errors, errors.join('\n')).toEqual([])
 })
 
