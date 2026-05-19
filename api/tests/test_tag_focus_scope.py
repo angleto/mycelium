@@ -62,18 +62,37 @@ async def test_client_focus_hides_other_clients_tags() -> None:
                 json={"name": "ProjB", "client_tag_id": cb["id"]},
             )
         ).json()
-        gen = (await c.post("/tags", headers=h, json={"kind": "generic", "name": "urgent"})).json()
+        gused = (
+            await c.post("/tags", headers=h, json={"kind": "generic", "name": "used-A"})
+        ).json()
+        gunused = (
+            await c.post("/tags", headers=h, json={"kind": "generic", "name": "unused"})
+        ).json()
+        # A task that belongs to client A's project, tagged with the
+        # 'used-A' generic: that generic is now "used within the focus".
+        tk = (await c.post("/tasks", headers=h, json={"title": "TA"})).json()
+        await c.post(f"/tasks/{tk['id']}/tags", headers=h, json={"tag_id": pa["id"]})
+        await c.post(f"/tasks/{tk['id']}/tags", headers=h, json={"tag_id": gused["id"]})
 
         scoped = (await c.get("/tags", headers=h, params={"for_client": ca["id"]})).json()
         ids = {t["id"] for t in scoped}
 
         assert ca["id"] in ids  # the focused client
         assert pa["id"] in ids  # its project
-        assert gen["id"] in ids  # generic (global) tags stay
+        assert gused["id"] in ids  # generic USED within the focus
         assert cb["id"] not in ids  # other client — was the bug
         assert pb["id"] not in ids  # other client's project — was the bug
+        # The "Filter by tags" leak (reported 4x): a generic tag not
+        # used anywhere in the focus must NOT appear under it.
+        assert gunused["id"] not in ids
 
         # No focus → everything is visible (unchanged behaviour).
-        allt = (await c.get("/tags", headers=h)).json()
-        allids = {t["id"] for t in allt}
-        assert {ca["id"], cb["id"], pa["id"], pb["id"], gen["id"]} <= allids
+        allids = {t["id"] for t in (await c.get("/tags", headers=h)).json()}
+        assert {
+            ca["id"],
+            cb["id"],
+            pa["id"],
+            pb["id"],
+            gused["id"],
+            gunused["id"],
+        } <= allids

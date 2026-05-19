@@ -158,8 +158,15 @@ async def test_for_client_and_for_project_scoping() -> None:
             )
         ).json()
 
-        # A global tag (no scope) -> always visible.
+        # A generic tag (no scope) actually USED within client A: a
+        # task in A's project carries it. Under a focus a generic tag
+        # is relevant only if scoped to it OR used within it (the
+        # reported "Filter by tags" leak: an unused global generic
+        # must NOT appear under an unrelated focus).
         g = (await c.post("/tags", headers=h, json={"kind": "generic", "name": "glob"})).json()
+        gtask = (await c.post("/tasks", headers=h, json={"title": "GA"})).json()
+        await c.post(f"/tasks/{gtask['id']}/tags", headers=h, json={"tag_id": proj_a["id"]})
+        await c.post(f"/tasks/{gtask['id']}/tags", headers=h, json={"tag_id": g["id"]})
         # A tag scoped to client A.
         sa = (await c.post("/tags", headers=h, json={"kind": "generic", "name": "scA"})).json()
         assert (
@@ -179,11 +186,12 @@ async def test_for_client_and_for_project_scoping() -> None:
             )
         ).status_code == 204
 
-        # Focus = client B: only the GLOBAL tag (no A-scoped, no
-        # A-project-scoped).
+        # Focus = client B: nothing here belongs to B — not the
+        # A-scoped tags, and NOT the global generic `g` (it is used
+        # only within A, not B). This is the corrected contract.
         for_b = (await c.get(f"/tags?for_client={client_b['id']}", headers=h)).json()
         keys_b = {x["id"] for x in for_b}
-        assert g["id"] in keys_b
+        assert g["id"] not in keys_b
         assert sa["id"] not in keys_b
         assert sp["id"] not in keys_b
 

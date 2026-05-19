@@ -18,10 +18,13 @@ from flow_core.errors import DomainError, NotFoundError
 from flow_core.i18n import MessageCode
 from flow_core.models.client_profile import ClientProfile
 from flow_core.models.membership import Role
+from flow_core.models.memory_blob import MemoryBlobTag
+from flow_core.models.note_tag import NoteTag
 from flow_core.models.organization import Organization
 from flow_core.models.project_profile import ProjectProfile
 from flow_core.models.tag import Tag, TagKind
 from flow_core.models.tag_scope import TagScope
+from flow_core.models.task_tag import TaskTag
 from flow_core.services import audit
 from flow_core.services.rbac import require_role
 
@@ -395,11 +398,27 @@ async def list_tags(
         targets.update(client_projects)
     if targets:
         tlist = list(targets)
-        # Generic/other tags: visible = global (no scope rows) OR
-        # explicitly scoped to a target.
-        scoped = select(TagScope.tag_id).distinct()
         in_scope = select(TagScope.tag_id).where(TagScope.target_tag_id.in_(tlist))
-        generic_ok = or_(Tag.id.not_in(scoped), Tag.id.in_(in_scope))
+        # Generic tags ("Filter by tags" chips) are global by nature
+        # (no TagScope rows), so without this they showed under ANY
+        # focus — the 4x-reported leak. Under a focus a generic tag is
+        # relevant only if it is explicitly scoped to the focus OR is
+        # actually applied to an entity (task/note/memory blob) that
+        # itself belongs to the focused client/project (i.e. carries a
+        # focus structural tag in `tlist`). No focus -> this whole
+        # block is skipped and everything shows (unchanged).
+        focus_tasks = select(TaskTag.task_id).where(TaskTag.tag_id.in_(tlist))
+        focus_notes = select(NoteTag.note_id).where(NoteTag.tag_id.in_(tlist))
+        focus_blobs = select(MemoryBlobTag.blob_id).where(MemoryBlobTag.tag_id.in_(tlist))
+        used_in_focus = (
+            select(TaskTag.tag_id)
+            .where(TaskTag.task_id.in_(focus_tasks))
+            .union(
+                select(NoteTag.tag_id).where(NoteTag.note_id.in_(focus_notes)),
+                select(MemoryBlobTag.tag_id).where(MemoryBlobTag.blob_id.in_(focus_blobs)),
+            )
+        )
+        generic_ok = or_(Tag.id.in_(in_scope), Tag.id.in_(used_in_focus))
         # Client/project tags are INTRINSICALLY owned (a client tag, a
         # project tag belonging to a client) and almost never carry
         # TagScope rows, so the rule above would always show them. Under
