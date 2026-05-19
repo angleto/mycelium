@@ -21,8 +21,7 @@ branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
 UPGRADE: tuple[str, ...] = (
-    "ALTER TABLE notes ADD COLUMN IF NOT EXISTS is_archived boolean "
-    "NOT NULL DEFAULT false",
+    "ALTER TABLE notes ADD COLUMN IF NOT EXISTS is_archived boolean NOT NULL DEFAULT false",
     "ALTER TABLE notes ADD COLUMN IF NOT EXISTS deleted_at timestamptz",
 )
 

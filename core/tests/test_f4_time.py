@@ -49,18 +49,14 @@ async def test_single_running_timer_and_stop() -> None:
         assert [r.id for r in running] == [e2.id]  # e1 auto-stopped
 
         # Parallel timer runs alongside the serial one.
-        p3 = await tt.start_timer(
-            s, org_id=org, actor_id=user, task_id=t3.id, parallel=True
-        )
+        p3 = await tt.start_timer(s, org_id=org, actor_id=user, task_id=t3.id, parallel=True)
         assert p3.parallel is True
         running = await tt.running_entries(s, org_id=org, user_id=user)
         assert {r.id for r in running} == {e2.id, p3.id}
 
         # The same task can't be double-tracked simultaneously.
         with pytest.raises(DomainError):
-            await tt.start_timer(
-                s, org_id=org, actor_id=user, task_id=t3.id, parallel=True
-            )
+            await tt.start_timer(s, org_id=org, actor_id=user, task_id=t3.id, parallel=True)
 
         # Stop a specific row by task; the other keeps running.
         s3 = await tt.stop_timer(s, org_id=org, actor_id=user, task_id=t3.id)
@@ -88,9 +84,7 @@ async def test_report_aggregation_billable_and_rate_snapshot() -> None:
             org_id=org,
             actor_id=user,
             name="Cli",
-            profile=taxonomy.ClientInput(
-                ragione_sociale="Cli", tariffa=Decimal(100)
-            ),
+            profile=taxonomy.ClientInput(ragione_sociale="Cli", tariffa=Decimal(100)),
         )
         proj = await taxonomy.create_project(
             s, org_id=org, actor_id=user, name="Proj", client_tag_id=cli.id
@@ -118,9 +112,7 @@ async def test_report_aggregation_billable_and_rate_snapshot() -> None:
         )
         # Rate edited after the fact must not rewrite history.
         await s.execute(
-            update(ClientProfile)
-            .where(ClientProfile.tag_id == cli.id)
-            .values(tariffa=Decimal(999))
+            update(ClientProfile).where(ClientProfile.tag_id == cli.id).values(tariffa=Decimal(999))
         )
         rows = await tt.report(s, org_id=org, actor_id=user, group_by=tt.ReportGroup.project)
         row = next(r for r in rows if r.key == str(proj.id))

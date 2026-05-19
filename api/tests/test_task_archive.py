@@ -39,9 +39,7 @@ async def test_archive_and_delete_lifecycle() -> None:
         )
         assert r.status_code == 200
         assert [t["id"] for t in (await c.get("/tasks", headers=h)).json()] == []
-        arch = (
-            await c.get("/tasks?include_archived=true", headers=h)
-        ).json()
+        arch = (await c.get("/tasks?include_archived=true", headers=h)).json()
         row = next(t for t in arch if t["id"] == tid)
         assert row["is_archived"] is True and row["deleted_at"] is None
 
@@ -52,9 +50,7 @@ async def test_archive_and_delete_lifecycle() -> None:
             json={"expected_version": row["version"]},
         )
         assert r.status_code == 200
-        cur = next(
-            t for t in (await c.get("/tasks", headers=h)).json() if t["id"] == tid
-        )
+        cur = next(t for t in (await c.get("/tasks", headers=h)).json() if t["id"] == tid)
         assert cur["is_archived"] is False
 
         # Soft delete -> deleted_at set, only visible with the flag.
@@ -65,9 +61,7 @@ async def test_archive_and_delete_lifecycle() -> None:
         )
         assert r.status_code == 200
         assert [t["id"] for t in (await c.get("/tasks", headers=h)).json()] == []
-        deleted = (
-            await c.get("/tasks?include_deleted=true", headers=h)
-        ).json()
+        deleted = (await c.get("/tasks?include_deleted=true", headers=h)).json()
         drow = next(t for t in deleted if t["id"] == tid)
         assert drow["deleted_at"] is not None
 
@@ -78,7 +72,5 @@ async def test_archive_and_delete_lifecycle() -> None:
             json={"expected_version": drow["version"]},
         )
         assert r.status_code == 200
-        cur = next(
-            t for t in (await c.get("/tasks", headers=h)).json() if t["id"] == tid
-        )
+        cur = next(t for t in (await c.get("/tasks", headers=h)).json() if t["id"] == tid)
         assert cur["deleted_at"] is None

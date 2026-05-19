@@ -186,22 +186,14 @@ async def ensure_default_project(
     if cur is not None:
         exists = (
             await session.execute(
-                select(Tag.id).where(
-                    Tag.id == uuid.UUID(str(cur)), Tag.kind == TagKind.project
-                )
+                select(Tag.id).where(Tag.id == uuid.UUID(str(cur)), Tag.kind == TagKind.project)
             )
         ).scalar_one_or_none()
         if exists is not None:
             return uuid.UUID(str(cur))
-    client_id = await ensure_default_client(
-        session, org_id=org_id, actor_id=actor_id
-    )
-    tag = await _insert_tag(
-        session, org_id, TagKind.project, _DEFAULT_PROJECT_NAME, None
-    )
-    session.add(
-        ProjectProfile(tag_id=tag.id, org_id=org_id, client_tag_id=client_id)
-    )
+    client_id = await ensure_default_client(session, org_id=org_id, actor_id=actor_id)
+    tag = await _insert_tag(session, org_id, TagKind.project, _DEFAULT_PROJECT_NAME, None)
+    session.add(ProjectProfile(tag_id=tag.id, org_id=org_id, client_tag_id=client_id))
     await session.flush()
     if org is not None:
         org.settings = {**settings, "default_project_tag_id": str(tag.id)}

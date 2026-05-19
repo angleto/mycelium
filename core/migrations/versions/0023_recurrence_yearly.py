@@ -23,9 +23,7 @@ depends_on: str | Sequence[str] | None = None
 
 def upgrade() -> None:
     with op.get_context().autocommit_block():
-        op.execute(
-            "ALTER TYPE recurrence_freq ADD VALUE IF NOT EXISTS 'yearly'"
-        )
+        op.execute("ALTER TYPE recurrence_freq ADD VALUE IF NOT EXISTS 'yearly'")
 
 
 def downgrade() -> None:

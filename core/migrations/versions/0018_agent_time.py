@@ -24,8 +24,7 @@ depends_on: str | Sequence[str] | None = None
 
 def upgrade() -> None:
     op.execute(
-        "ALTER TABLE time_entries "
-        "ADD COLUMN executor_kind exec_kind NOT NULL DEFAULT 'human'"
+        "ALTER TABLE time_entries ADD COLUMN executor_kind exec_kind NOT NULL DEFAULT 'human'"
     )
 
 

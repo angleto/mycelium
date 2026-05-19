@@ -144,20 +144,14 @@ class TaskReminder(UUIDPKMixin, TimestampMixin, Base):
 
     __tablename__ = "task_reminders"
     __table_args__ = (
-        UniqueConstraint(
-            "task_id", "offset_minutes", name="uq_task_reminders_task_offset"
-        ),
+        UniqueConstraint("task_id", "offset_minutes", name="uq_task_reminders_task_offset"),
     )
 
-    org_id: Mapped[uuid.UUID] = mapped_column(
-        PG_UUID(as_uuid=True), nullable=False, index=True
-    )
+    org_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False, index=True)
     task_id: Mapped[uuid.UUID] = mapped_column(
         PG_UUID(as_uuid=True),
         ForeignKey("tasks.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
-    offset_minutes: Mapped[int] = mapped_column(
-        Integer, nullable=False, server_default="0"
-    )
+    offset_minutes: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")

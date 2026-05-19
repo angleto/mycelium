@@ -38,10 +38,7 @@ router = APIRouter(prefix="/tasks", tags=["tasks"])
 
 def _out(t: Task, state_name: str, tags: list[Tag] | None = None) -> TaskOut:
     return TaskOut(
-        tags=[
-            TagBrief(id=g.id, kind=g.kind, name=g.name, color=g.color)
-            for g in (tags or [])
-        ],
+        tags=[TagBrief(id=g.id, kind=g.kind, name=g.name, color=g.color) for g in (tags or [])],
         id=t.id,
         title=t.title,
         description=t.description,
@@ -149,9 +146,7 @@ async def get_task(task_id: uuid.UUID, ctx: Annotated[TenantCtx, Depends(tenant_
     # include_deleted: a trashed/archived task must still open (read its
     # detail before restoring it from the Trash view). TaskOut carries
     # is_archived/deleted_at so the UI can render it read-only.
-    task = await svc.get_task(
-        ctx.session, org_id=ctx.org_id, task_id=task_id, include_deleted=True
-    )
+    task = await svc.get_task(ctx.session, org_id=ctx.org_id, task_id=task_id, include_deleted=True)
     names = await _state_names(ctx, {task.state_id})
     tagmap = await svc.tags_by_task(ctx.session, task_ids=[task.id])
     return _out(task, names.get(task.state_id, ""), tagmap.get(task.id, []))
@@ -161,9 +156,7 @@ async def get_task(task_id: uuid.UUID, ctx: Annotated[TenantCtx, Depends(tenant_
 async def task_states(
     task_id: uuid.UUID, ctx: Annotated[TenantCtx, Depends(tenant_ctx)]
 ) -> list[StateOut]:
-    await svc.get_task(
-        ctx.session, org_id=ctx.org_id, task_id=task_id, include_deleted=True
-    )
+    await svc.get_task(ctx.session, org_id=ctx.org_id, task_id=task_id, include_deleted=True)
     workflow = await wf.effective_workflow_for_task(ctx.session, ctx.org_id, task_id)
     states = await wf.get_states(ctx.session, workflow.id)
     return [
@@ -284,13 +277,8 @@ async def list_reminders(
     task_id: uuid.UUID,
     ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
 ) -> list[ReminderOut]:
-    rows = await notif_svc.list_reminders(
-        ctx.session, org_id=ctx.org_id, task_id=task_id
-    )
-    return [
-        ReminderOut(id=r.id, task_id=r.task_id, offset_minutes=r.offset_minutes)
-        for r in rows
-    ]
+    rows = await notif_svc.list_reminders(ctx.session, org_id=ctx.org_id, task_id=task_id)
+    return [ReminderOut(id=r.id, task_id=r.task_id, offset_minutes=r.offset_minutes) for r in rows]
 
 
 @router.post("/{task_id}/reminders", response_model=ReminderOut)

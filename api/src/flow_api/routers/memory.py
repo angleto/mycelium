@@ -43,10 +43,7 @@ def _blob_out(b: MemoryBlob, tags: list[Tag] | None = None) -> MemoryBlobOut:
         dim=b.dim,
         access_count=b.access_count,
         cluster_id=b.cluster_id,
-        tags=[
-            TagBrief(id=g.id, kind=g.kind, name=g.name, color=g.color)
-            for g in (tags or [])
-        ],
+        tags=[TagBrief(id=g.id, kind=g.kind, name=g.name, color=g.color) for g in (tags or [])],
     )
 
 
@@ -87,13 +84,8 @@ async def search(
         grader_min_rrf=body.grader_min_rrf,
         tag_ids=body.tag_ids,
     )
-    tagmap = await svc.tags_by_blob(
-        ctx.session, blob_ids=[h.blob.id for h in hits]
-    )
-    return [
-        MemoryHitOut(blob=_blob_out(h.blob, tagmap.get(h.blob.id)), rrf=h.rrf)
-        for h in hits
-    ]
+    tagmap = await svc.tags_by_blob(ctx.session, blob_ids=[h.blob.id for h in hits])
+    return [MemoryHitOut(blob=_blob_out(h.blob, tagmap.get(h.blob.id)), rrf=h.rrf) for h in hits]
 
 
 @router.get("/blobs/{blob_id}", response_model=MemoryBlobOut)
@@ -138,9 +130,7 @@ async def consolidate(
     return _blob_out(blob, tagmap.get(blob.id))
 
 
-@router.post(
-    "/blobs/{blob_id}/tags", status_code=status.HTTP_204_NO_CONTENT
-)
+@router.post("/blobs/{blob_id}/tags", status_code=status.HTTP_204_NO_CONTENT)
 async def attach_blob_tag(
     blob_id: uuid.UUID,
     body: TagRefIn,
@@ -155,9 +145,7 @@ async def attach_blob_tag(
     )
 
 
-@router.delete(
-    "/blobs/{blob_id}/tags/{tag_id}", status_code=status.HTTP_204_NO_CONTENT
-)
+@router.delete("/blobs/{blob_id}/tags/{tag_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def detach_blob_tag(
     blob_id: uuid.UUID,
     tag_id: uuid.UUID,

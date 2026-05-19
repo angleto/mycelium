@@ -40,8 +40,7 @@ UPGRADE: tuple[str, ...] = (
       updated_at timestamptz NOT NULL DEFAULT now()
     )
     """,
-    "CREATE INDEX ix_email_verification_tokens_user_id"
-    " ON email_verification_tokens (user_id)",
+    "CREATE INDEX ix_email_verification_tokens_user_id ON email_verification_tokens (user_id)",
     """
     CREATE TABLE password_reset_tokens (
       id uuid PRIMARY KEY DEFAULT gen_random_uuid(),

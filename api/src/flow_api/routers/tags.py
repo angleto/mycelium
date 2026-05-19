@@ -63,9 +63,7 @@ async def list_tags(
     tags = await taxonomy.list_tags(
         ctx.session, org_id=ctx.org_id, kind=kind, for_project=for_project
     )
-    scopes = await taxonomy.scopes_by_tag(
-        ctx.session, tag_ids=[t.id for t in tags]
-    )
+    scopes = await taxonomy.scopes_by_tag(ctx.session, tag_ids=[t.id for t in tags])
     return [_out(t, scopes.get(t.id, [])) for t in tags]
 
 
@@ -174,9 +172,7 @@ async def list_clients(
     ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
 ) -> list[ClientOut]:
     # A workspace always has the default "Personal" client.
-    await taxonomy.ensure_default_client(
-        ctx.session, org_id=ctx.org_id, actor_id=ctx.user_id
-    )
+    await taxonomy.ensure_default_client(ctx.session, org_id=ctx.org_id, actor_id=ctx.user_id)
     rows = await taxonomy.list_clients(ctx.session, org_id=ctx.org_id)
     return [_client_out(t, p) for t, p in rows]
 

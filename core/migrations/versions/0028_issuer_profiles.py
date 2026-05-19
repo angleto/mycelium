@@ -60,10 +60,7 @@ UPGRADE: tuple[str, ...] = (
     )
     """,
     "CREATE INDEX ix_issuer_profiles_org_id ON issuer_profiles (org_id)",
-    (
-        "CREATE UNIQUE INDEX uq_issuer_profiles_default "
-        "ON issuer_profiles (org_id) WHERE is_default"
-    ),
+    ("CREATE UNIQUE INDEX uq_issuer_profiles_default ON issuer_profiles (org_id) WHERE is_default"),
     # Migrate the single per-org profile into one default identity.
     """
     INSERT INTO issuer_profiles

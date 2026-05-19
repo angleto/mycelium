@@ -88,9 +88,7 @@ async def stop_timer(
 async def running(
     ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
 ) -> list[TimeEntryOut]:
-    rows = await svc.running_entries(
-        ctx.session, org_id=ctx.org_id, user_id=ctx.user_id
-    )
+    rows = await svc.running_entries(ctx.session, org_id=ctx.org_id, user_id=ctx.user_id)
     return [_out(e) for e in rows]
 
 

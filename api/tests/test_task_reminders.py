@@ -45,32 +45,22 @@ async def test_reminders_crud_and_scan() -> None:
         assert (await c.get(f"/tasks/{tid}/reminders", headers=h)).json() == []
 
         # Add two (1 day before, at due). Dedup on same offset.
-        r1 = await c.post(
-            f"/tasks/{tid}/reminders", headers=h, json={"offset_minutes": 1440}
-        )
+        r1 = await c.post(f"/tasks/{tid}/reminders", headers=h, json={"offset_minutes": 1440})
         assert r1.status_code == 200
-        await c.post(
-            f"/tasks/{tid}/reminders", headers=h, json={"offset_minutes": 0}
-        )
-        dup = await c.post(
-            f"/tasks/{tid}/reminders", headers=h, json={"offset_minutes": 1440}
-        )
+        await c.post(f"/tasks/{tid}/reminders", headers=h, json={"offset_minutes": 0})
+        dup = await c.post(f"/tasks/{tid}/reminders", headers=h, json={"offset_minutes": 1440})
         assert dup.status_code == 200
         rems = (await c.get(f"/tasks/{tid}/reminders", headers=h)).json()
         assert sorted(x["offset_minutes"] for x in rems) == [0, 1440]
 
         # Remove one.
         rid = r1.json()["id"]
-        assert (
-            await c.delete(f"/tasks/{tid}/reminders/{rid}", headers=h)
-        ).status_code == 204
+        assert (await c.delete(f"/tasks/{tid}/reminders/{rid}", headers=h)).status_code == 204
         rems = (await c.get(f"/tasks/{tid}/reminders", headers=h)).json()
         assert [x["offset_minutes"] for x in rems] == [0]
 
         # Assign self + enable a channel, then scan: a reminder is queued.
-        await c.post(
-            f"/tasks/{tid}/assignees", headers=h, json={"user_id": uid}
-        )
+        await c.post(f"/tasks/{tid}/assignees", headers=h, json={"user_id": uid})
         await c.put(
             "/notifications/prefs",
             headers=h,
@@ -81,9 +71,7 @@ async def test_reminders_crud_and_scan() -> None:
                 "target": "me@example.test",
             },
         )
-        scan = await c.post(
-            "/notifications/reminders/scan?within_days=400", headers=h
-        )
+        scan = await c.post("/notifications/reminders/scan?within_days=400", headers=h)
         assert scan.status_code == 200 and scan.json()["count"] >= 1
         notifs = (await c.get("/notifications", headers=h)).json()
         assert any(n["kind"] == "reminder" for n in notifs)

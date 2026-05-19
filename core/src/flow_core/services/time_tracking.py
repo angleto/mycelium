@@ -65,9 +65,7 @@ def _now() -> dt.datetime:
     return dt.datetime.now(tz=dt.UTC)
 
 
-async def _rate(
-    session: AsyncSession, task_id: uuid.UUID
-) -> tuple[Decimal | None, str, bool]:
+async def _rate(session: AsyncSession, task_id: uuid.UUID) -> tuple[Decimal | None, str, bool]:
     """Rate + currency (from the task's project) + the billable default
     (from that project's CLIENT — billing is a client relationship).
     Defaults (no project / no client): no rate, EUR, billable."""
@@ -98,9 +96,7 @@ async def _rate(
     return (cp.tariffa, cp.valuta, cp.default_billable)
 
 
-def _effective_billable(
-    explicit: bool | None, task: Task, client_default: bool
-) -> bool:
+def _effective_billable(explicit: bool | None, task: Task, client_default: bool) -> bool:
     """Explicit arg wins; else the task override; else the client's
     default_billable (true with no client)."""
     if explicit is not None:
@@ -233,9 +229,7 @@ async def start_timer(
     if not parallel:
         current = await running_serial(session, org_id=org_id, user_id=actor_id)
         if current is not None:
-            await _stop_entry(
-                session, org_id=org_id, actor_id=actor_id, entry=current
-            )
+            await _stop_entry(session, org_id=org_id, actor_id=actor_id, entry=current)
     rate, currency, client_billable = await _rate(session, task_id)
     eff_billable = _effective_billable(billable, task, client_billable)
     started = _now()
@@ -284,16 +278,12 @@ async def stop_timer(
     serial timer when ``task_id`` is omitted."""
     await require_role(session, org_id, actor_id, Role.member)
     if task_id is not None:
-        entry = await running_for_task(
-            session, org_id=org_id, user_id=actor_id, task_id=task_id
-        )
+        entry = await running_for_task(session, org_id=org_id, user_id=actor_id, task_id=task_id)
     else:
         entry = await running_serial(session, org_id=org_id, user_id=actor_id)
     if entry is None:
         raise DomainError(MessageCode.NO_RUNNING_TIMER)
-    return await _stop_entry(
-        session, org_id=org_id, actor_id=actor_id, entry=entry, note=note
-    )
+    return await _stop_entry(session, org_id=org_id, actor_id=actor_id, entry=entry, note=note)
 
 
 async def add_manual_entry(

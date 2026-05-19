@@ -24,8 +24,7 @@ branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
 UPGRADE: tuple[str, ...] = (
-    "ALTER TABLE time_entries "
-    "ADD COLUMN IF NOT EXISTS parallel boolean NOT NULL DEFAULT false",
+    "ALTER TABLE time_entries ADD COLUMN IF NOT EXISTS parallel boolean NOT NULL DEFAULT false",
     "DROP INDEX IF EXISTS uq_time_entries_running",
     """
     CREATE UNIQUE INDEX uq_time_entries_running_serial

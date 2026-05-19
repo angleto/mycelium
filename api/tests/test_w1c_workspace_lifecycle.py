@@ -43,18 +43,14 @@ async def test_archive_unarchive_workspace() -> None:
         ).json()
         ta = a["token"]
         second = (
-            await c.post(
-                "/workspaces", headers=_bearer(ta), json={"name": "Client X"}
-            )
+            await c.post("/workspaces", headers=_bearer(ta), json={"name": "Client X"})
         ).json()
 
         # New workspaces start active.
         ws = (await c.get("/workspaces", headers=_bearer(ta))).json()
         assert {w["status"] for w in ws} == {"active"}
 
-        r = await c.post(
-            f"/workspaces/{second['id']}/archive", headers=_bearer(ta)
-        )
+        r = await c.post(f"/workspaces/{second['id']}/archive", headers=_bearer(ta))
         assert r.status_code == 204
         ws = {w["id"]: w for w in (await c.get("/workspaces", headers=_bearer(ta))).json()}
         assert ws[second["id"]]["status"] == "archived"
@@ -67,9 +63,7 @@ async def test_archive_unarchive_workspace() -> None:
         )
         assert me.status_code == 200
 
-        r = await c.post(
-            f"/workspaces/{second['id']}/unarchive", headers=_bearer(ta)
-        )
+        r = await c.post(f"/workspaces/{second['id']}/unarchive", headers=_bearer(ta))
         assert r.status_code == 204
         ws = {w["id"]: w for w in (await c.get("/workspaces", headers=_bearer(ta))).json()}
         assert ws[second["id"]]["status"] == "active"
@@ -92,17 +86,13 @@ async def test_delete_workspace_cascades_and_safeguards() -> None:
         assert r.status_code == 400
 
         second = (
-            await c.post(
-                "/workspaces", headers=_bearer(ta), json={"name": "Client X"}
-            )
+            await c.post("/workspaces", headers=_bearer(ta), json={"name": "Client X"})
         ).json()
         sid = second["id"]
         hdr = {**_bearer(ta), "X-Workspace-Id": sid}
 
         # Tenant data in the second workspace, to prove the cascade.
-        task = await c.post(
-            "/tasks", headers=hdr, json={"title": "doomed", "priority": 3}
-        )
+        task = await c.post("/tasks", headers=hdr, json={"title": "doomed", "priority": 3})
         assert task.status_code == 200
         assert len((await c.get("/tasks", headers=hdr)).json()) == 1
 

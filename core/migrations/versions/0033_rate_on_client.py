@@ -23,16 +23,14 @@ depends_on: str | Sequence[str] | None = None
 
 UPGRADE: tuple[str, ...] = (
     "ALTER TABLE client_profile ADD COLUMN IF NOT EXISTS tariffa numeric(12, 2)",
-    "ALTER TABLE client_profile ADD COLUMN IF NOT EXISTS valuta varchar(3) "
-    "NOT NULL DEFAULT 'EUR'",
+    "ALTER TABLE client_profile ADD COLUMN IF NOT EXISTS valuta varchar(3) NOT NULL DEFAULT 'EUR'",
     "ALTER TABLE project_profile DROP COLUMN IF EXISTS tariffa",
     "ALTER TABLE project_profile DROP COLUMN IF EXISTS valuta",
 )
 
 DOWNGRADE: tuple[str, ...] = (
     "ALTER TABLE project_profile ADD COLUMN IF NOT EXISTS tariffa numeric(12, 2)",
-    "ALTER TABLE project_profile ADD COLUMN IF NOT EXISTS valuta varchar(3) "
-    "NOT NULL DEFAULT 'EUR'",
+    "ALTER TABLE project_profile ADD COLUMN IF NOT EXISTS valuta varchar(3) NOT NULL DEFAULT 'EUR'",
     "ALTER TABLE client_profile DROP COLUMN IF EXISTS valuta",
     "ALTER TABLE client_profile DROP COLUMN IF EXISTS tariffa",
 )

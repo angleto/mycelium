@@ -1817,9 +1817,7 @@ async def memory_search(
             tag_ids=[uuid.UUID(t) for t in (tag_ids or [])],
         )
         tagmap = await memory_svc.tags_by_blob(s, blob_ids=[h.blob.id for h in hits])
-        return [
-            {"blob": _blob(h.blob, tagmap.get(h.blob.id)), "rrf": h.rrf} for h in hits
-        ]
+        return [{"blob": _blob(h.blob, tagmap.get(h.blob.id)), "rrf": h.rrf} for h in hits]
 
 
 @mcp.tool()

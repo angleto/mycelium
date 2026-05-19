@@ -70,19 +70,19 @@ async def test_workflow_edit_default_delete() -> None:
             },
         )
         assert r.status_code == 204
-        names = {
-            s["name"] for s in (await c.get(f"/workflows/{w['id']}/states", headers=h)).json()
-        }
+        names = {s["name"] for s in (await c.get(f"/workflows/{w['id']}/states", headers=h)).json()}
         assert names == {"open", "wip", "closed"}
         tr = (await c.get(f"/workflows/{w['id']}/transitions", headers=h)).json()
         assert len(tr) == 2
-        assert next(x for x in (await c.get("/workflows", headers=h)).json()
-                    if x["id"] == w["id"])["name"] == "Simple v2"
+        assert (
+            next(x for x in (await c.get("/workflows", headers=h)).json() if x["id"] == w["id"])[
+                "name"
+            ]
+            == "Simple v2"
+        )
 
         # Promote it to default; the old default is demoted.
-        assert (
-            await c.post(f"/workflows/{w['id']}/default", headers=h)
-        ).status_code == 204
+        assert (await c.post(f"/workflows/{w['id']}/default", headers=h)).status_code == 204
         wfs = (await c.get("/workflows", headers=h)).json()
         assert [x["is_default"] for x in wfs].count(True) == 1
         assert next(x for x in wfs if x["id"] == w["id"])["is_default"] is True

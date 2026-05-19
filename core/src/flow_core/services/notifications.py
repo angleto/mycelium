@@ -390,9 +390,7 @@ async def scan_reminders(
         offsets = list(
             (
                 await session.execute(
-                    select(TaskReminder.offset_minutes).where(
-                        TaskReminder.task_id == t.id
-                    )
+                    select(TaskReminder.offset_minutes).where(TaskReminder.task_id == t.id)
                 )
             )
             .scalars()
@@ -429,10 +427,7 @@ async def scan_reminders(
                         kind="reminder",
                         title=f"Task due: {t.title}",
                         body=f"'{t.title}' is due on {due} ({when}).",
-                        dedupe_key=(
-                            f"reminder:{t.id}:{uid}:{p.channel.value}:"
-                            f"{due}:{off}"
-                        ),
+                        dedupe_key=(f"reminder:{t.id}:{uid}:{p.channel.value}:{due}:{off}"),
                     )
                     enqueued += 1
     return enqueued
@@ -474,9 +469,7 @@ async def add_reminder(
     ).scalar_one_or_none()
     if existing is not None:
         return existing
-    r = TaskReminder(
-        org_id=org_id, task_id=task_id, offset_minutes=max(0, offset_minutes)
-    )
+    r = TaskReminder(org_id=org_id, task_id=task_id, offset_minutes=max(0, offset_minutes))
     session.add(r)
     await session.flush()
     await audit.log(
@@ -500,9 +493,7 @@ async def remove_reminder(
 ) -> None:
     await require_role(session, org_id, actor_id, Role.member)
     await session.execute(
-        delete(TaskReminder).where(
-            TaskReminder.id == reminder_id, TaskReminder.task_id == task_id
-        )
+        delete(TaskReminder).where(TaskReminder.id == reminder_id, TaskReminder.task_id == task_id)
     )
     await audit.log(
         session,

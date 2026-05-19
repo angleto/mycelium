@@ -99,9 +99,7 @@ async def list_transitions(
     return list(
         (
             await session.execute(
-                select(WorkflowTransition).where(
-                    WorkflowTransition.workflow_id == workflow_id
-                )
+                select(WorkflowTransition).where(WorkflowTransition.workflow_id == workflow_id)
             )
         )
         .scalars()
@@ -285,16 +283,10 @@ async def delete_workflow(
         .values(workflow_id=None)
     )
     await session.execute(
-        delete(WorkflowTransition).where(
-            WorkflowTransition.workflow_id == workflow_id
-        )
+        delete(WorkflowTransition).where(WorkflowTransition.workflow_id == workflow_id)
     )
-    await session.execute(
-        delete(WorkflowState).where(WorkflowState.workflow_id == workflow_id)
-    )
-    await session.execute(
-        delete(WorkflowDefinition).where(WorkflowDefinition.id == workflow_id)
-    )
+    await session.execute(delete(WorkflowState).where(WorkflowState.workflow_id == workflow_id))
+    await session.execute(delete(WorkflowDefinition).where(WorkflowDefinition.id == workflow_id))
     await session.flush()
     await audit.log(
         session,
@@ -344,15 +336,11 @@ async def update_workflow(
             raise DomainError(MessageCode.WORKFLOW_IN_USE)
     # Transitions reference states; rebuild them after states settle.
     await session.execute(
-        delete(WorkflowTransition).where(
-            WorkflowTransition.workflow_id == workflow_id
-        )
+        delete(WorkflowTransition).where(WorkflowTransition.workflow_id == workflow_id)
     )
     for sid in existing:
         if sid not in keep_ids:
-            await session.execute(
-                delete(WorkflowState).where(WorkflowState.id == sid)
-            )
+            await session.execute(delete(WorkflowState).where(WorkflowState.id == sid))
     by_name: dict[str, uuid.UUID] = {}
     try:
         async with session.begin_nested():

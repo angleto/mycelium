@@ -43,17 +43,13 @@ async def test_lockout_then_recovery(monkeypatch: pytest.MonkeyPatch) -> None:
 
     # Simulate the lockout window expiring.
     async with admin_session() as db:
-        user = (
-            await db.execute(select(User).where(User.email == email))
-        ).scalar_one()
+        user = (await db.execute(select(User).where(User.email == email))).scalar_one()
         user.locked_until = dt.datetime.now(dt.UTC) - dt.timedelta(seconds=1)
 
     # Correct password now works and resets the counters.
     async with admin_session() as db:
         assert await A.login(db, email=email, password=_PW)
     async with admin_session() as db:
-        user = (
-            await db.execute(select(User).where(User.email == email))
-        ).scalar_one()
+        user = (await db.execute(select(User).where(User.email == email))).scalar_one()
         assert user.failed_login_count == 0
         assert user.locked_until is None

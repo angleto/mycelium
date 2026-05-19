@@ -61,22 +61,16 @@ async def test_totp_enrolment_gated_login_backup_and_disable() -> None:
     # a wrong code is rejected
     async with admin_session() as db:
         with pytest.raises(AuthError):
-            await A.login_mfa(
-                db, email=email, password="pw-strong-123", totp_code="000000"
-            )
+            await A.login_mfa(db, email=email, password="pw-strong-123", totp_code="000000")
 
     # a backup code works once and is then consumed
     backup = res.backup_codes[0]
     async with admin_session() as db:
-        assert await A.login_mfa(
-            db, email=email, password="pw-strong-123", totp_code=backup
-        )
+        assert await A.login_mfa(db, email=email, password="pw-strong-123", totp_code=backup)
     async with admin_session() as db:
         assert M.status(await A.get_user(db, user_id=uid)).backup_codes_remaining == 9
         with pytest.raises(AuthError):
-            await A.login_mfa(
-                db, email=email, password="pw-strong-123", totp_code=backup
-            )
+            await A.login_mfa(db, email=email, password="pw-strong-123", totp_code=backup)
 
     # disable requires a valid factor; afterwards plain login works
     async with admin_session() as db:

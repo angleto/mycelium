@@ -142,10 +142,7 @@ async def workflow_transitions(
     ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
 ) -> list[TransitionOut]:
     edges = await wf.list_transitions(ctx.session, workflow_id)
-    return [
-        TransitionOut(from_state_id=e.from_state_id, to_state_id=e.to_state_id)
-        for e in edges
-    ]
+    return [TransitionOut(from_state_id=e.from_state_id, to_state_id=e.to_state_id) for e in edges]
 
 
 @router.patch("/projects/{project_tag_id}/workflow", response_model=VersionOut)

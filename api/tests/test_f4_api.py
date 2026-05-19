@@ -60,9 +60,7 @@ async def test_f4_api_flow() -> None:
         assert started.status_code == 200 and started.json()["ended_at"] is None
         assert started.json()["parallel"] is False
         # Same task can't be double-tracked simultaneously.
-        dup = await c.post(
-            "/time/start", headers=h, json={"task_id": t["id"], "parallel": True}
-        )
+        dup = await c.post("/time/start", headers=h, json={"task_id": t["id"], "parallel": True})
         assert dup.status_code == 400
         assert dup.json()["code"] == "time.timer_already_running"
         run = (await c.get("/time/running", headers=h)).json()
@@ -75,9 +73,7 @@ async def test_f4_api_flow() -> None:
         assert [r["id"] for r in run] == [s2.json()["id"]]
 
         # Parallel timer runs alongside the serial one.
-        par = await c.post(
-            "/time/start", headers=h, json={"task_id": t["id"], "parallel": True}
-        )
+        par = await c.post("/time/start", headers=h, json={"task_id": t["id"], "parallel": True})
         assert par.status_code == 200 and par.json()["parallel"] is True
         assert len((await c.get("/time/running", headers=h)).json()) == 2
 

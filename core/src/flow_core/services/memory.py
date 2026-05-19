@@ -50,9 +50,7 @@ def _project_pred(project_id: uuid.UUID | None):  # type: ignore[no-untyped-def]
     return MemoryBlob.project_id == project_id
 
 
-async def _visible_tag_ids(
-    session: AsyncSession, ids: Sequence[uuid.UUID]
-) -> set[uuid.UUID]:
+async def _visible_tag_ids(session: AsyncSession, ids: Sequence[uuid.UUID]) -> set[uuid.UUID]:
     """Subset of ``ids`` that are tags visible in the current tenant
     (RLS scopes ``tags`` to the org): guards explicit tags so a caller
     cannot link a blob to another workspace's tag."""
@@ -78,9 +76,7 @@ async def _inherited_tag_ids(
             continue
     if not task_ids:
         return set()
-    rows = await session.execute(
-        select(TaskTag.tag_id).where(TaskTag.task_id.in_(task_ids))
-    )
+    rows = await session.execute(select(TaskTag.tag_id).where(TaskTag.task_id.in_(task_ids)))
     return set(rows.scalars().all())
 
 
@@ -170,9 +166,7 @@ async def write_blob(
     # provenance, so a blob derived from tagged sources keeps the facet.
     explicit = await _visible_tag_ids(session, tag_ids)
     inherited = await _inherited_tag_ids(session, sources)
-    await _attach_blob_tags(
-        session, org_id=org_id, blob_id=blob.id, tag_ids=explicit | inherited
-    )
+    await _attach_blob_tags(session, org_id=org_id, blob_id=blob.id, tag_ids=explicit | inherited)
     await audit.log(
         session,
         org_id=org_id,
@@ -455,17 +449,13 @@ async def consolidate(
     member_tags = set(
         (
             await session.execute(
-                select(MemoryBlobTag.tag_id)
-                .where(MemoryBlobTag.blob_id.in_(member_ids))
-                .distinct()
+                select(MemoryBlobTag.tag_id).where(MemoryBlobTag.blob_id.in_(member_ids)).distinct()
             )
         )
         .scalars()
         .all()
     )
-    await _attach_blob_tags(
-        session, org_id=org_id, blob_id=consolidated.id, tag_ids=member_tags
-    )
+    await _attach_blob_tags(session, org_id=org_id, blob_id=consolidated.id, tag_ids=member_tags)
     await audit.log(
         session,
         org_id=org_id,

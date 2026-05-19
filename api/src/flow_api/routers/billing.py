@@ -101,9 +101,7 @@ async def ledger(
     limit: int = 100,
     offset: int = 0,
 ) -> list[LedgerOut]:
-    rows = await svc.list_ledger(
-        ctx.session, org_id=ctx.org_id, limit=limit, offset=offset
-    )
+    rows = await svc.list_ledger(ctx.session, org_id=ctx.org_id, limit=limit, offset=offset)
 
     def _out(e: CreditLedger) -> LedgerOut:
         return LedgerOut(

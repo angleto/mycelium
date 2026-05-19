@@ -24,8 +24,7 @@ depends_on: str | Sequence[str] | None = None
 
 def upgrade() -> None:
     op.execute(
-        "ALTER TABLE organizations "
-        "ADD COLUMN IF NOT EXISTS settings jsonb NOT NULL DEFAULT '{}'"
+        "ALTER TABLE organizations ADD COLUMN IF NOT EXISTS settings jsonb NOT NULL DEFAULT '{}'"
     )
 
 

@@ -112,9 +112,7 @@ async def create_task(
     if eff_tag_ids:
         project_tag_id = (
             await session.execute(
-                select(Tag.id)
-                .where(Tag.id.in_(eff_tag_ids), Tag.kind == TagKind.project)
-                .limit(1)
+                select(Tag.id).where(Tag.id.in_(eff_tag_ids), Tag.kind == TagKind.project).limit(1)
             )
         ).scalar_one_or_none()
     if project_tag_id is None:

@@ -86,15 +86,11 @@ _PROFILE_FIELDS = frozenset(
 )
 
 
-async def list_issuer_profiles(
-    session: AsyncSession, *, org_id: uuid.UUID
-) -> list[IssuerProfile]:
+async def list_issuer_profiles(session: AsyncSession, *, org_id: uuid.UUID) -> list[IssuerProfile]:
     return list(
         (
             await session.execute(
-                select(IssuerProfile).order_by(
-                    IssuerProfile.is_default.desc(), IssuerProfile.label
-                )
+                select(IssuerProfile).order_by(IssuerProfile.is_default.desc(), IssuerProfile.label)
             )
         )
         .scalars()
@@ -121,9 +117,7 @@ async def get_default_issuer_profile(
     ).scalar_one_or_none()
 
 
-async def _clear_default(
-    session: AsyncSession, *, except_id: uuid.UUID | None = None
-) -> None:
+async def _clear_default(session: AsyncSession, *, except_id: uuid.UUID | None = None) -> None:
     rows = (
         (await session.execute(select(IssuerProfile).where(IssuerProfile.is_default.is_(True))))
         .scalars()
@@ -259,9 +253,7 @@ async def delete_issuer_profile(
     p = await get_issuer_profile(session, org_id=org_id, profile_id=profile_id)
     used = (
         await session.execute(
-            select(func.count())
-            .select_from(Invoice)
-            .where(Invoice.issuer_profile_id == profile_id)
+            select(func.count()).select_from(Invoice).where(Invoice.issuer_profile_id == profile_id)
         )
     ).scalar_one()
     if used:
@@ -803,9 +795,7 @@ async def transmit(
     # into inv.xml below, so later edits never touch this document.
     fiscal: IssuerProfile | None
     if inv.issuer_profile_id is not None:
-        fiscal = await get_issuer_profile(
-            session, org_id=org_id, profile_id=inv.issuer_profile_id
-        )
+        fiscal = await get_issuer_profile(session, org_id=org_id, profile_id=inv.issuer_profile_id)
     else:
         fiscal = await get_default_issuer_profile(session, org_id=org_id)
     client = await _client(session, inv.client_tag_id)

@@ -49,10 +49,7 @@ async def list_my_workspaces(
     """Workspaces the authenticated user belongs to (for the switcher)."""
     async with admin_session() as session:
         rows = await list_user_orgs(session, user_id=user_id)
-    return [
-        WorkspaceSummaryOut(id=r.id, name=r.name, role=r.role, status=r.status)
-        for r in rows
-    ]
+    return [WorkspaceSummaryOut(id=r.id, name=r.name, role=r.role, status=r.status) for r in rows]
 
 
 @router.post("", response_model=WorkspaceOut)
@@ -91,9 +88,7 @@ async def patch_my_workspace_settings(
     """Per-workspace config (admin). Merges into the settings bag so a
     future key is not clobbered by an estimate-presets save."""
     ensure_role(ctx.role, Role.admin)
-    result = await ctx.session.execute(
-        select(Organization).where(Organization.id == ctx.org_id)
-    )
+    result = await ctx.session.execute(select(Organization).where(Organization.id == ctx.org_id))
     org = result.scalar_one_or_none()
     if org is None:
         raise NotFoundError(MessageCode.ORG_NOT_FOUND)
@@ -158,9 +153,7 @@ async def archive_my_workspace(
     """Hide a workspace from the switcher by default (owner/admin).
     Reversible via unarchive; the workspace stays fully usable."""
     async with admin_session() as session:
-        await set_workspace_status(
-            session, user_id=user_id, org_id=workspace_id, status="archived"
-        )
+        await set_workspace_status(session, user_id=user_id, org_id=workspace_id, status="archived")
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -175,7 +168,5 @@ async def unarchive_my_workspace(
 ) -> Response:
     """Restore an archived workspace to the default switcher view."""
     async with admin_session() as session:
-        await set_workspace_status(
-            session, user_id=user_id, org_id=workspace_id, status="active"
-        )
+        await set_workspace_status(session, user_id=user_id, org_id=workspace_id, status="active")
     return Response(status_code=status.HTTP_204_NO_CONTENT)

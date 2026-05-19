@@ -157,9 +157,7 @@ async def test_f7_api_flow() -> None:
             json={"description": "late", "unit_price": "1"},
         )
         assert late.status_code == 409
-        late_patch = await c.patch(
-            f"/invoices/{inv['id']}", headers=h, json={"notes": "too late"}
-        )
+        late_patch = await c.patch(f"/invoices/{inv['id']}", headers=h, json={"notes": "too late"})
         assert late_patch.status_code == 409
 
         # A profile used by an invoice cannot be deleted.
