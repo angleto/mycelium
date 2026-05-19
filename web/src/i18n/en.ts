@@ -620,6 +620,18 @@ export const en = {
       'Hard-isolated: a search only ever sees this workspace (and project, if set), never another tenant.',
     tierLegend:
       'Each result shows its tier (hot/warm/cold = recency hint, not retention) and rrf (relevance score, higher = better).',
+    ch: {
+      channel: 'Channel',
+      none: '— no channel —',
+      newName: 'New channel name',
+      create: 'Create channel',
+      semanticOn: 'Semantic + keyword search is active.',
+      semanticOff:
+        'No embedding model installed: recall uses keyword (full-text) search only. Snippets are still saved and findable by words.',
+      indexed: 'semantic',
+      keywordOnly: 'keyword-only',
+      score: 'score',
+    },
     writeTitle: 'Add a memory manually (optional)',
     writeHint:
       'The assistant usually fills memory for you. Add one here only for a durable fact/preference you want it to recall.',

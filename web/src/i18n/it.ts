@@ -620,6 +620,18 @@ export const it: Catalog = {
       'Isolamento duro: una ricerca vede solo questo workspace (e progetto, se impostato), mai un altro tenant.',
     tierLegend:
       'Ogni risultato mostra il tier (hot/warm/cold = indizio di recency, non ritenzione) e rrf (punteggio di pertinenza, piu alto = meglio).',
+    ch: {
+      channel: 'Canale',
+      none: '— nessun canale —',
+      newName: 'Nome nuovo canale',
+      create: 'Crea canale',
+      semanticOn: 'Ricerca semantica + per parole attiva.',
+      semanticOff:
+        'Nessun modello di embedding: il recall usa solo la ricerca per parole (full-text). Gli appunti restano salvati e trovabili per parole.',
+      indexed: 'semantico',
+      keywordOnly: 'solo parole',
+      score: 'punteggio',
+    },
     writeTitle: 'Aggiungi una memoria manualmente (opzionale)',
     writeHint:
       'Di solito l\'assistente riempie la memoria da solo. Aggiungi qui solo un fatto/preferenza duraturo che vuoi gli resti.',

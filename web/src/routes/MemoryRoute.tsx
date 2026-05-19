@@ -9,33 +9,57 @@ type Hit = components['schemas']['MemoryHitOut']
 type Tag = components['schemas']['TagOut']
 
 // Memory is hard-isolated within (workspace, project) and metered.
-// Tags are an orthogonal facet inside that boundary: they narrow
-// retrieval, never cross it. operation_id makes write/search
-// idempotent on retry.
+// "Channels" are memory-only tags (kind=memory_channel) that organise
+// snippets and narrow recall; generic tags are an extra facet. Recall
+// is hybrid (semantic + keyword); if no embedding model is installed
+// it transparently degrades to keyword-only — snippets are still
+// saved and found by words.
 export function MemoryRoute() {
   const { t } = useTranslation()
   const session = useSession()
   const activeId = session?.workspaceId
   const [text, setText] = useState('')
-  const [ns, setNs] = useState('note')
   const [query, setQuery] = useState('')
   const [ran, setRan] = useState<string | null>(null)
   const [hits, setHits] = useState<Hit[] | null>(null)
   const [tags, setTags] = useState<Tag[]>([])
+  const [channels, setChannels] = useState<Tag[]>([])
+  const [sem, setSem] = useState<boolean | null>(null)
+  const [wCh, setWCh] = useState('')
+  const [fCh, setFCh] = useState('')
   const [wTags, setWTags] = useState<string[]>([])
   const [fTags, setFTags] = useState<string[]>([])
+  const [newCh, setNewCh] = useState('')
   const [sKind, setSKind] = useState('')
   const [sId, setSId] = useState('')
   const [msg, setMsg] = useState<string | null>(null)
   const [err, setErr] = useState<string | null>(null)
 
+  const loadTags = useCallback(async () => {
+    const { data } = await api.GET('/tags', {
+      params: { header: workspaceHeader() },
+    })
+    if (data) {
+      setTags(data.filter((g) => g.kind === 'generic'))
+      setChannels(data.filter((g) => g.kind === 'memory_channel'))
+    }
+  }, [])
+
   useEffect(() => {
     let active = true
     void (async () => {
-      const { data } = await api.GET('/tags', {
-        params: { header: workspaceHeader() },
-      })
-      if (active && data) setTags(data)
+      const [tg, st] = await Promise.all([
+        api.GET('/tags', { params: { header: workspaceHeader() } }),
+        api.GET('/memory/status', {
+          params: { header: workspaceHeader() },
+        }),
+      ])
+      if (!active) return
+      if (tg.data) {
+        setTags(tg.data.filter((g) => g.kind === 'generic'))
+        setChannels(tg.data.filter((g) => g.kind === 'memory_channel'))
+      }
+      setSem(st.data ? st.data.semantic : null)
     })()
     return () => {
       active = false
@@ -46,14 +70,33 @@ export function MemoryRoute() {
     set(list.includes(id) ? list.filter((x) => x !== id) : [...list, id])
   }
 
+  async function createChannel() {
+    const name = newCh.trim()
+    if (!name) return
+    setErr(null)
+    const { data, error } = await api.POST('/tags', {
+      params: { header: workspaceHeader() },
+      body: { kind: 'memory_channel', name },
+    })
+    if (error || !data) {
+      setErr(errMessage(error))
+      return
+    }
+    setNewCh('')
+    await loadTags()
+    setWCh(data.id)
+  }
+
   const runSearch = useCallback(
     async (q: string) => {
+      setErr(null)
       const { data, error } = await api.POST('/memory/search', {
         params: { header: workspaceHeader() },
         body: {
           query: q,
           operation_id: crypto.randomUUID(),
           limit: 10,
+          channel_tag_id: fCh || undefined,
           tag_ids: fTags,
         },
       })
@@ -64,7 +107,7 @@ export function MemoryRoute() {
       setRan(q)
       setHits(data)
     },
-    [fTags],
+    [fCh, fTags],
   )
 
   async function onWrite(e: FormEvent) {
@@ -75,9 +118,12 @@ export function MemoryRoute() {
       params: { header: workspaceHeader() },
       body: {
         text,
-        namespace: ns,
+        // Server-side default; not user-facing (channels organise
+        // memory). Sent because the generated type requires it.
+        namespace: 'note',
         operation_id: crypto.randomUUID(),
         importance: 0,
+        channel_tag_id: wCh || undefined,
         tag_ids: wTags,
       },
     })
@@ -88,12 +134,6 @@ export function MemoryRoute() {
     setText('')
     setWTags([])
     setMsg(t('memory.write'))
-  }
-
-  async function onSearch(e: FormEvent) {
-    e.preventDefault()
-    setErr(null)
-    await runSearch(query)
   }
 
   async function attach(blobId: string, tagId: string) {
@@ -139,176 +179,225 @@ export function MemoryRoute() {
     setMsg(t('memory.erased', { n: data.deleted }))
   }
 
+  const chanSelect = (
+    value: string,
+    set: (v: string) => void,
+    withNone: boolean,
+  ) => (
+    <select value={value} onChange={(e) => set(e.target.value)}>
+      {withNone && <option value="">{t('memory.ch.none')}</option>}
+      {channels.map((c) => (
+        <option key={c.id} value={c.id}>
+          {c.name}
+        </option>
+      ))}
+    </select>
+  )
+
   return (
-    <section className="card">
-      <h1>{t('memory.title')}</h1>
-      <p className="hint">{t('memory.intro')}</p>
-      <ul className="hint">
-        <li>{t('memory.howAuto')}</li>
-        <li>{t('memory.howManual')}</li>
-        <li>{t('memory.howEdit')}</li>
-        <li>{t('memory.howTier')}</li>
-        <li>{t('memory.howConsolidate')}</li>
-        <li>{t('memory.howIsolation')}</li>
-      </ul>
-      <p className="hint">{t('memory.meteredNote')}</p>
-      {err && <p className="err">{err}</p>}
-      {msg && <p className="ok">{msg}</p>}
+    <>
+      <h1 className="page-title">{t('memory.title')}</h1>
 
-      <h2>{t('memory.writeTitle')}</h2>
-      <p className="hint">{t('memory.writeHint')}</p>
-      <form onSubmit={(e) => void onWrite(e)}>
-        <label>
-          {t('memory.writeText')}
-          <textarea
-            required
-            placeholder={t('memory.writePlaceholder')}
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-          />
-        </label>
-        {tags.length > 0 && (
-          <div className="row">
-            <span className="muted">{t('memory.tags')}:</span>
-            {tags.map((g) => (
-              <button
-                key={g.id}
-                type="button"
-                className={
-                  'btn--sm' + (wTags.includes(g.id) ? '' : ' btn--ghost')
-                }
-                onClick={() => toggle(wTags, setWTags, g.id)}
-              >
-                <TagChip name={g.name} color={g.color} kind={g.kind} />
-              </button>
-            ))}
-          </div>
+      <section className="card">
+        <p className="hint">{t('memory.intro')}</p>
+        {sem === false && (
+          <p className="banner">{t('memory.ch.semanticOff')}</p>
         )}
-        <div className="row">
-          <label title={t('memory.nsHint')}>
-            {t('memory.namespace')}
-            <select value={ns} onChange={(e) => setNs(e.target.value)}>
-              {['note', 'idea', 'fact', 'email', 'consolidated'].map((n) => (
-                <option key={n} value={n}>
-                  {n}
-                </option>
-              ))}
-            </select>
-          </label>
-          <button type="submit">{t('memory.write')}</button>
-        </div>
-        <p className="hint">{t('memory.nsHint')}</p>
-      </form>
+        {sem === true && (
+          <p className="hint ok">{t('memory.ch.semanticOn')}</p>
+        )}
+        {err && <p className="err">{err}</p>}
+        {msg && <p className="ok">{msg}</p>}
 
-      <h2>{t('memory.searchTitle')}</h2>
-      <p className="hint">{t('memory.searchHint')}</p>
-      <form onSubmit={(e) => void onSearch(e)}>
-        <div className="row">
+        <h2>{t('memory.writeTitle')}</h2>
+        <form onSubmit={(e) => void onWrite(e)}>
+          <label>
+            {t('memory.writeText')}
+            <textarea
+              required
+              placeholder={t('memory.writePlaceholder')}
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+            />
+          </label>
+          <div className="row">
+            <label>
+              {t('memory.ch.channel')}
+              {chanSelect(wCh, setWCh, true)}
+            </label>
+            <label>
+              {t('memory.ch.create')}
+              <span className="row">
+                <input
+                  placeholder={t('memory.ch.newName')}
+                  value={newCh}
+                  onChange={(e) => setNewCh(e.target.value)}
+                />
+                <button
+                  type="button"
+                  className="btn--sm btn--ghost"
+                  disabled={!newCh.trim()}
+                  onClick={() => void createChannel()}
+                >
+                  +
+                </button>
+              </span>
+            </label>
+          </div>
+          {tags.length > 0 && (
+            <div className="row">
+              <span className="muted">{t('memory.tags')}:</span>
+              {tags.map((g) => (
+                <button
+                  key={g.id}
+                  type="button"
+                  className={
+                    'btn--sm' + (wTags.includes(g.id) ? '' : ' btn--ghost')
+                  }
+                  onClick={() => toggle(wTags, setWTags, g.id)}
+                >
+                  <TagChip name={g.name} color={g.color} kind={g.kind} />
+                </button>
+              ))}
+            </div>
+          )}
+          <div>
+            <button type="submit">{t('memory.write')}</button>
+          </div>
+        </form>
+      </section>
+
+      <section className="card">
+        <h2>{t('memory.searchTitle')}</h2>
+        <p className="hint">{t('memory.searchHint')}</p>
+        <form
+          onSubmit={(e) => {
+            e.preventDefault()
+            void runSearch(query)
+          }}
+        >
+          <div className="row">
+            <input
+              required
+              placeholder={t('memory.query')}
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+            <label>
+              {t('memory.ch.channel')}
+              {chanSelect(fCh, setFCh, true)}
+            </label>
+            <button type="submit">{t('memory.search')}</button>
+          </div>
+          {tags.length > 0 && (
+            <div className="row">
+              <span className="muted">{t('memory.filterTags')}:</span>
+              {tags.map((g) => (
+                <button
+                  key={g.id}
+                  type="button"
+                  className={
+                    'btn--sm' + (fTags.includes(g.id) ? '' : ' btn--ghost')
+                  }
+                  onClick={() => toggle(fTags, setFTags, g.id)}
+                >
+                  <TagChip name={g.name} color={g.color} kind={g.kind} />
+                </button>
+              ))}
+            </div>
+          )}
+        </form>
+
+        {hits && (
+          <>
+            <h3>{t('memory.results')}</h3>
+            {hits.length === 0 ? (
+              <p className="hint">{t('memory.none')}</p>
+            ) : (
+              <ul className="list">
+                {hits.map((h) => {
+                  const blobTags = h.blob.tags ?? []
+                  const own = new Set(blobTags.map((g) => g.id))
+                  const indexed =
+                    !!h.blob.model_id && h.blob.model_id !== 'none'
+                  return (
+                    <li key={h.blob.id}>
+                      <div>{h.blob.text ?? ''}</div>
+                      <div className="row">
+                        {blobTags.map((g) => (
+                          <button
+                            key={g.id}
+                            type="button"
+                            className="btn--sm btn--ghost"
+                            title={t('graph.remove')}
+                            onClick={() => void detach(h.blob.id, g.id)}
+                          >
+                            <TagChip
+                              name={g.name}
+                              color={g.color}
+                              kind={g.kind}
+                            />{' '}
+                            ✕
+                          </button>
+                        ))}
+                        <select
+                          value=""
+                          aria-label={t('memory.addTag')}
+                          onChange={(e) =>
+                            e.target.value &&
+                            void attach(h.blob.id, e.target.value)
+                          }
+                        >
+                          <option value="">+ {t('memory.addTag')}</option>
+                          {tags
+                            .filter((g) => !own.has(g.id))
+                            .map((g) => (
+                              <option key={g.id} value={g.id}>
+                                {g.name}
+                              </option>
+                            ))}
+                        </select>
+                        <span className="muted">
+                          {' · '}
+                          {t('memory.tier')} {h.blob.tier}
+                          {' · '}
+                          {t('memory.ch.score')} {h.rrf.toFixed(4)}
+                          {' · '}
+                          <span className="tag tag--muted">
+                            {indexed
+                              ? t('memory.ch.indexed')
+                              : t('memory.ch.keywordOnly')}
+                          </span>
+                        </span>
+                      </div>
+                    </li>
+                  )
+                })}
+              </ul>
+            )}
+          </>
+        )}
+      </section>
+
+      <section className="card">
+        <h2>{t('memory.eraseTitle')}</h2>
+        <p className="hint">{t('memory.eraseHint')}</p>
+        <form onSubmit={(e) => void onErase(e)} className="row">
           <input
             required
-            placeholder={t('memory.query')}
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            placeholder={t('memory.sourceKind')}
+            value={sKind}
+            onChange={(e) => setSKind(e.target.value)}
           />
-          <button type="submit">{t('memory.search')}</button>
-        </div>
-        {tags.length > 0 && (
-          <div className="row">
-            <span className="muted">{t('memory.filterTags')}:</span>
-            {tags.map((g) => (
-              <button
-                key={g.id}
-                type="button"
-                className={
-                  'btn--sm' + (fTags.includes(g.id) ? '' : ' btn--ghost')
-                }
-                onClick={() => toggle(fTags, setFTags, g.id)}
-              >
-                <TagChip name={g.name} color={g.color} kind={g.kind} />
-              </button>
-            ))}
-          </div>
-        )}
-      </form>
-
-      {hits && (
-        <>
-          <h2>{t('memory.results')}</h2>
-          <p className="hint">{t('memory.tierLegend')}</p>
-          {hits.length === 0 ? (
-            <p className="hint">{t('memory.none')}</p>
-          ) : (
-            <ul className="list">
-              {hits.map((h) => {
-                const blobTags = h.blob.tags ?? []
-                const own = new Set(blobTags.map((g) => g.id))
-                return (
-                  <li key={h.blob.id}>
-                    <div>{h.blob.text ?? ''}</div>
-                    <div className="row">
-                      {blobTags.map((g) => (
-                        <button
-                          key={g.id}
-                          type="button"
-                          className="btn--sm btn--ghost"
-                          title={t('graph.remove')}
-                          onClick={() => void detach(h.blob.id, g.id)}
-                        >
-                          <TagChip
-                            name={g.name}
-                            color={g.color}
-                            kind={g.kind}
-                          />{' '}
-                          ✕
-                        </button>
-                      ))}
-                      <select
-                        value=""
-                        aria-label={t('memory.addTag')}
-                        onChange={(e) =>
-                          e.target.value &&
-                          void attach(h.blob.id, e.target.value)
-                        }
-                      >
-                        <option value="">+ {t('memory.addTag')}</option>
-                        {tags
-                          .filter((g) => !own.has(g.id))
-                          .map((g) => (
-                            <option key={g.id} value={g.id}>
-                              {g.name}
-                            </option>
-                          ))}
-                      </select>
-                      <span className="muted">
-                        · {t('memory.tier')} {h.blob.tier} · rrf{' '}
-                        {h.rrf.toFixed(4)}
-                      </span>
-                    </div>
-                  </li>
-                )
-              })}
-            </ul>
-          )}
-        </>
-      )}
-
-      <h2>{t('memory.eraseTitle')}</h2>
-      <p className="hint">{t('memory.eraseHint')}</p>
-      <form onSubmit={(e) => void onErase(e)} className="row">
-        <input
-          required
-          placeholder={t('memory.sourceKind')}
-          value={sKind}
-          onChange={(e) => setSKind(e.target.value)}
-        />
-        <input
-          required
-          placeholder={t('memory.sourceId')}
-          value={sId}
-          onChange={(e) => setSId(e.target.value)}
-        />
-        <button type="submit">{t('memory.erase')}</button>
-      </form>
-    </section>
+          <input
+            required
+            placeholder={t('memory.sourceId')}
+            value={sId}
+            onChange={(e) => setSId(e.target.value)}
+          />
+          <button type="submit">{t('memory.erase')}</button>
+        </form>
+      </section>
+    </>
   )
 }

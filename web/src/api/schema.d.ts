@@ -1781,6 +1781,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/memory/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Status
+         * @description Whether semantic retrieval is available (the optional embedding
+         *     model is installed) or memory is running keyword-only. Member-level
+         *     via tenant_ctx; lets the SPA show "semantic vs keyword-only".
+         */
+        get: operations["status__memory_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/memory/blobs/{blob_id}": {
         parameters: {
             query?: never;
@@ -3698,6 +3720,13 @@ export interface components {
             grader_min_rrf?: number | null;
             /** Tag Ids */
             tag_ids?: string[];
+            /** Channel Tag Id */
+            channel_tag_id?: string | null;
+        };
+        /** MemoryStatusOut */
+        MemoryStatusOut: {
+            /** Semantic */
+            semantic: boolean;
         };
         /** MemoryWriteIn */
         MemoryWriteIn: {
@@ -3724,6 +3753,8 @@ export interface components {
             importance: number | string;
             /** Tag Ids */
             tag_ids?: string[];
+            /** Channel Tag Id */
+            channel_tag_id?: string | null;
         };
         /** MeterIn */
         MeterIn: {
@@ -4366,7 +4397,7 @@ export interface components {
          * TagKind
          * @enum {string}
          */
-        TagKind: "generic" | "client" | "project";
+        TagKind: "generic" | "client" | "project" | "memory_channel";
         /** TagOut */
         TagOut: {
             /**
@@ -9567,6 +9598,40 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MemoryHitOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    status__memory_status_get: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemoryStatusOut"];
                 };
             };
             /** @description Validation Error */
