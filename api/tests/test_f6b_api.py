@@ -49,7 +49,14 @@ async def test_f6b_api_flow(_providers: None) -> None:
                 json={"email": _email(), "password": "pw-strong-123", "workspace_name": "B"},
             )
         ).json()
-        h = {"Authorization": f"Bearer {a['token']}", "X-Workspace-Id": a["workspace_id"]}
+        # Owner with full entitlement: privileged writes need the
+        # effective role, X-Workspace-Role clamped to the membership
+        # (absent header => member, least privilege).
+        h = {
+            "Authorization": f"Bearer {a['token']}",
+            "X-Workspace-Id": a["workspace_id"],
+            "X-Workspace-Role": "owner",
+        }
 
         # Canonical command works before any billing (unmetered/offline).
         cmd = await c.post("/notes/command", headers=h, json={"text": "crea una nuova nota"})

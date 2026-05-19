@@ -14,7 +14,7 @@ from typing import Annotated, Any
 
 from fastapi import Depends, Header
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from flow_core.db import admin_session, tenant_session
@@ -185,6 +185,15 @@ async def tenant_ctx(
             user=user,
             x_workspace_role=x_workspace_role,
             x_admin_mode=x_admin_mode,
+        )
+        # Publish the sudo-clamped role for the service-layer RBAC
+        # choke point (rbac.require_role), same transaction-local GUC
+        # mechanism as the RLS tenant context. Without this the
+        # service re-derives from stored membership and the "act as"
+        # downgrade would not bind (privilege-confinement bug).
+        await session.execute(
+            text("SELECT set_config('app.current_role', :r, true)"),
+            {"r": role.value},
         )
         yield TenantCtx(
             session=session,

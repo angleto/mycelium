@@ -30,7 +30,14 @@ async def test_f3_api_flow() -> None:
                 json={"email": _email(), "password": "pw-strong-123", "workspace_name": "B"},
             )
         ).json()
-        h = {"Authorization": f"Bearer {a['token']}", "X-Workspace-Id": a["workspace_id"]}
+        # Owner with full entitlement: privileged writes need the
+        # effective role, X-Workspace-Role clamped to the membership
+        # (absent header => member, least privilege).
+        h = {
+            "Authorization": f"Bearer {a['token']}",
+            "X-Workspace-Id": a["workspace_id"],
+            "X-Workspace-Role": "owner",
+        }
         me = a["user_id"]
 
         # Default calendar is provisioned with the org.
