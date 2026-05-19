@@ -121,6 +121,25 @@ export const en = {
       tool_not_allowed: 'needs approval (tool not allowed)',
     },
   },
+  coord: {
+    title: 'Coordination',
+    intro:
+      'Handoff envelopes along this task’s dependency edges: work received from predecessors (incoming) and produced for successors (outgoing). Offering announces the task to eligible teammates (owner-only); a member then claims it (becomes assignee) or declines.',
+    offer: 'Offer to team',
+    offered: 'offered',
+    claim: 'Claim',
+    decline: 'Decline',
+    incoming: 'Incoming',
+    outgoing: 'Outgoing',
+    none: 'None.',
+    artifact: 'artifact note',
+    status: {
+      pending: 'pending',
+      delivered: 'delivered',
+      consumed: 'consumed',
+      cancelled: 'cancelled',
+    },
+  },
   mch: {
     title: 'Memory channels',
     intro:

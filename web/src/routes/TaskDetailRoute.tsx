@@ -8,6 +8,7 @@ import { PriorityChip } from '../components/PriorityChip'
 import { ScaleSelect } from '../components/ScaleSelect'
 import { Attachments } from '../components/Attachments'
 import { AgentRunPanel } from '../components/AgentRunPanel'
+import { CoordinationPanel } from '../components/CoordinationPanel'
 import { TaskTimer } from '../components/TaskTimer'
 import { formatHours } from '../lib/estimate'
 
@@ -738,6 +739,14 @@ export function TaskDetailRoute() {
         </button>
       </div>
       <p className="hint">{t('tasks.relatedTo')}</p>
+
+      <h2>{t('coord.title')}</h2>
+      <CoordinationPanel
+        taskId={id}
+        offered={task.offered}
+        titleOf={titleOf}
+        onChanged={() => void reload()}
+      />
 
       <h2>{t('tasks.workNotes')}</h2>
       <div className="row">

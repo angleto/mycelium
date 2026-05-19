@@ -914,6 +914,93 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/tasks/{task_id}/handoffs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Handoffs
+         * @description Member: incoming + outgoing coordination handoffs for the task
+         *     (the on-completion creation is automatic -- no create endpoint).
+         *     RLS-scoped; a foreign task simply yields none.
+         */
+        get: operations["list_handoffs_tasks__task_id__handoffs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tasks/{task_id}/offer": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Offer Task
+         * @description Owner: announce the task to eligible members (contract-net
+         *     call-for-proposals). Owner-gated in the service (effective-role
+         *     sudo enforced).
+         */
+        post: operations["offer_task_tasks__task_id__offer_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tasks/{task_id}/claim": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Claim Task
+         * @description Member: claim an offered task (contract-net award) -> the caller
+         *     becomes an assignee, ``offered`` is cleared. 400 if not offered /
+         *     already claimed.
+         */
+        post: operations["claim_task_tasks__task_id__claim_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tasks/{task_id}/decline": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Decline Task
+         * @description Member: decline an offered task (lightweight: notify the offerer
+         *     + audit; no assignment). 400 if not offered.
+         */
+        post: operations["decline_task_tasks__task_id__decline_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/workflows": {
         parameters: {
             query?: never;
@@ -3779,6 +3866,44 @@ export interface components {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
         };
+        /** HandoffOut */
+        HandoffOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Predecessor Task Id
+             * Format: uuid
+             */
+            predecessor_task_id: string;
+            /**
+             * Successor Task Id
+             * Format: uuid
+             */
+            successor_task_id: string;
+            /** From Executor Id */
+            from_executor_id: string | null;
+            /** To Executor Id */
+            to_executor_id: string | null;
+            /** Message */
+            message: string;
+            /** Artifact Note Id */
+            artifact_note_id: string | null;
+            status: components["schemas"]["HandoffStatus"];
+            /** Delivered At */
+            delivered_at: string | null;
+            /** Consumed At */
+            consumed_at: string | null;
+            /** Version */
+            version: number;
+        };
+        /**
+         * HandoffStatus
+         * @enum {string}
+         */
+        HandoffStatus: "pending" | "delivered" | "consumed" | "cancelled";
         /** HolidayIn */
         HolidayIn: {
             /**
@@ -5216,6 +5341,11 @@ export interface components {
             billable?: boolean | null;
             /** Is Archived */
             is_archived: boolean;
+            /**
+             * Offered
+             * @default false
+             */
+            offered: boolean;
             /** Deleted At */
             deleted_at?: string | null;
             /** Version */
@@ -7797,6 +7927,150 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["NoteOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_handoffs_tasks__task_id__handoffs_get: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HandoffOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    offer_task_tasks__task_id__offer_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    claim_task_tasks__task_id__claim_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    decline_task_tasks__task_id__decline_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskOut"];
                 };
             };
             /** @description Validation Error */

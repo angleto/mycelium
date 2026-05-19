@@ -120,6 +120,25 @@ export const it: Catalog = {
       tool_not_allowed: 'serve approvazione (tool non permesso)',
     },
   },
+  coord: {
+    title: 'Coordinamento',
+    intro:
+      'Buste di handoff lungo le dipendenze di questo task: il lavoro ricevuto dai predecessori (in entrata) e prodotto per i successori (in uscita). L’offerta annuncia il task ai membri idonei (solo owner); un membro lo prende poi in carico (diventa assegnatario) o lo rifiuta.',
+    offer: 'Offri al team',
+    offered: 'offerto',
+    claim: 'Prendi in carico',
+    decline: 'Rifiuta',
+    incoming: 'In entrata',
+    outgoing: 'In uscita',
+    none: 'Nessuno.',
+    artifact: 'nota artefatto',
+    status: {
+      pending: 'in attesa',
+      delivered: 'consegnato',
+      consumed: 'consumato',
+      cancelled: 'annullato',
+    },
+  },
   mch: {
     title: 'Canali memoria',
     intro:
