@@ -1,0 +1,99 @@
+# Flow — image build & push (public repo, free CI).
+# ==================================================
+# Builds linux/arm64 images (backend, worker, frontend) from this repo
+# at a chosen ref and pushes them to GHCR using the workflow's own
+# GITHUB_TOKEN. The cluster rollout (`kubectl apply`) is done locally
+# by the operator via `./redeploy.sh` against a gitignored kubeconfig
+# and a secrets bundle that never leaves the operator's machine.
+#
+# The Dockerfiles always come from the workflow ref (this commit on
+# the default branch). The app source comes from the user-supplied
+# `flow_ref` input — so we can build past tags whose source tree did
+# not yet contain `docker/`.
+
+name: build-images
+
+on:
+  workflow_dispatch:
+    inputs:
+      flow_ref:
+        description: "Ref to build from (tag/branch/SHA). Default: main"
+        required: true
+        default: "main"
+      image_tag:
+        description: "Image tag to push (e.g. 1.0.0, edge)"
+        required: true
+        default: "edge"
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: flow-build-images-${{ github.event.inputs.image_tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout workflow ref (Dockerfiles)
+        uses: actions/checkout@v4
+        with:
+          path: workflow-ref
+
+      - name: Checkout source @ ref
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.flow_ref || github.ref }}
+          path: flow-src
+
+      - name: Compute image tag
+        id: tag
+        run: |
+          set -euo pipefail
+          if [ -n "${{ github.event.inputs.image_tag }}" ]; then
+            TAG="${{ github.event.inputs.image_tag }}"
+          else
+            # tag push: strip leading "v" (v1.0.0 -> 1.0.0)
+            TAG="${GITHUB_REF_NAME#v}"
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Image tag: $TAG"
+
+      - name: Set up QEMU (arm64 emulation)
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Overlay workflow docker/ into source context
+        # The Dockerfiles reference `docker/nginx.conf` etc. relative to
+        # the build context; past tags (e.g. v1.0.0) do not yet carry
+        # `docker/` in-tree. Copy from workflow-ref so any flow_ref builds.
+        run: cp -r workflow-ref/docker flow-src/docker
+
+      - name: Build + push linux/arm64 images
+        working-directory: flow-src
+        run: |
+          set -euo pipefail
+          TAG="${{ steps.tag.outputs.tag }}"
+          for c in backend worker frontend; do
+            echo "::group::build $c:$TAG"
+            docker buildx build --platform linux/arm64 \
+              -f docker/$c.Dockerfile \
+              -t ghcr.io/angleto/flow/$c:"$TAG" \
+              --push .
+            echo "::endgroup::"
+          done
+          echo "Pushed: ghcr.io/angleto/flow/{backend,worker,frontend}:$TAG"
