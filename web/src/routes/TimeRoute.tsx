@@ -151,29 +151,53 @@ export function TimeRoute() {
     return q
   }, [group, scope, from, to, billableF, clientId, projectId])
 
+  // Generic CSV blob download. The two report flavors share auth +
+  // filename plumbing; only the path + query differ.
+  const downloadCsv = useCallback(
+    async (path: string, query: Record<string, string | boolean>, filename: string) => {
+      const usp = new URLSearchParams()
+      for (const [k, v] of Object.entries(query)) usp.set(k, String(v))
+      const res = await authFetch(`${path}?${usp.toString()}`)
+      if (!res.ok) {
+        setErr(`HTTP ${res.status}`)
+        return
+      }
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = filename
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+    },
+    [],
+  )
+
   const downloadReportCsv = useCallback(async () => {
-    // Backend already serves /api/time/report.csv with the same query
-    // params as /time/report. Fetch with the bearer (a plain <a href>
-    // would skip the Authorization header), then trigger a blob download.
-    const q = reportQuery() as Record<string, string | boolean>
-    const usp = new URLSearchParams()
-    for (const [k, v] of Object.entries(q)) usp.set(k, String(v))
-    const res = await authFetch(`/time/report.csv?${usp.toString()}`)
-    if (!res.ok) {
-      setErr(`HTTP ${res.status}`)
-      return
-    }
-    const blob = await res.blob()
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
     const today = new Date().toISOString().slice(0, 10)
-    a.href = url
-    a.download = `flow-time-report-${today}.csv`
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
-    URL.revokeObjectURL(url)
-  }, [reportQuery])
+    await downloadCsv(
+      '/time/report.csv',
+      reportQuery() as Record<string, string | boolean>,
+      `flow-time-report-${today}.csv`,
+    )
+  }, [downloadCsv, reportQuery])
+
+  const downloadEntriesCsv = useCallback(async () => {
+    // Detail CSV: one row per time entry with started_at / ended_at /
+    // duration / task / client / project. Uses the same date filters
+    // as the report (client/project filters apply on the report side
+    // only because /time/entries does not currently take them; if you
+    // want a per-client detail CSV, filter on the client column post-
+    // hoc in your spreadsheet).
+    const q: Record<string, string | boolean> = {}
+    if (from) q.start_from = `${from}T00:00:00`
+    if (to) q.start_to = `${to}T23:59:59`
+    if (billableF !== 'all') q.billable = billableF === 'yes'
+    const today = new Date().toISOString().slice(0, 10)
+    await downloadCsv('/time/entries.csv', q, `flow-time-entries-${today}.csv`)
+  }, [downloadCsv, from, to, billableF])
 
   const loadReport = useCallback(async () => {
     const r = await api.GET('/time/report', {
@@ -672,8 +696,17 @@ export function TimeRoute() {
           type="button"
           className="btn--ghost btn--sm"
           onClick={() => void downloadReportCsv()}
+          title={t('time.exportCsvAggregatedTip')}
         >
-          {t('time.exportCsv')}
+          {t('time.exportCsvAggregated')}
+        </button>{' '}
+        <button
+          type="button"
+          className="btn--ghost btn--sm"
+          onClick={() => void downloadEntriesCsv()}
+          title={t('time.exportCsvDetailedTip')}
+        >
+          {t('time.exportCsvDetailed')}
         </button>
       </h2>
       <div className="row">

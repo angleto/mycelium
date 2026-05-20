@@ -345,3 +345,79 @@ async def report_csv(
         media_type="text/csv",
         headers={"Content-Disposition": 'attachment; filename="time-report.csv"'},
     )
+
+
+@router.get("/time/entries.csv")
+async def entries_csv(
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    task_id: uuid.UUID | None = None,
+    user_id: uuid.UUID | None = None,
+    start_from: datetime.datetime | None = None,
+    start_to: datetime.datetime | None = None,
+    billable: bool | None = None,
+) -> Response:
+    """Detail-level CSV: one row per time entry, with started_at /
+    ended_at / duration_seconds / task title / client+project / memo.
+    Same filter knobs as ``GET /time/entries``; no aggregation."""
+    rows = await svc.list_entries(
+        ctx.session,
+        org_id=ctx.org_id,
+        task_id=task_id,
+        user_id=user_id,
+        start_from=start_from,
+        start_to=start_to,
+        billable=billable,
+        limit=None,
+        offset=0,
+    )
+    ctxs = await svc.resolve_task_contexts(ctx.session, [e.task_id for e in rows])
+    note_titles = await svc.resolve_note_titles(ctx.session, [e.note_id for e in rows])
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(
+        [
+            "started_at",
+            "ended_at",
+            "duration_seconds",
+            "task_id",
+            "task_title",
+            "client",
+            "project",
+            "billable",
+            "rate",
+            "currency",
+            "source",
+            "executor_kind",
+            "memo",
+            "note_id",
+            "note_title",
+        ]
+    )
+    for e in rows:
+        tctx = ctxs.get(e.task_id, _EMPTY_CTX)
+        w.writerow(
+            [
+                e.started_at.isoformat(),
+                e.ended_at.isoformat() if e.ended_at is not None else "",
+                e.duration_seconds if e.duration_seconds is not None else "",
+                str(e.task_id),
+                tctx.task_title or "",
+                tctx.client_name or "",
+                tctx.project_name or "",
+                "yes" if e.billable else "no",
+                f"{e.rate_snapshot}" if e.rate_snapshot is not None else "",
+                e.currency,
+                e.source.value if hasattr(e.source, "value") else str(e.source),
+                e.executor_kind.value
+                if hasattr(e.executor_kind, "value")
+                else str(e.executor_kind),
+                (e.memo or "").replace("\n", " ").replace("\r", " "),
+                str(e.note_id) if e.note_id is not None else "",
+                note_titles.get(e.note_id, "") if e.note_id is not None else "",
+            ]
+        )
+    return Response(
+        content=buf.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": 'attachment; filename="time-entries.csv"'},
+    )

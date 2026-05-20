@@ -1742,6 +1742,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/time/entries.csv": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Entries Csv
+         * @description Detail-level CSV: one row per time entry, with started_at /
+         *     ended_at / duration_seconds / task title / client+project / memo.
+         *     Same filter knobs as ``GET /time/entries``; no aggregation.
+         */
+        get: operations["entries_csv_time_entries_csv_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/budgets": {
         parameters: {
             query?: never;
@@ -10469,6 +10491,46 @@ export interface operations {
                 executor_kind?: components["schemas"]["ExecKind"] | null;
                 client_tag_id?: string | null;
                 project_tag_id?: string | null;
+            };
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    entries_csv_time_entries_csv_get: {
+        parameters: {
+            query?: {
+                task_id?: string | null;
+                user_id?: string | null;
+                start_from?: string | null;
+                start_to?: string | null;
+                billable?: boolean | null;
             };
             header: {
                 "x-workspace-id": string;
