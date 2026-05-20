@@ -996,6 +996,32 @@ button.btn--danger:hover {
   padding: 0.1rem 0.3rem;
   border-radius: 4px;
 }
+/* GFM task lists. The TaskList extension renders <ul data-type="taskList">
+   with each <li data-type="taskItem"> containing a <label><input
+   type="checkbox"></label><div>. Hide the default bullet, align the
+   checkbox to the first line of content, allow ticking inline. */
+.rte .ProseMirror ul[data-type='taskList'] {
+  list-style: none;
+  padding-left: 0;
+}
+.rte .ProseMirror ul[data-type='taskList'] li {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.4rem;
+}
+.rte .ProseMirror ul[data-type='taskList'] li > label {
+  flex: 0 0 auto;
+  margin-top: 0.3rem;
+  user-select: none;
+}
+.rte .ProseMirror ul[data-type='taskList'] li > div {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.rte .ProseMirror ul[data-type='taskList'] li[data-checked='true'] > div {
+  color: var(--text-muted, #888);
+  text-decoration: line-through;
+}
 .mention-pop {
   position: fixed;
   z-index: 1000;

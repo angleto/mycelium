@@ -4,6 +4,8 @@ import { Editor as CoreEditor, Extension } from '@tiptap/core'
 import { EditorContent, useEditor } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Link from '@tiptap/extension-link'
+import TaskList from '@tiptap/extension-task-list'
+import TaskItem from '@tiptap/extension-task-item'
 import { Markdown } from 'tiptap-markdown'
 import Suggestion, {
   type SuggestionKeyDownProps,
@@ -196,6 +198,10 @@ export function RichEditor({
           return /^(https?:|mailto:|tel:)/i.test(url)
         },
       }),
+      // GitHub-flavored task lists: round-trip via tiptap-markdown's
+      // built-in task_list / task_item serializers (`- [ ]` / `- [x]`).
+      TaskList,
+      TaskItem.configure({ nested: true }),
       Markdown.configure({ html: false }),
       MentionExt,
     ],
@@ -266,6 +272,8 @@ export function RichEditor({
             editor?.chain().focus().toggleBulletList().run(), 'bulletList')}
           {tb('1.', 'editor.ordered', () =>
             editor?.chain().focus().toggleOrderedList().run(), 'orderedList')}
+          {tb('☑', 'editor.checklist', () =>
+            editor?.chain().focus().toggleTaskList().run(), 'taskList')}
           {tb('❝', 'editor.quote', () =>
             editor?.chain().focus().toggleBlockquote().run(), 'blockquote')}
           {tb('</>', 'editor.code', () =>

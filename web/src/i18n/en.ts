@@ -439,6 +439,7 @@ export const en = {
     h3: 'Heading 3',
     bullet: 'Bullet list',
     ordered: 'Numbered list',
+    checklist: 'Checklist',
     quote: 'Quote',
     code: 'Inline code',
     toRaw: 'Edit as Markdown',

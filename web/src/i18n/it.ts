@@ -439,6 +439,7 @@ export const it: Catalog = {
     h3: 'Titolo 3',
     bullet: 'Elenco puntato',
     ordered: 'Elenco numerato',
+    checklist: 'Lista di controllo',
     quote: 'Citazione',
     code: 'Codice inline',
     toRaw: 'Modifica come Markdown',
