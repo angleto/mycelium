@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { api, errMessage, workspaceHeader } from '../api/client'
 import { useSession } from '../auth/useSession'
+import { kindGlyph } from '../lib/tagGlyph'
 import { useFocus } from '../lib/focus'
 import type { components } from '../api/schema'
 
@@ -359,13 +360,13 @@ export function GraphRoute() {
                   })
                 }
               >
-                {color && (
-                  <span
-                    className="chip__dot"
-                    style={{ background: color }}
-                    aria-hidden="true"
-                  />
-                )}
+                <span
+                  className="chip__glyph"
+                  style={{ color: color || 'currentColor' }}
+                  aria-hidden="true"
+                >
+                  {kindGlyph(g.kind)}
+                </span>
                 {g.name}
               </button>
             )

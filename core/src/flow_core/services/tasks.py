@@ -19,6 +19,7 @@ from flow_core.errors import DomainError, NotFoundError
 from flow_core.i18n import MessageCode
 from flow_core.models.comment import Comment
 from flow_core.models.membership import Role
+from flow_core.models.project_profile import ProjectProfile
 from flow_core.models.tag import Tag, TagKind
 from flow_core.models.task import ExecKind, Necessity, Task
 from flow_core.models.task_assignee import TaskAssignee
@@ -126,6 +127,22 @@ async def create_task(
             session, org_id=org_id, actor_id=actor_id
         )
         eff_tag_ids.append(project_tag_id)
+    # Auto-tag the project's client. A project always belongs to a
+    # client (project_profile.client_tag_id is set at creation,
+    # ensure_default_project also wires it to Personal). Carrying the
+    # client tag explicitly on the task lets every per-client filter /
+    # report / focus stay a flat ``WHERE tag_id = <client>`` instead of
+    # joining task_tags -> project_profile. Idempotent: skip if already
+    # present in tag_ids.
+    client_tag_id = (
+        await session.execute(
+            select(ProjectProfile.client_tag_id).where(
+                ProjectProfile.tag_id == project_tag_id
+            )
+        )
+    ).scalar_one_or_none()
+    if client_tag_id is not None and client_tag_id not in eff_tag_ids:
+        eff_tag_ids.append(client_tag_id)
     workflow = await wf.resolve_effective_workflow(session, org_id, project_tag_id)
     initial = await wf.get_initial_state(session, workflow.id)
     if importance is not None and urgency is not None:
@@ -468,12 +485,30 @@ async def attach_tag(
     await require_role(session, org_id, actor_id, Role.member)
     await get_task(session, org_id=org_id, task_id=task_id)
     await _require_tag(session, tag_id)
-    try:
-        async with session.begin_nested():
-            session.add(TaskTag(org_id=org_id, task_id=task_id, tag_id=tag_id))
-            await session.flush()
-    except IntegrityError:
-        return
+    # If the added tag is a project, also attach its client tag — same
+    # hierarchy invariant as create_task. Bulk-attach the pair so the
+    # caller can't observe a half-state.
+    extra: list[uuid.UUID] = []
+    tag_row = (
+        await session.execute(select(Tag.kind).where(Tag.id == tag_id))
+    ).scalar_one_or_none()
+    if tag_row is TagKind.project:
+        client_tag_id = (
+            await session.execute(
+                select(ProjectProfile.client_tag_id).where(
+                    ProjectProfile.tag_id == tag_id
+                )
+            )
+        ).scalar_one_or_none()
+        if client_tag_id is not None:
+            extra.append(client_tag_id)
+    for tid in (tag_id, *extra):
+        try:
+            async with session.begin_nested():
+                session.add(TaskTag(org_id=org_id, task_id=task_id, tag_id=tid))
+                await session.flush()
+        except IntegrityError:
+            continue
     await audit.log(
         session,
         org_id=org_id,
