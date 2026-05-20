@@ -194,21 +194,10 @@ export function ExecutorsAdmin() {
         <form onSubmit={(e) => void save(e)} className="card card--running">
           <h3>{edit === 'new' ? t('exec.newAgent') : t('exec.editTitle')}</h3>
           <div className="row">
-            {edit === 'new' && (
+            {edit !== 'new' && (
               <label>
                 {t('exec.kind')}
-                <select
-                  value={form.kind}
-                  onChange={(e) =>
-                    setForm({
-                      ...form,
-                      kind: e.target.value as 'llm_agent' | 'human',
-                    })
-                  }
-                >
-                  <option value="llm_agent">llm_agent</option>
-                  <option value="human">human</option>
-                </select>
+                <span className="tag tag--muted">{form.kind}</span>
               </label>
             )}
             <label>
