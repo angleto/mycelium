@@ -136,9 +136,7 @@ async def create_task(
     # present in tag_ids.
     client_tag_id = (
         await session.execute(
-            select(ProjectProfile.client_tag_id).where(
-                ProjectProfile.tag_id == project_tag_id
-            )
+            select(ProjectProfile.client_tag_id).where(ProjectProfile.tag_id == project_tag_id)
         )
     ).scalar_one_or_none()
     if client_tag_id is not None and client_tag_id not in eff_tag_ids:
@@ -489,15 +487,11 @@ async def attach_tag(
     # hierarchy invariant as create_task. Bulk-attach the pair so the
     # caller can't observe a half-state.
     extra: list[uuid.UUID] = []
-    tag_row = (
-        await session.execute(select(Tag.kind).where(Tag.id == tag_id))
-    ).scalar_one_or_none()
+    tag_row = (await session.execute(select(Tag.kind).where(Tag.id == tag_id))).scalar_one_or_none()
     if tag_row is TagKind.project:
         client_tag_id = (
             await session.execute(
-                select(ProjectProfile.client_tag_id).where(
-                    ProjectProfile.tag_id == tag_id
-                )
+                select(ProjectProfile.client_tag_id).where(ProjectProfile.tag_id == tag_id)
             )
         ).scalar_one_or_none()
         if client_tag_id is not None:

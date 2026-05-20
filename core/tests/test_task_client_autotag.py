@@ -52,13 +52,7 @@ async def test_create_task_auto_attaches_client_tag() -> None:
             tag_ids=[proj.id],
         )
         rows = list(
-            (
-                await s.execute(
-                    select(TaskTag.tag_id).where(TaskTag.task_id == t.id)
-                )
-            )
-            .scalars()
-            .all()
+            (await s.execute(select(TaskTag.tag_id).where(TaskTag.task_id == t.id))).scalars().all()
         )
         assert proj.id in rows
         assert cli.id in rows, "create_task should auto-attach the project's client tag"
@@ -80,21 +74,11 @@ async def test_attach_tag_with_project_pulls_client_tag() -> None:
         # Start the task WITHOUT any project tag (falls back to default
         # General/Personal). The default Personal client gets carried
         # along (the invariant already holds for the default chain).
-        t = await tasks_svc.create_task(
-            s, org_id=org, actor_id=user, title="T2"
-        )
+        t = await tasks_svc.create_task(s, org_id=org, actor_id=user, title="T2")
         # Now attach the explicit project. The client must come along.
-        await tasks_svc.attach_tag(
-            s, org_id=org, actor_id=user, task_id=t.id, tag_id=proj.id
-        )
+        await tasks_svc.attach_tag(s, org_id=org, actor_id=user, task_id=t.id, tag_id=proj.id)
         rows = set(
-            (
-                await s.execute(
-                    select(TaskTag.tag_id).where(TaskTag.task_id == t.id)
-                )
-            )
-            .scalars()
-            .all()
+            (await s.execute(select(TaskTag.tag_id).where(TaskTag.task_id == t.id))).scalars().all()
         )
         assert proj.id in rows
         assert cli.id in rows

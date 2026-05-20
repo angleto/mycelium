@@ -24,14 +24,11 @@ depends_on: str | Sequence[str] | None = None
 
 
 UPGRADE: tuple[str, ...] = (
-    "ALTER TABLE workflow_states "
-    "ADD COLUMN is_hidden boolean NOT NULL DEFAULT false",
+    "ALTER TABLE workflow_states ADD COLUMN is_hidden boolean NOT NULL DEFAULT false",
 )
 
 
-DOWNGRADE: tuple[str, ...] = (
-    "ALTER TABLE workflow_states DROP COLUMN IF EXISTS is_hidden",
-)
+DOWNGRADE: tuple[str, ...] = ("ALTER TABLE workflow_states DROP COLUMN IF EXISTS is_hidden",)
 
 
 def upgrade() -> None:
