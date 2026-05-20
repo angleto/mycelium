@@ -51,7 +51,7 @@ from flow_core.models.task_handoff import TaskHandoff
 from flow_core.models.time_entry import TimeEntry
 from flow_core.models.user import User
 from flow_core.models.workflow import WorkflowDefinition, WorkflowState, WorkflowTransition
-from flow_core.security import decode_token
+from flow_core.security import decode_token_async
 from flow_core.services import advisory as advisory_svc
 from flow_core.services import agent_runtime as agent_runtime_svc
 from flow_core.services import attachments as attachments_svc
@@ -82,12 +82,23 @@ mcp: FastMCP = FastMCP("flow")
 async def _tenant(
     token: str, org_id: str
 ) -> AsyncIterator[tuple[AsyncSession, uuid.UUID, uuid.UUID]]:
-    claims = decode_token(token)
+    # Accepts either a session JWT or a long-lived agent token
+    # (``flow_at_...``). The async decoder branches on the cheap
+    # discriminator prefix BEFORE attempting JWT decode, so each
+    # credential kind hits exactly one code path. For an agent token
+    # the workspace is intrinsic to the credential, so the
+    # claims-provided ``org_id`` wins over the positional one (an MCP
+    # client driven by an agent token may pass an empty string).
+    claims = await decode_token_async(token)
     sub = claims.get("sub")
     if not isinstance(sub, str):
         raise AuthError(MessageCode.AUTH_TOKEN_NO_SUB)
     user_id = uuid.UUID(sub)
-    org = uuid.UUID(org_id)
+    token_org = claims.get("org_id")
+    if isinstance(token_org, str) and token_org:
+        org = uuid.UUID(token_org)
+    else:
+        org = uuid.UUID(org_id)
     async with tenant_session(str(org), str(user_id)) as session:
         await get_role(session, org, user_id)  # raises if not a member
         yield session, org, user_id

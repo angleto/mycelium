@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from flow_core.models.activity_log import ActivityLog
 from flow_core.models.agent_run import AgentRun, AgentRunStatus
+from flow_core.models.agent_token import AgentToken
 from flow_core.models.attachment import Attachment
 from flow_core.models.auth_tokens import (
     EmailVerificationToken,
@@ -106,6 +107,7 @@ __all__ = [
     "ActivityLog",
     "AgentRun",
     "AgentRunStatus",
+    "AgentToken",
     "Attachment",
     "AutonomousDispatch",
     "Base",

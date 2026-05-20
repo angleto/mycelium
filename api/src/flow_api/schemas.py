@@ -1718,3 +1718,43 @@ class TelegramLinkStatusOut(BaseModel):
 
 class TelegramWebhookOut(BaseModel):
     ok: bool
+
+
+class AgentTokenCreateIn(BaseModel):
+    """Mint a long-lived bearer credential for MCP / external automation."""
+
+    name: str = Field(min_length=1, max_length=120)
+    scope: str = Field(default="mcp", min_length=1, max_length=32)
+    # 1-year TTL by default (matches the service constant). ``None`` =
+    # never expires; pass ``0`` to be explicit about "never". Capped at
+    # 5 years so a forgotten secret has a bounded lifetime even when
+    # the operator picks a long-lived rotation.
+    ttl_days: int | None = Field(default=365, ge=0, le=365 * 5)
+
+
+class AgentTokenOut(BaseModel):
+    """Persisted token metadata. The raw value is never on this shape;
+    it appears only on :class:`AgentTokenCreateOut`."""
+
+    id: uuid.UUID
+    name: str
+    scope: str
+    prefix: str
+    expires_at: datetime.datetime | None
+    last_used_at: datetime.datetime | None
+    revoked_at: datetime.datetime | None
+    created_at: datetime.datetime
+
+
+class AgentTokenCreateOut(BaseModel):
+    """The mint response. ``raw`` is the only place the plaintext token
+    ever leaves the server; the operator is told to copy it now or
+    rotate."""
+
+    id: uuid.UUID
+    name: str
+    scope: str
+    prefix: str
+    expires_at: datetime.datetime | None
+    created_at: datetime.datetime
+    raw: str

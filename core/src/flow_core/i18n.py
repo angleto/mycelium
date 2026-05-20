@@ -112,6 +112,8 @@ class MessageCode(enum.StrEnum):
     GOOGLE_CALENDAR_API_ERROR = "google_calendar.api_error"
     TELEGRAM_NOT_CONFIGURED = "telegram.not_configured"
     TELEGRAM_WEBHOOK_FORBIDDEN = "telegram.webhook_forbidden"
+    AGENT_TOKEN_NOT_FOUND = "agent_token.not_found"  # noqa: S105 (message code, not a secret)
+    AGENT_TOKEN_INVALID = "agent_token.invalid"  # noqa: S105 (message code, not a secret)
     DOMAIN_ERROR = "domain.error"
 
 
@@ -263,6 +265,8 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
             "Telegram bot is not configured on this instance"
         ),
         MessageCode.TELEGRAM_WEBHOOK_FORBIDDEN: "Forbidden webhook caller",
+        MessageCode.AGENT_TOKEN_NOT_FOUND: "Agent token not found",
+        MessageCode.AGENT_TOKEN_INVALID: "Invalid or revoked agent token",
         MessageCode.DOMAIN_ERROR: "Domain error",
     },
 }

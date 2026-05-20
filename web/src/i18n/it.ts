@@ -1051,5 +1051,50 @@ export const it: Catalog = {
     pick: 'scegli riferimento...',
     insert: 'Inserisci @rif',
   },
+  connectors: {
+    gmail: {
+      title: 'Gmail',
+      connect: 'Collega Gmail',
+      disconnect: 'Scollega',
+      redirectWarning:
+        'Verrai reindirizzato a Google per autorizzare Flow a leggere e inviare email per tuo conto.',
+      connectedBanner: 'Gmail collegato.',
+      since: 'Ultima sincronizzazione',
+    },
+    telegram: {
+      title: 'Telegram',
+      link: 'Collega Telegram',
+      unlink: 'Scollega',
+      deepLinkLabel: 'Apri Telegram',
+      codeLabel: 'Codice',
+      expiresAt: 'Scade il',
+      waiting:
+        'Invia il codice al bot, oppure usa il link diretto. La pagina si aggiornera quando il collegamento sara confermato.',
+      linkedAt: 'Collegato il',
+    },
+    mcp: {
+      title: 'MCP (Claude Desktop)',
+      generate: 'Genera nuovo token MCP',
+      name: 'Nome',
+      ttlDays: 'Validita (giorni)',
+      confirmGenerate: 'Crea',
+      cancel: 'Annulla',
+      dismiss: 'Chiudi',
+      token: 'Token grezzo',
+      tokenWarning:
+        'Copia il token adesso: non verra mostrato di nuovo. Se lo perdi, revocalo e generane uno nuovo.',
+      copyToken: 'Copia token',
+      copySnippet: 'Copia snippet',
+      configHint:
+        'Incolla questo nella configurazione di Claude Desktop. Sostituisci il percorso /path/to/flow/mcp con il tuo checkout locale.',
+      revoke: 'Revoca',
+      prefix: 'Prefisso',
+      createdAt: 'Creato',
+      lastUsedAt: 'Ultimo uso',
+      revoked: 'revocato',
+      expires: 'Scade',
+      empty: 'Nessun token MCP creato.',
+    },
+  },
   error: { generic: 'Si e verificato un errore.', network: 'Errore di rete.' },
 }

@@ -15,6 +15,7 @@ from flow_api.routers import (
     admin_users,
     advisory,
     agent_runs,
+    agent_tokens,
     attachments,
     auth,
     billing,
@@ -139,6 +140,7 @@ def create_app() -> FastAPI:
     app.include_router(schedule.router)
     app.include_router(executors.router)
     app.include_router(agent_runs.router)
+    app.include_router(agent_tokens.router)
     app.include_router(dispatch.router)
     app.include_router(time_tracking.router)
     app.include_router(budgets.router)

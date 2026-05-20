@@ -3,9 +3,12 @@ import { useTranslation } from 'react-i18next'
 import { api, errMessage } from '../api/client'
 import { BuildInfo } from '../components/BuildInfo'
 import { EstimatePresets } from '../components/EstimatePresets'
+import { GmailConnect } from '../components/GmailConnect'
 import { IssuerProfiles } from '../components/IssuerProfiles'
 import { ExecutorsAdmin } from '../components/ExecutorsAdmin'
+import { McpConnect } from '../components/McpConnect'
 import { MemoryChannelsAdmin } from '../components/MemoryChannelsAdmin'
+import { TelegramLink } from '../components/TelegramLink'
 import { useMe } from '../auth/useMe'
 import { isAdminMode } from '../auth/session'
 import type { components } from '../api/schema'
@@ -155,6 +158,9 @@ export function SettingsRoute() {
         </form>
       )}
     </section>
+    <GmailConnect />
+    <TelegramLink />
+    <McpConnect />
     {me?.is_admin && isAdminMode() && <MemoryChannelsAdmin />}
     <ExecutorsAdmin />
     <IssuerProfiles />

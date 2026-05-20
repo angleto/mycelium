@@ -1050,6 +1050,51 @@ export const en = {
     pick: 'pick reference...',
     insert: 'Insert @ref',
   },
+  connectors: {
+    gmail: {
+      title: 'Gmail',
+      connect: 'Connect Gmail',
+      disconnect: 'Disconnect',
+      redirectWarning:
+        'You will be redirected to Google to authorize Flow to read and send mail on your behalf.',
+      connectedBanner: 'Gmail connected.',
+      since: 'Last sync',
+    },
+    telegram: {
+      title: 'Telegram',
+      link: 'Link Telegram',
+      unlink: 'Unlink',
+      deepLinkLabel: 'Open Telegram',
+      codeLabel: 'Code',
+      expiresAt: 'Expires at',
+      waiting:
+        'Send the code to the bot, or follow the deep link. This page will update once the link is confirmed.',
+      linkedAt: 'Linked at',
+    },
+    mcp: {
+      title: 'MCP (Claude Desktop)',
+      generate: 'Generate new MCP token',
+      name: 'Name',
+      ttlDays: 'TTL (days)',
+      confirmGenerate: 'Create',
+      cancel: 'Cancel',
+      dismiss: 'Dismiss',
+      token: 'Raw token',
+      tokenWarning:
+        'Copy the token now: it will not be shown again. If lost, revoke it and generate a new one.',
+      copyToken: 'Copy token',
+      copySnippet: 'Copy snippet',
+      configHint:
+        'Paste this into your Claude Desktop config. Replace the /path/to/flow/mcp path with your local checkout.',
+      revoke: 'Revoke',
+      prefix: 'Prefix',
+      createdAt: 'Created',
+      lastUsedAt: 'Last used',
+      revoked: 'revoked',
+      expires: 'Expires',
+      empty: 'No MCP tokens yet.',
+    },
+  },
   error: { generic: 'Something went wrong.', network: 'Network error.' },
 }
 
