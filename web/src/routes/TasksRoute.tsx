@@ -7,10 +7,12 @@ import { TagChip } from '../components/TagChip'
 import { PriorityChip } from '../components/PriorityChip'
 import { ScaleSelect } from '../components/ScaleSelect'
 import { useFocus } from '../lib/focus'
+import { useLinkedClientProject } from '../lib/linkedClientProject'
 import type { components } from '../api/schema'
 
 type Task = components['schemas']['TaskOut']
 type Tag = components['schemas']['TagOut']
+type Project = components['schemas']['ProjectOut']
 type Running = components['schemas']['TimeEntryOut']
 type State = components['schemas']['StateOut']
 type Wf = components['schemas']['WorkflowOut']
@@ -31,6 +33,11 @@ export function TasksRoute() {
   const { focusIds, active: focusActive } = useFocus()
   const [tasks, setTasks] = useState<Task[]>([])
   const [tags, setTags] = useState<Tag[]>([])
+  // Projects come from /projects (not /tags) because only ProjectOut
+  // carries client_tag_id, which we need to (a) filter the Project
+  // dropdown by selected client and (b) auto-set Client when the user
+  // picks a Project.
+  const [projectsByClient, setProjectsByClient] = useState<Project[]>([])
   const [filter, setFilter] = useState('')
   const [title, setTitle] = useState('')
   // Default Low/Low (value 4 on the 1=Critical..5=Trivial scale).
@@ -38,8 +45,6 @@ export function TasksRoute() {
   const [urgency, setUrgency] = useState(4)
   const [due, setDue] = useState('')
   const [q, setQ] = useState('')
-  const [clientId, setClientId] = useState('')
-  const [projectId, setProjectId] = useState('')
   const [running, setRunning] = useState<Running[]>([])
   const [now, setNow] = useState<number>(() => Date.now())
   const [busy, setBusy] = useState(false)
@@ -62,8 +67,16 @@ export function TasksRoute() {
     allowed.get(e.from)!.add(e.to)
   }
 
+  const {
+    clientId,
+    projectId,
+    onPickClient,
+    onPickProject,
+    filterProjectsByClient,
+  } = useLinkedClientProject(projectsByClient)
+
   const clients = tags.filter((x) => x.kind === 'client')
-  const projects = tags.filter((x) => x.kind === 'project')
+  const projects = filterProjectsByClient(tags.filter((x) => x.kind === 'project'))
 
   const loadTasks = useCallback(async () => {
     setErr(null)
@@ -81,16 +94,18 @@ export function TasksRoute() {
     let active = true
     void (async () => {
       const h = workspaceHeader()
-      const [tk, tg] = await Promise.all([
+      const [tk, tg, pj] = await Promise.all([
         api.GET('/tasks', {
           params: { header: h, query: filter ? { tag_id: filter } : {} },
         }),
         api.GET('/tags', { params: { header: h } }),
+        api.GET('/projects', { params: { header: h } }),
       ])
       if (!active) return
       if (tk.data) setTasks(tk.data)
       else setErr(errMessage(tk.error))
       if (tg.data) setTags(tg.data)
+      if (pj.data) setProjectsByClient(pj.data)
     })()
     return () => {
       active = false
@@ -384,7 +399,7 @@ export function TasksRoute() {
         </label>
         <label>
           {t('tasks.client')}
-          <select value={clientId} onChange={(e) => setClientId(e.target.value)}>
+          <select value={clientId} onChange={(e) => onPickClient(e.target.value)}>
             <option value="">{t('tasks.noClient')}</option>
             {clients.map((c) => (
               <option key={c.id} value={c.id}>
@@ -395,7 +410,7 @@ export function TasksRoute() {
         </label>
         <label>
           {t('tasks.project')}
-          <select value={projectId} onChange={(e) => setProjectId(e.target.value)}>
+          <select value={projectId} onChange={(e) => onPickProject(e.target.value)}>
             <option value="">{t('tasks.noProject')}</option>
             {projects.map((p) => (
               <option key={p.id} value={p.id}>

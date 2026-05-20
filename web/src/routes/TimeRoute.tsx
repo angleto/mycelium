@@ -14,6 +14,7 @@ import {
   toLocalInput,
   fromLocalInput,
 } from '../lib/tz'
+import { useLinkedClientProject } from '../lib/linkedClientProject'
 import type { components } from '../api/schema'
 
 type Task = components['schemas']['TaskOut']
@@ -22,6 +23,7 @@ type TaskRep = components['schemas']['TaskTimeReportOut']
 type Row = components['schemas']['ReportRowOut']
 type Group = components['schemas']['ReportGroup']
 type Tag = components['schemas']['TagOut']
+type Project = components['schemas']['ProjectOut']
 type Scope = 'all' | 'mine' | 'ai'
 type BillableF = 'all' | 'yes' | 'no'
 
@@ -114,10 +116,17 @@ export function TimeRoute() {
   const [from, setFrom] = useState('')
   const [to, setTo] = useState('')
   const [billableF, setBillableF] = useState<BillableF>('all')
-  const [clientId, setClientId] = useState('')
-  const [projectId, setProjectId] = useState('')
   const [clients, setClients] = useState<Tag[]>([])
   const [projects, setProjects] = useState<Tag[]>([])
+  const [projectProfiles, setProjectProfiles] = useState<Project[]>([])
+  const {
+    clientId,
+    projectId,
+    onPickClient,
+    onPickProject,
+    filterProjectsByClient,
+  } = useLinkedClientProject(projectProfiles)
+  const projectsForClient = filterProjectsByClient(projects)
   const [pick, setPick] = useState('')
   const [now, setNow] = useState<number>(() => Date.now())
   const [err, setErr] = useState<string | null>(null)
@@ -211,15 +220,17 @@ export function TimeRoute() {
     let active = true
     void (async () => {
       const h = workspaceHeader()
-      const [tk, cl, pr] = await Promise.all([
+      const [tk, cl, pr, pp] = await Promise.all([
         api.GET('/tasks', { params: { header: h } }),
         api.GET('/tags', { params: { header: h, query: { kind: 'client' } } }),
         api.GET('/tags', { params: { header: h, query: { kind: 'project' } } }),
+        api.GET('/projects', { params: { header: h } }),
       ])
       if (!active) return
       if (tk.data) setTasks(tk.data)
       if (cl.data) setClients(cl.data)
       if (pr.data) setProjects(pr.data)
+      if (pp.data) setProjectProfiles(pp.data)
       await resetEntries()
     })()
     return () => {
@@ -661,7 +672,7 @@ export function TimeRoute() {
           {t('time.client')}
           <select
             value={clientId}
-            onChange={(e) => setClientId(e.target.value)}
+            onChange={(e) => onPickClient(e.target.value)}
           >
             <option value="">{t('graph.scopeAll')}</option>
             {clients.map((c) => (
@@ -675,10 +686,10 @@ export function TimeRoute() {
           {t('time.project')}
           <select
             value={projectId}
-            onChange={(e) => setProjectId(e.target.value)}
+            onChange={(e) => onPickProject(e.target.value)}
           >
             <option value="">{t('graph.scopeAll')}</option>
-            {projects.map((p) => (
+            {projectsForClient.map((p) => (
               <option key={p.id} value={p.id}>
                 {p.name}
               </option>

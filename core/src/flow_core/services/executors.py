@@ -144,7 +144,11 @@ async def ensure_workspace_executors(session: AsyncSession, *, org_id: uuid.UUID
 
 async def list_executors(session: AsyncSession, *, org_id: uuid.UUID) -> list[Executor]:
     """All executors for the workspace (RLS-scoped), deterministically
-    ordered (kind, name, id)."""
+    ordered (kind, name, id). Self-healing: the lazy seed used to run
+    only on schedule recompute, so a user landing on Settings before
+    ever triggering a schedule saw an empty list; do the (idempotent)
+    seed here too."""
+    await ensure_workspace_executors(session, org_id=org_id)
     rows = (
         (
             await session.execute(
