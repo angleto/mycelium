@@ -102,9 +102,15 @@ async def test_purge_project_wipes_subgraph() -> None:
     async with tenant_session(str(org), str(user)) as s:
         await taxonomy.purge_project(s, org_id=org, actor_id=user, tag_id=pr.id)
     async with tenant_session(str(org), str(user)) as s:
-        assert (await s.execute(select(Tag).where(Tag.id == pr.id))).scalar_one_or_none() is None
-        assert (await s.execute(select(Task).where(Task.id == task_id))).scalar_one_or_none() is None
-        notes_left = (await s.execute(select(Note).where(Note.project_id == pr.id))).scalars().all()
+        tag_row = (await s.execute(select(Tag).where(Tag.id == pr.id))).scalar_one_or_none()
+        assert tag_row is None
+        task_row = (
+            await s.execute(select(Task).where(Task.id == task_id))
+        ).scalar_one_or_none()
+        assert task_row is None
+        notes_left = (
+            await s.execute(select(Note).where(Note.project_id == pr.id))
+        ).scalars().all()
         assert notes_left == []
 
 

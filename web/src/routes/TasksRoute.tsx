@@ -101,6 +101,7 @@ export function TasksRoute() {
     projectId,
     onPickClient,
     onPickProject,
+    setClientId,
     filterProjectsByClient,
   } = useLinkedClientProject(projectsByClient)
 
