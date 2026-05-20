@@ -15,6 +15,8 @@ COPY web/ ./
 RUN pnpm build
 
 FROM nginx:1.27-alpine
+LABEL org.opencontainers.image.source="https://github.com/angleto/flow"
+LABEL org.opencontainers.image.licenses="AGPL-3.0-or-later"
 # Non-root: listen on 8080 (see nginx.conf), matches the Service
 # targetPort and the pod's containerPort.
 COPY docker/nginx.conf /etc/nginx/conf.d/default.conf

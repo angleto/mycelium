@@ -26,6 +26,8 @@ RUN --mount=type=cache,target=/root/.cache/uv uv sync --no-dev
 # ---
 
 FROM python:3.12-slim
+LABEL org.opencontainers.image.source="https://github.com/angleto/flow"
+LABEL org.opencontainers.image.licenses="AGPL-3.0-or-later"
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PATH="/app/.venv/bin:$PATH"

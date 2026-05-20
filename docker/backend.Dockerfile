@@ -40,6 +40,11 @@ RUN /app/.venv/bin/python -c "from sentence_transformers import SentenceTransfor
 # ---
 
 FROM python:3.12-slim
+# OCI image-source label: GHCR uses it to auto-link the package to the
+# source repo on first push from a workflow GITHUB_TOKEN, which gates
+# write permission on subsequent pushes.
+LABEL org.opencontainers.image.source="https://github.com/angleto/flow"
+LABEL org.opencontainers.image.licenses="AGPL-3.0-or-later"
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PATH="/app/.venv/bin:$PATH" \
