@@ -35,6 +35,15 @@ class Event(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, Base):
     start_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     end_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     location: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    # Provenance for external-ingested events (epic #125 P1). NULL on
+    # native events; non-NULL pair = an event mirrored from a remote
+    # provider (currently only "google"). The DB UNIQUE on
+    # (external_subscription_id, external_id) enforces ingest idempotency.
+    external_provider: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    external_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    external_subscription_id: Mapped[uuid.UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True), nullable=True
+    )
 
 
 class EventParticipant(OrgScopedMixin, Base):

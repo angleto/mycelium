@@ -103,6 +103,15 @@ class MessageCode(enum.StrEnum):
     RECURRENCE_WITH_DEPS = "recurrence.with_dependencies"
     WORKSPACE_NOT_OWNER = "workspace.not_owner"
     WORKSPACE_SOLE = "workspace.sole"
+    OAUTH_NOT_CONFIGURED = "oauth.not_configured"
+    OAUTH_STATE_INVALID = "oauth.state_invalid"
+    OAUTH_EXCHANGE_FAILED = "oauth.exchange_failed"
+    OAUTH_SCOPE_INVALID = "oauth.scope_invalid"
+    OAUTH_REFRESH_FAILED = "oauth.refresh_failed"
+    GOOGLE_CALENDAR_SUBSCRIPTION_NOT_FOUND = "google_calendar.subscription_not_found"
+    GOOGLE_CALENDAR_API_ERROR = "google_calendar.api_error"
+    TELEGRAM_NOT_CONFIGURED = "telegram.not_configured"
+    TELEGRAM_WEBHOOK_FORBIDDEN = "telegram.webhook_forbidden"
     DOMAIN_ERROR = "domain.error"
 
 
@@ -231,6 +240,29 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
         MessageCode.WORKSPACE_SOLE: (
             "Cannot delete your only workspace: create or join another first"
         ),
+        MessageCode.OAUTH_NOT_CONFIGURED: (
+            "Google OAuth is not configured on this server"
+        ),
+        MessageCode.OAUTH_STATE_INVALID: "Invalid or expired OAuth state",
+        MessageCode.OAUTH_EXCHANGE_FAILED: (
+            "Failed to exchange the authorization code for tokens: {detail}"
+        ),
+        MessageCode.OAUTH_SCOPE_INVALID: (
+            "Invalid OAuth scope: must be one of gmail, calendar, both"
+        ),
+        MessageCode.OAUTH_REFRESH_FAILED: (
+            "Failed to refresh the Google access token: {detail}"
+        ),
+        MessageCode.GOOGLE_CALENDAR_SUBSCRIPTION_NOT_FOUND: (
+            "Google Calendar subscription not found"
+        ),
+        MessageCode.GOOGLE_CALENDAR_API_ERROR: (
+            "Google Calendar API error: {detail}"
+        ),
+        MessageCode.TELEGRAM_NOT_CONFIGURED: (
+            "Telegram bot is not configured on this instance"
+        ),
+        MessageCode.TELEGRAM_WEBHOOK_FORBIDDEN: "Forbidden webhook caller",
         MessageCode.DOMAIN_ERROR: "Domain error",
     },
 }

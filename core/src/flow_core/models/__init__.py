@@ -47,6 +47,10 @@ from flow_core.models.email import (
 )
 from flow_core.models.event import Event, EventParticipant
 from flow_core.models.executor import Executor, ExecutorKind
+from flow_core.models.google_calendar import (
+    CalendarSubscription,
+    GoogleCalendarStatus,
+)
 from flow_core.models.invoice import (
     ConservationAdhesion,
     ConservationStatus,
@@ -87,6 +91,7 @@ from flow_core.models.task import (
 from flow_core.models.task_assignee import TaskAssignee
 from flow_core.models.task_handoff import HandoffStatus, TaskHandoff
 from flow_core.models.task_tag import TaskTag
+from flow_core.models.telegram import TelegramLink, TelegramLinkCode, TelegramUpdate
 from flow_core.models.time_entry import TimeEntry, TimeSource
 from flow_core.models.user import User
 from flow_core.models.workflow import (
@@ -109,6 +114,7 @@ __all__ = [
     "Budget",
     "BudgetPeriod",
     "CalendarHoliday",
+    "CalendarSubscription",
     "ClientProfile",
     "Comment",
     "ConservationAdhesion",
@@ -130,6 +136,7 @@ __all__ = [
     "ExecKind",
     "Executor",
     "ExecutorKind",
+    "GoogleCalendarStatus",
     "HandoffStatus",
     "Invoice",
     "InvoiceCounter",
@@ -173,6 +180,9 @@ __all__ = [
     "TaskHandoff",
     "TaskRecurrence",
     "TaskTag",
+    "TelegramLink",
+    "TelegramLinkCode",
+    "TelegramUpdate",
     "Tier",
     "TimeEntry",
     "TimeSource",

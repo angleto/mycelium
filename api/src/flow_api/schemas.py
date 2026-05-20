@@ -1694,3 +1694,27 @@ class ReminderOut(BaseModel):
     id: uuid.UUID
     task_id: uuid.UUID
     offset_minutes: int
+
+
+# --- Telegram bot integration (epic #125 P2) ---
+
+
+class TelegramLinkRequestOut(BaseModel):
+    """The single-use deep-link payload the SPA renders as a button /
+    QR. ``code`` is the short token embedded in the URL; ``deep_link``
+    is the pre-built ``https://t.me/<bot>?start=<code>``."""
+
+    code: str
+    expires_at: datetime.datetime
+    bot_username: str
+    deep_link: str
+
+
+class TelegramLinkStatusOut(BaseModel):
+    linked: bool
+    chat_username: str | None = None
+    linked_at: datetime.datetime | None = None
+
+
+class TelegramWebhookOut(BaseModel):
+    ok: bool

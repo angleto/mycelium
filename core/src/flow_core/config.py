@@ -120,11 +120,46 @@ class Settings(BaseSettings):
     # the middleware (same-origin dev/proxy needs no CORS).
     cors_origins: str = "http://localhost:5173"
 
+    # Google OAuth 2.0 (Gmail + Google Calendar; epic #125 P1). All
+    # empty by default so OSS self-hosters / dev / the test-suite are
+    # unaffected; ``google_configured`` is True iff all three are set
+    # and the router refuses to start an OAuth flow otherwise (same
+    # fail-closed spirit as smtp_configured). The redirect URI must
+    # match the one registered in the Google Cloud console exactly; it
+    # points at our public callback (``/oauth/google/callback``).
+    google_client_id: str = ""
+    google_client_secret: str = ""
+    google_redirect_uri: str = ""
+    # Tick interval for the periodic Google Calendar sync worker (epic
+    # #125 P1). Modest by default (do not hammer Google's API);
+    # per-subscription and exception-isolated, like the dispatch loop.
+    google_calendar_sync_interval_seconds: int = 300
+
     # Closed-loop dispatch worker (docs/adr/0025 P5). The periodic tick
     # interval, in seconds. Modest by default (do not hammer the
     # scheduler); per-workspace and exception-isolated. Configurable via
     # FLOW_DISPATCH_LOOP_INTERVAL_SECONDS like the other worker knobs.
     dispatch_loop_interval_seconds: int = 60
+
+    # Telegram bot integration (epic #125 P2). Empty defaults so OSS
+    # self-host + tests are unaffected: the link router refuses to mint
+    # codes when the bot is not configured, the webhook 404s on an empty
+    # secret, and the Telegram NotificationSender records a failure
+    # instead of trying to reach api.telegram.org. The HTTP client
+    # Protocol allows a fake-in-test injection (same seam pattern as the
+    # email connector / LLM provider). The bot token + webhook secret
+    # are deploy secrets (env / k8s Secret); the bot username is public
+    # (built into the t.me deep-link). The webhook base URL falls back
+    # to frontend_base_url when not set, since the SPA + API typically
+    # share a host in the OSS deploy; production override points at the
+    # API origin.
+    telegram_bot_token: str = ""
+    telegram_bot_username: str = ""
+    telegram_webhook_secret: str = ""
+    telegram_webhook_base_url: str = ""
+    # Network timeout for Telegram Bot API calls (seconds). Short on
+    # purpose: the webhook handler must reply quickly or Telegram retries.
+    telegram_http_timeout_seconds: float = 10.0
 
     # App
     env: str = "dev"
@@ -167,6 +202,36 @@ class Settings(BaseSettings):
         if self.smtp_host and not self.smtp_from:
             raise ValueError("FLOW_SMTP_HOST is set but FLOW_SMTP_FROM is required to enable SMTP")
         return self
+
+    @property
+    def google_configured(self) -> bool:
+        """Google OAuth is active iff client_id, client_secret and
+        redirect_uri are all set. Same fail-closed spirit as
+        smtp_configured: the OAuth router rejects flows when False."""
+        return bool(
+            self.google_client_id and self.google_client_secret and self.google_redirect_uri
+        )
+
+    @property
+    def telegram_configured(self) -> bool:
+        """Telegram bot is active iff bot token, bot username and the
+        webhook secret are all set. Same fail-closed spirit as
+        smtp_configured / google_configured: the router refuses to mint
+        link codes and the webhook 404s when False. The username is
+        required because the deep-link URL (``https://t.me/<bot>?start=
+        <code>``) cannot be built without it."""
+        return bool(
+            self.telegram_bot_token
+            and self.telegram_bot_username
+            and self.telegram_webhook_secret
+        )
+
+    @property
+    def telegram_webhook_url_base(self) -> str:
+        """Resolved public base URL the bot webhook is exposed at: the
+        explicit override when set, otherwise the SPA's base URL (the
+        co-host default in OSS deploys). Empty when neither is set."""
+        return self.telegram_webhook_base_url or self.frontend_base_url
 
     @property
     def smtp_configured(self) -> bool:

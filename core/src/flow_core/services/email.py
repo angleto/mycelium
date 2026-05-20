@@ -20,6 +20,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from flow_core.concurrency import optimistic_update
+from flow_core.config import get_settings
 from flow_core.crypto import decrypt_secret, encrypt_secret
 from flow_core.email_connector import (
     EmailConnector,
@@ -27,6 +28,7 @@ from flow_core.email_connector import (
     connector_for,
 )
 from flow_core.errors import DomainError, NotFoundError
+from flow_core.google_api import GoogleApiClient, google_api_client
 from flow_core.i18n import MessageCode
 from flow_core.models.email import (
     EmailAccount,
@@ -206,10 +208,47 @@ async def delete_account(
     )
 
 
-def _resolve_connector(account: EmailAccount, connector: EmailConnector | None) -> EmailConnector:
+async def access_token_for(
+    account: EmailAccount,
+    *,
+    google_api: GoogleApiClient | None = None,
+) -> str:
+    """Return a usable secret for the connector. For provider=gmail the
+    stored ``secret_encrypted`` is a refresh token: exchange it at
+    Google's token endpoint for a short-lived access token (XOAUTH2 uses
+    the access token, not the refresh token). For non-gmail providers it
+    is the IMAP password (or app password) and is returned as-is.
+
+    The Google HTTP boundary is a Protocol seam (``GoogleApiClient``) so
+    tests inject a fake; prod uses the real REST client."""
+    plaintext = decrypt_secret(account.secret_encrypted)
+    if account.provider is not EmailProvider.gmail:
+        return plaintext
+    s = get_settings()
+    if not s.google_configured:
+        raise DomainError(MessageCode.OAUTH_NOT_CONFIGURED)
+    api = google_api or google_api_client()
+    try:
+        token = await api.refresh_access_token(
+            refresh_token=plaintext,
+            client_id=s.google_client_id,
+            client_secret=s.google_client_secret,
+        )
+    except Exception as exc:
+        raise DomainError(MessageCode.OAUTH_REFRESH_FAILED, detail=str(exc)) from exc
+    return token.access_token
+
+
+async def _resolve_connector(
+    account: EmailAccount,
+    connector: EmailConnector | None,
+    *,
+    google_api: GoogleApiClient | None = None,
+) -> EmailConnector:
     if connector is not None:
         return connector
-    return connector_for(account, decrypt_secret(account.secret_encrypted))
+    secret = await access_token_for(account, google_api=google_api)
+    return connector_for(account, secret)
 
 
 async def sync_account(
@@ -227,7 +266,7 @@ async def sync_account(
     multi-account sync."""
     await require_role(session, org_id, actor_id, Role.member)
     account = await get_account(session, org_id=org_id, account_id=account_id)
-    conn = _resolve_connector(account, connector)
+    conn = await _resolve_connector(account, connector)
     try:
         fetched = await conn.fetch(limit=limit)
     except Exception as exc:
@@ -425,7 +464,7 @@ async def send_message(
 ) -> str:
     await require_role(session, org_id, actor_id, Role.member)
     account = await get_account(session, org_id=org_id, account_id=account_id)
-    conn = _resolve_connector(account, connector)
+    conn = await _resolve_connector(account, connector)
     sent_id = await conn.send(
         OutgoingMessage(
             to_addrs=list(to_addrs),
