@@ -131,6 +131,11 @@ type Action =
   | { type: 'tickComplete' }
   | { type: 'updateConfig'; patch: Partial<PomodoroConfig> }
   | { type: 'rollDay' }
+  | { type: 'adjustEndsAt'; deltaMs: number }
+  | { type: 'setRemaining'; ms: number }
+
+const MIN_REMAINING_MS = 10_000
+const MAX_REMAINING_MS = 4 * 60 * 60_000
 
 function reducer(state: State, action: Action): State {
   const { config, session } = state
@@ -209,6 +214,38 @@ function reducer(state: State, action: Action): State {
       saveSession(sess)
       return { config, session: sess }
     }
+    case 'adjustEndsAt': {
+      if (session.phase === 'idle') return state
+      if (session.pausedRemainingMs !== null) {
+        const next = Math.min(
+          MAX_REMAINING_MS,
+          Math.max(MIN_REMAINING_MS, session.pausedRemainingMs + action.deltaMs),
+        )
+        const sess: PomodoroSession = { ...session, pausedRemainingMs: next }
+        saveSession(sess)
+        return { config, session: sess }
+      }
+      const remaining = Math.max(0, session.endsAt - Date.now())
+      const next = Math.min(
+        MAX_REMAINING_MS,
+        Math.max(MIN_REMAINING_MS, remaining + action.deltaMs),
+      )
+      const sess: PomodoroSession = { ...session, endsAt: Date.now() + next }
+      saveSession(sess)
+      return { config, session: sess }
+    }
+    case 'setRemaining': {
+      if (session.phase === 'idle') return state
+      const next = Math.min(MAX_REMAINING_MS, Math.max(MIN_REMAINING_MS, action.ms))
+      if (session.pausedRemainingMs !== null) {
+        const sess: PomodoroSession = { ...session, pausedRemainingMs: next }
+        saveSession(sess)
+        return { config, session: sess }
+      }
+      const sess: PomodoroSession = { ...session, endsAt: Date.now() + next }
+      saveSession(sess)
+      return { config, session: sess }
+    }
   }
 }
 
@@ -220,6 +257,8 @@ export type Pomodoro = {
   config: PomodoroConfig
   session: PomodoroSession
   remainingSec: number
+  totalSec: number
+  progress: number
   isPaused: boolean
   isRunning: boolean
   suggestedNext: Phase
@@ -229,6 +268,8 @@ export type Pomodoro = {
   skip: () => void
   stop: () => void
   updateConfig: (patch: Partial<PomodoroConfig>) => void
+  adjustEndsAt: (deltaMs: number) => void
+  setRemaining: (ms: number) => void
 }
 
 function maybeNotify(prev: Phase, suggestedNext: Phase, cfg: PomodoroConfig): void {
@@ -378,11 +419,28 @@ export function usePomodoro(): Pomodoro {
     (patch: Partial<PomodoroConfig>) => dispatch({ type: 'updateConfig', patch }),
     [],
   )
+  const adjustEndsAt = useCallback(
+    (deltaMs: number) => dispatch({ type: 'adjustEndsAt', deltaMs }),
+    [],
+  )
+  const setRemaining = useCallback(
+    (ms: number) => dispatch({ type: 'setRemaining', ms }),
+    [],
+  )
+
+  const totalMs = phaseDurationMs(session.phase, config)
+  const totalSec = Math.ceil(totalMs / 1000)
+  const progress =
+    session.phase === 'idle' || totalMs <= 0
+      ? 0
+      : Math.min(1, Math.max(0, 1 - remainingMs / totalMs))
 
   return {
     config,
     session,
     remainingSec,
+    totalSec,
+    progress,
     isPaused,
     isRunning,
     suggestedNext,
@@ -392,6 +450,8 @@ export function usePomodoro(): Pomodoro {
     skip,
     stop,
     updateConfig,
+    adjustEndsAt,
+    setRemaining,
   }
 }
 

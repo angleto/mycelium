@@ -165,6 +165,36 @@ export function ClientsProjectsRoute() {
     await load()
   }
 
+  async function purgeProject(p: Project): Promise<void> {
+    setErr(null)
+    setMsg(null)
+    if (!window.confirm(t('cp.confirmPurgeProject', { name: p.name }))) return
+    const { error } = await api.DELETE('/projects/{tag_id}', {
+      params: { header: workspaceHeader(), path: { tag_id: p.id } },
+    })
+    if (error) {
+      setErr(errMessage(error))
+      return
+    }
+    setMsg(t('cp.purged'))
+    await load()
+  }
+
+  async function purgeClient(c: Client): Promise<void> {
+    setErr(null)
+    setMsg(null)
+    if (!window.confirm(t('cp.confirmPurgeClient', { name: c.name }))) return
+    const { error } = await api.DELETE('/clients/{tag_id}', {
+      params: { header: workspaceHeader(), path: { tag_id: c.id } },
+    })
+    if (error) {
+      setErr(errMessage(error))
+      return
+    }
+    setMsg(t('cp.purged'))
+    await load()
+  }
+
   async function setArchive(id: string, version: number, archived: boolean) {
     setErr(null)
     setMsg(null)
@@ -244,6 +274,16 @@ export function ClientsProjectsRoute() {
         >
           {p.status === 'archived' ? t('cp.unarchive') : t('cp.archive')}
         </button>
+        {p.status === 'archived' && (
+          <button
+            type="button"
+            className="btn--ghost btn--sm btn--danger"
+            onClick={() => void purgeProject(p)}
+            title={t('cp.purgeProjectHint')}
+          >
+            {t('cp.purge')}
+          </button>
+        )}
       </div>
       {editP === p.id && (
         <form
@@ -443,6 +483,16 @@ export function ClientsProjectsRoute() {
                         ? t('cp.unarchive')
                         : t('cp.archive')}
                     </button>
+                    {c.status === 'archived' && (
+                      <button
+                        type="button"
+                        className="btn--ghost btn--sm btn--danger"
+                        onClick={() => void purgeClient(c)}
+                        title={t('cp.purgeClientHint')}
+                      >
+                        {t('cp.purge')}
+                      </button>
+                    )}
                   </div>
 
                   {editC === c.id && (

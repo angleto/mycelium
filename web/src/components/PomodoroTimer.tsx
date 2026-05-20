@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { formatMmSs, usePomodoro, type Phase } from '../lib/pomodoro'
 
@@ -9,85 +9,122 @@ const PHASE_LABEL_KEY: Record<Phase, string> = {
   long_break: 'pomodoro.longBreak',
 }
 
-const POSITION_KEY = 'flow.pomodoro.collapsed'
-
-function loadCollapsed(): boolean {
-  try {
-    return localStorage.getItem(POSITION_KEY) === '1'
-  } catch {
-    return false
-  }
+const PHASE_ICON: Record<Phase, string> = {
+  idle: '🍅',
+  focus: '🎯',
+  short_break: '☕',
+  long_break: '🌿',
 }
 
-function saveCollapsed(v: boolean): void {
-  try {
-    localStorage.setItem(POSITION_KEY, v ? '1' : '0')
-  } catch {
-    /* ignore */
-  }
-}
-
-// Floating bottom-right pomodoro dock. Collapsed = a single small chip
-// showing the current phase + remaining time (click to expand). Expanded
-// = phase, big timer, primary action (start/pause/resume), skip/stop,
-// daily counter.
+// Topbar widget: a single button showing phase, mm:ss and a progress bar.
+// Click toggles a popover with start/pause/skip/stop, edit-running controls,
+// and inline settings. Lives in topbar__actions (see AppShell), not floating.
 export function PomodoroTimer() {
   const { t } = useTranslation()
   const p = usePomodoro()
-  const [collapsed, setCollapsed] = useState<boolean>(loadCollapsed)
+  const [open, setOpen] = useState(false)
+  const wrapRef = useRef<HTMLDivElement | null>(null)
 
+  // Close popover on outside click / Escape.
   useEffect(() => {
-    saveCollapsed(collapsed)
-  }, [collapsed])
+    if (!open) return
+    function onDocMouse(e: MouseEvent): void {
+      const el = wrapRef.current
+      if (!el) return
+      if (e.target instanceof Node && el.contains(e.target)) return
+      setOpen(false)
+    }
+    function onKey(e: KeyboardEvent): void {
+      if (e.key === 'Escape') setOpen(false)
+    }
+    document.addEventListener('mousedown', onDocMouse)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDocMouse)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [open])
 
-  // When idle and collapsed, show a slim "open" pill instead of the
-  // chip with the timer (the timer is 00:00 which is useless info).
   const isIdle = p.session.phase === 'idle'
   const phaseLabel = t(PHASE_LABEL_KEY[p.session.phase] || 'pomodoro.idle')
+  const displaySec = isIdle ? p.config.focusMin * 60 : p.remainingSec
+  const progressPct = Math.round(p.progress * 100)
 
-  if (collapsed) {
-    return (
+  return (
+    <div className="pomodoro" ref={wrapRef}>
       <button
         type="button"
         className={
-          'pomodoro pomodoro--chip' +
-          (p.isRunning ? ' pomodoro--running' : '') +
-          (p.isPaused ? ' pomodoro--paused' : '')
+          'pomodoro__trigger' +
+          (p.isRunning ? ' pomodoro__trigger--running' : '') +
+          (p.isPaused ? ' pomodoro__trigger--paused' : '') +
+          (isIdle ? ' pomodoro__trigger--idle' : '')
         }
-        onClick={() => setCollapsed(false)}
+        aria-expanded={open}
+        aria-label={t('pomodoro.openTimer')}
         title={t('pomodoro.title')}
+        onClick={() => setOpen((v) => !v)}
       >
         <span className="pomodoro__icon" aria-hidden="true">
-          {isIdle ? '🍅' : p.session.phase === 'focus' ? '🎯' : '☕'}
+          {PHASE_ICON[p.session.phase]}
         </span>
-        {!isIdle && <span className="pomodoro__mono">{formatMmSs(p.remainingSec)}</span>}
+        <span className="pomodoro__mono">{formatMmSs(displaySec)}</span>
+        <span
+          className="pomodoro__bar"
+          role="progressbar"
+          aria-label={t('pomodoro.progress')}
+          aria-valuenow={progressPct}
+          aria-valuemin={0}
+          aria-valuemax={100}
+        >
+          <span className="pomodoro__bar-fill" style={{ width: `${progressPct}%` }} />
+        </span>
         {isIdle && p.session.completedFocusToday > 0 && (
           <span className="pomodoro__count">{p.session.completedFocusToday}</span>
         )}
       </button>
-    )
+      {open && <PomodoroPopover phaseLabel={phaseLabel} p={p} />}
+    </div>
+  )
+}
+
+function PomodoroPopover({
+  phaseLabel,
+  p,
+}: {
+  phaseLabel: string
+  p: ReturnType<typeof usePomodoro>
+}) {
+  const { t } = useTranslation()
+  const isIdle = p.session.phase === 'idle'
+  const [editVal, setEditVal] = useState<string>(() => formatMmSs(p.remainingSec))
+  // Keep the absolute-set input in sync with the live remaining time when
+  // not editing it. We track focus to avoid clobbering user typing.
+  const editRef = useRef<HTMLInputElement | null>(null)
+  useEffect(() => {
+    if (editRef.current && document.activeElement === editRef.current) return
+    setEditVal(formatMmSs(p.remainingSec))
+  }, [p.remainingSec])
+
+  function applyAbsolute(): void {
+    const m = /^\s*(\d{1,3}):([0-5]?\d)\s*$/.exec(editVal)
+    if (!m) return
+    const mins = Number(m[1])
+    const secs = Number(m[2])
+    if (!Number.isFinite(mins) || !Number.isFinite(secs)) return
+    p.setRemaining(mins * 60_000 + secs * 1_000)
   }
 
   return (
-    <div className="pomodoro pomodoro--dock">
-      <header className="pomodoro__bar">
+    <div className="pomodoro__pop" role="dialog" aria-label={t('pomodoro.title')}>
+      <header className="pomodoro__pop-head">
         <strong>{t('pomodoro.title')}</strong>
-        <button
-          type="button"
-          className="btn--ghost btn--sm"
-          aria-label={t('pomodoro.minimize')}
-          onClick={() => setCollapsed(true)}
-        >
-          –
-        </button>
+        <span className="pomodoro__phase">{phaseLabel}</span>
       </header>
-      <p className="pomodoro__phase">{phaseLabel}</p>
       <p className="pomodoro__time pomodoro__mono">
-        {isIdle
-          ? formatMmSs(p.config.focusMin * 60)
-          : formatMmSs(p.remainingSec)}
+        {isIdle ? formatMmSs(p.config.focusMin * 60) : formatMmSs(p.remainingSec)}
       </p>
-      <div className="pomodoro__cycle">
+      <div className="pomodoro__cycle" aria-label={t('pomodoro.cycleLabel')}>
         {Array.from({ length: p.config.cyclesBeforeLongBreak }, (_, i) => (
           <span
             key={i}
@@ -152,6 +189,146 @@ export function PomodoroTimer() {
           </button>
         )}
       </div>
+      {!isIdle && (
+        <fieldset className="pomodoro__edit">
+          <legend>{t('pomodoro.editRunning')}</legend>
+          <div className="pomodoro__edit-row">
+            <button
+              type="button"
+              className="btn--ghost btn--sm"
+              onClick={() => p.adjustEndsAt(-5 * 60_000)}
+            >
+              −5m
+            </button>
+            <button
+              type="button"
+              className="btn--ghost btn--sm"
+              onClick={() => p.adjustEndsAt(-60_000)}
+            >
+              −1m
+            </button>
+            <button
+              type="button"
+              className="btn--ghost btn--sm"
+              onClick={() => p.adjustEndsAt(60_000)}
+            >
+              +1m
+            </button>
+            <button
+              type="button"
+              className="btn--ghost btn--sm"
+              onClick={() => p.adjustEndsAt(5 * 60_000)}
+            >
+              +5m
+            </button>
+          </div>
+          <div className="pomodoro__edit-row">
+            <label className="pomodoro__edit-set">
+              {t('pomodoro.setRemaining')}
+              <input
+                ref={editRef}
+                type="text"
+                inputMode="numeric"
+                pattern="\d{1,3}:[0-5]?\d"
+                value={editVal}
+                onChange={(e) => setEditVal(e.target.value)}
+                onBlur={applyAbsolute}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault()
+                    applyAbsolute()
+                  }
+                }}
+                placeholder="mm:ss"
+                style={{ width: '5rem' }}
+              />
+            </label>
+          </div>
+        </fieldset>
+      )}
+      <fieldset className="pomodoro__settings">
+        <legend>{t('pomodoro.settingsTitle')}</legend>
+        <div className="pomodoro__settings-grid">
+          <label>
+            <span>{t('pomodoro.focusMin')}</span>
+            <input
+              type="number"
+              min={1}
+              max={180}
+              value={p.config.focusMin}
+              onChange={(e) => {
+                const n = Number(e.target.value)
+                if (Number.isFinite(n) && n >= 1 && n <= 180) {
+                  p.updateConfig({ focusMin: n })
+                }
+              }}
+            />
+          </label>
+          <label>
+            <span>{t('pomodoro.shortBreakMin')}</span>
+            <input
+              type="number"
+              min={1}
+              max={60}
+              value={p.config.shortBreakMin}
+              onChange={(e) => {
+                const n = Number(e.target.value)
+                if (Number.isFinite(n) && n >= 1 && n <= 60) {
+                  p.updateConfig({ shortBreakMin: n })
+                }
+              }}
+            />
+          </label>
+          <label>
+            <span>{t('pomodoro.longBreakMin')}</span>
+            <input
+              type="number"
+              min={1}
+              max={120}
+              value={p.config.longBreakMin}
+              onChange={(e) => {
+                const n = Number(e.target.value)
+                if (Number.isFinite(n) && n >= 1 && n <= 120) {
+                  p.updateConfig({ longBreakMin: n })
+                }
+              }}
+            />
+          </label>
+          <label>
+            <span>{t('pomodoro.cyclesBeforeLongBreak')}</span>
+            <input
+              type="number"
+              min={2}
+              max={10}
+              value={p.config.cyclesBeforeLongBreak}
+              onChange={(e) => {
+                const n = Number(e.target.value)
+                if (Number.isFinite(n) && n >= 2 && n <= 10) {
+                  p.updateConfig({ cyclesBeforeLongBreak: n })
+                }
+              }}
+            />
+          </label>
+        </div>
+        <div className="pomodoro__settings-row">
+          <label className="row">
+            <input
+              type="checkbox"
+              checked={p.config.notify}
+              onChange={(e) => p.updateConfig({ notify: e.target.checked })}
+            />
+            {t('pomodoro.notify')}
+          </label>
+          <label className="row">
+            <input
+              type="checkbox"
+              checked={p.config.sound}
+              onChange={(e) => p.updateConfig({ sound: e.target.checked })}
+            />
+            {t('pomodoro.sound')}
+          </label>
+        </div>
+      </fieldset>
       <footer className="pomodoro__foot">
         <span>{t('pomodoro.todayLabel', { n: p.session.completedFocusToday })}</span>
       </footer>

@@ -363,6 +363,7 @@ export function AppShell() {
         </div>
         <div className="topbar__actions">
           <RunningIndicator />
+          <PomodoroTimer />
           <ModeChip
             canOwner={canSwitchRole}
             canAdmin={canAdmin}
@@ -411,7 +412,6 @@ export function AppShell() {
           <Outlet />
         </main>
       </div>
-      <PomodoroTimer />
     </div>
   )
 }

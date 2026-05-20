@@ -13,17 +13,24 @@ from sqlalchemy import and_, delete, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from flow_core.attachment_store import get_attachment_store
 from flow_core.concurrency import optimistic_update
+from flow_core.config import get_settings
 from flow_core.errors import DomainError, NotFoundError
 from flow_core.i18n import MessageCode
+from flow_core.models.attachment import Attachment
 from flow_core.models.client_profile import ClientProfile
+from flow_core.models.event import Event
+from flow_core.models.invoice import Invoice
 from flow_core.models.membership import Role
-from flow_core.models.memory_blob import MemoryBlobTag
+from flow_core.models.memory_blob import MemoryBlob, MemoryBlobTag
+from flow_core.models.note import Note
 from flow_core.models.note_tag import NoteTag
 from flow_core.models.organization import Organization
 from flow_core.models.project_profile import ProjectProfile
 from flow_core.models.tag import Tag, TagKind
 from flow_core.models.tag_scope import TagScope
+from flow_core.models.task import Task
 from flow_core.models.task_tag import TaskTag
 from flow_core.services import audit
 from flow_core.services.rbac import require_role
@@ -906,6 +913,225 @@ async def delete_memory_channel(
         entity="tag",
         entity_id=tag_id,
         action="delete_memory_channel",
+    )
+
+
+async def _is_default_tag(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    tag_id: uuid.UUID,
+    settings_key: str,
+) -> bool:
+    """The workspace default ``Personal``/``General`` tag is identified
+    by ``organizations.settings[settings_key]`` (idempotent get-or-
+    create cache). If the cache is missing — possible when the row was
+    seeded by a prior path that skipped the pointer write — fall back to
+    the natural-key match used by ``_ensure_default_tag``."""
+    org = (
+        await session.execute(select(Organization).where(Organization.id == org_id))
+    ).scalar_one_or_none()
+    if org is not None and org.settings:
+        cached = org.settings.get(settings_key)
+        if cached is not None and str(cached) == str(tag_id):
+            return True
+    tag = (
+        await session.execute(select(Tag).where(Tag.id == tag_id))
+    ).scalar_one_or_none()
+    if tag is None:
+        return False
+    fallback_name = {
+        "default_client_tag_id": _DEFAULT_CLIENT_NAME,
+        "default_project_tag_id": _DEFAULT_PROJECT_NAME,
+    }.get(settings_key)
+    return fallback_name is not None and tag.name == fallback_name
+
+
+async def _purge_attachment_blobs_for(
+    session: AsyncSession,
+    *,
+    task_ids: Sequence[uuid.UUID],
+    note_ids: Sequence[uuid.UUID],
+) -> None:
+    """Drop the off-DB bytes of every attachment under the given task
+    and note subgraphs BEFORE the DB rows get cascade-deleted, so an S3
+    backend never orphans objects in the bucket. ``pg``-backend rows
+    (bytes inline in ``attachments.data``) have ``storage_key IS NULL``
+    and are skipped here (the bytes go with the row). Mirrors the order
+    of ``services/attachments.delete_attachment``: object first, then
+    row, so a store failure aborts the unit of work."""
+    if not task_ids and not note_ids:
+        return
+    conds = []
+    if task_ids:
+        conds.append(Attachment.task_id.in_(task_ids))
+    if note_ids:
+        conds.append(Attachment.note_id.in_(note_ids))
+    rows = await session.execute(
+        select(Attachment.storage_key).where(
+            or_(*conds),
+            Attachment.storage_key.is_not(None),
+        )
+    )
+    keys = [k for k in rows.scalars().all() if k is not None]
+    if not keys:
+        return
+    store = get_attachment_store(get_settings())
+    for key in keys:
+        await store.delete(key)
+
+
+async def _purge_project_subgraph(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    project_tag_id: uuid.UUID,
+) -> None:
+    """Wipe everything semantically owned by a project (tag of kind
+    ``project``): tasks reachable via ``task_tags`` + their CASCADE
+    descendants (time entries, comments, attachments, schedules,
+    dependencies, handoffs, dispatch requests, agent runs, reminders,
+    recurrences, assignees), notes scoped via ``notes.project_id`` + their
+    descendants (turns, note-tags, attachments — ``time_entries.note_id``
+    is SET NULL by FK so any task-time loses only the back-link), memory
+    blobs scoped via ``memory_blobs.project_id`` + their composite-FK
+    descendants (blob_sources, memory_blob_tags), and events scoped via
+    ``events.project_tag_id`` + their event participants.
+
+    Off-DB attachment blobs are deleted from the store first. The
+    project tag row itself is NOT deleted here (the caller does, after
+    this returns, so the ProjectProfile CASCADE fires once)."""
+    task_ids = list(
+        (
+            await session.execute(
+                select(TaskTag.task_id)
+                .join(Tag, Tag.id == TaskTag.tag_id)
+                .where(TaskTag.tag_id == project_tag_id)
+            )
+        ).scalars().all()
+    )
+    note_ids = list(
+        (
+            await session.execute(select(Note.id).where(Note.project_id == project_tag_id))
+        ).scalars().all()
+    )
+    await _purge_attachment_blobs_for(session, task_ids=task_ids, note_ids=note_ids)
+    if task_ids:
+        await session.execute(delete(Task).where(Task.id.in_(task_ids)))
+    if note_ids:
+        await session.execute(delete(Note).where(Note.id.in_(note_ids)))
+    await session.execute(
+        delete(MemoryBlob).where(MemoryBlob.project_id == project_tag_id)
+    )
+    await session.execute(
+        delete(Event).where(Event.project_tag_id == project_tag_id)
+    )
+
+
+async def purge_project(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    tag_id: uuid.UUID,
+) -> None:
+    """Hard-delete an archived project (kind=``project``) and its full
+    subgraph. The project must be archived first (status='archived') so
+    a destructive op is always a deliberate two-step (archive → delete);
+    the workspace's default ``General`` project is never deletable (a
+    workspace must always resolve a default project for orphan-task
+    fallback, ``ensure_default_project``). Role: owner — this is
+    irreversible and crosses many domains.
+
+    Cascade is split into an explicit subgraph wipe (see
+    ``_purge_project_subgraph``) followed by ``DELETE FROM tags WHERE
+    id``, which lets the existing FK CASCADEs handle the satellites:
+    ``project_profile.tag_id``, every ``task_tags``/``note_tags``/
+    ``memory_blob_tags``/``tag_scopes`` row referencing this tag."""
+    await require_role(session, org_id, actor_id, Role.owner)
+    tag = await get_tag(session, org_id=org_id, tag_id=tag_id)
+    if tag.kind is not TagKind.project:
+        raise DomainError(MessageCode.TAG_KIND_MISMATCH)
+    if tag.status != _TAG_ARCHIVED:
+        raise DomainError(MessageCode.TAG_NOT_ARCHIVED, kind="project")
+    if await _is_default_tag(
+        session, org_id=org_id, tag_id=tag_id, settings_key="default_project_tag_id"
+    ):
+        raise DomainError(MessageCode.TAG_DEFAULT_PROTECTED, kind="project")
+    await _purge_project_subgraph(session, org_id=org_id, project_tag_id=tag_id)
+    await session.execute(delete(Tag).where(Tag.id == tag_id))
+    await session.flush()
+    await audit.log(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        entity="tag",
+        entity_id=tag_id,
+        action="purge_project",
+    )
+
+
+async def purge_client(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    tag_id: uuid.UUID,
+) -> None:
+    """Hard-delete an archived client (kind=``client``) and everything
+    transitively under it: every project linked via
+    ``project_profile.client_tag_id`` is purged (subgraph + tag), every
+    event scoped directly to the client (``events.client_tag_id``) is
+    deleted, then the client tag itself is deleted (cascading the
+    ``client_profile`` row).
+
+    **Invoices are NOT cascade-deleted.** Invoices are fiscal records:
+    if any row references this client we refuse with
+    ``CLIENT_HAS_INVOICES`` instead of silently destroying them. The
+    operator must reassign or delete the invoices first. Pre-conditions
+    mirror ``purge_project``: status=archived, not the workspace default.
+    Role: owner."""
+    await require_role(session, org_id, actor_id, Role.owner)
+    tag = await get_tag(session, org_id=org_id, tag_id=tag_id)
+    if tag.kind is not TagKind.client:
+        raise DomainError(MessageCode.TAG_KIND_MISMATCH)
+    if tag.status != _TAG_ARCHIVED:
+        raise DomainError(MessageCode.TAG_NOT_ARCHIVED, kind="client")
+    if await _is_default_tag(
+        session, org_id=org_id, tag_id=tag_id, settings_key="default_client_tag_id"
+    ):
+        raise DomainError(MessageCode.TAG_DEFAULT_PROTECTED, kind="client")
+    invoice_count = (
+        await session.execute(
+            select(Invoice.id).where(Invoice.client_tag_id == tag_id).limit(50)
+        )
+    ).scalars().all()
+    if invoice_count:
+        raise DomainError(MessageCode.CLIENT_HAS_INVOICES, count=len(invoice_count))
+    project_ids = list(
+        (
+            await session.execute(
+                select(ProjectProfile.tag_id).where(ProjectProfile.client_tag_id == tag_id)
+            )
+        ).scalars().all()
+    )
+    for project_tag_id in project_ids:
+        await _purge_project_subgraph(session, org_id=org_id, project_tag_id=project_tag_id)
+    if project_ids:
+        await session.execute(delete(Tag).where(Tag.id.in_(project_ids)))
+    await session.execute(
+        delete(Event).where(Event.client_tag_id == tag_id)
+    )
+    await session.execute(delete(Tag).where(Tag.id == tag_id))
+    await session.flush()
+    await audit.log(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        entity="tag",
+        entity_id=tag_id,
+        action="purge_client",
+        diff={"purged_projects": [str(p) for p in project_ids]},
     )
 
 

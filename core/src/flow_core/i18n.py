@@ -47,6 +47,9 @@ class MessageCode(enum.StrEnum):
     TAG_DUPLICATE = "tag.duplicate"
     TAG_AMBIGUOUS = "tag.ambiguous"
     TAG_KIND_MISMATCH = "tag.kind_mismatch"
+    TAG_NOT_ARCHIVED = "tag.not_archived"
+    TAG_DEFAULT_PROTECTED = "tag.default_protected"
+    CLIENT_HAS_INVOICES = "tag.client_has_invoices"
     CHANNEL_NOT_TAG_CREATABLE = "channel.not_tag_creatable"
     CHANNEL_ADMIN_ONLY = "channel.admin_only"
     CHANNEL_KEY_IMMUTABLE = "channel.key_immutable"
@@ -159,6 +162,15 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
         MessageCode.TAG_DUPLICATE: "A tag with this name already exists",
         MessageCode.TAG_AMBIGUOUS: "Ambiguous tag name: {name}",
         MessageCode.TAG_KIND_MISMATCH: "Tag is not of the expected kind",
+        MessageCode.TAG_NOT_ARCHIVED: (
+            "Archive the {kind} before deleting it permanently"
+        ),
+        MessageCode.TAG_DEFAULT_PROTECTED: (
+            "The default {kind} cannot be deleted"
+        ),
+        MessageCode.CLIENT_HAS_INVOICES: (
+            "Client has {count} invoice(s); void or delete them first"
+        ),
         MessageCode.CHANNEL_NOT_TAG_CREATABLE: (
             "Memory channels are managed in settings, not created as tags"
         ),

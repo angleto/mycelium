@@ -6,9 +6,30 @@ import { useSession } from '../auth/useSession'
 import { TagChip } from '../components/TagChip'
 import { PriorityChip } from '../components/PriorityChip'
 import { ScaleSelect } from '../components/ScaleSelect'
+import { TaskKanban } from '../components/TaskKanban'
 import { useFocus } from '../lib/focus'
 import { useLinkedClientProject } from '../lib/linkedClientProject'
 import type { components } from '../api/schema'
+
+type View = 'kanban' | 'list'
+const VIEW_KEY = 'flow.tasks.view'
+
+// Default view per viewport: desktop favours the kanban board, mobile
+// favours the dense list (small screens can't fit multiple columns
+// side-by-side legibly). Once the user picks a view it's persisted, so
+// subsequent visits respect their choice across viewports.
+function defaultView(): View {
+  try {
+    const saved = localStorage.getItem(VIEW_KEY)
+    if (saved === 'kanban' || saved === 'list') return saved
+  } catch {
+    /* private mode / quota: fall through to viewport default */
+  }
+  if (typeof window !== 'undefined' && window.matchMedia) {
+    return window.matchMedia('(max-width: 768px)').matches ? 'list' : 'kanban'
+  }
+  return 'kanban'
+}
 
 type Task = components['schemas']['TaskOut']
 type Tag = components['schemas']['TagOut']
@@ -58,7 +79,15 @@ export function TasksRoute() {
   const [bulkState, setBulkState] = useState('')
   const [bulkTag, setBulkTag] = useState('')
   const [bulkMsg, setBulkMsg] = useState<string | null>(null)
-  const [showDone, setShowDone] = useState(false)
+  const [showTerminal, setShowTerminal] = useState(false)
+  const [view, setView] = useState<View>(defaultView)
+  useEffect(() => {
+    try {
+      localStorage.setItem(VIEW_KEY, view)
+    } catch {
+      /* ignore */
+    }
+  }, [view])
 
   const stateById = new Map(wfStates.map((s) => [s.id, s]))
   const allowed = new Map<string, Set<string>>()
@@ -78,6 +107,17 @@ export function TasksRoute() {
   const clients = tags.filter((x) => x.kind === 'client')
   const projects = filterProjectsByClient(tags.filter((x) => x.kind === 'project'))
 
+  // A task always carries a client tag (and via the project, transitively
+  // belongs to it). Pre-select the default "Personal" client (matching
+  // the backend's _DEFAULT_CLIENT_NAME) as soon as the list arrives and
+  // nothing is selected yet; fall back to the first client if the name
+  // ever changes server-side. The empty option in the picker is gone.
+  useEffect(() => {
+    if (clientId || clients.length === 0) return
+    const def = clients.find((c) => c.name === 'Personal') ?? clients[0]
+    if (def) setClientId(def.id)
+  }, [clientId, clients])
+
   const loadTasks = useCallback(async () => {
     setErr(null)
     const { data, error } = await api.GET('/tasks', {
@@ -94,12 +134,21 @@ export function TasksRoute() {
     let active = true
     void (async () => {
       const h = workspaceHeader()
+      // /clients is fetched even though we render the picker from
+      // /tags, because the endpoint side-effects ``ensure_default_client``
+      // — guarantees the "Personal" default tag exists and can therefore
+      // be pre-selected (a task must always carry a client tag).
       const [tk, tg, pj] = await Promise.all([
         api.GET('/tasks', {
           params: { header: h, query: filter ? { tag_id: filter } : {} },
         }),
         api.GET('/tags', { params: { header: h } }),
         api.GET('/projects', { params: { header: h } }),
+        // /clients is fetched in parallel and intentionally discarded:
+        // the endpoint side-effects ``ensure_default_client`` so the
+        // "Personal" default tag exists and can be pre-selected (a task
+        // must always carry a client tag).
+        api.GET('/clients', { params: { header: h } }),
       ])
       if (!active) return
       if (tk.data) setTasks(tk.data)
@@ -177,7 +226,14 @@ export function TasksRoute() {
         urgency,
         executor_kind: 'human',
         necessity: 'should',
-        tag_ids: projectId ? [projectId] : [],
+        // Always emit the client tag (a task is never client-less; the
+        // default Personal is pre-selected when nothing is chosen) and
+        // the project tag when one is picked. The backend resolves the
+        // project anchor from the project-kind tag inside this list.
+        tag_ids: [
+          ...(clientId ? [clientId] : []),
+          ...(projectId ? [projectId] : []),
+        ],
         ...(due ? { due_date: due } : {}),
       },
     })
@@ -357,7 +413,7 @@ export function TasksRoute() {
         (tk.tags ?? []).some((g) => focusIds.includes(g.id)),
       )
     : matched
-  const shown = showDone
+  const shown = showTerminal
     ? focused
     : focused.filter((tk) => !terminalIds.has(tk.state_id))
 
@@ -399,8 +455,20 @@ export function TasksRoute() {
         </label>
         <label>
           {t('tasks.client')}
-          <select value={clientId} onChange={(e) => onPickClient(e.target.value)}>
-            <option value="">{t('tasks.noClient')}</option>
+          <select
+            value={clientId}
+            onChange={(e) => onPickClient(e.target.value)}
+            required
+          >
+            {/* Disabled placeholder only while clients are still
+                loading; the useEffect above pre-selects the default
+                Personal client as soon as the list arrives, so this
+                row disappears on first render after load. */}
+            {!clientId && (
+              <option value="" disabled>
+                …
+              </option>
+            )}
             {clients.map((c) => (
               <option key={c.id} value={c.id}>
                 {c.name}
@@ -452,11 +520,37 @@ export function TasksRoute() {
         <label className="row">
           <input
             type="checkbox"
-            checked={showDone}
-            onChange={(e) => setShowDone(e.target.checked)}
+            checked={showTerminal}
+            onChange={(e) => setShowTerminal(e.target.checked)}
           />{' '}
-          {t('tasks.showDone')}
+          {t('tasks.showTerminal')}
         </label>
+        <div className="viewtabs" role="tablist" aria-label={t('tasks.viewSwitch')}>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={view === 'kanban'}
+            className={
+              'viewtabs__tab' +
+              (view === 'kanban' ? ' viewtabs__tab--active' : '')
+            }
+            onClick={() => setView('kanban')}
+          >
+            {t('tasks.viewKanban')}
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={view === 'list'}
+            className={
+              'viewtabs__tab' +
+              (view === 'list' ? ' viewtabs__tab--active' : '')
+            }
+            onClick={() => setView('list')}
+          >
+            {t('tasks.viewList')}
+          </button>
+        </div>
       </div>
 
       {err && <p className="err">{err}</p>}
@@ -547,7 +641,14 @@ export function TasksRoute() {
         </div>
       )}
 
-      {shown.length === 0 ? (
+      {view === 'kanban' ? (
+        <TaskKanban
+          tasks={shown}
+          states={wfStates}
+          allowed={allowed}
+          onChangeState={changeState}
+        />
+      ) : shown.length === 0 ? (
         <p className="hint">{t('tasks.none')}</p>
       ) : (
         <ul className="list tasklist">
