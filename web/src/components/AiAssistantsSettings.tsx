@@ -74,9 +74,15 @@ export function AiAssistantsSettings() {
       setErr((e as Error).message)
     }
   }
+  // Bootstrap fetch — connector info, scope catalog, and the list.
+  // setState happens inside ``load`` but only after the awaits (a
+  // microtask boundary), so React doesn't see a synchronous cascade.
+  // The lint rule flags both that and the missing ``load`` dep; both
+  // disables are intentional (load reads no captured state).
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void load()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   async function onCreate(e: FormEvent) {

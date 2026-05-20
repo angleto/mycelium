@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { api, errMessage, workspaceHeader } from '../api/client'
@@ -240,6 +240,38 @@ export function TaskDetailRoute() {
     setTask((p) => (p ? { ...p, version: data.version } : p))
   }
 
+  // Title + description autosave: debounce 1s after the last change.
+  // Skips the initial mount (no patch for unchanged values) and bails
+  // if a sibling autosave already bumped the version while we were
+  // typing — the optimistic-concurrency reload triggers, and the
+  // debounced patch refires with the fresh version next tick.
+  const lastSentText = useRef<{ title: string; description: string } | null>(
+    null,
+  )
+  useEffect(() => {
+    if (!task) return
+    if (lastSentText.current === null) {
+      lastSentText.current = {
+        title: task.title,
+        description: task.description ?? '',
+      }
+      return
+    }
+    const prev = lastSentText.current
+    const curDescr = description ?? ''
+    if (prev.title === title && prev.description === curDescr) return
+    const handle = window.setTimeout(() => {
+      const patch: Record<string, unknown> = {}
+      if (title !== prev.title) patch.title = title
+      if (curDescr !== prev.description) patch.description = curDescr || null
+      if (Object.keys(patch).length === 0) return
+      lastSentText.current = { title, description: curDescr }
+      void autosave(patch)
+    }, 1000)
+    return () => window.clearTimeout(handle)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [title, description, task?.version])
+
   function onImp(n: number) {
     setImportance(n)
     void autosave({ importance: n, urgency })
@@ -437,7 +469,11 @@ export function TaskDetailRoute() {
   if (err && !task) return <p className="err">{err}</p>
   if (!task) return <p>{t('tasks.loading')}</p>
 
-  // Only title/description go through Save; everything else autosaves.
+  // Autosave covers every field. A "save now" button is intentionally
+  // gone — the debounced effect above flushes title/description ~1s
+  // after the user stops typing, and onSave is kept only as the form's
+  // onSubmit fallback (Enter in the title input still saves
+  // immediately instead of waiting for the debounce).
   const dirty =
     title !== task.title || description !== (task.description ?? '')
 
@@ -482,12 +518,13 @@ export function TaskDetailRoute() {
           {t('tasks.description')}
           <RichEditor value={description} onChange={setDescription} />
         </label>
-        <div className="row">
-          <button type="submit" disabled={busy || !dirty}>
-            {busy ? t('tasks.saving') : t('tasks.save')}
-          </button>
-          {dirty && <span className="muted">{t('tasks.unsaved')}</span>}
-        </div>
+        {(busy || dirty) && (
+          <div className="row">
+            <span className="muted">
+              {busy ? t('tasks.saving') : t('tasks.unsaved')}
+            </span>
+          </div>
+        )}
         <div className="row">
           <label>
             {t('tasks.importance')}

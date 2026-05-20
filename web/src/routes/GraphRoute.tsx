@@ -470,8 +470,25 @@ export function GraphRoute() {
             const p = pos.get(n.id)
             if (!p) return null
             const sel = from === n.id
+            const tk = taskById.get(n.id)
+            // SVG <title> is rendered by the browser as a native hover
+            // tooltip — gives full text on a truncated title without
+            // forcing the user to click and lose their place in /graph.
+            const tagsLine = (tk?.tags ?? [])
+              .map((g) => `${g.kind}:${g.name}`)
+              .join(', ')
+            const tooltipLines = [
+              n.title,
+              tk?.state ? `state: ${tk.state}` : '',
+              tk?.priority != null ? `priority: ${tk.priority}` : '',
+              tk?.due_date ? `due: ${tk.due_date}` : '',
+              tagsLine ? `tags: ${tagsLine}` : '',
+              tk?.executor_kind === 'llm_agent' ? 'AI agent' : '',
+            ].filter(Boolean)
+            const tooltip = tooltipLines.join('\n')
             return (
               <g key={n.id}>
+                <title>{tooltip}</title>
                 <rect
                   x={p.x}
                   y={p.y}
@@ -494,7 +511,7 @@ export function GraphRoute() {
                 </text>
                 <text x={p.x + 9} y={p.y + 36} className="dag__state">
                   {n.state}
-                  {taskById.get(n.id)?.executor_kind === 'llm_agent' ? ' · AI' : ''}
+                  {tk?.executor_kind === 'llm_agent' ? ' · AI' : ''}
                 </text>
               </g>
             )
