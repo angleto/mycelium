@@ -19,6 +19,7 @@ from flow_api.routers import (
     auth,
     billing,
     budgets,
+    buildinfo,
     calendars,
     dependencies,
     dispatch,
@@ -148,4 +149,5 @@ def create_app() -> FastAPI:
     app.include_router(attachments.router)
     app.include_router(invoices.router)
     app.include_router(notifications.router)
+    app.include_router(buildinfo.router)
     return app

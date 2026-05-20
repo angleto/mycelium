@@ -259,6 +259,12 @@ export const it: Catalog = {
     disableCode: 'Codice attuale o un codice di backup',
     disable: 'Disattiva',
   },
+  buildinfo: {
+    title: 'Versione installata',
+    version: 'Versione',
+    commit: 'Commit',
+    builtAt: 'Build del',
+  },
   switcher: {
     label: 'Workspace',
     create: 'Nuovo workspace',

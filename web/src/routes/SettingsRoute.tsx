@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { api, errMessage } from '../api/client'
+import { BuildInfo } from '../components/BuildInfo'
 import { EstimatePresets } from '../components/EstimatePresets'
 import { IssuerProfiles } from '../components/IssuerProfiles'
 import { ExecutorsAdmin } from '../components/ExecutorsAdmin'
@@ -158,6 +159,7 @@ export function SettingsRoute() {
     <ExecutorsAdmin />
     <IssuerProfiles />
     <EstimatePresets />
+    <BuildInfo />
     </>
   )
 }

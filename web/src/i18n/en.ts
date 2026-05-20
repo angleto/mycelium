@@ -260,6 +260,12 @@ export const en = {
     disableCode: 'Current code or a backup code',
     disable: 'Disable',
   },
+  buildinfo: {
+    title: 'About this build',
+    version: 'Version',
+    commit: 'Commit',
+    builtAt: 'Built at',
+  },
   switcher: {
     label: 'Workspace',
     create: 'New workspace',

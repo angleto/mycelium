@@ -28,6 +28,12 @@ RUN --mount=type=cache,target=/root/.cache/uv uv sync --no-dev
 FROM python:3.12-slim
 LABEL org.opencontainers.image.source="https://github.com/angleto/flow"
 LABEL org.opencontainers.image.licenses="AGPL-3.0-or-later"
+ARG FLOW_VERSION=dev
+ARG FLOW_GIT_SHA=
+ARG FLOW_BUILD_AT=
+ENV FLOW_VERSION=${FLOW_VERSION} \
+    FLOW_GIT_SHA=${FLOW_GIT_SHA} \
+    FLOW_BUILD_AT=${FLOW_BUILD_AT}
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PATH="/app/.venv/bin:$PATH"

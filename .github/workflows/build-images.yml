@@ -83,15 +83,31 @@ jobs:
         # `docker/` in-tree. Copy from workflow-ref so any flow_ref builds.
         run: cp -r workflow-ref/docker flow-src/docker
 
-      - name: Build + push linux/arm64 images
+      - name: Resolve source SHA
+        id: src
         working-directory: flow-src
         run: |
+          SHA=$(git rev-parse HEAD)
+          BUILT_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "built_at=$BUILT_AT" >> "$GITHUB_OUTPUT"
+          echo "Source SHA: $SHA  Built at: $BUILT_AT"
+
+      - name: Build + push linux/arm64 images
+        working-directory: flow-src
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+          GIT_SHA: ${{ steps.src.outputs.sha }}
+          BUILT_AT: ${{ steps.src.outputs.built_at }}
+        run: |
           set -euo pipefail
-          TAG="${{ steps.tag.outputs.tag }}"
           for c in backend worker frontend; do
             echo "::group::build $c:$TAG"
             docker buildx build --platform linux/arm64 \
               -f docker/$c.Dockerfile \
+              --build-arg FLOW_VERSION="$TAG" \
+              --build-arg FLOW_GIT_SHA="$GIT_SHA" \
+              --build-arg FLOW_BUILD_AT="$BUILT_AT" \
               -t ghcr.io/angleto/flow/$c:"$TAG" \
               --push .
             echo "::endgroup::"

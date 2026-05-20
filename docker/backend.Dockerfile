@@ -45,6 +45,15 @@ FROM python:3.12-slim
 # write permission on subsequent pushes.
 LABEL org.opencontainers.image.source="https://github.com/angleto/flow"
 LABEL org.opencontainers.image.licenses="AGPL-3.0-or-later"
+# Build-time identity (bake into env so /api/buildinfo can return it).
+# Passed via --build-arg from the build-images workflow; empty in local
+# `docker build` (the endpoint then reports "dev").
+ARG FLOW_VERSION=dev
+ARG FLOW_GIT_SHA=
+ARG FLOW_BUILD_AT=
+ENV FLOW_VERSION=${FLOW_VERSION} \
+    FLOW_GIT_SHA=${FLOW_GIT_SHA} \
+    FLOW_BUILD_AT=${FLOW_BUILD_AT}
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PATH="/app/.venv/bin:$PATH" \
