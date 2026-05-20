@@ -9,7 +9,10 @@
 FROM node:22-alpine AS build
 WORKDIR /web
 RUN corepack enable
-COPY web/package.json web/pnpm-lock.yaml ./
+# .npmrc carries the supply-chain min-release-age policy; without it
+# pnpm v11 applies a default 24h cutoff and a same-day dependency
+# upgrade (e.g. a TipTap patch) silently fails the install.
+COPY web/package.json web/pnpm-lock.yaml web/.npmrc ./
 RUN pnpm install --frozen-lockfile
 COPY web/ ./
 RUN pnpm build
