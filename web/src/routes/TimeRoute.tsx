@@ -254,11 +254,10 @@ export function TimeRoute() {
       params: { header: workspaceHeader(), query: q },
     })
     if (bt.data) setByTask(bt.data)
-    // Pie chart aggregation: same date / scope / client / project /
-    // billable filters as the main report, but a separate ``group``.
-    // Kept as its own request so changing the pie selector doesn't
-    // force the table to re-render with the same group.
-    const pieQ = { ...(reportQuery() as Record<string, unknown>), group: pieGroup }
+    // Pie chart aggregation: same filters as the main report, just a
+    // different group_by. Kept as a separate request so changing the
+    // pie selector doesn't force the table to re-render.
+    const pieQ = { ...reportQuery(), group_by: pieGroup }
     const pr = await api.GET('/time/report', {
       params: { header: workspaceHeader(), query: pieQ },
     })

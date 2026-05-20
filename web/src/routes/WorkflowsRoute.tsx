@@ -149,7 +149,10 @@ export function WorkflowsRoute() {
           name: s.name,
           is_initial: s.is_initial,
           is_terminal: s.is_terminal,
-          is_hidden: s.is_hidden,
+          // ``is_hidden`` is optional in the OpenAPI schema (default
+          // false at the DB level, defaulted to ?: in TS); coerce so
+          // EditRow's strict bool stays consistent.
+          is_hidden: s.is_hidden ?? false,
         })),
       tr: m.edges.map((e) => ({
         from_state: nameById.get(e.from_state_id) ?? '',
