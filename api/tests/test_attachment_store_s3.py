@@ -91,8 +91,6 @@ async def test_s3_backend_upload_download_byte_identical(
         assert "storage_key" not in at
         aid = at["id"]
 
-        # The bytes went to the object store, NOT the row.
-        assert await _s3_backend.get(aid) == png
         async with tenant_session(ws, uid) as s:
             row = (
                 await s.execute(
@@ -101,7 +99,14 @@ async def test_s3_backend_upload_download_byte_identical(
                 )
             ).one()
             assert row.data is None
-            assert row.storage_key == aid
+            # The hierarchical storage_key embeds the attachment id and
+            # filename and is non-empty (a flat UUID would also be
+            # accepted; we just refuse a NULL key).
+            assert row.storage_key
+            assert aid in row.storage_key
+        # The bytes went to the object store under the actual storage_key,
+        # NOT the row.
+        assert await _s3_backend.get(row.storage_key) == png
 
         # Download is byte-identical (same bytes, type, disposition).
         dl = await c.get(f"/attachments/{aid}/download", headers=h)
@@ -130,12 +135,17 @@ async def test_s3_backend_delete_removes_object_and_row(
             files={"file": ("a.txt", body, "text/plain")},
         )
         aid = up.json()["id"]
-        assert await _s3_backend.get(aid) == body
+        # Find the hierarchical key the service wrote it under, then
+        # verify the bytes are there.
+        keys_with_aid = [k for k in _s3_backend.objects if aid in k]
+        assert len(keys_with_aid) == 1
+        the_key = keys_with_aid[0]
+        assert await _s3_backend.get(the_key) == body
 
         d = await c.delete(f"/attachments/{aid}", headers=h)
         assert d.status_code == 204
         # Object gone from the store AND the row gone (download 404).
-        assert aid not in _s3_backend.objects
+        assert the_key not in _s3_backend.objects
         dl = await c.get(f"/attachments/{aid}/download", headers=h)
         assert dl.status_code == 404
         assert dl.json()["code"] == "attachment.not_found"
