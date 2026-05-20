@@ -338,6 +338,12 @@ a:hover {
   flex-direction: column;
   gap: 0.7rem;
 }
+/* Wide variant for data-dense routes (Tasks, Graph, Time tables) that
+   want to use the full available width inside .content instead of the
+   60rem reading-friendly cap. Opt-in per route. */
+.card--wide {
+  max-width: none;
+}
 .card + .card {
   margin-top: 1rem;
 }
@@ -502,6 +508,100 @@ button.btn--danger:hover {
   font-size: 0.7em;
   line-height: 1;
   display: inline-block;
+}
+
+/* Toggle pill: a button styled like a chip used as a stateful switch
+   (e.g. pomodoro notification on/off). Avoids the misalignment between
+   a native checkbox and its label that the original "label + input"
+   layout had. */
+.toggle-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.22rem 0.7rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  background: var(--surface-2);
+  color: var(--text-h);
+  border: 1px solid var(--border);
+  cursor: pointer;
+}
+.toggle-pill--on {
+  background: var(--accent);
+  color: var(--accent-fg, #fff);
+  border-color: var(--accent);
+}
+.toggle-pill:hover { border-color: var(--accent); }
+
+/* AI assistants page (replaces the old McpConnect). */
+.aiconnector {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.6rem 0.8rem;
+  background: var(--surface-2);
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+.aiconnector__url {
+  background: var(--surface);
+  padding: 0.2rem 0.45rem;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  font-family: var(--mono);
+  font-size: 0.85rem;
+  word-break: break-all;
+}
+.airreveal {
+  border: 1px solid var(--accent);
+  background: var(--surface-2);
+  border-radius: 10px;
+  padding: 0.6rem 0.8rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.aiscopes {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.5rem 0.7rem;
+}
+.aiscopes__group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  margin-bottom: 0.5rem;
+}
+.aiscopes__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.82rem;
+}
+.aiscopes__item code {
+  font-family: var(--mono);
+  background: var(--surface-2);
+  padding: 0 0.3rem;
+  border-radius: 4px;
+  font-size: 0.78rem;
+}
+.airow {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.5rem 0.7rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.airow__head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.airow__meta {
+  font-size: 0.78rem;
 }
 
 /* ---- status text ---- */

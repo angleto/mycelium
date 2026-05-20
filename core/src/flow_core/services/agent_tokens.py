@@ -79,6 +79,14 @@ class AuthenticatedAgent:
     user_id: uuid.UUID
     org_id: uuid.UUID
     scope: str
+    # Populated when the token is bound to an AI assistant (post-0059):
+    # ``assistant_id`` identifies the assistant row, ``assistant_scope``
+    # is the JSONB list of tool scopes the assistant is allowed to run
+    # (the MCP gate uses it to filter @mcp.tool calls). NULL on legacy
+    # bare tokens (pre-assistant), which keep their previous all-tools
+    # access — the UI funnels new mints through the assistant flow.
+    assistant_id: uuid.UUID | None = None
+    assistant_scope: list[str] | None = None
 
 
 async def mint(
@@ -89,11 +97,16 @@ async def mint(
     name: str,
     scope: str = "mcp",
     ttl_days: int | None = DEFAULT_TTL_DAYS,
+    assistant_id: uuid.UUID | None = None,
 ) -> MintResult:
     """Owner-gated. Mint a fresh long-lived bearer token.
 
     ``ttl_days=None`` disables expiry (a never-expiring credential);
     the default 365 days is a deliberate floor on forgotten secrets.
+
+    ``assistant_id`` binds the token to an ``ai_assistants`` row when
+    set (post-migration 0059); NULL keeps the legacy bare-token shape
+    for back-compat with pre-assistant integrations.
     """
     await require_role(session, org_id, actor_id, Role.owner)
     raw = _generate_raw()
@@ -109,6 +122,7 @@ async def mint(
         token_hash=token_hash,
         scope=scope,
         expires_at=expires_at,
+        assistant_id=assistant_id,
     )
     session.add(row)
     await session.flush()
@@ -119,7 +133,11 @@ async def mint(
         entity="agent_token",
         entity_id=row.id,
         action="mint",
-        diff={"name": name, "scope": scope},
+        diff={
+            "name": name,
+            "scope": scope,
+            "assistant_id": str(assistant_id) if assistant_id else None,
+        },
     )
     return MintResult(token=row, raw=raw)
 
@@ -214,7 +232,8 @@ async def _call_authenticate_fn(
 
     result = await session.execute(
         text(
-            "SELECT out_token_id, out_user_id, out_org_id, out_scope "
+            "SELECT out_token_id, out_user_id, out_org_id, out_scope, "
+            "out_assistant_id, out_assistant_scope "
             "FROM authenticate_agent_token(:h)"
         ),
         {"h": token_hash},
@@ -222,11 +241,25 @@ async def _call_authenticate_fn(
     row = result.first()
     if row is None or row[0] is None:
         return None
+    # The SECURITY DEFINER function gates a token bound to an
+    # ``is_active=false`` assistant by returning no row, so by the time
+    # we get here either the assistant is active or there is no
+    # assistant binding (legacy bare token).
+    raw_scope = row[5]
+    assistant_scope: list[str] | None
+    if raw_scope is None:
+        assistant_scope = None
+    elif isinstance(raw_scope, list):
+        assistant_scope = [str(s) for s in raw_scope]
+    else:
+        assistant_scope = None
     return AuthenticatedAgent(
         token_id=row[0],
         user_id=row[1],
         org_id=row[2],
         scope=row[3],
+        assistant_id=row[4],
+        assistant_scope=assistant_scope,
     )
 
 

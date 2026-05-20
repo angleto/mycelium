@@ -4,6 +4,46 @@
 // (string values, not literals) so other locales must mirror it.
 export const en = {
   app: { title: 'Flow' },
+  common: { on: 'on', off: 'off' },
+  aiAssistants: {
+    pageTitle: 'AI assistants',
+    intro:
+      'Configure AI clients (Claude Desktop, Cursor, custom MCP bots) that can act on your behalf against Flow.',
+    connectorTitle: 'MCP connector URL',
+    transportPending:
+      'Hosted MCP endpoint is being provisioned — the URL above is the connector target. Until the endpoint goes live, the secret is mintable but external clients cannot yet connect.',
+    copy: 'Copy',
+    newAssistant: 'New assistant',
+    labelLabel: 'Label',
+    providerLabel: 'Provider',
+    providerPlaceholder: 'anthropic, openai, ollama...',
+    modelIdLabel: 'Model id',
+    modelIdPlaceholder: 'claude-sonnet-4-6, gpt-4o...',
+    notesLabel: 'Notes',
+    permissions: 'Permissions',
+    scopesSelected: '{{selected}}/{{total}} scopes',
+    scopeCategory_read: 'Read',
+    scopeCategory_write: 'Write',
+    scopeCategory_danger: 'Dangerous',
+    create: 'Create',
+    creating: 'Creating…',
+    cancel: 'Cancel',
+    revealTitle: 'Credentials',
+    revealWarningTitle: 'Copy now.',
+    revealWarningBody:
+      'The client secret is shown exactly once. After you close this card it cannot be recovered.',
+    revealUrl: 'MCP URL',
+    revealSecret: 'Client secret',
+    revealAcknowledge: "I've copied the secret",
+    deleteAssistant: 'Delete',
+    rotateSecret: 'Rotate secret',
+    statusActive: 'Active',
+    statusRevoked: 'Revoked',
+    deleteConfirm: 'Delete assistant "{{label}}"?',
+    rotateConfirm:
+      'Rotate the secret for "{{label}}"? The old secret will stop working immediately.',
+    noAssistants: 'No assistants yet.',
+  },
   focus: {
     label: 'Focus',
     all: 'All projects',

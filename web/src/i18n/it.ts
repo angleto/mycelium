@@ -3,6 +3,46 @@ import type { Catalog } from './en'
 // Italian catalog. Same key shape as en (typed via Catalog).
 export const it: Catalog = {
   app: { title: 'Flow' },
+  common: { on: 'sì', off: 'no' },
+  aiAssistants: {
+    pageTitle: 'AI assistants',
+    intro:
+      'Configura client AI (Claude Desktop, Cursor, bot MCP custom) che possono agire per te su Flow.',
+    connectorTitle: 'URL del connettore MCP',
+    transportPending:
+      'L\'endpoint MCP hosted è in fase di provisioning — l\'URL qui sopra è il target del connettore. Finché non è attivo, il segreto si genera ma i client esterni non possono ancora connettersi.',
+    copy: 'Copia',
+    newAssistant: 'Nuovo assistente',
+    labelLabel: 'Etichetta',
+    providerLabel: 'Provider',
+    providerPlaceholder: 'anthropic, openai, ollama...',
+    modelIdLabel: 'Model id',
+    modelIdPlaceholder: 'claude-sonnet-4-6, gpt-4o...',
+    notesLabel: 'Note',
+    permissions: 'Permessi',
+    scopesSelected: '{{selected}}/{{total}} scope',
+    scopeCategory_read: 'Lettura',
+    scopeCategory_write: 'Scrittura',
+    scopeCategory_danger: 'Pericolosi',
+    create: 'Crea',
+    creating: 'Sto creando…',
+    cancel: 'Annulla',
+    revealTitle: 'Credenziali',
+    revealWarningTitle: 'Copia ora.',
+    revealWarningBody:
+      'Il client secret viene mostrato una sola volta. Quando chiudi questa card non è più recuperabile.',
+    revealUrl: 'URL MCP',
+    revealSecret: 'Client secret',
+    revealAcknowledge: 'Ho copiato il segreto',
+    deleteAssistant: 'Elimina',
+    rotateSecret: 'Ruota secret',
+    statusActive: 'Attivo',
+    statusRevoked: 'Revocato',
+    deleteConfirm: 'Eliminare l\'assistente "{{label}}"?',
+    rotateConfirm:
+      'Ruotare il secret per "{{label}}"? Il vecchio segreto smette di funzionare subito.',
+    noAssistants: 'Nessun assistente.',
+  },
   focus: {
     label: 'Focus',
     all: 'Tutti i progetti',

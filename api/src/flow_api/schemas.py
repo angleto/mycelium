@@ -1761,3 +1761,69 @@ class AgentTokenCreateOut(BaseModel):
     expires_at: datetime.datetime | None
     created_at: datetime.datetime
     raw: str
+
+
+# ---------- AI assistants (ADR-0XX, replaces /settings/mcp manual setup)
+class ScopeCatalogEntry(BaseModel):
+    """One row of the scope catalog returned by ``GET /ai-assistants/
+    scope-catalog`` — drives the SPA's permission picker."""
+
+    key: str
+    category: str  # 'read' | 'write' | 'danger'
+    label: str
+    description: str
+
+
+class ConnectorInfoOut(BaseModel):
+    """Where to point an MCP client. The SPA shows ``mcp_url`` in the
+    connector card and the operator pastes it into Claude / Cursor."""
+
+    mcp_url: str
+    instructions_md: str
+
+
+class AiAssistantCreateIn(BaseModel):
+    label: str = Field(min_length=1, max_length=255)
+    scope: list[str] | None = Field(default=None)
+    provider: str | None = Field(default=None, max_length=64)
+    model_id: str | None = Field(default=None, max_length=128)
+    notes: str | None = Field(default=None, max_length=2000)
+
+
+class AiAssistantPatchIn(BaseModel):
+    expected_version: int = Field(ge=1)
+    label: str | None = Field(default=None, min_length=1, max_length=255)
+    scope: list[str] | None = Field(default=None)
+    provider: str | None = Field(default=None, max_length=64)
+    model_id: str | None = Field(default=None, max_length=128)
+    notes: str | None = Field(default=None, max_length=2000)
+    is_active: bool | None = Field(default=None)
+
+
+class AiAssistantOut(BaseModel):
+    """Metadata; no secret ever ships in this shape."""
+
+    id: uuid.UUID
+    label: str
+    provider: str | None
+    model_id: str | None
+    notes: str | None
+    scope: list[str]
+    is_active: bool
+    version: int
+    created_at: datetime.datetime
+    updated_at: datetime.datetime
+    # First chars of the latest secret (for UI disambiguation across
+    # rotations). NULL when no token has been minted yet (shouldn't
+    # happen via this flow but defensive).
+    token_prefix: str | None = None
+
+
+class AiAssistantCreatedOut(BaseModel):
+    """Returned exactly once at create / rotate time. ``raw_secret`` is
+    plaintext — the SPA copies it to the clipboard and shows a
+    "credentials" card; after the user acknowledges, it cannot be
+    recovered."""
+
+    assistant: AiAssistantOut
+    raw_secret: str

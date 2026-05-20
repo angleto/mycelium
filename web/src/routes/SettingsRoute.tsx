@@ -6,7 +6,7 @@ import { EstimatePresets } from '../components/EstimatePresets'
 import { GmailConnect } from '../components/GmailConnect'
 import { IssuerProfiles } from '../components/IssuerProfiles'
 import { ExecutorsAdmin } from '../components/ExecutorsAdmin'
-import { McpConnect } from '../components/McpConnect'
+import { AiAssistantsSettings } from '../components/AiAssistantsSettings'
 import { MemoryChannelsAdmin } from '../components/MemoryChannelsAdmin'
 import { PomodoroSettings } from '../components/PomodoroSettings'
 import { TelegramLink } from '../components/TelegramLink'
@@ -161,7 +161,7 @@ export function SettingsRoute() {
     </section>
     <GmailConnect />
     <TelegramLink />
-    <McpConnect />
+    <AiAssistantsSettings />
     {me?.is_admin && isAdminMode() && <MemoryChannelsAdmin />}
     <ExecutorsAdmin />
     <IssuerProfiles />

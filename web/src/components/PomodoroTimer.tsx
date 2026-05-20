@@ -311,22 +311,28 @@ function PomodoroPopover({
           </label>
         </div>
         <div className="pomodoro__settings-row">
-          <label className="row">
-            <input
-              type="checkbox"
-              checked={p.config.notify}
-              onChange={(e) => p.updateConfig({ notify: e.target.checked })}
-            />
-            {t('pomodoro.notify')}
-          </label>
-          <label className="row">
-            <input
-              type="checkbox"
-              checked={p.config.sound}
-              onChange={(e) => p.updateConfig({ sound: e.target.checked })}
-            />
-            {t('pomodoro.sound')}
-          </label>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={p.config.notify}
+            className={
+              'toggle-pill' + (p.config.notify ? ' toggle-pill--on' : '')
+            }
+            onClick={() => p.updateConfig({ notify: !p.config.notify })}
+          >
+            {t('pomodoro.notify')}: {p.config.notify ? t('common.on') : t('common.off')}
+          </button>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={p.config.sound}
+            className={
+              'toggle-pill' + (p.config.sound ? ' toggle-pill--on' : '')
+            }
+            onClick={() => p.updateConfig({ sound: !p.config.sound })}
+          >
+            {t('pomodoro.sound')}: {p.config.sound ? t('common.on') : t('common.off')}
+          </button>
         </div>
       </fieldset>
       <footer className="pomodoro__foot">

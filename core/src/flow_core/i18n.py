@@ -117,6 +117,8 @@ class MessageCode(enum.StrEnum):
     TELEGRAM_WEBHOOK_FORBIDDEN = "telegram.webhook_forbidden"
     AGENT_TOKEN_NOT_FOUND = "agent_token.not_found"  # noqa: S105 (message code, not a secret)
     AGENT_TOKEN_INVALID = "agent_token.invalid"  # noqa: S105 (message code, not a secret)
+    AI_ASSISTANT_NOT_FOUND = "ai_assistant.not_found"
+    AI_ASSISTANT_INVALID_SCOPE = "ai_assistant.invalid_scope"
     DOMAIN_ERROR = "domain.error"
 
 
@@ -266,6 +268,8 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
         MessageCode.TELEGRAM_NOT_CONFIGURED: ("Telegram bot is not configured on this instance"),
         MessageCode.TELEGRAM_WEBHOOK_FORBIDDEN: "Forbidden webhook caller",
         MessageCode.AGENT_TOKEN_NOT_FOUND: "Agent token not found",
+        MessageCode.AI_ASSISTANT_NOT_FOUND: "AI assistant not found",
+        MessageCode.AI_ASSISTANT_INVALID_SCOPE: ("Unknown scope key: {key}"),
         MessageCode.AGENT_TOKEN_INVALID: "Invalid or revoked agent token",
         MessageCode.DOMAIN_ERROR: "Domain error",
     },

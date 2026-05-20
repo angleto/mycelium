@@ -426,7 +426,7 @@ export function TasksRoute() {
     : wfStates.filter((s) => !hiddenStateIds.has(s.id))
 
   return (
-    <section className="card">
+    <section className="card card--wide">
       <h1>{t('tasks.title')}</h1>
 
       <form onSubmit={(e) => void onCreate(e)} className="quickadd">

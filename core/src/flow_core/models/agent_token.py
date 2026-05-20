@@ -57,6 +57,15 @@ class AgentToken(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, Base
     revoked_at: Mapped[datetime.datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # Bind to an ``ai_assistants`` row (migration 0059). NULL for legacy
+    # bare tokens minted before the assistant flow existed; they keep
+    # working with full MCP surface (no scope filter). The UI only mints
+    # new tokens via the assistant lifecycle.
+    assistant_id: Mapped[uuid.UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("ai_assistants.id", ondelete="CASCADE"),
+        nullable=True,
+    )
 
 
 __all__ = ["AgentToken"]
