@@ -13,6 +13,7 @@ import { useMyWorkspace } from '../auth/useMyWorkspace'
 import { Logo } from './Logo'
 import { Icon, type IconName } from './NavIcon'
 import { ThemeToggle } from './ThemeToggle'
+import { PomodoroTimer } from './PomodoroTimer'
 import { hms, elapsedSec } from '../lib/time'
 import { useRunningTimers } from '../lib/useRunningTimer'
 import { parseMentionHref, routeForMention } from '../lib/mentions'
@@ -410,6 +411,7 @@ export function AppShell() {
           <Outlet />
         </main>
       </div>
+      <PomodoroTimer />
     </div>
   )
 }

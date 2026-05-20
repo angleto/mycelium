@@ -30,3 +30,4 @@ web/.vite/
 # Production deploy is an independent git repository (own history,
 # its own remote). Flow tracks only deploy/local/ (dev infra, used by CI).
 /deploy/prod/
+ReportMaggio.pdf

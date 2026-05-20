@@ -8,6 +8,7 @@ import { IssuerProfiles } from '../components/IssuerProfiles'
 import { ExecutorsAdmin } from '../components/ExecutorsAdmin'
 import { McpConnect } from '../components/McpConnect'
 import { MemoryChannelsAdmin } from '../components/MemoryChannelsAdmin'
+import { PomodoroSettings } from '../components/PomodoroSettings'
 import { TelegramLink } from '../components/TelegramLink'
 import { useMe } from '../auth/useMe'
 import { isAdminMode } from '../auth/session'
@@ -165,6 +166,7 @@ export function SettingsRoute() {
     <ExecutorsAdmin />
     <IssuerProfiles />
     <EstimatePresets />
+    <PomodoroSettings />
     <BuildInfo />
     </>
   )

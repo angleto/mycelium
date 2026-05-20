@@ -6,7 +6,7 @@ import {
   type FormEvent,
 } from 'react'
 import { useTranslation } from 'react-i18next'
-import { api, errMessage, workspaceHeader } from '../api/client'
+import { api, authFetch, errMessage, workspaceHeader } from '../api/client'
 import { useSession } from '../auth/useSession'
 import {
   fmtDateTime,
@@ -150,6 +150,30 @@ export function TimeRoute() {
     if (projectId) q.project_tag_id = projectId
     return q
   }, [group, scope, from, to, billableF, clientId, projectId])
+
+  const downloadReportCsv = useCallback(async () => {
+    // Backend already serves /api/time/report.csv with the same query
+    // params as /time/report. Fetch with the bearer (a plain <a href>
+    // would skip the Authorization header), then trigger a blob download.
+    const q = reportQuery() as Record<string, string | boolean>
+    const usp = new URLSearchParams()
+    for (const [k, v] of Object.entries(q)) usp.set(k, String(v))
+    const res = await authFetch(`/time/report.csv?${usp.toString()}`)
+    if (!res.ok) {
+      setErr(`HTTP ${res.status}`)
+      return
+    }
+    const blob = await res.blob()
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    const today = new Date().toISOString().slice(0, 10)
+    a.href = url
+    a.download = `flow-time-report-${today}.csv`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  }, [reportQuery])
 
   const loadReport = useCallback(async () => {
     const r = await api.GET('/time/report', {
@@ -642,7 +666,16 @@ export function TimeRoute() {
         </>
       )}
 
-      <h2>{t('time.report')}</h2>
+      <h2>
+        {t('time.report')}{' '}
+        <button
+          type="button"
+          className="btn--ghost btn--sm"
+          onClick={() => void downloadReportCsv()}
+        >
+          {t('time.exportCsv')}
+        </button>
+      </h2>
       <div className="row">
         <label>
           {t('time.groupBy')}
