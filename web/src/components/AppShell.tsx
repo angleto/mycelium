@@ -72,13 +72,19 @@ function ProjectFocus() {
     setClient(id)
   }
 
-  const ofClient = projects.filter((p) => p.client_tag_id === clientId)
+  // Archived clients/projects never appear in the focus picker:
+  // /tags?kind=client already filters server-side (include_archived=false
+  // default), /projects does NOT, so we filter both defensively here.
+  const visibleClients = clients.filter((c) => c.status !== 'archived')
+  const visibleProjects = projects.filter((p) => p.status !== 'archived')
+  const ofClient = visibleProjects.filter((p) => p.client_tag_id === clientId)
   // Keep the provider's effective allow-list in sync with the data.
+  // Archived projects don't expand the focus scope.
   useEffect(() => {
     setClientProjectIds(
       clientId
         ? projects
-            .filter((p) => p.client_tag_id === clientId)
+            .filter((p) => p.client_tag_id === clientId && p.status !== 'archived')
             .map((p) => p.id)
         : [],
     )
@@ -92,7 +98,7 @@ function ProjectFocus() {
         {clientId && !clientKnown && (
           <option value={clientId}>{cachedName || '…'}</option>
         )}
-        {clients.map((c) => (
+        {visibleClients.map((c) => (
           <option key={c.id} value={c.id}>
             {c.name}
           </option>

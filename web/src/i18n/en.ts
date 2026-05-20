@@ -602,6 +602,9 @@ export const en = {
     tagsLabel: 'Filter by tags',
     noTags: 'No tags on these tasks yet.',
     clearTags: 'Clear',
+    showTerminal: 'Show terminal',
+    stateLabel: 'Filter by state',
+    clearStates: 'Clear states',
   },
   scheduler: {
     nav: 'Schedule',

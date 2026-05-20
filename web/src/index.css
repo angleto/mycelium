@@ -1201,6 +1201,16 @@ button.btn--danger:hover {
   align-items: center;
   gap: 0.6rem;
   margin-left: auto;
+  /* Pin priority+state+timer to a single line: a long task title that
+     wraps to two rows must not push the timer buttons (⏱▶ / ⏱▶▶) to
+     a new line below. The whole meta block stays inline next to the
+     title — title shrinks, meta does not. */
+  flex-shrink: 0;
+  flex-wrap: nowrap;
+  white-space: nowrap;
+}
+.taskrow__meta > * {
+  flex-shrink: 0;
 }
 .chip.prio {
   font-variant-numeric: tabular-nums;

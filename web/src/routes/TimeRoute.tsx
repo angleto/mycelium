@@ -30,6 +30,24 @@ type BillableF = 'all' | 'yes' | 'no'
 const GROUPS: Group[] = ['project', 'client', 'generic', 'user', 'task']
 const ENT_PAGE = 50
 
+// Endpoints of the current local month as YYYY-MM-DD. Local rather
+// than UTC so the user always sees "1st of this month" matching their
+// calendar; the backend pairs these with 00:00:00 / 23:59:59 to form
+// the inclusive query range.
+function pad2(n: number): string {
+  return String(n).padStart(2, '0')
+}
+function thisMonthStart(): string {
+  const d = new Date()
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-01`
+}
+function thisMonthEnd(): string {
+  const d = new Date()
+  // Day 0 of next month == last day of current month.
+  const last = new Date(d.getFullYear(), d.getMonth() + 1, 0)
+  return `${last.getFullYear()}-${pad2(last.getMonth() + 1)}-${pad2(last.getDate())}`
+}
+
 function hhmmss(sec: number): string {
   const s = Math.max(0, Math.floor(sec))
   const h = Math.floor(s / 3600)
@@ -113,8 +131,11 @@ export function TimeRoute() {
   const [report, setReport] = useState<Row[]>([])
   const [group, setGroup] = useState<Group>('project')
   const [scope, setScope] = useState<Scope>('all')
-  const [from, setFrom] = useState('')
-  const [to, setTo] = useState('')
+  // Default range = current month (1st .. last day, inclusive). The
+  // backend treats start_from/start_to as ``[from 00:00:00, to 23:59:59]``,
+  // so the bounds here are the local YYYY-MM-DD endpoints of the month.
+  const [from, setFrom] = useState(() => thisMonthStart())
+  const [to, setTo] = useState(() => thisMonthEnd())
   const [billableF, setBillableF] = useState<BillableF>('all')
   const [clients, setClients] = useState<Tag[]>([])
   const [projects, setProjects] = useState<Tag[]>([])

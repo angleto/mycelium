@@ -602,6 +602,9 @@ export const it: Catalog = {
     tagsLabel: 'Filtra per tag',
     noTags: 'Nessun tag su questi task.',
     clearTags: 'Azzera',
+    showTerminal: 'Mostra terminali',
+    stateLabel: 'Filtra per stato',
+    clearStates: 'Azzera stati',
   },
   scheduler: {
     nav: 'Pianificazione',

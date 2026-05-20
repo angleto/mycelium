@@ -460,10 +460,12 @@ async def update_entry(
 
     patch = dict(values)
     touches_interval = "started_at" in patch or "ended_at" in patch
+    new_task: Task | None = None
     if "task_id" in patch:
         # Validates same-tenant existence (RLS scopes the lookup);
-        # raises NotFoundError(TASK_NOT_FOUND) if absent.
-        await get_task(session, org_id=org_id, task_id=patch["task_id"])
+        # raises NotFoundError(TASK_NOT_FOUND) if absent. Hold on to
+        # the resolved Task so we can re-snapshot rate/currency below.
+        new_task = await get_task(session, org_id=org_id, task_id=patch["task_id"])
     # Proposal A invariant after the patch: the *effective* note_id
     # (the new one if set, the stored one if untouched, none if cleared)
     # must be linked to the *effective* billing task (the reassigned one
@@ -490,6 +492,27 @@ async def update_entry(
         patch["duration_seconds"] = (
             None if new_ended is None else int((new_ended - new_started).total_seconds())
         )
+
+    # Re-snapshot billing when the entry moves to a different task OR
+    # when ``billable`` is explicitly toggled. Moving an entry to a task
+    # under a different client must follow the chain (a Kiwi entry
+    # reassigned to a non-billable internal task is now non-billable
+    # and earns 0 EUR; the reverse mistake also self-corrects). The
+    # snapshot is overwritten — this is a correction, not history.
+    if new_task is not None or "billable" in patch:
+        snapshot_task = new_task or await get_task(
+            session, org_id=org_id, task_id=entry.task_id
+        )
+        rate, currency, client_billable = await _rate(session, snapshot_task.id)
+        # When the user explicitly toggles billable in this patch, that
+        # value is the override; otherwise let _effective_billable walk
+        # the chain (task.billable -> client.default_billable). Passing
+        # the stored ``entry.billable`` as the explicit would pin the
+        # final value and defeat the whole point of re-snapshotting.
+        explicit = patch["billable"] if "billable" in patch else None
+        patch["rate_snapshot"] = rate
+        patch["currency"] = currency
+        patch["billable"] = _effective_billable(explicit, snapshot_task, client_billable)
 
     new_version = await optimistic_update(
         session,
@@ -604,6 +627,31 @@ async def report(
         }
         entries = [e for e in entries if e.task_id in keep]
 
+    # rate_snapshot is set when the entry is created/edited; entries
+    # created when the client had no ``tariffa`` (or no client) have
+    # NULL snapshots that historically rendered as 0 EUR even after the
+    # rate was later configured. Backfill the missing rates LIVE from
+    # the current task -> project -> client lookup, without mutating
+    # history: snapshot semantics ("the rate at the time of the entry")
+    # only apply when the snapshot exists; ``None`` means "no rate was
+    # captured", so the live rate is the most accurate available value.
+    live_rates: dict[uuid.UUID, tuple[Decimal | None, str]] = {}
+    needing_live = {e.task_id for e in entries if e.billable and e.rate_snapshot is None}
+    for tid in needing_live:
+        r, cur, _ = await _rate(session, tid)
+        live_rates[tid] = (r, cur)
+
+    def rate_for(e: TimeEntry) -> Decimal | None:
+        if e.rate_snapshot is not None:
+            return e.rate_snapshot
+        return live_rates.get(e.task_id, (None, "EUR"))[0]
+
+    def currency_for(e: TimeEntry) -> str:
+        if e.rate_snapshot is not None:
+            return e.currency
+        live = live_rates.get(e.task_id)
+        return live[1] if live else e.currency
+
     # acc key -> [label, seconds, billable_seconds, amount, currency]
     acc: dict[str | None, list[Any]] = {}
 
@@ -649,8 +697,8 @@ async def report(
                 labels.get(ent_id),
                 e.duration_seconds or 0,
                 e.billable,
-                e.rate_snapshot,
-                e.currency,
+                rate_for(e),
+                currency_for(e),
             )
     else:
         kind = {
@@ -662,7 +710,7 @@ async def report(
         for e in entries:
             tags = tag_map.get(e.task_id, [])
             if not tags:
-                bump(None, None, e.duration_seconds or 0, e.billable, e.rate_snapshot, e.currency)
+                bump(None, None, e.duration_seconds or 0, e.billable, rate_for(e), currency_for(e))
                 continue
             for tag_id, name in tags:
                 bump(

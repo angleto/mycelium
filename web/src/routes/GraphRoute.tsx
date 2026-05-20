@@ -11,6 +11,8 @@ type Graph = components['schemas']['GraphOut']
 type Dep = components['schemas']['DependencyOut']
 type DepType = components['schemas']['DependencyType']
 type Tag = components['schemas']['TagOut']
+type State = components['schemas']['StateOut']
+type Wf = components['schemas']['WorkflowOut']
 
 const ORDER: DepType[] = ['FS', 'SS', 'FF', 'SF']
 const NW = 170
@@ -72,6 +74,12 @@ export function GraphRoute() {
   const [zoom, setZoom] = useState(1)
   const [from, setFrom] = useState<string | null>(null)
   const [err, setErr] = useState<string | null>(null)
+  // Workflow states drive both the per-state filter and the
+  // hide-terminal default (a finished task shouldn't clutter the DAG
+  // by default — the toggle reveals them, mirrors /tasks).
+  const [wfStates, setWfStates] = useState<State[]>([])
+  const [stateFilter, setStateFilter] = useState<Set<string>>(new Set())
+  const [showTerminal, setShowTerminal] = useState(false)
 
   const reload = useCallback(async () => {
     const h = workspaceHeader()
@@ -108,17 +116,48 @@ export function GraphRoute() {
     }
   }, [activeId, tagQuery])
 
+  useEffect(() => {
+    let active = true
+    void (async () => {
+      const h = workspaceHeader()
+      const wfs = await api.GET('/workflows', { params: { header: h } })
+      if (!active || !wfs.data) return
+      const def =
+        wfs.data.find((w: Wf) => w.is_default) ?? wfs.data[0]
+      if (!def) return
+      const st = await api.GET('/workflows/{workflow_id}/states', {
+        params: { header: h, path: { workflow_id: def.id } },
+      })
+      if (!active) return
+      if (st.data) setWfStates(st.data)
+    })()
+    return () => {
+      active = false
+    }
+  }, [activeId])
+
   const taskById = new Map(tasks.map((x) => [x.id, x]))
   const titleOf = (id: string) => taskById.get(id)?.title ?? id.slice(0, 8)
   // Filter chips come from the tag catalog (authoritative + complete),
   // not from whatever tags happen to be on the loaded tasks (that was
   // empty/wrong, especially with a focus or an empty task list).
   const allTags = tags.filter((g) => g.status !== 'archived')
+  const terminalIds = new Set(
+    wfStates.filter((s) => s.is_terminal).map((s) => s.id),
+  )
 
   function visible(id: string): boolean {
     const tk = taskById.get(id)
     if (scope === 'mine' && tk?.executor_kind !== 'human') return false
     if (scope === 'ai' && tk?.executor_kind !== 'llm_agent') return false
+    // Terminal-state tasks are hidden by default (the toggle reveals
+    // them, mirroring /tasks). A node with no state info is shown.
+    if (!showTerminal && tk && terminalIds.has(tk.state_id)) return false
+    // Per-state filter: when one or more states are selected, only
+    // tasks in those states show.
+    if (stateFilter.size > 0 && tk && !stateFilter.has(tk.state_id)) {
+      return false
+    }
     // Multi-tag: OR — show a task if it carries ANY selected tag (no
     // selection = all). AND made "select all tags" hide everything,
     // since no single task has every tag.
@@ -236,7 +275,51 @@ export function GraphRoute() {
             <option value="ai">{t('graph.scopeAi')}</option>
           </select>
         </label>
+        <label className="row">
+          <input
+            type="checkbox"
+            checked={showTerminal}
+            onChange={(e) => setShowTerminal(e.target.checked)}
+          />{' '}
+          {t('graph.showTerminal')}
+        </label>
       </div>
+      {wfStates.length > 0 && (
+        <div className="tagfilter">
+          <span className="muted">{t('graph.stateLabel')}:</span>
+          {wfStates.map((s) => {
+            const on = stateFilter.has(s.id)
+            return (
+              <button
+                key={s.id}
+                type="button"
+                aria-pressed={on}
+                className={'chip ' + (on ? 'chip--on' : 'chip--off')}
+                onClick={() =>
+                  setStateFilter((prev) => {
+                    const n = new Set(prev)
+                    if (n.has(s.id)) n.delete(s.id)
+                    else n.add(s.id)
+                    return n
+                  })
+                }
+              >
+                {on ? '✓ ' : ''}
+                {s.name}
+              </button>
+            )
+          })}
+          {stateFilter.size > 0 && (
+            <button
+              type="button"
+              className="btn--ghost btn--sm"
+              onClick={() => setStateFilter(new Set())}
+            >
+              {t('graph.clearStates')}
+            </button>
+          )}
+        </div>
+      )}
       <div className="tagfilter">
         <span className="muted">{t('graph.tagsLabel')}:</span>
         {allTags.length === 0 ? (

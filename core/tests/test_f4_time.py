@@ -153,6 +153,72 @@ async def test_first_entry_feeds_scheduler_actual_start() -> None:
     assert r.es.astimezone(_RM).hour == 9
 
 
+async def test_update_entry_resnapshots_billing_on_task_move() -> None:
+    """Moving a TimeEntry to a task under a different client must
+    overwrite rate_snapshot / currency / billable from the *new* chain.
+    A correction (mis-billed entry reassigned to the right project)
+    should self-update the report — the entry's stored snapshot is
+    semantically "the billing context of the new task", not the stale
+    one from when the timer was started."""
+    async with admin_session() as s:
+        a = await signup(s, email=_email(), password="pw-strong-123", org_name="MOVE")
+    org, user = a.org_id, a.user_id
+    async with tenant_session(str(org), str(user)) as s:
+        wrong = await taxonomy.create_client(
+            s,
+            org_id=org,
+            actor_id=user,
+            name="Wrong",
+            profile=taxonomy.ClientInput(
+                ragione_sociale="Wrong", tariffa=Decimal(50), default_billable=False
+            ),
+        )
+        right = await taxonomy.create_client(
+            s,
+            org_id=org,
+            actor_id=user,
+            name="Right",
+            profile=taxonomy.ClientInput(
+                ragione_sociale="Right", tariffa=Decimal(200), default_billable=True
+            ),
+        )
+        wrong_proj = await taxonomy.create_project(
+            s, org_id=org, actor_id=user, name="WP", client_tag_id=wrong.id
+        )
+        right_proj = await taxonomy.create_project(
+            s, org_id=org, actor_id=user, name="RP", client_tag_id=right.id
+        )
+        wrong_task = await tasks.create_task(
+            s, org_id=org, actor_id=user, title="oops", tag_ids=[wrong_proj.id]
+        )
+        right_task = await tasks.create_task(
+            s, org_id=org, actor_id=user, title="correct", tag_ids=[right_proj.id]
+        )
+        entry = await tt.add_manual_entry(
+            s,
+            org_id=org,
+            actor_id=user,
+            task_id=wrong_task.id,
+            started_at=dt.datetime(2026, 1, 12, 9, 0, tzinfo=dt.UTC),
+            duration_seconds=3600,
+        )
+        assert entry.rate_snapshot == Decimal(50)
+        assert entry.billable is False  # wrong client is default non-billable
+        v = await tt.update_entry(
+            s,
+            org_id=org,
+            actor_id=user,
+            entry_id=entry.id,
+            expected_version=entry.version,
+            values={"task_id": right_task.id},
+        )
+        fixed = await tt.get_entry(s, org_id=org, entry_id=entry.id)
+        assert fixed.version == v
+        assert fixed.task_id == right_task.id
+        assert fixed.rate_snapshot == Decimal(200)
+        assert fixed.billable is True
+
+
 async def test_time_entries_are_org_isolated() -> None:
     async with admin_session() as s:
         a = await signup(s, email=_email(), password="pw-strong-123", org_name="ISO-A")
