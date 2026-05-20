@@ -68,10 +68,12 @@ def upgrade() -> None:
     # CREATE OR REPLACE. The 0014 GRANT/REVOKE bindings need to be
     # re-established after re-create.
     op.execute("DROP FUNCTION IF EXISTS list_user_organizations(uuid)")
+    # Signature must match 0019's _LIST_ORGS_V2: 4 columns
+    # (org_id, name, role, status). status is organizations.status.
     op.execute(
         """
         CREATE FUNCTION list_user_organizations(p_user_id uuid)
-        RETURNS TABLE(org_id uuid, name text, role text)
+        RETURNS TABLE(org_id uuid, name text, role text, status text)
         LANGUAGE plpgsql
         STABLE
         SECURITY DEFINER
@@ -80,7 +82,7 @@ def upgrade() -> None:
         BEGIN
           PERFORM set_config('app.current_user', p_user_id::text, true);
           RETURN QUERY
-            SELECT o.id, o.name::text, m.role::text
+            SELECT o.id, o.name::text, m.role::text, o.status::text
             FROM memberships m
             JOIN organizations o ON o.id = m.org_id
             WHERE m.user_id = p_user_id;
@@ -93,17 +95,19 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    # Restore the 0019 LANGUAGE sql version (not the 0014 3-column form,
+    # since 0019 is the state at our parent revision 0050).
     op.execute("DROP FUNCTION IF EXISTS list_user_organizations(uuid)")
     op.execute(
         """
         CREATE FUNCTION list_user_organizations(p_user_id uuid)
-        RETURNS TABLE(org_id uuid, name text, role text)
+        RETURNS TABLE(org_id uuid, name text, role text, status text)
         LANGUAGE sql
         STABLE
         SECURITY DEFINER
         SET search_path = public, pg_temp
         AS $fn$
-          SELECT o.id, o.name, m.role::text
+          SELECT o.id, o.name, m.role::text, o.status
           FROM memberships m
           JOIN organizations o ON o.id = m.org_id
           WHERE m.user_id = p_user_id
