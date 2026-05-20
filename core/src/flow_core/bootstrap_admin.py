@@ -17,7 +17,7 @@ import asyncio
 import os
 import sys
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 
 from flow_core.db import admin_session
 from flow_core.models.user import User
@@ -50,8 +50,37 @@ async def ensure_admin(email: str, password: str) -> str:
             # Idempotent: never reset the password here (rotate via the
             # reset flow), but make sure the account actually carries the
             # admin flag (the whole point of this bootstrap).
+            promoted = False
             if not existing.is_admin:
                 existing.is_admin = True
+                promoted = True
+            # Self-heal: a partial signup (e.g. an older migration where
+            # provision_organization could not bypass RLS) may have left
+            # the user without any membership. Detect that case and
+            # provision the default "Personal" org now; without this the
+            # SPA's post-login GET /workspaces returns [] and the user
+            # cannot enter the app. We count via list_user_organizations
+            # (SECURITY DEFINER) because admin_session() has no tenant
+            # GUC and a direct memberships SELECT would be filtered out
+            # by RLS to 0 -- which would defeat the idempotency check.
+            ocount = (
+                await s.execute(
+                    text("SELECT count(*) FROM list_user_organizations(CAST(:u AS uuid))"),
+                    {"u": str(existing.id)},
+                )
+            ).scalar_one()
+            if ocount == 0:
+                await s.execute(
+                    text("SELECT provision_organization(:n, CAST(:u AS uuid))"),
+                    {"n": "Personal", "u": str(existing.id)},
+                )
+                if promoted:
+                    return (
+                        f"admin {email} already existed; promoted to admin "
+                        f"and provisioned missing Personal workspace"
+                    )
+                return f"admin {email} already existed; provisioned missing Personal workspace"
+            if promoted:
                 return f"admin {email} already existed; promoted to admin"
             return f"admin {email} already exists; left untouched"
         result = await signup(s, email=email, password=password, org_name="Personal")
