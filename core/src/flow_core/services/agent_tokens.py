@@ -135,9 +135,7 @@ async def list_tokens(
     has minted -- the raw value is never in the row, so visibility is
     safe."""
     result = await session.execute(
-        select(AgentToken)
-        .where(AgentToken.org_id == org_id)
-        .order_by(AgentToken.created_at.desc())
+        select(AgentToken).where(AgentToken.org_id == org_id).order_by(AgentToken.created_at.desc())
     )
     return list(result.scalars().all())
 
@@ -153,9 +151,7 @@ async def revoke(
     no-op that preserves the original ``revoked_at`` timestamp)."""
     await require_role(session, org_id, actor_id, Role.owner)
     result = await session.execute(
-        select(AgentToken).where(
-            AgentToken.id == token_id, AgentToken.org_id == org_id
-        )
+        select(AgentToken).where(AgentToken.id == token_id, AgentToken.org_id == org_id)
     )
     row = result.scalar_one_or_none()
     if row is None:

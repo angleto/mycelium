@@ -151,9 +151,7 @@ async def test_non_owner_cannot_mint() -> None:
             owner = await signup(s, email=owner_email, password="pw-strong-123", org_name="A")
             member = await signup(s, email=member_email, password="pw-strong-123", org_name="B")
         async with tenant_session(str(owner.org_id), str(owner.user_id)) as s:
-            s.add(
-                Membership(org_id=owner.org_id, user_id=member.user_id, role=Role.member)
-            )
+            s.add(Membership(org_id=owner.org_id, user_id=member.user_id, role=Role.member))
             await s.flush()
 
         async with admin_session() as s:

@@ -132,9 +132,7 @@ async def webhook(
         chat_id = chat.get("id") if isinstance(chat, dict) else None
         if isinstance(chat_id, int):
             try:
-                await get_telegram_api().send_message(
-                    chat_id=chat_id, text=outcome.reply_text
-                )
+                await get_telegram_api().send_message(chat_id=chat_id, text=outcome.reply_text)
             except Exception:
                 # Reply is best-effort; never fail the webhook on a
                 # transient Telegram error (Telegram would retry).

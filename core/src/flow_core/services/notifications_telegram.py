@@ -123,9 +123,7 @@ async def sync_pref_from_link(
     return pref
 
 
-async def disable_pref_on_unlink(
-    session: AsyncSession, *, user_id: uuid.UUID
-) -> None:
+async def disable_pref_on_unlink(session: AsyncSession, *, user_id: uuid.UUID) -> None:
     """Soft-disable the user's telegram pref on unlink: clear the
     target so a future link refreshes it cleanly, but keep the row
     (a relink will toggle ``enabled`` back). Idempotent on a

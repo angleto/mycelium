@@ -74,9 +74,7 @@ async def _rekey_one(att: Attachment, store: AttachmentStore, dry: bool) -> str 
     # FK + the admin session sees all). The helper does not actually
     # need a GUC: its queries are JOINs by id, not RLS-filtered selects.
     async with admin_session() as s:
-        client_tag_id = await _resolve_client_tag_id(
-            s, task_id=att.task_id, note_id=att.note_id
-        )
+        client_tag_id = await _resolve_client_tag_id(s, task_id=att.task_id, note_id=att.note_id)
     parent_kind = "tasks" if att.task_id is not None else "notes"
     parent_id = att.task_id or att.note_id or att.id
     new_key = _build_storage_key(

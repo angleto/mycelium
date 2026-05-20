@@ -221,9 +221,7 @@ class Settings(BaseSettings):
         required because the deep-link URL (``https://t.me/<bot>?start=
         <code>``) cannot be built without it."""
         return bool(
-            self.telegram_bot_token
-            and self.telegram_bot_username
-            and self.telegram_webhook_secret
+            self.telegram_bot_token and self.telegram_bot_username and self.telegram_webhook_secret
         )
 
     @property

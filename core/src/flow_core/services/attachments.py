@@ -229,8 +229,7 @@ def _build_storage_key(
     if client_tag_id is None:
         return f"org/{org_id}/misc/{attachment_id}/{filename}"
     return (
-        f"org/{org_id}/client/{client_tag_id}/{parent_kind}/"
-        f"{parent_id}/{attachment_id}/{filename}"
+        f"org/{org_id}/client/{client_tag_id}/{parent_kind}/{parent_id}/{attachment_id}/{filename}"
     )
 
 
@@ -277,9 +276,7 @@ async def add_attachment(
         # notes/, invoicing/ side by side. Orphans (no client) go under
         # .../misc/. The key is computed AFTER the row exists because the
         # attachment_id is part of the path.
-        client_tag_id = await _resolve_client_tag_id(
-            session, task_id=task_id, note_id=note_id
-        )
+        client_tag_id = await _resolve_client_tag_id(session, task_id=task_id, note_id=note_id)
         parent_kind = "tasks" if task_id is not None else "notes"
         # _assert_parent enforces task_id XOR note_id, so one of the two
         # is set here; fall back to the attachment id (impossible at

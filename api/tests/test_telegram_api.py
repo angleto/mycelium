@@ -38,9 +38,7 @@ class FakeTelegramApi:
         self.sent.append((chat_id, text))
         return TelegramSendResult(message_id=len(self.sent))
 
-    async def set_webhook(
-        self, *, url: str, secret_token: str
-    ) -> TelegramSetWebhookResult:
+    async def set_webhook(self, *, url: str, secret_token: str) -> TelegramSetWebhookResult:
         return TelegramSetWebhookResult(ok=True, description="ok")
 
 

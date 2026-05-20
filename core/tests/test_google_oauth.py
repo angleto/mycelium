@@ -213,9 +213,11 @@ def _id_token(email: str) -> str:
     import base64
     import json
 
-    body = base64.urlsafe_b64encode(
-        json.dumps({"email": email, "sub": "google-1"}).encode()
-    ).rstrip(b"=").decode()
+    body = (
+        base64.urlsafe_b64encode(json.dumps({"email": email, "sub": "google-1"}).encode())
+        .rstrip(b"=")
+        .decode()
+    )
     return f"eyJhbGciOiJSUzI1NiJ9.{body}.sig"
 
 
@@ -430,9 +432,7 @@ async def test_ingest_updates_changed_event(_configure_google_oauth) -> None:
     )
     set_google_api_client_override(lambda: fake)
     async with tenant_session(str(org_id), str(user_id)) as s:
-        await gcal_svc.sync_subscription(
-            s, org_id=org_id, actor_id=user_id, subscription_id=sub_id
-        )
+        await gcal_svc.sync_subscription(s, org_id=org_id, actor_id=user_id, subscription_id=sub_id)
 
     fake.events = [
         _ge(

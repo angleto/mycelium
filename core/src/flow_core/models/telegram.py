@@ -80,9 +80,7 @@ class TelegramLinkCode(UUIDPKMixin, OrgScopedMixin, TimestampMixin, Base):
         index=True,
     )
     code: Mapped[str] = mapped_column(String(32), nullable=False)
-    expires_at: Mapped[datetime.datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
+    expires_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     # Set by the webhook on a successful ``/start <code>``; once set
     # the code is dead and further redemptions are rejected.
     consumed_at: Mapped[datetime.datetime | None] = mapped_column(

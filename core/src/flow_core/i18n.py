@@ -162,12 +162,8 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
         MessageCode.TAG_DUPLICATE: "A tag with this name already exists",
         MessageCode.TAG_AMBIGUOUS: "Ambiguous tag name: {name}",
         MessageCode.TAG_KIND_MISMATCH: "Tag is not of the expected kind",
-        MessageCode.TAG_NOT_ARCHIVED: (
-            "Archive the {kind} before deleting it permanently"
-        ),
-        MessageCode.TAG_DEFAULT_PROTECTED: (
-            "The default {kind} cannot be deleted"
-        ),
+        MessageCode.TAG_NOT_ARCHIVED: ("Archive the {kind} before deleting it permanently"),
+        MessageCode.TAG_DEFAULT_PROTECTED: ("The default {kind} cannot be deleted"),
         MessageCode.CLIENT_HAS_INVOICES: (
             "Client has {count} invoice(s); void or delete them first"
         ),
@@ -254,9 +250,7 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
         MessageCode.WORKSPACE_SOLE: (
             "Cannot delete your only workspace: create or join another first"
         ),
-        MessageCode.OAUTH_NOT_CONFIGURED: (
-            "Google OAuth is not configured on this server"
-        ),
+        MessageCode.OAUTH_NOT_CONFIGURED: ("Google OAuth is not configured on this server"),
         MessageCode.OAUTH_STATE_INVALID: "Invalid or expired OAuth state",
         MessageCode.OAUTH_EXCHANGE_FAILED: (
             "Failed to exchange the authorization code for tokens: {detail}"
@@ -264,18 +258,12 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
         MessageCode.OAUTH_SCOPE_INVALID: (
             "Invalid OAuth scope: must be one of gmail, calendar, both"
         ),
-        MessageCode.OAUTH_REFRESH_FAILED: (
-            "Failed to refresh the Google access token: {detail}"
-        ),
+        MessageCode.OAUTH_REFRESH_FAILED: ("Failed to refresh the Google access token: {detail}"),
         MessageCode.GOOGLE_CALENDAR_SUBSCRIPTION_NOT_FOUND: (
             "Google Calendar subscription not found"
         ),
-        MessageCode.GOOGLE_CALENDAR_API_ERROR: (
-            "Google Calendar API error: {detail}"
-        ),
-        MessageCode.TELEGRAM_NOT_CONFIGURED: (
-            "Telegram bot is not configured on this instance"
-        ),
+        MessageCode.GOOGLE_CALENDAR_API_ERROR: ("Google Calendar API error: {detail}"),
+        MessageCode.TELEGRAM_NOT_CONFIGURED: ("Telegram bot is not configured on this instance"),
         MessageCode.TELEGRAM_WEBHOOK_FORBIDDEN: "Forbidden webhook caller",
         MessageCode.AGENT_TOKEN_NOT_FOUND: "Agent token not found",
         MessageCode.AGENT_TOKEN_INVALID: "Invalid or revoked agent token",

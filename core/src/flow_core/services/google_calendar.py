@@ -384,9 +384,7 @@ async def push_event(
     Returns the Google event id. Subsequent ingests will reconcile it
     (the row gets ``external_*`` set so future syncs deduplicate)."""
     await require_role(session, org_id, actor_id, Role.member)
-    ev = (
-        await session.execute(select(Event).where(Event.id == event_id))
-    ).scalar_one_or_none()
+    ev = (await session.execute(select(Event).where(Event.id == event_id))).scalar_one_or_none()
     if ev is None:
         raise NotFoundError(MessageCode.EVENT_NOT_FOUND)
     sub = await get_subscription(session, org_id=org_id, subscription_id=subscription_id)

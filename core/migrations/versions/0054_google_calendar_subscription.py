@@ -47,10 +47,7 @@ depends_on: str | Sequence[str] | None = None
 _ORG = "nullif(current_setting('app.current_org', true), '')::uuid"
 
 UPGRADE: tuple[str, ...] = (
-    (
-        "CREATE TYPE google_calendar_status AS ENUM "
-        "('active', 'error', 'disabled')"
-    ),
+    ("CREATE TYPE google_calendar_status AS ENUM ('active', 'error', 'disabled')"),
     """
     CREATE TABLE google_calendar_subscriptions (
       id uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -86,10 +83,7 @@ UPGRADE: tuple[str, ...] = (
         "CREATE POLICY p_google_calendar_subscriptions ON google_calendar_subscriptions "
         f"USING (org_id = {_ORG}) WITH CHECK (org_id = {_ORG})"
     ),
-    (
-        "GRANT SELECT, INSERT, UPDATE, DELETE "
-        "ON google_calendar_subscriptions TO flow_app"
-    ),
+    ("GRANT SELECT, INSERT, UPDATE, DELETE ON google_calendar_subscriptions TO flow_app"),
     # Provenance on events: idempotent ingest by (subscription, external_id).
     "ALTER TABLE events ADD COLUMN external_provider varchar(20)",
     "ALTER TABLE events ADD COLUMN external_id varchar(255)",

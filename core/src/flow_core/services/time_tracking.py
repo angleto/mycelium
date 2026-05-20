@@ -500,9 +500,7 @@ async def update_entry(
     # and earns 0 EUR; the reverse mistake also self-corrects). The
     # snapshot is overwritten — this is a correction, not history.
     if new_task is not None or "billable" in patch:
-        snapshot_task = new_task or await get_task(
-            session, org_id=org_id, task_id=entry.task_id
-        )
+        snapshot_task = new_task or await get_task(session, org_id=org_id, task_id=entry.task_id)
         rate, currency, client_billable = await _rate(session, snapshot_task.id)
         # When the user explicitly toggles billable in this patch, that
         # value is the override; otherwise let _effective_billable walk

@@ -113,16 +113,12 @@ async def test_revoke_marks_revoked_at_and_is_idempotent() -> None:
         token_id = r.token.id
     async with tenant_session(str(org), str(user)) as s:
         await svc.revoke(s, org_id=org, actor_id=user, token_id=token_id)
-        row = (
-            await s.execute(select(AgentToken).where(AgentToken.id == token_id))
-        ).scalar_one()
+        row = (await s.execute(select(AgentToken).where(AgentToken.id == token_id))).scalar_one()
         first_revoked = row.revoked_at
         assert first_revoked is not None
         # Idempotent re-revoke preserves the timestamp.
         await svc.revoke(s, org_id=org, actor_id=user, token_id=token_id)
-        row2 = (
-            await s.execute(select(AgentToken).where(AgentToken.id == token_id))
-        ).scalar_one()
+        row2 = (await s.execute(select(AgentToken).where(AgentToken.id == token_id))).scalar_one()
         assert row2.revoked_at == first_revoked
 
 
@@ -145,9 +141,7 @@ async def test_authenticate_resolves_principal_and_bumps_last_used_at() -> None:
     assert result.scope == "mcp"
 
     async with tenant_session(str(org), str(user)) as s:
-        row = (
-            await s.execute(select(AgentToken).where(AgentToken.id == r.token.id))
-        ).scalar_one()
+        row = (await s.execute(select(AgentToken).where(AgentToken.id == r.token.id))).scalar_one()
         first_bump = row.last_used_at
         assert first_bump is not None
 
@@ -177,10 +171,7 @@ async def test_authenticate_rejects_expired_token() -> None:
         await s.execute(
             update(AgentToken)
             .where(AgentToken.id == r.token.id)
-            .values(
-                expires_at=datetime.datetime.now(tz=datetime.UTC)
-                - datetime.timedelta(days=1)
-            )
+            .values(expires_at=datetime.datetime.now(tz=datetime.UTC) - datetime.timedelta(days=1))
         )
     assert await svc.authenticate(r.raw) is None
 

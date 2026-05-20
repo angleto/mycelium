@@ -141,9 +141,7 @@ class LinkStatus:
     linked_at: datetime.datetime | None
 
 
-async def get_link_status(
-    session: AsyncSession, *, user_id: uuid.UUID
-) -> LinkStatus:
+async def get_link_status(session: AsyncSession, *, user_id: uuid.UUID) -> LinkStatus:
     """Read the user's Telegram link. RLS keys on
     ``app.current_user`` (set by ``tenant_session``) and the self
     policy from migration 0053 lets the user see their own row."""
@@ -301,10 +299,7 @@ async def handle_webhook_update(payload: dict[str, object]) -> UpdateOutcome:
     async with admin_session() as s:
         chat_lookup = (
             await s.execute(
-                text(
-                    "SELECT out_user_id, out_default_org_id"
-                    " FROM resolve_telegram_chat(:chat)"
-                ),
+                text("SELECT out_user_id, out_default_org_id FROM resolve_telegram_chat(:chat)"),
                 {"chat": chat_id},
             )
         ).first()
@@ -402,9 +397,7 @@ async def get_link_for_user(user_id: uuid.UUID) -> TelegramLink | None:
             {"u": str(user_id)},
         )
         row = (
-            await s.execute(
-                select(TelegramLink).where(TelegramLink.user_id == user_id)
-            )
+            await s.execute(select(TelegramLink).where(TelegramLink.user_id == user_id))
         ).scalar_one_or_none()
     return row
 

@@ -119,9 +119,7 @@ async def _store_gmail_account(
     binds it to the right workspace; tagged by the caller."""
     async with tenant_session(str(org_id), str(user_id)) as s:
         existing = (
-            await s.execute(
-                select(EmailAccount).where(EmailAccount.email_address == email_address)
-            )
+            await s.execute(select(EmailAccount).where(EmailAccount.email_address == email_address))
         ).scalar_one_or_none()
         if existing is not None:
             existing.secret_encrypted = encrypt_secret(refresh_token)

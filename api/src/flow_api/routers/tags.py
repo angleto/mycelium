@@ -249,18 +249,12 @@ async def patch_project(
 # and the service cascades the subgraph (tasks, notes, memory blobs,
 # events, attachment objects in the store). Role: owner.
 @router.delete("/clients/{tag_id}", status_code=204)
-async def delete_client(
-    tag_id: uuid.UUID, ctx: Annotated[TenantCtx, Depends(tenant_ctx)]
-) -> None:
-    await taxonomy.purge_client(
-        ctx.session, org_id=ctx.org_id, actor_id=ctx.user_id, tag_id=tag_id
-    )
+async def delete_client(tag_id: uuid.UUID, ctx: Annotated[TenantCtx, Depends(tenant_ctx)]) -> None:
+    await taxonomy.purge_client(ctx.session, org_id=ctx.org_id, actor_id=ctx.user_id, tag_id=tag_id)
 
 
 @router.delete("/projects/{tag_id}", status_code=204)
-async def delete_project(
-    tag_id: uuid.UUID, ctx: Annotated[TenantCtx, Depends(tenant_ctx)]
-) -> None:
+async def delete_project(tag_id: uuid.UUID, ctx: Annotated[TenantCtx, Depends(tenant_ctx)]) -> None:
     await taxonomy.purge_project(
         ctx.session, org_id=ctx.org_id, actor_id=ctx.user_id, tag_id=tag_id
     )

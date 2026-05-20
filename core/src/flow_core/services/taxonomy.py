@@ -935,9 +935,7 @@ async def _is_default_tag(
         cached = org.settings.get(settings_key)
         if cached is not None and str(cached) == str(tag_id):
             return True
-    tag = (
-        await session.execute(select(Tag).where(Tag.id == tag_id))
-    ).scalar_one_or_none()
+    tag = (await session.execute(select(Tag).where(Tag.id == tag_id))).scalar_one_or_none()
     if tag is None:
         return False
     fallback_name = {
@@ -1008,24 +1006,22 @@ async def _purge_project_subgraph(
                 .join(Tag, Tag.id == TaskTag.tag_id)
                 .where(TaskTag.tag_id == project_tag_id)
             )
-        ).scalars().all()
+        )
+        .scalars()
+        .all()
     )
     note_ids = list(
-        (
-            await session.execute(select(Note.id).where(Note.project_id == project_tag_id))
-        ).scalars().all()
+        (await session.execute(select(Note.id).where(Note.project_id == project_tag_id)))
+        .scalars()
+        .all()
     )
     await _purge_attachment_blobs_for(session, task_ids=task_ids, note_ids=note_ids)
     if task_ids:
         await session.execute(delete(Task).where(Task.id.in_(task_ids)))
     if note_ids:
         await session.execute(delete(Note).where(Note.id.in_(note_ids)))
-    await session.execute(
-        delete(MemoryBlob).where(MemoryBlob.project_id == project_tag_id)
-    )
-    await session.execute(
-        delete(Event).where(Event.project_tag_id == project_tag_id)
-    )
+    await session.execute(delete(MemoryBlob).where(MemoryBlob.project_id == project_tag_id))
+    await session.execute(delete(Event).where(Event.project_tag_id == project_tag_id))
 
 
 async def purge_project(
@@ -1102,10 +1098,10 @@ async def purge_client(
     ):
         raise DomainError(MessageCode.TAG_DEFAULT_PROTECTED, kind="client")
     invoice_count = (
-        await session.execute(
-            select(Invoice.id).where(Invoice.client_tag_id == tag_id).limit(50)
-        )
-    ).scalars().all()
+        (await session.execute(select(Invoice.id).where(Invoice.client_tag_id == tag_id).limit(50)))
+        .scalars()
+        .all()
+    )
     if invoice_count:
         raise DomainError(MessageCode.CLIENT_HAS_INVOICES, count=len(invoice_count))
     project_ids = list(
@@ -1113,15 +1109,15 @@ async def purge_client(
             await session.execute(
                 select(ProjectProfile.tag_id).where(ProjectProfile.client_tag_id == tag_id)
             )
-        ).scalars().all()
+        )
+        .scalars()
+        .all()
     )
     for project_tag_id in project_ids:
         await _purge_project_subgraph(session, org_id=org_id, project_tag_id=project_tag_id)
     if project_ids:
         await session.execute(delete(Tag).where(Tag.id.in_(project_ids)))
-    await session.execute(
-        delete(Event).where(Event.client_tag_id == tag_id)
-    )
+    await session.execute(delete(Event).where(Event.client_tag_id == tag_id))
     await session.execute(delete(Tag).where(Tag.id == tag_id))
     await session.flush()
     await audit.log(

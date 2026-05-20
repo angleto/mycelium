@@ -47,9 +47,7 @@ class FakeTelegramApi:
         self.sent.append((chat_id, text))
         return TelegramSendResult(message_id=len(self.sent))
 
-    async def set_webhook(
-        self, *, url: str, secret_token: str
-    ) -> TelegramSetWebhookResult:
+    async def set_webhook(self, *, url: str, secret_token: str) -> TelegramSetWebhookResult:
         self.webhook = (url, secret_token)
         return TelegramSetWebhookResult(ok=True, description="ok")
 
@@ -92,9 +90,7 @@ async def test_create_link_code_returns_deep_link_and_invalidates_previous() -> 
         first = await svc.create_link_code(
             s, org_id=org, user_id=user, bot_username="flow_test_bot"
         )
-        assert first.deep_link == telegram_deep_link(
-            bot_username="flow_test_bot", code=first.code
-        )
+        assert first.deep_link == telegram_deep_link(bot_username="flow_test_bot", code=first.code)
         # Second mint invalidates the first (consumed_at set on the
         # previous unconsumed row).
         second = await svc.create_link_code(
@@ -102,11 +98,7 @@ async def test_create_link_code_returns_deep_link_and_invalidates_previous() -> 
         )
         assert second.code != first.code
         rows = (
-            (
-                await s.execute(
-                    select(TelegramLinkCode).where(TelegramLinkCode.user_id == user)
-                )
-            )
+            (await s.execute(select(TelegramLinkCode).where(TelegramLinkCode.user_id == user)))
             .scalars()
             .all()
         )
@@ -192,9 +184,7 @@ async def test_webhook_is_idempotent_by_update_id() -> None:
     assert second.reply_text is None  # replay no-ops
     async with admin_session() as s:
         seen = (
-            await s.execute(
-                select(TelegramUpdate).where(TelegramUpdate.update_id == update_id)
-            )
+            await s.execute(select(TelegramUpdate).where(TelegramUpdate.update_id == update_id))
         ).scalar_one()
         assert seen.update_id == update_id
 
@@ -222,9 +212,7 @@ async def test_regular_message_from_linked_chat_creates_note() -> None:
     )
     assert outcome.note_id is not None and outcome.task_id is None
     async with tenant_session(str(org), str(user)) as s:
-        note = (
-            await s.execute(select(Note).where(Note.id == outcome.note_id))
-        ).scalar_one()
+        note = (await s.execute(select(Note).where(Note.id == outcome.note_id))).scalar_one()
         assert note.transcript == "Pay invoice tomorrow"
 
 
@@ -243,9 +231,7 @@ async def test_task_prefix_creates_task_not_note() -> None:
     )
     assert outcome.task_id is not None and outcome.note_id is None
     async with tenant_session(str(org), str(user)) as s:
-        task = (
-            await s.execute(select(Task).where(Task.id == outcome.task_id))
-        ).scalar_one()
+        task = (await s.execute(select(Task).where(Task.id == outcome.task_id))).scalar_one()
         assert task.title == "Call client"
 
 
@@ -285,9 +271,7 @@ async def test_link_codes_are_org_isolated() -> None:
     org_a, user_a = await _signup()
     org_b, user_b = await _signup()
     async with tenant_session(str(org_a), str(user_a)) as s:
-        await svc.create_link_code(
-            s, org_id=org_a, user_id=user_a, bot_username="flow_test_bot"
-        )
+        await svc.create_link_code(s, org_id=org_a, user_id=user_a, bot_username="flow_test_bot")
     async with tenant_session(str(org_b), str(user_b)) as s:
         rows = (await s.execute(select(TelegramLinkCode))).scalars().all()
         assert rows == []

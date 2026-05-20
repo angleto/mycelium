@@ -54,9 +54,7 @@ class TelegramApi(Protocol):
 
     async def send_message(self, *, chat_id: int, text: str) -> TelegramSendResult: ...
 
-    async def set_webhook(
-        self, *, url: str, secret_token: str
-    ) -> TelegramSetWebhookResult: ...
+    async def set_webhook(self, *, url: str, secret_token: str) -> TelegramSetWebhookResult: ...
 
 
 class HttpxTelegramApi:
@@ -100,9 +98,7 @@ class HttpxTelegramApi:
         message_id = int(result.get("message_id") or 0)
         return TelegramSendResult(message_id=message_id)
 
-    async def set_webhook(
-        self, *, url: str, secret_token: str
-    ) -> TelegramSetWebhookResult:
+    async def set_webhook(self, *, url: str, secret_token: str) -> TelegramSetWebhookResult:
         body: dict[str, str] = {"url": url}
         if secret_token:
             # Telegram echoes this back as the
@@ -131,9 +127,7 @@ class _UnconfiguredTelegramApi:
     async def send_message(self, *, chat_id: int, text: str) -> TelegramSendResult:
         raise RuntimeError("telegram bot is not configured")
 
-    async def set_webhook(
-        self, *, url: str, secret_token: str
-    ) -> TelegramSetWebhookResult:
+    async def set_webhook(self, *, url: str, secret_token: str) -> TelegramSetWebhookResult:
         return TelegramSetWebhookResult(ok=False, description="telegram bot is not configured")
 
 
