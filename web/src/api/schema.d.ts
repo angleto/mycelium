@@ -5571,6 +5571,11 @@ export interface components {
             is_initial: boolean;
             /** Is Terminal */
             is_terminal: boolean;
+            /**
+             * Is Hidden
+             * @default false
+             */
+            is_hidden?: boolean;
         };
         /**
          * StorageKind
@@ -6222,6 +6227,11 @@ export interface components {
              * @default false
              */
             is_terminal: boolean;
+            /**
+             * Is Hidden
+             * @default false
+             */
+            is_hidden?: boolean;
         };
         /** WorkflowStateSpecIn */
         WorkflowStateSpecIn: {
@@ -6242,6 +6252,11 @@ export interface components {
              * @default false
              */
             is_terminal: boolean;
+            /**
+             * Is Hidden
+             * @default false
+             */
+            is_hidden?: boolean;
         };
         /** WorkspaceCreateIn */
         WorkspaceCreateIn: {

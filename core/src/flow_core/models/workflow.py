@@ -40,6 +40,11 @@ class WorkflowState(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, B
     ord: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     is_initial: Mapped[bool] = mapped_column(nullable=False, server_default=text("false"))
     is_terminal: Mapped[bool] = mapped_column(nullable=False, server_default=text("false"))
+    # UI hint: hidden columns are skipped in the kanban view by default
+    # (the SPA reveals them with a "Show hidden" toggle). Storage-level
+    # boolean only — the scheduler / dispatch / transitions don't read it,
+    # tasks in a hidden state are still in the workflow normally.
+    is_hidden: Mapped[bool] = mapped_column(nullable=False, server_default=text("false"))
 
 
 class WorkflowTransition(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, Base):

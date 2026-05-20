@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { api, errMessage, workspaceHeader } from '../api/client'
@@ -327,12 +327,29 @@ export function GraphRoute() {
         ) : (
           allTags.map((g) => {
             const on = tagFilter.has(g.id)
+            // Color comes from the tag itself. When ON the colour fills
+            // the chip (with strong opacity); when OFF only the dot +
+            // border carry the colour, so the chip stays visually
+            // distinguishable across same-named tags on different
+            // clients/projects.
+            const color = g.color || undefined
+            const style: CSSProperties = on
+              ? color
+                ? { background: color, borderColor: color, color: '#fff' }
+                : {}
+              : color
+                ? { borderColor: `${color}66` }
+                : {}
             return (
               <button
                 key={g.id}
                 type="button"
                 aria-pressed={on}
-                className={'chip ' + (on ? 'chip--on' : 'chip--off')}
+                className={
+                  'chip ' + (on ? 'chip--on' : 'chip--off')
+                }
+                style={style}
+                title={`${g.kind}: ${g.name}`}
                 onClick={() =>
                   setTagFilter((s) => {
                     const n = new Set(s)
@@ -342,7 +359,13 @@ export function GraphRoute() {
                   })
                 }
               >
-                {on ? '✓ ' : ''}
+                {color && (
+                  <span
+                    className="chip__dot"
+                    style={{ background: color }}
+                    aria-hidden="true"
+                  />
+                )}
                 {g.name}
               </button>
             )

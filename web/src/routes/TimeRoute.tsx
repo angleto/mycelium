@@ -130,6 +130,28 @@ export function TimeRoute() {
   const [entLoading, setEntLoading] = useState(false)
   const [report, setReport] = useState<Row[]>([])
   const [group, setGroup] = useState<Group>('project')
+  // The pie chart can be grouped independently from the report table
+  // — three buckets only: task / project / client. Persisted in
+  // localStorage; default = project.
+  type PieGroup = 'task' | 'project' | 'client'
+  const PIE_KEY = 'flow.time.pieGroup'
+  const [pieGroup, setPieGroup] = useState<PieGroup>(() => {
+    try {
+      const saved = localStorage.getItem(PIE_KEY)
+      if (saved === 'task' || saved === 'project' || saved === 'client') return saved
+    } catch {
+      /* fall through */
+    }
+    return 'project'
+  })
+  useEffect(() => {
+    try {
+      localStorage.setItem(PIE_KEY, pieGroup)
+    } catch {
+      /* ignore */
+    }
+  }, [pieGroup])
+  const [pieReport, setPieReport] = useState<Row[]>([])
   const [scope, setScope] = useState<Scope>('all')
   // Default range = current month (1st .. last day, inclusive). The
   // backend treats start_from/start_to as ``[from 00:00:00, to 23:59:59]``,
@@ -232,7 +254,16 @@ export function TimeRoute() {
       params: { header: workspaceHeader(), query: q },
     })
     if (bt.data) setByTask(bt.data)
-  }, [reportQuery, from, to])
+    // Pie chart aggregation: same date / scope / client / project /
+    // billable filters as the main report, but a separate ``group``.
+    // Kept as its own request so changing the pie selector doesn't
+    // force the table to re-render with the same group.
+    const pieQ = { ...(reportQuery() as Record<string, unknown>), group: pieGroup }
+    const pr = await api.GET('/time/report', {
+      params: { header: workspaceHeader(), query: pieQ },
+    })
+    if (pr.data) setPieReport(pr.data)
+  }, [reportQuery, from, to, pieGroup])
 
   const resetEntries = useCallback(async () => {
     const { data } = await api.GET('/time/entries', {
@@ -621,18 +652,48 @@ export function TimeRoute() {
         <p className="hint">{t('time.idle')}</p>
       ) : (
         <>
+        <div className="viewtabs" role="tablist" aria-label={t('time.pieGroup')}>
+          {(['task', 'project', 'client'] as const).map((g) => (
+            <button
+              key={g}
+              type="button"
+              role="tab"
+              aria-selected={pieGroup === g}
+              className={
+                'viewtabs__tab' +
+                (pieGroup === g ? ' viewtabs__tab--active' : '')
+              }
+              onClick={() => setPieGroup(g)}
+            >
+              {t(`time.pieGroup_${g}`)}
+            </button>
+          ))}
+        </div>
         <Donut
           data={(() => {
-            const s = [...shownByTask].sort(
-              (a, b) => b.total_seconds - a.total_seconds,
-            )
+            // Pie data comes from the dedicated pieReport (grouped by
+            // pieGroup) when the user picks project/client; when on
+            // 'task' we keep the by-task drill-down so the donut and
+            // the table below share the same numbers.
+            if (pieGroup === 'task') {
+              const s = [...shownByTask].sort(
+                (a, b) => b.total_seconds - a.total_seconds,
+              )
+              const top = s.slice(0, 8).map((r) => ({
+                label: r.task_title ?? r.task_id.slice(0, 8),
+                secs: r.total_seconds,
+              }))
+              const rest = s.slice(8).reduce((x, r) => x + r.total_seconds, 0)
+              return rest > 0
+                ? [...top, { label: `+${s.length - 8}`, secs: rest }]
+                : top
+            }
+            const s = [...pieReport].sort((a, b) => b.seconds - a.seconds)
             const top = s.slice(0, 8).map((r) => ({
-              label: r.task_title ?? r.task_id.slice(0, 8),
-              secs: r.total_seconds,
+              label: r.label ?? '—',
+              secs: r.seconds,
             }))
-            const rest = s
-              .slice(8)
-              .reduce((x, r) => x + r.total_seconds, 0)
+            const rest = s.slice(8).reduce((x, r) => x + r.seconds, 0)
             return rest > 0
               ? [...top, { label: `+${s.length - 8}`, secs: rest }]
               : top

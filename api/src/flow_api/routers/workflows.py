@@ -42,6 +42,7 @@ async def create_workflow(
                 ord=s.ord,
                 is_initial=s.is_initial,
                 is_terminal=s.is_terminal,
+                is_hidden=s.is_hidden,
             )
             for s in body.states
         ],
@@ -70,6 +71,7 @@ async def update_workflow(
                 ord=s.ord,
                 is_initial=s.is_initial,
                 is_terminal=s.is_terminal,
+                is_hidden=s.is_hidden,
             )
             for s in body.states
         ],
@@ -134,6 +136,7 @@ async def workflow_states(
             ord=s.ord,
             is_initial=s.is_initial,
             is_terminal=s.is_terminal,
+            is_hidden=s.is_hidden,
         )
         for s in states
     ]

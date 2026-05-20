@@ -79,7 +79,12 @@ export function TasksRoute() {
   const [bulkState, setBulkState] = useState('')
   const [bulkTag, setBulkTag] = useState('')
   const [bulkMsg, setBulkMsg] = useState<string | null>(null)
-  const [showTerminal, setShowTerminal] = useState(false)
+  // Kanban hides columns whose state has ``is_hidden=true`` by default
+  // (per-state UI hint set in /workflows). The list view always shows
+  // everything: ``showTerminal`` was removed because terminal tasks are
+  // legitimate "done" rows the user wants to see in their list — only
+  // the graph still hides them by default (it has its own toggle).
+  const [showHidden, setShowHidden] = useState(false)
   const [view, setView] = useState<View>(defaultView)
   useEffect(() => {
     try {
@@ -395,10 +400,8 @@ export function TasksRoute() {
 
   const activeTag = tags.find((x) => x.id === filter)
   const ql = q.trim().toLowerCase()
-  // Terminal-state (done) tasks are hidden by default: a finished task
-  // shouldn't clutter the working list. The toggle reveals them.
-  const terminalIds = new Set(
-    wfStates.filter((s) => s.is_terminal).map((s) => s.id),
+  const hiddenStateIds = new Set(
+    wfStates.filter((s) => s.is_hidden).map((s) => s.id),
   )
   const matched = ql
     ? tasks.filter(
@@ -414,9 +417,13 @@ export function TasksRoute() {
         (tk.tags ?? []).some((g) => focusIds.includes(g.id)),
       )
     : matched
-  const shown = showTerminal
-    ? focused
-    : focused.filter((tk) => !terminalIds.has(tk.state_id))
+  // List view shows everything; kanban filters out tasks whose state is
+  // hidden unless ``showHidden`` is on (the toggle gates the kanban
+  // columns directly inside TaskKanban — see ``kanbanStates``).
+  const shown = focused
+  const kanbanStates = showHidden
+    ? wfStates
+    : wfStates.filter((s) => !hiddenStateIds.has(s.id))
 
   return (
     <section className="card">
@@ -518,14 +525,16 @@ export function TasksRoute() {
         {activeTag && (
           <TagChip name={activeTag.name} color={activeTag.color} kind={activeTag.kind} />
         )}
-        <label className="row">
-          <input
-            type="checkbox"
-            checked={showTerminal}
-            onChange={(e) => setShowTerminal(e.target.checked)}
-          />{' '}
-          {t('tasks.showTerminal')}
-        </label>
+        {view === 'kanban' && (
+          <label className="row">
+            <input
+              type="checkbox"
+              checked={showHidden}
+              onChange={(e) => setShowHidden(e.target.checked)}
+            />{' '}
+            {t('tasks.showHidden')}
+          </label>
+        )}
         <div className="viewtabs" role="tablist" aria-label={t('tasks.viewSwitch')}>
           <button
             type="button"
@@ -645,7 +654,7 @@ export function TasksRoute() {
       {view === 'kanban' ? (
         <TaskKanban
           tasks={shown}
-          states={wfStates}
+          states={kanbanStates}
           allowed={allowed}
           onChangeState={changeState}
         />

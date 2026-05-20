@@ -34,6 +34,7 @@ class StateSpec:
     ord: int = 0
     is_initial: bool = False
     is_terminal: bool = False
+    is_hidden: bool = False
 
 
 async def get_default_workflow(session: AsyncSession, org_id: uuid.UUID) -> WorkflowDefinition:
@@ -177,6 +178,7 @@ async def create_workflow(
             ord=spec.ord,
             is_initial=spec.is_initial,
             is_terminal=spec.is_terminal,
+            is_hidden=spec.is_hidden,
         )
         session.add(st)
         await session.flush()
@@ -210,6 +212,7 @@ class StateEdit:
     ord: int = 0
     is_initial: bool = False
     is_terminal: bool = False
+    is_hidden: bool = False
     id: uuid.UUID | None = None  # None = new state
 
 
@@ -351,6 +354,7 @@ async def update_workflow(
                     st.ord = spec.ord
                     st.is_initial = spec.is_initial
                     st.is_terminal = spec.is_terminal
+                    st.is_hidden = spec.is_hidden
                     by_name[spec.name] = st.id
                 else:
                     st = WorkflowState(
@@ -360,6 +364,7 @@ async def update_workflow(
                         ord=spec.ord,
                         is_initial=spec.is_initial,
                         is_terminal=spec.is_terminal,
+                        is_hidden=spec.is_hidden,
                     )
                     session.add(st)
                     await session.flush()

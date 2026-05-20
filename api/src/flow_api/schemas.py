@@ -425,6 +425,7 @@ class StateOut(BaseModel):
     ord: int
     is_initial: bool
     is_terminal: bool
+    is_hidden: bool = False
 
 
 class TransitionOut(BaseModel):
@@ -490,6 +491,7 @@ class WorkflowStateSpecIn(BaseModel):
     ord: int = 0
     is_initial: bool = False
     is_terminal: bool = False
+    is_hidden: bool = False
 
 
 class TransitionIn(BaseModel):
@@ -509,6 +511,7 @@ class WorkflowStateEditIn(BaseModel):
     ord: int = 0
     is_initial: bool = False
     is_terminal: bool = False
+    is_hidden: bool = False
 
 
 class WorkflowPatchIn(BaseModel):

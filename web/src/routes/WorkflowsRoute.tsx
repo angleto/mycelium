@@ -8,7 +8,12 @@ type Workflow = components['schemas']['WorkflowOut']
 type State = components['schemas']['StateOut']
 type Edge = components['schemas']['TransitionOut']
 type WfMeta = { states: State[]; edges: Edge[] }
-type StateRow = { name: string; is_initial: boolean; is_terminal: boolean }
+type StateRow = {
+  name: string
+  is_initial: boolean
+  is_terminal: boolean
+  is_hidden: boolean
+}
 type Transition = { from_state: string; to_state: string }
 type EditRow = StateRow & { id?: string }
 type Edit = { id: string; name: string; states: EditRow[]; tr: Transition[] }
@@ -26,9 +31,9 @@ export function WorkflowsRoute() {
   // New-workflow template mirrors the system default
   // (todo -> in_progress -> done) so it is not misleading.
   const [states, setStates] = useState<StateRow[]>([
-    { name: 'todo', is_initial: true, is_terminal: false },
-    { name: 'in_progress', is_initial: false, is_terminal: false },
-    { name: 'done', is_initial: false, is_terminal: true },
+    { name: 'todo', is_initial: true, is_terminal: false, is_hidden: false },
+    { name: 'in_progress', is_initial: false, is_terminal: false, is_hidden: false },
+    { name: 'done', is_initial: false, is_terminal: true, is_hidden: false },
   ])
   const [transitions, setTransitions] = useState<Transition[]>([
     { from_state: 'todo', to_state: 'in_progress' },
@@ -115,6 +120,7 @@ export function WorkflowsRoute() {
           ord: i,
           is_initial: s.is_initial,
           is_terminal: s.is_terminal,
+          is_hidden: s.is_hidden,
         })),
         transitions,
       },
@@ -143,6 +149,7 @@ export function WorkflowsRoute() {
           name: s.name,
           is_initial: s.is_initial,
           is_terminal: s.is_terminal,
+          is_hidden: s.is_hidden,
         })),
       tr: m.edges.map((e) => ({
         from_state: nameById.get(e.from_state_id) ?? '',
@@ -170,6 +177,7 @@ export function WorkflowsRoute() {
           ord: i,
           is_initial: s.is_initial,
           is_terminal: s.is_terminal,
+          is_hidden: s.is_hidden,
         })),
         transitions: editing.tr.filter((x) => x.from_state && x.to_state),
       },
@@ -232,6 +240,7 @@ export function WorkflowsRoute() {
                         {s.name}
                         {s.is_initial ? ` · ${t('workflows.defaultState')}` : ''}
                         {s.is_terminal ? ` · ${t('workflows.terminal')}` : ''}
+                        {s.is_hidden ? ` · ${t('workflows.hidden')}` : ''}
                       </span>
                     ))}
                   </div>
@@ -327,6 +336,22 @@ export function WorkflowsRoute() {
                           />{' '}
                           {t('workflows.terminal')}
                         </label>
+                        <label title={t('workflows.hiddenHint')}>
+                          <input
+                            type="checkbox"
+                            checked={s.is_hidden}
+                            onChange={(e) =>
+                              patchE({
+                                states: editing.states.map((x, j) =>
+                                  j === i
+                                    ? { ...x, is_hidden: e.target.checked }
+                                    : x,
+                                ),
+                              })
+                            }
+                          />{' '}
+                          {t('workflows.hidden')}
+                        </label>
                         <button
                           type="button"
                           className="btn--ghost btn--sm"
@@ -389,6 +414,7 @@ export function WorkflowsRoute() {
                               name: '',
                               is_initial: false,
                               is_terminal: false,
+                              is_hidden: false,
                             },
                           ],
                         })
@@ -539,6 +565,14 @@ export function WorkflowsRoute() {
               />{' '}
               {t('workflows.terminal')}
             </label>
+            <label title={t('workflows.hiddenHint')}>
+              <input
+                type="checkbox"
+                checked={s.is_hidden}
+                onChange={(e) => setState(i, { is_hidden: e.target.checked })}
+              />{' '}
+              {t('workflows.hidden')}
+            </label>
             <button
               type="button"
               className="btn--ghost btn--sm"
@@ -562,7 +596,10 @@ export function WorkflowsRoute() {
         <button
           type="button"
           onClick={() =>
-            setStates((rs) => [...rs, { name: '', is_initial: false, is_terminal: false }])
+            setStates((rs) => [
+              ...rs,
+              { name: '', is_initial: false, is_terminal: false, is_hidden: false },
+            ])
           }
         >
           {t('workflows.addState')}
