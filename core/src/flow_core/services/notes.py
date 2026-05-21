@@ -31,7 +31,6 @@ from flow_core.ai_providers import (
     get_stt,
     get_tts,
 )
-from flow_core.concurrency import optimistic_update
 from flow_core.errors import DomainError, NotFoundError
 from flow_core.i18n import MessageCode
 from flow_core.models.billing import CostBasis
@@ -42,7 +41,7 @@ from flow_core.models.project_profile import ProjectProfile
 from flow_core.models.tag import Tag, TagKind
 from flow_core.models.task import Task
 from flow_core.models.task_tag import TaskTag
-from flow_core.services import audit, billing, taxonomy
+from flow_core.services import audit, billing, lifecycle, taxonomy
 from flow_core.services import memory as memory_svc
 from flow_core.services.rbac import require_role
 
@@ -259,24 +258,21 @@ async def _note_set(
     values: dict[str, Any],
     action: str,
 ) -> int:
-    await require_role(session, org_id, actor_id, Role.member)
+    # Validate existence (include deleted: restore needs to see the
+    # soft-deleted row). Flag flip + audit shared with tasks via
+    # lifecycle.transition.
     await get_note(session, org_id=org_id, note_id=note_id, include_deleted=True)
-    new_version = await optimistic_update(
+    return await lifecycle.transition(
         session,
-        Note,
-        pk=note_id,
-        expected_version=expected_version,
-        values=values,
-    )
-    await audit.log(
-        session,
+        model_cls=Note,
         org_id=org_id,
         actor_id=actor_id,
-        entity="note",
         entity_id=note_id,
-        action=action,
+        expected_version=expected_version,
+        values=values,
+        audit_entity="note",
+        audit_action=action,
     )
-    return new_version
 
 
 async def update_note(

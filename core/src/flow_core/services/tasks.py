@@ -25,7 +25,7 @@ from flow_core.models.task import ExecKind, Necessity, Task
 from flow_core.models.task_assignee import TaskAssignee
 from flow_core.models.task_tag import TaskTag
 from flow_core.models.workflow import WorkflowState
-from flow_core.services import audit, taxonomy
+from flow_core.services import audit, lifecycle, taxonomy
 from flow_core.services import workflow as wf
 from flow_core.services.rbac import require_role
 
@@ -461,24 +461,21 @@ async def _set(
     values: dict[str, Any],
     action: str,
 ) -> int:
-    await require_role(session, org_id, actor_id, Role.member)
+    # Validate existence (include deleted: restore needs to see the
+    # soft-deleted row). The actual flag flip + audit is shared with
+    # notes via lifecycle.transition.
     await get_task(session, org_id=org_id, task_id=task_id, include_deleted=True)
-    new_version = await optimistic_update(
+    return await lifecycle.transition(
         session,
-        Task,
-        pk=task_id,
-        expected_version=expected_version,
-        values=values,
-    )
-    await audit.log(
-        session,
+        model_cls=Task,
         org_id=org_id,
         actor_id=actor_id,
-        entity="task",
         entity_id=task_id,
-        action=action,
+        expected_version=expected_version,
+        values=values,
+        audit_entity="task",
+        audit_action=action,
     )
-    return new_version
 
 
 async def archive_task(
