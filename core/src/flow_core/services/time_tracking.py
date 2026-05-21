@@ -717,13 +717,18 @@ async def report(
                 bump(None, None, e.duration_seconds or 0, e.billable, rate_for(e), currency_for(e))
                 continue
             for tag_id, name in tags:
+                # Use the live-rate fallback helpers same as the
+                # user/task branch — the project/client/generic
+                # aggregation used to read e.rate_snapshot directly,
+                # bypassing the fix that backfills NULL / zero
+                # snapshots with the current task -> client rate.
                 bump(
                     str(tag_id),
                     name,
                     e.duration_seconds or 0,
                     e.billable,
-                    e.rate_snapshot,
-                    e.currency,
+                    rate_for(e),
+                    currency_for(e),
                 )
 
     rows = [
