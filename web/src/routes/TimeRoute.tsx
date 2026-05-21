@@ -15,6 +15,7 @@ import {
   fromLocalInput,
 } from '../lib/tz'
 import { useLinkedClientProject } from '../lib/linkedClientProject'
+import { useWorkflowStates } from '../lib/useWorkflowStates'
 import { TaskPickList } from '../components/TaskPickList'
 import type { components } from '../api/schema'
 
@@ -38,15 +39,92 @@ const ENT_PAGE = 50
 function pad2(n: number): string {
   return String(n).padStart(2, '0')
 }
-function thisMonthStart(): string {
-  const d = new Date()
-  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-01`
+// Period selector helpers (#65). Each returns { from, to, label,
+// prevAnchor, nextAnchor } so the SPA can render navigation + a
+// previous-period diff fetch. The anchor is a Date stamped at noon
+// local to avoid DST edge cases when stepping by 1 month / 1 week.
+type Period = 'day' | 'week' | 'month' | 'custom'
+
+function ymdLocal(d: Date): string {
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`
 }
-function thisMonthEnd(): string {
-  const d = new Date()
-  // Day 0 of next month == last day of current month.
-  const last = new Date(d.getFullYear(), d.getMonth() + 1, 0)
-  return `${last.getFullYear()}-${pad2(last.getMonth() + 1)}-${pad2(last.getDate())}`
+
+function periodRange(period: Period, anchor: Date): {
+  from: string
+  to: string
+  label: string
+  prevAnchor: Date
+  nextAnchor: Date
+  prevFrom: string
+  prevTo: string
+} {
+  const a = new Date(anchor.getFullYear(), anchor.getMonth(), anchor.getDate(), 12)
+  if (period === 'day') {
+    const from = ymdLocal(a)
+    const to = ymdLocal(a)
+    const label = a.toLocaleDateString(undefined, {
+      weekday: 'short',
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+    })
+    const prev = new Date(a)
+    prev.setDate(prev.getDate() - 1)
+    const next = new Date(a)
+    next.setDate(next.getDate() + 1)
+    return {
+      from,
+      to,
+      label,
+      prevAnchor: prev,
+      nextAnchor: next,
+      prevFrom: ymdLocal(prev),
+      prevTo: ymdLocal(prev),
+    }
+  }
+  if (period === 'week') {
+    // ISO-ish: week starts on Monday. getDay() = 0 (Sun) .. 6 (Sat).
+    const day = a.getDay() === 0 ? 7 : a.getDay()
+    const start = new Date(a)
+    start.setDate(a.getDate() - (day - 1))
+    const end = new Date(start)
+    end.setDate(start.getDate() + 6)
+    const label = `${start.toLocaleDateString(undefined, { day: '2-digit', month: 'short' })} – ${end.toLocaleDateString(undefined, { day: '2-digit', month: 'short', year: 'numeric' })}`
+    const prevStart = new Date(start)
+    prevStart.setDate(prevStart.getDate() - 7)
+    const prevEnd = new Date(prevStart)
+    prevEnd.setDate(prevEnd.getDate() + 6)
+    const nextAnchor = new Date(start)
+    nextAnchor.setDate(start.getDate() + 7)
+    return {
+      from: ymdLocal(start),
+      to: ymdLocal(end),
+      label,
+      prevAnchor: prevStart,
+      nextAnchor,
+      prevFrom: ymdLocal(prevStart),
+      prevTo: ymdLocal(prevEnd),
+    }
+  }
+  // month
+  const start = new Date(a.getFullYear(), a.getMonth(), 1, 12)
+  const end = new Date(a.getFullYear(), a.getMonth() + 1, 0, 12)
+  const label = start.toLocaleDateString(undefined, {
+    month: 'long',
+    year: 'numeric',
+  })
+  const prevStart = new Date(a.getFullYear(), a.getMonth() - 1, 1, 12)
+  const prevEnd = new Date(a.getFullYear(), a.getMonth(), 0, 12)
+  const nextAnchor = new Date(a.getFullYear(), a.getMonth() + 1, 1, 12)
+  return {
+    from: ymdLocal(start),
+    to: ymdLocal(end),
+    label,
+    prevAnchor: prevStart,
+    nextAnchor,
+    prevFrom: ymdLocal(prevStart),
+    prevTo: ymdLocal(prevEnd),
+  }
 }
 
 function hhmmss(sec: number): string {
@@ -157,15 +235,42 @@ export function TimeRoute() {
   // Default range = current month (1st .. last day, inclusive). The
   // backend treats start_from/start_to as ``[from 00:00:00, to 23:59:59]``,
   // so the bounds here are the local YYYY-MM-DD endpoints of the month.
-  const [from, setFrom] = useState(() => thisMonthStart())
-  const [to, setTo] = useState(() => thisMonthEnd())
+  // #65: period selector. Default = month (current). The anchor is
+  // the Date inside the period; navigation steps it. ``period='custom'``
+  // is set when the user types into the from/to inputs; the selector
+  // chips switch back to month/week/day by re-anchoring to today.
+  const [period, setPeriod] = useState<Period>('month')
+  const [periodAnchor, setPeriodAnchor] = useState<Date>(() => new Date())
+  const periodInfo =
+    period === 'custom' ? null : periodRange(period, periodAnchor)
+  const [from, setFrom] = useState(() => periodRange('month', new Date()).from)
+  const [to, setTo] = useState(() => periodRange('month', new Date()).to)
+  // Total seconds + amount for the previous-period diff. Loaded by a
+  // dedicated useEffect keyed on the previous-range (skipped when
+  // period='custom' since "previous" is undefined for arbitrary ranges).
+  const [prevTotal, setPrevTotal] = useState<{
+    seconds: number
+    amount: string
+  } | null>(null)
+  // Sync from/to when the period selector or anchor moves. When the
+  // user is in custom mode the picker stays static; the from/to
+  // inputs remain user-controlled.
+  useEffect(() => {
+    if (!periodInfo) return
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setFrom(periodInfo.from)
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setTo(periodInfo.to)
+    // periodInfo is derived from period + periodAnchor; ESLint can't
+    // see that.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [period, periodAnchor])
+
   const [billableF, setBillableF] = useState<BillableF>('all')
   const [clients, setClients] = useState<Tag[]>([])
   const [projects, setProjects] = useState<Tag[]>([])
   const [allTags, setAllTags] = useState<Tag[]>([])
-  const [wfStates, setWfStates] = useState<
-    components['schemas']['StateOut'][]
-  >([])
+  const wfStates = useWorkflowStates()
   const [projectProfiles, setProjectProfiles] = useState<Project[]>([])
   const {
     clientId,
@@ -206,6 +311,43 @@ export function TimeRoute() {
     if (projectId) q.project_tag_id = projectId
     return q
   }, [group, scope, from, to, billableF, clientId, projectId])
+
+  // Previous-period diff: fetch /time/report grouped by user (gives
+  // one row) for the previous range and store totals. Skipped when
+  // period=custom (no canonical "previous" of an arbitrary range).
+  useEffect(() => {
+    if (!periodInfo) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setPrevTotal(null)
+      return
+    }
+    let active = true
+    void (async () => {
+      const q = { ...reportQuery() }
+      q.start_from = `${periodInfo.prevFrom}T00:00:00`
+      q.start_to = `${periodInfo.prevTo}T23:59:59`
+      q.group_by = 'user'
+      const r = await api.GET('/time/report', {
+        params: { header: workspaceHeader(), query: q },
+      })
+      if (!active) return
+      if (!r.data || r.data.length === 0) {
+        setPrevTotal({ seconds: 0, amount: '0' })
+        return
+      }
+      let secs = 0
+      let amount = 0
+      for (const row of r.data) {
+        secs += row.seconds
+        amount += Number(row.amount ?? 0)
+      }
+      setPrevTotal({ seconds: secs, amount: amount.toFixed(2) })
+    })()
+    return () => {
+      active = false
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [period, periodAnchor, reportQuery, reportTick])
 
   // Generic CSV blob download. The two report flavors share auth +
   // filename plumbing; only the path + query differ.
@@ -332,13 +474,14 @@ export function TimeRoute() {
     let active = true
     void (async () => {
       const h = workspaceHeader()
-      const [tk, cl, pr, pp, allTagsRes, wfs] = await Promise.all([
+      // Workflow states loaded via useWorkflowStates() hook — no
+      // need to refetch them here.
+      const [tk, cl, pr, pp, allTagsRes] = await Promise.all([
         api.GET('/tasks', { params: { header: h } }),
         api.GET('/tags', { params: { header: h, query: { kind: 'client' } } }),
         api.GET('/tags', { params: { header: h, query: { kind: 'project' } } }),
         api.GET('/projects', { params: { header: h } }),
         api.GET('/tags', { params: { header: h } }),
-        api.GET('/workflows', { params: { header: h } }),
       ])
       if (!active) return
       if (tk.data) setTasks(tk.data)
@@ -346,20 +489,6 @@ export function TimeRoute() {
       if (pr.data) setProjects(pr.data)
       if (pp.data) setProjectProfiles(pp.data)
       if (allTagsRes.data) setAllTags(allTagsRes.data)
-      if (wfs.data && wfs.data.length > 0) {
-        // Workflow states drive the "is_terminal" filter on the new
-        // TaskPickList. Pick the default workflow's states; this
-        // mirrors how TasksRoute and GraphRoute do it (the picker
-        // doesn't need per-project workflow nuance — it just needs
-        // a name + terminal flag for filtering).
-        const def = wfs.data.find((w) => w.is_default) ?? wfs.data[0]
-        if (def) {
-          const st = await api.GET('/workflows/{workflow_id}/states', {
-            params: { header: h, path: { workflow_id: def.id } },
-          })
-          if (st.data) setWfStates(st.data)
-        }
-      }
       await resetEntries()
     })()
     return () => {
@@ -886,6 +1015,43 @@ export function TimeRoute() {
         </>
       )}
 
+      {periodInfo && (
+        <div className="perioddiff">
+          {(() => {
+            // Sum the current period total from ``report`` (already
+            // filtered by from/to + reportQuery). The report list
+            // groups by ``group`` (project by default); we sum across
+            // rows to get the period total regardless of grouping.
+            let curSecs = 0
+            let curAmount = 0
+            for (const row of report) {
+              curSecs += row.seconds
+              curAmount += Number(row.amount ?? 0)
+            }
+            const diffSecs = curSecs - (prevTotal?.seconds ?? 0)
+            const diffAmount = curAmount - Number(prevTotal?.amount ?? 0)
+            const sign = (n: number) => (n > 0 ? '+' : n < 0 ? '−' : '±')
+            return (
+              <>
+                <span className="perioddiff__cur">
+                  <strong>{hhmmss(curSecs)}</strong> ·{' '}
+                  <strong>{curAmount.toFixed(2)} EUR</strong>
+                </span>
+                {prevTotal && (
+                  <span className="muted perioddiff__delta">
+                    {' '}
+                    vs {t(`time.period_prev_${period}`)}:{' '}
+                    {sign(diffSecs)}
+                    {hhmmss(Math.abs(diffSecs))} · {sign(diffAmount)}
+                    {Math.abs(diffAmount).toFixed(2)} EUR
+                  </span>
+                )}
+              </>
+            )
+          })()}
+        </div>
+      )}
+
       <h2>
         {t('time.report')}{' '}
         <button
@@ -958,13 +1124,54 @@ export function TimeRoute() {
             ))}
           </select>
         </label>
+        <div className="periodbar">
+          {(['day', 'week', 'month', 'custom'] as Period[]).map((p) => (
+            <button
+              key={p}
+              type="button"
+              className={
+                'btn--sm' + (period === p ? '' : ' btn--ghost')
+              }
+              onClick={() => {
+                setPeriod(p)
+                if (p !== 'custom') setPeriodAnchor(new Date())
+              }}
+            >
+              {t(`time.period_${p}`)}
+            </button>
+          ))}
+          {periodInfo && (
+            <span className="periodbar__nav">
+              <button
+                type="button"
+                className="btn--ghost btn--sm"
+                onClick={() => setPeriodAnchor(periodInfo.prevAnchor)}
+                title={t('time.periodPrev')}
+              >
+                ◀
+              </button>
+              <strong className="periodbar__label">{periodInfo.label}</strong>
+              <button
+                type="button"
+                className="btn--ghost btn--sm"
+                onClick={() => setPeriodAnchor(periodInfo.nextAnchor)}
+                title={t('time.periodNext')}
+              >
+                ▶
+              </button>
+            </span>
+          )}
+        </div>
         <div className="daterange">
           <label>
             {t('time.from')}
             <input
               type="date"
               value={from}
-              onChange={(e) => setFrom(e.target.value)}
+              onChange={(e) => {
+                setPeriod('custom')
+                setFrom(e.target.value)
+              }}
             />
           </label>
           <label>
@@ -972,7 +1179,10 @@ export function TimeRoute() {
             <input
               type="date"
               value={to}
-              onChange={(e) => setTo(e.target.value)}
+              onChange={(e) => {
+                setPeriod('custom')
+                setTo(e.target.value)
+              }}
             />
           </label>
         </div>

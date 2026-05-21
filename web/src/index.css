@@ -2060,6 +2060,33 @@ button.btn--danger:hover {
   gap: 0.6rem;
   flex: 0 0 auto;
 }
+.periodbar {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  margin: 0.3rem 0;
+}
+.periodbar__nav {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin-left: 0.4rem;
+}
+.periodbar__label {
+  min-width: 12rem;
+  text-align: center;
+}
+.perioddiff {
+  font-size: 1rem;
+  margin: 0.5rem 0 0.3rem;
+  padding: 0.6rem 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-2);
+}
+.perioddiff__cur { font-size: 1.1rem; }
+.perioddiff__delta { font-size: 0.85rem; margin-left: 0.4rem; }
 
 /* Attachments: chip list, image thumbnails, click-to-zoom lightbox. */
 .atts {

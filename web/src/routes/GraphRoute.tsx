@@ -5,6 +5,7 @@ import { api, errMessage, workspaceHeader } from '../api/client'
 import { useSession } from '../auth/useSession'
 import { kindGlyph } from '../lib/tagGlyph'
 import { useFocus } from '../lib/focus'
+import { useWorkflowStates } from '../lib/useWorkflowStates'
 import type { components } from '../api/schema'
 
 type Task = components['schemas']['TaskOut']
@@ -12,8 +13,6 @@ type Graph = components['schemas']['GraphOut']
 type Dep = components['schemas']['DependencyOut']
 type DepType = components['schemas']['DependencyType']
 type Tag = components['schemas']['TagOut']
-type State = components['schemas']['StateOut']
-type Wf = components['schemas']['WorkflowOut']
 
 const ORDER: DepType[] = ['FS', 'SS', 'FF', 'SF']
 const NW = 170
@@ -78,7 +77,7 @@ export function GraphRoute() {
   // Workflow states drive both the per-state filter and the
   // hide-terminal default (a finished task shouldn't clutter the DAG
   // by default — the toggle reveals them, mirrors /tasks).
-  const [wfStates, setWfStates] = useState<State[]>([])
+  const wfStates = useWorkflowStates()
   const [stateFilter, setStateFilter] = useState<Set<string>>(new Set())
   const [showTerminal, setShowTerminal] = useState(false)
 
@@ -116,26 +115,6 @@ export function GraphRoute() {
       active = false
     }
   }, [activeId, tagQuery])
-
-  useEffect(() => {
-    let active = true
-    void (async () => {
-      const h = workspaceHeader()
-      const wfs = await api.GET('/workflows', { params: { header: h } })
-      if (!active || !wfs.data) return
-      const def =
-        wfs.data.find((w: Wf) => w.is_default) ?? wfs.data[0]
-      if (!def) return
-      const st = await api.GET('/workflows/{workflow_id}/states', {
-        params: { header: h, path: { workflow_id: def.id } },
-      })
-      if (!active) return
-      if (st.data) setWfStates(st.data)
-    })()
-    return () => {
-      active = false
-    }
-  }, [activeId])
 
   const taskById = new Map(tasks.map((x) => [x.id, x]))
   const titleOf = (id: string) => taskById.get(id)?.title ?? id.slice(0, 8)
