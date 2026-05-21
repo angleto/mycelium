@@ -1,8 +1,15 @@
 name: CI
 
+# Trigger policy (per operator request): fire only on tag pushes,
+# not on every branch commit. The release flow is tag-driven (each
+# v1.X.Y goes through tag-push -> build-images -> deploy), so the
+# CI gate runs at the same boundary the operator already cares
+# about. ``workflow_dispatch`` is kept for manual ad-hoc runs.
 on:
   push:
-  pull_request:
+    tags:
+      - "v*"
+  workflow_dispatch:
 
 jobs:
   quality:
