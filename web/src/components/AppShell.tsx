@@ -269,6 +269,11 @@ export function AppShell() {
   const { me } = useMe()
   const elevated = useAdminMode()
   const canAdmin = !!me?.is_admin
+  // Mobile sidebar toggle. The hamburger in topbar flips this; CSS
+  // media query at <820px overlays the sidebar as a drawer when
+  // ``.app--sidebar-open`` is set, otherwise it stays off-screen.
+  // Desktop ignores both — the sidebar is always docked.
+  const [sidebarOpen, setSidebarOpen] = useState(false)
   // Workspace role switcher: only meaningful if the entitlement
   // ceiling is above member (an owner/admin can act down as a user).
   const { ws } = useMyWorkspace()
@@ -362,8 +367,17 @@ export function AppShell() {
   }
 
   return (
-    <div className="app">
+    <div className={'app' + (sidebarOpen ? ' app--sidebar-open' : '')}>
       <header className="topbar">
+        <button
+          type="button"
+          className="topbar__hamburger"
+          aria-label={t('nav.toggleSidebar')}
+          aria-expanded={sidebarOpen}
+          onClick={() => setSidebarOpen((v) => !v)}
+        >
+          ☰
+        </button>
         <div className="topbar__brand">
           <Logo /> {t('app.title')}
         </div>

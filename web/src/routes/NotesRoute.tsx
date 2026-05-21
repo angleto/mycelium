@@ -8,13 +8,14 @@ import {
 import { Link, useSearchParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { mentionLink } from '../lib/mentions'
-import { api, errMessage, workspaceHeader } from '../api/client'
+import { api, authFetch, errMessage, workspaceHeader } from '../api/client'
 import { useSession } from '../auth/useSession'
 import { RichEditor } from '../components/RichEditor'
 import { MarkdownView } from '../components/Markdown'
 import { NoteListItem } from '../components/NoteListItem'
 import { TagPicker } from '../components/TagPicker'
 import { TagPickerGrid } from '../components/TagPickerGrid'
+import { VoiceRecorder } from '../components/VoiceRecorder'
 import { TaskTimer } from '../components/TaskTimer'
 import { Attachments } from '../components/Attachments'
 import { useFocus } from '../lib/focus'
@@ -71,6 +72,12 @@ export function NotesRoute() {
   // Create draft (modal in create mode, before the note exists).
   const [creating, setCreating] = useState(false)
   const [cKind, setCKind] = useState<Kind>('text')
+  // Voice-note recording buffer: the VoiceRecorder hands the parent
+  // the captured Blob + mime + duration; doCreate uploads it AFTER
+  // the note row is created (the upload endpoint wants a note_id).
+  const [cAudioBlob, setCAudioBlob] = useState<Blob | null>(null)
+  const [cAudioMime, setCAudioMime] = useState<string>('audio/webm')
+  const [cAudioSeconds, setCAudioSeconds] = useState<number>(0)
   const [cTitle, setCTitle] = useState('')
   const [cText, setCText] = useState('')
   const [cProject, setCProject] = useState('')
@@ -214,6 +221,59 @@ export function NotesRoute() {
     if (error || !data) {
       setErr(errMessage(error))
       return
+    }
+    // Voice notes: upload the recorded audio as a note attachment,
+    // then PATCH note.audio_ref to point at it and trigger an STT
+    // transcription run (fire-and-forget — if no STT provider is
+    // configured the call surfaces an error in the note's
+    // ``last_error`` but the audio is still playable).
+    if (cKind === 'voice' && cAudioBlob) {
+      try {
+        const ext = cAudioMime.includes('mp4')
+          ? 'm4a'
+          : cAudioMime.includes('ogg')
+            ? 'ogg'
+            : 'webm'
+        const form = new FormData()
+        form.append('file', cAudioBlob, `voice-${data.id}.${ext}`)
+        const upRes = await authFetch(`/notes/${data.id}/attachments`, {
+          method: 'POST',
+          body: form,
+        })
+        if (upRes.ok) {
+          const att = (await upRes.json()) as { id: string; filename: string }
+          // audio_ref schema: ``attachment:<id>``. The STT provider
+          // resolves it through ``get_attachment_store().get(...)``
+          // when transcribe runs; until that resolver is wired the
+          // value is at least an unambiguous breadcrumb.
+          await api.PATCH('/notes/{note_id}', {
+            params: {
+              header: workspaceHeader(),
+              path: { note_id: data.id },
+            },
+            body: {
+              expected_version: data.version,
+              audio_ref: `attachment:${att.id}`,
+              audio_seconds: cAudioSeconds,
+            },
+          })
+          // Best-effort transcribe; ignore failure.
+          await api.POST('/notes/{note_id}/transcribe', {
+            params: {
+              header: workspaceHeader(),
+              path: { note_id: data.id },
+            },
+            body: { operation_id: `transcribe-${data.id}`, embed: true },
+          }).catch(() => undefined)
+        }
+      } catch {
+        /* upload failure leaves the note in 'captured' state without
+           audio_ref. The user can re-record + upload later via the
+           edit view. */
+      }
+      setCAudioBlob(null)
+      setCAudioMime('audio/webm')
+      setCAudioSeconds(0)
     }
     await loadNotes()
     // Continue in edit mode on the created note: tags / convert /
@@ -613,6 +673,15 @@ export function NotesRoute() {
                     ))}
                   </select>
                 </div>
+                {cKind === 'voice' && (
+                  <VoiceRecorder
+                    onRecorded={(blob, mime, durSec) => {
+                      setCAudioBlob(blob)
+                      setCAudioMime(mime)
+                      setCAudioSeconds(durSec)
+                    }}
+                  />
+                )}
                 {cKind !== 'conversation' && (
                   <label className="grow">
                     {t('notes.text')}

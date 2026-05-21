@@ -61,6 +61,7 @@ export const en = {
     language: 'Language',
     settings: 'Settings',
     home: 'Home',
+    toggleSidebar: 'Toggle navigation',
     groups: {
       productivity: 'Productivity',
       structure: 'Structure',
@@ -944,6 +945,9 @@ export const en = {
     noteTitle: 'Title (optional)',
     text: 'Text',
     create: 'Create note',
+    voiceRecord: 'Record',
+    voiceStop: 'Stop',
+    voiceReRecord: 'Re-record',
     command: 'Canonical command (offline, not metered)',
     commandPh: 'e.g. create a new note',
     run: 'Run',

@@ -57,6 +57,7 @@ export const it: Catalog = {
   },
   nav: {
     logout: 'Esci',
+    toggleSidebar: 'Mostra/nascondi navigazione',
     language: 'Lingua',
     settings: 'Impostazioni',
     home: 'Home',
@@ -945,6 +946,9 @@ export const it: Catalog = {
     noteTitle: 'Titolo (opzionale)',
     text: 'Testo',
     create: 'Crea nota',
+    voiceRecord: 'Registra',
+    voiceStop: 'Stop',
+    voiceReRecord: 'Ri-registra',
     command: 'Comando canonico (offline, non a consumo)',
     commandPh: 'es. crea una nuova nota',
     run: 'Esegui',
