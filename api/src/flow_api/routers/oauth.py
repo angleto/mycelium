@@ -322,6 +322,26 @@ async def token_endpoint(
         if not form_client_secret:
             form_client_secret = basic[1]
 
+    # Debug trail for the OAuth handshake (#48). Logs the SHAPE of
+    # the request (keys, lengths, prefixes) without exposing the full
+    # client_secret — enough to triage "client_secret rejected" vs
+    # "client_id mismatch" vs "code expired" without re-running the
+    # flow each time.
+    logger.info(
+        "token request: ct=%s keys=%s grant=%s code=%s redirect=%s cid=%s cs=%s cv=%s basic=%s",
+        content_type,
+        sorted(body.keys()),
+        grant_type,
+        f"{code[:6]}..." if code else "<empty>",
+        redirect_uri,
+        form_client_id,
+        f"{form_client_secret[:8]}...({len(form_client_secret)})"
+        if form_client_secret
+        else "<empty>",
+        f"{code_verifier[:6]}...({len(code_verifier)})" if code_verifier else "<empty>",
+        "yes" if basic else "no",
+    )
+
     if grant_type != "authorization_code":
         return _oauth_error(
             status_code=400,
@@ -368,10 +388,21 @@ async def token_endpoint(
         )
     principal = await agent_tokens_svc.authenticate(form_client_secret)
     if principal is None:
+        logger.warning(
+            "token /token: authenticate returned None for secret prefix=%s len=%s; "
+            "the bearer is either unknown, revoked, or expired",
+            form_client_secret[:8],
+            len(form_client_secret),
+        )
         return _oauth_error(
             status_code=401, error="invalid_client", description="client_secret rejected"
         )
     if principal.assistant_id is None or str(principal.assistant_id) != form_client_id:
+        logger.warning(
+            "token /token: assistant_id mismatch; form_client_id=%s principal.assistant_id=%s",
+            form_client_id,
+            principal.assistant_id,
+        )
         return _oauth_error(
             status_code=401,
             error="invalid_client",
