@@ -140,7 +140,9 @@ def _basic_auth_creds(authorization: str | None) -> tuple[str, str] | None:
 async def authorization_server_metadata(request: Request) -> JSONResponse:
     """RFC 8414. The authorize + token endpoints sit under /api/oauth
     because nginx already proxies /api/* to the backend; the issuer
-    is the host root so MCP clients can compose the URLs from it."""
+    is the host root so MCP clients can compose the URLs from it.
+
+    """
     iss = _issuer(request)
     return JSONResponse(
         {
@@ -456,6 +458,63 @@ async def token_endpoint(
         },
         headers={"Cache-Control": "no-store", "Pragma": "no-cache"},
     )
+
+
+@oauth_router.get("/selftest")
+async def selftest() -> JSONResponse:
+    """One-shot diagnostic: confirms the mint -> hash -> authenticate
+    chain works end-to-end in THIS environment. Does NOT require any
+    bearer (returns 200 with a JSON shape describing each step) so we
+    can curl it from outside and find out whether
+    ``client_secret rejected`` is a paste-side bug or a server-side
+    one. Not exposed via metadata; never logs secrets. Safe to leave
+    in place — it inserts a throwaway row in a transaction it always
+    rolls back."""
+    import hashlib
+
+    from sqlalchemy import text as _t
+
+    result: dict[str, Any] = {"hash_matches_local": False, "db_lookup_works": False}
+    try:
+        raw = agent_tokens_svc._generate_raw()
+        h_lib = hashlib.sha256(raw.encode("utf-8")).digest()
+        h_svc = agent_tokens_svc._hash(raw)
+        result["hash_matches_local"] = h_lib == h_svc
+        result["raw_len"] = len(raw)
+        result["hash_len"] = len(h_svc)
+        result["prefix"] = raw[:8]
+
+        # Insert + read-back via the SECURITY DEFINER function path
+        # the OAuth shim uses. Wrap in a transaction we ROLLBACK at
+        # the end so the agent_tokens table doesn't keep diagnostic
+        # noise. The function returns the diag row regardless of
+        # tenant context.
+        async with admin_session() as session:
+            await session.execute(
+                _t(
+                    "INSERT INTO agent_tokens "
+                    "(id, org_id, user_id, name, prefix, token_hash, scope, expires_at, "
+                    "revoked_at, last_used_at) "
+                    "SELECT gen_random_uuid(), o.id, m.user_id, '_selftest', :pfx, :h, "
+                    "'mcp', now() + interval '1 minute', NULL, NULL "
+                    "FROM organizations o "
+                    "JOIN memberships m ON m.org_id = o.id AND m.role = 'owner' "
+                    "LIMIT 1"
+                ),
+                {"pfx": raw[:16], "h": h_svc},
+            )
+            # Read back via the production auth function.
+            row = (
+                await session.execute(
+                    _t("SELECT out_token_id FROM authenticate_agent_token(:h)"),
+                    {"h": h_svc},
+                )
+            ).first()
+            result["db_lookup_works"] = bool(row and row[0])
+            await session.rollback()
+    except Exception as exc:  # diagnostic best-effort
+        result["error"] = str(exc)
+    return JSONResponse(result)
 
 
 __all__ = ["oauth_router", "well_known_router"]
