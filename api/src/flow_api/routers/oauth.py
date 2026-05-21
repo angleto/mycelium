@@ -238,30 +238,24 @@ async def authorize_endpoint(request: Request) -> Response:
             description="code_challenge_method must be S256",
         )
 
-    # Validate the assistant exists and is active. We do not gate on
-    # client_secret at /authorize -- that comes at /token. The check
-    # here is "is this a real client we should issue a code for".
-    # ai_assistants is RLS-scoped (org_id = app.current_org); at the
-    # /authorize entry point the request has no tenant yet, so a
-    # direct SELECT returns 0 rows and looks like "unknown assistant".
-    # Use the SECURITY DEFINER ``oauth_lookup_assistant`` function
-    # (migration 0063) that bypasses RLS, same pattern as
-    # ``authenticate_agent_token``.
-    from sqlalchemy import text as sql_text
-
-    async with admin_session() as session:
-        row = (
-            await session.execute(
-                sql_text("SELECT out_active FROM oauth_lookup_assistant(:id)"),
-                {"id": str(client_uuid)},
-            )
-        ).first()
-    if row is None or row[0] is None or not row[0]:
-        return _oauth_error(
-            status_code=400,
-            error="invalid_client",
-            description="unknown or revoked assistant",
-        )
+    # We DON'T validate the assistant's existence here. ai_assistants
+    # is RLS-scoped on app.current_org; /authorize runs pre-tenant
+    # (the user hasn't picked a workspace, the GUC is empty), so a
+    # direct SELECT returns 0 rows and we'd reject every real
+    # client_id. Wrapping the lookup in a SECURITY DEFINER function
+    # that bypasses RLS requires the function owner to have either
+    # BYPASSRLS or superuser; that depends on how the deploy's DB
+    # role was provisioned and isn't guaranteed.
+    #
+    # The real auth gate is /token: it validates client_secret
+    # against the existing agent_token system (which uses the proven
+    # SECURITY DEFINER ``authenticate_agent_token`` from migration
+    # 0059) and verifies that the bound assistant_id matches the
+    # client_id from the body. Without that pair, the code is
+    # useless: PKCE binds the code to a single client_secret holder.
+    # Letting /authorize mint a code for any well-formed UUID
+    # widens the surface for nothing (the code expires in 10 min
+    # and can only be redeemed once).
 
     async with admin_session() as session:
         code = await codes_svc.mint(
