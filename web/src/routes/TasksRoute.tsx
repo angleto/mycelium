@@ -526,14 +526,17 @@ export function TasksRoute() {
           <TagChip name={activeTag.name} color={activeTag.color} kind={activeTag.kind} />
         )}
         {view === 'kanban' && (
-          <label className="row">
-            <input
-              type="checkbox"
-              checked={showHidden}
-              onChange={(e) => setShowHidden(e.target.checked)}
-            />{' '}
-            {t('tasks.showHidden')}
-          </label>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={showHidden}
+            className={
+              'toggle-pill' + (showHidden ? ' toggle-pill--on' : '')
+            }
+            onClick={() => setShowHidden((v) => !v)}
+          >
+            {t('tasks.showHidden')}: {showHidden ? t('common.on') : t('common.off')}
+          </button>
         )}
         <div className="viewtabs" role="tablist" aria-label={t('tasks.viewSwitch')}>
           <button
@@ -568,20 +571,24 @@ export function TasksRoute() {
 
       {shown.length > 0 && (
         <div className="row">
-          <label>
-            <input
-              type="checkbox"
-              checked={sel.size > 0 && shown.every((x) => sel.has(x.id))}
-              onChange={(e) =>
-                setSel(
-                  e.target.checked
-                    ? new Set(shown.map((x) => x.id))
-                    : new Set(),
-                )
-              }
-            />{' '}
-            {t('tasks.selectAll')}
-          </label>
+          {(() => {
+            const allOn = sel.size > 0 && shown.every((x) => sel.has(x.id))
+            return (
+              <button
+                type="button"
+                role="switch"
+                aria-checked={allOn}
+                className={
+                  'toggle-pill' + (allOn ? ' toggle-pill--on' : '')
+                }
+                onClick={() =>
+                  setSel(allOn ? new Set() : new Set(shown.map((x) => x.id)))
+                }
+              >
+                {t('tasks.selectAll')}: {allOn ? t('common.on') : t('common.off')}
+              </button>
+            )
+          })()}
           {sel.size > 0 && (
             <>
               <span className="muted">

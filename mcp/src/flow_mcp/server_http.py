@@ -70,7 +70,8 @@ class _BearerAuthMiddleware(BaseHTTPMiddleware):
             )
         token = _PRINCIPAL.set((principal.user_id, principal.org_id))
         try:
-            return await call_next(request)
+            response: Response = await call_next(request)
+            return response
         finally:
             _PRINCIPAL.reset(token)
 
