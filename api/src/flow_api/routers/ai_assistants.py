@@ -39,12 +39,12 @@ router = APIRouter(prefix="/ai-assistants", tags=["ai-assistants"])
 # /mcp/* requests to the MCP transport.
 
 _INSTRUCTIONS_MD = """\
-1. In Claude (or Cursor / any MCP client), add a **custom MCP server**.
+1. In Claude (or Cursor / any MCP client), add a **custom MCP server**
+   using the streamable-http transport.
 2. Set the URL to the value shown above.
-3. Set the bearer token to the **client secret** the create dialog will
-   reveal (shown only once — copy it now or rotate).
-4. Save. The client will call Flow's MCP tools on your behalf,
-   restricted to the scopes you selected for this assistant.
+3. Set the bearer token to the **client secret** the create dialog
+   will reveal (shown only once - copy it now or rotate).
+4. Save. The client will call Flow's MCP tools on your behalf.
 """
 
 
@@ -53,8 +53,9 @@ async def connector_info(
     ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
 ) -> ConnectorInfoOut:
     # Same-origin: SPA at /, API at /api, MCP at /mcp. The frontend
-    # passes the absolute URL to the operator's clipboard.
-    return ConnectorInfoOut(mcp_url="/mcp/", instructions_md=_INSTRUCTIONS_MD)
+    # prefixes window.location.origin so the operator gets the full
+    # public URL (e.g. https://flow.leto.blue/mcp).
+    return ConnectorInfoOut(mcp_url="/mcp", instructions_md=_INSTRUCTIONS_MD)
 
 
 @router.get("/scope-catalog", response_model=list[ScopeCatalogEntry])

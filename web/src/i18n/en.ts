@@ -11,7 +11,7 @@ export const en = {
       'Configure AI clients (Claude Desktop, Cursor, custom MCP bots) that can act on your behalf against Flow.',
     connectorTitle: 'MCP connector URL',
     transportPending:
-      'Hosted MCP endpoint is being provisioned — the URL above is the connector target. Until the endpoint goes live, the secret is mintable but external clients cannot yet connect.',
+      'Paste the URL + secret into your MCP client (Claude Desktop, Cursor, ...) as a streamable-http server. The server enforces your bearer on every tool call.',
     copy: 'Copy',
     newAssistant: 'New assistant',
     labelLabel: 'Label',

@@ -12,6 +12,7 @@ import datetime as dt
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from contextvars import ContextVar
 from decimal import Decimal
 from typing import Any
 
@@ -78,27 +79,46 @@ from flow_core.services.workflow import StateEdit, StateSpec
 mcp: FastMCP = FastMCP("flow")
 
 
+# Per-request principal published by the HTTP transport's bearer
+# middleware (``server_http.py``). When set, ``_tenant`` reads
+# ``(user_id, org_id)`` from here and skips both the JWT decode and the
+# claims/positional org resolution — the bearer was already validated
+# at the HTTP boundary via ``authenticate_agent_token`` (migration
+# 0059) so the principal is trustworthy. ``None`` for the stdio
+# transport, which keeps using the legacy positional-args flow.
+_PRINCIPAL: ContextVar[tuple[uuid.UUID, uuid.UUID] | None] = ContextVar("_PRINCIPAL", default=None)
+
+
 @asynccontextmanager
 async def _tenant(
-    token: str, org_id: str
+    token: str = "", org_id: str = ""
 ) -> AsyncIterator[tuple[AsyncSession, uuid.UUID, uuid.UUID]]:
-    # Accepts either a session JWT or a long-lived agent token
-    # (``flow_at_...``). The async decoder branches on the cheap
-    # discriminator prefix BEFORE attempting JWT decode, so each
-    # credential kind hits exactly one code path. For an agent token
-    # the workspace is intrinsic to the credential, so the
-    # claims-provided ``org_id`` wins over the positional one (an MCP
-    # client driven by an agent token may pass an empty string).
-    claims = await decode_token_async(token)
-    sub = claims.get("sub")
-    if not isinstance(sub, str):
-        raise AuthError(MessageCode.AUTH_TOKEN_NO_SUB)
-    user_id = uuid.UUID(sub)
-    token_org = claims.get("org_id")
-    if isinstance(token_org, str) and token_org:
-        org = uuid.UUID(token_org)
+    """Open a tenant session for the duration of the call.
+
+    Two code paths:
+    - HTTP transport: the bearer middleware in ``server_http`` populated
+      ``_PRINCIPAL`` with the authenticated ``(user_id, org_id)``; we
+      ignore the positional args (the client may send empty strings
+      since the bearer header IS the credential).
+    - stdio transport (legacy): the caller passes a session JWT or a
+      ``flow_at_…`` agent token plus ``org_id`` as positional args; we
+      decode the token (claims-provided org wins for agent tokens, the
+      arg is the fallback for plain JWTs).
+    """
+    principal = _PRINCIPAL.get()
+    if principal is not None:
+        user_id, org = principal[0], principal[1]
     else:
-        org = uuid.UUID(org_id)
+        claims = await decode_token_async(token)
+        sub = claims.get("sub")
+        if not isinstance(sub, str):
+            raise AuthError(MessageCode.AUTH_TOKEN_NO_SUB)
+        user_id = uuid.UUID(sub)
+        token_org = claims.get("org_id")
+        if isinstance(token_org, str) and token_org:
+            org = uuid.UUID(token_org)
+        else:
+            org = uuid.UUID(org_id)
     async with tenant_session(str(org), str(user_id)) as session:
         await get_role(session, org, user_id)  # raises if not a member
         yield session, org, user_id

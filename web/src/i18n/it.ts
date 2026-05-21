@@ -10,7 +10,7 @@ export const it: Catalog = {
       'Configura client AI (Claude Desktop, Cursor, bot MCP custom) che possono agire per te su Flow.',
     connectorTitle: 'URL del connettore MCP',
     transportPending:
-      'L\'endpoint MCP hosted è in fase di provisioning — l\'URL qui sopra è il target del connettore. Finché non è attivo, il segreto si genera ma i client esterni non possono ancora connettersi.',
+      'Incolla URL + segreto nel tuo client MCP (Claude Desktop, Cursor, ...) come server streamable-http. Il server applica il bearer ad ogni chiamata.',
     copy: 'Copia',
     newAssistant: 'Nuovo assistente',
     labelLabel: 'Etichetta',

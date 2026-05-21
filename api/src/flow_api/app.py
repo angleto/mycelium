@@ -158,4 +158,16 @@ def create_app() -> FastAPI:
     app.include_router(oauth_google.router)
     app.include_router(telegram.router)
     app.include_router(buildinfo.router)
+
+    # MCP streamable-http transport — same process, same DB, same
+    # ingress. Authenticated by Authorization: Bearer flow_at_…; the
+    # middleware in flow_mcp.server_http resolves the principal via
+    # the SECURITY DEFINER authenticate_agent_token (migration 0059)
+    # and publishes it into a ContextVar that ``_tenant`` inside every
+    # @mcp.tool short-circuits on. URL becomes /mcp at the public
+    # ingress (flow.leto.blue/mcp); behind nginx the SPA's same-origin
+    # routing already covers /api/, the deploy adds a /mcp/ proxy.
+    from flow_mcp.server_http import make_mcp_app
+
+    app.mount("/mcp", make_mcp_app())
     return app
