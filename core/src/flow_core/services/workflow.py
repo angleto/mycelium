@@ -35,6 +35,7 @@ class StateSpec:
     is_initial: bool = False
     is_terminal: bool = False
     is_hidden: bool = False
+    description: str | None = None
 
 
 async def get_default_workflow(session: AsyncSession, org_id: uuid.UUID) -> WorkflowDefinition:
@@ -158,11 +159,17 @@ async def create_workflow(
     name: str,
     states: list[StateSpec],
     transitions: list[tuple[str, str]],
+    description: str | None = None,
 ) -> WorkflowDefinition:
     await require_role(session, org_id, actor_id, Role.admin)
     if sum(1 for s in states if s.is_initial) != 1:
         raise DomainError(MessageCode.WORKFLOW_INVALID)
-    wf = WorkflowDefinition(org_id=org_id, name=name, is_default=False)
+    wf = WorkflowDefinition(
+        org_id=org_id,
+        name=name,
+        description=description,
+        is_default=False,
+    )
     try:
         async with session.begin_nested():
             session.add(wf)
@@ -179,6 +186,7 @@ async def create_workflow(
             is_initial=spec.is_initial,
             is_terminal=spec.is_terminal,
             is_hidden=spec.is_hidden,
+            description=spec.description,
         )
         session.add(st)
         await session.flush()
@@ -213,6 +221,7 @@ class StateEdit:
     is_initial: bool = False
     is_terminal: bool = False
     is_hidden: bool = False
+    description: str | None = None
     id: uuid.UUID | None = None  # None = new state
 
 
@@ -310,6 +319,7 @@ async def update_workflow(
     name: str,
     states: list[StateEdit],
     transitions: list[tuple[str, str]],
+    description: str | None = None,
 ) -> None:
     """Rename + reconcile states (match by id; new ones inserted; ones
     dropped only if no task uses them) + replace transitions. Exactly
@@ -355,6 +365,7 @@ async def update_workflow(
                     st.is_initial = spec.is_initial
                     st.is_terminal = spec.is_terminal
                     st.is_hidden = spec.is_hidden
+                    st.description = spec.description
                     by_name[spec.name] = st.id
                 else:
                     st = WorkflowState(
@@ -365,11 +376,13 @@ async def update_workflow(
                         is_initial=spec.is_initial,
                         is_terminal=spec.is_terminal,
                         is_hidden=spec.is_hidden,
+                        description=spec.description,
                     )
                     session.add(st)
                     await session.flush()
                     by_name[spec.name] = st.id
             wf.name = name
+            wf.description = description
             await session.flush()
     except IntegrityError as exc:
         raise DomainError(MessageCode.WORKFLOW_INVALID) from exc

@@ -13,10 +13,17 @@ type StateRow = {
   is_initial: boolean
   is_terminal: boolean
   is_hidden: boolean
+  description?: string | null
 }
 type Transition = { from_state: string; to_state: string }
 type EditRow = StateRow & { id?: string }
-type Edit = { id: string; name: string; states: EditRow[]; tr: Transition[] }
+type Edit = {
+  id: string
+  name: string
+  description: string
+  states: EditRow[]
+  tr: Transition[]
+}
 
 // WorkflowDefinition editor. The backend enforces "exactly one initial
 // state" (workflow.invalid) and the transition rules; errors surface
@@ -28,6 +35,7 @@ export function WorkflowsRoute() {
   const [list, setList] = useState<Workflow[]>([])
   const [meta, setMeta] = useState<Record<string, WfMeta>>({})
   const [name, setName] = useState('')
+  const [description, setDescription] = useState('')
   // New-workflow template mirrors the system default
   // (todo -> in_progress -> done) so it is not misleading.
   const [states, setStates] = useState<StateRow[]>([
@@ -115,12 +123,14 @@ export function WorkflowsRoute() {
       params: { header: workspaceHeader() },
       body: {
         name,
+        description: description || null,
         states: states.map((s, i) => ({
           name: s.name,
           ord: i,
           is_initial: s.is_initial,
           is_terminal: s.is_terminal,
           is_hidden: s.is_hidden,
+          description: s.description || null,
         })),
         transitions,
       },
@@ -142,6 +152,7 @@ export function WorkflowsRoute() {
     setEditing({
       id: w.id,
       name: w.name,
+      description: w.description ?? '',
       states: [...m.states]
         .sort((a, b) => a.ord - b.ord)
         .map((s) => ({
@@ -153,6 +164,7 @@ export function WorkflowsRoute() {
           // false at the DB level, defaulted to ?: in TS); coerce so
           // EditRow's strict bool stays consistent.
           is_hidden: s.is_hidden ?? false,
+          description: s.description ?? '',
         })),
       tr: m.edges.map((e) => ({
         from_state: nameById.get(e.from_state_id) ?? '',
@@ -174,6 +186,7 @@ export function WorkflowsRoute() {
       params: { header: workspaceHeader(), path: { workflow_id: editing.id } },
       body: {
         name: editing.name,
+        description: editing.description || null,
         states: editing.states.map((s, i) => ({
           id: s.id,
           name: s.name,
@@ -181,6 +194,7 @@ export function WorkflowsRoute() {
           is_initial: s.is_initial,
           is_terminal: s.is_terminal,
           is_hidden: s.is_hidden,
+          description: s.description || null,
         })),
         transitions: editing.tr.filter((x) => x.from_state && x.to_state),
       },
@@ -292,6 +306,15 @@ export function WorkflowsRoute() {
                       <input
                         value={editing.name}
                         onChange={(e) => patchE({ name: e.target.value })}
+                      />
+                    </label>
+                    <label>
+                      {t('workflows.description')}
+                      <textarea
+                        rows={2}
+                        value={editing.description}
+                        placeholder={t('workflows.descriptionHint')}
+                        onChange={(e) => patchE({ description: e.target.value })}
                       />
                     </label>
                     <h3>{t('workflows.states')}</h3>
@@ -415,6 +438,22 @@ export function WorkflowsRoute() {
                         >
                           ✕
                         </button>
+                        <input
+                          type="text"
+                          placeholder={t('workflows.stateDescriptionHint')}
+                          title={t('workflows.stateDescriptionHint')}
+                          value={s.description ?? ''}
+                          onChange={(e) =>
+                            patchE({
+                              states: editing.states.map((x, j) =>
+                                j === i
+                                  ? { ...x, description: e.target.value }
+                                  : x,
+                              ),
+                            })
+                          }
+                          style={{ flex: 1, minWidth: '12rem' }}
+                        />
                       </div>
                     ))}
                     <button
@@ -429,6 +468,7 @@ export function WorkflowsRoute() {
                               is_initial: false,
                               is_terminal: false,
                               is_hidden: false,
+                              description: '',
                             },
                           ],
                         })
@@ -547,6 +587,15 @@ export function WorkflowsRoute() {
         <label>
           {t('workflows.name')}
           <input required value={name} onChange={(e) => setName(e.target.value)} />
+        </label>
+        <label>
+          {t('workflows.description')}
+          <textarea
+            rows={2}
+            value={description}
+            placeholder={t('workflows.descriptionHint')}
+            onChange={(e) => setDescription(e.target.value)}
+          />
         </label>
 
         <h2>{t('workflows.states')}</h2>

@@ -161,6 +161,33 @@ export function TaskDetailRoute() {
     setMsg(t('tasks.saved'))
   }
 
+  async function onNewChild() {
+    if (!task) return
+    setErr(null)
+    // Inherit ALL tags from the parent (client, project, generic).
+    // Backend dedups and auto-attaches the client tag from any
+    // project tag (#20); generic tags carry over for free. Title is
+    // a placeholder; the detail surface (autosave on title change)
+    // lets the user rename + set every other field inline.
+    const inheritedTagIds = (task.tags ?? []).map((g) => g.id)
+    const { data, error } = await api.POST('/tasks', {
+      params: { header: workspaceHeader() },
+      body: {
+        title: t('tasks.newChildPlaceholder'),
+        priority: task.priority ?? 3,
+        executor_kind: 'human',
+        necessity: 'should',
+        parent_task_id: task.id,
+        tag_ids: inheritedTagIds,
+      },
+    })
+    if (error || !data) {
+      setErr(errMessage(error))
+      return
+    }
+    navigate(`/tasks/${data.id}`)
+  }
+
   async function onDelete() {
     if (!task) return
     if (!window.confirm(t('tasks.confirmDelete', { title: task.title }))) return
@@ -670,6 +697,14 @@ export function TaskDetailRoute() {
         {msg && <p className="ok">{msg}</p>}
         {err && <p className="err">{err}</p>}
         <div className="row">
+          <button
+            type="button"
+            className="btn--sm"
+            onClick={() => void onNewChild()}
+            title={t('tasks.newChildHint')}
+          >
+            {t('tasks.newChild')}
+          </button>
           <button
             type="button"
             className="btn--ghost btn--sm"

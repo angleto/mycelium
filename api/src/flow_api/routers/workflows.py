@@ -36,6 +36,7 @@ async def create_workflow(
         org_id=ctx.org_id,
         actor_id=ctx.user_id,
         name=body.name,
+        description=body.description,
         states=[
             StateSpec(
                 name=s.name,
@@ -43,12 +44,19 @@ async def create_workflow(
                 is_initial=s.is_initial,
                 is_terminal=s.is_terminal,
                 is_hidden=s.is_hidden,
+                description=s.description,
             )
             for s in body.states
         ],
         transitions=[(t.from_state, t.to_state) for t in body.transitions],
     )
-    return WorkflowOut(id=w.id, name=w.name, is_default=w.is_default, version=w.version)
+    return WorkflowOut(
+        id=w.id,
+        name=w.name,
+        description=w.description,
+        is_default=w.is_default,
+        version=w.version,
+    )
 
 
 @router.patch("/workflows/{workflow_id}", status_code=204)
@@ -64,6 +72,7 @@ async def update_workflow(
         actor_id=ctx.user_id,
         workflow_id=workflow_id,
         name=body.name,
+        description=body.description,
         states=[
             StateEdit(
                 id=s.id,
@@ -72,6 +81,7 @@ async def update_workflow(
                 is_initial=s.is_initial,
                 is_terminal=s.is_terminal,
                 is_hidden=s.is_hidden,
+                description=s.description,
             )
             for s in body.states
         ],
@@ -116,6 +126,7 @@ async def list_workflows(
         WorkflowOut(
             id=w.id,
             name=w.name,
+            description=w.description,
             is_default=w.is_default,
             version=w.version,
         )
@@ -137,6 +148,7 @@ async def workflow_states(
             is_initial=s.is_initial,
             is_terminal=s.is_terminal,
             is_hidden=s.is_hidden,
+            description=s.description,
         )
         for s in states
     ]

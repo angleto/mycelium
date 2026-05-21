@@ -5576,6 +5576,8 @@ export interface components {
              * @default false
              */
             is_hidden?: boolean;
+            /** Description */
+            description?: string | null;
         };
         /**
          * StorageKind
@@ -6184,6 +6186,8 @@ export interface components {
         WorkflowCreateIn: {
             /** Name */
             name: string;
+            /** Description */
+            description?: string | null;
             /** States */
             states: components["schemas"]["WorkflowStateSpecIn"][];
             /** Transitions */
@@ -6198,6 +6202,8 @@ export interface components {
             id: string;
             /** Name */
             name: string;
+            /** Description */
+            description?: string | null;
             /** Is Default */
             is_default: boolean;
             /** Version */
@@ -6207,6 +6213,8 @@ export interface components {
         WorkflowPatchIn: {
             /** Name */
             name: string;
+            /** Description */
+            description?: string | null;
             /** States */
             states: components["schemas"]["WorkflowStateEditIn"][];
             /** Transitions */
@@ -6238,6 +6246,8 @@ export interface components {
              * @default false
              */
             is_hidden?: boolean;
+            /** Description */
+            description?: string | null;
         };
         /** WorkflowStateSpecIn */
         WorkflowStateSpecIn: {
@@ -6263,6 +6273,8 @@ export interface components {
              * @default false
              */
             is_hidden?: boolean;
+            /** Description */
+            description?: string | null;
         };
         /** WorkspaceCreateIn */
         WorkspaceCreateIn: {

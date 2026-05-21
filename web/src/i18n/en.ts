@@ -414,6 +414,9 @@ export const en = {
     create: 'Add',
     createAndOpen: 'Add & open',
     createAndOpenHint: 'Create the task and jump to its detail page for inline editing',
+    newChild: '+ New child',
+    newChildHint: 'Create a sub-task that inherits all tags from this parent, then open it for inline editing',
+    newChildPlaceholder: 'New child task',
     filterTag: 'Filter by tag',
     all: 'All',
     showHidden: 'Show hidden',
@@ -627,6 +630,11 @@ export const en = {
     nav: 'Workflows',
     title: 'Workflows',
     name: 'Workflow name',
+    description: 'Description',
+    descriptionHint:
+      'What this workflow is for — read by MCP agents so they know the lifecycle they\'re operating in (e.g. "Tracks tickets from intake to delivery, with QA approval before done").',
+    stateDescriptionHint:
+      'What this state means — surfaced to MCP agents so they can reason about a task\'s position in the flow (e.g. "Waiting on client validation").',
     states: 'States',
     addState: 'Add state',
     stateName: 'State name',

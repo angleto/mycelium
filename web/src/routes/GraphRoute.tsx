@@ -276,14 +276,18 @@ export function GraphRoute() {
             <option value="ai">{t('graph.scopeAi')}</option>
           </select>
         </label>
-        <label className="row">
-          <input
-            type="checkbox"
-            checked={showTerminal}
-            onChange={(e) => setShowTerminal(e.target.checked)}
-          />{' '}
-          {t('graph.showTerminal')}
-        </label>
+        <button
+          type="button"
+          role="switch"
+          aria-checked={showTerminal}
+          className={
+            'toggle-pill' + (showTerminal ? ' toggle-pill--on' : '')
+          }
+          onClick={() => setShowTerminal((v) => !v)}
+        >
+          {t('graph.showTerminal')}:{' '}
+          {showTerminal ? t('common.on') : t('common.off')}
+        </button>
       </div>
       {wfStates.length > 0 && (
         <div className="tagfilter">

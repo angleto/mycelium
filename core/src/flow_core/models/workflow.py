@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import ForeignKey, Integer, String, UniqueConstraint, text
+from sqlalchemy import ForeignKey, Integer, String, Text, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -24,6 +24,10 @@ class WorkflowDefinition(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMix
 
     name: Mapped[str] = mapped_column(String(120), nullable=False)
     is_default: Mapped[bool] = mapped_column(nullable=False, server_default=text("false"))
+    # Free-form description (added in migration 0065). Read by the
+    # SPA's workflow editor and surfaced to MCP agents so they can
+    # reason about a task's workflow without inferring from name.
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class WorkflowState(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, Base):
@@ -45,6 +49,11 @@ class WorkflowState(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, B
     # boolean only — the scheduler / dispatch / transitions don't read it,
     # tasks in a hidden state are still in the workflow normally.
     is_hidden: Mapped[bool] = mapped_column(nullable=False, server_default=text("false"))
+    # Free-form description (added in migration 0065). The MCP layer
+    # surfaces this on list_tasks / state-info tools so an agent knows
+    # what "in_review" or "blocked" means for THIS workflow without
+    # guessing from the state name.
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class WorkflowTransition(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, Base):

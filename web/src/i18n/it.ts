@@ -414,6 +414,9 @@ export const it: Catalog = {
     create: 'Aggiungi',
     createAndOpen: 'Aggiungi e apri',
     createAndOpenHint: "Crea il task e vai subito alla pagina di dettaglio per modificarlo",
+    newChild: '+ Nuovo figlio',
+    newChildHint: 'Crea un sotto-task che eredita tutti i tag dal padre, e aprilo per modificarlo',
+    newChildPlaceholder: 'Nuovo sotto-task',
     filterTag: 'Filtra per tag',
     all: 'Tutti',
     showHidden: 'Mostra nascosti',
@@ -627,6 +630,11 @@ export const it: Catalog = {
     nav: 'Workflow',
     title: 'Workflow',
     name: 'Nome workflow',
+    description: 'Descrizione',
+    descriptionHint:
+      "A cosa serve questo workflow — letto dagli agenti MCP per sapere il ciclo di vita su cui operano (es. \"Traccia i ticket dalla presa in carico alla consegna, con QA prima del done\").",
+    stateDescriptionHint:
+      "Cosa significa questo stato — visibile agli agenti MCP per ragionare sulla posizione di un task nel flusso (es. \"In attesa di validazione cliente\").",
     states: 'Stati',
     addState: 'Aggiungi stato',
     stateName: 'Nome stato',

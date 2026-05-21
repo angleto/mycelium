@@ -434,6 +434,7 @@ class StateOut(BaseModel):
     is_initial: bool
     is_terminal: bool
     is_hidden: bool = False
+    description: str | None = None
 
 
 class TransitionOut(BaseModel):
@@ -505,6 +506,7 @@ class WorkflowStateSpecIn(BaseModel):
     is_initial: bool = False
     is_terminal: bool = False
     is_hidden: bool = False
+    description: str | None = None
 
 
 class TransitionIn(BaseModel):
@@ -514,6 +516,7 @@ class TransitionIn(BaseModel):
 
 class WorkflowCreateIn(BaseModel):
     name: str = Field(min_length=1, max_length=120)
+    description: str | None = None
     states: list[WorkflowStateSpecIn]
     transitions: list[TransitionIn] = Field(default_factory=list)
 
@@ -525,10 +528,12 @@ class WorkflowStateEditIn(BaseModel):
     is_initial: bool = False
     is_terminal: bool = False
     is_hidden: bool = False
+    description: str | None = None
 
 
 class WorkflowPatchIn(BaseModel):
     name: str = Field(min_length=1, max_length=120)
+    description: str | None = None
     states: list[WorkflowStateEditIn]
     transitions: list[TransitionIn] = Field(default_factory=list)
 
@@ -536,6 +541,7 @@ class WorkflowPatchIn(BaseModel):
 class WorkflowOut(BaseModel):
     id: uuid.UUID
     name: str
+    description: str | None = None
     is_default: bool
     version: int
 
