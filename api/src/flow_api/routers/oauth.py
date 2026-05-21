@@ -41,6 +41,7 @@ through to a 4xx with an OAuth-shaped error body.
 from __future__ import annotations
 
 import base64
+import datetime as dt
 import hashlib
 import logging
 import secrets
@@ -458,6 +459,69 @@ async def token_endpoint(
         },
         headers={"Cache-Control": "no-store", "Pragma": "no-cache"},
     )
+
+
+@oauth_router.post("/diag-secret", include_in_schema=False)
+async def diag_secret(request: Request) -> JSONResponse:
+    """Diagnostic: POST a JSON body ``{"raw": "flow_at_..."}`` to
+    confirm whether the hash of the supplied raw matches an existing
+    ``agent_tokens`` row via the SECURITY DEFINER lookup. Returns the
+    row's status flags (revoked / expires / assistant_active) without
+    surfacing any tenant identifiers. Used to bisect whether the
+    "client_secret rejected" path on /token is a paste-side bug or a
+    server-side function ownership issue.
+
+    The raw is read from the body, hashed in-memory, never logged.
+    The endpoint is intentionally public (no bearer required) because
+    the input IS the bearer being tested — adding auth here would
+    require a separate one. Output is non-identifying.
+    """
+    import hashlib
+
+    from sqlalchemy import text as _t
+
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse(
+            {"error": "json body required"},
+            status_code=400,
+        )
+    if not isinstance(body, dict):
+        return JSONResponse(
+            {"error": "object body required"},
+            status_code=400,
+        )
+    raw = str(body.get("raw", "")).strip()
+    if not raw:
+        return JSONResponse({"error": "raw required"}, status_code=400)
+    secret_hash = hashlib.sha256(raw.encode("utf-8")).digest()
+    out: dict[str, Any] = {
+        "prefix": raw[:8],
+        "raw_len": len(raw),
+    }
+    try:
+        async with admin_session() as s:
+            row = (
+                await s.execute(
+                    _t(
+                        "SELECT out_exists, out_revoked_at, out_expires_at, "
+                        "out_assistant_active "
+                        "FROM oauth_token_diag(:h)"
+                    ),
+                    {"h": secret_hash},
+                )
+            ).first()
+        if row is None or not row[0]:
+            out["found"] = False
+        else:
+            out["found"] = True
+            out["revoked"] = row[1] is not None
+            out["expired"] = row[2] is not None and row[2] < dt.datetime.now(dt.UTC)
+            out["assistant_active"] = bool(row[3]) if row[3] is not None else None
+    except Exception as exc:
+        out["error"] = str(exc)
+    return JSONResponse(out)
 
 
 @oauth_router.get("/selftest")
