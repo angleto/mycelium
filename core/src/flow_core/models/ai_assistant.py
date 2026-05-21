@@ -42,6 +42,11 @@ class AiAssistant(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, Bas
         nullable=False,
     )
     label: Mapped[str] = mapped_column(String(255), nullable=False)
+    # Human-readable assignee handle (migration 0060). Workspace-
+    # scoped uniqueness via a partial unique index. Seed default is
+    # the empty sentinel; the service derives a slug from ``label``
+    # on next mutation.
+    handle: Mapped[str] = mapped_column(String(40), nullable=False, default="")
     provider: Mapped[str | None] = mapped_column(String(64), nullable=True)
     model_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)

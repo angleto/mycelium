@@ -22,6 +22,11 @@ class User(UUIDPKMixin, TimestampMixin, Base):
     __tablename__ = "users"
 
     email: Mapped[str] = mapped_column(String(320), nullable=False, unique=True)
+    # Human-readable assignee handle (migration 0060). The assignee
+    # picker uses this instead of the UUID. Empty string is the seed
+    # sentinel; the service mints a slug on next write. Uniqueness via
+    # a partial unique index that ignores the empty sentinel.
+    handle: Mapped[str] = mapped_column(String(40), nullable=False, default="")
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     is_active: Mapped[bool] = mapped_column(nullable=False, server_default=text("true"))
     display_name: Mapped[str | None] = mapped_column(String(200), nullable=True)

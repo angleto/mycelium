@@ -237,7 +237,22 @@ export function TaskDetailRoute() {
       setErr(errMessage(error))
       return
     }
-    setTask((p) => (p ? { ...p, version: data.version } : p))
+    // Merge the patch keys into the local task so ``dirty`` clears
+    // and the debounced text-autosave effect short-circuits on the
+    // next render. Just bumping ``version`` (as before) left
+    // task.title pointing at the pre-save value, so dirty stayed
+    // true forever and the user saw "unsaved" with no way to clear.
+    setTask((p) => {
+      if (!p) return p
+      const next: typeof p = { ...p, version: data.version }
+      for (const [k, v] of Object.entries(patch)) {
+        // The PATCH body keys are a strict subset of TaskOut keys
+        // (``_UPDATABLE`` in the backend service); cast through Record
+        // for the type-system, the runtime stays a 1:1 copy.
+        ;(next as unknown as Record<string, unknown>)[k] = v
+      }
+      return next
+    })
   }
 
   // Title + description autosave: debounce 1s after the last change.
@@ -518,13 +533,15 @@ export function TaskDetailRoute() {
           {t('tasks.description')}
           <RichEditor value={description} onChange={setDescription} />
         </label>
-        {(busy || dirty) && (
-          <div className="row">
-            <span className="muted">
-              {busy ? t('tasks.saving') : t('tasks.unsaved')}
-            </span>
-          </div>
-        )}
+        <div className="row">
+          <button type="submit" disabled={busy || !dirty}>
+            {busy ? t('tasks.saving') : t('tasks.save')}
+          </button>
+          {dirty && <span className="muted">{t('tasks.unsaved')}</span>}
+          {!dirty && !busy && (
+            <span className="muted">{t('tasks.saved')}</span>
+          )}
+        </div>
         <div className="row">
           <label>
             {t('tasks.importance')}

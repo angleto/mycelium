@@ -105,6 +105,13 @@ class Task(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, Base):
         ForeignKey("users.id", ondelete="SET NULL"),
         nullable=True,
     )
+    # Human-readable assignee (migration 0060). Backfilled from
+    # ``executor_user_id`` -> users.handle. NULL when the task has no
+    # human executor (LLM agent or unassigned). Stage A of the
+    # "kill Executor" refactor: ``executor_user_id`` and ``executor_kind``
+    # remain authoritative for the scheduler/dispatch; ``assignee_handle``
+    # is the new addressable surface for UI / MCP picker.
+    assignee_handle: Mapped[str | None] = mapped_column(String(40), nullable=True)
     # Capabilities this task needs from its executor (docs/adr/0025 P2
     # admission control). An llm task is eligible for an ``llm_agent``
     # executor iff this set is a subset of the executor's

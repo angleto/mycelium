@@ -627,25 +627,31 @@ async def report(
 
     # rate_snapshot is set when the entry is created/edited; entries
     # created when the client had no ``tariffa`` (or no client) have
-    # NULL snapshots that historically rendered as 0 EUR even after the
-    # rate was later configured. Backfill the missing rates LIVE from
-    # the current task -> project -> client lookup, without mutating
-    # history: snapshot semantics ("the rate at the time of the entry")
-    # only apply when the snapshot exists; ``None`` means "no rate was
-    # captured", so the live rate is the most accurate available value.
+    # NULL or ZERO snapshots that historically rendered as 0 EUR even
+    # after the rate was later configured. Backfill the missing rates
+    # LIVE from the current task -> project -> client lookup, without
+    # mutating history: snapshot semantics ("the rate at the time of
+    # the entry") only apply when the snapshot is a real positive
+    # number. NULL / 0 mean "no rate was captured" (the explicit-free
+    # case is rare and indistinguishable from "didn't know yet"; the
+    # live rate is the most accurate available value either way).
     live_rates: dict[uuid.UUID, tuple[Decimal | None, str]] = {}
-    needing_live = {e.task_id for e in entries if e.billable and e.rate_snapshot is None}
+    needing_live = {
+        e.task_id
+        for e in entries
+        if e.billable and (e.rate_snapshot is None or e.rate_snapshot <= 0)
+    }
     for tid in needing_live:
         r, cur, _ = await _rate(session, tid)
         live_rates[tid] = (r, cur)
 
     def rate_for(e: TimeEntry) -> Decimal | None:
-        if e.rate_snapshot is not None:
+        if e.rate_snapshot is not None and e.rate_snapshot > 0:
             return e.rate_snapshot
         return live_rates.get(e.task_id, (None, "EUR"))[0]
 
     def currency_for(e: TimeEntry) -> str:
-        if e.rate_snapshot is not None:
+        if e.rate_snapshot is not None and e.rate_snapshot > 0:
             return e.currency
         live = live_rates.get(e.task_id)
         return live[1] if live else e.currency

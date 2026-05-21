@@ -360,6 +360,28 @@ export function TimeRoute() {
     }
   }, [activeId, reportQuery, from, to])
 
+  // Pie chart fetch (separate from the table report so changing the
+  // pie group selector doesn't refetch the table). Also drives the
+  // first paint after page load — the previous version only fetched
+  // pieReport inside ``loadReport`` (called from edit / create flows),
+  // so switching the pie to project or client on a fresh load showed
+  // an empty donut.
+  useEffect(() => {
+    let active = true
+    void (async () => {
+      if (pieGroup === 'task') return
+      const pieQ = { ...reportQuery(), group_by: pieGroup }
+      const pr = await api.GET('/time/report', {
+        params: { header: workspaceHeader(), query: pieQ },
+      })
+      if (!active) return
+      if (pr.data) setPieReport(pr.data)
+    })()
+    return () => {
+      active = false
+    }
+  }, [activeId, reportQuery, pieGroup])
+
   const refreshRunning = useCallback(async () => {
     const { data } = await api.GET('/time/running', {
       params: { header: workspaceHeader() },
