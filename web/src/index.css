@@ -1259,14 +1259,45 @@ button.btn--danger:hover {
   flex-direction: column;
   gap: 0.35rem;
   box-shadow: 0 1px 0 rgba(0, 0, 0, 0.04);
+  /* Suppress text selection while dragging so the cursor stays the
+     hand and the drag image is the card, not a selected text span. */
+  user-select: none;
+  -webkit-user-select: none;
 }
 .kanban__card:active { cursor: grabbing; }
 .kanban__card--dragging { opacity: 0.5; }
+/* Inner interactive elements shouldn't start their own drag. The
+   Link explicitly opts out via draggable={false} too — the CSS rule
+   below covers any nested image / chip / etc. that the browser
+   would otherwise grab. */
+.kanban__card a,
+.kanban__card .chip,
+.kanban__card .aibadge {
+  -webkit-user-drag: none;
+}
+.kanban__card-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.4rem;
+}
+.kanban__card-actions {
+  display: flex;
+  gap: 0.25rem;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+.kanban__timer {
+  padding: 0.1rem 0.4rem;
+  font-size: 0.78rem;
+  line-height: 1.2;
+}
 .kanban__title {
   font-weight: 500;
   color: inherit;
   text-decoration: none;
   word-break: break-word;
+  flex: 1 1 auto;
+  min-width: 0;
 }
 .kanban__title:hover { text-decoration: underline; }
 .kanban__meta {

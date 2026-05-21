@@ -7,6 +7,12 @@ import type { components } from '../api/schema'
 
 type Task = components['schemas']['TaskOut']
 type State = components['schemas']['StateOut']
+type Running = components['schemas']['TimeEntryOut']
+
+function hms(sec: number): string {
+  const s = Math.max(0, Math.floor(sec))
+  return `${Math.floor(s / 3600)}:${String(Math.floor((s % 3600) / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`
+}
 
 // Kanban board for the Tasks view. Columns map to workflow states in
 // their canonical order (workflow_states.position, mirrored by the order
@@ -25,11 +31,19 @@ export function TaskKanban({
   states,
   allowed,
   onChangeState,
+  running,
+  now,
+  onToggleTimer,
+  onStartParallel,
 }: {
   tasks: Task[]
   states: State[]
   allowed: Map<string, Set<string>>
   onChangeState: (task: Task, toStateId: string) => Promise<void> | void
+  running: Running[]
+  now: number
+  onToggleTimer: (taskId: string) => Promise<void> | void
+  onStartParallel: (taskId: string) => Promise<void> | void
 }) {
   const { t } = useTranslation()
   const [draggingId, setDraggingId] = useState<string | null>(null)
@@ -150,14 +164,82 @@ export function TaskKanban({
                     onDragStart={(e) => onCardDragStart(e, tk.id)}
                     onDragEnd={onCardDragEnd}
                   >
-                    <Link to={`/tasks/${tk.id}`} className="kanban__title">
-                      {tk.executor_kind === 'llm_agent' && (
-                        <span className="aibadge" title={t('tasks.aiTitle')}>
-                          {t('tasks.aiBadge')}
-                        </span>
-                      )}
-                      {tk.title}
-                    </Link>
+                    {/* draggable={false} on the inner Link so the
+                        browser starts the LI's HTML5 drag instead of
+                        the anchor's native drag (which would otherwise
+                        carry just the href, never firing the column's
+                        drop). Click still navigates to /tasks/{id}. */}
+                    <div className="kanban__card-head">
+                      <Link
+                        to={`/tasks/${tk.id}`}
+                        className="kanban__title"
+                        draggable={false}
+                      >
+                        {tk.executor_kind === 'llm_agent' && (
+                          <span
+                            className="aibadge"
+                            title={t('tasks.aiTitle')}
+                          >
+                            {t('tasks.aiBadge')}
+                          </span>
+                        )}
+                        {tk.title}
+                      </Link>
+                      {(() => {
+                        // Icon-only timer controls pinned top-right.
+                        // ``stopPropagation`` keeps click from bubbling
+                        // into the LI's mousedown that would otherwise
+                        // race with the dragstart heuristic.
+                        const cur = running.find((r) => r.task_id === tk.id)
+                        const onThis = cur != null
+                        const elapsed = cur
+                          ? (now - new Date(cur.started_at).getTime()) / 1000
+                          : 0
+                        return (
+                          <div className="kanban__card-actions">
+                            <button
+                              type="button"
+                              draggable={false}
+                              className={
+                                (onThis ? 'btn--sm' : 'btn--ghost btn--sm') +
+                                ' kanban__timer'
+                              }
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                void onToggleTimer(tk.id)
+                              }}
+                              title={
+                                onThis
+                                  ? `${t('tasks.stop')} (${hms(elapsed)})`
+                                  : t('time.startSerial')
+                              }
+                              aria-label={
+                                onThis
+                                  ? t('tasks.stop')
+                                  : t('time.startSerial')
+                              }
+                            >
+                              {onThis ? '⏱■' : '⏱▶'}
+                            </button>
+                            {!onThis && (
+                              <button
+                                type="button"
+                                draggable={false}
+                                className="btn--ghost btn--sm kanban__timer"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  void onStartParallel(tk.id)
+                                }}
+                                title={t('time.startParallel')}
+                                aria-label={t('time.startParallel')}
+                              >
+                                ⏱▶▶
+                              </button>
+                            )}
+                          </div>
+                        )
+                      })()}
+                    </div>
                     <div className="kanban__meta">
                       <PriorityChip priority={tk.priority} score={score} />
                       {tk.due_date && (

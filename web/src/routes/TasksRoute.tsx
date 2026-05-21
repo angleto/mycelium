@@ -664,6 +664,10 @@ export function TasksRoute() {
           states={kanbanStates}
           allowed={allowed}
           onChangeState={changeState}
+          running={running}
+          now={now}
+          onToggleTimer={toggleTimer}
+          onStartParallel={startParallel}
         />
       ) : shown.length === 0 ? (
         <p className="hint">{t('tasks.none')}</p>
