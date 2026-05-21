@@ -5,7 +5,13 @@ import { BuildInfo } from '../components/BuildInfo'
 import { EstimatePresets } from '../components/EstimatePresets'
 import { GmailConnect } from '../components/GmailConnect'
 import { IssuerProfiles } from '../components/IssuerProfiles'
-import { ExecutorsAdmin } from '../components/ExecutorsAdmin'
+// ExecutorsAdmin removed in Stage B of #21 (kill Executor model).
+// Tasks are now assigned to ``@handle`` actors via AssigneePicker
+// (users + AI assistants). The executors table remains as legacy
+// plumbing for the scheduler / dispatch until Stage C drops it; the
+// admin UI is gone because (a) self-deletion of one's own executor
+// row was the original pain point and (b) executor rows are now
+// auto-derived from users / ai_assistants.
 import { AiAssistantsSettings } from '../components/AiAssistantsSettings'
 import { MemoryChannelsAdmin } from '../components/MemoryChannelsAdmin'
 import { PomodoroSettings } from '../components/PomodoroSettings'
@@ -163,7 +169,7 @@ export function SettingsRoute() {
     <TelegramLink />
     <AiAssistantsSettings />
     {me?.is_admin && isAdminMode() && <MemoryChannelsAdmin />}
-    <ExecutorsAdmin />
+    {/* ExecutorsAdmin removed in v1.2.27, #21 Stage B */}
     <IssuerProfiles />
     <EstimatePresets />
     <PomodoroSettings />

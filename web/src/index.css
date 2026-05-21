@@ -740,6 +740,69 @@ button.btn--danger:hover {
   .aiform__grid { grid-template-columns: 1fr; }
 }
 
+/* AssigneePicker (#21 Stage B): single-select chip + search list,
+   mirroring TagPicker's layout. Anchored within the task detail
+   fieldset; the result list is absolute-positioned under the input. */
+.assignpick { display: flex; flex-direction: column; gap: 0.4rem; }
+.assignpick__row { gap: 0.4rem; align-items: center; }
+.assignpick__current { display: inline-flex; align-items: center; gap: 0.2rem; }
+.assignpick__clear {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-size: 0.9rem;
+  cursor: pointer;
+  padding: 0 0.1rem;
+}
+.assignpick__searchbox { position: relative; }
+.assignpick__search { width: 100%; max-width: 22rem; }
+.assignpick__list {
+  position: absolute;
+  top: calc(100% + 2px);
+  left: 0;
+  z-index: 30;
+  list-style: none;
+  padding: 0.2rem;
+  margin: 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  max-height: 14rem;
+  overflow-y: auto;
+  width: 100%;
+  max-width: 22rem;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+.assignpick__hint { padding: 0.3rem 0.5rem; }
+.assignpick__opt {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.3rem 0.5rem;
+  background: transparent;
+  border: 0;
+  text-align: left;
+  cursor: pointer;
+  border-radius: 4px;
+  font-size: 0.85rem;
+}
+.assignpick__opt:hover { background: var(--surface-2); }
+.assignpick__handle { font-weight: 500; }
+.taskdetail__assignee {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.5rem 0.7rem;
+  margin: 0.5rem 0;
+}
+.taskdetail__assignee legend {
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted, #888);
+  padding: 0 0.3rem;
+}
+
 /* ---- status text ---- */
 .err {
   color: var(--err);

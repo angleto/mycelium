@@ -4,6 +4,13 @@ import type { Catalog } from './en'
 export const it: Catalog = {
   app: { title: 'Flow' },
   common: { on: 'sì', off: 'no' },
+  assigneePicker: {
+    label: 'Assegnatario',
+    none: 'Nessun assegnatario',
+    search: 'Cerca @handle o nome…',
+    noMatch: 'Nessun match',
+    clear: 'Rimuovi assegnazione',
+  },
   aiAssistants: {
     pageTitle: 'AI assistants',
     intro:

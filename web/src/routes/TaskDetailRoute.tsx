@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { api, errMessage, workspaceHeader } from '../api/client'
 import { RichEditor } from '../components/RichEditor'
+import { AssigneePicker } from '../components/AssigneePicker'
 import { TagPicker } from '../components/TagPicker'
 import { PriorityChip } from '../components/PriorityChip'
 import { ScaleSelect } from '../components/ScaleSelect'
@@ -564,6 +565,13 @@ export function TaskDetailRoute() {
             onChange={(e) => onDue(e.target.value)}
           />
         </label>
+        <fieldset className="taskdetail__assignee">
+          <legend>{t('assigneePicker.label')}</legend>
+          <AssigneePicker
+            value={task.assignee_handle ?? null}
+            onChange={(next) => void autosave({ assignee_handle: next ?? '' })}
+          />
+        </fieldset>
         <label>
           {t('tasks.billable')}
           <select

@@ -5,6 +5,13 @@
 export const en = {
   app: { title: 'Flow' },
   common: { on: 'on', off: 'off' },
+  assigneePicker: {
+    label: 'Assignee',
+    none: 'Unassigned',
+    search: 'Search @handle or name…',
+    noMatch: 'No actor matches',
+    clear: 'Unassign',
+  },
   aiAssistants: {
     pageTitle: 'AI assistants',
     intro:

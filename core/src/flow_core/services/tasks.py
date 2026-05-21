@@ -53,6 +53,7 @@ _UPDATABLE = frozenset(
         "estimate_effort_h",
         "executor_kind",
         "executor_user_id",
+        "assignee_handle",
         "required_capabilities",
         "parent_task_id",
         "monetary_cost",
@@ -99,6 +100,7 @@ async def create_task(
     parent_task_id: uuid.UUID | None = None,
     executor_kind: ExecKind = ExecKind.human,
     executor_user_id: uuid.UUID | None = None,
+    assignee_handle: str | None = None,
     estimate_effort_h: Decimal | None = None,
     required_capabilities: Sequence[str] | None = None,
     monetary_cost: Decimal | None = None,
@@ -145,6 +147,35 @@ async def create_task(
     initial = await wf.get_initial_state(session, workflow.id)
     if importance is not None and urgency is not None:
         priority = derive_priority(importance, urgency)
+    # #21 Stage B: when the SPA sends ``assignee_handle`` it wins over
+    # the legacy executor_kind / executor_user_id pair. Resolve the
+    # handle against users + AI assistants and mirror the result into
+    # the legacy columns so the scheduler / dispatch keep working
+    # unchanged. Stage C drops the mirror columns entirely.
+    if assignee_handle:
+        from flow_core.models.ai_assistant import AiAssistant
+        from flow_core.models.user import User
+
+        user_row = (
+            await session.execute(select(User.id).where(User.handle == assignee_handle))
+        ).scalar_one_or_none()
+        if user_row is not None:
+            executor_kind = ExecKind.human
+            executor_user_id = user_row
+        else:
+            assistant_row = (
+                await session.execute(
+                    select(AiAssistant.id).where(
+                        AiAssistant.handle == assignee_handle,
+                        AiAssistant.org_id == org_id,
+                    )
+                )
+            ).scalar_one_or_none()
+            if assistant_row is not None:
+                executor_kind = ExecKind.llm_agent
+                executor_user_id = None
+            else:
+                raise DomainError(MessageCode.DOMAIN_ERROR)
     task = Task(
         org_id=org_id,
         title=title,
@@ -159,6 +190,7 @@ async def create_task(
         parent_task_id=parent_task_id,
         executor_kind=executor_kind,
         executor_user_id=executor_user_id,
+        assignee_handle=assignee_handle or None,
         estimate_effort_h=estimate_effort_h,
         required_capabilities=list(required_capabilities or []),
         monetary_cost=monetary_cost,
@@ -255,6 +287,41 @@ async def update_task(
         urg = values.get("urgency", current.urgency)
         if imp is not None and urg is not None:
             values["priority"] = derive_priority(imp, urg)
+    # #21 Stage B: assignee_handle is the authoritative assignee from
+    # v1.2.27 onward. To keep the legacy scheduler / dispatch happy we
+    # ALSO update the executor_kind / executor_user_id mirror columns
+    # synchronously here: the resolver looks the handle up in users
+    # vs ai_assistants and writes the appropriate exec_kind. Stage C
+    # will drop the mirror columns entirely and rewire the scheduler.
+    if "assignee_handle" in values:
+        handle = values["assignee_handle"]
+        if handle:
+            from flow_core.models.ai_assistant import AiAssistant
+            from flow_core.models.user import User
+
+            user_row = (
+                await session.execute(select(User.id).where(User.handle == handle))
+            ).scalar_one_or_none()
+            if user_row is not None:
+                values["executor_kind"] = ExecKind.human
+                values["executor_user_id"] = user_row
+            else:
+                assistant_row = (
+                    await session.execute(
+                        select(AiAssistant.id).where(
+                            AiAssistant.handle == handle,
+                            AiAssistant.org_id == org_id,
+                        )
+                    )
+                ).scalar_one_or_none()
+                if assistant_row is not None:
+                    values["executor_kind"] = ExecKind.llm_agent
+                    values["executor_user_id"] = None
+                else:
+                    raise DomainError(MessageCode.DOMAIN_ERROR)
+        else:
+            # Explicit clear: drop the human binding too.
+            values["executor_user_id"] = None
     new_version = await optimistic_update(
         session,
         Task,

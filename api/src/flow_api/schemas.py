@@ -381,6 +381,10 @@ class TaskCreateIn(BaseModel):
     parent_task_id: uuid.UUID | None = None
     executor_kind: ExecKind = ExecKind.human
     executor_user_id: uuid.UUID | None = None
+    # Handle-based assignee (#21 Stage B). When set, the service
+    # resolves the handle to a user / ai_assistant and writes the
+    # legacy executor_kind / executor_user_id mirror columns too.
+    assignee_handle: str | None = Field(default=None, max_length=40)
     estimate_effort_h: Decimal | None = None
     # Capabilities the task needs from its executor (docs/adr/0025 P2).
     # Empty = any enabled agent. Additive, default [].
@@ -406,6 +410,10 @@ class TaskPatchIn(BaseModel):
     estimate_effort_h: Decimal | None = None
     executor_kind: ExecKind | None = None
     executor_user_id: uuid.UUID | None = None
+    # Handle-based assignee (#21 Stage B). Empty string clears the
+    # assignment; ``None`` means "no change". The service resolves to
+    # the legacy mirror columns synchronously.
+    assignee_handle: str | None = Field(default=None, max_length=40)
     required_capabilities: list[str] | None = None
     parent_task_id: uuid.UUID | None = None
     monetary_cost: Decimal | None = None
@@ -450,6 +458,11 @@ class TaskOut(BaseModel):
     due_date: datetime.date | None
     parent_task_id: uuid.UUID | None
     executor_kind: ExecKind
+    # Handle-based assignee (#21 Stage B). Surfaces the resolved
+    # ``@handle`` the SPA's AssigneePicker uses. NULL when the task
+    # has no assignee or when it was created before migration 0060
+    # (no backfill for tasks without executor_user_id).
+    assignee_handle: str | None = None
     estimate_effort_h: Decimal | None
     required_capabilities: list[str] = Field(default_factory=list)
     monetary_cost: Decimal | None

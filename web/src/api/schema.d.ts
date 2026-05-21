@@ -5720,6 +5720,8 @@ export interface components {
             executor_kind: components["schemas"]["ExecKind"];
             /** Executor User Id */
             executor_user_id?: string | null;
+            /** Assignee Handle */
+            assignee_handle?: string | null;
             /** Estimate Effort H */
             estimate_effort_h?: number | string | null;
             /** Required Capabilities */
@@ -5783,6 +5785,8 @@ export interface components {
             /** Parent Task Id */
             parent_task_id: string | null;
             executor_kind: components["schemas"]["ExecKind"];
+            /** Assignee Handle */
+            assignee_handle?: string | null;
             /** Estimate Effort H */
             estimate_effort_h: string | null;
             /** Required Capabilities */
@@ -5835,6 +5839,8 @@ export interface components {
             executor_kind?: components["schemas"]["ExecKind"] | null;
             /** Executor User Id */
             executor_user_id?: string | null;
+            /** Assignee Handle */
+            assignee_handle?: string | null;
             /** Required Capabilities */
             required_capabilities?: string[] | null;
             /** Parent Task Id */

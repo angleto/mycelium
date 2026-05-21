@@ -394,13 +394,24 @@ export function WorkflowsRoute() {
                         <button
                           type="button"
                           className="btn--ghost btn--sm"
-                          onClick={() =>
+                          onClick={() => {
+                            // Also prune transitions that reference
+                            // the removed state's name; otherwise the
+                            // backend's transition validator raises
+                            // WORKFLOW_INVALID with the misleading
+                            // "exactly one initial state" message.
+                            const goneName = editing.states[i].name
                             patchE({
                               states: editing.states.filter(
                                 (_, j) => j !== i,
                               ),
+                              tr: editing.tr.filter(
+                                (x) =>
+                                  x.from_state !== goneName &&
+                                  x.to_state !== goneName,
+                              ),
                             })
-                          }
+                          }}
                         >
                           ✕
                         </button>
