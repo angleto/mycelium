@@ -388,11 +388,44 @@ async def token_endpoint(
         )
     principal = await agent_tokens_svc.authenticate(form_client_secret)
     if principal is None:
+        # Drill into the agent_tokens row via the SECURITY DEFINER
+        # ``oauth_token_diag`` function (migration 0064) so we can
+        # tell WHY authenticate returned None. authenticate_agent_token
+        # lumps "no row" + "revoked" + "expired" + "assistant inactive"
+        # into a single empty result, which leaves the operator
+        # guessing.
+        import hashlib
+
+        from sqlalchemy import text as _t
+
+        diag = "diagnostic unavailable"
+        try:
+            secret_hash = hashlib.sha256(form_client_secret.encode("utf-8")).digest()
+            async with admin_session() as _s:
+                row = (
+                    await _s.execute(
+                        _t(
+                            "SELECT out_exists, out_revoked_at, out_expires_at, "
+                            "out_assistant_id, out_assistant_active "
+                            "FROM oauth_token_diag(:h)"
+                        ),
+                        {"h": secret_hash},
+                    )
+                ).first()
+            if row is None or not row[0]:
+                diag = "no agent_tokens row matches the hash"
+            else:
+                diag = (
+                    f"row exists: revoked_at={row[1]} expires_at={row[2]} "
+                    f"assistant_id={row[3]} assistant_active={row[4]}"
+                )
+        except Exception as exc:  # diagnostic best-effort
+            diag = f"diagnostic query failed: {exc}"
         logger.warning(
-            "token /token: authenticate returned None for secret prefix=%s len=%s; "
-            "the bearer is either unknown, revoked, or expired",
+            "token /token: authenticate returned None for secret prefix=%s len=%s -- %s",
             form_client_secret[:8],
             len(form_client_secret),
+            diag,
         )
         return _oauth_error(
             status_code=401, error="invalid_client", description="client_secret rejected"

@@ -189,6 +189,7 @@ export function TimeRoute() {
   const [openTask, setOpenTask] = useState<string | null>(null)
   const [editId, setEditId] = useState<string | null>(null)
   const [eTask, setETask] = useState('')
+  const [eProject, setEProject] = useState('')
   const [eStart, setEStart] = useState('')
   const [eEnd, setEEnd] = useState('')
 
@@ -421,8 +422,7 @@ export function TimeRoute() {
   async function beginEdit(en: Entry) {
     setErr(null)
     setEditId(en.id)
-    // TaskPickList carries its own search state; no project filter
-    // needed at this layer (the DSL covers it).
+    setEProject(en.project_tag_id ?? '')
     setETask(en.task_id)
     setEStart(toLocalInput(en.started_at))
     setEEnd(toLocalInput(en.ended_at))
@@ -614,13 +614,56 @@ export function TimeRoute() {
                 </span>
                 {editId === en.id && (
                   <span className="entryedit">
-                    <TaskPickList
-                      tasks={tasks}
-                      tags={allTags}
-                      states={wfStates}
-                      value={eTask || null}
-                      onPick={(id) => setETask(id)}
-                    />
+                    <select
+                      value={eProject}
+                      onChange={(e) => {
+                        const newProj = e.target.value
+                        setEProject(newProj)
+                        // Real bug fix: changing the project dropdown
+                        // now ALSO promotes a task in that project as
+                        // the new ``eTask`` so the PATCH actually
+                        // moves the entry. Without this the dropdown
+                        // was a filter-only widget and Save still
+                        // sent the old task_id.
+                        if (newProj) {
+                          const inProj = tasks.find((tk) =>
+                            (tk.tags ?? []).some((g) => g.id === newProj),
+                          )
+                          if (inProj) setETask(inProj.id)
+                        }
+                      }}
+                      title={t('time.editProject')}
+                    >
+                      <option value="">{t('time.editAnyProject')}</option>
+                      {projects.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name}
+                        </option>
+                      ))}
+                    </select>
+                    <select
+                      value={eTask}
+                      onChange={(e) => setETask(e.target.value)}
+                    >
+                      {tasks
+                        .filter(
+                          (tk) =>
+                            !eProject ||
+                            (tk.tags ?? []).some((g) => g.id === eProject),
+                        )
+                        .map((tk) => {
+                          const dupe = tasks.filter(
+                            (x) => x.title === tk.title && x.id !== tk.id,
+                          ).length
+                          const suffix = dupe > 0 ? ` · ${tk.id.slice(0, 4)}` : ''
+                          return (
+                            <option key={tk.id} value={tk.id}>
+                              {tk.title}
+                              {suffix}
+                            </option>
+                          )
+                        })}
+                    </select>
                     <input
                       type="datetime-local"
                       value={eStart}
