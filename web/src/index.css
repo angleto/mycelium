@@ -534,6 +534,32 @@ button.btn--danger:hover {
 }
 .toggle-pill:hover { border-color: var(--accent); }
 
+/* TagPickerGrid: laid-out toggleable chip grid, used by /memory and
+   /notes (and any other route that wants the visual selector rather
+   than a search-as-you-type dropdown). Mirrors the existing .chip /
+   chip--on / chip--off look-and-feel + the kind-aware glyph. */
+.tagpickgrid {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+.tagpickgrid__search {
+  width: 100%;
+  max-width: 24rem;
+}
+.tagpickgrid__group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  align-items: center;
+}
+.tagpickgrid__kind {
+  text-transform: uppercase;
+  font-size: 0.68rem;
+  letter-spacing: 0.04em;
+  margin-right: 0.2rem;
+}
+
 /* AI assistants page (replaces the old McpConnect). */
 .aiconnector {
   border: 1px solid var(--border);

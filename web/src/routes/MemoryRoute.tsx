@@ -10,6 +10,7 @@ import { api, errMessage, workspaceHeader } from '../api/client'
 import { useSession } from '../auth/useSession'
 import { useFocus } from '../lib/focus'
 import { TagChip } from '../components/TagChip'
+import { TagPickerGrid } from '../components/TagPickerGrid'
 import type { components } from '../api/schema'
 
 type Hit = components['schemas']['MemoryHitOut']
@@ -344,18 +345,12 @@ export function MemoryRoute() {
           {tags.length > 0 && (
             <div className="row">
               <span className="muted">{t('memory.filterTags')}:</span>
-              {tags.map((g) => (
-                <button
-                  key={g.id}
-                  type="button"
-                  className={
-                    'btn--sm' + (fTags.includes(g.id) ? '' : ' btn--ghost')
-                  }
-                  onClick={() => toggle(fTags, setFTags, g.id)}
-                >
-                  <TagChip name={g.name} color={g.color} kind={g.kind} />
-                </button>
-              ))}
+              <TagPickerGrid
+                tags={tags}
+                selected={fTags}
+                onToggle={(id) => toggle(fTags, setFTags, id)}
+                searchable={false}
+              />
             </div>
           )}
         </form>

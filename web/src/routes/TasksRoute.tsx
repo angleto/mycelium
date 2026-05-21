@@ -9,6 +9,7 @@ import { ScaleSelect } from '../components/ScaleSelect'
 import { TaskKanban } from '../components/TaskKanban'
 import { useFocus } from '../lib/focus'
 import { useLinkedClientProject } from '../lib/linkedClientProject'
+import { parseFilter } from '../lib/taskFilter'
 import type { components } from '../api/schema'
 
 type View = 'kanban' | 'list'
@@ -399,16 +400,31 @@ export function TasksRoute() {
   }
 
   const activeTag = tags.find((x) => x.id === filter)
-  const ql = q.trim().toLowerCase()
   const hiddenStateIds = new Set(
     wfStates.filter((s) => s.is_hidden).map((s) => s.id),
   )
+  // Filter DSL: free text matches title or tag name (existing
+  // behaviour); ``@tagname`` / ``state:in_progress`` / ``due:today``
+  // / ``priority:<=3`` / ``!@done`` / ``A | B`` cover the Todoist-
+  // style structured filters. Parser is in lib/taskFilter.
+  const ql = q.trim()
   const matched = ql
-    ? tasks.filter(
-        (tk) =>
-          tk.title.toLowerCase().includes(ql) ||
-          (tk.tags ?? []).some((g) => g.name.toLowerCase().includes(ql)),
-      )
+    ? (() => {
+        const filterCtx = {
+          tagsById: new Map(
+            tags.map((g) => [g.id, { name: g.name, kind: g.kind ?? 'generic' }]),
+          ),
+          statesById: new Map(
+            wfStates.map((s) => [
+              s.id,
+              { name: s.name, is_terminal: s.is_terminal },
+            ]),
+          ),
+          now: new Date(),
+        }
+        const pred = parseFilter(ql, filterCtx)
+        return tasks.filter(pred)
+      })()
     : tasks
   // Focus (sidebar): client (all its projects) or one project. Only
   // tasks tagged with a focused project show — additive to the filter.
@@ -507,6 +523,7 @@ export function TasksRoute() {
       <div className="row">
         <input
           placeholder={t('tasks.search')}
+          title={t('tasks.searchHint')}
           value={q}
           onChange={(e) => setQ(e.target.value)}
           style={{ flex: 1, minWidth: '12rem' }}

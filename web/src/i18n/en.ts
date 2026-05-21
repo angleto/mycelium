@@ -450,7 +450,9 @@ export const en = {
     urgLabels: ['Now', 'High', 'Soon', 'Low', 'Whenever'],
     aiBadge: 'AI',
     aiTitle: 'Created/owned by the AI agent',
-    search: 'Search title or tag...',
+    search: 'Search title, @tag, state:in_progress, due:today, priority:<=4...',
+    searchHint:
+      'Free text matches title or tag name. Filter shorthand: @tagname (or !@tagname for exclusion), state:NAME, state:!NAME, due:today | tomorrow | overdue | none | +Nd | -Nd | YYYY-MM-DD, priority:<=N (or <,>,>=,=), executor:human | llm_agent | offered. Separate with spaces (AND), use | for OR.',
     estimate: 'Estimate (h)',
     estNone: '— none —',
     estCustom: 'Custom...',

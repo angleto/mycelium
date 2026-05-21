@@ -14,6 +14,7 @@ import { RichEditor } from '../components/RichEditor'
 import { MarkdownView } from '../components/Markdown'
 import { NoteListItem } from '../components/NoteListItem'
 import { TagPicker } from '../components/TagPicker'
+import { TagPickerGrid } from '../components/TagPickerGrid'
 import { TaskTimer } from '../components/TaskTimer'
 import { Attachments } from '../components/Attachments'
 import { useFocus } from '../lib/focus'
@@ -498,15 +499,21 @@ export function NotesRoute() {
         <button type="button" onClick={openCreate}>
           {t('notes.newNote')}
         </button>
-        <select value={fTag} onChange={(e) => setFTag(e.target.value)}>
-          <option value="">{t('notes.allTags')}</option>
-          {tags.map((g) => (
-            <option key={g.id} value={g.id}>
-              {g.kind}: {g.name}
-            </option>
-          ))}
-        </select>
       </div>
+      {tags.length > 0 && (
+        <div className="row">
+          <span className="muted">{t('notes.allTags')}:</span>
+          <TagPickerGrid
+            tags={tags}
+            selected={fTag ? [fTag] : []}
+            // Single-select on /notes: clicking the active chip clears
+            // the filter, clicking a different one swaps it. Matches
+            // the existing backend list call that takes one tag_id.
+            onToggle={(id) => setFTag((cur) => (cur === id ? '' : id))}
+            searchable={tags.length > 20}
+          />
+        </div>
+      )}
 
       <h2>{t('notes.yours')}</h2>
       {focusActive && (
