@@ -234,8 +234,15 @@ function ModeChip({
   const cur = adminOn ? 'admin' : wsRole === 'owner' ? 'owner' : 'user'
   const apply = (m: string) => {
     if (m === 'admin') {
+      // Platform admin (god mode): the backend's effective_role
+      // ceiling becomes ``owner`` for any workspace. Without sending
+      // X-Workspace-Role=owner explicitly, the request would default
+      // to ``member`` and clamp DOWN to member — admin-mode would
+      // not actually unlock owner-gated routes (workflows save,
+      // tag CRUD). Force the requested role to owner so admin-mode
+      // really is "act as owner of this workspace".
       setAdminMode(true)
-      setWorkspaceRole('')
+      setWorkspaceRole('owner')
     } else if (m === 'owner') {
       setAdminMode(false)
       setWorkspaceRole('owner')

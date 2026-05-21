@@ -8,7 +8,9 @@ from __future__ import annotations
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Header, HTTPException, status
+from pydantic import BaseModel, Field
+from sqlalchemy import select
 
 from flow_api.deps import TenantCtx, tenant_ctx
 from flow_api.routers.attachments import att_out, read_capped, upload_file_field
@@ -30,8 +32,11 @@ from flow_api.schemas import (
     TagBrief,
     VersionOut,
 )
+from flow_core.db import admin_session
 from flow_core.models.note import Note, NoteKind, NoteTurn
-from flow_core.models.tag import Tag
+from flow_core.models.project_profile import ProjectProfile
+from flow_core.models.tag import Tag, TagKind
+from flow_core.services import agent_tokens as agent_tokens_svc
 from flow_core.services import attachments as att_svc
 from flow_core.services import notes as svc
 
@@ -370,3 +375,136 @@ async def erase(
         audio_ref=res.audio_ref,
         memory_blobs_deleted=res.memory_blobs_deleted,
     )
+
+
+# ----------------------------------------------------------------------
+# Quick-create endpoint (Apple Shortcut / Tasker / cURL one-liner).
+# Auth: agent_token (``flow_at_...``). The user mints one in
+# /settings/ai-assistants, pastes it into the Shortcut. The Shortcut
+# resolves the project by case-insensitive partial name (or UUID).
+# Designed to be hit from a single ``Get Contents of URL`` action on
+# iOS Shortcuts; no JWT, no workspace header, just the bearer.
+
+
+class QuickCreateIn(BaseModel):
+    """Body for the Apple Shortcut / iOS Dictation flow. ``project``
+    is a project name (case-insensitive partial match) or a UUID; if
+    omitted, the note lands in the default project of the assistant's
+    workspace. ``kind`` defaults to ``text`` because dictation is
+    text-first; voice notes still go through the /notes flow."""
+
+    project: str | None = Field(default=None, max_length=200)
+    text: str = Field(min_length=1, max_length=20000)
+    kind: NoteKind = NoteKind.text
+    title: str | None = Field(default=None, max_length=300)
+
+
+class QuickCreateOut(BaseModel):
+    id: uuid.UUID
+    project_id: uuid.UUID | None
+    kind: NoteKind
+
+
+async def _agent_principal(
+    authorization: Annotated[str | None, Header()] = None,
+) -> agent_tokens_svc.AuthenticatedAgent:
+    """Resolve the ``Authorization: Bearer flow_at_...`` header to an
+    ``AuthenticatedAgent``. 401 if missing / malformed / unknown.
+    Mirrors the MCP HTTP transport bearer middleware (mcp/server_http)
+    but at the FastAPI dep boundary so this endpoint can be reached
+    from the regular ingress without going through /mcp."""
+    if not authorization or not authorization.lower().startswith("bearer "):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing or malformed Authorization header",
+        )
+    raw = authorization.split(" ", 1)[1].strip()
+    if not agent_tokens_svc.is_agent_token(raw):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Bearer is not a Flow agent token",
+        )
+    principal = await agent_tokens_svc.authenticate(raw)
+    if principal is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Unknown / revoked / expired token",
+        )
+    return principal
+
+
+async def _resolve_project(org_id: uuid.UUID, needle: str | None) -> uuid.UUID | None:
+    """``needle`` may be a UUID (exact match), a project name (exact,
+    case-insensitive), or a substring (case-insensitive partial). The
+    first matching project tag wins; absent project yields ``None``
+    (create_note falls back to the default ``General`` project)."""
+    if not needle:
+        return None
+    try:
+        return uuid.UUID(needle)
+    except ValueError:
+        pass
+    async with admin_session() as session:
+        # Set the org GUC so RLS lets us see the tags.
+        from sqlalchemy import text as sql_text
+
+        await session.execute(
+            sql_text("SELECT set_config('app.current_org', :o, true)"),
+            {"o": str(org_id)},
+        )
+        # Exact case-insensitive first; partial as fallback.
+        exact = (
+            await session.execute(
+                select(Tag.id)
+                .join(ProjectProfile, ProjectProfile.tag_id == Tag.id)
+                .where(Tag.kind == TagKind.project)
+                .where(Tag.name.ilike(needle))
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if exact:
+            return exact
+        partial = (
+            await session.execute(
+                select(Tag.id)
+                .join(ProjectProfile, ProjectProfile.tag_id == Tag.id)
+                .where(Tag.kind == TagKind.project)
+                .where(Tag.name.ilike(f"%{needle}%"))
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        return partial
+
+
+@router.post("/quick-create", response_model=QuickCreateOut)
+async def quick_create(
+    body: QuickCreateIn,
+    principal: Annotated[agent_tokens_svc.AuthenticatedAgent, Depends(_agent_principal)],
+) -> QuickCreateOut:
+    """Single-shot note creation for Apple Shortcuts, Tasker, or any
+    one-liner client. The agent token's bound user becomes the actor.
+    Resolves ``project`` to a project tag; creates the note via
+    ``services/notes.create_note``."""
+    project_id = await _resolve_project(principal.org_id, body.project)
+    async with admin_session() as session:
+        from sqlalchemy import text as sql_text
+
+        await session.execute(
+            sql_text("SELECT set_config('app.current_org', :o, true)"),
+            {"o": str(principal.org_id)},
+        )
+        await session.execute(
+            sql_text("SELECT set_config('app.current_user', :u, true)"),
+            {"u": str(principal.user_id)},
+        )
+        note = await svc.create_note(
+            session,
+            org_id=principal.org_id,
+            actor_id=principal.user_id,
+            kind=body.kind,
+            text=body.text,
+            title=body.title,
+            project_id=project_id,
+        )
+        await session.commit()
+    return QuickCreateOut(id=note.id, project_id=note.project_id, kind=note.kind)

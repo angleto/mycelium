@@ -162,7 +162,8 @@ export function NotesRoute() {
   useEffect(() => {
     const openId = searchParams.get('open')
     const tagId = searchParams.get('tag')
-    if (!openId && !tagId) return
+    const action = searchParams.get('action')
+    if (!openId && !tagId && action !== 'new') return
     void (async () => {
       if (tagId) setFTag(tagId)
       if (openId) {
@@ -170,6 +171,10 @@ export function NotesRoute() {
           params: { header: workspaceHeader(), path: { note_id: openId } },
         })
         if (data) await openEdit(data)
+      } else if (action === 'new') {
+        // PWA home-screen shortcut entry point: jump directly to the
+        // new-note modal so the user can capture without an extra tap.
+        openCreate()
       }
       setSearchParams({}, { replace: true })
     })()
