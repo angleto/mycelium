@@ -765,6 +765,7 @@ export const it: Catalog = {
     idle: 'Nessun timer attivo.',
     editProject: 'Filtra i task per progetto',
     editAnyProject: 'Qualsiasi progetto',
+    showTerminal: 'Mostra terminali',
     pick: 'Task',
     start: 'Avvia',
     stop: 'Ferma',

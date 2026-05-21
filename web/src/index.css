@@ -803,6 +803,68 @@ button.btn--danger:hover {
   padding: 0 0.3rem;
 }
 
+/* TaskPickList (#49): the searchable scrolling task picker that
+   replaced the /time start-timer and entry-edit <select>s. Shared
+   container so any future place that needs the same widget gets
+   the same look. */
+.taskpicklist {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: 0;
+}
+.taskpicklist__head {
+  align-items: center;
+  gap: 0.4rem;
+}
+.taskpicklist__search {
+  flex: 1 1 auto;
+  min-width: 12rem;
+}
+.taskpicklist__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 14rem;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+}
+.taskpicklist__item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.35rem 0.6rem;
+  cursor: pointer;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.88rem;
+}
+.taskpicklist__item:last-child { border-bottom: 0; }
+.taskpicklist__item:hover { background: var(--surface-2); }
+.taskpicklist__item--selected {
+  background: rgba(109, 40, 217, 0.12);
+  font-weight: 500;
+}
+.taskpicklist__title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.taskpicklist__meta {
+  display: flex;
+  gap: 0.45rem;
+  align-items: center;
+  font-size: 0.78rem;
+  flex-shrink: 0;
+}
+.taskpicklist__state {
+  text-transform: lowercase;
+  letter-spacing: 0.02em;
+}
+.taskpicklist__empty { padding: 0.5rem 0.6rem; }
+.toggle-pill--sm {
+  font-size: 0.78rem;
+  padding: 0.15rem 0.45rem;
+}
+
 /* ---- status text ---- */
 .err {
   color: var(--err);

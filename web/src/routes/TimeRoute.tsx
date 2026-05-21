@@ -15,6 +15,7 @@ import {
   fromLocalInput,
 } from '../lib/tz'
 import { useLinkedClientProject } from '../lib/linkedClientProject'
+import { TaskPickList } from '../components/TaskPickList'
 import type { components } from '../api/schema'
 
 type Task = components['schemas']['TaskOut']
@@ -161,6 +162,10 @@ export function TimeRoute() {
   const [billableF, setBillableF] = useState<BillableF>('all')
   const [clients, setClients] = useState<Tag[]>([])
   const [projects, setProjects] = useState<Tag[]>([])
+  const [allTags, setAllTags] = useState<Tag[]>([])
+  const [wfStates, setWfStates] = useState<
+    components['schemas']['StateOut'][]
+  >([])
   const [projectProfiles, setProjectProfiles] = useState<Project[]>([])
   const {
     clientId,
@@ -177,11 +182,6 @@ export function TimeRoute() {
   const [openTask, setOpenTask] = useState<string | null>(null)
   const [editId, setEditId] = useState<string | null>(null)
   const [eTask, setETask] = useState('')
-  // Project filter on the task picker during entry edit. Empty string
-  // shows all tasks; otherwise restricts to tasks tagged with the
-  // selected project. Defaulted to the entry's current project when
-  // opening the editor so the picker starts pre-narrowed.
-  const [eProject, setEProject] = useState('')
   const [eStart, setEStart] = useState('')
   const [eEnd, setEEnd] = useState('')
 
@@ -324,17 +324,34 @@ export function TimeRoute() {
     let active = true
     void (async () => {
       const h = workspaceHeader()
-      const [tk, cl, pr, pp] = await Promise.all([
+      const [tk, cl, pr, pp, allTagsRes, wfs] = await Promise.all([
         api.GET('/tasks', { params: { header: h } }),
         api.GET('/tags', { params: { header: h, query: { kind: 'client' } } }),
         api.GET('/tags', { params: { header: h, query: { kind: 'project' } } }),
         api.GET('/projects', { params: { header: h } }),
+        api.GET('/tags', { params: { header: h } }),
+        api.GET('/workflows', { params: { header: h } }),
       ])
       if (!active) return
       if (tk.data) setTasks(tk.data)
       if (cl.data) setClients(cl.data)
       if (pr.data) setProjects(pr.data)
       if (pp.data) setProjectProfiles(pp.data)
+      if (allTagsRes.data) setAllTags(allTagsRes.data)
+      if (wfs.data && wfs.data.length > 0) {
+        // Workflow states drive the "is_terminal" filter on the new
+        // TaskPickList. Pick the default workflow's states; this
+        // mirrors how TasksRoute and GraphRoute do it (the picker
+        // doesn't need per-project workflow nuance — it just needs
+        // a name + terminal flag for filtering).
+        const def = wfs.data.find((w) => w.is_default) ?? wfs.data[0]
+        if (def) {
+          const st = await api.GET('/workflows/{workflow_id}/states', {
+            params: { header: h, path: { workflow_id: def.id } },
+          })
+          if (st.data) setWfStates(st.data)
+        }
+      }
       await resetEntries()
     })()
     return () => {
@@ -397,7 +414,8 @@ export function TimeRoute() {
   async function beginEdit(en: Entry) {
     setErr(null)
     setEditId(en.id)
-    setEProject(en.project_tag_id ?? '')
+    // TaskPickList carries its own search state; no project filter
+    // needed at this layer (the DSL covers it).
     setETask(en.task_id)
     setEStart(toLocalInput(en.started_at))
     setEEnd(toLocalInput(en.ended_at))
@@ -516,29 +534,31 @@ export function TimeRoute() {
             ))}
           </ul>
         )}
-        <form className="row" onSubmit={(e) => void onStart(e, false)}>
+        <form onSubmit={(e) => void onStart(e, false)}>
           <label>
             {t('time.pick')}
-            <select value={pick} onChange={(e) => setPick(e.target.value)}>
-              <option value="">--</option>
-              {tasks.map((x) => (
-                <option key={x.id} value={x.id}>
-                  {x.title}
-                </option>
-              ))}
-            </select>
+            <TaskPickList
+              tasks={tasks}
+              tags={allTags}
+              states={wfStates}
+              value={pick || null}
+              onPick={(id) => setPick(id)}
+            />
           </label>
-          <button type="submit" title={t('time.startSerial')}>
-            ⏱▶ {t('time.startSerial')}
-          </button>
-          <button
-            type="button"
-            className="btn--ghost"
-            title={t('time.startParallel')}
-            onClick={() => void startTask(pick, true)}
-          >
-            ⏱▶▶ {t('time.startParallel')}
-          </button>
+          <div className="row">
+            <button type="submit" title={t('time.startSerial')} disabled={!pick}>
+              ⏱▶ {t('time.startSerial')}
+            </button>
+            <button
+              type="button"
+              className="btn--ghost"
+              title={t('time.startParallel')}
+              onClick={() => void startTask(pick, true)}
+              disabled={!pick}
+            >
+              ⏱▶▶ {t('time.startParallel')}
+            </button>
+          </div>
         </form>
       </div>
 
@@ -585,46 +605,13 @@ export function TimeRoute() {
                 </span>
                 {editId === en.id && (
                   <span className="entryedit">
-                    <select
-                      value={eProject}
-                      onChange={(e) => setEProject(e.target.value)}
-                      title={t('time.editProject')}
-                    >
-                      <option value="">{t('time.editAnyProject')}</option>
-                      {projects.map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {p.name}
-                        </option>
-                      ))}
-                    </select>
-                    <select
-                      value={eTask}
-                      onChange={(e) => setETask(e.target.value)}
-                    >
-                      {tasks
-                        .filter(
-                          (tk) =>
-                            !eProject ||
-                            (tk.tags ?? []).some((g) => g.id === eProject),
-                        )
-                        .map((tk) => {
-                          // Disambiguator when multiple tasks share a
-                          // title: append a short tail of the UUID so
-                          // the user can tell them apart. Cheap and
-                          // doesn't force a "merge tasks" feature yet.
-                          const dupe = tasks.filter(
-                            (x) =>
-                              x.title === tk.title && x.id !== tk.id,
-                          ).length
-                          const suffix = dupe > 0 ? ` · ${tk.id.slice(0, 4)}` : ''
-                          return (
-                            <option key={tk.id} value={tk.id}>
-                              {tk.title}
-                              {suffix}
-                            </option>
-                          )
-                        })}
-                    </select>
+                    <TaskPickList
+                      tasks={tasks}
+                      tags={allTags}
+                      states={wfStates}
+                      value={eTask || null}
+                      onPick={(id) => setETask(id)}
+                    />
                     <input
                       type="datetime-local"
                       value={eStart}

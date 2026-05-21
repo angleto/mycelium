@@ -765,6 +765,7 @@ export const en = {
     idle: 'No timer running.',
     editProject: 'Filter the task list by project',
     editAnyProject: 'Any project',
+    showTerminal: 'Show terminal',
     pick: 'Task',
     start: 'Start',
     stop: 'Stop',
