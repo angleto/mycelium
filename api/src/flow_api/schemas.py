@@ -1369,6 +1369,10 @@ class NotePatchIn(BaseModel):
     # request body (model_fields_set): an explicit null unlinks,
     # omitting it preserves the existing link.
     task_id: uuid.UUID | None = None
+    # Voice-note audio binding (#46): set after the attachment upload
+    # completes ("attachment:<id>"). Same model_fields_set semantics
+    # as task_id (omit = no change, ``None`` = clear).
+    audio_ref: str | None = Field(default=None, max_length=512)
 
 
 class TaskNoteCreateIn(BaseModel):

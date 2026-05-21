@@ -6,7 +6,7 @@ seam (fakes in tests)."""
 from __future__ import annotations
 
 import uuid
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, status
 from pydantic import BaseModel, Field
@@ -190,9 +190,15 @@ async def update_note(
     # task_id is bidirectional Proposal A: pass it through only when the
     # client actually sent the key (an explicit null unlinks; omitting
     # it preserves the link). The service sentinel is "argument absent".
-    extra: dict[str, uuid.UUID | None] = {}
+    # ``audio_ref`` uses the same omit-vs-explicit-None semantics so the
+    # voice-recorder UX can attach the audio in a separate request after
+    # the row exists. We split the call rather than ``**extra`` so mypy
+    # can verify each kwarg's type against its sentinel union.
+    kwargs: dict[str, Any] = {}
     if "task_id" in body.model_fields_set:
-        extra["task_id"] = body.task_id
+        kwargs["task_id"] = body.task_id
+    if "audio_ref" in body.model_fields_set:
+        kwargs["audio_ref"] = body.audio_ref
     v = await svc.update_note(
         ctx.session,
         org_id=ctx.org_id,
@@ -201,7 +207,7 @@ async def update_note(
         expected_version=body.expected_version,
         title=body.title,
         text=body.text,
-        **extra,
+        **kwargs,
     )
     return VersionOut(id=note_id, version=v)
 

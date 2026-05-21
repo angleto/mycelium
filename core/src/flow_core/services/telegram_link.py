@@ -37,8 +37,10 @@ from flow_core.errors import DomainError
 from flow_core.i18n import MessageCode
 from flow_core.models.note import NoteKind
 from flow_core.models.telegram import TelegramLink, TelegramLinkCode, TelegramUpdate
+from flow_core.services import attachments as att_svc
 from flow_core.services import notes as notes_svc
 from flow_core.services import tasks as tasks_svc
+from flow_core.telegram_client import get_telegram_api
 
 logger = logging.getLogger("flow.telegram")
 
@@ -334,6 +336,76 @@ async def handle_webhook_update(payload: dict[str, object]) -> UpdateOutcome:
                 )
                 .values(chat_username=chat_username)
             )
+
+    # --- Voice message ---------------------------------------------------
+    # Telegram delivers voice messages as ``message.voice`` with file_id,
+    # duration_seconds, mime_type ("audio/ogg" by convention). We pull
+    # the bytes via the bot API (getFile -> /file/bot...), attach to a
+    # new voice note, set audio_ref = ``attachment:<id>``, and trigger
+    # transcription best-effort. If no STT provider is configured, the
+    # transcribe call surfaces an error in the note's status; the audio
+    # itself is still playable from /notes.
+    voice = message.get("voice")
+    if isinstance(voice, dict) and isinstance(voice.get("file_id"), str):
+        file_id = voice["file_id"]
+        duration = voice.get("duration")
+        audio_seconds = int(duration) if isinstance(duration, int) else 0
+        mime = voice.get("mime_type") or "audio/ogg"
+        try:
+            api_client = get_telegram_api()
+            tg_path = await api_client.get_file_path(file_id=file_id)
+            data = await api_client.download_file(file_path=tg_path)
+        except Exception:
+            logger.exception("telegram voice download failed for chat_id=%s", chat_id)
+            return UpdateOutcome(
+                reply_text="Could not download voice message. Try again.",
+                user_id=user_id,
+            )
+        async with tenant_session(str(org_id), str(user_id)) as ts:
+            note = await notes_svc.create_note(
+                ts,
+                org_id=org_id,
+                actor_id=user_id,
+                kind=NoteKind.voice,
+                title=None,
+                text=None,
+                audio_seconds=audio_seconds,
+            )
+            att = await att_svc.add_attachment(
+                ts,
+                org_id=org_id,
+                actor_id=user_id,
+                note_id=note.id,
+                filename=f"telegram-{file_id[:16]}.ogg",
+                mime_type=mime,
+                data=data,
+            )
+            await notes_svc.update_note(
+                ts,
+                org_id=org_id,
+                actor_id=user_id,
+                note_id=note.id,
+                expected_version=note.version,
+                audio_ref=f"attachment:{att.id}",
+            )
+            try:
+                await notes_svc.transcribe(
+                    ts,
+                    org_id=org_id,
+                    actor_id=user_id,
+                    note_id=note.id,
+                    operation_id=f"telegram-{file_id}",
+                    embed=True,
+                )
+            except Exception:
+                # Best-effort: an unconfigured STT raises here; the
+                # audio is still saved on the note for later replay.
+                logger.exception("telegram voice transcribe failed for note=%s", note.id)
+        return UpdateOutcome(
+            reply_text="Voice note saved.",
+            note_id=note.id,
+            user_id=user_id,
+        )
 
     if not body_stripped:
         return UpdateOutcome(

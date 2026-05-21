@@ -45,16 +45,19 @@ class TelegramSetWebhookResult:
 
 @runtime_checkable
 class TelegramApi(Protocol):
-    """Two-call surface: send a message to a chat, register the webhook.
-
-    The Protocol stays small on purpose: every other Telegram feature
-    we might want later (sendPhoto, editMessage, ...) goes through the
-    same seam, but for P2 these are the only two operations the
-    backend needs at runtime."""
+    """Four-call surface: send a message to a chat, register the webhook,
+    and (added v1.2.29 for voice-note capture) fetch the storage path
+    for a file_id + download the bytes. Voice messages from the bot
+    are uploaded by the user as ``message.voice``; we need both calls
+    to materialise the audio on our side as a note attachment."""
 
     async def send_message(self, *, chat_id: int, text: str) -> TelegramSendResult: ...
 
     async def set_webhook(self, *, url: str, secret_token: str) -> TelegramSetWebhookResult: ...
+
+    async def get_file_path(self, *, file_id: str) -> str: ...
+
+    async def download_file(self, *, file_path: str) -> bytes: ...
 
 
 class HttpxTelegramApi:
@@ -116,6 +119,43 @@ class HttpxTelegramApi:
         except httpx.HTTPError as exc:
             return TelegramSetWebhookResult(ok=False, description=str(exc))
 
+    async def get_file_path(self, *, file_id: str) -> str:
+        """Resolve a Telegram ``file_id`` (the opaque token Telegram
+        hands us inside a voice/document message) to the relative
+        ``file_path`` we can pass to ``download_file``. Telegram
+        returns this from ``getFile``; the file_path embeds Telegram's
+        bucket layout and is valid for ~1 hour."""
+        async with httpx.AsyncClient(timeout=self._timeout) as client:
+            resp = await client.get(f"{self._base}/getFile", params={"file_id": file_id})
+        resp.raise_for_status()
+        payload = resp.json()
+        if not payload.get("ok"):
+            raise httpx.HTTPError(
+                f"telegram getFile rejected: {payload.get('description', 'unknown')}"
+            )
+        result = payload.get("result") or {}
+        path = result.get("file_path")
+        if not isinstance(path, str) or not path:
+            raise httpx.HTTPError("telegram getFile returned no file_path")
+        return path
+
+    async def download_file(self, *, file_path: str) -> bytes:
+        """Fetch the actual bytes for a file_path returned by
+        ``get_file_path``. The download URL uses the ``file/bot<token>``
+        host (different from the API base) and returns the raw payload
+        with no JSON wrapping."""
+        # ``self._base`` is ``https://api.telegram.org/bot<token>``; the
+        # file download host is ``https://api.telegram.org/file/bot<token>``.
+        download_base = self._base.replace(
+            "https://api.telegram.org/bot",
+            "https://api.telegram.org/file/bot",
+            1,
+        )
+        async with httpx.AsyncClient(timeout=self._timeout) as client:
+            resp = await client.get(f"{download_base}/{file_path}")
+        resp.raise_for_status()
+        return resp.content
+
 
 class _UnconfiguredTelegramApi:
     """Fallback when no bot token is configured. Refuses to talk; the
@@ -129,6 +169,12 @@ class _UnconfiguredTelegramApi:
 
     async def set_webhook(self, *, url: str, secret_token: str) -> TelegramSetWebhookResult:
         return TelegramSetWebhookResult(ok=False, description="telegram bot is not configured")
+
+    async def get_file_path(self, *, file_id: str) -> str:
+        raise RuntimeError("telegram bot is not configured")
+
+    async def download_file(self, *, file_path: str) -> bytes:
+        raise RuntimeError("telegram bot is not configured")
 
 
 _override: Callable[[], TelegramApi] | None = None

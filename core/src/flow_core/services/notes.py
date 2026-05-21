@@ -289,6 +289,7 @@ async def update_note(
     title: str | None = None,
     text: str | None = None,
     task_id: uuid.UUID | None | _Unset = _UNSET,
+    audio_ref: str | None | _Unset = _UNSET,
 ) -> int:
     """Edit title/body. When the title is blank it is re-derived from
     the first line of the body (Apple Notes style).
@@ -312,6 +313,12 @@ async def update_note(
             if exists is None:
                 raise NotFoundError(MessageCode.TASK_NOT_FOUND)
         values["task_id"] = task_id
+    if not isinstance(audio_ref, _Unset):
+        # Voice-note capture (Telegram bot / PWA recorder) sets
+        # ``audio_ref`` after the row exists -- the attachment id is
+        # known only after the upload completes. Same sentinel semantic
+        # as task_id: omit = no change, ``None`` = clear.
+        values["audio_ref"] = audio_ref
     return await _note_set(
         session,
         org_id=org_id,

@@ -85,18 +85,59 @@ The bound bearer dies immediately and the Shortcut stops working.
 
 ## 3. Telegram bot (voice-first)
 
-Status: scaffolding present in `flow_telegram`, not yet redeployed
-in prod (see [`#46`](#)). Target UX once live:
+**Code shipped in v1.2.29**; awaits a one-time prod deploy step
+(bot token + webhook registration). Once that's done the UX is:
 
-- One-time bind: open the Flow bot on Telegram → `/start <OTP>` (you
-  copy the OTP from `/settings → Telegram link`).
-- `/project Kiwiprocess` switches the project for subsequent notes.
-- Send a **voice message** to the bot → it lands as a voice note in
-  the current project. Once STT is configured the transcript shows
-  up shortly after.
-- Send **text** → text note.
-- `/note Kiwiprocess: testo libero` → one-shot, doesn't change the
-  default project.
+- One-time bind: open `/settings → Telegram link` → copy the deep
+  link → opens the bot → `/start <code>` runs automatically →
+  account bound.
+- Send **text** → text note in your default project.
+- Send a **voice message** (Telegram's mic icon) → voice note: the
+  bot downloads the `.ogg` via `getFile`, stores it as a note
+  attachment, sets `audio_ref = attachment:<id>`, and best-effort
+  triggers transcription. The audio is always playable from
+  `/notes`; the transcript appears once an STT provider responds
+  (see "STT provider" below).
+- `/task <title>` → creates a task instead.
+
+The bot routes EVERYTHING into your workspace's default project. To
+land a note in a specific project, use the web SPA or move it via
+drag-drop from `/notes`.
+
+### Deploy step (one-time, ops)
+
+To enable the bot in prod:
+
+1. Mint the bot via BotFather, get the token.
+2. Add to the Flow secret store:
+   - `FLOW_TELEGRAM_BOT_TOKEN` = the BotFather token
+   - `FLOW_TELEGRAM_BOT_USERNAME` = e.g. `flow_leto_bot`
+   - `FLOW_TELEGRAM_WEBHOOK_SECRET` = a long random string
+3. Restart the backend; the `/telegram/webhook/{secret}` route comes
+   alive (it 404s when the bot is unconfigured).
+4. Register the webhook with Telegram:
+
+   ```bash
+   curl -s "https://api.telegram.org/bot$TOKEN/setWebhook" \
+     -d "url=https://flow.leto.blue/api/telegram/webhook/$SECRET" \
+     -d "secret_token=$SECRET"
+   ```
+
+### STT provider
+
+Voice notes land as audio + empty transcript until an STT provider
+is wired. The `transcribe` service calls `get_stt().transcribe(...)`;
+the default `LocalSTT` raises `RuntimeError` unless the
+`faster-whisper` extra is installed. Two prod options:
+
+- **faster-whisper on Ollama / GPU pod**: install the extra,
+  configure the model id, point Flow at it. Self-hosted.
+- **External Whisper API**: implement an `OpenAIWhisperProvider` (or
+  similar) that returns the same `TranscriptResult` shape. Set the
+  override via `set_stt_override`.
+
+Until one of these is configured, the voice notes are functionally
+complete (capture + playback) and the transcript stays empty.
 
 ## Picking between them
 
