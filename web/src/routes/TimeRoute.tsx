@@ -177,6 +177,11 @@ export function TimeRoute() {
   const [openTask, setOpenTask] = useState<string | null>(null)
   const [editId, setEditId] = useState<string | null>(null)
   const [eTask, setETask] = useState('')
+  // Project filter on the task picker during entry edit. Empty string
+  // shows all tasks; otherwise restricts to tasks tagged with the
+  // selected project. Defaulted to the entry's current project when
+  // opening the editor so the picker starts pre-narrowed.
+  const [eProject, setEProject] = useState('')
   const [eStart, setEStart] = useState('')
   const [eEnd, setEEnd] = useState('')
 
@@ -392,6 +397,7 @@ export function TimeRoute() {
   async function beginEdit(en: Entry) {
     setErr(null)
     setEditId(en.id)
+    setEProject(en.project_tag_id ?? '')
     setETask(en.task_id)
     setEStart(toLocalInput(en.started_at))
     setEEnd(toLocalInput(en.ended_at))
@@ -580,14 +586,44 @@ export function TimeRoute() {
                 {editId === en.id && (
                   <span className="entryedit">
                     <select
+                      value={eProject}
+                      onChange={(e) => setEProject(e.target.value)}
+                      title={t('time.editProject')}
+                    >
+                      <option value="">{t('time.editAnyProject')}</option>
+                      {projects.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name}
+                        </option>
+                      ))}
+                    </select>
+                    <select
                       value={eTask}
                       onChange={(e) => setETask(e.target.value)}
                     >
-                      {tasks.map((tk) => (
-                        <option key={tk.id} value={tk.id}>
-                          {tk.title}
-                        </option>
-                      ))}
+                      {tasks
+                        .filter(
+                          (tk) =>
+                            !eProject ||
+                            (tk.tags ?? []).some((g) => g.id === eProject),
+                        )
+                        .map((tk) => {
+                          // Disambiguator when multiple tasks share a
+                          // title: append a short tail of the UUID so
+                          // the user can tell them apart. Cheap and
+                          // doesn't force a "merge tasks" feature yet.
+                          const dupe = tasks.filter(
+                            (x) =>
+                              x.title === tk.title && x.id !== tk.id,
+                          ).length
+                          const suffix = dupe > 0 ? ` · ${tk.id.slice(0, 4)}` : ''
+                          return (
+                            <option key={tk.id} value={tk.id}>
+                              {tk.title}
+                              {suffix}
+                            </option>
+                          )
+                        })}
                     </select>
                     <input
                       type="datetime-local"
@@ -743,6 +779,24 @@ export function TimeRoute() {
                   <td>
                     {openTask === r.task_id ? '▾ ' : '▸ '}
                     {r.task_title ?? r.task_id.slice(0, 8)}
+                    {/* Disambiguator: when another by-task row has the
+                        same title, append a short tail of the UUID so
+                        "Stesso task due volte" stops being ambiguous.
+                        Pure visual hint; the row is still keyed by
+                        task_id and the drill-down stays correct. */}
+                    {(() => {
+                      const dupe = shownByTask.filter(
+                        (x) =>
+                          x.task_title === r.task_title &&
+                          x.task_id !== r.task_id,
+                      ).length
+                      return dupe > 0 ? (
+                        <span className="muted">
+                          {' · '}
+                          {r.task_id.slice(0, 4)}
+                        </span>
+                      ) : null
+                    })()}
                   </td>
                   <td>{r.client_name ?? '—'}</td>
                   <td>{r.project_name ?? '—'}</td>

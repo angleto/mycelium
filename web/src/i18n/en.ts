@@ -763,6 +763,8 @@ export const en = {
     runningOn: 'Running on',
     elapsed: 'Elapsed',
     idle: 'No timer running.',
+    editProject: 'Filter the task list by project',
+    editAnyProject: 'Any project',
     pick: 'Task',
     start: 'Start',
     stop: 'Stop',

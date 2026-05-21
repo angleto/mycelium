@@ -763,6 +763,8 @@ export const it: Catalog = {
     runningOn: 'In corso su',
     elapsed: 'Trascorso',
     idle: 'Nessun timer attivo.',
+    editProject: 'Filtra i task per progetto',
+    editAnyProject: 'Qualsiasi progetto',
     pick: 'Task',
     start: 'Avvia',
     stop: 'Ferma',
