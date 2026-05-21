@@ -41,7 +41,29 @@ export const it: Catalog = {
     deleteConfirm: 'Eliminare l\'assistente "{{label}}"?',
     rotateConfirm:
       'Ruotare il secret per "{{label}}"? Il vecchio segreto smette di funzionare subito.',
+    revokeConfirm:
+      'Revocare "{{label}}"? Le sessioni MCP attive smettono di funzionare finché non lo riattivi.',
     noAssistants: 'Nessun assistente.',
+    copied: 'Copiato!',
+    createTitle: 'Nuovo AI assistant',
+    editTitle: 'Modifica {{label}}',
+    editAssistant: 'Modifica',
+    revoke: 'Revoca',
+    reactivate: 'Riattiva',
+    saveChanges: 'Salva modifiche',
+    saving: 'Salvataggio…',
+    revealClientId: 'Client ID',
+    revealHowTo:
+      'Incolla questi tre valori nel form custom-connector del tuo client AI (transport streamable-http).',
+    scopesCount: '{{n}} scope',
+    selectAllScopes: 'Seleziona tutti',
+    clearAllScopes: 'Deseleziona tutti',
+    dangerousScopeConfirm:
+      "Abilitare lo scope pericoloso '{{label}}'? Concede azioni privilegiate.",
+    selectAllConfirm:
+      'Verranno abilitati {{dangerCount}} scope pericolosi. Continuare?',
+    atLeastOnePerm: 'Seleziona almeno un permesso.',
+    loadFailed: 'Impossibile caricare gli assistenti.',
   },
   focus: {
     label: 'Focus',

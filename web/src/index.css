@@ -642,6 +642,104 @@ button.btn--danger:hover {
   font-size: 0.78rem;
 }
 
+/* AI assistants page (rewritten v1.2.25, mirroring bitvision_phoenix
+   ai-assistants UX). The container card stays wide (.card--wide on
+   .aiset), connector strip + reveal card sit at the top, the
+   create/edit form opens inline above the per-assistant list. */
+.aiset { gap: 0.9rem; }
+.aiconnector__row { align-items: center; flex-wrap: wrap; gap: 0.4rem; }
+.aiconnector__instructions {
+  font-family: var(--font);
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  font-size: 0.85rem;
+  white-space: pre-wrap;
+  color: var(--text-muted, #888);
+}
+.airreveal__row { align-items: baseline; flex-wrap: wrap; gap: 0.4rem; }
+.airreveal__secret {
+  font-size: 1rem;
+  letter-spacing: 0.02em;
+  word-break: break-all;
+}
+
+.aiform { gap: 0.7rem; }
+.aiform__grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.5rem;
+}
+.aiform__grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+.aiform__grid input,
+.aiform__grid textarea {
+  width: 100%;
+  box-sizing: border-box;
+}
+.aiform__full { grid-column: 1 / -1; }
+.aiform__perms {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.6rem 0.8rem;
+  margin: 0;
+}
+.aiform__perms legend {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  width: 100%;
+  flex-wrap: wrap;
+  padding: 0 0.3rem;
+}
+.aiform__perms-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.aiform__perms-actions {
+  display: flex;
+  gap: 0.3rem;
+  margin-left: auto;
+}
+.aiform__perms-group {
+  margin-top: 0.5rem;
+  padding: 0.4rem 0.6rem;
+}
+.aiform__perms-cat {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 0.25rem;
+}
+.aiform__perm {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 0.2rem 0;
+  font-size: 0.85rem;
+}
+.aiform__perm input { margin-top: 0.2rem; }
+.aiform__perm-key {
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  background: var(--surface-2);
+  padding: 0 0.3rem;
+  border-radius: 4px;
+  color: var(--text-muted, #888);
+}
+.aiform__actions {
+  justify-content: flex-end;
+  margin-top: 0.5rem;
+}
+@media (max-width: 640px) {
+  .aiform__grid { grid-template-columns: 1fr; }
+}
+
 /* ---- status text ---- */
 .err {
   color: var(--err);

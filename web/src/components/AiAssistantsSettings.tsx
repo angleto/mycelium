@@ -1,11 +1,15 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { type CSSProperties, type FormEvent, useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { authFetch } from '../api/client'
 
-// /ai-assistants endpoints exist in v1.2.15; the OpenAPI schema regen
-// runs from the live backend (pnpm gen:api) — until then, type the
-// payloads inline matching the API contract documented in
-// api/src/flow_api/routers/ai_assistants.py.
+// Ported from bitvision_phoenix/frontend/src/app/settings/ai-assistants
+// (Flow API shape: scope is a flat ``string[]`` named ``scope``, not
+// ``permissions``; Flow has no ``deidentify_on_use`` or shared-patient
+// surface — those belonged to the medical domain). Categorized scope
+// grid (read / write / danger), dangerous-confirm modal, select-all
+// with confirm when danger entries exist, clear-all, per-assistant
+// edit / rotate-secret / revoke (is_active toggle) / delete, secret
+// shown ONCE on create / rotate.
 
 type Scope = { key: string; category: 'read' | 'write' | 'danger'; label: string; description: string }
 type ConnectorInfo = { mcp_url: string; instructions_md: string }
@@ -24,89 +28,486 @@ type Assistant = {
 }
 type AssistantCreated = { assistant: Assistant; raw_secret: string }
 
+const CATEGORY_ORDER: Array<Scope['category']> = ['read', 'write', 'danger']
+
 async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   const res = await authFetch(path, {
     ...init,
     headers: { 'Content-Type': 'application/json', ...(init.headers ?? {}) },
   })
   if (!res.ok) {
-    const detail = await res.text().catch(() => '')
-    throw new Error(`HTTP ${res.status}: ${detail}`)
+    let detail: string
+    try {
+      const j = (await res.json()) as unknown
+      detail =
+        typeof j === 'object' && j !== null && 'detail' in j
+          ? String((j as { detail: unknown }).detail)
+          : JSON.stringify(j)
+    } catch {
+      detail = await res.text().catch(() => '')
+    }
+    throw new Error(detail || `HTTP ${res.status}`)
   }
+  if (res.status === 204) return undefined as T
   return res.json() as Promise<T>
+}
+
+const aiApi = {
+  list: () => api<Assistant[]>('/ai-assistants'),
+  connectorInfo: () => api<ConnectorInfo>('/ai-assistants/connector-info'),
+  scopeCatalog: () => api<Scope[]>('/ai-assistants/scope-catalog'),
+  create: (body: object) =>
+    api<AssistantCreated>('/ai-assistants', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  update: (id: string, body: object) =>
+    api<Assistant>(`/ai-assistants/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    }),
+  remove: (id: string) =>
+    api<void>(`/ai-assistants/${id}`, { method: 'DELETE' }),
+  rotate: (id: string) =>
+    api<AssistantCreated>(`/ai-assistants/${id}/rotate`, { method: 'POST' }),
+}
+
+function categoryColor(cat: Scope['category']): string {
+  return cat === 'danger' ? '#c0392b' : cat === 'write' ? '#d68910' : '#28a745'
 }
 
 export function AiAssistantsSettings() {
   const { t } = useTranslation()
+  const [assistants, setAssistants] = useState<Assistant[] | null>(null)
   const [connector, setConnector] = useState<ConnectorInfo | null>(null)
-  const [catalog, setCatalog] = useState<Scope[]>([])
-  const [assistants, setAssistants] = useState<Assistant[]>([])
-  const [busy, setBusy] = useState(false)
-  const [err, setErr] = useState<string | null>(null)
-  const [showCreate, setShowCreate] = useState(false)
-  const [label, setLabel] = useState('')
-  const [provider, setProvider] = useState('')
-  const [modelId, setModelId] = useState('')
-  const [notes, setNotes] = useState('')
-  const [selectedScopes, setSelectedScopes] = useState<Set<string>>(new Set())
+  const [copied, setCopied] = useState(false)
   const [reveal, setReveal] = useState<AssistantCreated | null>(null)
+  const [creating, setCreating] = useState(false)
+  const [editing, setEditing] = useState<Assistant | null>(null)
+  const [err, setErr] = useState<string | null>(null)
 
-  const load = async () => {
-    setErr(null)
+  const reload = useCallback(async () => {
     try {
-      const [ci, cat, list] = await Promise.all([
-        api<ConnectorInfo>('/ai-assistants/connector-info'),
-        api<Scope[]>('/ai-assistants/scope-catalog'),
-        api<Assistant[]>('/ai-assistants'),
-      ])
-      setConnector(ci)
-      setCatalog(cat)
-      setAssistants(list)
-      // Default: every non-danger scope on. Mirrors the server's
-      // DEFAULT_SCOPES so the picker matches the create-with-no-scope
-      // case visually.
-      if (selectedScopes.size === 0) {
-        setSelectedScopes(
-          new Set(cat.filter((s) => s.category !== 'danger').map((s) => s.key)),
-        )
-      }
+      setAssistants(await aiApi.list())
     } catch (e) {
       setErr((e as Error).message)
     }
-  }
-  // Bootstrap fetch — connector info, scope catalog, and the list.
-  // setState happens inside ``load`` but only after the awaits (a
-  // microtask boundary), so React doesn't see a synchronous cascade.
-  // The lint rule flags both that and the missing ``load`` dep; both
-  // disables are intentional (load reads no captured state).
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    void load()
   }, [])
 
-  async function onCreate(e: FormEvent) {
+  useEffect(() => {
+    // setState happens inside ``reload`` and the connector promise,
+    // both after an await — microtask boundary, no synchronous
+    // cascade. react-hooks/set-state-in-effect flags this anyway.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void reload()
+    aiApi
+      .connectorInfo()
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      .then(setConnector)
+      .catch(() => {
+        /* non-fatal */
+      })
+  }, [reload])
+
+  const mcpAbsoluteUrl = useMemo(() => {
+    if (!connector) return ''
+    const u = connector.mcp_url
+    return u.startsWith('http') ? u : `${window.location.origin}${u}`
+  }, [connector])
+
+  const copyMcpUrl = useCallback(async () => {
+    if (!connector) return
+    try {
+      await navigator.clipboard.writeText(mcpAbsoluteUrl)
+      setCopied(true)
+      window.setTimeout(() => setCopied(false), 2000)
+    } catch {
+      /* older browsers */
+    }
+  }, [connector, mcpAbsoluteUrl])
+
+  const handleDelete = useCallback(
+    async (a: Assistant) => {
+      if (!window.confirm(t('aiAssistants.deleteConfirm', { label: a.label }))) return
+      try {
+        await aiApi.remove(a.id)
+        await reload()
+      } catch (e) {
+        setErr((e as Error).message)
+      }
+    },
+    [reload, t],
+  )
+
+  const handleSetActive = useCallback(
+    async (a: Assistant, next: boolean) => {
+      if (!next) {
+        if (!window.confirm(t('aiAssistants.revokeConfirm', { label: a.label }))) return
+      }
+      try {
+        await aiApi.update(a.id, {
+          expected_version: a.version,
+          is_active: next,
+        })
+        await reload()
+      } catch (e) {
+        setErr((e as Error).message)
+      }
+    },
+    [reload, t],
+  )
+
+  const handleRotate = useCallback(
+    async (a: Assistant) => {
+      if (!window.confirm(t('aiAssistants.rotateConfirm', { label: a.label }))) return
+      try {
+        const created = await aiApi.rotate(a.id)
+        setReveal(created)
+        await reload()
+      } catch (e) {
+        setErr((e as Error).message)
+      }
+    },
+    [reload, t],
+  )
+
+  return (
+    <section className="card card--wide aiset">
+      <h2>{t('aiAssistants.pageTitle')}</h2>
+      <p className="hint">{t('aiAssistants.intro')}</p>
+
+      {err && (
+        <p className="err">
+          {err}{' '}
+          <button type="button" className="btn--ghost btn--sm" onClick={() => setErr(null)}>
+            ✕
+          </button>
+        </p>
+      )}
+
+      {connector && (
+        <div className="aiconnector">
+          <strong>{t('aiAssistants.connectorTitle')}</strong>
+          <div className="row aiconnector__row">
+            <code className="aiconnector__url">{mcpAbsoluteUrl}</code>
+            <button type="button" className="btn--ghost btn--sm" onClick={() => void copyMcpUrl()}>
+              {copied ? t('aiAssistants.copied') : t('aiAssistants.copy')}
+            </button>
+          </div>
+          <pre className="aiconnector__instructions">{connector.instructions_md}</pre>
+        </div>
+      )}
+
+      {reveal && connector && (
+        <CredentialsRevealCard
+          assistant={reveal}
+          mcpUrl={mcpAbsoluteUrl}
+          onClose={() => setReveal(null)}
+        />
+      )}
+
+      <div className="row">
+        {!creating && !editing && (
+          <button type="button" className="btn" onClick={() => setCreating(true)}>
+            + {t('aiAssistants.newAssistant')}
+          </button>
+        )}
+      </div>
+
+      {creating && (
+        <AssistantForm
+          mode="create"
+          onCancel={() => setCreating(false)}
+          onSaved={(created) => {
+            setCreating(false)
+            if (created) setReveal(created)
+            void reload()
+          }}
+        />
+      )}
+
+      {editing && (
+        <AssistantForm
+          mode="edit"
+          assistant={editing}
+          onCancel={() => setEditing(null)}
+          onSaved={() => {
+            setEditing(null)
+            void reload()
+          }}
+        />
+      )}
+
+      {assistants === null && !err && <p className="hint">…</p>}
+      {assistants !== null && assistants.length === 0 && !creating && (
+        <p className="hint">{t('aiAssistants.noAssistants')}</p>
+      )}
+      {assistants?.map((a) => (
+        <AssistantCard
+          key={a.id}
+          assistant={a}
+          onEdit={() => {
+            setEditing(a)
+            setCreating(false)
+          }}
+          onRotate={() => void handleRotate(a)}
+          onSetActive={(next) => void handleSetActive(a, next)}
+          onDelete={() => void handleDelete(a)}
+        />
+      ))}
+    </section>
+  )
+}
+
+function CredentialsRevealCard({
+  assistant,
+  mcpUrl,
+  onClose,
+}: {
+  assistant: AssistantCreated
+  mcpUrl: string
+  onClose: () => void
+}) {
+  const { t } = useTranslation()
+  function copy(text: string) {
+    void navigator.clipboard?.writeText(text)
+  }
+  return (
+    <div className="airreveal">
+      <h3>{t('aiAssistants.revealTitle')}</h3>
+      <p className="err">
+        <strong>{t('aiAssistants.revealWarningTitle')}</strong>{' '}
+        {t('aiAssistants.revealWarningBody')}
+      </p>
+      <RevealRow
+        label={t('aiAssistants.revealUrl')}
+        value={mcpUrl}
+        onCopy={() => copy(mcpUrl)}
+      />
+      <RevealRow
+        label={t('aiAssistants.revealClientId')}
+        value={assistant.assistant.id}
+        onCopy={() => copy(assistant.assistant.id)}
+      />
+      <RevealRow
+        label={t('aiAssistants.revealSecret')}
+        value={assistant.raw_secret}
+        onCopy={() => copy(assistant.raw_secret)}
+        monoBig
+      />
+      <p className="hint">{t('aiAssistants.revealHowTo')}</p>
+      <div className="row">
+        <button type="button" className="btn" onClick={onClose}>
+          {t('aiAssistants.revealAcknowledge')}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function RevealRow({
+  label,
+  value,
+  onCopy,
+  monoBig,
+}: {
+  label: string
+  value: string
+  onCopy: () => void
+  monoBig?: boolean
+}) {
+  const { t } = useTranslation()
+  return (
+    <div className="row airreveal__row">
+      <span className="muted">{label}</span>
+      <code className={'aiconnector__url' + (monoBig ? ' airreveal__secret' : '')}>
+        {value}
+      </code>
+      <button type="button" className="btn--ghost btn--sm" onClick={onCopy}>
+        {t('aiAssistants.copy')}
+      </button>
+    </div>
+  )
+}
+
+function AssistantCard({
+  assistant,
+  onEdit,
+  onRotate,
+  onSetActive,
+  onDelete,
+}: {
+  assistant: Assistant
+  onEdit: () => void
+  onRotate: () => void
+  onSetActive: (next: boolean) => void
+  onDelete: () => void
+}) {
+  const { t } = useTranslation()
+  return (
+    <div className="airow">
+      <div className="airow__head">
+        <strong>{assistant.label}</strong>
+        {(assistant.provider || assistant.model_id) && (
+          <span className="muted">
+            {assistant.provider}
+            {assistant.provider && assistant.model_id ? ' · ' : ''}
+            {assistant.model_id}
+          </span>
+        )}
+        <span
+          className={
+            'tag ' + (assistant.is_active ? 'tag--ok' : 'tag--muted')
+          }
+        >
+          {assistant.is_active
+            ? t('aiAssistants.statusActive')
+            : t('aiAssistants.statusRevoked')}
+        </span>
+        <span className="grow" />
+        <button type="button" className="btn--ghost btn--sm" onClick={onEdit}>
+          {t('aiAssistants.editAssistant')}
+        </button>
+        <button type="button" className="btn--ghost btn--sm" onClick={onRotate}>
+          {t('aiAssistants.rotateSecret')}
+        </button>
+        <button
+          type="button"
+          className="btn--ghost btn--sm"
+          onClick={() => onSetActive(!assistant.is_active)}
+        >
+          {assistant.is_active
+            ? t('aiAssistants.revoke')
+            : t('aiAssistants.reactivate')}
+        </button>
+        <button
+          type="button"
+          className="btn--ghost btn--sm btn--danger"
+          onClick={onDelete}
+        >
+          {t('aiAssistants.deleteAssistant')}
+        </button>
+      </div>
+      <div className="airow__meta muted">
+        <code>{assistant.token_prefix ?? '—'}…</code>{' '}
+        {t('aiAssistants.scopesCount', { n: assistant.scope.length })}
+      </div>
+    </div>
+  )
+}
+
+function AssistantForm({
+  mode,
+  assistant,
+  onCancel,
+  onSaved,
+}: {
+  mode: 'create' | 'edit'
+  assistant?: Assistant
+  onCancel: () => void
+  onSaved: (created: AssistantCreated | null) => void
+}) {
+  const { t } = useTranslation()
+  const [label, setLabel] = useState(assistant?.label ?? '')
+  const [provider, setProvider] = useState(assistant?.provider ?? '')
+  const [modelId, setModelId] = useState(assistant?.model_id ?? '')
+  const [notes, setNotes] = useState(assistant?.notes ?? '')
+  const [catalog, setCatalog] = useState<Scope[] | null>(null)
+  const [perms, setPerms] = useState<Record<string, boolean>>({})
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    aiApi
+      .scopeCatalog()
+      .then((entries) => {
+        if (cancelled) return
+        setCatalog(entries)
+        if (mode === 'edit' && assistant) {
+          const sel = new Set(assistant.scope)
+          setPerms(Object.fromEntries(entries.map((e) => [e.key, sel.has(e.key)])))
+        } else {
+          // Default-on: every non-danger entry (mirrors backend
+          // DEFAULT_SCOPES in core/src/flow_core/mcp_scopes.py).
+          setPerms(
+            Object.fromEntries(entries.map((e) => [e.key, e.category !== 'danger'])),
+          )
+        }
+      })
+      .catch(() => {
+        if (cancelled) return
+        setErr(t('aiAssistants.loadFailed'))
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [mode, assistant, t])
+
+  const grouped = useMemo(() => {
+    if (!catalog) return null
+    const out = new Map<Scope['category'], Scope[]>()
+    for (const cat of CATEGORY_ORDER) out.set(cat, [])
+    for (const e of catalog) out.get(e.category)?.push(e)
+    return out
+  }, [catalog])
+
+  const selectedCount = useMemo(
+    () => Object.values(perms).filter(Boolean).length,
+    [perms],
+  )
+
+  function togglePermission(entry: Scope, next: boolean) {
+    if (next && entry.category === 'danger') {
+      if (
+        !window.confirm(
+          t('aiAssistants.dangerousScopeConfirm', { label: entry.label }),
+        )
+      )
+        return
+    }
+    setPerms((prev) => ({ ...prev, [entry.key]: next }));
+  }
+  function selectAll() {
+    if (!catalog) return
+    const dangerCount = catalog.filter((e) => e.category === 'danger').length
+    if (dangerCount > 0) {
+      if (!window.confirm(t('aiAssistants.selectAllConfirm', { dangerCount })))
+        return
+    }
+    setPerms(Object.fromEntries(catalog.map((e) => [e.key, true])))
+  }
+  function clearAll() {
+    if (!catalog) return
+    setPerms(Object.fromEntries(catalog.map((e) => [e.key, false])))
+  }
+
+  async function submit(e: FormEvent) {
     e.preventDefault()
     setBusy(true)
     setErr(null)
     try {
-      const res = await api<AssistantCreated>('/ai-assistants', {
-        method: 'POST',
-        body: JSON.stringify({
-          label,
-          scope: [...selectedScopes],
-          provider: provider || null,
-          model_id: modelId || null,
-          notes: notes || null,
-        }),
-      })
-      setReveal(res)
-      setShowCreate(false)
-      setLabel('')
-      setProvider('')
-      setModelId('')
-      setNotes('')
-      await load()
+      const selected = (catalog ?? [])
+        .filter((p) => perms[p.key])
+        .map((p) => p.key)
+      if (selected.length === 0) throw new Error(t('aiAssistants.atLeastOnePerm'))
+      const body = {
+        label,
+        scope: selected,
+        provider: provider.trim() || null,
+        model_id: modelId.trim() || null,
+        notes: notes.trim() || null,
+      }
+      if (mode === 'create') {
+        const created = await aiApi.create(body)
+        onSaved(created)
+      } else if (assistant) {
+        await aiApi.update(assistant.id, {
+          ...body,
+          expected_version: assistant.version,
+        })
+        onSaved(null)
+      }
     } catch (e) {
       setErr((e as Error).message)
     } finally {
@@ -114,240 +515,130 @@ export function AiAssistantsSettings() {
     }
   }
 
-  async function onDelete(a: Assistant) {
-    if (!window.confirm(t('aiAssistants.deleteConfirm', { label: a.label }))) return
-    setErr(null)
-    try {
-      await authFetch(`/ai-assistants/${a.id}`, { method: 'DELETE' })
-      await load()
-    } catch (e) {
-      setErr((e as Error).message)
-    }
-  }
-
-  async function onRotate(a: Assistant) {
-    if (!window.confirm(t('aiAssistants.rotateConfirm', { label: a.label }))) return
-    setErr(null)
-    try {
-      const res = await api<AssistantCreated>(`/ai-assistants/${a.id}/rotate`, {
-        method: 'POST',
-      })
-      setReveal(res)
-      await load()
-    } catch (e) {
-      setErr((e as Error).message)
-    }
-  }
-
-  function toggleScope(key: string) {
-    setSelectedScopes((s) => {
-      const n = new Set(s)
-      if (n.has(key)) n.delete(key)
-      else n.add(key)
-      return n
-    })
-  }
-
-  function copy(text: string) {
-    void navigator.clipboard?.writeText(text)
-  }
-
-  const grouped: Record<Scope['category'], Scope[]> = { read: [], write: [], danger: [] }
-  for (const s of catalog) grouped[s.category].push(s)
-
   return (
-    <section className="card card--wide">
-      <h2>{t('aiAssistants.pageTitle')}</h2>
-      <p className="hint">{t('aiAssistants.intro')}</p>
-      {connector && (
-        <div className="aiconnector">
-          <strong>{t('aiAssistants.connectorTitle')}</strong>
-          <div className="row">
-            <code className="aiconnector__url">
-              {window.location.origin}{connector.mcp_url}
-            </code>
-            <button
-              type="button"
-              className="btn--ghost btn--sm"
-              onClick={() => copy(`${window.location.origin}${connector.mcp_url}`)}
-            >
-              {t('aiAssistants.copy')}
-            </button>
-          </div>
-          <p className="hint">{t('aiAssistants.transportPending')}</p>
-        </div>
-      )}
+    <form className="card aiform" onSubmit={(e) => void submit(e)}>
+      <h3>
+        {mode === 'create'
+          ? t('aiAssistants.createTitle')
+          : t('aiAssistants.editTitle', { label: assistant?.label ?? '' })}
+      </h3>
       {err && <p className="err">{err}</p>}
-      {reveal && (
-        <div className="airreveal">
-          <h3>{t('aiAssistants.revealTitle')}</h3>
-          <p className="err">
-            <strong>{t('aiAssistants.revealWarningTitle')}</strong>{' '}
-            {t('aiAssistants.revealWarningBody')}
-          </p>
-          <div className="row">
-            <label>
-              {t('aiAssistants.revealUrl')}{' '}
-              <code>{window.location.origin}{connector?.mcp_url}</code>
-            </label>
-            <button
-              type="button"
-              className="btn--ghost btn--sm"
-              onClick={() => copy(`${window.location.origin}${connector?.mcp_url ?? ''}`)}
-            >
-              {t('aiAssistants.copy')}
-            </button>
-          </div>
-          <div className="row">
-            <label>
-              {t('aiAssistants.revealSecret')}{' '}
-              <code className="aiconnector__url">{reveal.raw_secret}</code>
-            </label>
-            <button
-              type="button"
-              className="btn--ghost btn--sm"
-              onClick={() => copy(reveal.raw_secret)}
-            >
-              {t('aiAssistants.copy')}
-            </button>
-          </div>
-          <button
-            type="button"
-            className="btn"
-            onClick={() => setReveal(null)}
-          >
-            {t('aiAssistants.revealAcknowledge')}
-          </button>
-        </div>
-      )}
-      <div className="row">
-        {!showCreate && (
-          <button type="button" className="btn" onClick={() => setShowCreate(true)}>
-            + {t('aiAssistants.newAssistant')}
-          </button>
-        )}
+
+      <div className="aiform__grid">
+        <label className="aiform__full">
+          <span className="muted">{t('aiAssistants.labelLabel')}</span>
+          <input
+            value={label}
+            onChange={(e) => setLabel(e.target.value)}
+            required
+            minLength={1}
+            maxLength={255}
+          />
+        </label>
+        <label>
+          <span className="muted">{t('aiAssistants.providerLabel')}</span>
+          <input
+            value={provider}
+            onChange={(e) => setProvider(e.target.value)}
+            placeholder={t('aiAssistants.providerPlaceholder')}
+            maxLength={64}
+          />
+        </label>
+        <label>
+          <span className="muted">{t('aiAssistants.modelIdLabel')}</span>
+          <input
+            value={modelId}
+            onChange={(e) => setModelId(e.target.value)}
+            placeholder={t('aiAssistants.modelIdPlaceholder')}
+            maxLength={128}
+          />
+        </label>
+        <label className="aiform__full">
+          <span className="muted">{t('aiAssistants.notesLabel')}</span>
+          <textarea
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            rows={2}
+            maxLength={2000}
+          />
+        </label>
       </div>
-      {showCreate && (
-        <form onSubmit={(e) => void onCreate(e)} className="cpform">
-          <label>
-            {t('aiAssistants.labelLabel')}
-            <input
-              required
-              value={label}
-              onChange={(e) => setLabel(e.target.value)}
-              minLength={1}
-              maxLength={255}
-            />
-          </label>
-          <label>
-            {t('aiAssistants.providerLabel')}
-            <input
-              value={provider}
-              onChange={(e) => setProvider(e.target.value)}
-              placeholder={t('aiAssistants.providerPlaceholder')}
-              maxLength={64}
-            />
-          </label>
-          <label>
-            {t('aiAssistants.modelIdLabel')}
-            <input
-              value={modelId}
-              onChange={(e) => setModelId(e.target.value)}
-              placeholder={t('aiAssistants.modelIdPlaceholder')}
-              maxLength={128}
-            />
-          </label>
-          <label>
-            {t('aiAssistants.notesLabel')}
-            <textarea
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              maxLength={2000}
-              rows={2}
-            />
-          </label>
-          <fieldset className="aiscopes">
-            <legend>
-              {t('aiAssistants.permissions')} ({selectedScopes.size}/{catalog.length})
-            </legend>
-            {(['read', 'write', 'danger'] as const).map((cat) => (
-              <div key={cat} className="aiscopes__group">
-                <strong>{t(`aiAssistants.scopeCategory_${cat}`)}</strong>
-                {grouped[cat].map((s) => (
-                  <label key={s.key} className="aiscopes__item" title={s.description}>
+
+      <fieldset className="aiform__perms">
+        <legend>
+          <span className="aiform__perms-title">
+            <strong>{t('aiAssistants.permissions')}</strong>
+            {catalog && (
+              <span className="muted">
+                {t('aiAssistants.scopesSelected', {
+                  selected: selectedCount,
+                  total: catalog.length,
+                })}
+              </span>
+            )}
+          </span>
+          {catalog && (
+            <span className="aiform__perms-actions">
+              <button type="button" className="btn--ghost btn--sm" onClick={() => void selectAll()}>
+                {t('aiAssistants.selectAllScopes')}
+              </button>
+              <button type="button" className="btn--ghost btn--sm" onClick={clearAll}>
+                {t('aiAssistants.clearAllScopes')}
+              </button>
+            </span>
+          )}
+        </legend>
+        {!grouped && <p className="hint">…</p>}
+        {grouped &&
+          CATEGORY_ORDER.map((cat) => {
+            const entries = grouped.get(cat) ?? []
+            if (entries.length === 0) return null
+            const style: CSSProperties = {
+              borderLeft: `3px solid ${categoryColor(cat)}`,
+              background: cat === 'danger' ? 'rgba(192,57,43,0.05)' : undefined,
+            }
+            return (
+              <div key={cat} className="aiform__perms-group" style={style}>
+                <div className="aiform__perms-cat muted">
+                  {t(`aiAssistants.scopeCategory_${cat}`)}
+                </div>
+                {entries.map((entry) => (
+                  <label key={entry.key} className="aiform__perm">
                     <input
                       type="checkbox"
-                      checked={selectedScopes.has(s.key)}
-                      onChange={() => toggleScope(s.key)}
+                      checked={!!perms[entry.key]}
+                      onChange={(e) => togglePermission(entry, e.target.checked)}
                     />
-                    <span>
-                      <code>{s.key}</code> — {s.label}
-                    </span>
+                    <div>
+                      <div>
+                        <strong>{entry.label}</strong>{' '}
+                        <code className="aiform__perm-key">{entry.key}</code>
+                      </div>
+                      {entry.description && (
+                        <div className="hint">{entry.description}</div>
+                      )}
+                    </div>
                   </label>
                 ))}
               </div>
-            ))}
-          </fieldset>
-          <div className="row">
-            <button type="submit" className="btn" disabled={busy}>
-              {busy ? t('aiAssistants.creating') : t('aiAssistants.create')}
-            </button>
-            <button
-              type="button"
-              className="btn--ghost"
-              onClick={() => setShowCreate(false)}
-              disabled={busy}
-            >
-              {t('aiAssistants.cancel')}
-            </button>
-          </div>
-        </form>
-      )}
-      {assistants.length === 0 && !showCreate && (
-        <p className="hint">{t('aiAssistants.noAssistants')}</p>
-      )}
-      <ul className="list">
-        {assistants.map((a) => (
-          <li key={a.id} className="airow">
-            <div className="airow__head">
-              <strong>{a.label}</strong>
-              <span className="muted">
-                {a.provider}
-                {a.provider && a.model_id ? ' · ' : ''}
-                {a.model_id}
-              </span>
-              <span
-                className={a.is_active ? 'tag tag--ok' : 'tag tag--muted'}
-                title={a.token_prefix ?? ''}
-              >
-                {a.is_active ? t('aiAssistants.statusActive') : t('aiAssistants.statusRevoked')}
-              </span>
-              <span className="grow" />
-              <button
-                type="button"
-                className="btn--ghost btn--sm"
-                onClick={() => void onRotate(a)}
-              >
-                {t('aiAssistants.rotateSecret')}
-              </button>
-              <button
-                type="button"
-                className="btn--ghost btn--sm btn--danger"
-                onClick={() => void onDelete(a)}
-              >
-                {t('aiAssistants.deleteAssistant')}
-              </button>
-            </div>
-            <div className="airow__meta muted">
-              <code>{a.token_prefix ?? '—'}…</code> ·{' '}
-              {t('aiAssistants.scopesSelected', {
-                selected: a.scope.length,
-                total: catalog.length,
-              })}
-            </div>
-          </li>
-        ))}
-      </ul>
-    </section>
+            )
+          })}
+      </fieldset>
+
+      <div className="row aiform__actions">
+        <button type="button" className="btn--ghost" onClick={onCancel} disabled={busy}>
+          {t('aiAssistants.cancel')}
+        </button>
+        <button type="submit" className="btn" disabled={busy}>
+          {busy
+            ? mode === 'create'
+              ? t('aiAssistants.creating')
+              : t('aiAssistants.saving')
+            : mode === 'create'
+              ? t('aiAssistants.create')
+              : t('aiAssistants.saveChanges')}
+        </button>
+      </div>
+    </form>
   )
 }

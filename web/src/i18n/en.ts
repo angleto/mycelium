@@ -42,7 +42,29 @@ export const en = {
     deleteConfirm: 'Delete assistant "{{label}}"?',
     rotateConfirm:
       'Rotate the secret for "{{label}}"? The old secret will stop working immediately.',
+    revokeConfirm:
+      'Revoke "{{label}}"? Every active MCP session for this assistant will fail until you re-activate.',
     noAssistants: 'No assistants yet.',
+    copied: 'Copied!',
+    createTitle: 'New AI assistant',
+    editTitle: 'Edit {{label}}',
+    editAssistant: 'Edit',
+    revoke: 'Revoke',
+    reactivate: 'Reactivate',
+    saveChanges: 'Save changes',
+    saving: 'Saving…',
+    revealClientId: 'Client ID',
+    revealHowTo:
+      'Paste these three values into your AI client\'s custom-connector form (streamable-http transport).',
+    scopesCount: '{{n}} scope(s)',
+    selectAllScopes: 'Select all',
+    clearAllScopes: 'Clear all',
+    dangerousScopeConfirm:
+      "Enable dangerous scope '{{label}}'? This grants privileged actions.",
+    selectAllConfirm:
+      'This will enable {{dangerCount}} dangerous scope(s). Continue?',
+    atLeastOnePerm: 'Select at least one permission.',
+    loadFailed: 'Could not load the assistants.',
   },
   focus: {
     label: 'Focus',
