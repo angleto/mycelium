@@ -35,6 +35,7 @@ from flow_api.routers import (
     mfa,
     notes,
     notifications,
+    oauth,
     oauth_google,
     schedule,
     tags,
@@ -145,6 +146,14 @@ def create_app() -> FastAPI:
     app.include_router(agent_tokens.router)
     app.include_router(ai_assistants.router)
     app.include_router(actors.router)
+    # OAuth shim (#48). The /api-prefixed router carries the
+    # authorize + token endpoints; the well-known one mounts at the
+    # host root so MCP clients fetch metadata from
+    # /.well-known/oauth-* (RFC 8414 / 9728). The latter is included
+    # on the SAME FastAPI app — see the api_prefix("") below for
+    # why nginx must proxy /.well-known/oauth-* to the backend.
+    app.include_router(oauth.oauth_router)
+    app.include_router(oauth.well_known_router)
     app.include_router(dispatch.router)
     app.include_router(time_tracking.router)
     app.include_router(budgets.router)
