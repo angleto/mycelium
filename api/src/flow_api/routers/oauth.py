@@ -50,10 +50,8 @@ from urllib.parse import urlencode
 
 from fastapi import APIRouter, Header, Request
 from fastapi.responses import JSONResponse, RedirectResponse, Response
-from sqlalchemy import select
 
 from flow_core.db import admin_session
-from flow_core.models.ai_assistant import AiAssistant
 from flow_core.services import agent_tokens as agent_tokens_svc
 from flow_core.services import oauth_codes as codes_svc
 
@@ -243,13 +241,22 @@ async def authorize_endpoint(request: Request) -> Response:
     # Validate the assistant exists and is active. We do not gate on
     # client_secret at /authorize -- that comes at /token. The check
     # here is "is this a real client we should issue a code for".
+    # ai_assistants is RLS-scoped (org_id = app.current_org); at the
+    # /authorize entry point the request has no tenant yet, so a
+    # direct SELECT returns 0 rows and looks like "unknown assistant".
+    # Use the SECURITY DEFINER ``oauth_lookup_assistant`` function
+    # (migration 0063) that bypasses RLS, same pattern as
+    # ``authenticate_agent_token``.
+    from sqlalchemy import text as sql_text
+
     async with admin_session() as session:
         row = (
             await session.execute(
-                select(AiAssistant.id, AiAssistant.is_active).where(AiAssistant.id == client_uuid)
+                sql_text("SELECT out_active FROM oauth_lookup_assistant(:id)"),
+                {"id": str(client_uuid)},
             )
         ).first()
-    if row is None or not row[1]:
+    if row is None or row[0] is None or not row[0]:
         return _oauth_error(
             status_code=400,
             error="invalid_client",
