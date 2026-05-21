@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { api, errMessage, workspaceHeader } from '../api/client'
 import { useSession } from '../auth/useSession'
@@ -50,6 +50,7 @@ function hms(sec: number): string {
 // priority chip and a clock-play/clock-stop timer.
 export function TasksRoute() {
   const { t } = useTranslation()
+  const navigate = useNavigate()
   const session = useSession()
   const activeId = session?.workspaceId
   const { focusIds, active: focusActive } = useFocus()
@@ -218,11 +219,11 @@ export function TasksRoute() {
     }
   }, [activeId])
 
-  async function onCreate(e: FormEvent) {
+  async function onCreate(e: FormEvent, openAfter = false) {
     e.preventDefault()
     setBusy(true)
     setErr(null)
-    const { error } = await api.POST('/tasks', {
+    const { data, error } = await api.POST('/tasks', {
       params: { header: workspaceHeader() },
       body: {
         title,
@@ -245,12 +246,19 @@ export function TasksRoute() {
       },
     })
     setBusy(false)
-    if (error) {
+    if (error || !data) {
       setErr(errMessage(error))
       return
     }
     setTitle('')
     setDue('')
+    if (openAfter) {
+      // Skip the loadTasks() round-trip: we're leaving /tasks and the
+      // detail route doesn't depend on the list cache. Navigation lands
+      // straight on the editable surface (description, tags, assignee).
+      navigate(`/tasks/${data.id}`)
+      return
+    }
     await loadTasks()
   }
 
@@ -511,8 +519,26 @@ export function TasksRoute() {
             ))}
           </select>
         </label>
-        <button type="submit" disabled={busy}>
+        <button type="submit" disabled={busy || !title.trim()}>
           {busy ? t('tasks.saving') : t('tasks.create')}
+        </button>
+        <button
+          type="button"
+          className="btn--ghost"
+          disabled={busy || !title.trim()}
+          onClick={() =>
+            void onCreate(
+              // synthesize the FormEvent shape onCreate expects so
+              // we don't duplicate the body. preventDefault is a no-op
+              // on a synthetic click but the function calls it
+              // unconditionally.
+              { preventDefault: () => undefined } as FormEvent,
+              true,
+            )
+          }
+          title={t('tasks.createAndOpenHint')}
+        >
+          {t('tasks.createAndOpen')}
         </button>
       </form>
       <p className="hint">

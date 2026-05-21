@@ -177,6 +177,13 @@ export function TimeRoute() {
   const projectsForClient = filterProjectsByClient(projects)
   const [pick, setPick] = useState('')
   const [now, setNow] = useState<number>(() => Date.now())
+  // Force-refresh counter for the report / pie chart effects. Bumped
+  // by saveEntry / deleteEntry / startTask / stopTimer so the
+  // dependent useEffects re-fetch the reports independently of the
+  // userpond filters (from/to/group/scope). Without this the report
+  // can stay stale after an entry is reassigned to a different
+  // project — the bootstrap effect's deps haven't changed.
+  const [reportTick, setReportTick] = useState(0)
   const [err, setErr] = useState<string | null>(null)
   const [byTask, setByTask] = useState<TaskRep[]>([])
   const [openTask, setOpenTask] = useState<string | null>(null)
@@ -380,7 +387,7 @@ export function TimeRoute() {
     return () => {
       active = false
     }
-  }, [activeId, reportQuery, from, to])
+  }, [activeId, reportQuery, from, to, reportTick])
 
   // Pie chart fetch (separate from the table report so changing the
   // pie group selector doesn't refetch the table). Also drives the
@@ -402,7 +409,7 @@ export function TimeRoute() {
     return () => {
       active = false
     }
-  }, [activeId, reportQuery, pieGroup])
+  }, [activeId, reportQuery, pieGroup, reportTick])
 
   const refreshRunning = useCallback(async () => {
     const { data } = await api.GET('/time/running', {
@@ -439,6 +446,7 @@ export function TimeRoute() {
     setEditId(null)
     await resetEntries()
     await loadReport()
+    setReportTick((n) => n + 1)
   }
 
   async function deleteEntry(en: Entry) {
@@ -454,6 +462,7 @@ export function TimeRoute() {
     if (editId === en.id) setEditId(null)
     await resetEntries()
     await loadReport()
+    setReportTick((n) => n + 1)
   }
 
   async function startTask(taskId: string, parallel: boolean) {
