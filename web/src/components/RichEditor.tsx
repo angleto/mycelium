@@ -98,6 +98,9 @@ const MentionExt = Extension.create({
               const row = document.createElement('div')
               row.className =
                 'mention-pop__row' + (i === sel ? ' mention-pop__row--sel' : '')
+              row.id = `mention-opt-${i}`
+              row.setAttribute('role', 'option')
+              row.setAttribute('aria-selected', i === sel ? 'true' : 'false')
               row.textContent = `@${c.kind}: ${c.label}`
               row.addEventListener('mousedown', (e) => {
                 e.preventDefault()
@@ -105,7 +108,10 @@ const MentionExt = Extension.create({
               })
               el.append(row)
             })
-            if (list.length === 0) {
+            // Point the listbox at the active option for screen readers.
+            if (list.length > 0) el.setAttribute('aria-activedescendant', `mention-opt-${sel}`)
+            else {
+              el.removeAttribute('aria-activedescendant')
               el.textContent = '...'
             }
           }
@@ -119,6 +125,7 @@ const MentionExt = Extension.create({
             onStart: (p: SuggestionProps<Cand>) => {
               box = document.createElement('div')
               box.className = 'mention-pop'
+              box.setAttribute('role', 'listbox')
               document.body.append(box)
               list = p.items
               sel = 0
