@@ -28,7 +28,7 @@ from reportlab.platypus import (
 
 from flow_core.models.client_profile import ClientProfile
 from flow_core.models.invoice import Invoice, InvoiceLine, IssuerProfile
-from flow_core.services.invoice import (
+from flow_core.services.invoice_format import (
     BOLLO_DICITURA,
     Totals,
     _is_forfettario,
