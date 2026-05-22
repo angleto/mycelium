@@ -88,6 +88,9 @@ async def test_f7_api_flow() -> None:
                     "id_paese": "IT",
                     "id_codice": "09876543210",
                     "codice_destinatario": "ABCDEFG",
+                    "indirizzo": "Via Milano 2",
+                    "cap": "20100",
+                    "comune": "Milano",
                 },
             )
         ).json()

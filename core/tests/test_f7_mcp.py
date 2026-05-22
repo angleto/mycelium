@@ -36,6 +36,9 @@ async def test_mcp_invoicing() -> None:
                 id_paese="IT",
                 id_codice="01234567890",
                 codice_destinatario="0000000",
+                indirizzo="Via Milano 2",
+                cap="20100",
+                comune="Milano",
             ),
         )
         client_id = client.id

@@ -17,8 +17,9 @@ infeasible.
 
 A **single shared channel**; the tenant's identity in the **FatturaPA
 payload** (`CedentePrestatore`, `TerzoIntermediarioOSoggettoEmittente`),
-never in the TLS identity. An explicit per-Org `SdiMandate` model
-(scope, validity, revocation, audit): Flow transmits on the tenant's
+never in the TLS identity. An explicit per-issuer-profile (per VAT
+subject) `SdiMandate` model (scope, validity, revocation, audit): Flow
+transmits on the tenant's
 behalf under mandate and assumes the intermediary's operational duties
 (always-on inbound SOAP endpoint, notification correlation by
 `IdentificativoSdI`, audit). v1 = **B2B/B2C only**: no signature (not
@@ -44,3 +45,20 @@ SdICoop test, F7c production).
 - Third-party intermediary via API: valid but rejected because the user
   wants no third party seeing the invoices; the mandate model with our
   own channel satisfies the constraint while staying legally correct.
+
+## Implementation status (2026-05-22)
+
+F7b implemented as code, config-gated on `FLOW_SDI_CHANNEL=sdicoop`: the
+`SdiMandate` is keyed per issuer profile (per VAT subject), not per Org,
+because one Org may hold several VAT subjects each authorizing transmission
+independently (consistent with the per-P.IVA `conservation_adhesion`). The
+intermediary payload (`IdTrasmittente` = channel holder,
+`TerzoIntermediarioOSoggettoEmittente`, `SoggettoEmittente=TZ`), the SdICoop
+`RiceviFile` SOAP client (mutual TLS, per-intermediary file name /
+ProgressivoInvio), the inbound `/sdi/notifica` receiver (cross-org
+correlation by `IdentificativoSdI` via a SECURITY DEFINER resolver; FORCE
+RLS dropped on `invoices` per the 0068 pattern) and official-XSD validation
+are all present. The live SOAP transport is never exercised in CI; the exact
+WSDL namespace/operation, the SOAP esito and whether WS-Security signing is
+required are to be verified against the AdE test environment at
+accreditation. Signature (CAdES/XAdES) + PA/B2G remain deferred.

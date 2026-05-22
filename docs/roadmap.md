@@ -62,15 +62,21 @@ end-to-end per phase.
   interoperability tests; from here AdE conservation is effective.
 - **F7c SdICoop production**: service agreement + accreditation +
   switching the channel to production (a heavy item, resourced as
-  such). Implementation status (2026-05-18): F7a complete; the
-  deterministic core of F7b (the `SdiChannel` abstraction,
-  `IdentificativoSdI` assignment, RC/MC/NS/AT receipt correlation,
-  conservation coverage) is implemented and tested with an injected
-  (fake) SdICoop channel. What remains as an external step for F7c,
-  not as code: the AdE service agreement, accreditation and the
-  always-on inbound mutual-TLS SOAP endpoint in production (ADR-0011:
-  it is the heaviest item, deliberately outside the code perimeter
-  until accreditation is obtained).
+  such). Implementation status (2026-05-22): F7a complete. F7b is now
+  implemented as code, config-gated on `FLOW_SDI_CHANNEL=sdicoop`:
+  official FatturaPA XSD validation at transmit; the per-issuer
+  `SdiMandate` + `TerzoIntermediarioOSoggettoEmittente` /
+  `SoggettoEmittente=TZ` intermediary payload; a real SdICoop `RiceviFile`
+  SOAP client over mutual TLS with a per-intermediary file name /
+  ProgressivoInvio sequence; and the inbound `/sdi/notifica` receiver that
+  correlates RC/MC/NS/AT to the tenant by `IdentificativoSdI` (a SECURITY
+  DEFINER cross-org resolver, the 0068 owner-bypass pattern). The SOAP
+  envelope build + notification parse are unit-tested; the network calls are
+  never exercised in CI. What remains for F7c is external, not code: the AdE
+  service agreement + accreditation, the channel certificates, and verifying
+  against the AdE test environment the exact WSDL namespace/operation, the
+  SOAP esito response, and whether WS-Security signing is required for the
+  profile. Inbound mutual TLS is terminated at the edge.
 - **Post-v1**: PA/B2G (CAdES/XAdES signature + qualified certificate,
   NE/DT/EC/SE), passive cycle, reverse charge/self-billing TD16-TD19,
   foreign clients, quarterly stamp-duty settlement, CP-SAT optimizing
