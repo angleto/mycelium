@@ -38,7 +38,11 @@ concurrency:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    # Native arm64 hosted runner (free for public repos): builds the
+    # linux/arm64 images directly, no QEMU. The previous QEMU-on-amd64
+    # emulation made the 3-image build heavy and flaky (~15 min, periodic
+    # resource-exhaustion failures needing manual re-runs).
+    runs-on: ubuntu-24.04-arm
     steps:
       - name: Checkout workflow ref (Dockerfiles)
         uses: actions/checkout@v4
@@ -63,9 +67,6 @@ jobs:
           fi
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "Image tag: $TAG"
-
-      - name: Set up QEMU (arm64 emulation)
-        uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
