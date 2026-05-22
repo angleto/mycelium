@@ -14,9 +14,13 @@ from flow_core.ai_providers import set_llm_override
 from flow_core.db import admin_session
 from flow_core.services.auth import signup
 from flow_mcp.server import (
+    add_note_tag,
     append_message,
     create_note,
+    create_tag,
+    get_note,
     grant_credits,
+    list_notes,
     run_command,
     start_conversation_session,
     upsert_rate_card,
@@ -67,3 +71,27 @@ async def test_mcp_notes(_llm: None) -> None:
         operation_id="m1",
     )
     assert reply["role"] == "assistant" and reply["content"].startswith("echo:")
+
+
+async def test_note_serializers_carry_tags() -> None:
+    """Regression: get_note / list_notes surface a note's tags so an MCP
+    caller sees them without a separate list_tags round-trip."""
+    async with admin_session() as s:
+        r = await signup(
+            s,
+            email=f"{uuid.uuid4().hex[:10]}@example.test",
+            password="pw-strong-123",
+            org_name="MCP6B-tags",
+        )
+    token, org = r.token, str(r.org_id)
+    note = await create_note(token=token, org_id=org, kind="text", text="tagme")
+    tag = await create_tag(token=token, org_id=org, kind="generic", name="note-tag")
+    await add_note_tag(token=token, org_id=org, note_id=note["id"], tag_id=tag["id"])
+
+    full = await get_note(token=token, org_id=org, note_id=note["id"])
+    assert "note-tag" in {g["name"] for g in full["tags"]}
+    chip = next(g for g in full["tags"] if g["name"] == "note-tag")
+    assert {"id", "kind", "name", "color"} <= chip.keys()
+
+    listed = next(n for n in await list_notes(token=token, org_id=org) if n["id"] == note["id"])
+    assert "note-tag" in {g["name"] for g in listed["tags"]}

@@ -139,13 +139,26 @@ def _tag(t: Tag) -> dict[str, Any]:
     }
 
 
-def _task(t: Task) -> dict[str, Any]:
+def _tag_brief(t: Tag) -> dict[str, Any]:
+    """Tag chip as carried on a task/note (mirrors the REST TagBrief):
+    id/kind/name/color, no version. Lets MCP callers see and reason
+    about a task's tags without a follow-up list_tags round-trip."""
+    return {
+        "id": str(t.id),
+        "kind": t.kind.value,
+        "name": t.name,
+        "color": t.color,
+    }
+
+
+def _task(t: Task, tags: list[Tag] | None = None) -> dict[str, Any]:
     return {
         "id": str(t.id),
         "title": t.title,
         "state_id": str(t.state_id),
         "priority": t.priority,
         "version": t.version,
+        "tags": [_tag_brief(g) for g in (tags or [])],
     }
 
 
@@ -462,7 +475,8 @@ async def list_tasks(token: str, org_id: str, state_id: str | None = None) -> li
             org_id=org,
             state_id=uuid.UUID(state_id) if state_id else None,
         )
-        return [_task(t) for t in rows]
+        tagmap = await tasks.tags_by_task(s, task_ids=[t.id for t in rows])
+        return [_task(t, tagmap.get(t.id, [])) for t in rows]
 
 
 @mcp.tool()
@@ -534,7 +548,7 @@ async def set_task_state(
         return {"task_id": task_id, "version": version}
 
 
-def _task_full(t: Task) -> dict[str, Any]:
+def _task_full(t: Task, tags: list[Tag] | None = None) -> dict[str, Any]:
     return {
         "id": str(t.id),
         "title": t.title,
@@ -559,6 +573,7 @@ def _task_full(t: Task) -> dict[str, Any]:
         "offered": t.offered,
         "deleted_at": t.deleted_at.isoformat() if t.deleted_at else None,
         "version": t.version,
+        "tags": [_tag_brief(g) for g in (tags or [])],
     }
 
 
@@ -567,7 +582,8 @@ async def get_task(token: str, org_id: str, task_id: str) -> dict[str, Any]:
     """Read one task with its full attribute set (for editing)."""
     async with _tenant(token, org_id) as (s, org, _user):
         t = await tasks.get_task(s, org_id=org, task_id=uuid.UUID(task_id))
-        return _task_full(t)
+        tagmap = await tasks.tags_by_task(s, task_ids=[t.id])
+        return _task_full(t, tagmap.get(t.id, []))
 
 
 @mcp.tool()
@@ -1386,7 +1402,8 @@ async def task_offer(token: str, org_id: str, task_id: str) -> dict[str, Any]:
         task = await coordination_svc.offer_task(
             s, org_id=org, actor_id=user, task_id=uuid.UUID(task_id)
         )
-        return _task_full(task)
+        tagmap = await tasks.tags_by_task(s, task_ids=[task.id])
+        return _task_full(task, tagmap.get(task.id, []))
 
 
 @mcp.tool()
@@ -1398,7 +1415,8 @@ async def task_claim(token: str, org_id: str, task_id: str) -> dict[str, Any]:
         task = await coordination_svc.claim_task(
             s, org_id=org, actor_id=user, task_id=uuid.UUID(task_id)
         )
-        return _task_full(task)
+        tagmap = await tasks.tags_by_task(s, task_ids=[task.id])
+        return _task_full(task, tagmap.get(task.id, []))
 
 
 @mcp.tool()
@@ -1410,7 +1428,8 @@ async def task_decline(token: str, org_id: str, task_id: str) -> dict[str, Any]:
         task = await coordination_svc.decline_task(
             s, org_id=org, actor_id=user, task_id=uuid.UUID(task_id)
         )
-        return _task_full(task)
+        tagmap = await tasks.tags_by_task(s, task_ids=[task.id])
+        return _task_full(task, tagmap.get(task.id, []))
 
 
 # --- P5: closed-loop dispatch + approval gates (docs/adr/0025) ---
@@ -2579,7 +2598,7 @@ async def memory_channel_delete(token: str, org_id: str, channel_id: str) -> dic
 # --- F6b: notes / conversation / canonical intent (FR-16) ---
 
 
-def _note(n: Note) -> dict[str, Any]:
+def _note(n: Note, tags: list[Tag] | None = None) -> dict[str, Any]:
     return {
         "id": str(n.id),
         "project_id": str(n.project_id) if n.project_id else None,
@@ -2589,6 +2608,7 @@ def _note(n: Note) -> dict[str, Any]:
         "title": n.title,
         "transcript": n.transcript,
         "version": n.version,
+        "tags": [_tag_brief(g) for g in (tags or [])],
     }
 
 
@@ -2621,7 +2641,8 @@ async def create_note(
             title=title,
             text=text,
         )
-        return _note(n)
+        tagmap = await notes_svc.tags_by_note(s, note_ids=[n.id])
+        return _note(n, tagmap.get(n.id, []))
 
 
 @mcp.tool()
@@ -2644,7 +2665,8 @@ async def list_notes(
             include_archived=include_archived,
             include_deleted=include_deleted,
         )
-        return [_note(n) for n in rows]
+        tagmap = await notes_svc.tags_by_note(s, note_ids=[n.id for n in rows])
+        return [_note(n, tagmap.get(n.id, [])) for n in rows]
 
 
 @mcp.tool()
@@ -2652,7 +2674,8 @@ async def get_note(token: str, org_id: str, note_id: str) -> dict[str, Any]:
     """Read one note."""
     async with _tenant(token, org_id) as (s, org, _user):
         note = await notes_svc.get_note(s, org_id=org, note_id=uuid.UUID(note_id))
-        return _note(note)
+        tagmap = await notes_svc.tags_by_note(s, note_ids=[note.id])
+        return _note(note, tagmap.get(note.id, []))
 
 
 @mcp.tool()
@@ -2667,7 +2690,8 @@ async def get_or_create_task_note(token: str, org_id: str, task_id: str) -> dict
             actor_id=user,
             task_id=uuid.UUID(task_id),
         )
-        return _note(n)
+        tagmap = await notes_svc.tags_by_note(s, note_ids=[n.id])
+        return _note(n, tagmap.get(n.id, []))
 
 
 @mcp.tool()
@@ -2691,7 +2715,8 @@ async def create_task_note(
             title=title,
             text=text,
         )
-        return _note(n)
+        tagmap = await notes_svc.tags_by_note(s, note_ids=[n.id])
+        return _note(n, tagmap.get(n.id, []))
 
 
 @mcp.tool()
@@ -2836,7 +2861,8 @@ async def start_conversation_session(
             project_id=uuid.UUID(project_id) if project_id else None,
             title=title,
         )
-        return _note(n)
+        tagmap = await notes_svc.tags_by_note(s, note_ids=[n.id])
+        return _note(n, tagmap.get(n.id, []))
 
 
 @mcp.tool()
@@ -2869,7 +2895,8 @@ async def transcribe_note(
             note_id=uuid.UUID(note_id),
             operation_id=operation_id,
         )
-        return _note(n)
+        tagmap = await notes_svc.tags_by_note(s, note_ids=[n.id])
+        return _note(n, tagmap.get(n.id, []))
 
 
 @mcp.tool()
@@ -2877,7 +2904,8 @@ async def run_command(token: str, org_id: str, text: str) -> dict[str, Any]:
     """Deterministic canonical NL command (offline, unmetered)."""
     async with _tenant(token, org_id) as (s, org, user):
         n = await notes_svc.run_command(s, org_id=org, actor_id=user, text=text)
-        return _note(n)
+        tagmap = await notes_svc.tags_by_note(s, note_ids=[n.id])
+        return _note(n, tagmap.get(n.id, []))
 
 
 @mcp.tool()
