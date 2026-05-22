@@ -7526,6 +7526,7 @@ export interface operations {
                 for_project?: string | null;
                 for_client?: string | null;
                 include_archived?: boolean;
+                manage?: boolean;
             };
             header: {
                 "x-workspace-id": string;

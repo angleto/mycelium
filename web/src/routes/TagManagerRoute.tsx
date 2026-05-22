@@ -161,6 +161,10 @@ export function TagManagerRoute() {
   const tagQuery = useMemo(
     () => ({
       include_archived: true,
+      // Manager surface: keep GLOBAL (unrestricted) generic tags visible
+      // even under a focus, so an unrestricted tag stays reachable here
+      // to add a "Restrict to...". Filter surfaces omit this.
+      manage: true,
       ...(clientId
         ? {
             for_client: clientId,

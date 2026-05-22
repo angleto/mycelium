@@ -63,12 +63,16 @@ async def list_tags(
     for_project: uuid.UUID | None = None,
     for_client: uuid.UUID | None = None,
     include_archived: bool = False,
+    manage: bool = False,
 ) -> list[TagOut]:
     """Archived tags are excluded by default so they vanish from every
     selection/filter surface; the Tag manager passes
     ``include_archived=true`` to still un-archive one. ``for_project`` /
     ``for_client`` scope the list to the SPA's current focus (global +
-    in-scope tags only)."""
+    in-scope tags only). ``manage=true`` marks the Tag-manager surface:
+    under a focus it still surfaces GLOBAL generic tags (no scope rows)
+    so an unrestricted tag stays reachable to add a "Restrict to..." —
+    filter/selection surfaces keep the stricter focus rule."""
     tags = await taxonomy.list_tags(
         ctx.session,
         org_id=ctx.org_id,
@@ -76,6 +80,7 @@ async def list_tags(
         for_project=for_project,
         for_client=for_client,
         include_archived=include_archived,
+        manage=manage,
     )
     scopes = await taxonomy.scopes_by_tag(ctx.session, tag_ids=[t.id for t in tags])
     return [_out(t, scopes.get(t.id, [])) for t in tags]

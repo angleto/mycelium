@@ -349,6 +349,7 @@ async def list_tags(
     for_project: uuid.UUID | None = None,
     for_client: uuid.UUID | None = None,
     include_archived: bool = False,
+    manage: bool = False,
 ) -> list[Tag]:
     """List tags (RLS-scoped to the tenant).
 
@@ -368,7 +369,17 @@ async def list_tags(
     and of projects not under the focused client. They are mutually
     compatible (a tag visible under either is included); the SPA sends
     at most one. With neither passed the behaviour is unchanged except
-    the archived exclusion above."""
+    the archived exclusion above.
+
+    ``manage`` selects the Tag-manager surface (as opposed to the
+    TagPicker / graph "Filter by tags" chips). On filter surfaces a
+    GLOBAL generic tag (no ``tag_scope`` rows) is hidden under a focus —
+    the reported "leak". The manager is the opposite case: it is where a
+    global tag gets a "Restrict to..." added, so it must show global
+    generics even under a focus, otherwise an unrestricted tag is
+    unreachable while a focus is active (the reported bug). The
+    structural client/project ownership constraint is unaffected: other
+    clients' structural tags stay hidden under a focus on both surfaces."""
     stmt = select(Tag).order_by(Tag.kind, Tag.name)
     if kind is not None:
         stmt = stmt.where(Tag.kind == kind)
@@ -426,6 +437,13 @@ async def list_tags(
             )
         )
         generic_ok = or_(Tag.id.in_(in_scope), Tag.id.in_(used_in_focus))
+        if manage:
+            # Manager surface: a GLOBAL generic (no tag_scope rows at all)
+            # must stay reachable under a focus, since the manager is
+            # where its "Restrict to..." gets added. Filter surfaces keep
+            # the stricter rule above (the leak fix).
+            scoped_generics = select(TagScope.tag_id)
+            generic_ok = or_(generic_ok, Tag.id.not_in(scoped_generics))
         # Client/project tags are INTRINSICALLY owned (a client tag, a
         # project tag belonging to a client) and almost never carry
         # TagScope rows, so the rule above would always show them. Under

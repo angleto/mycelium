@@ -96,3 +96,22 @@ async def test_client_focus_hides_other_clients_tags() -> None:
             gused["id"],
             gunused["id"],
         } <= allids
+
+        # Manager surface (manage=true): under the same client focus a
+        # GLOBAL generic (no scope rows) must reappear, since the manager
+        # is where its "Restrict to..." is added — the reported bug. The
+        # cross-client structural leak must STAY closed even here.
+        managed = (
+            await c.get(
+                "/tags",
+                headers=h,
+                params={"for_client": ca["id"], "manage": "true"},
+            )
+        ).json()
+        mids = {t["id"] for t in managed}
+        assert gunused["id"] in mids  # global generic — the fix
+        assert gused["id"] in mids  # still used within the focus
+        assert ca["id"] in mids  # the focused client
+        assert pa["id"] in mids  # its project
+        assert cb["id"] not in mids  # other client — leak stays closed
+        assert pb["id"] not in mids  # other client's project — stays closed
