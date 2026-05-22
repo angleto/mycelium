@@ -16,6 +16,8 @@ import {
 } from '../lib/tz'
 import { useLinkedClientProject } from '../lib/linkedClientProject'
 import { useWorkflowStates } from '../lib/useWorkflowStates'
+import { periodRange, type Period } from '../lib/period'
+import { PeriodPicker } from '../components/PeriodPicker'
 import { TaskPickList } from '../components/TaskPickList'
 import type { components } from '../api/schema'
 
@@ -31,101 +33,6 @@ type BillableF = 'all' | 'yes' | 'no'
 
 const GROUPS: Group[] = ['project', 'client', 'generic', 'user', 'task']
 const ENT_PAGE = 50
-
-// Endpoints of the current local month as YYYY-MM-DD. Local rather
-// than UTC so the user always sees "1st of this month" matching their
-// calendar; the backend pairs these with 00:00:00 / 23:59:59 to form
-// the inclusive query range.
-function pad2(n: number): string {
-  return String(n).padStart(2, '0')
-}
-// Period selector helpers (#65). Each returns { from, to, label,
-// prevAnchor, nextAnchor } so the SPA can render navigation + a
-// previous-period diff fetch. The anchor is a Date stamped at noon
-// local to avoid DST edge cases when stepping by 1 month / 1 week.
-type Period = 'day' | 'week' | 'month' | 'custom'
-
-function ymdLocal(d: Date): string {
-  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`
-}
-
-function periodRange(period: Period, anchor: Date): {
-  from: string
-  to: string
-  label: string
-  prevAnchor: Date
-  nextAnchor: Date
-  prevFrom: string
-  prevTo: string
-} {
-  const a = new Date(anchor.getFullYear(), anchor.getMonth(), anchor.getDate(), 12)
-  if (period === 'day') {
-    const from = ymdLocal(a)
-    const to = ymdLocal(a)
-    const label = a.toLocaleDateString(undefined, {
-      weekday: 'short',
-      day: '2-digit',
-      month: 'short',
-      year: 'numeric',
-    })
-    const prev = new Date(a)
-    prev.setDate(prev.getDate() - 1)
-    const next = new Date(a)
-    next.setDate(next.getDate() + 1)
-    return {
-      from,
-      to,
-      label,
-      prevAnchor: prev,
-      nextAnchor: next,
-      prevFrom: ymdLocal(prev),
-      prevTo: ymdLocal(prev),
-    }
-  }
-  if (period === 'week') {
-    // ISO-ish: week starts on Monday. getDay() = 0 (Sun) .. 6 (Sat).
-    const day = a.getDay() === 0 ? 7 : a.getDay()
-    const start = new Date(a)
-    start.setDate(a.getDate() - (day - 1))
-    const end = new Date(start)
-    end.setDate(start.getDate() + 6)
-    const label = `${start.toLocaleDateString(undefined, { day: '2-digit', month: 'short' })} – ${end.toLocaleDateString(undefined, { day: '2-digit', month: 'short', year: 'numeric' })}`
-    const prevStart = new Date(start)
-    prevStart.setDate(prevStart.getDate() - 7)
-    const prevEnd = new Date(prevStart)
-    prevEnd.setDate(prevEnd.getDate() + 6)
-    const nextAnchor = new Date(start)
-    nextAnchor.setDate(start.getDate() + 7)
-    return {
-      from: ymdLocal(start),
-      to: ymdLocal(end),
-      label,
-      prevAnchor: prevStart,
-      nextAnchor,
-      prevFrom: ymdLocal(prevStart),
-      prevTo: ymdLocal(prevEnd),
-    }
-  }
-  // month
-  const start = new Date(a.getFullYear(), a.getMonth(), 1, 12)
-  const end = new Date(a.getFullYear(), a.getMonth() + 1, 0, 12)
-  const label = start.toLocaleDateString(undefined, {
-    month: 'long',
-    year: 'numeric',
-  })
-  const prevStart = new Date(a.getFullYear(), a.getMonth() - 1, 1, 12)
-  const prevEnd = new Date(a.getFullYear(), a.getMonth(), 0, 12)
-  const nextAnchor = new Date(a.getFullYear(), a.getMonth() + 1, 1, 12)
-  return {
-    from: ymdLocal(start),
-    to: ymdLocal(end),
-    label,
-    prevAnchor: prevStart,
-    nextAnchor,
-    prevFrom: ymdLocal(prevStart),
-    prevTo: ymdLocal(prevEnd),
-  }
-}
 
 function hhmmss(sec: number): string {
   const s = Math.max(0, Math.floor(sec))
@@ -259,7 +166,6 @@ export function TimeRoute() {
     if (!periodInfo) return
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setFrom(periodInfo.from)
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setTo(periodInfo.to)
     // periodInfo is derived from period + periodAnchor; ESLint can't
     // see that.
@@ -1130,44 +1036,14 @@ export function TimeRoute() {
             ))}
           </select>
         </label>
-        <div className="periodbar">
-          {(['day', 'week', 'month', 'custom'] as Period[]).map((p) => (
-            <button
-              key={p}
-              type="button"
-              className={
-                'btn--sm' + (period === p ? '' : ' btn--ghost')
-              }
-              onClick={() => {
-                setPeriod(p)
-                if (p !== 'custom') setPeriodAnchor(new Date())
-              }}
-            >
-              {t(`time.period_${p}`)}
-            </button>
-          ))}
-          {periodInfo && (
-            <span className="periodbar__nav">
-              <button
-                type="button"
-                className="btn--ghost btn--sm"
-                onClick={() => setPeriodAnchor(periodInfo.prevAnchor)}
-                title={t('time.periodPrev')}
-              >
-                ◀
-              </button>
-              <strong className="periodbar__label">{periodInfo.label}</strong>
-              <button
-                type="button"
-                className="btn--ghost btn--sm"
-                onClick={() => setPeriodAnchor(periodInfo.nextAnchor)}
-                title={t('time.periodNext')}
-              >
-                ▶
-              </button>
-            </span>
-          )}
-        </div>
+        <PeriodPicker
+          period={period}
+          anchor={periodAnchor}
+          onChange={(p, a) => {
+            setPeriod(p)
+            setPeriodAnchor(a)
+          }}
+        />
         <div className="daterange">
           <label>
             {t('time.from')}

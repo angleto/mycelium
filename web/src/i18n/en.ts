@@ -1167,7 +1167,10 @@ export const en = {
     confirmDeleteProfile: 'Delete this issuer profile?',
     fromTime: 'Bill from tracked time',
     fromTimeHint:
-      'Billable hours for this client in the period, per task. Pick what to invoice; each becomes a line.',
+      'Billable hours for this client in the selected period. Pick what to invoice; each row becomes a line.',
+    billGranularity: 'Detail',
+    billBy_task: 'Per task',
+    billBy_project: 'Per project',
     periodFrom: 'From',
     periodTo: 'To',
     loadReport: 'Load report',

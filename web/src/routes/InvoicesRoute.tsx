@@ -3,6 +3,8 @@ import { Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { api, authFetch, errMessage, workspaceHeader } from '../api/client'
 import { useSession } from '../auth/useSession'
+import { periodRange, type Period } from '../lib/period'
+import { PeriodPicker } from '../components/PeriodPicker'
 import type { components } from '../api/schema'
 
 type Invoice = components['schemas']['InvoiceOut']
@@ -11,6 +13,10 @@ type Profile = components['schemas']['IssuerProfileOut']
 type Tag = components['schemas']['TagOut']
 type ReportRow = components['schemas']['ReportRowOut']
 type Preview = components['schemas']['InvoicePreviewOut']
+// Granularity of the "bill from tracked time" report. 'task' bills one
+// line per task (full detail); 'project' aggregates to one line per
+// project, so clients who shouldn't see the task breakdown don't.
+type BillGroup = Extract<components['schemas']['ReportGroup'], 'task' | 'project'>
 
 
 const EMPTY_LINE = {
@@ -84,12 +90,23 @@ export function InvoicesRoute() {
   const [lEditId, setLEditId] = useState<string | null>(null)
   const [lEdit, setLEdit] = useState<LineForm>(EMPTY_LINE)
 
-  // time-report -> lines
-  const [triFrom, setTriFrom] = useState('')
-  const [triTo, setTriTo] = useState('')
+  // time-report -> lines. Period defaults to the current month with
+  // prev/next navigation (same widget as the Time report); custom mode
+  // exposes free from/to date inputs. Granularity toggles between one
+  // line per task and one aggregated line per project. from/to are
+  // derived (not state) to avoid a setState-in-effect sync loop.
+  const [triPeriod, setTriPeriod] = useState<Period>('month')
+  const [triAnchor, setTriAnchor] = useState<Date>(() => new Date())
+  const [triCustomFrom, setTriCustomFrom] = useState('')
+  const [triCustomTo, setTriCustomTo] = useState('')
+  const [triGroup, setTriGroup] = useState<BillGroup>('task')
   const [triRows, setTriRows] = useState<ReportRow[]>([])
   const [triSel, setTriSel] = useState<Set<string>>(new Set())
   const [triLoaded, setTriLoaded] = useState(false)
+  const { from: triFrom, to: triTo } =
+    triPeriod === 'custom'
+      ? { from: triCustomFrom, to: triCustomTo }
+      : periodRange(triPeriod, triAnchor)
 
   const isDraft = sel?.state === 'draft'
   const defaultIssuer = useMemo(
@@ -278,14 +295,14 @@ export function InvoicesRoute() {
     await reloadSel()
   }
 
-  async function loadReport() {
-    if (!sel) return
+  const loadReport = useCallback(async () => {
+    if (!sel || !dClient) return
     setErr(null)
     const { data, error } = await api.GET('/time/report', {
       params: {
         header: workspaceHeader(),
         query: {
-          group_by: 'task',
+          group_by: triGroup,
           billable: true,
           client_tag_id: dClient,
           ...(triFrom ? { start_from: `${triFrom}T00:00:00Z` } : {}),
@@ -301,11 +318,25 @@ export function InvoicesRoute() {
     setTriRows((data ?? []).filter((r) => r.billable_seconds > 0))
     setTriSel(new Set())
     setTriLoaded(true)
-  }
+  }, [sel, dClient, triGroup, triFrom, triTo])
+
+  // Auto-refresh the billable report whenever the draft, its client,
+  // the range, or the granularity changes (loadReport's identity tracks
+  // range + group). No manual "load" step: the month is preselected.
+  useEffect(() => {
+    if (!isDraft || !dClient) return
+    // loadReport is a fetch (external-system sync); its synchronous
+    // setErr(null) is what trips the rule, not a cascading render.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void loadReport()
+  }, [isDraft, dClient, loadReport])
 
   async function addSelectedLines() {
     if (!sel) return
     setErr(null)
+    // Forfettario invoices bill at 0% + Natura N2.2 (same default as
+    // manual lines via blankLine); ordinary regimes default to 22%.
+    const forfettario = !!preview?.is_forfettario
     const picked = triRows.filter((r) => r.key && triSel.has(r.key))
     for (const r of picked) {
       const hours = Math.round((r.billable_seconds / 3600) * 100) / 100
@@ -317,7 +348,8 @@ export function InvoicesRoute() {
           description: r.label ?? 'Time',
           quantity: hours,
           unit_price: rate,
-          vat_rate: 22,
+          vat_rate: forfettario ? 0 : 22,
+          ...(forfettario ? { natura: 'N2.2' } : {}),
         },
       })
       if (error) {
@@ -831,27 +863,49 @@ export function InvoicesRoute() {
             <div className="card">
               <h3>{t('invoices.fromTime')}</h3>
               <p className="hint">{t('invoices.fromTimeHint')}</p>
-              <div className="row">
-                <label>
-                  {t('invoices.periodFrom')}
-                  <input
-                    type="date"
-                    value={triFrom}
-                    onChange={(e) => setTriFrom(e.target.value)}
-                  />
-                </label>
-                <label>
-                  {t('invoices.periodTo')}
-                  <input
-                    type="date"
-                    value={triTo}
-                    onChange={(e) => setTriTo(e.target.value)}
-                  />
-                </label>
-                <button type="button" className="btn--sm" onClick={() => void loadReport()}>
-                  {t('invoices.loadReport')}
-                </button>
+              <div className="periodbar">
+                <span className="periodbar__label" style={{ minWidth: 'auto' }}>
+                  {t('invoices.billGranularity')}
+                </span>
+                {(['task', 'project'] as BillGroup[]).map((g) => (
+                  <button
+                    key={g}
+                    type="button"
+                    className={'btn--sm' + (triGroup === g ? '' : ' btn--ghost')}
+                    onClick={() => setTriGroup(g)}
+                  >
+                    {t(`invoices.billBy_${g}`)}
+                  </button>
+                ))}
               </div>
+              <PeriodPicker
+                period={triPeriod}
+                anchor={triAnchor}
+                onChange={(p, a) => {
+                  setTriPeriod(p)
+                  setTriAnchor(a)
+                }}
+              />
+              {triPeriod === 'custom' && (
+                <div className="row">
+                  <label>
+                    {t('invoices.periodFrom')}
+                    <input
+                      type="date"
+                      value={triCustomFrom}
+                      onChange={(e) => setTriCustomFrom(e.target.value)}
+                    />
+                  </label>
+                  <label>
+                    {t('invoices.periodTo')}
+                    <input
+                      type="date"
+                      value={triCustomTo}
+                      onChange={(e) => setTriCustomTo(e.target.value)}
+                    />
+                  </label>
+                </div>
+              )}
               {triLoaded && triRows.length === 0 && (
                 <p className="hint">{t('invoices.noReport')}</p>
               )}

@@ -1168,7 +1168,10 @@ export const it: Catalog = {
     confirmDeleteProfile: 'Eliminare questo profilo emittente?',
     fromTime: 'Fattura dal tempo tracciato',
     fromTimeHint:
-      'Ore fatturabili per questo cliente nel periodo, per task. Scegli cosa fatturare; ognuna diventa una riga.',
+      'Ore fatturabili per questo cliente nel periodo selezionato. Scegli cosa fatturare; ogni riga diventa una riga fattura.',
+    billGranularity: 'Dettaglio',
+    billBy_task: 'Per task',
+    billBy_project: 'Per progetto',
     periodFrom: 'Da',
     periodTo: 'A',
     loadReport: 'Carica report',
