@@ -207,15 +207,25 @@ async def _is_duplicate_update(session: AsyncSession, *, update_id: int) -> bool
 
 _TASK_PREFIX = "/task"
 
-# Bot usage text. The bot is a capture front-end: plain text -> note,
-# voice message -> voice note, ``/task <title>`` -> task. Slash-commands
-# are recognised explicitly so they are never silently stored as notes.
+# Bot usage text. Capture is command-driven now: ``/note`` / ``/task``
+# create explicitly, voice messages still capture a voice note. Free-text
+# (no command) is reserved for the upcoming Flow assistant, so it is NOT
+# stored as a note; the bot replies with this guidance instead.
 _HELP_TEXT = (
-    "Flow capture bot. Just send me something:\n"
-    "• text → saved as a note\n"
-    "• voice message → saved as a voice note\n"
-    "• /task <title> → creates a task instead\n"
-    "• /help → this message"
+    "Flow bot:\n"
+    "• /note <text> → save a note\n"
+    "• /task <title> → create a task\n"
+    "• voice message → save a voice note\n"
+    "• /help → this message\n"
+    "Free-text chat will be handled by a Flow assistant (coming soon)."
+)
+
+# Reply to a non-command, non-voice message. Free-text is held for the
+# future assistant rather than silently stored.
+_FREETEXT_HINT = (
+    "Send /note <text> to save a note, /task <title> for a task, or a voice"
+    " message for a voice note. /help for the list. (Free-text chat with a"
+    " Flow assistant is coming.)"
 )
 
 
@@ -448,27 +458,31 @@ async def handle_webhook_update(payload: dict[str, object]) -> UpdateOutcome:
                 task_id=task.id,
                 user_id=user_id,
             )
+        if command == "/note":
+            text_body = body_stripped.split(maxsplit=1)
+            text_body = text_body[1].strip() if len(text_body) == 2 else ""
+            if not text_body:
+                return UpdateOutcome(reply_text="Usage: /note <text>", user_id=user_id)
+            async with tenant_session(str(org_id), str(user_id)) as ts:
+                note = await notes_svc.create_note(
+                    ts,
+                    org_id=org_id,
+                    actor_id=user_id,
+                    kind=NoteKind.text,
+                    title=None,
+                    text=text_body,
+                )
+            return UpdateOutcome(reply_text="Note saved.", note_id=note.id, user_id=user_id)
         if command == "/help":
             return UpdateOutcome(reply_text=_HELP_TEXT, user_id=user_id)
         return UpdateOutcome(
-            reply_text=f"Unknown command {command}. Send text to save a note, or /help.",
+            reply_text=f"Unknown command {command}. {_HELP_TEXT}",
             user_id=user_id,
         )
 
-    async with tenant_session(str(org_id), str(user_id)) as ts:
-        note = await notes_svc.create_note(
-            ts,
-            org_id=org_id,
-            actor_id=user_id,
-            kind=NoteKind.text,
-            title=None,
-            text=body_stripped,
-        )
-    return UpdateOutcome(
-        reply_text="Note saved.",
-        note_id=note.id,
-        user_id=user_id,
-    )
+    # Free-text (no command): reserved for the future Flow assistant, not
+    # stored as a note. Reply with guidance toward the explicit commands.
+    return UpdateOutcome(reply_text=_FREETEXT_HINT, user_id=user_id)
 
 
 async def get_link_for_user(user_id: uuid.UUID) -> TelegramLink | None:

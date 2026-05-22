@@ -1,9 +1,11 @@
 """Telegram bot integration (epic #125 P2) tests.
 
 State-of-link transitions, idempotent webhook, ``/start <code>`` ->
-TelegramLink created, regular message -> Note created, ``/task ...``
--> Task created, RLS isolation (Telegram link belongs to user/org).
-Runs against the real DB + a fake ``TelegramApi``."""
+TelegramLink created, ``/note ...`` -> Note created, ``/task ...`` ->
+Task created, ``/help`` + unknown commands answered without storing,
+free-text reserved for the future assistant (not stored), RLS isolation
+(Telegram link belongs to user/org). Runs against the real DB + a fake
+``TelegramApi``."""
 
 from __future__ import annotations
 
@@ -197,7 +199,7 @@ async def test_start_with_invalid_code_does_not_link() -> None:
     assert outcome.reply_text is not None and "invalid" in outcome.reply_text.lower()
 
 
-async def test_regular_message_from_linked_chat_creates_note() -> None:
+async def test_note_command_creates_note() -> None:
     org, user = await _signup()
     async with tenant_session(str(org), str(user)) as s:
         issued = await svc.create_link_code(
@@ -208,12 +210,30 @@ async def test_regular_message_from_linked_chat_creates_note() -> None:
         _start_update(update_id=_uid(), code=issued.code, chat_id=chat_id)
     )
     outcome = await svc.handle_webhook_update(
-        _text_update(update_id=_uid(), chat_id=chat_id, text="Pay invoice tomorrow")
+        _text_update(update_id=_uid(), chat_id=chat_id, text="/note Pay invoice tomorrow")
     )
     assert outcome.note_id is not None and outcome.task_id is None
     async with tenant_session(str(org), str(user)) as s:
         note = (await s.execute(select(Note).where(Note.id == outcome.note_id))).scalar_one()
         assert note.transcript == "Pay invoice tomorrow"
+
+
+async def test_plain_text_is_not_stored_and_returns_hint() -> None:
+    org, user = await _signup()
+    async with tenant_session(str(org), str(user)) as s:
+        issued = await svc.create_link_code(
+            s, org_id=org, user_id=user, bot_username="flow_test_bot"
+        )
+    chat_id = uuid.uuid4().int & 0xFFFFFFFF
+    await svc.handle_webhook_update(
+        _start_update(update_id=_uid(), code=issued.code, chat_id=chat_id)
+    )
+    outcome = await svc.handle_webhook_update(
+        _text_update(update_id=_uid(), chat_id=chat_id, text="just chatting")
+    )
+    # Free-text is reserved for the future assistant: no note, just guidance.
+    assert outcome.note_id is None and outcome.task_id is None
+    assert outcome.reply_text is not None and "/note" in outcome.reply_text
 
 
 async def test_task_prefix_creates_task_not_note() -> None:
