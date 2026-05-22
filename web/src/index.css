@@ -1108,12 +1108,18 @@ button.btn--danger:hover {
   flex-direction: column;
   gap: 0.7rem;
 }
-/* The editor grows to use the available height. */
+/* The editor grows to use the available height. The min-height floor
+   lives HERE, on the flex item modal__body lays out, not on the editor
+   leaf: if the leaf carried the floor it could exceed this (shrunk)
+   wrapper and, since the wrapper does not clip, spill out the bottom
+   and overlap the Attachments block below (the v1.2.58 regression).
+   With the floor on the wrapper, modal__body (overflow:auto) scrolls
+   when the whole body can't fit, instead of the editor overflowing. */
 .modal__body .grow {
   flex: 1 1 auto;
   display: flex;
   flex-direction: column;
-  min-height: 0;
+  min-height: 12rem;
 }
 .modal__body .grow .rte {
   flex: 1 1 auto;
@@ -1124,12 +1130,12 @@ button.btn--danger:hover {
 .modal__body .grow .rte .ProseMirror,
 .modal__body .grow .rte .rte__raw {
   flex: 1 1 auto;
-  /* A floor, not a fixed height: the editor flex-grows to fill the
-     space but may also shrink below it on a short modal, so the
-     Attachments block underneath always stays in view. */
-  min-height: 8rem;
-  /* Long content scrolls inside the editor box; it never overflows to
-     overlap the Attachments below (the reported markdown-mode bug). */
+  /* No floor on the leaf: it fills the .grow wrapper exactly (which
+     carries the real floor) and never exceeds it. */
+  min-height: 0;
+  /* Long content scrolls INSIDE the editor box; it never overflows to
+     overlap the Attachments below, and the wheel scrolls the editor,
+     not the outer modal/window (the reported markdown-mode bugs). */
   overflow: auto;
   /* The flex box owns the height; a drag-resize handle would let the
      textarea grow past its slot and cover the Attachments. */
