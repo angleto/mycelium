@@ -1,0 +1,127 @@
+"""Dynamic-toolset gateway: the HTTP surface is the three meta-tools
+(search/describe/execute) over the full registry, not the ~140 concrete
+tools. Verifies the small surface, semantic + lexical discovery, schema
+loading with auth stripped, and dispatch with the principal injected.
+"""
+
+from __future__ import annotations
+
+import uuid
+from collections.abc import Iterator
+
+import pytest
+from _fake_embedder import FakeEmbedder
+
+import flow_mcp.gateway as gw
+from flow_core.db import admin_session
+from flow_core.embedder import set_embedder_override
+from flow_core.services.auth import signup
+from flow_mcp.gateway import describe_tools, execute_tool, gateway, search_tools
+from flow_mcp.server import _PRINCIPAL
+
+
+@pytest.fixture(autouse=True)
+def _reset_index() -> Iterator[None]:
+    # The embedding index + catalog are module globals cached across
+    # calls; reset so each test starts clean (and an index built with
+    # one embedder is not reused under another).
+    gw._index = None
+    gw._catalog_cache = None
+    yield
+    gw._index = None
+    gw._catalog_cache = None
+
+
+async def _signup_principal() -> tuple[uuid.UUID, uuid.UUID]:
+    async with admin_session() as s:
+        r = await signup(
+            s,
+            email=f"{uuid.uuid4().hex[:10]}@example.test",
+            password="pw-strong-123",
+            org_name="GW",
+        )
+    return r.user_id, r.org_id
+
+
+async def test_public_surface_is_only_meta_tools() -> None:
+    names = {t.name for t in await gateway.list_tools()}
+    assert names == {"ping", "search_tools", "describe_tools", "execute_tool"}
+
+
+async def test_search_semantic_ranks_relevant_tool() -> None:
+    set_embedder_override(FakeEmbedder)
+    try:
+        hits = await search_tools(query="list all my tasks", limit=8)
+    finally:
+        set_embedder_override(None)
+    names = [h["name"] for h in hits]
+    assert "list_tasks" in names
+    # results carry a one-line summary + domain for the LLM to choose
+    assert all({"name", "summary", "domain", "score"} <= set(h) for h in hits)
+
+
+async def test_search_lexical_fallback_without_embedder() -> None:
+    # No override and sentence-transformers absent in CI -> the lexical
+    # branch runs; it must still surface the obvious match.
+    from flow_core.embedder import embedder_available
+
+    if embedder_available():
+        pytest.skip("a real/overridden embedder is available; lexical path not exercised")
+    hits = await search_tools(query="timer start stop", limit=8)
+    assert any(h["name"] in {"start_timer", "stop_timer"} for h in hits)
+
+
+async def test_search_domain_filter() -> None:
+    set_embedder_override(FakeEmbedder)
+    try:
+        hits = await search_tools(query="anything", limit=50, domain="calendar")
+    finally:
+        set_embedder_override(None)
+    assert hits and all(h["domain"] == "calendar" for h in hits)
+
+
+async def test_describe_strips_auth_and_keeps_real_params() -> None:
+    out = await describe_tools(names=["create_task"])
+    assert len(out) == 1
+    schema = out[0]["inputSchema"]
+    props = schema["properties"]
+    assert "token" not in props and "org_id" not in props
+    assert "title" in props  # the real, LLM-facing param survives
+    assert "token" not in schema.get("required", [])
+
+
+async def test_describe_unknown_tool_is_soft_error() -> None:
+    out = await describe_tools(names=["does_not_exist"])
+    assert out[0]["name"] == "does_not_exist"
+    assert "error" in out[0]
+
+
+async def test_execute_dispatches_with_injected_principal() -> None:
+    user_id, org_id = await _signup_principal()
+    tok = _PRINCIPAL.set((user_id, org_id))
+    try:
+        # No token/org_id passed: execute_tool injects them from the
+        # principal, exactly as the HTTP bearer path does.
+        tag = await execute_tool(name="create_tag", arguments={"kind": "generic", "name": "gw-tag"})
+        assert tag["name"] == "gw-tag"
+        listed = await execute_tool(name="list_tags", arguments={})
+        assert any(t["name"] == "gw-tag" for t in listed)
+    finally:
+        _PRINCIPAL.reset(tok)
+
+
+async def test_execute_unknown_tool_is_soft_error() -> None:
+    res = await execute_tool(name="nope", arguments={})
+    assert "error" in res
+
+
+async def test_http_app_builds_and_serves_the_gateway() -> None:
+    # Guards the wiring: the HTTP transport must serve the 3-meta-tool
+    # gateway, not regress to the full registry.
+    from flow_mcp.server_http import make_mcp_app
+
+    app = make_mcp_app()
+    assert app is not None
+    assert gateway.settings.streamable_http_path == "/"
+    names = {t.name for t in await gateway.list_tools()}
+    assert "execute_tool" in names and "create_task" not in names

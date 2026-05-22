@@ -1,8 +1,14 @@
 """HTTP transport for the MCP server.
 
-Wraps the existing stdio-mode FastMCP instance (``flow_mcp.server.mcp``)
-with a streamable-http Starlette app + a Bearer middleware that
-authenticates each request via the SECURITY DEFINER
+Serves the dynamic-toolset *gateway* (``flow_mcp.gateway.gateway``,
+three meta-tools) rather than the full ~140-tool registry, so the
+``tools/list`` payload an OAuth client carries drops from ~21k to ~1k
+tokens. The concrete tools stay on ``flow_mcp.server.mcp`` and are
+dispatched by ``execute_tool``; the stdio entrypoint still serves them
+directly. See ``gateway.py`` for the rationale.
+
+It wraps the gateway in a streamable-http Starlette app + a Bearer
+middleware that authenticates each request via the SECURITY DEFINER
 ``authenticate_agent_token`` function (migration 0059) and publishes
 the resolved principal into ``_PRINCIPAL`` so the tools'
 ``_tenant`` context picks it up without re-decoding.
@@ -39,7 +45,8 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
 from flow_core.services import agent_tokens as agent_tokens_svc
-from flow_mcp.server import _PRINCIPAL, mcp
+from flow_mcp.gateway import gateway
+from flow_mcp.server import _PRINCIPAL
 
 
 class _BearerAuthMiddleware(BaseHTTPMiddleware):
@@ -86,7 +93,7 @@ def make_mcp_app() -> Starlette:
     # Inner FastMCP route at '/' so when this app is mounted at '/mcp'
     # in the FastAPI parent, the public URL is just '/mcp' (otherwise
     # the default '/mcp' route would compose to '/mcp/mcp').
-    mcp.settings.streamable_http_path = "/"
+    gateway.settings.streamable_http_path = "/"
     # Disable the SDK's DNS-rebinding Host/Origin guard. FastMCP
     # auto-enables it (with allowed_hosts = localhost-only) because the
     # instance's default host is 127.0.0.1; behind nginx the public
@@ -98,10 +105,10 @@ def make_mcp_app() -> Starlette:
     # ``flow_at_`` bearer + the nginx Host routing, both already in
     # place. Setting an explicit (disabled) policy overrides the
     # auto-enabled localhost one.
-    mcp.settings.transport_security = TransportSecuritySettings(
+    gateway.settings.transport_security = TransportSecuritySettings(
         enable_dns_rebinding_protection=False
     )
-    app = mcp.streamable_http_app()
+    app = gateway.streamable_http_app()
     app.add_middleware(_BearerAuthMiddleware)
     return app
 
