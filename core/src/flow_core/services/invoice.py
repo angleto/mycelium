@@ -944,7 +944,7 @@ async def ingest_receipt(
     session: AsyncSession,
     *,
     org_id: uuid.UUID,
-    actor_id: uuid.UUID,
+    actor_id: uuid.UUID | None,
     identificativo_sdi: str,
     outcome: str,
 ) -> Invoice:
