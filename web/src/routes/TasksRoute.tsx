@@ -83,11 +83,12 @@ export function TasksRoute() {
   const [bulkTag, setBulkTag] = useState('')
   const [bulkMsg, setBulkMsg] = useState<string | null>(null)
   // Kanban hides columns whose state has ``is_hidden=true`` by default
-  // (per-state UI hint set in /workflows). The list view always shows
-  // everything: ``showTerminal`` was removed because terminal tasks are
-  // legitimate "done" rows the user wants to see in their list — only
-  // the graph still hides them by default (it has its own toggle).
+  // (per-state UI hint set in /workflows).
   const [showHidden, setShowHidden] = useState(false)
+  // List view hides terminal-state tasks (done/cancelled/...) by default
+  // so the working list stays focused on open work; a toggle reveals
+  // them. Kanban is unaffected (it has its own per-column hiding).
+  const [hideTerminal, setHideTerminal] = useState(true)
   const [view, setView] = useState<View>(defaultView)
   useEffect(() => {
     try {
@@ -385,10 +386,18 @@ export function TasksRoute() {
         (tk.tags ?? []).some((g) => focusIds.includes(g.id)),
       )
     : matched
-  // List view shows everything; kanban filters out tasks whose state is
-  // hidden unless ``showHidden`` is on (the toggle gates the kanban
-  // columns directly inside TaskKanban — see ``kanbanStates``).
+  // ``shown`` feeds the kanban (full set; its columns are gated by
+  // is_hidden/showHidden). ``listShown`` is the list view's set: in list
+  // mode it also drops terminal-state tasks unless ``hideTerminal`` is
+  // off. In kanban mode listShown === shown (the gate is view-scoped).
   const shown = focused
+  const terminalStateIds = new Set(
+    wfStates.filter((s) => s.is_terminal).map((s) => s.id),
+  )
+  const listShown =
+    view === 'list' && hideTerminal
+      ? shown.filter((tk) => !terminalStateIds.has(tk.state_id))
+      : shown
   const kanbanStates = showHidden
     ? wfStates
     : wfStates.filter((s) => !hiddenStateIds.has(s.id))
@@ -527,6 +536,20 @@ export function TasksRoute() {
             {t('tasks.showHidden')}: {showHidden ? t('common.on') : t('common.off')}
           </button>
         )}
+        {view === 'list' && (
+          <button
+            type="button"
+            role="switch"
+            aria-checked={hideTerminal}
+            className={
+              'toggle-pill' + (hideTerminal ? ' toggle-pill--on' : '')
+            }
+            onClick={() => setHideTerminal((v) => !v)}
+          >
+            {t('tasks.hideTerminal')}:{' '}
+            {hideTerminal ? t('common.on') : t('common.off')}
+          </button>
+        )}
         <div className="viewtabs" role="tablist" aria-label={t('tasks.viewSwitch')}>
           <button
             type="button"
@@ -558,10 +581,10 @@ export function TasksRoute() {
       {err && <p className="err">{err}</p>}
       {bulkMsg && <p className="ok">{bulkMsg}</p>}
 
-      {shown.length > 0 && (
+      {listShown.length > 0 && (
         <div className="row">
           {(() => {
-            const allOn = sel.size > 0 && shown.every((x) => sel.has(x.id))
+            const allOn = sel.size > 0 && listShown.every((x) => sel.has(x.id))
             return (
               <button
                 type="button"
@@ -571,7 +594,7 @@ export function TasksRoute() {
                   'toggle-pill' + (allOn ? ' toggle-pill--on' : '')
                 }
                 onClick={() =>
-                  setSel(allOn ? new Set() : new Set(shown.map((x) => x.id)))
+                  setSel(allOn ? new Set() : new Set(listShown.map((x) => x.id)))
                 }
               >
                 {t('tasks.selectAll')}: {allOn ? t('common.on') : t('common.off')}
@@ -654,11 +677,11 @@ export function TasksRoute() {
           allowed={allowed}
           onChangeState={changeState}
         />
-      ) : shown.length === 0 ? (
+      ) : listShown.length === 0 ? (
         <p className="hint">{t('tasks.none')}</p>
       ) : (
         <ul className="list tasklist">
-          {shown.map((tk) => {
+          {listShown.map((tk) => {
             const score =
               tk.importance != null && tk.urgency != null
                 ? tk.importance * tk.urgency

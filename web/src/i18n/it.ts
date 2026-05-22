@@ -420,6 +420,7 @@ export const it: Catalog = {
     filterTag: 'Filtra per tag',
     all: 'Tutti',
     showHidden: 'Mostra nascosti',
+    hideTerminal: 'Nascondi completati',
     viewSwitch: 'Vista',
     viewKanban: 'Kanban',
     viewList: 'Lista',

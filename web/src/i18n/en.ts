@@ -420,6 +420,7 @@ export const en = {
     filterTag: 'Filter by tag',
     all: 'All',
     showHidden: 'Show hidden',
+    hideTerminal: 'Hide done',
     viewSwitch: 'View',
     viewKanban: 'Kanban',
     viewList: 'List',
