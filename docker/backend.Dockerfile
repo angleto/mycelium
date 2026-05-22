@@ -67,4 +67,10 @@ WORKDIR /app
 COPY --from=builder /app /app
 
 EXPOSE 8000
-CMD ["uvicorn", "flow_api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# --proxy-headers + --forwarded-allow-ips so uvicorn trusts the
+# X-Forwarded-Proto/-Host nginx (and the Kapsule LB) set. Without it
+# the app sees the TLS-terminated request as plain http and builds
+# redirect Location headers with scheme=http — e.g. the MCP mount's
+# /mcp -> /mcp/ 307 pointed at http://, which Claude Desktop refuses
+# to follow (downgrade), breaking the connector handshake.
+CMD ["uvicorn", "flow_api.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--forwarded-allow-ips", "*"]
