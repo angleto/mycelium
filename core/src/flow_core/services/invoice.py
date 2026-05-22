@@ -59,6 +59,7 @@ from flow_core.services.invoice_format import (
     _is_forfettario,
     _resolve_line_tax,
 )
+from flow_core.services.invoice_xsd import validate_fatturapa
 from flow_core.services.rbac import require_role
 
 # --- issuer profiles (the invoice "intestazione") ---
@@ -663,10 +664,27 @@ def _validate(
         missing.append("piva|codice_fiscale")
     if missing:
         raise DomainError(MessageCode.FISCAL_PROFILE_REQUIRED, detail=", ".join(missing))
-    if not client.ragione_sociale or not (client.id_codice or client.codice_fiscale):
-        raise DomainError(MessageCode.INVOICE_INVALID, detail="client fiscal id missing")
+    # The cessionario's Sede (Indirizzo/CAP/Comune) is mandatory in
+    # FatturaPA; surface a clean domain error here rather than letting the
+    # XSD reject an empty Indirizzo with a cryptic pattern message.
+    client_missing = [
+        f
+        for f, v in (
+            ("ragione_sociale", client.ragione_sociale),
+            ("indirizzo", client.indirizzo),
+            ("cap", client.cap),
+            ("comune", client.comune),
+        )
+        if not v
+    ]
+    if not (client.id_codice or client.codice_fiscale):
+        client_missing.append("piva|codice_fiscale")
     if not (client.codice_destinatario or client.pec):
-        raise DomainError(MessageCode.INVOICE_INVALID, detail="client SdI address missing")
+        client_missing.append("codice_destinatario|pec")
+    if client_missing:
+        raise DomainError(
+            MessageCode.INVOICE_INVALID, detail="client: " + ", ".join(client_missing)
+        )
     if not lines:
         raise DomainError(MessageCode.INVOICE_INVALID, detail="no lines")
 
@@ -711,6 +729,19 @@ async def _allocate_number(
     return counter.last_number
 
 
+async def _resolve_collegata(
+    session: AsyncSession, *, org_id: uuid.UUID, inv: Invoice
+) -> tuple[str, dt.date] | None:
+    """For a TD04, the corrected invoice's FISCAL number + issue date for
+    DatiFattureCollegate (not the internal UUID). None when no parent."""
+    if inv.parent_invoice_id is None:
+        return None
+    parent = await get_invoice(session, org_id=org_id, invoice_id=inv.parent_invoice_id)
+    numero = f"{parent.series}{parent.number}" if parent.number is not None else str(parent.series)
+    data = (parent.issued_at or dt.datetime.now(tz=dt.UTC)).date()
+    return numero, data
+
+
 async def transmit(
     session: AsyncSession,
     *,
@@ -740,10 +771,20 @@ async def transmit(
     number = await _allocate_number(session, org_id=org_id, series=inv.series, year=inv.year)
     inv.number = number
     inv.issued_at = dt.datetime.now(tz=dt.UTC)
-    inv.xml = _build_xml(inv, fiscal, client, lines, progressivo or f"{inv.year}{number:05d}")
+    collegata = await _resolve_collegata(session, org_id=org_id, inv=inv)
+    xml = _build_xml(
+        inv, fiscal, client, lines, progressivo or f"{inv.year}{number:05d}", collegata=collegata
+    )
+    # Validate against the official FatturaPA XSD before emission: SdI
+    # scarta anything non-conformant, so an invalid document must never
+    # leave draft. Surfaced as the domain error the UI already renders.
+    xsd_errors = validate_fatturapa(xml)
+    if xsd_errors:
+        raise DomainError(MessageCode.INVOICE_INVALID, detail="; ".join(xsd_errors[:5]))
+    inv.xml = xml
     inv.state = InvoiceState.transmitted
     ch = channel or get_channel()
-    res = ch.transmit(xml=inv.xml, invoice_id=str(inv.id))
+    res = ch.transmit(xml=xml, invoice_id=str(inv.id))
     inv.identificativo_sdi = res.identificativo_sdi
     inv.conservation_status = res.conservation
     inv.version += 1
@@ -984,7 +1025,10 @@ async def get_xml_preview(
         p.totals.bollo,
         p.totals.total,
     )
-    return _build_xml(inv, p.issuer, p.client, p.lines, "ANTEPRIMA", numero_override=p.number)
+    collegata = await _resolve_collegata(session, org_id=org_id, inv=inv)
+    return _build_xml(
+        inv, p.issuer, p.client, p.lines, "ANTEPRIMA", numero_override=p.number, collegata=collegata
+    )
 
 
 async def render_pdf(

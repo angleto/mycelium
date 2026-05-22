@@ -160,6 +160,7 @@ def _build_xml(
     lines: Sequence[InvoiceLine],
     progressivo: str,
     numero_override: str | None = None,
+    collegata: tuple[str, dt.date] | None = None,
 ) -> str:
     ET.register_namespace("p", _NS)
     root = ET.Element(f"{{{_NS}}}FatturaElettronica", versione="FPR12")
@@ -270,10 +271,15 @@ def _build_xml(
         _sub(det, "ImportoPagamento", _money(inv.total))
         if inv.payment_iban:
             _sub(det, "IBAN", inv.payment_iban)
-    if inv.parent_invoice_id is not None:
-        # TD04: link the corrected invoice.
+    if collegata is not None:
+        # TD04: link the corrected invoice by its FISCAL number + date
+        # (e.g. "A12", 2026-03-01), NOT the internal UUID.
+        # DatiFattureCollegate/IdDocumento is the human document number SdI
+        # expects; emitting a UUID here makes a real TD04 malformed.
+        numero, data = collegata
         fc = ET.SubElement(dg, "DatiFattureCollegate")
-        _sub(fc, "IdDocumento", str(inv.parent_invoice_id))
+        _sub(fc, "IdDocumento", numero)
+        _sub(fc, "Data", data.isoformat())
     return ET.tostring(root, encoding="unicode", xml_declaration=True)
 
 

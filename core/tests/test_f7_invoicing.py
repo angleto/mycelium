@@ -59,6 +59,10 @@ async def _setup(s, org: uuid.UUID, user: uuid.UUID) -> uuid.UUID:
             id_paese="IT",
             id_codice="09876543210",
             codice_destinatario="ABCDEFG",
+            indirizzo="Via Milano 2",
+            cap="20100",
+            comune="Milano",
+            provincia="MI",
         ),
     )
     return client.id
@@ -173,6 +177,11 @@ async def test_td04_credit_note_links_parent() -> None:
         ntx = await inv.transmit(s, org_id=org, actor_id=user, invoice_id=note.id)
         assert ntx.number == 2  # shares the (org, series, year) sequence
         assert "TD04" in (ntx.xml or "")
+        # DatiFattureCollegate links the parent by its FISCAL number + date,
+        # never the internal UUID (the bug this guards against).
+        assert "<DatiFattureCollegate>" in (ntx.xml or "")
+        assert f"<IdDocumento>{parent.series}{parent.number}</IdDocumento>" in (ntx.xml or "")
+        assert str(parent.id) not in (ntx.xml or "")
 
 
 @pytest.fixture

@@ -204,6 +204,9 @@ async def test_forfettario_bollo_below_threshold_is_zero() -> None:
                     "id_paese": "IT",
                     "id_codice": "16639311006",
                     "codice_destinatario": "KRRH6B9",
+                    "indirizzo": "Via Cliente 5",
+                    "cap": "20100",
+                    "comune": "Milano",
                 },
             )
         ).json()
@@ -338,6 +341,9 @@ async def test_ordinary_regime_rf01_is_untouched() -> None:
                     "id_paese": "IT",
                     "id_codice": "09876543210",
                     "codice_destinatario": "ABCDEFG",
+                    "indirizzo": "Via Cliente 5",
+                    "cap": "20100",
+                    "comune": "Milano",
                 },
             )
         ).json()

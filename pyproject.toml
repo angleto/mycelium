@@ -63,6 +63,7 @@ module = [
     "qrcode.*",
     "reportlab.*",
     "boto3.*",
+    "lxml.*",
 ]
 ignore_missing_imports = true
 
