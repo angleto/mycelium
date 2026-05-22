@@ -210,3 +210,61 @@ def test_persona_fisica_emits_nome_cognome() -> None:
     assert "<Nome>Angelo</Nome><Cognome>Leto</Cognome>" in xml
     assert "<Nome>Mario</Nome><Cognome>Rossi</Cognome>" in xml
     assert "<Denominazione>" not in xml
+
+
+def test_recipient_pec_goes_in_pecdestinatario() -> None:
+    issuer = IssuerProfile(
+        paese="IT",
+        piva="13438810015",
+        codice_fiscale=None,
+        denominazione="Acme Srl",
+        regime_fiscale="RF01",
+        indirizzo="Via Roma 1",
+        cap="00100",
+        comune="Roma",
+        provincia="RM",
+        nazione="IT",
+    )
+    client = ClientProfile(
+        ragione_sociale="Mario Rossi",
+        id_paese="IT",
+        id_codice=None,
+        codice_fiscale="RSSMRA80A01H501U",
+        codice_destinatario=None,  # no SdI code: delivery is by PEC
+        pec="mario@pec.example.it",
+        indirizzo="Via Milano 2",
+        cap="20100",
+        comune="Milano",
+        provincia="MI",
+        nazione="IT",
+    )
+    invoice = Invoice(
+        document_type=DocumentType.TD01,
+        currency="EUR",
+        issued_at=dt.datetime(2026, 3, 1, tzinfo=dt.UTC),
+        series="A",
+        number=4,
+        taxable=Decimal("100.00"),
+        vat=Decimal("22.00"),
+        bollo=Decimal("0.00"),
+        total=Decimal("122.00"),
+        causale=None,
+        notes=None,
+        payment_iban=None,
+        payment_due_date=None,
+    )
+    line = InvoiceLine(
+        line_no=1,
+        description="consulting",
+        quantity=Decimal(1),
+        unit_price=Decimal("100.00"),
+        vat_rate=Decimal(22),
+        natura=None,
+    )
+    xml = _build_xml(invoice, issuer, client, [line], "202600004")
+    assert validate_fatturapa(xml) == []
+    assert "<CodiceDestinatario>0000000</CodiceDestinatario>" in xml
+    # The recipient PEC is the routing address (PECDestinatario), not the
+    # transmitter's ContattiTrasmittente/Email.
+    assert "<PECDestinatario>mario@pec.example.it</PECDestinatario>" in xml
+    assert "<ContattiTrasmittente>" not in xml

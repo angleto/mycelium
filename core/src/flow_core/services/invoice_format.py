@@ -199,8 +199,11 @@ def _build_xml(
     _sub(dt_, "FormatoTrasmissione", "FPR12")
     _sub(dt_, "CodiceDestinatario", client.codice_destinatario or "0000000")
     if not client.codice_destinatario and client.pec:
-        cc = _sub(dt_, "ContattiTrasmittente")
-        _sub(cc, "Email", client.pec)
+        # CodiceDestinatario "0000000" + recipient PEC: the cessionario's PEC
+        # is its electronic address, so it goes in PECDestinatario (SdI routes
+        # delivery to it). NOT ContattiTrasmittente/Email, which is the
+        # transmitter's contact and is ignored for routing.
+        _sub(dt_, "PECDestinatario", client.pec)
     cedente = _sub(header, "CedentePrestatore")
     anag = _sub(cedente, "DatiAnagrafici")
     if fiscal.piva:
