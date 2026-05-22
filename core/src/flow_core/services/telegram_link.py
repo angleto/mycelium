@@ -207,6 +207,17 @@ async def _is_duplicate_update(session: AsyncSession, *, update_id: int) -> bool
 
 _TASK_PREFIX = "/task"
 
+# Bot usage text. The bot is a capture front-end: plain text -> note,
+# voice message -> voice note, ``/task <title>`` -> task. Slash-commands
+# are recognised explicitly so they are never silently stored as notes.
+_HELP_TEXT = (
+    "Flow capture bot. Just send me something:\n"
+    "• text → saved as a note\n"
+    "• voice message → saved as a voice note\n"
+    "• /task <title> → creates a task instead\n"
+    "• /help → this message"
+)
+
 
 async def handle_webhook_update(payload: dict[str, object]) -> UpdateOutcome:
     """Top-level webhook entry. Idempotent by ``update_id``: a
@@ -413,19 +424,34 @@ async def handle_webhook_update(payload: dict[str, object]) -> UpdateOutcome:
             user_id=user_id,
         )
 
-    if body_stripped.lower().startswith(_TASK_PREFIX):
-        title = body_stripped[len(_TASK_PREFIX) :].strip() or "Task from Telegram"
-        async with tenant_session(str(org_id), str(user_id)) as ts:
-            task = await tasks_svc.create_task(
-                ts,
-                org_id=org_id,
-                actor_id=user_id,
-                title=title[:300],
-                description=body_stripped if len(body_stripped) > 300 else None,
+    # Slash-commands are handled explicitly. Telegram renders ``/foo`` as
+    # a tappable command, so a user who sends one means a command, not
+    # note text -- never silently store it as a note.
+    if body_stripped.startswith("/"):
+        # First token, lowercased, with the ``@botname`` suffix Telegram
+        # appends in group chats stripped off.
+        command = body_stripped.split(maxsplit=1)[0].lower().split("@", 1)[0]
+        if command == _TASK_PREFIX:
+            title = body_stripped.split(maxsplit=1)
+            title = title[1].strip() if len(title) == 2 else ""
+            title = title or "Task from Telegram"
+            async with tenant_session(str(org_id), str(user_id)) as ts:
+                task = await tasks_svc.create_task(
+                    ts,
+                    org_id=org_id,
+                    actor_id=user_id,
+                    title=title[:300],
+                    description=body_stripped if len(body_stripped) > 300 else None,
+                )
+            return UpdateOutcome(
+                reply_text=f"Task created: {title[:80]}",
+                task_id=task.id,
+                user_id=user_id,
             )
+        if command == "/help":
+            return UpdateOutcome(reply_text=_HELP_TEXT, user_id=user_id)
         return UpdateOutcome(
-            reply_text=f"Task created: {title[:80]}",
-            task_id=task.id,
+            reply_text=f"Unknown command {command}. Send text to save a note, or /help.",
             user_id=user_id,
         )
 

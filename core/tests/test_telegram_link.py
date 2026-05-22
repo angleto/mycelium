@@ -235,6 +235,41 @@ async def test_task_prefix_creates_task_not_note() -> None:
         assert task.title == "Call client"
 
 
+async def test_help_command_replies_without_storing() -> None:
+    org, user = await _signup()
+    async with tenant_session(str(org), str(user)) as s:
+        issued = await svc.create_link_code(
+            s, org_id=org, user_id=user, bot_username="flow_test_bot"
+        )
+    chat_id = uuid.uuid4().int & 0xFFFFFFFF
+    await svc.handle_webhook_update(
+        _start_update(update_id=_uid(), code=issued.code, chat_id=chat_id)
+    )
+    outcome = await svc.handle_webhook_update(
+        _text_update(update_id=_uid(), chat_id=chat_id, text="/help")
+    )
+    # /help is answered, not swallowed as a note or task.
+    assert outcome.note_id is None and outcome.task_id is None
+    assert outcome.reply_text is not None and "/task" in outcome.reply_text
+
+
+async def test_unknown_command_is_not_saved_as_note() -> None:
+    org, user = await _signup()
+    async with tenant_session(str(org), str(user)) as s:
+        issued = await svc.create_link_code(
+            s, org_id=org, user_id=user, bot_username="flow_test_bot"
+        )
+    chat_id = uuid.uuid4().int & 0xFFFFFFFF
+    await svc.handle_webhook_update(
+        _start_update(update_id=_uid(), code=issued.code, chat_id=chat_id)
+    )
+    outcome = await svc.handle_webhook_update(
+        _text_update(update_id=_uid(), chat_id=chat_id, text="/frobnicate now")
+    )
+    assert outcome.note_id is None and outcome.task_id is None
+    assert outcome.reply_text is not None and "unknown command" in outcome.reply_text.lower()
+
+
 async def test_unknown_chat_returns_instruction() -> None:
     chat_id = uuid.uuid4().int & 0xFFFFFFFF
     outcome = await svc.handle_webhook_update(
