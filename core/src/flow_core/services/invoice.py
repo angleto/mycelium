@@ -28,6 +28,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from flow_core.errors import ConflictError, DomainError, NotFoundError
 from flow_core.i18n import MessageCode
+from flow_core.it_provinces import is_valid_provincia
 from flow_core.models.client_profile import ClientProfile
 from flow_core.models.invoice import (
     ConservationAdhesion,
@@ -82,6 +83,7 @@ _PROFILE_FIELDS = frozenset(
         "nazione",
         "rea",
         "default_iban",
+        "riferimento_normativo",
     }
 )
 
@@ -147,6 +149,7 @@ async def create_issuer_profile(
     nazione: str = "IT",
     rea: str | None = None,
     default_iban: str | None = None,
+    riferimento_normativo: str | None = None,
     is_default: bool = False,
 ) -> IssuerProfile:
     await require_role(session, org_id, actor_id, Role.admin)
@@ -171,6 +174,7 @@ async def create_issuer_profile(
         nazione=nazione,
         rea=rea,
         default_iban=default_iban,
+        riferimento_normativo=riferimento_normativo,
         is_default=make_default,
     )
     session.add(p)
@@ -663,8 +667,11 @@ def _validate(
         )
         if not v
     ]
-    if not (fiscal.piva or fiscal.codice_fiscale):
-        missing.append("piva|codice_fiscale")
+    # The cedente's IdFiscaleIVA (P.IVA) is mandatory in FatturaPA (the
+    # CodiceFiscale alone is not enough for the issuer; the cessionario may
+    # have just a CodiceFiscale, the cedente may not).
+    if not fiscal.piva:
+        missing.append("piva")
     if missing:
         raise DomainError(MessageCode.FISCAL_PROFILE_REQUIRED, detail=", ".join(missing))
     # The cessionario's Sede (Indirizzo/CAP/Comune) is mandatory in
@@ -687,6 +694,16 @@ def _validate(
     if client_missing:
         raise DomainError(
             MessageCode.INVOICE_INVALID, detail="client: " + ", ".join(client_missing)
+        )
+    # Provincia: the XSD only checks the [A-Z]{2} shape; reject a well-formed
+    # but nonexistent Italian province before SdI does (scarto).
+    if not is_valid_provincia(fiscal.provincia, fiscal.nazione):
+        raise DomainError(
+            MessageCode.INVOICE_INVALID, detail=f"issuer provincia '{fiscal.provincia}'"
+        )
+    if not is_valid_provincia(client.provincia, client.nazione):
+        raise DomainError(
+            MessageCode.INVOICE_INVALID, detail=f"client provincia '{client.provincia}'"
         )
     if not lines:
         raise DomainError(MessageCode.INVOICE_INVALID, detail="no lines")

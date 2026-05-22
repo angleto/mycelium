@@ -136,8 +136,9 @@ async def test_forfettario_draft_lines_causale_bollo_and_xml_preview() -> None:
         assert (
             "<DatiRiepilogo><AliquotaIVA>0.00</AliquotaIVA><Natura>N2.2</Natura>"
             "<ImponibileImporto>3731.00</ImponibileImporto>"
-            "<Imposta>0.00</Imposta></DatiRiepilogo>" in xml
+            "<Imposta>0.00</Imposta>" in xml
         )
+        assert "<RiferimentoNormativo>" in xml  # forfettario default (#1)
         assert _FORFETTARIO_CAUSALE in xml
         # ANTEPRIMA progressivo + would-be number, no allocation.
         assert "<ProgressivoInvio>ANTEPRIMA</ProgressivoInvio>" in xml
@@ -186,6 +187,7 @@ async def test_forfettario_bollo_below_threshold_is_zero() -> None:
                     "label": "DI",
                     "denominazione": "Angelo Leto",
                     "codice_fiscale": "LTENGL79M31I356X",
+                    "piva": "13438810015",
                     "regime_fiscale": "RF19",
                     "indirizzo": "Via X 1",
                     "cap": "10100",
@@ -226,6 +228,7 @@ async def test_forfettario_bollo_below_threshold_is_zero() -> None:
         xml = (await c.get(f"/invoices/{inv['id']}/xml", headers=h)).json()["xml"]
         assert "<DatiBollo>" not in xml
         assert "<Natura>N2.2</Natura>" in xml  # still 0% + Natura
+        assert "<RiferimentoNormativo>" in xml  # forfettario default (#1)
 
 
 async def test_iban_precedence_invoice_over_client_over_issuer() -> None:
@@ -240,6 +243,7 @@ async def test_iban_precedence_invoice_over_client_over_issuer() -> None:
                     "label": "DI",
                     "denominazione": "Angelo Leto",
                     "codice_fiscale": "LTENGL79M31I356X",
+                    "piva": "13438810015",
                     "regime_fiscale": "RF19",
                     "indirizzo": "Via X 1",
                     "cap": "10100",

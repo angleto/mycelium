@@ -61,6 +61,11 @@ FORFETTARIO_CAUSALE = (
 # stamp duty applies (it is not transmitted in the XML, only the
 # structured DatiBollo is).
 BOLLO_DICITURA = "Imposta di bollo assolta in modo virtuale"
+# DatiRiepilogo/RiferimentoNormativo default for the forfettario regime when
+# the issuer profile sets none (max 100 latin chars, XSD String100LatinType).
+FORFETTARIO_RIFERIMENTO_NORMATIVO = (
+    "Operazione in franchigia da IVA ai sensi dell'art.1, commi 54-89, L.190/2014"
+)
 
 
 def _is_forfettario(issuer: IssuerProfile | None) -> bool:
@@ -272,6 +277,11 @@ def _build_xml(
     # ImponibileImporto, or SdI rejects the document. Deterministic
     # order: by rate, then natura ("" sorts before any code).
     groups = _riepilogo_groups(lines)
+    # RiferimentoNormativo: the issuer's text, else the forfettario default;
+    # emitted only for groups carrying a Natura, after Imposta (XSD order).
+    rif_normativo = fiscal.riferimento_normativo or (
+        FORFETTARIO_RIFERIMENTO_NORMATIVO if _is_forfettario(fiscal) else None
+    )
     for rate, natura in sorted(groups, key=lambda k: (k[0], k[1] or "")):
         imp = _q2(groups[(rate, natura)])
         rie = _sub(dbs, "DatiRiepilogo")
@@ -280,6 +290,8 @@ def _build_xml(
             _sub(rie, "Natura", natura)
         _sub(rie, "ImponibileImporto", _money(imp))
         _sub(rie, "Imposta", _money(_q2(imp * rate / Decimal(100))))
+        if natura and rif_normativo:
+            _sub(rie, "RiferimentoNormativo", rif_normativo)
     if inv.payment_iban or inv.payment_due_date:
         # MP05 = bonifico; TP02 = pagamento completo (single payment).
         pay = _sub(body, "DatiPagamento")
@@ -306,6 +318,7 @@ def _build_xml(
 __all__ = [
     "BOLLO_DICITURA",
     "FORFETTARIO_CAUSALE",
+    "FORFETTARIO_RIFERIMENTO_NORMATIVO",
     "Totals",
     "_bollo_for",
     "_build_xml",

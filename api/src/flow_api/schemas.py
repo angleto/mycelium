@@ -1466,6 +1466,7 @@ class IssuerProfileIn(BaseModel):
     rea: str | None = Field(default=None, max_length=40)
     # Fallback payment IBAN (precedence: invoice > client > issuer).
     default_iban: str | None = Field(default=None, max_length=34)
+    riferimento_normativo: str | None = Field(default=None, max_length=100)
     is_default: bool = False
 
 
@@ -1483,6 +1484,7 @@ class IssuerProfilePatchIn(BaseModel):
     nazione: str | None = Field(default=None, max_length=2)
     rea: str | None = Field(default=None, max_length=40)
     default_iban: str | None = Field(default=None, max_length=34)
+    riferimento_normativo: str | None = Field(default=None, max_length=100)
     is_default: bool | None = None
 
 
@@ -1501,6 +1503,7 @@ class IssuerProfileOut(BaseModel):
     nazione: str
     rea: str | None
     default_iban: str | None
+    riferimento_normativo: str | None
     is_default: bool
     conservation_adhesion: str
     version: int

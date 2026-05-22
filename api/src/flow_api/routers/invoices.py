@@ -105,6 +105,7 @@ def _ip_out(p: IssuerProfile) -> IssuerProfileOut:
         nazione=p.nazione,
         rea=p.rea,
         default_iban=p.default_iban,
+        riferimento_normativo=p.riferimento_normativo,
         is_default=p.is_default,
         conservation_adhesion=p.conservation_adhesion.value,
         version=p.version,
@@ -158,6 +159,7 @@ async def create_issuer_profile(
         nazione=body.nazione,
         rea=body.rea,
         default_iban=body.default_iban,
+        riferimento_normativo=body.riferimento_normativo,
         is_default=body.is_default,
     )
     return _ip_out(p)

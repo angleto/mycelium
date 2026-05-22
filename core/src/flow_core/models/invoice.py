@@ -112,6 +112,10 @@ class IssuerProfile(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, B
     # nor the client carries one (IBAN precedence: invoice > client >
     # issuer). NULL until the issuer sets one.
     default_iban: Mapped[str | None] = mapped_column(String(34), nullable=True)
+    # Free-text legal reference for the VAT exemption, emitted in
+    # DatiRiepilogo/RiferimentoNormativo for lines carrying a Natura (max 100
+    # latin chars, XSD String100LatinType). NULL -> a default for RF19.
+    riferimento_normativo: Mapped[str | None] = mapped_column(String(100), nullable=True)
     is_default: Mapped[bool] = mapped_column(nullable=False, server_default="false")
     conservation_adhesion: Mapped[ConservationAdhesion] = mapped_column(
         SAEnum(
