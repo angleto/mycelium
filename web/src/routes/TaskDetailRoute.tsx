@@ -557,10 +557,10 @@ export function TaskDetailRoute() {
             onChange={(e) => setTitle(e.target.value)}
           />
         </label>
-        <label>
+        <div className="field">
           {t('tasks.description')}
           <RichEditor value={description} onChange={setDescription} />
-        </label>
+        </div>
         <div className="row">
           <button type="submit" disabled={busy || !dirty}>
             {busy ? t('tasks.saving') : t('tasks.save')}

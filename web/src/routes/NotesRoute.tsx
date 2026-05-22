@@ -688,10 +688,10 @@ export function NotesRoute() {
                   />
                 )}
                 {cKind !== 'conversation' && (
-                  <label className="grow">
+                  <div className="field grow">
                     {t('notes.text')}
                     <RichEditor value={cText} onChange={setCText} large />
-                  </label>
+                  </div>
                 )}
               </div>
             )}
@@ -760,10 +760,10 @@ export function NotesRoute() {
                   onAdd={(tid) => void addTag(tid)}
                   onRemove={(tid) => void removeTag(tid)}
                 />
-                <label className="grow">
+                <div className="field grow">
                   {t('notes.text')}
                   <RichEditor value={eText} onChange={setEText} large />
-                </label>
+                </div>
                 <Attachments noteId={sel.id} />
               </div>
             )}

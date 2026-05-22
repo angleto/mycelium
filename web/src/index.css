@@ -361,7 +361,13 @@ a:hover {
 }
 
 /* ---- forms ---- */
-label {
+/* ``.field`` is a non-label captioned group: same look as a form
+   label, but a <div>. Used to wrap the RichEditor, which must NOT sit
+   inside a <label> — a label forwards user clicks to its first control
+   (the toolbar's Bold button), so a double-click in the editor toggled
+   bold on the selected word (the reported bug). */
+label,
+.field {
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
