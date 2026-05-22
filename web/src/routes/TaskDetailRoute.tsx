@@ -522,9 +522,15 @@ export function TaskDetailRoute() {
 
   return (
     <section className="card">
-      <p className="hint">
-        <Link to="/tasks">{t('tasks.back')}</Link>
-      </p>
+      <div className="taskdetail__top">
+        <p className="hint">
+          <Link to="/tasks">{t('tasks.back')}</Link>
+        </p>
+        {/* Quick start/stop for this task, opposite the back link.
+            Server-authoritative, so it stays in sync with the work-notes
+            timer below. */}
+        <TaskTimer taskId={id} />
+      </div>
       {task.deleted_at != null && (
         <p className="banner">
           {t('trash.deleted')}
