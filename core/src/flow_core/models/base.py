@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import datetime
 import uuid
+from typing import Any, ClassVar
 
 from sqlalchemy import BigInteger, DateTime, ForeignKey, MetaData, func
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
@@ -37,6 +38,15 @@ class UUIDPKMixin:
 
 
 class TimestampMixin:
+    # ``created_at`` / ``updated_at`` are computed by the DB (server_default
+    # now(), and updated_at via onupdate=now()). ``eager_defaults`` makes
+    # SQLAlchemy fetch these inline with RETURNING after INSERT *and* UPDATE,
+    # so the attributes stay populated rather than expired. Without it an
+    # UPDATE leaves updated_at expired, and reading it from a *sync*
+    # serializer (e.g. a router ``_out``) triggers a sync reload under
+    # asyncpg -> sqlalchemy.exc.MissingGreenlet.
+    __mapper_args__: ClassVar[dict[str, Any]] = {"eager_defaults": True}
+
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
