@@ -310,11 +310,28 @@ a:hover {
   cursor: pointer;
 }
 
+/* ===========================================================
+   Responsive layout. Breakpoints used across this file:
+     820px  layout/shell  — sidebar collapses to an off-canvas drawer,
+                            topbar utilities move into the drawer foot
+                            (mirrors useMediaQuery MOBILE_QUERY).
+     768px  tablet        — kanban column sizing, tasks default view.
+     640px  small phone   — single-column form grids, popover sizing.
+   =========================================================== */
 @media (max-width: 820px) {
   .topbar__hamburger { display: inline-block; }
-  /* Sidebar becomes an off-canvas drawer; ``.app--sidebar-open``
-     slides it in from the left. The main content stays full-width
-     underneath, ungated by a focus trap (esc-to-close is a follow-up). */
+  /* Tighter topbar: only the hamburger, brand and the glanceable
+     timers stay here — the utilities relocate into the drawer foot
+     (AppShell), so the row fits a phone instead of forcing the page
+     ~200px wider than the viewport. */
+  .topbar { gap: 0.5rem; padding: 0 0.65rem; }
+  .topbar__brand { min-width: 0; overflow: hidden; }
+  .topbar__actions { gap: 0.4rem; min-width: 0; }
+  .running__title { max-width: 6rem; }
+
+  /* Sidebar becomes an off-canvas drawer; ``.app--sidebar-open`` slides
+     it in from the left over a tap-to-close backdrop. Escape closes it
+     and tapping a destination closes it (both wired in AppShell). */
   .sidebar {
     position: fixed;
     top: var(--topbar-h);
@@ -330,6 +347,55 @@ a:hover {
   .app--sidebar-open .sidebar { transform: translateX(0); }
   .layout { display: block; }
   .content { padding: 1.25rem clamp(0.8rem, 4vw, 1.5rem); }
+
+  /* Wide data tables scroll horizontally inside their own box rather
+     than stretching the whole page. */
+  .tbl {
+    display: block;
+    overflow-x: auto;
+    max-width: 100%;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* 16px form controls: below this width iOS Safari auto-zooms inputs
+     whose font is < 16px (base is 15px), shoving the layout on every
+     focus. (Class-scoped compact inputs keep their own size.) */
+  input,
+  select,
+  textarea {
+    font-size: 16px;
+  }
+}
+
+/* Drawer scrim: dims and intercepts taps on the page behind the open
+   mobile drawer. Sits below the drawer (z 50) and below the topbar,
+   which it deliberately leaves uncovered (the hamburger toggles it).
+   Only mounted below the layout breakpoint (AppShell). */
+.sidebar__backdrop {
+  position: fixed;
+  inset: var(--topbar-h) 0 0 0;
+  z-index: 40;
+  background: rgba(8, 9, 13, 0.45);
+  border: 0;
+  cursor: pointer;
+}
+body.body--locked {
+  overflow: hidden;
+}
+
+/* Drawer foot: the topbar utilities relocated here on mobile. A wrapped
+   row under a divider, pushed to the bottom by the flex:1 nav above. */
+.nav__util {
+  margin-top: 0.6rem;
+  padding-top: 0.7rem;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+.nav__util select {
+  width: auto;
 }
 
 /* ---- cards / surfaces ---- */
@@ -2223,6 +2289,7 @@ button.btn--danger:hover {
 .atts__head {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 0.6rem;
   margin-bottom: 0.35rem;
 }

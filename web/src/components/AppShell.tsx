@@ -18,6 +18,7 @@ import { hms, elapsedSec } from '../lib/time'
 import { useRunningTimers } from '../lib/useRunningTimer'
 import { parseMentionHref, routeForMention } from '../lib/mentions'
 import { useFocus } from '../lib/focus'
+import { useMediaQuery, MOBILE_QUERY } from '../lib/useMediaQuery'
 import type { components } from '../api/schema'
 import i18n from '../i18n'
 
@@ -281,6 +282,11 @@ export function AppShell() {
   // ``.app--sidebar-open`` is set, otherwise it stays off-screen.
   // Desktop ignores both — the sidebar is always docked.
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  // Below the layout breakpoint the sidebar is an off-canvas drawer and
+  // the topbar utilities (theme/lang/mode/settings/logout) relocate into
+  // its foot. One JS source of truth, kept in sync with the CSS media
+  // query (see useMediaQuery).
+  const isMobile = useMediaQuery(MOBILE_QUERY)
   // Workspace role switcher: only meaningful if the entitlement
   // ceiling is above member (an owner/admin can act down as a user).
   const { ws } = useMyWorkspace()
@@ -307,6 +313,24 @@ export function AppShell() {
     document.addEventListener('click', onClick, true)
     return () => document.removeEventListener('click', onClick, true)
   }, [navigate])
+
+  // Drawer: close on Escape (keyboard parity with the backdrop tap).
+  useEffect(() => {
+    if (!sidebarOpen) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setSidebarOpen(false)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [sidebarOpen])
+
+  // Lock body scroll while the mobile drawer overlays the page, so the
+  // content underneath does not scroll behind the drawer.
+  useEffect(() => {
+    const lock = isMobile && sidebarOpen
+    document.body.classList.toggle('body--locked', lock)
+    return () => document.body.classList.remove('body--locked')
+  }, [isMobile, sidebarOpen])
 
   async function onLogout() {
     // Real server-side logout: revoke the JWT, then drop the session.
@@ -373,6 +397,48 @@ export function AppShell() {
     })
   }
 
+  const closeDrawer = () => setSidebarOpen(false)
+
+  // Secondary controls. On desktop they sit in the topbar; below the
+  // layout breakpoint they relocate into the drawer foot (rendered in
+  // exactly one place at a time, so no duplicate controls in the DOM).
+  const utilities = (
+    <>
+      <ModeChip
+        canOwner={canSwitchRole}
+        canAdmin={canAdmin}
+        wsRole={wsRole}
+        adminOn={elevated}
+      />
+      <ThemeToggle />
+      <select
+        aria-label="language"
+        value={i18n.language}
+        onChange={(e) => void i18n.changeLanguage(e.target.value)}
+      >
+        <option value="en">EN</option>
+        <option value="it">IT</option>
+      </select>
+      <NavLink
+        to="/settings"
+        onClick={closeDrawer}
+        className={({ isActive }) =>
+          isActive ? 'nav__link nav__link--active' : 'nav__link'
+        }
+      >
+        <Icon name="settings" />
+        {t('nav.settings')}
+      </NavLink>
+      <button
+        type="button"
+        className="btn btn--ghost"
+        onClick={() => void onLogout()}
+      >
+        {t('nav.logout')}
+      </button>
+    </>
+  )
+
   return (
     <div className={'app' + (sidebarOpen ? ' app--sidebar-open' : '')}>
       <header className="topbar">
@@ -391,49 +457,34 @@ export function AppShell() {
         <div className="topbar__actions">
           <RunningIndicator />
           <PomodoroTimer />
-          <ModeChip
-            canOwner={canSwitchRole}
-            canAdmin={canAdmin}
-            wsRole={wsRole}
-            adminOn={elevated}
-          />
-          <ThemeToggle />
-          <select
-            aria-label="language"
-            value={i18n.language}
-            onChange={(e) => void i18n.changeLanguage(e.target.value)}
-          >
-            <option value="en">EN</option>
-            <option value="it">IT</option>
-          </select>
-          <NavLink
-            to="/settings"
-            className={({ isActive }) =>
-              isActive ? 'nav__link nav__link--active' : 'nav__link'
-            }
-          >
-            <Icon name="settings" />
-            {t('nav.settings')}
-          </NavLink>
-          <button
-            type="button"
-            className="btn btn--ghost"
-            onClick={() => void onLogout()}
-          >
-            {t('nav.logout')}
-          </button>
+          {!isMobile && utilities}
         </div>
       </header>
+      {isMobile && sidebarOpen && (
+        <div
+          className="sidebar__backdrop"
+          aria-hidden="true"
+          onClick={closeDrawer}
+        />
+      )}
       <div className="layout">
         <aside className="sidebar">
           <div className="sidebar__ws">
             <ProjectFocus />
           </div>
-          <nav className="nav">
+          <nav
+            className="nav"
+            onClick={(e) => {
+              // Tapping a destination closes the drawer on mobile.
+              if (isMobile && (e.target as HTMLElement).closest('a'))
+                closeDrawer()
+            }}
+          >
             {groups.map((g) => (
               <NavGroup key={g.title} title={g.title} items={g.items} />
             ))}
           </nav>
+          {isMobile && <div className="nav__util">{utilities}</div>}
         </aside>
         <main className="content">
           <Outlet />
