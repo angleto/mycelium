@@ -213,6 +213,17 @@ single GUI/REST/MCP choke point).
   reused.
 - History search; mark paid (manual reconciliation in v1); TD04 credit
   note.
+- Implemented (F7b, config-gated on `FLOW_SDI_CHANNEL=sdicoop`): official
+  FatturaPA XSD validation at transmit (`Schema_VFPA12_V1.2.3`); the per-issuer
+  `SdiMandate` + `TerzoIntermediarioOSoggettoEmittente` /
+  `SoggettoEmittente=TZ`; the SdICoop `RiceviFile` SOAP transport (mutual TLS) +
+  `/sdi/notifica` inbound receiver (cross-org correlation by `IdentificativoSdI`
+  via a SECURITY DEFINER resolver). Fiscal conformance vs the v2.6 specs: the
+  VAT id is stored split (`IdPaese`/`IdCodice`) with country-prefix
+  normalization and a mandatory cedente P.IVA; `RiferimentoNormativo` per issuer
+  (RF19 default); persona fisica `Nome`/`Cognome` (Anagrafica choice);
+  `Provincia` validated against the Italian list. External (F7c): accreditation
+  + certificates + WSDL/esito verification against the AdE test environment.
 
 ## FR-10 MCP server (co-equal)
 

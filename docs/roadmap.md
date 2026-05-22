@@ -76,7 +76,10 @@ end-to-end per phase.
   service agreement + accreditation, the channel certificates, and verifying
   against the AdE test environment the exact WSDL namespace/operation, the
   SOAP esito response, and whether WS-Security signing is required for the
-  profile. Inbound mutual TLS is terminated at the edge.
+  profile. Inbound mutual TLS is terminated at the edge. Fiscal conformance
+  (v2.6 specs) is also in place: VAT id IdPaese/IdCodice split + country-prefix
+  normalization (mandatory cedente P.IVA), RiferimentoNormativo, persona fisica
+  Nome/Cognome, and Provincia validation against the Italian list.
 - **Post-v1**: PA/B2G (CAdES/XAdES signature + qualified certificate,
   NE/DT/EC/SE), passive cycle, reverse charge/self-billing TD16-TD19,
   foreign clients, quarterly stamp-duty settlement, CP-SAT optimizing
