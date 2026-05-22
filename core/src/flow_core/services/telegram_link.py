@@ -32,6 +32,7 @@ from dataclasses import dataclass
 from sqlalchemy import select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from flow_core.config import get_settings
 from flow_core.db import admin_session, tenant_session
 from flow_core.errors import DomainError
 from flow_core.i18n import MessageCode
@@ -480,8 +481,20 @@ async def handle_webhook_update(payload: dict[str, object]) -> UpdateOutcome:
             user_id=user_id,
         )
 
-    # Free-text (no command): reserved for the future Flow assistant, not
-    # stored as a note. Reply with guidance toward the explicit commands.
+    # Free-text (no command). When the conversational assistant is enabled
+    # (ADR-0026) the message is handled by the in-process LLM agent scoped
+    # to this user's workspace; otherwise free-text is reserved for the
+    # future assistant and we reply with guidance toward the commands.
+    if get_settings().assistant_enabled:
+        from flow_core.services import assistant as assistant_svc
+
+        reply = await assistant_svc.run_turn(
+            org_id=org_id,
+            user_id=user_id,
+            text=body_stripped,
+            turn_key=str(update_id),
+        )
+        return UpdateOutcome(reply_text=reply, user_id=user_id)
     return UpdateOutcome(reply_text=_FREETEXT_HINT, user_id=user_id)
 
 

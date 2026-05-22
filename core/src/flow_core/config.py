@@ -161,6 +161,19 @@ class Settings(BaseSettings):
     # purpose: the webhook handler must reply quickly or Telegram retries.
     telegram_http_timeout_seconds: float = 10.0
 
+    # Conversational assistant (ADR-0026). When enabled, a free-text
+    # Telegram message is handled by an in-process LLM agent that uses
+    # Flow's tools (read/scoped-write on notes/tasks) and replies. Off by
+    # default: OSS / dev / CI keep the safe "free-text -> hint" behavior
+    # unless a model is configured. Spend follows the configured model
+    # (free local Ollama costs nothing; a premium model debits credits via
+    # the existing metering); ``assistant_credit_budget`` caps per-turn
+    # spend (<= 0 means no cap) and ``assistant_max_steps`` bounds the
+    # tool/think loop regardless of the script.
+    assistant_enabled: bool = False
+    assistant_max_steps: int = 8
+    assistant_credit_budget: float = 0.0
+
     # App
     env: str = "dev"
     log_level: str = "INFO"
