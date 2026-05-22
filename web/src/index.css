@@ -449,6 +449,10 @@ textarea {
   border: 1px solid var(--border);
   border-radius: 7px;
   padding: 0.46rem 0.6rem;
+  /* Never grow past the container. A native <select> otherwise widens
+     to fit its longest option (e.g. a long task title), spilling the
+     page sideways on a phone; the cap truncates the label instead. */
+  max-width: 100%;
 }
 input:focus,
 select:focus,
@@ -468,6 +472,19 @@ textarea {
   gap: 0.6rem;
   flex-wrap: wrap;
   margin: 0.5rem 0;
+}
+/* A select captioned by a label/.field fills its group and shrinks with
+   it, rather than widening to its longest <option>: long task titles in
+   the scheduler/notifications task pickers were otherwise spilling the
+   page sideways on a phone. Inline selects (topbar, segmented controls)
+   sit outside a label/.field and keep their own sizing. */
+label > select,
+.field > select {
+  width: 100%;
+}
+/* Let those labels shrink below their content in a wrapping form row. */
+.row > label {
+  min-width: 0;
 }
 
 button,
@@ -1830,6 +1847,26 @@ button.btn--danger:hover {
 .taskrow__state {
   font-size: 0.8rem;
   padding: 0.1rem 0.3rem;
+}
+/* Phone: the task row stacks — title on its own line (wrapping in full),
+   the no-shrink meta cluster (due/priority/state/timer) on the next —
+   instead of squeezing the title to zero width beside the meta. */
+@media (max-width: 640px) {
+  .tasklist .taskrow {
+    flex-wrap: wrap;
+  }
+  .taskrow__title {
+    flex: 1 1 8rem;
+    white-space: normal;
+  }
+  .taskrow__tags {
+    max-width: 100%;
+  }
+  .taskrow__meta {
+    width: 100%;
+    margin-left: 0;
+    flex-wrap: wrap;
+  }
 }
 .taskrow__sep {
   align-self: stretch;
