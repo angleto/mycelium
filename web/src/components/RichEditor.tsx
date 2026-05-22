@@ -254,6 +254,20 @@ export function RichEditor({
     </button>
   )
 
+  // Link insert/edit: prompt for a URL (empty clears the link). The
+  // editor's own Link.validate rejects unsafe schemes.
+  const setLink = () => {
+    if (!editor) return
+    const prev = (editor.getAttributes('link').href as string | undefined) ?? ''
+    const url = window.prompt(t('editor.linkPrompt'), prev)
+    if (url === null) return
+    if (url === '') {
+      editor.chain().focus().extendMarkRange('link').unsetLink().run()
+      return
+    }
+    editor.chain().focus().extendMarkRange('link').setLink({ href: url }).run()
+  }
+
   return (
     <div
       className={'rte' + (large ? ' rte--lg' : '')}
@@ -286,6 +300,11 @@ export function RichEditor({
             editor?.chain().focus().toggleBlockquote().run(), 'blockquote')}
           {tb('</>', 'editor.code', () =>
             editor?.chain().focus().toggleCode().run(), 'code')}
+          {tb('{ }', 'editor.codeBlock', () =>
+            editor?.chain().focus().toggleCodeBlock().run(), 'codeBlock')}
+          {tb('🔗', 'editor.link', setLink, 'link')}
+          {tb('―', 'editor.hr', () =>
+            editor?.chain().focus().setHorizontalRule().run())}
           <button
             type="button"
             className="btn--ghost btn--sm rte__fmt"
@@ -311,6 +330,10 @@ export function RichEditor({
                 editor?.chain().focus().deleteTable().run())}
             </>
           )}
+          {tb('↶', 'editor.undo', () =>
+            editor?.chain().focus().undo().run())}
+          {tb('↷', 'editor.redo', () =>
+            editor?.chain().focus().redo().run())}
         </span>
         <button
           type="button"
