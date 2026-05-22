@@ -1028,8 +1028,10 @@ export function TimeRoute() {
               curSecs += row.seconds
               curAmount += Number(row.amount ?? 0)
             }
-            const diffSecs = curSecs - (prevTotal?.seconds ?? 0)
-            const diffAmount = curAmount - Number(prevTotal?.amount ?? 0)
+            const prevSecs = prevTotal?.seconds ?? 0
+            const prevAmount = Number(prevTotal?.amount ?? 0)
+            const diffSecs = curSecs - prevSecs
+            const diffAmount = curAmount - prevAmount
             const sign = (n: number) => (n > 0 ? '+' : n < 0 ? '−' : '±')
             return (
               <>
@@ -1038,12 +1040,16 @@ export function TimeRoute() {
                   <strong>{curAmount.toFixed(2)} EUR</strong>
                 </span>
                 {prevTotal && (
+                  // Show the previous period's ABSOLUTE total first, then
+                  // the delta in parentheses. The old "vs last week: +X"
+                  // form was a bare delta: when last week was empty it
+                  // read as +current and looked identical to this week.
                   <span className="muted perioddiff__delta">
                     {' '}
-                    vs {t(`time.period_prev_${period}`)}:{' '}
-                    {sign(diffSecs)}
+                    {t(`time.period_prev_${period}`)}: {hhmmss(prevSecs)} ·{' '}
+                    {prevAmount.toFixed(2)} EUR ({sign(diffSecs)}
                     {hhmmss(Math.abs(diffSecs))} · {sign(diffAmount)}
-                    {Math.abs(diffAmount).toFixed(2)} EUR
+                    {Math.abs(diffAmount).toFixed(2)} EUR)
                   </span>
                 )}
               </>
