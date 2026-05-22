@@ -1124,7 +1124,21 @@ button.btn--danger:hover {
 .modal__body .grow .rte .ProseMirror,
 .modal__body .grow .rte .rte__raw {
   flex: 1 1 auto;
-  min-height: 14rem;
+  /* A floor, not a fixed height: the editor flex-grows to fill the
+     space but may also shrink below it on a short modal, so the
+     Attachments block underneath always stays in view. */
+  min-height: 8rem;
+  /* Long content scrolls inside the editor box; it never overflows to
+     overlap the Attachments below (the reported markdown-mode bug). */
+  overflow: auto;
+  /* The flex box owns the height; a drag-resize handle would let the
+     textarea grow past its slot and cover the Attachments. */
+  resize: none;
+}
+/* Attachments are a fixed-size block after the editor: never shrunk,
+   never pushed out of the note, and never covered by the editor. */
+.modal__body .atts {
+  flex: 0 0 auto;
 }
 .chips {
   display: flex;
