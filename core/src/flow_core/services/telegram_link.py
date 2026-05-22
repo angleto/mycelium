@@ -35,7 +35,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from flow_core.config import get_settings
 from flow_core.db import admin_session, tenant_session
 from flow_core.errors import DomainError
-from flow_core.i18n import MessageCode
+from flow_core.i18n import MessageCode, render
 from flow_core.models.note import NoteKind
 from flow_core.models.telegram import TelegramLink, TelegramLinkCode, TelegramUpdate
 from flow_core.services import attachments as att_svc
@@ -208,26 +208,11 @@ async def _is_duplicate_update(session: AsyncSession, *, update_id: int) -> bool
 
 _TASK_PREFIX = "/task"
 
-# Bot usage text. Capture is command-driven now: ``/note`` / ``/task``
-# create explicitly, voice messages still capture a voice note. Free-text
-# (no command) is reserved for the upcoming Flow assistant, so it is NOT
-# stored as a note; the bot replies with this guidance instead.
-_HELP_TEXT = (
-    "Flow bot:\n"
-    "• /note <text> → save a note\n"
-    "• /task <title> → create a task\n"
-    "• voice message → save a voice note\n"
-    "• /help → this message\n"
-    "Free-text chat will be handled by a Flow assistant (coming soon)."
-)
-
-# Reply to a non-command, non-voice message. Free-text is held for the
-# future assistant rather than silently stored.
-_FREETEXT_HINT = (
-    "Send /note <text> to save a note, /task <title> for a task, or a voice"
-    " message for a voice note. /help for the list. (Free-text chat with a"
-    " Flow assistant is coming.)"
-)
+# Bot replies live in the i18n catalog (ADR-0017). Rendered once at import
+# (only the "en" locale exists). The assistant's own generated answer is
+# passthrough, not catalogable.
+_HELP_TEXT = render(MessageCode.TELEGRAM_HELP)
+_FREETEXT_HINT = render(MessageCode.TELEGRAM_FREETEXT_HINT)
 
 
 async def handle_webhook_update(payload: dict[str, object]) -> UpdateOutcome:
@@ -282,12 +267,7 @@ async def handle_webhook_update(payload: dict[str, object]) -> UpdateOutcome:
         parts = body_stripped.split(maxsplit=1)
         code = parts[1].strip() if len(parts) == 2 else ""
         if not code:
-            return UpdateOutcome(
-                reply_text=(
-                    "Welcome to Flow. To link your account, open the deep-link"
-                    " from the Flow web app's Telegram settings."
-                )
-            )
+            return UpdateOutcome(reply_text=render(MessageCode.TELEGRAM_START_WELCOME))
         async with admin_session() as s:
             row = (
                 await s.execute(
@@ -299,12 +279,7 @@ async def handle_webhook_update(payload: dict[str, object]) -> UpdateOutcome:
                 )
             ).first()
         if row is None or row.out_user_id is None:
-            return UpdateOutcome(
-                reply_text=(
-                    "That link code is invalid or has expired."
-                    " Generate a new one from the Flow web app."
-                )
-            )
+            return UpdateOutcome(reply_text=render(MessageCode.TELEGRAM_CODE_INVALID))
         linked_user_id = row.out_user_id
         linked_org_id = row.out_org_id
         async with tenant_session(str(linked_org_id), str(linked_user_id)) as ts:
@@ -312,10 +287,7 @@ async def handle_webhook_update(payload: dict[str, object]) -> UpdateOutcome:
                 ts, org_id=linked_org_id, user_id=linked_user_id, chat_id=chat_id
             )
         return UpdateOutcome(
-            reply_text=(
-                "Your Telegram account is now linked to Flow. Send a message"
-                " to create a note; prefix it with /task to create a task instead."
-            ),
+            reply_text=render(MessageCode.TELEGRAM_LINKED),
             user_id=linked_user_id,
         )
 
@@ -328,21 +300,14 @@ async def handle_webhook_update(payload: dict[str, object]) -> UpdateOutcome:
             )
         ).first()
     if chat_lookup is None or chat_lookup.out_user_id is None:
-        return UpdateOutcome(
-            reply_text=(
-                "Your Telegram chat is not linked to Flow."
-                " Open the Flow web app and use the Telegram settings to link."
-            )
-        )
+        return UpdateOutcome(reply_text=render(MessageCode.TELEGRAM_NOT_LINKED))
     user_id = chat_lookup.out_user_id
     org_id = chat_lookup.out_default_org_id
     if org_id is None:
         # Linked user with no workspace (a partial signup that the
         # bootstrap-admin self-heal would normally repair). Refuse
         # politely rather than 500.
-        return UpdateOutcome(
-            reply_text="Your Flow account has no workspace yet. Open the web app first."
-        )
+        return UpdateOutcome(reply_text=render(MessageCode.TELEGRAM_NO_WORKSPACE))
 
     # Refresh the cached username if it changed (Telegram lets users
     # rename their @handle). Self policy on telegram_links allows the
@@ -380,7 +345,7 @@ async def handle_webhook_update(payload: dict[str, object]) -> UpdateOutcome:
         except Exception:
             logger.exception("telegram voice download failed for chat_id=%s", chat_id)
             return UpdateOutcome(
-                reply_text="Could not download voice message. Try again.",
+                reply_text=render(MessageCode.TELEGRAM_VOICE_FAILED),
                 user_id=user_id,
             )
         async with tenant_session(str(org_id), str(user_id)) as ts:
@@ -424,14 +389,14 @@ async def handle_webhook_update(payload: dict[str, object]) -> UpdateOutcome:
                 # audio is still saved on the note for later replay.
                 logger.exception("telegram voice transcribe failed for note=%s", note.id)
         return UpdateOutcome(
-            reply_text="Voice note saved.",
+            reply_text=render(MessageCode.TELEGRAM_VOICE_SAVED),
             note_id=note.id,
             user_id=user_id,
         )
 
     if not body_stripped:
         return UpdateOutcome(
-            reply_text="Empty message ignored. Send text to create a note.",
+            reply_text=render(MessageCode.TELEGRAM_EMPTY_IGNORED),
             user_id=user_id,
         )
 
@@ -454,7 +419,7 @@ async def handle_webhook_update(payload: dict[str, object]) -> UpdateOutcome:
                     description=body_stripped if len(body_stripped) > 300 else None,
                 )
             return UpdateOutcome(
-                reply_text=f"Task created: {title[:80]}",
+                reply_text=render(MessageCode.TELEGRAM_TASK_CREATED, title=title[:80]),
                 task_id=task.id,
                 user_id=user_id,
             )
@@ -462,7 +427,9 @@ async def handle_webhook_update(payload: dict[str, object]) -> UpdateOutcome:
             note_parts = body_stripped.split(maxsplit=1)
             text_body = note_parts[1].strip() if len(note_parts) == 2 else ""
             if not text_body:
-                return UpdateOutcome(reply_text="Usage: /note <text>", user_id=user_id)
+                return UpdateOutcome(
+                    reply_text=render(MessageCode.TELEGRAM_NOTE_USAGE), user_id=user_id
+                )
             async with tenant_session(str(org_id), str(user_id)) as ts:
                 note = await notes_svc.create_note(
                     ts,
@@ -472,11 +439,17 @@ async def handle_webhook_update(payload: dict[str, object]) -> UpdateOutcome:
                     title=None,
                     text=text_body,
                 )
-            return UpdateOutcome(reply_text="Note saved.", note_id=note.id, user_id=user_id)
+            return UpdateOutcome(
+                reply_text=render(MessageCode.TELEGRAM_NOTE_SAVED),
+                note_id=note.id,
+                user_id=user_id,
+            )
         if command == "/help":
             return UpdateOutcome(reply_text=_HELP_TEXT, user_id=user_id)
         return UpdateOutcome(
-            reply_text=f"Unknown command {command}. {_HELP_TEXT}",
+            reply_text=render(
+                MessageCode.TELEGRAM_UNKNOWN_COMMAND, command=command, help=_HELP_TEXT
+            ),
             user_id=user_id,
         )
 

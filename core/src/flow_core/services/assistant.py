@@ -46,6 +46,7 @@ from flow_core.ai_providers import LLMProvider, get_llm
 from flow_core.config import get_settings
 from flow_core.db import admin_session, tenant_session
 from flow_core.errors import DomainError
+from flow_core.i18n import MessageCode, render
 from flow_core.models.billing import CostBasis
 from flow_core.models.note import NoteKind
 from flow_core.models.telegram import TelegramAssistantJob, TelegramConversation
@@ -432,16 +433,12 @@ async def run_turn(
         async with tenant_session(str(org_id), str(user_id)) as session:
             for step in range(max_steps):
                 if budget > 0 and spent >= budget:
-                    return (
-                        last_answer or "Budget for this turn is exhausted. Try a simpler request."
-                    )
+                    return last_answer or render(MessageCode.TELEGRAM_ASSISTANT_BUDGET)
                 try:
                     result = await llm.complete(system=_SYSTEM_PROMPT, messages=history)
                 except Exception:
                     logger.exception("assistant provider error (turn=%s)", turn_key)
-                    return (
-                        "The assistant is unavailable right now. Try again, or use /note and /task."
-                    )
+                    return render(MessageCode.TELEGRAM_ASSISTANT_UNAVAILABLE)
 
                 rec = await billing.meter_if_billable(
                     session,
@@ -467,13 +464,10 @@ async def run_turn(
                     obs = await _run_tool(session, org_id=org_id, actor_id=user_id, action=action)
                 history = [*history, ("assistant", result.text), ("user", obs)]
             # Step cap hit without an explicit finish.
-            return (
-                last_answer
-                or "I couldn't finish that in time. Try rephrasing, or use /note and /task."
-            )
+            return last_answer or render(MessageCode.TELEGRAM_ASSISTANT_TIMEOUT)
     except Exception:
         logger.exception("assistant turn failed (turn=%s)", turn_key)
-        return "Something went wrong handling that. Try again, or use /note and /task."
+        return render(MessageCode.TELEGRAM_ASSISTANT_ERROR)
 
 
 # ---------------------------------------------------------------------------

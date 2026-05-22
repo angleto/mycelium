@@ -115,6 +115,27 @@ class MessageCode(enum.StrEnum):
     GOOGLE_CALENDAR_API_ERROR = "google_calendar.api_error"
     TELEGRAM_NOT_CONFIGURED = "telegram.not_configured"
     TELEGRAM_WEBHOOK_FORBIDDEN = "telegram.webhook_forbidden"
+    # Bot webhook replies (ADR-0026 P4 / ADR-0017): Flow-generated bot
+    # feedback goes through the catalog. The assistant's own generated
+    # answer is passthrough (not catalogable).
+    TELEGRAM_HELP = "telegram.help"
+    TELEGRAM_FREETEXT_HINT = "telegram.freetext_hint"
+    TELEGRAM_START_WELCOME = "telegram.start_welcome"
+    TELEGRAM_CODE_INVALID = "telegram.code_invalid"
+    TELEGRAM_LINKED = "telegram.linked"
+    TELEGRAM_NOT_LINKED = "telegram.not_linked"
+    TELEGRAM_NO_WORKSPACE = "telegram.no_workspace"
+    TELEGRAM_VOICE_FAILED = "telegram.voice_failed"
+    TELEGRAM_VOICE_SAVED = "telegram.voice_saved"
+    TELEGRAM_EMPTY_IGNORED = "telegram.empty_ignored"
+    TELEGRAM_TASK_CREATED = "telegram.task_created"
+    TELEGRAM_NOTE_SAVED = "telegram.note_saved"
+    TELEGRAM_NOTE_USAGE = "telegram.note_usage"
+    TELEGRAM_UNKNOWN_COMMAND = "telegram.unknown_command"
+    TELEGRAM_ASSISTANT_UNAVAILABLE = "telegram.assistant_unavailable"
+    TELEGRAM_ASSISTANT_TIMEOUT = "telegram.assistant_timeout"
+    TELEGRAM_ASSISTANT_ERROR = "telegram.assistant_error"
+    TELEGRAM_ASSISTANT_BUDGET = "telegram.assistant_budget"
     AGENT_TOKEN_NOT_FOUND = "agent_token.not_found"  # noqa: S105 (message code, not a secret)
     AGENT_TOKEN_INVALID = "agent_token.invalid"  # noqa: S105 (message code, not a secret)
     AI_ASSISTANT_NOT_FOUND = "ai_assistant.not_found"
@@ -267,6 +288,57 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
         MessageCode.GOOGLE_CALENDAR_API_ERROR: ("Google Calendar API error: {detail}"),
         MessageCode.TELEGRAM_NOT_CONFIGURED: ("Telegram bot is not configured on this instance"),
         MessageCode.TELEGRAM_WEBHOOK_FORBIDDEN: "Forbidden webhook caller",
+        MessageCode.TELEGRAM_HELP: (
+            "Flow bot:\n"
+            "• /note <text> → save a note\n"
+            "• /task <title> → create a task\n"
+            "• voice message → save a voice note\n"
+            "• /help → this message\n"
+            "Send free text to chat with the Flow assistant."
+        ),
+        MessageCode.TELEGRAM_FREETEXT_HINT: (
+            "Send /note <text> to save a note, /task <title> for a task, or a voice"
+            " message for a voice note. /help for the list."
+        ),
+        MessageCode.TELEGRAM_START_WELCOME: (
+            "Welcome to Flow. To link your account, open the deep-link from the Flow"
+            " web app's Telegram settings."
+        ),
+        MessageCode.TELEGRAM_CODE_INVALID: (
+            "That link code is invalid or has expired. Generate a new one from the Flow web app."
+        ),
+        MessageCode.TELEGRAM_LINKED: (
+            "Your Telegram account is now linked to Flow. Send /help to see what I"
+            " can do, or just tell me what you need."
+        ),
+        MessageCode.TELEGRAM_NOT_LINKED: (
+            "Your Telegram chat is not linked to Flow. Open the Flow web app and use"
+            " the Telegram settings to link."
+        ),
+        MessageCode.TELEGRAM_NO_WORKSPACE: (
+            "Your Flow account has no workspace yet. Open the web app first."
+        ),
+        MessageCode.TELEGRAM_VOICE_FAILED: "Could not download voice message. Try again.",
+        MessageCode.TELEGRAM_VOICE_SAVED: "Voice note saved.",
+        MessageCode.TELEGRAM_EMPTY_IGNORED: (
+            "Empty message ignored. Send /note <text> to save a note."
+        ),
+        MessageCode.TELEGRAM_TASK_CREATED: "Task created: {title}",
+        MessageCode.TELEGRAM_NOTE_SAVED: "Note saved.",
+        MessageCode.TELEGRAM_NOTE_USAGE: "Usage: /note <text>",
+        MessageCode.TELEGRAM_UNKNOWN_COMMAND: "Unknown command {command}. {help}",
+        MessageCode.TELEGRAM_ASSISTANT_UNAVAILABLE: (
+            "The assistant is unavailable right now. Try again, or use /note and /task."
+        ),
+        MessageCode.TELEGRAM_ASSISTANT_TIMEOUT: (
+            "I couldn't finish that in time. Try rephrasing, or use /note and /task."
+        ),
+        MessageCode.TELEGRAM_ASSISTANT_ERROR: (
+            "Something went wrong handling that. Try again, or use /note and /task."
+        ),
+        MessageCode.TELEGRAM_ASSISTANT_BUDGET: (
+            "Budget for this turn is exhausted. Try a simpler request."
+        ),
         MessageCode.AGENT_TOKEN_NOT_FOUND: "Agent token not found",
         MessageCode.AI_ASSISTANT_NOT_FOUND: "AI assistant not found",
         MessageCode.AI_ASSISTANT_INVALID_SCOPE: ("Unknown scope key: {key}"),
