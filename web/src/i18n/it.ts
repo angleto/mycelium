@@ -423,6 +423,8 @@ export const it: Catalog = {
     viewSwitch: 'Vista',
     viewKanban: 'Kanban',
     viewList: 'Lista',
+    recentTitle: 'Recenti',
+    recentCount: 'Mostra',
     kanbanEmpty: 'Nessuno stato di workflow per generare colonne.',
     kanbanColEmpty: 'Nessun task qui.',
     none: 'Nessun task.',

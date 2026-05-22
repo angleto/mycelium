@@ -1458,6 +1458,79 @@ button.btn--danger:hover {
   font-weight: 600;
 }
 
+/* Recent-tasks widget: an inset panel pinned at the top of /tasks
+   (last N tasks by created/modified, newest first). A subtle surface-2
+   box so it reads as a distinct shortcut without competing with the
+   main card; rows keep the .list li look (surface) and pop against it. */
+.recentwidget {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  padding: 0.5rem 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+.recentwidget__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+.recentwidget__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  background: transparent;
+  border: 0;
+  padding: 0.1rem 0;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-h);
+  cursor: pointer;
+}
+.recentwidget__caret {
+  font-size: 0.7rem;
+  color: var(--muted);
+}
+/* Override the global column-layout `label` so the count control sits
+   inline (label text + number box on one row). */
+.recentwidget__count {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+.recentwidget__count input {
+  width: 3.2rem;
+  padding: 0.15rem 0.3rem;
+}
+.recentlist {
+  margin: 0;
+}
+.recentrow {
+  flex-wrap: nowrap;
+  padding: 0.4rem 0.6rem;
+}
+.recentrow__title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.recentrow__meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+.recentrow__when {
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
 /* Kanban board. Horizontal scroll if more columns than fit. Each
    column holds a sorted stack of cards. Columns and cards keep a
    compact visual to fit several side-by-side on a typical 13" laptop. */

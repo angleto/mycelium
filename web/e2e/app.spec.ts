@@ -197,8 +197,10 @@ test('graph: catalog tag filter + proper scope label', async ({ page }) => {
   }).first()
   await expect(scopeLabel).not.toHaveText(/^All$|^Tutti$/)
   // Tag filter region present (chips from the catalog, or the empty
-  // hint) — never the old indistinct chip/chip--rm pair.
-  await expect(page.locator('.tagfilter')).toBeVisible()
+  // hint) — never the old indistinct chip/chip--rm pair. GraphRoute
+  // renders two .tagfilter blocks (state filter + tag filter); the tag
+  // one is rendered last.
+  await expect(page.locator('.tagfilter').last()).toBeVisible()
   expect(errors, errors.join('\n')).toEqual([])
 })
 
@@ -344,6 +346,69 @@ test('task work note: open from task + billable timer in the note', async ({
   // note-editor vs task-detail timer instances + the reload — a
   // per-instance button re-render races in the serial suite).
   await expect(page.locator('.running')).toHaveCount(0)
+  await expect(page.locator('main.content .err')).toHaveCount(0)
+  expect(errors, errors.join('\n')).toEqual([])
+})
+
+test('tasks: recent widget — newest first, configurable N, toggle persists', async ({
+  page,
+}) => {
+  const errors: string[] = []
+  watch(page, errors)
+  await login(page)
+  await page.goto('/tasks')
+
+  // Quick-add three tasks (member-level write). The client picker is
+  // sourced from /clients (which ensures the Personal default), so the
+  // only required select auto-selects without racing the /tags load.
+  // Wait for it before the first create so each task carries its client
+  // tag.
+  const form = page.locator('form.quickadd')
+  await expect(form.locator('select[required]')).not.toHaveValue('')
+
+  const stamp = Date.now()
+  const titles = [`Recent A ${stamp}`, `Recent B ${stamp}`, `Recent C ${stamp}`]
+  for (const tt of titles) {
+    await form.locator('.quickadd__title').fill(tt)
+    await form.locator('button[type=submit]').click()
+    // The list reloads on create; the new task lands in the widget.
+    await expect(
+      page.locator('.recentlist .recentrow__title', { hasText: tt }),
+    ).toBeVisible()
+  }
+
+  const widget = page.locator('.recentwidget')
+  await expect(widget).toBeVisible()
+  // Most recently created (C) sits on top; A and B are within the
+  // default window (N=4), older suite tasks fill any remaining slots.
+  await expect(widget.locator('.recentrow__title').first()).toContainText(
+    titles[2],
+  )
+  for (const tt of titles) {
+    await expect(
+      widget.locator('.recentrow__title', { hasText: tt }),
+    ).toBeVisible()
+  }
+
+  // Configurable N: shrink to 1 → only the newest survives.
+  await widget.locator('.recentwidget__count input').fill('1')
+  await expect(widget.locator('.recentrow')).toHaveCount(1)
+  await expect(widget.locator('.recentrow__title').first()).toContainText(
+    titles[2],
+  )
+
+  // Collapse → the list unmounts; the state must survive a full reload
+  // (persisted in localStorage, like the view toggle).
+  await widget.locator('.recentwidget__toggle').click()
+  await expect(page.locator('.recentlist')).toHaveCount(0)
+  await page.reload()
+  await expect(page.locator('.recentwidget')).toBeVisible()
+  await expect(page.locator('.recentlist')).toHaveCount(0)
+
+  // Re-expand → the persisted N=1 is still in effect.
+  await page.locator('.recentwidget__toggle').click()
+  await expect(page.locator('.recentlist .recentrow')).toHaveCount(1)
+
   await expect(page.locator('main.content .err')).toHaveCount(0)
   expect(errors, errors.join('\n')).toEqual([])
 })

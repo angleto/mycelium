@@ -5811,6 +5811,16 @@ export interface components {
             offered: boolean;
             /** Deleted At */
             deleted_at?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
             /** Version */
             version: number;
             /** Tags */

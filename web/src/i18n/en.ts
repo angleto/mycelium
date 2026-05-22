@@ -423,6 +423,8 @@ export const en = {
     viewSwitch: 'View',
     viewKanban: 'Kanban',
     viewList: 'List',
+    recentTitle: 'Recent',
+    recentCount: 'Show',
     kanbanEmpty: 'No workflow states to render columns from.',
     kanbanColEmpty: 'No tasks here.',
     none: 'No tasks yet.',

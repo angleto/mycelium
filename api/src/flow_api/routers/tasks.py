@@ -72,6 +72,8 @@ def _out(t: Task, state_name: str, tags: list[Tag] | None = None) -> TaskOut:
         is_archived=t.is_archived,
         offered=t.offered,
         deleted_at=t.deleted_at,
+        created_at=t.created_at,
+        updated_at=t.updated_at,
         version=t.version,
     )
 

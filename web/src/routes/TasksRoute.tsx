@@ -7,6 +7,7 @@ import { TagChip } from '../components/TagChip'
 import { PriorityChip } from '../components/PriorityChip'
 import { ScaleSelect } from '../components/ScaleSelect'
 import { TaskKanban } from '../components/TaskKanban'
+import { RecentTasks } from '../components/RecentTasks'
 import { useFocus } from '../lib/focus'
 import { useLinkedClientProject } from '../lib/linkedClientProject'
 import { parseFilter } from '../lib/taskFilter'
@@ -38,6 +39,7 @@ type Project = components['schemas']['ProjectOut']
 type Running = components['schemas']['TimeEntryOut']
 type State = components['schemas']['StateOut']
 type Wf = components['schemas']['WorkflowOut']
+type Client = components['schemas']['ClientOut']
 
 function hms(sec: number): string {
   const s = Math.max(0, Math.floor(sec))
@@ -61,6 +63,12 @@ export function TasksRoute() {
   // dropdown by selected client and (b) auto-set Client when the user
   // picks a Project.
   const [projectsByClient, setProjectsByClient] = useState<Project[]>([])
+  // Client picker is sourced from /clients (not /tags): that endpoint
+  // side-effects ensure_default_client, so its response always carries
+  // the Personal default. Pre-selecting from it can't lose a race with
+  // the parallel /tags load (a brand-new user otherwise saw an empty
+  // required client select until they reloaded).
+  const [clientsList, setClientsList] = useState<Client[]>([])
   const [filter, setFilter] = useState('')
   const [title, setTitle] = useState('')
   // Default Low/Low (value 4 on the 1=Critical..5=Trivial scale).
@@ -112,7 +120,9 @@ export function TasksRoute() {
     filterProjectsByClient,
   } = useLinkedClientProject(projectsByClient)
 
-  const clients = tags.filter((x) => x.kind === 'client')
+  // Clients from /clients (always includes the ensured Personal default);
+  // projects still come from /tags filtered by the selected client.
+  const clients = clientsList
   const projects = filterProjectsByClient(tags.filter((x) => x.kind === 'project'))
 
   // A task always carries a client tag (and via the project, transitively
@@ -142,20 +152,16 @@ export function TasksRoute() {
     let active = true
     void (async () => {
       const h = workspaceHeader()
-      // /clients is fetched even though we render the picker from
-      // /tags, because the endpoint side-effects ``ensure_default_client``
-      // — guarantees the "Personal" default tag exists and can therefore
-      // be pre-selected (a task must always carry a client tag).
-      const [tk, tg, pj] = await Promise.all([
+      const [tk, tg, pj, cl] = await Promise.all([
         api.GET('/tasks', {
           params: { header: h, query: filter ? { tag_id: filter } : {} },
         }),
         api.GET('/tags', { params: { header: h } }),
         api.GET('/projects', { params: { header: h } }),
-        // /clients is fetched in parallel and intentionally discarded:
-        // the endpoint side-effects ``ensure_default_client`` so the
-        // "Personal" default tag exists and can be pre-selected (a task
-        // must always carry a client tag).
+        // /clients is the authoritative client list and side-effects
+        // ``ensure_default_client``, so its response always includes the
+        // Personal default. It drives the client picker + pre-select
+        // (clientsList) — see the note on that state.
         api.GET('/clients', { params: { header: h } }),
       ])
       if (!active) return
@@ -163,6 +169,7 @@ export function TasksRoute() {
       else setErr(errMessage(tk.error))
       if (tg.data) setTags(tg.data)
       if (pj.data) setProjectsByClient(pj.data)
+      if (cl.data) setClientsList(cl.data)
     })()
     return () => {
       active = false
@@ -452,6 +459,8 @@ export function TasksRoute() {
   return (
     <section className="card card--wide">
       <h1>{t('tasks.title')}</h1>
+
+      <RecentTasks tasks={tasks} />
 
       <form onSubmit={(e) => void onCreate(e)} className="quickadd">
         <input

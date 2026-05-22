@@ -476,6 +476,12 @@ class TaskOut(BaseModel):
     # awaiting a member ``claim`` (cleared on claim).
     offered: bool = False
     deleted_at: datetime.datetime | None = None
+    # Recency timestamps (TimestampMixin). ``created_at`` is set on insert;
+    # ``updated_at`` is bumped on every mutation (onupdate=now()), so the SPA
+    # can sort by ``updated_at`` desc to surface the most recently
+    # created/modified tasks first (Recent-tasks widget).
+    created_at: datetime.datetime
+    updated_at: datetime.datetime
     version: int
     tags: list[TagBrief] = Field(default_factory=list)
 
