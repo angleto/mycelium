@@ -27,6 +27,10 @@ class ClientProfile(OrgScopedMixin, TimestampMixin, VersionMixin, Base):
         primary_key=True,
     )
     ragione_sociale: Mapped[str] = mapped_column(String(200), nullable=False)
+    # Persona fisica: when both set, FatturaPA emits Anagrafica/Nome+Cognome
+    # instead of Denominazione (max 60 latin, AnagraficaType choice).
+    nome: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    cognome: Mapped[str | None] = mapped_column(String(60), nullable=True)
     id_paese: Mapped[str | None] = mapped_column(String(2), nullable=True)
     id_codice: Mapped[str | None] = mapped_column(String(30), nullable=True)
     codice_fiscale: Mapped[str | None] = mapped_column(String(30), nullable=True)

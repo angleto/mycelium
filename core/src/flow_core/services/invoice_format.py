@@ -159,6 +159,19 @@ def _sub(parent: ET.Element, tag: str, text: str | None = None) -> ET.Element:
     return el
 
 
+def _emit_anagrafica(
+    parent: ET.Element, *, denominazione: str, nome: str | None, cognome: str | None
+) -> None:
+    """FatturaPA Anagrafica is a choice: Denominazione OR Nome+Cognome. Emit
+    Nome+Cognome for a persona fisica when BOTH are set, else Denominazione."""
+    an = _sub(parent, "Anagrafica")
+    if nome and cognome:
+        _sub(an, "Nome", nome)
+        _sub(an, "Cognome", cognome)
+    else:
+        _sub(an, "Denominazione", denominazione)
+
+
 def _build_xml(
     inv: Invoice,
     fiscal: IssuerProfile,
@@ -196,8 +209,9 @@ def _build_xml(
         _sub(iva, "IdCodice", fiscal.piva)
     if fiscal.codice_fiscale:
         _sub(anag, "CodiceFiscale", fiscal.codice_fiscale)
-    an = _sub(anag, "Anagrafica")
-    _sub(an, "Denominazione", fiscal.denominazione)
+    _emit_anagrafica(
+        anag, denominazione=fiscal.denominazione, nome=fiscal.nome, cognome=fiscal.cognome
+    )
     _sub(anag, "RegimeFiscale", fiscal.regime_fiscale)
     sede = _sub(cedente, "Sede")
     _sub(sede, "Indirizzo", fiscal.indirizzo)
@@ -214,8 +228,9 @@ def _build_xml(
         _sub(civa, "IdCodice", client.id_codice)
     if client.codice_fiscale:
         _sub(canag, "CodiceFiscale", client.codice_fiscale)
-    can = _sub(canag, "Anagrafica")
-    _sub(can, "Denominazione", client.ragione_sociale)
+    _emit_anagrafica(
+        canag, denominazione=client.ragione_sociale, nome=client.nome, cognome=client.cognome
+    )
     csede = _sub(cess, "Sede")
     _sub(csede, "Indirizzo", client.indirizzo or "")
     _sub(csede, "CAP", client.cap or "")

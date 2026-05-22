@@ -40,6 +40,8 @@ from flow_core.vat import is_valid_vat_code, normalize_vat
 @dataclass(frozen=True, slots=True)
 class ClientInput:
     ragione_sociale: str
+    nome: str | None = None
+    cognome: str | None = None
     id_paese: str | None = None
     id_codice: str | None = None
     codice_fiscale: str | None = None
@@ -131,6 +133,8 @@ async def create_client(
             tag_id=tag.id,
             org_id=org_id,
             ragione_sociale=profile.ragione_sociale,
+            nome=profile.nome,
+            cognome=profile.cognome,
             id_paese=id_paese,
             id_codice=id_codice,
             codice_fiscale=profile.codice_fiscale,

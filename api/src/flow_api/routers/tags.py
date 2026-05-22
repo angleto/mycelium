@@ -109,6 +109,8 @@ async def create_client(
     ensure_role(ctx.role, Role.owner)
     profile = ClientInput(
         ragione_sociale=body.ragione_sociale,
+        nome=body.nome,
+        cognome=body.cognome,
         id_paese=body.id_paese,
         id_codice=body.id_codice,
         codice_fiscale=body.codice_fiscale,
@@ -161,6 +163,8 @@ def _client_out(t: Tag, p: object) -> ClientOut:
         status=t.status,
         version=t.version,
         ragione_sociale=p.ragione_sociale,  # type: ignore[attr-defined]
+        nome=p.nome,  # type: ignore[attr-defined]
+        cognome=p.cognome,  # type: ignore[attr-defined]
         id_paese=p.id_paese,  # type: ignore[attr-defined]
         id_codice=p.id_codice,  # type: ignore[attr-defined]
         codice_fiscale=p.codice_fiscale,  # type: ignore[attr-defined]

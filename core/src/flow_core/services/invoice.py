@@ -85,6 +85,8 @@ _PROFILE_FIELDS = frozenset(
         "rea",
         "default_iban",
         "riferimento_normativo",
+        "nome",
+        "cognome",
     }
 )
 
@@ -151,6 +153,8 @@ async def create_issuer_profile(
     rea: str | None = None,
     default_iban: str | None = None,
     riferimento_normativo: str | None = None,
+    nome: str | None = None,
+    cognome: str | None = None,
     is_default: bool = False,
 ) -> IssuerProfile:
     await require_role(session, org_id, actor_id, Role.admin)
@@ -183,6 +187,8 @@ async def create_issuer_profile(
         rea=rea,
         default_iban=default_iban,
         riferimento_normativo=riferimento_normativo,
+        nome=nome,
+        cognome=cognome,
         is_default=make_default,
     )
     session.add(p)

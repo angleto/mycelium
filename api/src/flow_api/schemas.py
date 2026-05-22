@@ -276,6 +276,8 @@ class TagBrief(BaseModel):
 class ClientCreateIn(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     ragione_sociale: str = Field(min_length=1, max_length=200)
+    nome: str | None = Field(default=None, max_length=60)
+    cognome: str | None = Field(default=None, max_length=60)
     id_paese: str | None = Field(default=None, max_length=2)
     id_codice: str | None = Field(default=None, max_length=30)
     codice_fiscale: str | None = Field(default=None, max_length=30)
@@ -308,6 +310,8 @@ class ProjectCreateIn(BaseModel):
 class ClientPatchIn(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=120)
     ragione_sociale: str | None = Field(default=None, min_length=1, max_length=200)
+    nome: str | None = Field(default=None, max_length=60)
+    cognome: str | None = Field(default=None, max_length=60)
     id_paese: str | None = Field(default=None, max_length=2)
     id_codice: str | None = Field(default=None, max_length=30)
     codice_fiscale: str | None = Field(default=None, max_length=30)
@@ -332,6 +336,8 @@ class ClientOut(BaseModel):
     status: str
     version: int
     ragione_sociale: str
+    nome: str | None
+    cognome: str | None
     id_paese: str | None
     id_codice: str | None
     codice_fiscale: str | None
@@ -1467,6 +1473,8 @@ class IssuerProfileIn(BaseModel):
     # Fallback payment IBAN (precedence: invoice > client > issuer).
     default_iban: str | None = Field(default=None, max_length=34)
     riferimento_normativo: str | None = Field(default=None, max_length=100)
+    nome: str | None = Field(default=None, max_length=60)
+    cognome: str | None = Field(default=None, max_length=60)
     is_default: bool = False
 
 
@@ -1485,6 +1493,8 @@ class IssuerProfilePatchIn(BaseModel):
     rea: str | None = Field(default=None, max_length=40)
     default_iban: str | None = Field(default=None, max_length=34)
     riferimento_normativo: str | None = Field(default=None, max_length=100)
+    nome: str | None = Field(default=None, max_length=60)
+    cognome: str | None = Field(default=None, max_length=60)
     is_default: bool | None = None
 
 
@@ -1504,6 +1514,8 @@ class IssuerProfileOut(BaseModel):
     rea: str | None
     default_iban: str | None
     riferimento_normativo: str | None
+    nome: str | None
+    cognome: str | None
     is_default: bool
     conservation_adhesion: str
     version: int

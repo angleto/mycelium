@@ -102,6 +102,10 @@ class IssuerProfile(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, B
     piva: Mapped[str | None] = mapped_column(String(28), nullable=True)
     codice_fiscale: Mapped[str | None] = mapped_column(String(16), nullable=True)
     denominazione: Mapped[str] = mapped_column(String(200), nullable=False)
+    # Persona fisica: when both set, FatturaPA emits Anagrafica/Nome+Cognome
+    # instead of Denominazione (AnagraficaType is a choice; max 60 latin).
+    nome: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    cognome: Mapped[str | None] = mapped_column(String(60), nullable=True)
     indirizzo: Mapped[str] = mapped_column(String(200), nullable=False, server_default="")
     cap: Mapped[str] = mapped_column(String(10), nullable=False, server_default="")
     comune: Mapped[str] = mapped_column(String(120), nullable=False, server_default="")
