@@ -81,10 +81,26 @@ def make_mcp_app() -> Starlette:
     Idempotent: re-invoking returns a fresh app sharing the same FastMCP
     instance + tool registry (the in-process session manager is created
     lazily on first ``streamable_http_app()`` call)."""
+    from mcp.server.transport_security import TransportSecuritySettings
+
     # Inner FastMCP route at '/' so when this app is mounted at '/mcp'
     # in the FastAPI parent, the public URL is just '/mcp' (otherwise
     # the default '/mcp' route would compose to '/mcp/mcp').
     mcp.settings.streamable_http_path = "/"
+    # Disable the SDK's DNS-rebinding Host/Origin guard. FastMCP
+    # auto-enables it (with allowed_hosts = localhost-only) because the
+    # instance's default host is 127.0.0.1; behind nginx the public
+    # Host is flow.leto.blue and the Origin is the MCP client
+    # (claude.ai, Cursor, ...), so the localhost allowlist returns
+    # 421 Misdirected Request on every call. DNS rebinding is a
+    # localhost-server threat (a malicious page reaching a loopback
+    # MCP); for a public HTTPS server the real gate is the
+    # ``flow_at_`` bearer + the nginx Host routing, both already in
+    # place. Setting an explicit (disabled) policy overrides the
+    # auto-enabled localhost one.
+    mcp.settings.transport_security = TransportSecuritySettings(
+        enable_dns_rebinding_protection=False
+    )
     app = mcp.streamable_http_app()
     app.add_middleware(_BearerAuthMiddleware)
     return app
