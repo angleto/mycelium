@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import datetime
 import uuid
+from typing import Any
 
 from sqlalchemy import (
     BigInteger,
@@ -45,9 +46,11 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     String,
+    Text,
     UniqueConstraint,
     func,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -163,4 +166,69 @@ class TelegramUpdate(Base):
     )
 
 
-__all__ = ["TelegramLink", "TelegramLinkCode", "TelegramUpdate"]
+class TelegramAssistantJob(UUIDPKMixin, OrgScopedMixin, TimestampMixin, Base):
+    """A free-text Telegram message queued for the conversational
+    assistant (ADR-0026, P3). The webhook enqueues it (fast ack) and the
+    worker processes it (run the LLM turn, send the reply). UNIQUE on
+    ``update_id`` makes the enqueue idempotent under Telegram retries.
+
+    Operational queue, not browsable tenant data: written/read from the
+    webhook + worker ``admin_session``, RLS-enabled with an unrestricted
+    policy (the per-user tenant confinement happens in
+    ``assistant.run_turn`` for the actual note/task work)."""
+
+    __tablename__ = "telegram_assistant_jobs"
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    chat_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    update_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    prompt_text: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, server_default="pending")
+    reply_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    started_at: Mapped[datetime.datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    finished_at: Mapped[datetime.datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    __table_args__ = (
+        UniqueConstraint("update_id", name="uq_telegram_assistant_jobs_update_id"),
+        Index(
+            "ix_telegram_assistant_jobs_pending",
+            "created_at",
+            postgresql_where="status = 'pending'",
+        ),
+        CheckConstraint(
+            "status IN ('pending', 'running', 'done', 'failed')",
+            name="ck_telegram_assistant_jobs_status",
+        ),
+    )
+
+
+class TelegramConversation(TimestampMixin, Base):
+    """The recent (role, text) turns for one Telegram chat, so the
+    assistant is multi-turn. ``chat_id`` PK (one conversation per chat);
+    ``turns`` is a trimmed JSON list of ``{"role": ..., "text": ...}``.
+    Operational state, same RLS posture as the job queue."""
+
+    __tablename__ = "telegram_conversations"
+
+    chat_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    turns: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSONB, nullable=False, server_default="[]"
+    )
+
+
+__all__ = [
+    "TelegramAssistantJob",
+    "TelegramConversation",
+    "TelegramLink",
+    "TelegramLinkCode",
+    "TelegramUpdate",
+]

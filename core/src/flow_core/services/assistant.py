@@ -30,6 +30,7 @@ Governance / safety, by construction:
 
 from __future__ import annotations
 
+import datetime as dt
 import json
 import logging
 import uuid
@@ -38,20 +39,27 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any
 
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from flow_core.ai_providers import LLMProvider, get_llm
 from flow_core.config import get_settings
-from flow_core.db import tenant_session
+from flow_core.db import admin_session, tenant_session
 from flow_core.errors import DomainError
 from flow_core.models.billing import CostBasis
 from flow_core.models.note import NoteKind
+from flow_core.models.telegram import TelegramAssistantJob, TelegramConversation
 from flow_core.services import billing
 from flow_core.services import notes as notes_svc
 from flow_core.services import tasks as tasks_svc
 from flow_core.services import workflow as workflow_svc
+from flow_core.telegram_client import get_telegram_api
 
 logger = logging.getLogger("flow.assistant")
+
+# Cap on conversation turns kept per chat (role+text pairs). ~6 exchanges
+# of context is enough for follow-ups without unbounded prompt growth.
+_MAX_TURNS = 12
 
 # The tool allowlist. Read + scoped writes (create/update/set_state/
 # comment). Anything else -> error observation (no side effect). There is
@@ -399,6 +407,7 @@ async def run_turn(
     user_id: uuid.UUID,
     text: str,
     turn_key: str,
+    prior: Sequence[tuple[str, str]] | None = None,
     provider: LLMProvider | None = None,
 ) -> str:
     """Run one conversational turn for the linked user and return the
@@ -416,7 +425,7 @@ async def run_turn(
     budget = Decimal(str(settings.assistant_credit_budget))
     spent = Decimal(0)
 
-    history: list[tuple[str, str]] = [("user", text.strip())]
+    history: list[tuple[str, str]] = [*(prior or []), ("user", text.strip())]
     last_answer = ""
 
     try:
@@ -467,7 +476,160 @@ async def run_turn(
         return "Something went wrong handling that. Try again, or use /note and /task."
 
 
-__all__ = ["run_turn"]
+# ---------------------------------------------------------------------------
+# Durable async channel (ADR-0026, P3): the webhook enqueues, the worker
+# processes (run the turn, send the reply) so a slow turn never blocks the
+# Telegram webhook reply.
+# ---------------------------------------------------------------------------
+
+
+async def enqueue_turn(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    user_id: uuid.UUID,
+    chat_id: int,
+    update_id: int,
+    text: str,
+) -> None:
+    """Queue a free-text message for the worker. Idempotent by
+    ``update_id`` (the webhook already dedupes updates; the UNIQUE
+    constraint is the backstop)."""
+    exists = (
+        await session.execute(
+            select(TelegramAssistantJob.id).where(TelegramAssistantJob.update_id == update_id)
+        )
+    ).scalar_one_or_none()
+    if exists is not None:
+        return
+    session.add(
+        TelegramAssistantJob(
+            org_id=org_id,
+            user_id=user_id,
+            chat_id=chat_id,
+            update_id=update_id,
+            prompt_text=text,
+            status="pending",
+        )
+    )
+    await session.flush()
+
+
+async def _load_turns(chat_id: int) -> list[tuple[str, str]]:
+    async with admin_session() as s:
+        row = (
+            await s.execute(
+                select(TelegramConversation).where(TelegramConversation.chat_id == chat_id)
+            )
+        ).scalar_one_or_none()
+        if row is None:
+            return []
+        return [
+            (str(t.get("role", "user")), str(t.get("text", "")))
+            for t in row.turns
+            if isinstance(t, dict)
+        ]
+
+
+async def _append_turns(session: AsyncSession, *, chat_id: int, new: list[tuple[str, str]]) -> None:
+    row = (
+        await session.execute(
+            select(TelegramConversation)
+            .where(TelegramConversation.chat_id == chat_id)
+            .with_for_update()
+        )
+    ).scalar_one_or_none()
+    existing = list(row.turns) if row is not None else []
+    combined = [*existing, *({"role": r, "text": t} for r, t in new)]
+    combined = combined[-_MAX_TURNS:]
+    if row is None:
+        session.add(TelegramConversation(chat_id=chat_id, turns=combined))
+    else:
+        row.turns = combined
+    await session.flush()
+
+
+@dataclass(frozen=True)
+class _ClaimedJob:
+    id: uuid.UUID
+    org_id: uuid.UUID
+    user_id: uuid.UUID
+    chat_id: int
+    update_id: int
+    text: str
+
+
+async def process_pending_jobs(*, limit: int = 10) -> int:
+    """Worker entry: claim up to ``limit`` pending jobs, run each turn
+    with the chat's recent history, send the reply via the Telegram API,
+    persist the turn into the conversation, and mark the job done|failed.
+    Returns the number of jobs processed. Per-job failure is isolated."""
+    now = dt.datetime.now(tz=dt.UTC)
+    async with admin_session() as s:
+        rows = (
+            (
+                await s.execute(
+                    select(TelegramAssistantJob)
+                    .where(TelegramAssistantJob.status == "pending")
+                    .order_by(TelegramAssistantJob.created_at)
+                    .limit(limit)
+                    .with_for_update(skip_locked=True)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        claimed = [
+            _ClaimedJob(
+                id=j.id,
+                org_id=j.org_id,
+                user_id=j.user_id,
+                chat_id=j.chat_id,
+                update_id=j.update_id,
+                text=j.prompt_text,
+            )
+            for j in rows
+        ]
+        for j in rows:
+            j.status = "running"
+            j.started_at = now
+        await s.flush()
+
+    processed = 0
+    for job in claimed:
+        prior = await _load_turns(job.chat_id)
+        reply = await run_turn(
+            org_id=job.org_id,
+            user_id=job.user_id,
+            text=job.text,
+            turn_key=str(job.update_id),
+            prior=prior,
+        )
+        sent_ok = True
+        try:
+            await get_telegram_api().send_message(chat_id=job.chat_id, text=reply)
+        except Exception:
+            sent_ok = False
+            logger.exception("assistant reply send failed (chat=%s)", job.chat_id)
+        async with admin_session() as s:
+            await _append_turns(
+                s, chat_id=job.chat_id, new=[("user", job.text), ("assistant", reply)]
+            )
+            await s.execute(
+                update(TelegramAssistantJob)
+                .where(TelegramAssistantJob.id == job.id)
+                .values(
+                    status="done" if sent_ok else "failed",
+                    reply_text=reply,
+                    error=None if sent_ok else "telegram send failed",
+                    finished_at=dt.datetime.now(tz=dt.UTC),
+                )
+            )
+        processed += 1
+    return processed
+
+
+__all__ = ["enqueue_turn", "process_pending_jobs", "run_turn"]
 
 
 # Re-exported for tests / future callers that want the allowlist.

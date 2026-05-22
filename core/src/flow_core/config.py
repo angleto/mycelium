@@ -173,6 +173,8 @@ class Settings(BaseSettings):
     assistant_enabled: bool = False
     assistant_max_steps: int = 8
     assistant_credit_budget: float = 0.0
+    # Worker poll interval for the assistant job queue (ADR-0026 P3).
+    assistant_loop_interval_seconds: int = 5
 
     # App
     env: str = "dev"

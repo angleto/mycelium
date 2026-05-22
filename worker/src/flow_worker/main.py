@@ -16,17 +16,20 @@ import logging
 
 from flow_core.config import get_settings
 from flow_core.services.mailer import build_system_mailer, set_mailer
-from flow_worker import dispatch, google_calendar
+from flow_worker import dispatch, google_calendar, telegram_assistant
 
 
 async def _run() -> None:
     # Registered jobs run concurrently:
     #  - P5 closed-loop dispatch tick;
     #  - epic #125 P1 Google Calendar periodic ingest (no-op when
-    #    Google OAuth is not configured).
+    #    Google OAuth is not configured);
+    #  - ADR-0026 P3 Telegram assistant queue drain (no-op when
+    #    FLOW_ASSISTANT_ENABLED is false).
     await asyncio.gather(
         dispatch.run_forever(),
         google_calendar.run_forever(),
+        telegram_assistant.run_forever(),
     )
 
 
@@ -40,7 +43,7 @@ def main() -> None:
     if settings.smtp_configured:
         set_mailer(build_system_mailer(settings))
     logging.getLogger("flow.worker").info(
-        "worker started (env=%s); jobs: dispatch-loop, google-calendar-sync",
+        "worker started (env=%s); jobs: dispatch-loop, google-calendar-sync, telegram-assistant",
         settings.env,
     )
     asyncio.run(_run())

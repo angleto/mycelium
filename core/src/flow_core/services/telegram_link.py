@@ -487,13 +487,19 @@ async def handle_webhook_update(payload: dict[str, object]) -> UpdateOutcome:
     if get_settings().assistant_enabled:
         from flow_core.services import assistant as assistant_svc
 
-        reply = await assistant_svc.run_turn(
-            org_id=org_id,
-            user_id=user_id,
-            text=body_stripped,
-            turn_key=str(update_id),
-        )
-        return UpdateOutcome(reply_text=reply, user_id=user_id)
+        # Enqueue for the worker (ADR-0026 P3): a slow LLM turn must not
+        # block the webhook reply (Telegram retries on timeout). The
+        # worker runs the turn and sends the answer; we ack with no reply.
+        async with admin_session() as s:
+            await assistant_svc.enqueue_turn(
+                s,
+                org_id=org_id,
+                user_id=user_id,
+                chat_id=chat_id,
+                update_id=update_id,
+                text=body_stripped,
+            )
+        return UpdateOutcome(reply_text=None, user_id=user_id)
     return UpdateOutcome(reply_text=_FREETEXT_HINT, user_id=user_id)
 
 

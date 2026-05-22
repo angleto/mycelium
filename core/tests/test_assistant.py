@@ -10,20 +10,39 @@ from __future__ import annotations
 import json
 import re
 import uuid
-from collections.abc import Callable, Sequence
+from collections.abc import AsyncIterator, Callable, Sequence
 
-from sqlalchemy import select
+import pytest
+from sqlalchemy import delete, select
 
-from flow_core.ai_providers import LLMResult
+from flow_core.ai_providers import LLMResult, set_llm_override
 from flow_core.db import admin_session, tenant_session
 from flow_core.models.note import Note, NoteKind
 from flow_core.models.task import Task
+from flow_core.models.telegram import TelegramAssistantJob, TelegramConversation
 from flow_core.services import assistant as svc
 from flow_core.services import notes as notes_svc
 from flow_core.services import tasks as tasks_svc
 from flow_core.services.auth import signup
+from flow_core.telegram_client import (
+    TelegramSendResult,
+    TelegramSetWebhookResult,
+    set_telegram_api_override,
+)
 
 _Step = str | Callable[[Sequence[tuple[str, str]]], str]
+
+
+@pytest.fixture(autouse=True)
+async def _clear_assistant_queue() -> AsyncIterator[None]:
+    """The assistant job queue + conversation state are global (one bot,
+    accessed from admin_session). Isolate tests by clearing both before
+    each so a leftover pending job from one test does not get drained by
+    another's ``process_pending_jobs``."""
+    async with admin_session() as s:
+        await s.execute(delete(TelegramAssistantJob))
+        await s.execute(delete(TelegramConversation))
+    yield
 
 
 class _ScriptLLM:
@@ -238,3 +257,128 @@ async def test_update_task_priority_persists() -> None:
     async with tenant_session(str(org), str(user)) as s:
         t = (await s.execute(select(Task).where(Task.id == tid))).scalar_one()
         assert t.priority == 1
+
+
+# --- P3: durable queue + worker + multi-turn --------------------------------
+
+
+class _CountingLLM:
+    """Finishes immediately with the number of messages it was given, so a
+    test can prove prior conversation turns were loaded into context."""
+
+    model_id = "fake-llm"
+
+    async def complete(
+        self, *, system: str | None, messages: Sequence[tuple[str, str]]
+    ) -> LLMResult:
+        out = json.dumps({"tool": "finish", "args": {"output": str(len(messages))}})
+        return LLMResult(text=out, tokens_in=1, tokens_out=1, model_id=self.model_id)
+
+
+class _FakeTg:
+    def __init__(self) -> None:
+        self.sent: list[tuple[int, str]] = []
+
+    async def send_message(self, *, chat_id: int, text: str) -> TelegramSendResult:
+        self.sent.append((chat_id, text))
+        return TelegramSendResult(message_id=len(self.sent))
+
+    async def set_webhook(self, *, url: str, secret_token: str) -> TelegramSetWebhookResult:
+        return TelegramSetWebhookResult(ok=True, description="ok")
+
+    async def get_file_path(self, *, file_id: str) -> str:
+        return "x"
+
+    async def download_file(self, *, file_path: str) -> bytes:
+        return b""
+
+
+def _chat_id() -> int:
+    return uuid.uuid4().int & 0x7FFFFFFF
+
+
+async def test_enqueue_then_worker_processes_and_replies() -> None:
+    org, user = await _signup()
+    chat_id = _chat_id()
+    async with admin_session() as s:
+        await svc.enqueue_turn(
+            s, org_id=org, user_id=user, chat_id=chat_id, update_id=_chat_id(), text="hi"
+        )
+    fake = _FakeTg()
+    set_llm_override(_CountingLLM)
+    set_telegram_api_override(lambda: fake)
+    try:
+        processed = await svc.process_pending_jobs(limit=10)
+    finally:
+        set_llm_override(None)
+        set_telegram_api_override(None)
+    assert processed == 1
+    # The reply was sent to the right chat.
+    assert any(cid == chat_id for cid, _ in fake.sent)
+    async with admin_session() as s:
+        jobs = (
+            (
+                await s.execute(
+                    select(TelegramAssistantJob).where(TelegramAssistantJob.chat_id == chat_id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len(jobs) == 1 and jobs[0].status == "done"
+        conv = (
+            await s.execute(
+                select(TelegramConversation).where(TelegramConversation.chat_id == chat_id)
+            )
+        ).scalar_one()
+        assert len(conv.turns) == 2  # user + assistant
+
+
+async def test_second_turn_sees_prior_history() -> None:
+    org, user = await _signup()
+    chat_id = _chat_id()
+    fake = _FakeTg()
+    set_llm_override(_CountingLLM)
+    set_telegram_api_override(lambda: fake)
+    try:
+        async with admin_session() as s:
+            await svc.enqueue_turn(
+                s, org_id=org, user_id=user, chat_id=chat_id, update_id=_chat_id(), text="first"
+            )
+        await svc.process_pending_jobs(limit=10)
+        async with admin_session() as s:
+            await svc.enqueue_turn(
+                s, org_id=org, user_id=user, chat_id=chat_id, update_id=_chat_id(), text="second"
+            )
+        await svc.process_pending_jobs(limit=10)
+    finally:
+        set_llm_override(None)
+        set_telegram_api_override(None)
+    # _CountingLLM replies with len(messages). First turn: [user] -> "1".
+    # Second turn: [prior user, prior assistant, new user] -> "3".
+    replies = [text for _, text in fake.sent]
+    assert replies == ["1", "3"]
+
+
+async def test_enqueue_is_idempotent_by_update_id() -> None:
+    org, user = await _signup()
+    chat_id = _chat_id()
+    uid = _chat_id()
+    async with admin_session() as s:
+        await svc.enqueue_turn(
+            s, org_id=org, user_id=user, chat_id=chat_id, update_id=uid, text="a"
+        )
+        await svc.enqueue_turn(
+            s, org_id=org, user_id=user, chat_id=chat_id, update_id=uid, text="a again"
+        )
+    async with admin_session() as s:
+        jobs = (
+            (
+                await s.execute(
+                    select(TelegramAssistantJob).where(TelegramAssistantJob.update_id == uid)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len(jobs) == 1
