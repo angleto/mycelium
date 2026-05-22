@@ -41,7 +41,6 @@ through to a 4xx with an OAuth-shaped error body.
 from __future__ import annotations
 
 import base64
-import datetime as dt
 import hashlib
 import logging
 import secrets
@@ -459,126 +458,6 @@ async def token_endpoint(
         },
         headers={"Cache-Control": "no-store", "Pragma": "no-cache"},
     )
-
-
-@oauth_router.post("/diag-secret", include_in_schema=False)
-async def diag_secret(request: Request) -> JSONResponse:
-    """Diagnostic: POST a JSON body ``{"raw": "flow_at_..."}`` to
-    confirm whether the hash of the supplied raw matches an existing
-    ``agent_tokens`` row via the SECURITY DEFINER lookup. Returns the
-    row's status flags (revoked / expires / assistant_active) without
-    surfacing any tenant identifiers. Used to bisect whether the
-    "client_secret rejected" path on /token is a paste-side bug or a
-    server-side function ownership issue.
-
-    The raw is read from the body, hashed in-memory, never logged.
-    The endpoint is intentionally public (no bearer required) because
-    the input IS the bearer being tested — adding auth here would
-    require a separate one. Output is non-identifying.
-    """
-    import hashlib
-
-    from sqlalchemy import text as _t
-
-    try:
-        body = await request.json()
-    except Exception:
-        return JSONResponse(
-            {"error": "json body required"},
-            status_code=400,
-        )
-    if not isinstance(body, dict):
-        return JSONResponse(
-            {"error": "object body required"},
-            status_code=400,
-        )
-    raw = str(body.get("raw", "")).strip()
-    if not raw:
-        return JSONResponse({"error": "raw required"}, status_code=400)
-    secret_hash = hashlib.sha256(raw.encode("utf-8")).digest()
-    out: dict[str, Any] = {
-        "prefix": raw[:8],
-        "raw_len": len(raw),
-    }
-    try:
-        async with admin_session() as s:
-            row = (
-                await s.execute(
-                    _t(
-                        "SELECT out_exists, out_revoked_at, out_expires_at, "
-                        "out_assistant_active "
-                        "FROM oauth_token_diag(:h)"
-                    ),
-                    {"h": secret_hash},
-                )
-            ).first()
-        if row is None or not row[0]:
-            out["found"] = False
-        else:
-            out["found"] = True
-            out["revoked"] = row[1] is not None
-            out["expired"] = row[2] is not None and row[2] < dt.datetime.now(dt.UTC)
-            out["assistant_active"] = bool(row[3]) if row[3] is not None else None
-    except Exception as exc:
-        out["error"] = str(exc)
-    return JSONResponse(out)
-
-
-@oauth_router.get("/selftest")
-async def selftest() -> JSONResponse:
-    """One-shot diagnostic: confirms the mint -> hash -> authenticate
-    chain works end-to-end in THIS environment. Does NOT require any
-    bearer (returns 200 with a JSON shape describing each step) so we
-    can curl it from outside and find out whether
-    ``client_secret rejected`` is a paste-side bug or a server-side
-    one. Not exposed via metadata; never logs secrets. Safe to leave
-    in place — it inserts a throwaway row in a transaction it always
-    rolls back."""
-    import hashlib
-
-    from sqlalchemy import text as _t
-
-    result: dict[str, Any] = {"hash_matches_local": False, "db_lookup_works": False}
-    try:
-        raw = agent_tokens_svc._generate_raw()
-        h_lib = hashlib.sha256(raw.encode("utf-8")).digest()
-        h_svc = agent_tokens_svc._hash(raw)
-        result["hash_matches_local"] = h_lib == h_svc
-        result["raw_len"] = len(raw)
-        result["hash_len"] = len(h_svc)
-        result["prefix"] = raw[:8]
-
-        # Insert + read-back via the SECURITY DEFINER function path
-        # the OAuth shim uses. Wrap in a transaction we ROLLBACK at
-        # the end so the agent_tokens table doesn't keep diagnostic
-        # noise. The function returns the diag row regardless of
-        # tenant context.
-        async with admin_session() as session:
-            await session.execute(
-                _t(
-                    "INSERT INTO agent_tokens "
-                    "(id, org_id, user_id, name, prefix, token_hash, scope, expires_at, "
-                    "revoked_at, last_used_at) "
-                    "SELECT gen_random_uuid(), o.id, m.user_id, '_selftest', :pfx, :h, "
-                    "'mcp', now() + interval '1 minute', NULL, NULL "
-                    "FROM organizations o "
-                    "JOIN memberships m ON m.org_id = o.id AND m.role = 'owner' "
-                    "LIMIT 1"
-                ),
-                {"pfx": raw[:16], "h": h_svc},
-            )
-            # Read back via the production auth function.
-            row = (
-                await session.execute(
-                    _t("SELECT out_token_id FROM authenticate_agent_token(:h)"),
-                    {"h": h_svc},
-                )
-            ).first()
-            result["db_lookup_works"] = bool(row and row[0])
-            await session.rollback()
-    except Exception as exc:  # diagnostic best-effort
-        result["error"] = str(exc)
-    return JSONResponse(result)
 
 
 __all__ = ["oauth_router", "well_known_router"]
