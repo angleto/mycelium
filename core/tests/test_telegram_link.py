@@ -44,6 +44,10 @@ class FakeTelegramApi:
     def __init__(self) -> None:
         self.sent: list[tuple[int, str]] = []
         self.webhook: tuple[str, str] | None = None
+        # Voice-note capture (file download seam): map file_id -> path
+        # and path -> bytes so a test can stage a fake voice file.
+        self.file_paths: dict[str, str] = {}
+        self.files: dict[str, bytes] = {}
 
     async def send_message(self, *, chat_id: int, text: str) -> TelegramSendResult:
         self.sent.append((chat_id, text))
@@ -53,12 +57,21 @@ class FakeTelegramApi:
         self.webhook = (url, secret_token)
         return TelegramSetWebhookResult(ok=True, description="ok")
 
+    async def get_file_path(self, *, file_id: str) -> str:
+        return self.file_paths.get(file_id, f"voice/{file_id}.oga")
+
+    async def download_file(self, *, file_path: str) -> bytes:
+        return self.files.get(file_path, b"")
+
 
 def test_fake_satisfies_protocol() -> None:
-    # Structural Protocol check: an attribute access on the static
-    # type catches a Protocol signature drift here.
+    # Structural Protocol check. ``TelegramApi`` is @runtime_checkable,
+    # so isinstance verifies every Protocol member is present: this fails
+    # loudly if the fake drifts from the Protocol (e.g. a new method is
+    # added to TelegramApi but not mirrored here). The bare hasattr that
+    # used to stand here let exactly that drift through.
     api: TelegramApi = FakeTelegramApi()
-    assert hasattr(api, "send_message")
+    assert isinstance(api, TelegramApi)
 
 
 def _email() -> str:
