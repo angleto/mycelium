@@ -96,7 +96,9 @@ async def test_forfettario_draft_lines_causale_bollo_and_xml_preview() -> None:
             await c.post(
                 "/invoices",
                 headers=h,
-                json={"client_tag_id": client["id"], "year": 2026},
+                # Pin series "A": this test asserts on the Numero (A1), it is not
+                # exercising the per-client sezionale default.
+                json={"client_tag_id": client["id"], "year": 2026, "series": "A"},
             )
         ).json()
         assert inv["causale"] == _FORFETTARIO_CAUSALE

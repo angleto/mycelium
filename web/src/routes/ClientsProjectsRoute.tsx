@@ -24,6 +24,7 @@ const CLIENT_FIELDS: Array<keyof Client> = [
   'nazione',
   'codice_destinatario',
   'pec',
+  'invoice_series',
   'description',
 ]
 

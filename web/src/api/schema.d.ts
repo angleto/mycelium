@@ -3799,6 +3799,8 @@ export interface components {
             codice_destinatario?: string | null;
             /** Pec */
             pec?: string | null;
+            /** Invoice Series */
+            invoice_series?: string | null;
             /** Payment Iban */
             payment_iban?: string | null;
             /** Description */
@@ -3853,6 +3855,8 @@ export interface components {
             codice_destinatario: string | null;
             /** Pec */
             pec: string | null;
+            /** Invoice Series */
+            invoice_series: string | null;
             /** Payment Iban */
             payment_iban: string | null;
             /** Description */
@@ -3892,6 +3896,8 @@ export interface components {
             codice_destinatario?: string | null;
             /** Pec */
             pec?: string | null;
+            /** Invoice Series */
+            invoice_series?: string | null;
             /** Payment Iban */
             payment_iban?: string | null;
             /** Description */
@@ -4627,11 +4633,8 @@ export interface components {
             issuer_profile_id?: string | null;
             /** Year */
             year?: number | null;
-            /**
-             * Series
-             * @default A
-             */
-            series: string;
+            /** Series */
+            series?: string | null;
             /** Causale */
             causale?: string | null;
         };

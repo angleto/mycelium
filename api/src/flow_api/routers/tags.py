@@ -121,6 +121,7 @@ async def create_client(
         nazione=body.nazione,
         codice_destinatario=body.codice_destinatario,
         pec=body.pec,
+        invoice_series=body.invoice_series,
         payment_iban=body.payment_iban,
         description=body.description,
         default_billable=body.default_billable,
@@ -175,6 +176,7 @@ def _client_out(t: Tag, p: object) -> ClientOut:
         nazione=p.nazione,  # type: ignore[attr-defined]
         codice_destinatario=p.codice_destinatario,  # type: ignore[attr-defined]
         pec=p.pec,  # type: ignore[attr-defined]
+        invoice_series=p.invoice_series,  # type: ignore[attr-defined]
         payment_iban=p.payment_iban,  # type: ignore[attr-defined]
         description=p.description,  # type: ignore[attr-defined]
         default_billable=p.default_billable,  # type: ignore[attr-defined]

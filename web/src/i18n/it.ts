@@ -636,6 +636,7 @@ export const it: Catalog = {
       nazione: 'Nazione',
       codice_destinatario: 'Codice SDI',
       pec: 'PEC',
+      invoice_series: 'Serie fattura (sezionale; vuoto = auto dal nome)',
       description: 'Descrizione (contesto AI)',
     },
   },
@@ -1106,7 +1107,7 @@ export const it: Catalog = {
       'Configura un profilo emittente prima di emettere fatture.',
     goSettings: 'Impostazioni → Profili emittente',
     seriesLegalHint:
-      'Le nuove bozze usano la serie A; cambiala nell editor della bozza. Il numero progressivo e per legge sequenziale per serie e anno (FatturaPA), quindi non puo essere casuale; usa una serie separata se vuoi compartimentare.',
+      'La "serie" è il sezionale. Di default ogni cliente ne ha una propria (derivata dal nome, es. ACME/2026/1, ACME/2026/2), così ogni cliente ha una numerazione progressiva indipendente. Il numero è per emittente+serie+anno (DPR 633/72) ed è assegnato solo all’emissione (in bozza vedi "–"). Puoi cambiare la serie sul singolo documento o impostarne una fissa nella scheda del cliente.',
     client: 'Cliente',
     issuer: 'Emittente',
     series: 'Serie',

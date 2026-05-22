@@ -2,10 +2,11 @@
 
 An invoice is immutable after emission (only ``draft`` mutable;
 correction is a TD04 credit note linked via ``parent_invoice_id``).
-The progressive number per (org, series, year) is allocated
+The progressive number per (issuer_profile, series, year) is allocated
 concurrency-safe only at draft -> transmitted via ``invoice_counters``
-and never reused. ``identificativo_sdi`` is a first-class indexed
-column for correlating SdI receipts to the tenant (ADR-0011).
+and never reused (it belongs to the cedente, DPR 633/72 art.21).
+``identificativo_sdi`` is a first-class indexed column for correlating
+SdI receipts to the tenant (ADR-0011).
 """
 
 from __future__ import annotations
@@ -134,10 +135,29 @@ class IssuerProfile(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, B
 
 
 class InvoiceCounter(Base):
+    """Progressive invoice numbering, keyed per **issuer profile** (per VAT
+    subject), not per org. The progressive number that "la identifichi in modo
+    univoco" (DPR 633/72 art.21 c.2) belongs to the cedente/prestatore, so each
+    issuer profile owns an independent sequence; an org holding several P.IVA
+    keeps them separate (otherwise two VAT subjects would interleave one
+    sequence). ``series`` is the sezionale (default "A"): per-client numbering,
+    when wanted, is a series-per-client, never a separate counter dimension.
+    A profile cannot be deleted while it has invoices (FK RESTRICT on
+    ``invoices.issuer_profile_id``), so the profile-id key never restarts a live
+    sequence. Allocated FOR UPDATE at transmit; numbers are never reused.
+
+    ``org_id`` is retained NOT as part of the key but only to drive the table's
+    RLS policy (``USING/WITH CHECK org_id = current_org``, FORCE RLS): it is
+    functionally determined by ``issuer_profile_id`` and must be set on insert
+    to the issuer's org so the row passes the tenant check."""
+
     __tablename__ = "invoice_counters"
-    __table_args__ = (PrimaryKeyConstraint("org_id", "series", "year", name="pk_invoice_counters"),)
+    __table_args__ = (
+        PrimaryKeyConstraint("issuer_profile_id", "series", "year", name="pk_invoice_counters"),
+    )
 
     org_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    issuer_profile_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
     series: Mapped[str] = mapped_column(String(20), nullable=False)
     year: Mapped[int] = mapped_column(Integer, nullable=False)
     last_number: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
@@ -146,7 +166,11 @@ class InvoiceCounter(Base):
 class Invoice(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, Base):
     __tablename__ = "invoices"
     __table_args__ = (
-        UniqueConstraint("org_id", "series", "year", "number", name="uq_invoices_org_id"),
+        # Number uniqueness is per issuer (the cedente owns its sequence), not
+        # per org: two VAT subjects in one org may legitimately share a number.
+        UniqueConstraint(
+            "issuer_profile_id", "series", "year", "number", name="uq_invoices_issuer"
+        ),
     )
 
     client_tag_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
@@ -241,12 +265,13 @@ class InvoiceLine(UUIDPKMixin, OrgScopedMixin, Base):
 
 
 class SdiTransmissionCounter(Base):
-    """Per-intermediary monotonic sequence for the SdI file name +
-    ProgressivoInvio. These must be unique per *trasmittente*, and one
-    accredited channel transmits for many tenants (ADR-0011), so the
-    sequence is platform-level (keyed by the intermediary id_codice), not
-    per-org: NOT OrgScoped, no RLS org policy. Allocated FOR UPDATE at
-    transmit, like ``InvoiceCounter``."""
+    """Monotonic sequence for the SdI file name + ProgressivoInvio. These
+    must be unique per *trasmittente*, so the key is the trasmittente's fiscal
+    id: the accredited channel holder when Flow transmits as intermediary (one
+    channel for many tenants, ADR-0011), or the cedente itself on
+    self-submission / manual export. Platform-level (NOT OrgScoped, no RLS org
+    policy). Allocated FOR UPDATE at transmit, like ``InvoiceCounter``. (The
+    column keeps the name ``intermediary_id`` for migration stability.)"""
 
     __tablename__ = "sdi_transmission_counters"
 

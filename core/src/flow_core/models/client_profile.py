@@ -41,6 +41,12 @@ class ClientProfile(OrgScopedMixin, TimestampMixin, VersionMixin, Base):
     nazione: Mapped[str | None] = mapped_column(String(2), nullable=True)
     codice_destinatario: Mapped[str | None] = mapped_column(String(7), nullable=True)
     pec: Mapped[str | None] = mapped_column(String(320), nullable=True)
+    # Per-client invoice sezionale: the series prefix used for this client's
+    # invoices (e.g. "ACME" -> ACME/2026/1). Gives each client an independent
+    # progressive sequence (numbering is per issuer+series). Auto-derived from
+    # the name + made unique within the org on first invoice; user-editable.
+    # NULL on legacy clients -> resolved lazily at draft creation.
+    invoice_series: Mapped[str | None] = mapped_column(String(20), nullable=True)
     # Client-specific payment IBAN: overrides the issuer default, is
     # itself overridden by an explicit per-invoice IBAN (precedence:
     # invoice > client > issuer).

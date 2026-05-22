@@ -202,9 +202,8 @@ export function InvoicesRoute() {
       body: {
         client_tag_id: niClient,
         issuer_profile_id: niIssuer || defaultIssuer || null,
-        // Series defaults to 'A'; it's editable in the draft editor.
-        // (FatturaPA numbering is legally sequential per series+year.)
-        series: 'A',
+        // Series omitted on purpose: the backend defaults to the client's own
+        // sezionale (per-client numbering). Editable later in the draft editor.
       },
     })
     if (error || !data) {

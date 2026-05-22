@@ -636,6 +636,7 @@ export const en = {
       nazione: 'Country',
       codice_destinatario: 'SDI code',
       pec: 'PEC email',
+      invoice_series: 'Invoice series (sezionale; empty = auto from name)',
       description: 'Description (AI context)',
     },
   },
@@ -1105,7 +1106,7 @@ export const en = {
       'Configure an issuer profile before issuing invoices.',
     goSettings: 'Settings → Issuer profiles',
     seriesLegalHint:
-      'New drafts use series A; change it in the draft editor. The progressive number is legally sequential per series and year (FatturaPA), so it cannot be randomised; use a separate series if you need to compartmentalise.',
+      'The "series" is the sezionale. By default each client has its own (derived from the name, e.g. ACME/2026/1, ACME/2026/2), so every client gets an independent progressive sequence. The number is per issuer+series+year (DPR 633/72) and is assigned only at emission (a draft shows "–"). You can change the series on a single document, or set a fixed one in the client card.',
     client: 'Client',
     issuer: 'Issuer',
     series: 'Series',

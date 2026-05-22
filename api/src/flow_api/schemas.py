@@ -288,6 +288,9 @@ class ClientCreateIn(BaseModel):
     nazione: str | None = Field(default=None, max_length=2)
     codice_destinatario: str | None = Field(default=None, max_length=7)
     pec: str | None = Field(default=None, max_length=320)
+    # Per-client invoice sezionale (series prefix). None -> auto-derived from
+    # the name on the first invoice. Optional override here.
+    invoice_series: str | None = Field(default=None, max_length=20)
     # Client-specific payment IBAN (precedence: invoice > client >
     # issuer). Optional.
     payment_iban: str | None = Field(default=None, max_length=34)
@@ -322,6 +325,7 @@ class ClientPatchIn(BaseModel):
     nazione: str | None = Field(default=None, max_length=2)
     codice_destinatario: str | None = Field(default=None, max_length=7)
     pec: str | None = Field(default=None, max_length=320)
+    invoice_series: str | None = Field(default=None, max_length=20)
     payment_iban: str | None = Field(default=None, max_length=34)
     description: str | None = None
     default_billable: bool | None = None
@@ -348,6 +352,7 @@ class ClientOut(BaseModel):
     nazione: str | None
     codice_destinatario: str | None
     pec: str | None
+    invoice_series: str | None
     payment_iban: str | None
     description: str | None
     default_billable: bool
@@ -1544,7 +1549,9 @@ class InvoiceCreateIn(BaseModel):
     client_tag_id: uuid.UUID
     issuer_profile_id: uuid.UUID | None = None
     year: int | None = None
-    series: str = Field(default="A", max_length=20)
+    # None -> the service defaults to the client's own sezionale (per-client
+    # numbering). An explicit value pins a custom series.
+    series: str | None = Field(default=None, max_length=20)
     causale: str | None = Field(default=None, max_length=200)
 
 

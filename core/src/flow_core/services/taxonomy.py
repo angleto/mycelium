@@ -52,6 +52,7 @@ class ClientInput:
     nazione: str | None = None
     codice_destinatario: str | None = None
     pec: str | None = None
+    invoice_series: str | None = None
     payment_iban: str | None = None
     description: str | None = None
     default_billable: bool = True
@@ -145,6 +146,7 @@ async def create_client(
             nazione=profile.nazione,
             codice_destinatario=profile.codice_destinatario,
             pec=profile.pec,
+            invoice_series=profile.invoice_series,
             payment_iban=profile.payment_iban,
             description=profile.description,
             default_billable=profile.default_billable,

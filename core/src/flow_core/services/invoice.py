@@ -4,9 +4,10 @@ FR-9).
 Legally load-bearing invariants, enforced here:
 - only ``draft`` is mutable; after emission the document is
   append-only, correction is a TD04 credit note (ADR-0009);
-- the progressive number per (org, series, year) is allocated
-  concurrency-safe (counter row, ``FOR UPDATE``) only at
-  draft -> transmitted, in the same transaction, never reused;
+- the progressive number per (issuer_profile, series, year) is
+  allocated concurrency-safe (counter row, ``FOR UPDATE``) only at
+  draft -> transmitted, in the same transaction, never reused; the
+  series defaults to the client's own sezionale (per-client numbering);
 - the tenant identity is in the FatturaPA payload, not the channel
   (ADR-0011); ``ManualExportChannel`` invoices are out of AdE free
   conservation (ADR-0010), SdI-transited ones become covered.
@@ -17,6 +18,7 @@ arithmetically validated (full XSD validation is a hardening add-on).
 from __future__ import annotations
 
 import datetime as dt
+import re
 import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -348,6 +350,50 @@ def _require_draft(inv: Invoice) -> None:
         raise ConflictError(MessageCode.INVOICE_NOT_DRAFT)
 
 
+_SERIES_BASE_MAX = 8
+
+
+def _derive_series_base(name: str) -> str:
+    """A client's default sezionale code: the name uppercased, stripped to
+    [A-Z0-9], capped at 8 chars (kept short so ``series + number`` stays a sane
+    FatturaPA Numero). Falls back to "CLI" when the name has no usable chars."""
+    base = re.sub(r"[^A-Z0-9]", "", (name or "").upper())[:_SERIES_BASE_MAX]
+    return base or "CLI"
+
+
+async def _ensure_client_series(
+    session: AsyncSession, *, org_id: uuid.UUID, client: ClientProfile
+) -> str:
+    """The client's invoice sezionale, deriving + persisting a unique one on
+    first use. Per-client numbering is a series-per-client (each client an
+    independent progressive sequence): the code defaults to a sanitized prefix
+    of the name, suffixed with a counter if another client already took it, so
+    two clients never collide on one sequence. Stored on the client, so it is
+    stable across that client's invoices."""
+    if client.invoice_series:
+        return client.invoice_series
+    taken = set(
+        (
+            await session.execute(
+                select(ClientProfile.invoice_series).where(
+                    ClientProfile.invoice_series.is_not(None)
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    base = _derive_series_base(client.ragione_sociale)
+    code = base
+    n = 2
+    while code in taken:
+        code = f"{base}{n}"
+        n += 1
+    client.invoice_series = code
+    await session.flush()
+    return code
+
+
 async def create_draft(
     session: AsyncSession,
     *,
@@ -355,7 +401,7 @@ async def create_draft(
     actor_id: uuid.UUID,
     client_tag_id: uuid.UUID,
     year: int | None = None,
-    series: str = "A",
+    series: str | None = None,
     causale: str | None = None,
     issuer_profile_id: uuid.UUID | None = None,
     document_type: DocumentType = DocumentType.TD01,
@@ -370,6 +416,18 @@ async def create_draft(
     else:
         issuer = await get_default_issuer_profile(session, org_id=org_id)
         issuer_profile_id = issuer.id if issuer is not None else None
+    cp = (
+        await session.execute(select(ClientProfile).where(ClientProfile.tag_id == client_tag_id))
+    ).scalar_one_or_none()
+    # Series defaults to the client's own sezionale (per-client numbering): each
+    # client gets an independent progressive sequence under (issuer, series,
+    # year). An explicit series always wins; with no client profile yet, "A".
+    if series is None:
+        series = (
+            await _ensure_client_series(session, org_id=org_id, client=cp)
+            if cp is not None
+            else "A"
+        )
     # Forfettario (RF19): default the mandatory L.190/2014 causale when
     # the caller gave none (an explicit causale is always honoured).
     if causale is None and _is_forfettario(issuer):
@@ -392,9 +450,6 @@ async def create_draft(
     # visible/editable on the draft (precedence: invoice > client >
     # issuer). The client may not have a profile yet at draft time;
     # that is fine, update_draft re-resolves while still empty.
-    cp = (
-        await session.execute(select(ClientProfile).where(ClientProfile.tag_id == client_tag_id))
-    ).scalar_one_or_none()
     iban, _src = _effective_iban(inv, cp, issuer)
     if iban is not None:
         inv.payment_iban = iban
@@ -730,15 +785,24 @@ def _validate(
 
 
 async def _allocate_number(
-    session: AsyncSession, *, org_id: uuid.UUID, series: str, year: int
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    issuer_profile_id: uuid.UUID,
+    series: str,
+    year: int,
 ) -> int:
-    """Concurrency-safe: lock (or create) the per-(org,series,year)
-    counter row FOR UPDATE; numbers are sequential and never reused."""
+    """Concurrency-safe: lock (or create) the per-(issuer,series,year)
+    counter row FOR UPDATE; numbers are sequential and never reused. Keyed by
+    the issuer profile (the cedente/prestatore), not the org: each VAT subject
+    owns an independent progressive sequence (DPR 633/72 art.21). ``org_id`` is
+    not part of the key; it is stamped on a new counter row only to satisfy the
+    table's RLS WITH CHECK (tenant isolation)."""
     counter = (
         await session.execute(
             select(InvoiceCounter)
             .where(
-                InvoiceCounter.org_id == org_id,
+                InvoiceCounter.issuer_profile_id == issuer_profile_id,
                 InvoiceCounter.series == series,
                 InvoiceCounter.year == year,
             )
@@ -748,7 +812,13 @@ async def _allocate_number(
     if counter is None:
         try:
             async with session.begin_nested():
-                counter = InvoiceCounter(org_id=org_id, series=series, year=year, last_number=0)
+                counter = InvoiceCounter(
+                    org_id=org_id,
+                    issuer_profile_id=issuer_profile_id,
+                    series=series,
+                    year=year,
+                    last_number=0,
+                )
                 session.add(counter)
                 await session.flush()
         except IntegrityError:
@@ -757,7 +827,7 @@ async def _allocate_number(
             await session.execute(
                 select(InvoiceCounter)
                 .where(
-                    InvoiceCounter.org_id == org_id,
+                    InvoiceCounter.issuer_profile_id == issuer_profile_id,
                     InvoiceCounter.series == series,
                     InvoiceCounter.year == year,
                 )
@@ -854,20 +924,31 @@ async def transmit(
         totals.bollo,
         totals.total,
     )
-    number = await _allocate_number(session, org_id=org_id, series=inv.series, year=inv.year)
+    number = await _allocate_number(
+        session, org_id=org_id, issuer_profile_id=fiscal.id, series=inv.series, year=inv.year
+    )
     inv.number = number
     inv.issued_at = dt.datetime.now(tz=dt.UTC)
+    # The SdI file-name progressivo is max 5 alphanumeric chars (Specifiche
+    # SDI, Allegato B). It must also be unique per trasmittente across every
+    # file ever sent, which the per-org/per-issuer invoice number is NOT
+    # (it resets each year and is scoped differently). So both paths draw a
+    # dedicated monotonic per-trasmittente sequence rendered base36 width 5
+    # (``transmission_progressivo``); the trasmittente is the accredited
+    # channel holder when Flow acts as intermediary, else the cedente itself.
     if intermediary is not None:
-        # Per-intermediary unique progressivo + file name: unique per
-        # trasmittente across all tenants (the per-org invoice number is not).
         seq = await _allocate_transmission_seq(session, intermediary_id=intermediary.id_codice)
         progressivo_str = transmission_progressivo(seq)
         filename = fatturapa_filename(
             intermediary.id_paese, intermediary.id_codice, progressivo_str
         )
     else:
-        progressivo_str = progressivo or f"{inv.year}{number:05d}"
         cedente_id = fiscal.piva or fiscal.codice_fiscale or ""
+        if progressivo is not None:
+            progressivo_str = progressivo
+        else:
+            seq = await _allocate_transmission_seq(session, intermediary_id=cedente_id)
+            progressivo_str = transmission_progressivo(seq)
         filename = fatturapa_filename(fiscal.paese, cedente_id, progressivo_str)
     collegata = await _resolve_collegata(session, org_id=org_id, inv=inv)
     xml = _build_xml(
@@ -924,6 +1005,11 @@ async def create_credit_note(
         client_tag_id=parent.client_tag_id,
         year=parent.year,
         series=parent.series,
+        # A credit note must be issued by the SAME cedente as the corrected
+        # invoice: inherit the parent's issuer explicitly (not the current org
+        # default, which may have changed) so the document is fiscally coherent
+        # and shares the parent's (issuer, series, year) numbering sequence.
+        issuer_profile_id=parent.issuer_profile_id,
         causale=causale,
         document_type=DocumentType.TD04,
         kind=InvoiceKind.credit_note,
@@ -1053,15 +1139,16 @@ class InvoicePreview:
 
 
 async def _would_be_number(
-    session: AsyncSession, *, org_id: uuid.UUID, series: str, year: int
+    session: AsyncSession, *, issuer_profile_id: uuid.UUID, series: str, year: int
 ) -> int:
     """The number this draft would get at transmit, WITHOUT allocating
     (no counter mutation, no lock): last_number + 1, or 1 if none yet.
-    For display only; the authoritative allocation stays in transmit."""
+    Keyed per issuer like the real allocation. For display only; the
+    authoritative allocation stays in transmit."""
     counter = (
         await session.execute(
             select(InvoiceCounter).where(
-                InvoiceCounter.org_id == org_id,
+                InvoiceCounter.issuer_profile_id == issuer_profile_id,
                 InvoiceCounter.series == series,
                 InvoiceCounter.year == year,
             )
@@ -1084,7 +1171,15 @@ async def _gather_preview(
     iban, src = _effective_iban(inv, client, issuer)
     n = inv.number
     if n is None:
-        n = await _would_be_number(session, org_id=org_id, series=inv.series, year=inv.year)
+        # Display-only "would-be" number, keyed per issuer like the real
+        # allocation. ``issuer`` may be None on an incomplete draft with no
+        # profile yet; then there is no sequence to peek, so show 1.
+        iid = issuer.id if issuer is not None else inv.issuer_profile_id
+        n = (
+            await _would_be_number(session, issuer_profile_id=iid, series=inv.series, year=inv.year)
+            if iid is not None
+            else 1
+        )
     return InvoicePreview(
         issuer=issuer,
         client=client,
