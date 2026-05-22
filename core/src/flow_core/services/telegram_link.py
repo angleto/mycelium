@@ -443,9 +443,8 @@ async def handle_webhook_update(payload: dict[str, object]) -> UpdateOutcome:
         # appends in group chats stripped off.
         command = body_stripped.split(maxsplit=1)[0].lower().split("@", 1)[0]
         if command == _TASK_PREFIX:
-            title = body_stripped.split(maxsplit=1)
-            title = title[1].strip() if len(title) == 2 else ""
-            title = title or "Task from Telegram"
+            parts = body_stripped.split(maxsplit=1)
+            title = (parts[1].strip() if len(parts) == 2 else "") or "Task from Telegram"
             async with tenant_session(str(org_id), str(user_id)) as ts:
                 task = await tasks_svc.create_task(
                     ts,
@@ -460,8 +459,8 @@ async def handle_webhook_update(payload: dict[str, object]) -> UpdateOutcome:
                 user_id=user_id,
             )
         if command == "/note":
-            text_body = body_stripped.split(maxsplit=1)
-            text_body = text_body[1].strip() if len(text_body) == 2 else ""
+            note_parts = body_stripped.split(maxsplit=1)
+            text_body = note_parts[1].strip() if len(note_parts) == 2 else ""
             if not text_body:
                 return UpdateOutcome(reply_text="Usage: /note <text>", user_id=user_id)
             async with tenant_session(str(org_id), str(user_id)) as ts:

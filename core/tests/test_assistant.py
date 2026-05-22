@@ -12,9 +12,12 @@ import re
 import uuid
 from collections.abc import Callable, Sequence
 
+from sqlalchemy import select
+
 from flow_core.ai_providers import LLMResult
 from flow_core.db import admin_session, tenant_session
-from flow_core.models.note import NoteKind
+from flow_core.models.note import Note, NoteKind
+from flow_core.models.task import Task
 from flow_core.services import assistant as svc
 from flow_core.services import notes as notes_svc
 from flow_core.services import tasks as tasks_svc
@@ -146,3 +149,92 @@ async def test_step_cap_returns_graceful_message() -> None:
         org_id=org, user_id=user, text="loop", turn_key=uuid.uuid4().hex, provider=llm
     )
     assert reply  # non-empty graceful fallback, no hang/exception
+
+
+# --- P2: scoped writes -----------------------------------------------------
+
+
+def _created_task_id(msgs: Sequence[tuple[str, str]]) -> str:
+    for _, content in msgs:
+        m = re.search(r"created task id=([0-9a-fA-F-]{36})", content)
+        if m:
+            return m.group(1)
+    return ""
+
+
+def _first_transition_name(obs: str) -> str:
+    m = re.search(r": (.+?) \(id=", obs)
+    return m.group(1).strip() if m else ""
+
+
+async def test_create_note_via_tool_persists() -> None:
+    org, user = await _signup()
+    steps: list[_Step] = [
+        '{"tool": "create_note", "args": {"text": "buy milk", "title": "Shopping"}}',
+        lambda msgs: json.dumps({"tool": "finish", "args": {"output": msgs[-1][1]}}),
+    ]
+    reply = await svc.run_turn(
+        org_id=org,
+        user_id=user,
+        text="note that I should buy milk",
+        turn_key=uuid.uuid4().hex,
+        provider=_ScriptLLM(steps),
+    )
+    assert "created note" in reply.lower()
+    async with tenant_session(str(org), str(user)) as s:
+        rows = (await s.execute(select(Note).where(Note.transcript == "buy milk"))).scalars().all()
+        assert len(rows) == 1
+
+
+async def test_create_task_then_set_state_transitions() -> None:
+    org, user = await _signup()
+    steps: list[_Step] = [
+        '{"tool": "create_task", "args": {"title": "Ship the release"}}',
+        lambda msgs: json.dumps(
+            {"tool": "list_task_transitions", "args": {"id": _created_task_id(msgs)}}
+        ),
+        lambda msgs: json.dumps(
+            {
+                "tool": "set_task_state",
+                "args": {
+                    "id": _created_task_id(msgs),
+                    "state": _first_transition_name(msgs[-1][1]),
+                },
+            }
+        ),
+        lambda msgs: json.dumps({"tool": "finish", "args": {"output": msgs[-1][1]}}),
+    ]
+    reply = await svc.run_turn(
+        org_id=org,
+        user_id=user,
+        text="create a task and start it",
+        turn_key=uuid.uuid4().hex,
+        provider=_ScriptLLM(steps),
+    )
+    # The set_task_state observation is "task <id> -> <Name>"; the default
+    # workflow's initial state has at least one outgoing transition.
+    assert "->" in reply and "error" not in reply.lower()
+
+
+async def test_update_task_priority_persists() -> None:
+    org, user = await _signup()
+    async with tenant_session(str(org), str(user)) as s:
+        task = await tasks_svc.create_task(
+            s, org_id=org, actor_id=user, title="reprioritize me", priority=3
+        )
+        tid = task.id
+    steps: list[_Step] = [
+        json.dumps({"tool": "update_task", "args": {"id": str(tid), "priority": 1}}),
+        lambda msgs: json.dumps({"tool": "finish", "args": {"output": msgs[-1][1]}}),
+    ]
+    reply = await svc.run_turn(
+        org_id=org,
+        user_id=user,
+        text="make it top priority",
+        turn_key=uuid.uuid4().hex,
+        provider=_ScriptLLM(steps),
+    )
+    assert "updated task" in reply.lower()
+    async with tenant_session(str(org), str(user)) as s:
+        t = (await s.execute(select(Task).where(Task.id == tid))).scalar_one()
+        assert t.priority == 1
