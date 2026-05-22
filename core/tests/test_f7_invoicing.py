@@ -307,3 +307,36 @@ async def test_mark_paid_allowed_post_emission() -> None:
                 identificativo_sdi="nope",
                 outcome="ZZ",
             )
+
+
+async def test_issuer_piva_country_prefix_is_normalized() -> None:
+    org, user = await _org()
+    async with tenant_session(str(org), str(user)) as s:
+        p = await inv.create_issuer_profile(
+            s,
+            org_id=org,
+            actor_id=user,
+            label="P",
+            denominazione="Acme",
+            piva="IT13438810015",  # VIES form: prefix glued to the number
+            indirizzo="Via Roma 1",
+            cap="00100",
+            comune="Roma",
+            is_default=True,
+        )
+        # Split into IdPaese + bare IdCodice (no prefix in the number).
+        assert p.paese == "IT"
+        assert p.piva == "13438810015"
+        # A malformed code (not 11 digits after the prefix) is rejected.
+        with pytest.raises(DomainError):
+            await inv.create_issuer_profile(
+                s,
+                org_id=org,
+                actor_id=user,
+                label="Bad",
+                denominazione="Bad",
+                piva="IT123",
+                indirizzo="Via Roma 1",
+                cap="00100",
+                comune="Roma",
+            )

@@ -65,6 +65,7 @@ from flow_core.services.invoice_xsd import validate_fatturapa
 from flow_core.services.rbac import require_role
 from flow_core.services.sdi_mandate import get_active_mandate
 from flow_core.services.sdi_transport import fatturapa_filename, transmission_progressivo
+from flow_core.vat import is_valid_vat_code, normalize_vat
 
 # --- issuer profiles (the invoice "intestazione") ---
 
@@ -159,6 +160,13 @@ async def create_issuer_profile(
     make_default = is_default or not existing
     if make_default:
         await _clear_default(session)
+    # Normalize a VIES-form P.IVA ("IT13438810015") into IdPaese + bare
+    # IdCodice; reject a malformed code (FatturaPA IdCodice is the number
+    # only, no country prefix).
+    new_paese, piva = normalize_vat(piva, paese)
+    paese = new_paese or paese
+    if not is_valid_vat_code(piva, paese):
+        raise DomainError(MessageCode.FISCAL_PROFILE_REQUIRED, detail=f"piva '{piva}'")
     p = IssuerProfile(
         org_id=org_id,
         label=label,
@@ -206,6 +214,12 @@ async def update_issuer_profile(
         raise DomainError(MessageCode.DOMAIN_ERROR, detail=", ".join(sorted(unknown)))
     for field, value in values.items():
         setattr(p, field, value)
+    if "piva" in values or "paese" in values:
+        new_paese, p.piva = normalize_vat(p.piva, p.paese)
+        if new_paese is not None:
+            p.paese = new_paese
+        if not is_valid_vat_code(p.piva, p.paese):
+            raise DomainError(MessageCode.FISCAL_PROFILE_REQUIRED, detail=f"piva '{p.piva}'")
     # Promoting to default demotes the rest; the default is moved away
     # only via set_default_issuer_profile (an org keeps exactly one).
     if is_default is True and not p.is_default:

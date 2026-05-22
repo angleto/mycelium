@@ -34,6 +34,7 @@ from flow_core.models.task import Task
 from flow_core.models.task_tag import TaskTag
 from flow_core.services import audit
 from flow_core.services.rbac import require_role
+from flow_core.vat import is_valid_vat_code, normalize_vat
 
 
 @dataclass(frozen=True, slots=True)
@@ -120,13 +121,18 @@ async def create_client(
 ) -> Tag:
     await require_role(session, org_id, actor_id, Role.admin)
     tag = await _insert_tag(session, org_id, TagKind.client, name, None)
+    # Normalize a VIES-form VAT id ("IT09876543210") into IdPaese + bare
+    # IdCodice (FatturaPA IdCodice carries no country prefix).
+    id_paese, id_codice = normalize_vat(profile.id_codice, profile.id_paese)
+    if not is_valid_vat_code(id_codice, id_paese):
+        raise DomainError(MessageCode.INVOICE_INVALID, detail=f"client piva '{id_codice}'")
     session.add(
         ClientProfile(
             tag_id=tag.id,
             org_id=org_id,
             ragione_sociale=profile.ragione_sociale,
-            id_paese=profile.id_paese,
-            id_codice=profile.id_codice,
+            id_paese=id_paese,
+            id_codice=id_codice,
             codice_fiscale=profile.codice_fiscale,
             indirizzo=profile.indirizzo,
             cap=profile.cap,
@@ -578,8 +584,13 @@ async def update_client(
     if name is not None:
         tag.name = name
         tag.version += 1
-    for k, v in (fields or {}).items():
+    flds = fields or {}
+    for k, v in flds.items():
         setattr(prof, k, v)
+    if "id_codice" in flds or "id_paese" in flds:
+        prof.id_paese, prof.id_codice = normalize_vat(prof.id_codice, prof.id_paese)
+        if not is_valid_vat_code(prof.id_codice, prof.id_paese):
+            raise DomainError(MessageCode.INVOICE_INVALID, detail=f"client piva '{prof.id_codice}'")
     await session.flush()
     await audit.log(
         session,
