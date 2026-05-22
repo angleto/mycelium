@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import contextlib
 from collections.abc import AsyncIterator, Awaitable, Callable
+from typing import Any
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -86,29 +87,44 @@ def _make_handler(
     return handler
 
 
-@contextlib.asynccontextmanager
-async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
-    """Process-global wiring for the *real* ASGI server.
+def _make_lifespan(mcp_app: Any) -> Any:
+    """Parent lifespan that ALSO drives the mounted MCP sub-app's
+    lifespan. FastAPI/Starlette do NOT run a mounted app's lifespan
+    automatically, so the MCP ``StreamableHTTPSessionManager.run()``
+    (entered by ``streamable_http_app()``'s own lifespan) would never
+    start — every POST /mcp then 500s with "Task group is not
+    initialized. Make sure to use run()". We enter the sub-app's
+    lifespan context here so its session-manager task group is live
+    for the process lifetime.
 
-    Lifespan events fire only under an ASGI server (uvicorn) or a
-    ``with TestClient(...)`` block; the suite drives the app via
-    ``httpx.ASGITransport`` / bare ``TestClient(...)``, neither of
-    which emits lifespan, so this never runs in unit tests and a
-    test-injected fake mailer is never clobbered.
+    Lifespan events fire only under a real ASGI server (uvicorn) or a
+    ``with TestClient(...)`` block; the unit suite drives the app via
+    bare ``httpx.ASGITransport`` which doesn't emit lifespan, so the
+    MCP task group simply isn't started in tests (no MCP HTTP test
+    exercises it in-process). SMTP wiring stays as before."""
 
-    Defensive belt-and-braces even if it did run: only swap the
-    process-global when SMTP is actually configured. Unconfigured
-    (dev/OSS/tests) the module default is already ``LogMailer`` and we
-    leave the global untouched, so an explicit ``set_mailer(fake)``
-    always wins regardless of lifespan ordering."""
-    settings = get_settings()
-    if settings.smtp_configured:
-        set_mailer(build_system_mailer(settings))
-    yield
+    @contextlib.asynccontextmanager
+    async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
+        settings = get_settings()
+        if settings.smtp_configured:
+            set_mailer(build_system_mailer(settings))
+        # Drive the mounted MCP app's lifespan (starts the streamable
+        # HTTP session manager's task group).
+        async with mcp_app.router.lifespan_context(mcp_app):
+            yield
+
+    return _lifespan
 
 
 def create_app() -> FastAPI:
-    app = FastAPI(title="Flow API", version="0.0.0", lifespan=_lifespan)
+    from flow_mcp.server_http import make_mcp_app
+
+    mcp_app = make_mcp_app()
+    app = FastAPI(
+        title="Flow API",
+        version="0.0.0",
+        lifespan=_make_lifespan(mcp_app),
+    )
 
     @app.get("/healthz", tags=["meta"])
     async def healthz() -> dict[str, str]:
@@ -178,7 +194,8 @@ def create_app() -> FastAPI:
     # @mcp.tool short-circuits on. URL becomes /mcp at the public
     # ingress (flow.leto.blue/mcp); behind nginx the SPA's same-origin
     # routing already covers /api/, the deploy adds a /mcp/ proxy.
-    from flow_mcp.server_http import make_mcp_app
-
-    app.mount("/mcp", make_mcp_app())
+    # Mount the SAME mcp_app instance whose lifespan _make_lifespan
+    # drives — mounting a fresh one would leave the session manager
+    # uninitialised again.
+    app.mount("/mcp", mcp_app)
     return app
