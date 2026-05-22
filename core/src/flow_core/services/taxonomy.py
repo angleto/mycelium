@@ -180,7 +180,6 @@ async def _ensure_default_tag(
     session: AsyncSession,
     *,
     org_id: uuid.UUID,
-    actor_id: uuid.UUID,
     kind: TagKind,
     name: str,
     settings_key: str,
@@ -241,7 +240,6 @@ async def ensure_default_client(
     tag_id, created = await _ensure_default_tag(
         session,
         org_id=org_id,
-        actor_id=actor_id,
         kind=TagKind.client,
         name=_DEFAULT_CLIENT_NAME,
         settings_key="default_client_tag_id",
@@ -273,7 +271,6 @@ async def ensure_default_project(
     tag_id, created = await _ensure_default_tag(
         session,
         org_id=org_id,
-        actor_id=actor_id,
         kind=TagKind.project,
         name=_DEFAULT_PROJECT_NAME,
         settings_key="default_project_tag_id",
@@ -380,7 +377,10 @@ async def list_tags(
     unreachable while a focus is active (the reported bug). The
     structural client/project ownership constraint is unaffected: other
     clients' structural tags stay hidden under a focus on both surfaces."""
-    stmt = select(Tag).order_by(Tag.kind, Tag.name)
+    # Explicit org filter on top of RLS (defense-in-depth): a read must
+    # not leak across tenants even on a path where the RLS GUC is unset
+    # (the SECURITY DEFINER + FORCE RLS gotcha seen in #48/#125).
+    stmt = select(Tag).where(Tag.org_id == org_id).order_by(Tag.kind, Tag.name)
     if kind is not None:
         stmt = stmt.where(Tag.kind == kind)
     if not include_archived:
@@ -523,7 +523,10 @@ async def set_tag_scope(
 
 
 async def get_tag(session: AsyncSession, *, org_id: uuid.UUID, tag_id: uuid.UUID) -> Tag:
-    tag = (await session.execute(select(Tag).where(Tag.id == tag_id))).scalar_one_or_none()
+    # Explicit org filter on top of RLS (defense-in-depth, see list_tags).
+    tag = (
+        await session.execute(select(Tag).where(Tag.id == tag_id, Tag.org_id == org_id))
+    ).scalar_one_or_none()
     if tag is None:
         raise NotFoundError(MessageCode.TAG_NOT_FOUND)
     return tag
@@ -535,7 +538,7 @@ async def list_clients(
     rows = await session.execute(
         select(Tag, ClientProfile)
         .join(ClientProfile, ClientProfile.tag_id == Tag.id)
-        .where(Tag.kind == TagKind.client)
+        .where(Tag.kind == TagKind.client, Tag.org_id == org_id)
         .order_by(Tag.name)
     )
     return [(t, p) for t, p in rows.all()]
@@ -547,7 +550,7 @@ async def list_projects(
     rows = await session.execute(
         select(Tag, ProjectProfile)
         .join(ProjectProfile, ProjectProfile.tag_id == Tag.id)
-        .where(Tag.kind == TagKind.project)
+        .where(Tag.kind == TagKind.project, Tag.org_id == org_id)
         .order_by(Tag.name)
     )
     return [(t, p) for t, p in rows.all()]
@@ -644,7 +647,11 @@ async def find_tag_by_name(
     none, TAG_AMBIGUOUS if more than one (docs/adr/0021: confirm,
     never guess)."""
     rows = list(
-        (await session.execute(select(Tag).where(Tag.kind == kind, Tag.name == name)))
+        (
+            await session.execute(
+                select(Tag).where(Tag.kind == kind, Tag.name == name, Tag.org_id == org_id)
+            )
+        )
         .scalars()
         .all()
     )
@@ -1000,7 +1007,6 @@ async def _purge_attachment_blobs_for(
 async def _purge_project_subgraph(
     session: AsyncSession,
     *,
-    org_id: uuid.UUID,
     project_tag_id: uuid.UUID,
 ) -> None:
     """Wipe everything semantically owned by a project (tag of kind
@@ -1072,7 +1078,7 @@ async def purge_project(
         session, org_id=org_id, tag_id=tag_id, settings_key="default_project_tag_id"
     ):
         raise DomainError(MessageCode.TAG_DEFAULT_PROTECTED, kind="project")
-    await _purge_project_subgraph(session, org_id=org_id, project_tag_id=tag_id)
+    await _purge_project_subgraph(session, project_tag_id=tag_id)
     await session.execute(delete(Tag).where(Tag.id == tag_id))
     await session.flush()
     await audit.log(
@@ -1132,7 +1138,7 @@ async def purge_client(
         .all()
     )
     for project_tag_id in project_ids:
-        await _purge_project_subgraph(session, org_id=org_id, project_tag_id=project_tag_id)
+        await _purge_project_subgraph(session, project_tag_id=project_tag_id)
     if project_ids:
         await session.execute(delete(Tag).where(Tag.id.in_(project_ids)))
     await session.execute(delete(Event).where(Event.client_tag_id == tag_id))
