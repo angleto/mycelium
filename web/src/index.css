@@ -2114,10 +2114,10 @@ button.btn--danger:hover {
   align-items: center;
   gap: 0.6rem;
 }
-.tasktimer__on {
-  font-family: var(--mono);
+/* Running stop button carries the live readout; tabular figures keep
+   its width from jittering as the seconds tick. */
+.tasktimer__stop {
   font-variant-numeric: tabular-nums;
-  font-size: 0.82rem;
   color: var(--accent);
 }
 .notebanner {

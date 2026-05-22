@@ -3,16 +3,11 @@ import { Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { PriorityChip } from './PriorityChip'
 import { TagChip } from './TagChip'
+import { TaskTimer } from './TaskTimer'
 import type { components } from '../api/schema'
 
 type Task = components['schemas']['TaskOut']
 type State = components['schemas']['StateOut']
-type Running = components['schemas']['TimeEntryOut']
-
-function hms(sec: number): string {
-  const s = Math.max(0, Math.floor(sec))
-  return `${Math.floor(s / 3600)}:${String(Math.floor((s % 3600) / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`
-}
 
 // Kanban board for the Tasks view. Columns map to workflow states in
 // their canonical order (workflow_states.position, mirrored by the order
@@ -31,19 +26,11 @@ export function TaskKanban({
   states,
   allowed,
   onChangeState,
-  running,
-  now,
-  onToggleTimer,
-  onStartParallel,
 }: {
   tasks: Task[]
   states: State[]
   allowed: Map<string, Set<string>>
   onChangeState: (task: Task, toStateId: string) => Promise<void> | void
-  running: Running[]
-  now: number
-  onToggleTimer: (taskId: string) => Promise<void> | void
-  onStartParallel: (taskId: string) => Promise<void> | void
 }) {
   const { t } = useTranslation()
   const [draggingId, setDraggingId] = useState<string | null>(null)
@@ -185,60 +172,16 @@ export function TaskKanban({
                         )}
                         {tk.title}
                       </Link>
-                      {(() => {
-                        // Icon-only timer controls pinned top-right.
-                        // ``stopPropagation`` keeps click from bubbling
-                        // into the LI's mousedown that would otherwise
-                        // race with the dragstart heuristic.
-                        const cur = running.find((r) => r.task_id === tk.id)
-                        const onThis = cur != null
-                        const elapsed = cur
-                          ? (now - new Date(cur.started_at).getTime()) / 1000
-                          : 0
-                        return (
-                          <div className="kanban__card-actions">
-                            <button
-                              type="button"
-                              draggable={false}
-                              className={
-                                (onThis ? 'btn--sm' : 'btn--ghost btn--sm') +
-                                ' kanban__timer'
-                              }
-                              onClick={(e) => {
-                                e.stopPropagation()
-                                void onToggleTimer(tk.id)
-                              }}
-                              title={
-                                onThis
-                                  ? `${t('tasks.stop')} (${hms(elapsed)})`
-                                  : t('time.startSerial')
-                              }
-                              aria-label={
-                                onThis
-                                  ? t('tasks.stop')
-                                  : t('time.startSerial')
-                              }
-                            >
-                              {onThis ? '⏱■' : '⏱▶'}
-                            </button>
-                            {!onThis && (
-                              <button
-                                type="button"
-                                draggable={false}
-                                className="btn--ghost btn--sm kanban__timer"
-                                onClick={(e) => {
-                                  e.stopPropagation()
-                                  void onStartParallel(tk.id)
-                                }}
-                                title={t('time.startParallel')}
-                                aria-label={t('time.startParallel')}
-                              >
-                                ⏱▶▶
-                              </button>
-                            )}
-                          </div>
-                        )
-                      })()}
+                      {/* Shared timer widget, pinned top-right. The
+                          wrapper stops mousedown/click from bubbling into
+                          the LI's dragstart heuristic. */}
+                      <div
+                        className="kanban__card-actions"
+                        onMouseDown={(e) => e.stopPropagation()}
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <TaskTimer taskId={tk.id} />
+                      </div>
                     </div>
                     <div className="kanban__meta">
                       <PriorityChip priority={tk.priority} score={score} />

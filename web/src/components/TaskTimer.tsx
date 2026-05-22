@@ -28,12 +28,12 @@ export function TaskTimer({
   const [err, setErr] = useState<string | null>(null)
   const entry = running.find((r) => r.task_id === taskId) ?? null
 
-  async function start() {
+  async function start(parallel: boolean) {
     setBusy(true)
     setErr(null)
     const { error } = await api.POST('/time/start', {
       params: { header: workspaceHeader() },
-      body: { task_id: taskId, parallel: false, note_id: noteId ?? null },
+      body: { task_id: taskId, parallel, note_id: noteId ?? null },
     })
     setBusy(false)
     if (error) {
@@ -58,31 +58,45 @@ export function TaskTimer({
     await refreshRunning()
   }
 
+  // The shared timer control: ⏱▶ start (serial), ⏱▶▶ start parallel,
+  // ⏱■ stop with a live readout. Same buttons everywhere (task list,
+  // kanban, task detail, work notes) — server-authoritative.
   return (
     <span className="tasktimer">
       {entry ? (
-        <>
-          <span className="tasktimer__on">
-            ⏱ {hms(elapsedSec(entry.started_at, now))}
-          </span>
-          <button
-            type="button"
-            className="btn--sm btn--danger"
-            disabled={busy}
-            onClick={() => void stop()}
-          >
-            {t('time.stop')}
-          </button>
-        </>
-      ) : (
         <button
           type="button"
-          className="btn--sm"
+          className="btn--sm tasktimer__stop"
           disabled={busy}
-          onClick={() => void start()}
+          title={t('time.stop')}
+          aria-label={t('time.stop')}
+          onClick={() => void stop()}
         >
-          {t('time.start')}
+          ⏱■ {hms(elapsedSec(entry.started_at, now))}
         </button>
+      ) : (
+        <>
+          <button
+            type="button"
+            className="btn--ghost btn--sm"
+            disabled={busy}
+            title={t('time.startSerial')}
+            aria-label={t('time.startSerial')}
+            onClick={() => void start(false)}
+          >
+            ⏱▶
+          </button>
+          <button
+            type="button"
+            className="btn--ghost btn--sm"
+            disabled={busy}
+            title={t('time.startParallel')}
+            aria-label={t('time.startParallel')}
+            onClick={() => void start(true)}
+          >
+            ⏱▶▶
+          </button>
+        </>
       )}
       {err && <span className="err">{err}</span>}
     </span>

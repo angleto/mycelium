@@ -324,9 +324,9 @@ test('task work note: open from task + billable timer in the note', async ({
   await expect(banner).toBeVisible()
   const timer = banner.locator('.tasktimer')
   await expect(timer).toBeVisible()
-  // Start the timer → running readout.
+  // Start the timer (serial ▶, not parallel ▶▶) → running stop button.
   await timer.getByRole('button', { name: /^start$|^avvia$/i }).click()
-  await expect(timer.locator('.tasktimer__on')).toBeVisible()
+  await expect(timer.locator('.tasktimer__stop')).toBeVisible()
   // Robustness (Toggl-like): a running timer is server state, not a
   // JS counter. Reloading drops every client-side timer; the top-bar
   // running indicator must come back from /time/running with its
@@ -339,7 +339,7 @@ test('task work note: open from task + billable timer in the note', async ({
   // Stop from the task's own timer; duration is computed server-side.
   await page.goto(href ?? '/tasks')
   const tdTimer = page.locator('.tasktimer').first()
-  await expect(tdTimer.locator('.tasktimer__on')).toBeVisible()
+  await expect(tdTimer.locator('.tasktimer__stop')).toBeVisible()
   await tdTimer.getByRole('button', { name: /^stop$|^ferma$/i }).click()
   // Server-truth signal: the shared running source reflects the stop,
   // so the top-bar running indicator disappears (robust across the

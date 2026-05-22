@@ -8,6 +8,7 @@ import { PriorityChip } from '../components/PriorityChip'
 import { ScaleSelect } from '../components/ScaleSelect'
 import { TaskKanban } from '../components/TaskKanban'
 import { RecentTasks } from '../components/RecentTasks'
+import { TaskTimer } from '../components/TaskTimer'
 import { useFocus } from '../lib/focus'
 import { useLinkedClientProject } from '../lib/linkedClientProject'
 import { parseFilter } from '../lib/taskFilter'
@@ -36,15 +37,9 @@ function defaultView(): View {
 type Task = components['schemas']['TaskOut']
 type Tag = components['schemas']['TagOut']
 type Project = components['schemas']['ProjectOut']
-type Running = components['schemas']['TimeEntryOut']
 type State = components['schemas']['StateOut']
 type Wf = components['schemas']['WorkflowOut']
 type Client = components['schemas']['ClientOut']
-
-function hms(sec: number): string {
-  const s = Math.max(0, Math.floor(sec))
-  return `${Math.floor(s / 3600)}:${String(Math.floor((s % 3600) / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`
-}
 
 // Tasks surface: quick-add with the Eisenhower inputs (importance/
 // urgency default 4 -> score 16 -> P1) and client/project pickers with
@@ -76,8 +71,6 @@ export function TasksRoute() {
   const [urgency, setUrgency] = useState(4)
   const [due, setDue] = useState('')
   const [q, setQ] = useState('')
-  const [running, setRunning] = useState<Running[]>([])
-  const [now, setNow] = useState<number>(() => Date.now())
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   // Workflow meta for inline + bulk state changes. Tasks share the
@@ -208,24 +201,6 @@ export function TasksRoute() {
     }
   }, [activeId])
 
-  useEffect(() => {
-    let active = true
-    const tick = async () => {
-      const { data } = await api.GET('/time/running', {
-        params: { header: workspaceHeader() },
-      })
-      if (active) setRunning(data ?? [])
-    }
-    void tick()
-    const poll = setInterval(() => void tick(), 5000)
-    const clock = setInterval(() => setNow(Date.now()), 1000)
-    return () => {
-      active = false
-      clearInterval(poll)
-      clearInterval(clock)
-    }
-  }, [activeId])
-
   async function onCreate(e: FormEvent, openAfter = false) {
     e.preventDefault()
     setBusy(true)
@@ -267,44 +242,6 @@ export function TasksRoute() {
       return
     }
     await loadTasks()
-  }
-
-  async function toggleTimer(taskId: string) {
-    setErr(null)
-    const onThis = running.some((r) => r.task_id === taskId)
-    const { error } = onThis
-      ? await api.POST('/time/stop', {
-          params: { header: workspaceHeader() },
-          body: { task_id: taskId },
-        })
-      : await api.POST('/time/start', {
-          params: { header: workspaceHeader() },
-          body: { task_id: taskId, parallel: false },
-        })
-    if (error) {
-      setErr(errMessage(error))
-      return
-    }
-    const { data } = await api.GET('/time/running', {
-      params: { header: workspaceHeader() },
-    })
-    setRunning(data ?? [])
-  }
-
-  async function startParallel(taskId: string) {
-    setErr(null)
-    const { error } = await api.POST('/time/start', {
-      params: { header: workspaceHeader() },
-      body: { task_id: taskId, parallel: true },
-    })
-    if (error) {
-      setErr(errMessage(error))
-      return
-    }
-    const { data } = await api.GET('/time/running', {
-      params: { header: workspaceHeader() },
-    })
-    setRunning(data ?? [])
   }
 
   function toggleSel(id: string) {
@@ -716,21 +653,12 @@ export function TasksRoute() {
           states={kanbanStates}
           allowed={allowed}
           onChangeState={changeState}
-          running={running}
-          now={now}
-          onToggleTimer={toggleTimer}
-          onStartParallel={startParallel}
         />
       ) : shown.length === 0 ? (
         <p className="hint">{t('tasks.none')}</p>
       ) : (
         <ul className="list tasklist">
           {shown.map((tk) => {
-            const cur = running.find((r) => r.task_id === tk.id)
-            const onThis = cur != null
-            const elapsed = cur
-              ? (now - new Date(cur.started_at).getTime()) / 1000
-              : 0
             const score =
               tk.importance != null && tk.urgency != null
                 ? tk.importance * tk.urgency
@@ -785,24 +713,7 @@ export function TasksRoute() {
                   ) : (
                     <span className="muted">{tk.state}</span>
                   )}
-                  <button
-                    type="button"
-                    className={onThis ? 'btn--sm' : 'btn--ghost btn--sm'}
-                    onClick={() => void toggleTimer(tk.id)}
-                    title={onThis ? t('tasks.stop') : t('time.startSerial')}
-                  >
-                    {onThis ? `⏱■ ${hms(elapsed)}` : '⏱▶'}
-                  </button>
-                  {!onThis && (
-                    <button
-                      type="button"
-                      className="btn--ghost btn--sm"
-                      onClick={() => void startParallel(tk.id)}
-                      title={t('time.startParallel')}
-                    >
-                      ⏱▶▶
-                    </button>
-                  )}
+                  <TaskTimer taskId={tk.id} />
                 </span>
               </li>
             )
