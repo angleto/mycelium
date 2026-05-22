@@ -22,6 +22,7 @@ from decimal import ROUND_HALF_UP, Decimal
 
 from flow_core.models.client_profile import ClientProfile
 from flow_core.models.invoice import Invoice, InvoiceLine, IssuerProfile
+from flow_core.sdi_channel import IntermediaryIdentity
 
 _NS = "http://ivaservizi.agenziaentrate.gov.it/docs/xsd/fatture/v1.2"
 
@@ -161,14 +162,21 @@ def _build_xml(
     progressivo: str,
     numero_override: str | None = None,
     collegata: tuple[str, dt.date] | None = None,
+    intermediary: IntermediaryIdentity | None = None,
 ) -> str:
     ET.register_namespace("p", _NS)
     root = ET.Element(f"{{{_NS}}}FatturaElettronica", versione="FPR12")
     header = _sub(root, "FatturaElettronicaHeader")
     dt_ = _sub(header, "DatiTrasmissione")
     idt = _sub(dt_, "IdTrasmittente")
-    _sub(idt, "IdPaese", fiscal.paese)
-    _sub(idt, "IdCodice", fiscal.piva or fiscal.codice_fiscale or "")
+    if intermediary is not None:
+        # Flow transmits as intermediary: the trasmittente is the accredited
+        # channel holder, not the cedente (ADR-0011).
+        _sub(idt, "IdPaese", intermediary.id_paese)
+        _sub(idt, "IdCodice", intermediary.id_codice)
+    else:
+        _sub(idt, "IdPaese", fiscal.paese)
+        _sub(idt, "IdCodice", fiscal.piva or fiscal.codice_fiscale or "")
     _sub(dt_, "ProgressivoInvio", progressivo)
     _sub(dt_, "FormatoTrasmissione", "FPR12")
     _sub(dt_, "CodiceDestinatario", client.codice_destinatario or "0000000")
@@ -210,6 +218,18 @@ def _build_xml(
     if client.provincia:
         _sub(csede, "Provincia", client.provincia)
     _sub(csede, "Nazione", client.nazione or "IT")
+    if intermediary is not None:
+        # Flow as terzo intermediario / soggetto emittente. Header order:
+        # after CessionarioCommittente, then SoggettoEmittente.
+        terzo = _sub(header, "TerzoIntermediarioOSoggettoEmittente")
+        tanag = _sub(terzo, "DatiAnagrafici")
+        tiva = _sub(tanag, "IdFiscaleIVA")
+        _sub(tiva, "IdPaese", intermediary.id_paese)
+        _sub(tiva, "IdCodice", intermediary.id_codice)
+        tan = _sub(tanag, "Anagrafica")
+        _sub(tan, "Denominazione", intermediary.denominazione)
+        # TZ = document transmitted by a third party on the cedente's behalf.
+        _sub(header, "SoggettoEmittente", "TZ")
 
     body = _sub(root, "FatturaElettronicaBody")
     dg = _sub(body, "DatiGenerali")

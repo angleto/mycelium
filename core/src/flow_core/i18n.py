@@ -88,6 +88,8 @@ class MessageCode(enum.StrEnum):
     FISCAL_PROFILE_REQUIRED = "invoice.fiscal_profile_required"
     ISSUER_PROFILE_IN_USE = "invoice.issuer_profile_in_use"
     ISSUER_PROFILE_SOLE_DEFAULT = "invoice.issuer_profile_sole_default"
+    MANDATE_REQUIRED = "invoice.mandate_required"
+    MANDATE_NOT_FOUND = "invoice.mandate_not_found"
     NOTIFICATION_NOT_FOUND = "notification.not_found"
     EXECUTOR_NOT_FOUND = "executor.not_found"
     EXECUTOR_INVALID = "executor.invalid"
@@ -248,6 +250,11 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
         MessageCode.ISSUER_PROFILE_SOLE_DEFAULT: (
             "Set another profile as default before deleting this one"
         ),
+        MessageCode.MANDATE_REQUIRED: (
+            "No active SdI transmission mandate for this issuer profile; grant one "
+            "before transmitting through the accredited channel"
+        ),
+        MessageCode.MANDATE_NOT_FOUND: "No active SdI transmission mandate to revoke",
         MessageCode.NOTIFICATION_NOT_FOUND: "Notification not found",
         MessageCode.EXECUTOR_NOT_FOUND: "Executor not found",
         MessageCode.EXECUTOR_INVALID: "Invalid executor: {detail}",

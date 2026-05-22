@@ -20,7 +20,7 @@ import pytest
 from flow_core.db import admin_session, tenant_session
 from flow_core.errors import ConflictError, DomainError, NotFoundError
 from flow_core.models.invoice import ConservationStatus, InvoiceState, SdiStatus
-from flow_core.sdi_channel import TransmitResult, set_channel_override
+from flow_core.sdi_channel import IntermediaryIdentity, TransmitResult, set_channel_override
 from flow_core.services import invoice as inv
 from flow_core.services.auth import signup
 from flow_core.services.taxonomy import ClientInput, create_client
@@ -189,6 +189,12 @@ def _sdicoop() -> Iterator[None]:
     class FakeCoop:
         name = "sdicoop"
 
+        @property
+        def intermediary(self) -> IntermediaryIdentity | None:
+            return IntermediaryIdentity(
+                id_paese="IT", id_codice="11122233344", denominazione="Flow Intermediary Srl"
+            )
+
         def transmit(self, *, xml: str, invoice_id: str) -> TransmitResult:
             return TransmitResult(
                 identificativo_sdi=f"SDI{invoice_id[:8].upper()}",
@@ -218,9 +224,17 @@ async def test_sdicoop_assigns_identificativo_and_receipt_correlation(
             description="svc",
             unit_price=Decimal(100),
         )
+        # The SdICoop (intermediary) path requires an active mandate.
+        from flow_core.services import sdi_mandate
+
+        issuer = await inv.get_default_issuer_profile(s, org_id=org)
+        assert issuer is not None
+        await sdi_mandate.grant_mandate(s, org_id=org, actor_id=user, issuer_profile_id=issuer.id)
         tx = await inv.transmit(s, org_id=org, actor_id=user, invoice_id=d.id)
         assert tx.identificativo_sdi is not None
         assert tx.conservation_status is ConservationStatus.ade_pending
+        # Flow stamped itself as terzo intermediario / soggetto emittente (TZ).
+        assert "<SoggettoEmittente>TZ</SoggettoEmittente>" in (tx.xml or "")
         # RC receipt: delivered + AdE-covered (it transited SdI).
         rc = await inv.ingest_receipt(
             s,

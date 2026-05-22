@@ -1510,6 +1510,21 @@ class ConservationAdhesionIn(BaseModel):
     adhesion: str = Field(pattern="^(none|requested|active)$")
 
 
+class SdiMandateIn(BaseModel):
+    reference: str | None = Field(default=None, max_length=200)
+
+
+class SdiMandateOut(BaseModel):
+    id: uuid.UUID
+    issuer_profile_id: uuid.UUID
+    status: str
+    scope: str
+    reference: str | None
+    granted_at: datetime.datetime
+    revoked_at: datetime.datetime | None
+    version: int
+
+
 class InvoiceCreateIn(BaseModel):
     client_tag_id: uuid.UUID
     issuer_profile_id: uuid.UUID | None = None

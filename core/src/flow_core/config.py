@@ -176,6 +176,26 @@ class Settings(BaseSettings):
     # Worker poll interval for the assistant job queue (ADR-0026 P3).
     assistant_loop_interval_seconds: int = 5
 
+    # SdI electronic-invoice transmission (ADR-0011, FR-9). Default
+    # "manual_export": Flow builds downloadable XML and the tenant submits
+    # it (no SdI transit; AdE conservation not covered). "sdicoop":
+    # transmit through Flow's single accredited channel as intermediary --
+    # the tenant's identity stays in the FatturaPA payload, Flow's goes in
+    # TerzoIntermediarioOSoggettoEmittente (requires a per-issuer
+    # SdiMandate). The intermediary identity + the mutual-TLS SOAP
+    # transport below are required only when "sdicoop" is selected
+    # (validated fail-closed, same spirit as smtp/s3). id_codice is the
+    # accredited channel holder's P.IVA; cert/key/ca are PEM file paths
+    # (deploy secrets).
+    sdi_channel: Literal["manual_export", "sdicoop"] = "manual_export"
+    sdi_intermediary_id_paese: str = "IT"
+    sdi_intermediary_id_codice: str = ""
+    sdi_intermediary_denominazione: str = ""
+    sdi_endpoint_url: str = ""
+    sdi_client_cert: str = ""
+    sdi_client_key: str = ""
+    sdi_ca_bundle: str = ""
+
     # App
     env: str = "dev"
     log_level: str = "INFO"
@@ -218,6 +238,27 @@ class Settings(BaseSettings):
             raise ValueError("FLOW_SMTP_HOST is set but FLOW_SMTP_FROM is required to enable SMTP")
         return self
 
+    @model_validator(mode="after")
+    def _validate_sdi(self) -> Settings:
+        """Fail closed: selecting the SdICoop channel means configuring it
+        fully (intermediary identity + mutual-TLS transport). The CA bundle
+        is optional (the system trust store is acceptable for SdI's cert)."""
+        if self.sdi_channel == "sdicoop":
+            missing = [
+                name
+                for name, value in (
+                    ("FLOW_SDI_INTERMEDIARY_ID_CODICE", self.sdi_intermediary_id_codice),
+                    ("FLOW_SDI_INTERMEDIARY_DENOMINAZIONE", self.sdi_intermediary_denominazione),
+                    ("FLOW_SDI_ENDPOINT_URL", self.sdi_endpoint_url),
+                    ("FLOW_SDI_CLIENT_CERT", self.sdi_client_cert),
+                    ("FLOW_SDI_CLIENT_KEY", self.sdi_client_key),
+                )
+                if not value
+            ]
+            if missing:
+                raise ValueError("sdi_channel='sdicoop' requires: " + ", ".join(sorted(missing)))
+        return self
+
     @property
     def google_configured(self) -> bool:
         """Google OAuth is active iff client_id, client_secret and
@@ -251,6 +292,12 @@ class Settings(BaseSettings):
         """SMTP transport is active iff host and From are both set
         (the validator above guarantees from is present when host is)."""
         return bool(self.smtp_host and self.smtp_from)
+
+    @property
+    def sdicoop_active(self) -> bool:
+        """True iff invoices are transmitted through Flow's accredited
+        SdICoop channel (Flow as intermediary). False = manual export."""
+        return self.sdi_channel == "sdicoop"
 
     @property
     def cors_origin_list(self) -> list[str]:

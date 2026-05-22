@@ -34,11 +34,15 @@ from flow_api.schemas import (
     IssuerProfileOut,
     IssuerProfilePatchIn,
     ReceiptIn,
+    SdiMandateIn,
+    SdiMandateOut,
     TransmitIn,
 )
 from flow_core.models.invoice import Invoice, InvoiceLine, IssuerProfile
 from flow_core.models.membership import Role
+from flow_core.models.sdi_mandate import SdiMandate
 from flow_core.services import invoice as svc
+from flow_core.services import sdi_mandate as msvc
 from flow_core.services.rbac import ensure_role
 
 router = APIRouter(tags=["invoices"])
@@ -104,6 +108,19 @@ def _ip_out(p: IssuerProfile) -> IssuerProfileOut:
         is_default=p.is_default,
         conservation_adhesion=p.conservation_adhesion.value,
         version=p.version,
+    )
+
+
+def _mandate_out(m: SdiMandate) -> SdiMandateOut:
+    return SdiMandateOut(
+        id=m.id,
+        issuer_profile_id=m.issuer_profile_id,
+        status=m.status.value,
+        scope=m.scope,
+        reference=m.reference,
+        granted_at=m.granted_at,
+        revoked_at=m.revoked_at,
+        version=m.version,
     )
 
 
@@ -212,6 +229,56 @@ async def delete_issuer_profile(
     await svc.delete_issuer_profile(
         ctx.session, org_id=ctx.org_id, actor_id=ctx.user_id, profile_id=profile_id
     )
+
+
+# --- SdI transmission mandate (per issuer profile / VAT subject; ADR-0011) ---
+
+
+@router.get("/issuer-profiles/{profile_id}/mandate", response_model=SdiMandateOut | None)
+async def get_mandate(
+    profile_id: uuid.UUID,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+) -> SdiMandateOut | None:
+    m = await msvc.get_active_mandate(ctx.session, org_id=ctx.org_id, issuer_profile_id=profile_id)
+    return _mandate_out(m) if m is not None else None
+
+
+@router.get("/issuer-profiles/{profile_id}/mandates", response_model=list[SdiMandateOut])
+async def list_mandates(
+    profile_id: uuid.UUID,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+) -> list[SdiMandateOut]:
+    rows = await msvc.list_mandates(ctx.session, org_id=ctx.org_id, issuer_profile_id=profile_id)
+    return [_mandate_out(m) for m in rows]
+
+
+@router.post("/issuer-profiles/{profile_id}/mandate", response_model=SdiMandateOut)
+async def grant_mandate(
+    profile_id: uuid.UUID,
+    body: SdiMandateIn,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+) -> SdiMandateOut:
+    ensure_role(ctx.role, Role.owner)
+    m = await msvc.grant_mandate(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        issuer_profile_id=profile_id,
+        reference=body.reference,
+    )
+    return _mandate_out(m)
+
+
+@router.delete("/issuer-profiles/{profile_id}/mandate", response_model=SdiMandateOut)
+async def revoke_mandate(
+    profile_id: uuid.UUID,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+) -> SdiMandateOut:
+    ensure_role(ctx.role, Role.owner)
+    m = await msvc.revoke_mandate(
+        ctx.session, org_id=ctx.org_id, actor_id=ctx.user_id, issuer_profile_id=profile_id
+    )
+    return _mandate_out(m)
 
 
 # --- invoices ---

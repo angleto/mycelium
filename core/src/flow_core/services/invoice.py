@@ -61,6 +61,7 @@ from flow_core.services.invoice_format import (
 )
 from flow_core.services.invoice_xsd import validate_fatturapa
 from flow_core.services.rbac import require_role
+from flow_core.services.sdi_mandate import get_active_mandate
 
 # --- issuer profiles (the invoice "intestazione") ---
 
@@ -761,6 +762,20 @@ async def transmit(
     lines = await list_lines(session, org_id=org_id, invoice_id=invoice_id)
     _validate(fiscal, client, lines)
     assert fiscal is not None  # _validate raised otherwise  # noqa: S101
+    ch = channel or get_channel()
+    intermediary = ch.intermediary
+    if intermediary is not None:
+        # Transmitting via the accredited channel = Flow acts as intermediary
+        # for this VAT subject; an active SdiMandate is required (ADR-0011).
+        mandate = (
+            await get_active_mandate(
+                session, org_id=org_id, issuer_profile_id=inv.issuer_profile_id
+            )
+            if inv.issuer_profile_id is not None
+            else None
+        )
+        if mandate is None:
+            raise ConflictError(MessageCode.MANDATE_REQUIRED)
     totals = _compute_totals(lines, fiscal)
     inv.taxable, inv.vat, inv.bollo, inv.total = (
         totals.taxable,
@@ -773,7 +788,13 @@ async def transmit(
     inv.issued_at = dt.datetime.now(tz=dt.UTC)
     collegata = await _resolve_collegata(session, org_id=org_id, inv=inv)
     xml = _build_xml(
-        inv, fiscal, client, lines, progressivo or f"{inv.year}{number:05d}", collegata=collegata
+        inv,
+        fiscal,
+        client,
+        lines,
+        progressivo or f"{inv.year}{number:05d}",
+        collegata=collegata,
+        intermediary=intermediary,
     )
     # Validate against the official FatturaPA XSD before emission: SdI
     # scarta anything non-conformant, so an invalid document must never
@@ -783,7 +804,6 @@ async def transmit(
         raise DomainError(MessageCode.INVOICE_INVALID, detail="; ".join(xsd_errors[:5]))
     inv.xml = xml
     inv.state = InvoiceState.transmitted
-    ch = channel or get_channel()
     res = ch.transmit(xml=xml, invoice_id=str(inv.id))
     inv.identificativo_sdi = res.identificativo_sdi
     inv.conservation_status = res.conservation
@@ -1027,7 +1047,14 @@ async def get_xml_preview(
     )
     collegata = await _resolve_collegata(session, org_id=org_id, inv=inv)
     return _build_xml(
-        inv, p.issuer, p.client, p.lines, "ANTEPRIMA", numero_override=p.number, collegata=collegata
+        inv,
+        p.issuer,
+        p.client,
+        p.lines,
+        "ANTEPRIMA",
+        numero_override=p.number,
+        collegata=collegata,
+        intermediary=get_channel().intermediary,
     )
 
 
