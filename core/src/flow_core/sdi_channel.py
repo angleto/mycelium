@@ -14,9 +14,11 @@ intermediary under a per-issuer ``SdiMandate``). The channel is selected by
   transmits as intermediary, so its ``IntermediaryIdentity`` is stamped into
   ``IdTrasmittente`` + ``TerzoIntermediarioOSoggettoEmittente`` and a
   per-issuer ``SdiMandate`` is required (enforced in ``invoice.transmit``).
-  The real mutual-TLS SOAP transport lands in
-  ``flow_core.services.sdi_transport`` (F7b); the test-suite injects a fake
-  via ``set_channel_override``.
+  The live mutual-TLS SOAP send is in ``services.sdi_transport`` (F7b) and is
+  never exercised in CI (the test-suite injects a fake).
+
+``transmit`` is async: the real send is network I/O and must not block the
+event loop.
 """
 
 from __future__ import annotations
@@ -49,14 +51,15 @@ class TransmitResult:
 class SdiChannel(Protocol):
     """The transmission seam. ``intermediary`` is None for self-submission
     (manual export) and the channel identity when Flow transmits as
-    intermediary (which then requires a per-issuer ``SdiMandate``)."""
+    intermediary (which then requires a per-issuer ``SdiMandate``).
+    ``filename`` is the SdI file name (``IT{id}_{progressivo}.xml``)."""
 
     name: str
 
     @property
     def intermediary(self) -> IntermediaryIdentity | None: ...
 
-    def transmit(self, *, xml: str, invoice_id: str) -> TransmitResult: ...
+    async def transmit(self, *, xml: str, invoice_id: str, filename: str) -> TransmitResult: ...
 
 
 class ManualExportChannel:
@@ -66,7 +69,7 @@ class ManualExportChannel:
     def intermediary(self) -> IntermediaryIdentity | None:
         return None
 
-    def transmit(self, *, xml: str, invoice_id: str) -> TransmitResult:
+    async def transmit(self, *, xml: str, invoice_id: str, filename: str) -> TransmitResult:
         # Legally issued but outside AdE free conservation (ADR-0010).
         return TransmitResult(
             identificativo_sdi=None,
@@ -78,9 +81,9 @@ class ManualExportChannel:
 class SdICoopChannel:
     """Production transport (mutual-TLS SOAP RiceviFile) requires F7c
     accreditation (ADR-0011). Bound to the configured intermediary identity
-    + transport settings; the live send lands in
-    ``services.sdi_transport`` (F7b) and is never exercised in CI (the
-    test-suite injects a fake)."""
+    + transport settings; the live send lives in
+    ``services.sdi_transport.send_via_sdicoop`` and is never exercised in CI
+    (no accreditation / certificates)."""
 
     name = "sdicoop"
 
@@ -103,10 +106,23 @@ class SdICoopChannel:
     def intermediary(self) -> IntermediaryIdentity | None:
         return self._intermediary
 
-    def transmit(self, *, xml: str, invoice_id: str) -> TransmitResult:  # pragma: no cover
-        raise NotImplementedError(
-            "SdICoop mutual-TLS SOAP transport lands in F7b "
-            "(flow_core.services.sdi_transport); configure once accredited"
+    async def transmit(
+        self, *, xml: str, invoice_id: str, filename: str
+    ) -> TransmitResult:  # pragma: no cover
+        from flow_core.services.sdi_transport import send_via_sdicoop
+
+        identificativo = await send_via_sdicoop(
+            xml=xml,
+            filename=filename,
+            endpoint_url=self._endpoint_url,
+            client_cert=self._client_cert,
+            client_key=self._client_key,
+            ca_bundle=self._ca_bundle,
+        )
+        return TransmitResult(
+            identificativo_sdi=identificativo,
+            conservation=ConservationStatus.ade_pending,
+            channel=self.name,
         )
 
 

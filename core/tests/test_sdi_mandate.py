@@ -98,7 +98,7 @@ def _intermediary_channel() -> Iterator[None]:
                 id_paese="IT", id_codice="11122233344", denominazione="Flow Intermediary Srl"
             )
 
-        def transmit(self, *, xml: str, invoice_id: str) -> TransmitResult:
+        async def transmit(self, *, xml: str, invoice_id: str, filename: str) -> TransmitResult:
             return TransmitResult(
                 identificativo_sdi="SDIFAKE000001",
                 conservation=ConservationStatus.ade_pending,

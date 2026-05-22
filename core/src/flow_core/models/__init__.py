@@ -64,6 +64,7 @@ from flow_core.models.invoice import (
     IssuerProfile,
     PaymentStatus,
     SdiStatus,
+    SdiTransmissionCounter,
 )
 from flow_core.models.membership import Membership, Role
 from flow_core.models.memory_blob import BlobSource, MemoryBlob, Tier
@@ -174,6 +175,7 @@ __all__ = [
     "SdiMandate",
     "SdiMandateStatus",
     "SdiStatus",
+    "SdiTransmissionCounter",
     "StorageKind",
     "StorageRate",
     "Tag",

@@ -41,6 +41,7 @@ from flow_core.models.invoice import (
     IssuerProfile,
     PaymentStatus,
     SdiStatus,
+    SdiTransmissionCounter,
 )
 from flow_core.models.membership import Role
 from flow_core.sdi_channel import SdiChannel, get_channel
@@ -62,6 +63,7 @@ from flow_core.services.invoice_format import (
 from flow_core.services.invoice_xsd import validate_fatturapa
 from flow_core.services.rbac import require_role
 from flow_core.services.sdi_mandate import get_active_mandate
+from flow_core.services.sdi_transport import fatturapa_filename, transmission_progressivo
 
 # --- issuer profiles (the invoice "intestazione") ---
 
@@ -730,6 +732,38 @@ async def _allocate_number(
     return counter.last_number
 
 
+async def _allocate_transmission_seq(session: AsyncSession, *, intermediary_id: str) -> int:
+    """Concurrency-safe per-intermediary monotonic sequence for the SdI file
+    name + ProgressivoInvio (unique per trasmittente, across all tenants since
+    one channel serves all). Mirrors ``_allocate_number``: lock (or create)
+    the counter row FOR UPDATE; never reused."""
+    counter = (
+        await session.execute(
+            select(SdiTransmissionCounter)
+            .where(SdiTransmissionCounter.intermediary_id == intermediary_id)
+            .with_for_update()
+        )
+    ).scalar_one_or_none()
+    if counter is None:
+        try:
+            async with session.begin_nested():
+                counter = SdiTransmissionCounter(intermediary_id=intermediary_id, last_number=0)
+                session.add(counter)
+                await session.flush()
+        except IntegrityError:
+            pass
+        counter = (
+            await session.execute(
+                select(SdiTransmissionCounter)
+                .where(SdiTransmissionCounter.intermediary_id == intermediary_id)
+                .with_for_update()
+            )
+        ).scalar_one()
+    counter.last_number += 1
+    await session.flush()
+    return counter.last_number
+
+
 async def _resolve_collegata(
     session: AsyncSession, *, org_id: uuid.UUID, inv: Invoice
 ) -> tuple[str, dt.date] | None:
@@ -786,13 +820,25 @@ async def transmit(
     number = await _allocate_number(session, org_id=org_id, series=inv.series, year=inv.year)
     inv.number = number
     inv.issued_at = dt.datetime.now(tz=dt.UTC)
+    if intermediary is not None:
+        # Per-intermediary unique progressivo + file name: unique per
+        # trasmittente across all tenants (the per-org invoice number is not).
+        seq = await _allocate_transmission_seq(session, intermediary_id=intermediary.id_codice)
+        progressivo_str = transmission_progressivo(seq)
+        filename = fatturapa_filename(
+            intermediary.id_paese, intermediary.id_codice, progressivo_str
+        )
+    else:
+        progressivo_str = progressivo or f"{inv.year}{number:05d}"
+        cedente_id = fiscal.piva or fiscal.codice_fiscale or ""
+        filename = fatturapa_filename(fiscal.paese, cedente_id, progressivo_str)
     collegata = await _resolve_collegata(session, org_id=org_id, inv=inv)
     xml = _build_xml(
         inv,
         fiscal,
         client,
         lines,
-        progressivo or f"{inv.year}{number:05d}",
+        progressivo_str,
         collegata=collegata,
         intermediary=intermediary,
     )
@@ -804,7 +850,7 @@ async def transmit(
         raise DomainError(MessageCode.INVOICE_INVALID, detail="; ".join(xsd_errors[:5]))
     inv.xml = xml
     inv.state = InvoiceState.transmitted
-    res = ch.transmit(xml=xml, invoice_id=str(inv.id))
+    res = await ch.transmit(xml=xml, invoice_id=str(inv.id), filename=filename)
     inv.identificativo_sdi = res.identificativo_sdi
     inv.conservation_status = res.conservation
     inv.version += 1

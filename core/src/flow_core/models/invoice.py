@@ -16,6 +16,7 @@ import uuid
 from decimal import Decimal
 
 from sqlalchemy import (
+    BigInteger,
     Date,
     DateTime,
     ForeignKey,
@@ -229,3 +230,17 @@ class InvoiceLine(UUIDPKMixin, OrgScopedMixin, Base):
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
+
+
+class SdiTransmissionCounter(Base):
+    """Per-intermediary monotonic sequence for the SdI file name +
+    ProgressivoInvio. These must be unique per *trasmittente*, and one
+    accredited channel transmits for many tenants (ADR-0011), so the
+    sequence is platform-level (keyed by the intermediary id_codice), not
+    per-org: NOT OrgScoped, no RLS org policy. Allocated FOR UPDATE at
+    transmit, like ``InvoiceCounter``."""
+
+    __tablename__ = "sdi_transmission_counters"
+
+    intermediary_id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    last_number: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default="0")
