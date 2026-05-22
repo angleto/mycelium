@@ -4,9 +4,10 @@ dispatch/recurrence/reminder logic lives in the service."""
 
 from __future__ import annotations
 
+import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, status
 
 from flow_api.deps import TenantCtx, tenant_ctx
 from flow_api.schemas import (
@@ -39,6 +40,8 @@ def _n_out(n: Notification) -> NotificationOut:
         title=n.title,
         body=n.body,
         status=n.status,
+        created_at=n.created_at,
+        sent_at=n.sent_at,
     )
 
 
@@ -84,6 +87,19 @@ async def list_notifications(
 ) -> list[NotificationOut]:
     rows = await svc.list_notifications(ctx.session, org_id=ctx.org_id, user_id=ctx.user_id)
     return [_n_out(n) for n in rows]
+
+
+@router.delete("/{notification_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_notification(
+    notification_id: uuid.UUID,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+) -> None:
+    await svc.delete_notification(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        notification_id=notification_id,
+    )
 
 
 @router.post("/dispatch", response_model=DispatchOut)

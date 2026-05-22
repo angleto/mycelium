@@ -1178,6 +1178,12 @@ export const it: Catalog = {
     saved: 'Salvato.',
     list: 'Notifiche',
     none: 'Nessuna.',
+    delete: 'Rimuovi',
+    status: {
+      pending: 'in sospeso',
+      sent: 'inviata',
+      failed: 'fallita',
+    },
     dispatch: 'Invia in sospeso',
     dispatched: 'Inviate {{sent}}, fallite {{failed}}.',
     recurrence: 'Rendi un task ricorrente',

@@ -1506,6 +1506,111 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/ai-assistants/connector-info": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Connector Info */
+        get: operations["connector_info_ai_assistants_connector_info_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/ai-assistants/scope-catalog": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Scope Catalog */
+        get: operations["scope_catalog_ai_assistants_scope_catalog_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/ai-assistants": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Assistants */
+        get: operations["list_assistants_ai_assistants_get"];
+        put?: never;
+        /** Create Assistant */
+        post: operations["create_assistant_ai_assistants_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/ai-assistants/{assistant_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Assistant */
+        get: operations["get_assistant_ai_assistants__assistant_id__get"];
+        put?: never;
+        post?: never;
+        /** Delete Assistant */
+        delete: operations["delete_assistant_ai_assistants__assistant_id__delete"];
+        options?: never;
+        head?: never;
+        /** Patch Assistant */
+        patch: operations["patch_assistant_ai_assistants__assistant_id__patch"];
+        trace?: never;
+    };
+    "/ai-assistants/{assistant_id}/rotate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Rotate Secret */
+        post: operations["rotate_secret_ai_assistants__assistant_id__rotate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/actors": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Actors */
+        get: operations["list_actors_actors_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/dispatch/requests": {
         parameters: {
             query?: never;
@@ -2656,6 +2761,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/notes/quick-create": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Quick Create
+         * @description Single-shot note creation for Apple Shortcuts, Tasker, or any
+         *     one-liner client. The agent token's bound user becomes the actor.
+         *     Resolves ``project`` to a project tag; creates the note via
+         *     ``services/notes.create_note``.
+         */
+        post: operations["quick_create_notes_quick_create_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/attachments/{attachment_id}/download": {
         parameters: {
             query?: never;
@@ -2988,6 +3116,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/notifications/{notification_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete Notification */
+        delete: operations["delete_notification_notifications__notification_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/notifications/dispatch": {
         parameters: {
             query?: never;
@@ -3162,6 +3307,22 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /**
+         * ActorOut
+         * @description One row of the directory. The kind discriminator lets the
+         *     picker render a kind-aware glyph (user / assistant) and the SPA
+         *     decide what to do on click.
+         */
+        ActorOut: {
+            /** Handle */
+            handle: string;
+            /** Kind */
+            kind: string;
+            /** Display Name */
+            display_name: string;
+            /** Ref Id */
+            ref_id: string;
+        };
         /** AdminUserOut */
         AdminUserOut: {
             /**
@@ -3307,6 +3468,85 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+        };
+        /** AiAssistantCreateIn */
+        AiAssistantCreateIn: {
+            /** Label */
+            label: string;
+            /** Scope */
+            scope?: string[] | null;
+            /** Provider */
+            provider?: string | null;
+            /** Model Id */
+            model_id?: string | null;
+            /** Notes */
+            notes?: string | null;
+        };
+        /**
+         * AiAssistantCreatedOut
+         * @description Returned exactly once at create / rotate time. ``raw_secret`` is
+         *     plaintext — the SPA copies it to the clipboard and shows a
+         *     "credentials" card; after the user acknowledges, it cannot be
+         *     recovered.
+         */
+        AiAssistantCreatedOut: {
+            assistant: components["schemas"]["AiAssistantOut"];
+            /** Raw Secret */
+            raw_secret: string;
+        };
+        /**
+         * AiAssistantOut
+         * @description Metadata; no secret ever ships in this shape.
+         */
+        AiAssistantOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Label */
+            label: string;
+            /** Provider */
+            provider: string | null;
+            /** Model Id */
+            model_id: string | null;
+            /** Notes */
+            notes: string | null;
+            /** Scope */
+            scope: string[];
+            /** Is Active */
+            is_active: boolean;
+            /** Version */
+            version: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /** Token Prefix */
+            token_prefix?: string | null;
+        };
+        /** AiAssistantPatchIn */
+        AiAssistantPatchIn: {
+            /** Expected Version */
+            expected_version: number;
+            /** Label */
+            label?: string | null;
+            /** Scope */
+            scope?: string[] | null;
+            /** Provider */
+            provider?: string | null;
+            /** Model Id */
+            model_id?: string | null;
+            /** Notes */
+            notes?: string | null;
+            /** Is Active */
+            is_active?: boolean | null;
         };
         /** AppendMessageIn */
         AppendMessageIn: {
@@ -3693,6 +3933,17 @@ export interface components {
             body: string;
             /** Version */
             version: number;
+        };
+        /**
+         * ConnectorInfoOut
+         * @description Where to point an MCP client. The SPA shows ``mcp_url`` in the
+         *     connector card and the operator pastes it into Claude / Cursor.
+         */
+        ConnectorInfoOut: {
+            /** Mcp Url */
+            mcp_url: string;
+            /** Instructions Md */
+            instructions_md: string;
         };
         /** ConservationAdhesionIn */
         ConservationAdhesionIn: {
@@ -5100,6 +5351,8 @@ export interface components {
             text?: string | null;
             /** Task Id */
             task_id?: string | null;
+            /** Audio Ref */
+            audio_ref?: string | null;
         };
         /**
          * NoteStatus
@@ -5162,6 +5415,13 @@ export interface components {
             /** Body */
             body: string;
             status: components["schemas"]["NotificationStatus"];
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Sent At */
+            sent_at?: string | null;
         };
         /** NotificationPrefIn */
         NotificationPrefIn: {
@@ -5266,6 +5526,35 @@ export interface components {
             expected_version: number;
             /** Workflow Id */
             workflow_id?: string | null;
+        };
+        /**
+         * QuickCreateIn
+         * @description Body for the Apple Shortcut / iOS Dictation flow. ``project``
+         *     is a project name (case-insensitive partial match) or a UUID; if
+         *     omitted, the note lands in the default project of the assistant's
+         *     workspace. ``kind`` defaults to ``text`` because dictation is
+         *     text-first; voice notes still go through the /notes flow.
+         */
+        QuickCreateIn: {
+            /** Project */
+            project?: string | null;
+            /** Text */
+            text: string;
+            /** @default text */
+            kind: components["schemas"]["NoteKind"];
+            /** Title */
+            title?: string | null;
+        };
+        /** QuickCreateOut */
+        QuickCreateOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Project Id */
+            project_id: string | null;
+            kind: components["schemas"]["NoteKind"];
         };
         /** RateCardOut */
         RateCardOut: {
@@ -5516,6 +5805,21 @@ export interface components {
          */
         SchedulePolicy: "fastest" | "cheapest" | "balanced" | "throughput";
         /**
+         * ScopeCatalogEntry
+         * @description One row of the scope catalog returned by ``GET /ai-assistants/
+         *     scope-catalog`` — drives the SPA's permission picker.
+         */
+        ScopeCatalogEntry: {
+            /** Key */
+            key: string;
+            /** Category */
+            category: string;
+            /** Label */
+            label: string;
+            /** Description */
+            description: string;
+        };
+        /**
          * SdiStatus
          * @enum {string}
          */
@@ -5575,7 +5879,7 @@ export interface components {
              * Is Hidden
              * @default false
              */
-            is_hidden?: boolean;
+            is_hidden: boolean;
             /** Description */
             description?: string | null;
         };
@@ -6255,7 +6559,7 @@ export interface components {
              * Is Hidden
              * @default false
              */
-            is_hidden?: boolean;
+            is_hidden: boolean;
             /** Description */
             description?: string | null;
         };
@@ -6282,7 +6586,7 @@ export interface components {
              * Is Hidden
              * @default false
              */
-            is_hidden?: boolean;
+            is_hidden: boolean;
             /** Description */
             description?: string | null;
         };
@@ -7474,6 +7778,40 @@ export interface operations {
             };
         };
     };
+    delete_client_clients__tag_id__delete: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                tag_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     patch_client_clients__tag_id__patch: {
         parameters: {
             query?: never;
@@ -7512,6 +7850,40 @@ export interface operations {
             };
         };
     };
+    delete_project_projects__tag_id__delete: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                tag_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     patch_project_projects__tag_id__patch: {
         parameters: {
             query?: never;
@@ -7531,74 +7903,6 @@ export interface operations {
                 "application/json": components["schemas"]["ProjectPatchIn"];
             };
         };
-        responses: {
-            /** @description Successful Response */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    delete_client_clients__tag_id__delete: {
-        parameters: {
-            query?: never;
-            header: {
-                "x-workspace-id": string;
-                "x-project-id"?: string | null;
-                "x-workspace-role"?: string | null;
-                "x-admin-mode"?: string | null;
-            };
-            path: {
-                tag_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    delete_project_projects__tag_id__delete: {
-        parameters: {
-            query?: never;
-            header: {
-                "x-workspace-id": string;
-                "x-project-id"?: string | null;
-                "x-workspace-role"?: string | null;
-                "x-admin-mode"?: string | null;
-            };
-            path: {
-                tag_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
         responses: {
             /** @description Successful Response */
             204: {
@@ -10051,6 +10355,329 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    connector_info_ai_assistants_connector_info_get: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConnectorInfoOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    scope_catalog_ai_assistants_scope_catalog_get: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScopeCatalogEntry"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_assistants_ai_assistants_get: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AiAssistantOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_assistant_ai_assistants_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AiAssistantCreateIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AiAssistantCreatedOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_assistant_ai_assistants__assistant_id__get: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                assistant_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AiAssistantOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_assistant_ai_assistants__assistant_id__delete: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                assistant_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    patch_assistant_ai_assistants__assistant_id__patch: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                assistant_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AiAssistantPatchIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AiAssistantOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    rotate_secret_ai_assistants__assistant_id__rotate_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                assistant_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AiAssistantCreatedOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_actors_actors_get: {
+        parameters: {
+            query?: {
+                q?: string | null;
+                limit?: number;
+            };
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ActorOut"][];
+                };
             };
             /** @description Validation Error */
             422: {
@@ -13027,6 +13654,41 @@ export interface operations {
             };
         };
     };
+    quick_create_notes_quick_create_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["QuickCreateIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuickCreateOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     download_attachment_attachments__attachment_id__download_get: {
         parameters: {
             query?: never;
@@ -14043,6 +14705,40 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["NotificationOut"][];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_notification_notifications__notification_id__delete: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                notification_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

@@ -589,7 +589,7 @@ async def test_contract_net_offer_claim_decline_via_api() -> None:
             (
                 await s.execute(
                     select(Notification).where(
-                        Notification.kind == "task_offer",
+                        Notification.kind == "task_claimed",
                         Notification.title.ilike("Task claimed:%"),
                     )
                 )
@@ -623,7 +623,7 @@ async def test_contract_net_offer_claim_decline_via_api() -> None:
             (
                 await s.execute(
                     select(Notification).where(
-                        Notification.kind == "task_offer",
+                        Notification.kind == "task_declined",
                         Notification.title.ilike("Task declined:%"),
                     )
                 )

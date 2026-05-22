@@ -1689,6 +1689,8 @@ class NotificationOut(BaseModel):
     title: str
     body: str
     status: NotificationStatus
+    created_at: datetime.datetime
+    sent_at: datetime.datetime | None = None
 
 
 class DispatchOut(BaseModel):

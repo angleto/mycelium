@@ -230,3 +230,32 @@ async def test_notifications_org_isolated(_sender: FakeSender) -> None:
         )
     async with tenant_session(str(b_org), str(b_user)) as s:
         assert await nf.list_notifications(s, org_id=b_org) == []
+
+
+async def test_delete_notification_dismisses_own_only() -> None:
+    org, user = await _org()
+    async with tenant_session(str(org), str(user)) as s:
+        n = await nf.enqueue(
+            s,
+            org_id=org,
+            actor_id=user,
+            user_id=user,
+            channel=NotificationChannelKind.email,
+            kind="task_offer",
+            title="Offered",
+            body="b",
+            dedupe_key="del-1",
+        )
+        # Unknown id -> domain error (not silently ignored).
+        with pytest.raises(DomainError):
+            await nf.delete_notification(
+                s, org_id=org, actor_id=user, notification_id=uuid.uuid4()
+            )
+        # A notification addressed to someone else is not deletable by the
+        # actor (scoped to user_id == actor_id).
+        with pytest.raises(DomainError):
+            await nf.delete_notification(
+                s, org_id=org, actor_id=uuid.uuid4(), notification_id=n.id
+            )
+        await nf.delete_notification(s, org_id=org, actor_id=user, notification_id=n.id)
+        assert await nf.list_notifications(s, org_id=org, user_id=user) == []

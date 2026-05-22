@@ -84,6 +84,18 @@ export function NotificationsRoute() {
     setMsg(t('notif.saved'))
   }
 
+  async function onDelete(id: string) {
+    setErr(null)
+    const { error } = await api.DELETE('/notifications/{notification_id}', {
+      params: { header: workspaceHeader(), path: { notification_id: id } },
+    })
+    if (error) {
+      setErr(errMessage(error))
+      return
+    }
+    setList((xs) => xs.filter((x) => x.id !== id))
+  }
+
   async function onDispatch() {
     setErr(null)
     const { data, error } = await api.POST('/notifications/dispatch', {
@@ -250,8 +262,36 @@ export function NotificationsRoute() {
       ) : (
         <ul className="list">
           {list.map((n) => (
-            <li key={n.id}>
-              {n.kind} <span className="muted">· {n.channel}</span>
+            <li key={n.id} className="row">
+              <span>
+                <strong>{n.title || n.kind}</strong>{' '}
+                <span className="muted">· {n.channel}</span>{' '}
+                <span
+                  className={
+                    n.status === 'sent'
+                      ? 'ok'
+                      : n.status === 'failed'
+                        ? 'err'
+                        : 'muted'
+                  }
+                >
+                  {t(`notif.status.${n.status}`)}
+                </span>
+                {n.created_at && (
+                  <span className="muted">
+                    {' '}
+                    · {new Date(n.created_at).toLocaleString()}
+                  </span>
+                )}
+              </span>
+              <button
+                type="button"
+                className="link"
+                onClick={() => void onDelete(n.id)}
+                title={t('notif.delete')}
+              >
+                {t('notif.delete')}
+              </button>
             </li>
           ))}
         </ul>

@@ -1177,6 +1177,12 @@ export const en = {
     saved: 'Saved.',
     list: 'Notifications',
     none: 'None.',
+    delete: 'Dismiss',
+    status: {
+      pending: 'pending',
+      sent: 'sent',
+      failed: 'failed',
+    },
     dispatch: 'Dispatch pending',
     dispatched: 'Sent {{sent}}, failed {{failed}}.',
     recurrence: 'Make a task recurring',

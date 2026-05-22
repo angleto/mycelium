@@ -62,6 +62,7 @@ async def set_pref(
     pref = (
         await session.execute(
             select(NotificationPref).where(
+                NotificationPref.org_id == org_id,
                 NotificationPref.user_id == user_id,
                 NotificationPref.channel == channel,
             )
@@ -88,7 +89,14 @@ async def list_prefs(
     session: AsyncSession, *, org_id: uuid.UUID, user_id: uuid.UUID
 ) -> list[NotificationPref]:
     return list(
-        (await session.execute(select(NotificationPref).where(NotificationPref.user_id == user_id)))
+        (
+            await session.execute(
+                select(NotificationPref).where(
+                    NotificationPref.org_id == org_id,
+                    NotificationPref.user_id == user_id,
+                )
+            )
+        )
         .scalars()
         .all()
     )
@@ -148,7 +156,10 @@ async def dispatch_pending(
     rows = list(
         (
             await session.execute(
-                select(Notification).where(Notification.status == NotificationStatus.pending)
+                select(Notification).where(
+                    Notification.org_id == org_id,
+                    Notification.status == NotificationStatus.pending,
+                )
             )
         )
         .scalars()
@@ -159,6 +170,7 @@ async def dispatch_pending(
         pref = (
             await session.execute(
                 select(NotificationPref).where(
+                    NotificationPref.org_id == org_id,
                     NotificationPref.user_id == n.user_id,
                     NotificationPref.channel == n.channel,
                 )
@@ -519,3 +531,35 @@ async def list_notifications(
         stmt = stmt.where(Notification.status == status)
     stmt = stmt.order_by(Notification.created_at.desc())
     return list((await session.execute(stmt)).scalars().all())
+
+
+async def delete_notification(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    notification_id: uuid.UUID,
+) -> None:
+    """Dismiss a notification from the actor's log. Scoped to the actor's
+    own rows (a member can only clear notifications addressed to them)."""
+    n = (
+        await session.execute(
+            select(Notification).where(
+                Notification.id == notification_id,
+                Notification.org_id == org_id,
+                Notification.user_id == actor_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if n is None:
+        raise DomainError(MessageCode.NOTIFICATION_NOT_FOUND)
+    await session.delete(n)
+    await session.flush()
+    await audit.log(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        entity="notification",
+        entity_id=notification_id,
+        action="delete",
+    )
