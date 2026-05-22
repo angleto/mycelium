@@ -1418,6 +1418,28 @@ button.btn--danger:hover {
   color: var(--text-muted, #888);
   text-decoration: line-through;
 }
+/* GFM tables in the editor. */
+.rte .ProseMirror table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 0.5rem 0;
+  table-layout: fixed;
+}
+.rte .ProseMirror th,
+.rte .ProseMirror td {
+  border: 1px solid var(--border);
+  padding: 0.35rem 0.5rem;
+  vertical-align: top;
+  text-align: left;
+}
+.rte .ProseMirror th {
+  background: var(--surface-2);
+  font-weight: 600;
+}
+/* The active cell selection highlight (table editing). */
+.rte .ProseMirror .selectedCell {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+}
 .mention-pop {
   position: fixed;
   z-index: 1000;

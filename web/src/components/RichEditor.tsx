@@ -6,6 +6,7 @@ import StarterKit from '@tiptap/starter-kit'
 import Link from '@tiptap/extension-link'
 import TaskList from '@tiptap/extension-task-list'
 import TaskItem from '@tiptap/extension-task-item'
+import { Table, TableCell, TableHeader, TableRow } from '@tiptap/extension-table'
 import { Markdown } from 'tiptap-markdown'
 import Suggestion, {
   type SuggestionKeyDownProps,
@@ -202,6 +203,13 @@ export function RichEditor({
       // built-in task_list / task_item serializers (`- [ ]` / `- [x]`).
       TaskList,
       TaskItem.configure({ nested: true }),
+      // GFM tables. tiptap-markdown carries a table serializer keyed on
+      // these node names, so pasting/typing a `| a | b |` table in raw
+      // mode round-trips to a real table in WYSIWYG and back.
+      Table.configure({ resizable: false }),
+      TableRow,
+      TableHeader,
+      TableCell,
       Markdown.configure({ html: false }),
       MentionExt,
     ],
@@ -278,6 +286,31 @@ export function RichEditor({
             editor?.chain().focus().toggleBlockquote().run(), 'blockquote')}
           {tb('</>', 'editor.code', () =>
             editor?.chain().focus().toggleCode().run(), 'code')}
+          <button
+            type="button"
+            className="btn--ghost btn--sm rte__fmt"
+            title={t('editor.table')}
+            disabled={!fmt}
+            onClick={() =>
+              editor
+                ?.chain()
+                .focus()
+                .insertTable({ rows: 3, cols: 3, withHeaderRow: true })
+                .run()
+            }
+          >
+            ▦
+          </button>
+          {fmt && editor?.isActive('table') && (
+            <>
+              {tb('+row', 'editor.tableRow', () =>
+                editor?.chain().focus().addRowAfter().run())}
+              {tb('+col', 'editor.tableCol', () =>
+                editor?.chain().focus().addColumnAfter().run())}
+              {tb('✕tbl', 'editor.tableDel', () =>
+                editor?.chain().focus().deleteTable().run())}
+            </>
+          )}
         </span>
         <button
           type="button"
