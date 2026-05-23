@@ -88,10 +88,12 @@ UPGRADE: tuple[str, ...] = (
       AND i.org_id = t.org_id
       AND i.handle = t.assignee_handle
     """,
-    # Re-enable RLS now that both backfills are done. The policy
-    # rows are unchanged so behaviour reverts to the pre-migration
-    # tenant-scoped contract.
+    # Re-enable RLS now that both backfills are done. ``tasks``
+    # is FORCE RLS in baseline (migration 0034), so we must
+    # restore BOTH flags or the table owner would silently bypass
+    # tenant isolation. Policy rows themselves are untouched.
     "ALTER TABLE tasks ENABLE ROW LEVEL SECURITY",
+    "ALTER TABLE tasks FORCE ROW LEVEL SECURITY",
     "CREATE INDEX ix_tasks_owner_id ON tasks (owner_id)",
     "CREATE INDEX ix_tasks_assignee_id ON tasks (assignee_id)",
 )
