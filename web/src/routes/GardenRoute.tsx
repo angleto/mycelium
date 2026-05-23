@@ -16,6 +16,7 @@ import { Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 
 import { api, errMessage, workspaceHeader } from '../api/client'
+import { MarkdownView } from '../components/Markdown'
 import type { components } from '../api/schema'
 
 type Note = components['schemas']['NoteOut']
@@ -311,7 +312,11 @@ function PlantDetail({
           <span className="chip chip--promoted">{t('garden.promotedChip')}</span>
         )}
       </div>
-      {n.transcript && <pre className="plant-detail__body">{n.transcript}</pre>}
+      {n.transcript && (
+        <div className="plant-detail__body">
+          <MarkdownView text={n.transcript} />
+        </div>
+      )}
       <h3>{t('garden.outgoing')}</h3>
       {data.outgoing.length === 0 ? (
         <p className="hint">{t('garden.none')}</p>
