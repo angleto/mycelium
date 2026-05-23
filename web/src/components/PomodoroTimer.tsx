@@ -104,7 +104,13 @@ export function PomodoroTimer() {
           onClick={() => setOpen(false)}
         />
       )}
-      {open && <PomodoroPopover phaseLabel={phaseLabel} p={p} />}
+      {open && (
+        <PomodoroPopover
+          phaseLabel={phaseLabel}
+          p={p}
+          onClose={() => setOpen(false)}
+        />
+      )}
     </div>
   )
 }
@@ -112,9 +118,11 @@ export function PomodoroTimer() {
 function PomodoroPopover({
   phaseLabel,
   p,
+  onClose,
 }: {
   phaseLabel: string
   p: ReturnType<typeof usePomodoro>
+  onClose: () => void
 }) {
   const { t } = useTranslation()
   const isIdle = p.session.phase === 'idle'
@@ -141,6 +149,15 @@ function PomodoroPopover({
       <header className="pomodoro__pop-head">
         <strong>{t('pomodoro.title')}</strong>
         <span className="pomodoro__phase">{phaseLabel}</span>
+        <button
+          type="button"
+          className="pomodoro__close"
+          aria-label={t('common.close')}
+          title={t('common.close')}
+          onClick={onClose}
+        >
+          ×
+        </button>
       </header>
       <p className="pomodoro__time pomodoro__mono">
         {isIdle ? formatMmSs(p.config.focusMin * 60) : formatMmSs(p.remainingSec)}

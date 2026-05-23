@@ -305,7 +305,10 @@ a:hover {
   border: 0;
   font-size: 1.5rem;
   line-height: 1;
-  padding: 0.2rem 0.6rem;
+  /* 0.7rem vertical padding + 1.5rem glyph ≈ 46px effective height, just
+     above the 44px tap-target floor (Apple HIG / Material 48dp) without
+     overflowing the 52px topbar. */
+  padding: 0.7rem 0.6rem;
   color: inherit;
   cursor: pointer;
 }
@@ -387,8 +390,20 @@ a:hover {
   .topbar__row2 .running {
     max-width: 100%;
   }
+  /* Row 2 has the full topbar width to work with, so the title doesn't
+     need to scroll horizontally any more — at some animation frames the
+     marquee left empty space between the "1/n" badge and the elapsed
+     counter. Show it statically with an ellipsis instead. */
   .topbar__row2 .running__title {
-    max-width: 12rem;
+    max-width: 16rem;
+  }
+  .topbar__row2 .running__title > span {
+    padding-left: 0;
+    animation: none;
+    max-width: 16rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 }
 
@@ -2538,8 +2553,30 @@ button.btn--danger:hover {
 .pomodoro__pop-head {
   display: flex;
   justify-content: space-between;
-  align-items: baseline;
+  align-items: center;
   gap: 0.5rem;
+}
+.pomodoro__pop-head > .pomodoro__phase {
+  /* The phase chip lives between the title and the close X; let it
+     absorb the slack so the X always sits at the right edge. */
+  margin-left: auto;
+  margin-right: 0;
+}
+.pomodoro__close {
+  border: 0;
+  background: transparent;
+  font-size: 1.4rem;
+  line-height: 1;
+  /* ~44px tap target. The wider chrome around the X is just padding,
+     not a visible border, so the popover header stays tidy. */
+  padding: 0.45rem 0.6rem;
+  margin: -0.4rem -0.4rem -0.4rem 0;
+  cursor: pointer;
+  color: inherit;
+  border-radius: 6px;
+}
+.pomodoro__close:hover {
+  background: var(--surface-2);
 }
 .pomodoro__phase {
   margin: 0;

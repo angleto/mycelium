@@ -4,7 +4,7 @@
 // (string values, not literals) so other locales must mirror it.
 export const en = {
   app: { title: 'Flow' },
-  common: { on: 'on', off: 'off' },
+  common: { on: 'on', off: 'off', close: 'Close' },
   assigneePicker: {
     label: 'Assignee',
     none: 'Unassigned',

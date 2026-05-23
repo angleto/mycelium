@@ -3,7 +3,7 @@ import type { Catalog } from './en'
 // Italian catalog. Same key shape as en (typed via Catalog).
 export const it: Catalog = {
   app: { title: 'Flow' },
-  common: { on: 'sì', off: 'no' },
+  common: { on: 'sì', off: 'no', close: 'Chiudi' },
   assigneePicker: {
     label: 'Assegnatario',
     none: 'Nessun assegnatario',
