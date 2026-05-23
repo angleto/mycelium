@@ -871,6 +871,9 @@ export const it: Catalog = {
     editAnyProject: 'Qualsiasi progetto',
     editPickTask: 'Seleziona un task',
     editNoTaskInProject: 'Nessun task in questo progetto',
+    editNoTaskInProjectHint:
+      'Nessun task in questo progetto: scegli un altro progetto o crea prima un task lì. Non puoi spostare la entry qui finché non esiste un task.',
+    editPickTaskHint: 'Scegli un task: questo è il vero campo che sposta la entry. La entry non verrà salvata finché un task non è selezionato.',
     errPickTask: 'Seleziona un task prima di salvare.',
     showTerminal: 'Mostra terminali',
     period_day: 'Giorno',

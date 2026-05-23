@@ -870,6 +870,9 @@ export const en = {
     editAnyProject: 'Any project',
     editPickTask: 'Pick a task',
     editNoTaskInProject: 'No tasks in this project',
+    editNoTaskInProjectHint:
+      'No tasks in this project: pick another project or create a task there first. The entry cannot be moved here until a task exists.',
+    editPickTaskHint: 'Pick a task: this is the real control that moves the entry. The entry will not save until a task is selected.',
     errPickTask: 'Pick a task before saving.',
     showTerminal: 'Show terminal',
     period_day: 'Day',

@@ -707,10 +707,15 @@ export function TimeRoute() {
                   // that the current task no longer matches, blank
                   // eTask so the Save button surfaces the "pick a
                   // task" guard rather than silently re-saving the
-                  // old task_id.
+                  // old task_id. The empty-task state is also flagged
+                  // visually (red Task select + inline warning) so
+                  // imported entries whose chosen project has zero
+                  // candidate tasks don't look "silently broken".
                   const tasksInProj = tasks.filter(
                     (tk) => !eProject || (tk.tags ?? []).some((g) => g.id === eProject),
                   )
+                  const taskInvalid = !eTask
+                  const noTaskInProj = !!eProject && tasksInProj.length === 0
                   return (
                     <form
                       className="entryedit"
@@ -744,6 +749,17 @@ export function TimeRoute() {
                       <select
                         value={eTask}
                         onChange={(e) => setETask(e.target.value)}
+                        aria-invalid={taskInvalid}
+                        className={
+                          taskInvalid ? 'entryedit__select--invalid' : undefined
+                        }
+                        title={
+                          taskInvalid
+                            ? noTaskInProj
+                              ? t('time.editNoTaskInProjectHint')
+                              : t('time.editPickTaskHint')
+                            : undefined
+                        }
                       >
                         <option value="">
                           {tasksInProj.length === 0
@@ -776,7 +792,10 @@ export function TimeRoute() {
                       <button
                         type="submit"
                         className="btn--sm"
-                        disabled={!eTask}
+                        disabled={taskInvalid}
+                        title={
+                          taskInvalid ? t('time.errPickTask') : undefined
+                        }
                       >
                         {t('time.save')}
                       </button>
@@ -787,6 +806,13 @@ export function TimeRoute() {
                       >
                         {t('notes.close')}
                       </button>
+                      {taskInvalid && (
+                        <span className="entryedit__warn" role="alert">
+                          {noTaskInProj
+                            ? t('time.editNoTaskInProjectHint')
+                            : t('time.editPickTaskHint')}
+                        </span>
+                      )}
                     </form>
                   )
                 })()}
