@@ -477,6 +477,12 @@ export const it: Catalog = {
     depSearch: 'Cerca un task...',
     depNone:
       'Nessuna dipendenza: questo task non ha prerequisiti. Aggiungine una solo se deve attendere il completamento di un altro task.',
+    related: 'Correlati',
+    relatedNone:
+      'Nessun task correlato. Usa questa lista per segnare task a cui vale la pena saltare da qui (nessun effetto sulla pianificazione).',
+    relatedAdd: 'Aggiungi correlato',
+    relatedSearch: 'Cerca un task...',
+    relatedRemove: 'Rimuovi',
     quickAdd: 'Aggiungi task al volo...',
     importance: 'Importanza',
     urgency: 'Urgenza',

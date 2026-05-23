@@ -40,6 +40,7 @@ from flow_api.routers import (
     oauth_google,
     schedule,
     tags,
+    task_relations,
     tasks,
     telegram,
     time_tracking,
@@ -180,6 +181,7 @@ def create_app() -> FastAPI:
     app.include_router(tasks.router)
     app.include_router(workflows.router)
     app.include_router(dependencies.router)
+    app.include_router(task_relations.router)
     app.include_router(calendars.router)
     app.include_router(events.router)
     app.include_router(schedule.router)

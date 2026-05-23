@@ -602,6 +602,18 @@ class DependencyOut(BaseModel):
     version: int
 
 
+class TaskRelationCreateIn(BaseModel):
+    task_id: uuid.UUID
+    other_id: uuid.UUID
+
+
+class TaskRelationOut(BaseModel):
+    id: uuid.UUID
+    task_a_id: uuid.UUID
+    task_b_id: uuid.UUID
+    version: int
+
+
 class GraphNode(BaseModel):
     id: str
     title: str

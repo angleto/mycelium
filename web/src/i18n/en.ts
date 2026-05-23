@@ -477,6 +477,12 @@ export const en = {
     depSearch: 'Search a task...',
     depNone:
       'No dependencies: this task has no prerequisites. Add one only if it must wait for another task to finish first.',
+    related: 'Related',
+    relatedNone:
+      'No related tasks. Use this to bookmark tasks worth jumping to from here (no scheduling effect).',
+    relatedAdd: 'Add related',
+    relatedSearch: 'Search a task...',
+    relatedRemove: 'Remove',
     quickAdd: 'Quick add a task...',
     importance: 'Importance',
     urgency: 'Urgency',

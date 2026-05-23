@@ -93,6 +93,7 @@ from flow_core.models.task import (
 )
 from flow_core.models.task_assignee import TaskAssignee
 from flow_core.models.task_handoff import HandoffStatus, TaskHandoff
+from flow_core.models.task_relation import TaskRelation
 from flow_core.models.task_tag import TaskTag
 from flow_core.models.telegram import TelegramLink, TelegramLinkCode, TelegramUpdate
 from flow_core.models.time_entry import TimeEntry, TimeSource
@@ -186,6 +187,7 @@ __all__ = [
     "TaskDependency",
     "TaskHandoff",
     "TaskRecurrence",
+    "TaskRelation",
     "TaskTag",
     "TelegramLink",
     "TelegramLinkCode",

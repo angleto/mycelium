@@ -25,6 +25,7 @@ type Task = components['schemas']['TaskOut']
 type State = components['schemas']['StateOut']
 type Tag = components['schemas']['TagOut']
 type Dep = components['schemas']['DependencyOut']
+type Rel = components['schemas']['TaskRelationOut']
 
 // Task detail with optimistic concurrency: edits send expected_version;
 // a stale write yields 409 and we reload the canonical task.
@@ -56,6 +57,9 @@ export function TaskDetailRoute() {
   const [depQuery, setDepQuery] = useState('')
   const [depOpen, setDepOpen] = useState(false)
   const [depRel, setDepRel] = useState<'depends' | 'blocks'>('depends')
+  const [rels, setRels] = useState<Rel[]>([])
+  const [relQuery, setRelQuery] = useState('')
+  const [relOpen, setRelOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState<string | null>(null)
   const [err, setErr] = useState<string | null>(null)
@@ -94,11 +98,18 @@ export function TaskDetailRoute() {
     if (data) setDeps(data)
   }, [])
 
+  const reloadRels = useCallback(async () => {
+    const { data } = await api.GET('/task-relations', {
+      params: { header: workspaceHeader(), query: { task_id: id } },
+    })
+    if (data) setRels(data)
+  }, [id])
+
   useEffect(() => {
     let active = true
     void (async () => {
       const h = workspaceHeader()
-      const [tk, st, tg, all, dp, ws, rm, nt] = await Promise.all([
+      const [tk, st, tg, all, dp, ws, rm, nt, rl] = await Promise.all([
         api.GET('/tasks/{task_id}', { params: { header: h, path: { task_id: id } } }),
         api.GET('/tasks/{task_id}/states', {
           params: { header: h, path: { task_id: id } },
@@ -111,6 +122,7 @@ export function TaskDetailRoute() {
           params: { header: h, path: { task_id: id } },
         }),
         api.GET('/notes', { params: { header: h } }),
+        api.GET('/task-relations', { params: { header: h, query: { task_id: id } } }),
       ])
       if (!active) return
       if (tk.data) apply(tk.data)
@@ -119,6 +131,7 @@ export function TaskDetailRoute() {
       if (tg.data) setTags(tg.data)
       if (all.data) setAllTasks(all.data)
       if (dp.data) setDeps(dp.data)
+      if (rl.data) setRels(rl.data)
       if (ws.data) setPresets(ws.data.settings?.estimate_presets ?? [])
       if (rm.data) setReminders(rm.data)
       if (nt.data)
@@ -494,6 +507,34 @@ export function TaskDetailRoute() {
     await reloadDeps()
   }
 
+  async function onAddRelated(otherId: string) {
+    if (!otherId || otherId === id) return
+    setErr(null)
+    const { error } = await api.POST('/task-relations', {
+      params: { header: workspaceHeader() },
+      body: { task_id: id, other_id: otherId },
+    })
+    if (error) {
+      setErr(errMessage(error))
+      return
+    }
+    setRelQuery('')
+    setRelOpen(false)
+    await reloadRels()
+  }
+
+  async function onRemoveRelated(relId: string) {
+    setErr(null)
+    const { error } = await api.DELETE('/task-relations/{relation_id}', {
+      params: { header: workspaceHeader(), path: { relation_id: relId } },
+    })
+    if (error) {
+      setErr(errMessage(error))
+      return
+    }
+    await reloadRels()
+  }
+
   const titleOf = (tid: string) =>
     allTasks.find((x) => x.id === tid)?.title ?? tid.slice(0, 8)
   const dependsOn = deps.filter((d) => d.successor_id === id)
@@ -506,6 +547,22 @@ export function TaskDetailRoute() {
         (depQ === '' ||
           x.title.toLowerCase().includes(depQ) ||
           x.id.startsWith(depQ)),
+    )
+    .slice(0, 10)
+  // Symmetric relations: pick the *other* endpoint regardless of which
+  // side of the canonical pair this task lives on.
+  const relatedIds = new Set(
+    rels.map((r) => (r.task_a_id === id ? r.task_b_id : r.task_a_id)),
+  )
+  const relQ = relQuery.trim().toLowerCase()
+  const relMatches = allTasks
+    .filter(
+      (x) =>
+        x.id !== id &&
+        !relatedIds.has(x.id) &&
+        (relQ === '' ||
+          x.title.toLowerCase().includes(relQ) ||
+          x.id.startsWith(relQ)),
     )
     .slice(0, 10)
 
@@ -842,6 +899,63 @@ export function TaskDetailRoute() {
         </button>
       </div>
       <p className="hint">{t('tasks.relatedTo')}</p>
+
+      <h2>{t('tasks.related')}</h2>
+      {rels.length === 0 ? (
+        <p className="hint">{t('tasks.relatedNone')}</p>
+      ) : (
+        <div className="chips">
+          {rels.map((r) => {
+            const otherId = r.task_a_id === id ? r.task_b_id : r.task_a_id
+            return (
+              <span key={r.id} className="chip">
+                <Link to={`/tasks/${otherId}`}>{titleOf(otherId)}</Link>
+                <button
+                  type="button"
+                  className="btn--ghost btn--sm"
+                  title={t('tasks.relatedRemove')}
+                  onClick={() => void onRemoveRelated(r.id)}
+                >
+                  ✕
+                </button>
+              </span>
+            )
+          })}
+        </div>
+      )}
+      <div className="row">
+        <label className="deppick">
+          {t('tasks.relatedAdd')}
+          <input
+            type="text"
+            value={relQuery}
+            placeholder={t('tasks.relatedSearch')}
+            onChange={(e) => {
+              setRelQuery(e.target.value)
+              setRelOpen(true)
+            }}
+            onFocus={() => setRelOpen(true)}
+            onBlur={() => window.setTimeout(() => setRelOpen(false), 150)}
+          />
+          {relOpen && relMatches.length > 0 && (
+            <div className="deppick__list">
+              {relMatches.map((x) => (
+                <button
+                  key={x.id}
+                  type="button"
+                  className="deppick__row"
+                  onMouseDown={(e) => {
+                    e.preventDefault()
+                    void onAddRelated(x.id)
+                  }}
+                >
+                  {x.title}
+                </button>
+              ))}
+            </div>
+          )}
+        </label>
+      </div>
 
       <h2>{t('coord.title')}</h2>
       <CoordinationPanel

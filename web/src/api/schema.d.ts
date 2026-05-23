@@ -1162,6 +1162,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/task-relations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Task Relations */
+        get: operations["list_task_relations_task_relations_get"];
+        put?: never;
+        /** Add Task Relation */
+        post: operations["add_task_relation_task_relations_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/task-relations/{relation_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Remove Task Relation */
+        delete: operations["remove_task_relation_task_relations__relation_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/calendars": {
         parameters: {
             query?: never;
@@ -6423,6 +6458,39 @@ export interface components {
             /** Budget Id */
             budget_id?: string | null;
         };
+        /** TaskRelationCreateIn */
+        TaskRelationCreateIn: {
+            /**
+             * Task Id
+             * Format: uuid
+             */
+            task_id: string;
+            /**
+             * Other Id
+             * Format: uuid
+             */
+            other_id: string;
+        };
+        /** TaskRelationOut */
+        TaskRelationOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Task A Id
+             * Format: uuid
+             */
+            task_a_id: string;
+            /**
+             * Task B Id
+             * Format: uuid
+             */
+            task_b_id: string;
+            /** Version */
+            version: number;
+        };
         /**
          * TaskScheduleIn
          * @description Drag/write-back of scheduler fields (FR-4). Only provided fields
@@ -9659,6 +9727,114 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["GraphOut"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_task_relations_task_relations_get: {
+        parameters: {
+            query?: {
+                task_id?: string | null;
+            };
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskRelationOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    add_task_relation_task_relations_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TaskRelationCreateIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskRelationOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    remove_task_relation_task_relations__relation_id__delete: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                relation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {
