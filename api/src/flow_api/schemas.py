@@ -503,6 +503,11 @@ class TaskOut(BaseModel):
     # via the identity payload when needed.
     assignee_id: uuid.UUID | None = None
     assignee_handle: str | None = None
+    # docs/adr/0028 Punto 4: kind of the assignee identity
+    # (user / ai_assistant) resolved at serialisation. NULL when the
+    # task is unassigned. The SPA renders an IdentityBadge from this
+    # without re-querying ``/identities`` per row.
+    assignee_kind: str | None = None
     owner_id: uuid.UUID
     # ``executor_kind`` is re-exposed for SPA backward compat
     # (cards/filters/graph still consume it). The serializer fills it

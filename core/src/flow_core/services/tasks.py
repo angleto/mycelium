@@ -18,12 +18,14 @@ from flow_core.concurrency import optimistic_update
 from flow_core.errors import DomainError, NotFoundError
 from flow_core.i18n import MessageCode
 from flow_core.models.comment import Comment
+from flow_core.models.identity import Identity, IdentityKind
 from flow_core.models.membership import Role
 from flow_core.models.project_profile import ProjectProfile
 from flow_core.models.tag import Tag, TagKind
 from flow_core.models.task import ExecKind, Necessity, Task
 from flow_core.models.task_collaborator import TaskCollaborator
 from flow_core.models.task_tag import TaskTag
+from flow_core.models.user import User
 from flow_core.models.workflow import WorkflowState
 from flow_core.services import audit, lifecycle, taxonomy
 from flow_core.services import identities as identities_svc
@@ -224,6 +226,9 @@ async def list_tasks(
     state_id: uuid.UUID | None = None,
     tag_id: uuid.UUID | None = None,
     assignee_id: uuid.UUID | None = None,
+    assignee_kind: IdentityKind | None = None,
+    assignee_handles: Sequence[str] | None = None,
+    owner_handles: Sequence[str] | None = None,
     parent_task_id: uuid.UUID | None = None,
     include_archived: bool = False,
     include_deleted: bool = False,
@@ -243,6 +248,21 @@ async def list_tasks(
         stmt = stmt.join(TaskCollaborator, TaskCollaborator.task_id == Task.id).where(
             TaskCollaborator.user_id == assignee_id
         )
+    # docs/adr/0028: identity-axis filters on Task.assignee_id (FK to
+    # identities) and Task.owner_id (FK to users). ``assignee_kind``
+    # narrows the assignee polymorphism (human vs llm_agent); the
+    # ``*_handles`` lists are multi-select. NULL assignee never matches
+    # an identity filter (unassigned tasks are excluded from those
+    # facets by design).
+    if assignee_kind is not None or assignee_handles:
+        ident_alias = Identity
+        stmt = stmt.join(ident_alias, ident_alias.id == Task.assignee_id)
+        if assignee_kind is not None:
+            stmt = stmt.where(ident_alias.kind == assignee_kind)
+        if assignee_handles:
+            stmt = stmt.where(ident_alias.handle.in_(list(assignee_handles)))
+    if owner_handles:
+        stmt = stmt.join(User, User.id == Task.owner_id).where(User.handle.in_(list(owner_handles)))
     # Default order: most prioritary first (priority asc, 1 = top),
     # newest as tiebreak. The number is always "smaller = sooner".
     stmt = stmt.order_by(Task.priority.asc(), Task.created_at.desc())

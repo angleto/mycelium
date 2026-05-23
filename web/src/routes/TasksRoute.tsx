@@ -5,6 +5,7 @@ import { api, errMessage, workspaceHeader } from '../api/client'
 import { useSession } from '../auth/useSession'
 import { TagChip } from '../components/TagChip'
 import { PriorityChip } from '../components/PriorityChip'
+import { IdentityBadge } from '../components/IdentityBadge'
 import { ScaleSelect } from '../components/ScaleSelect'
 import { TaskKanban } from '../components/TaskKanban'
 import { RecentTasks } from '../components/RecentTasks'
@@ -369,6 +370,27 @@ export function TasksRoute() {
   const hiddenStateIds = new Set(
     wfStates.filter((s) => s.is_hidden).map((s) => s.id),
   )
+  // Identity facet (Punto 4, ADR-0028): three-way toggle on top of
+  // the existing ``executor:`` DSL atom. The facet derives its active
+  // state from ``q`` so the user-typed DSL and the toggle stay in
+  // sync (typing ``executor:llm_agent`` lights the Bots pill).
+  const identityFacet: 'all' | 'humans' | 'bots' = /\bexecutor:llm_agent\b/.test(q)
+    ? 'bots'
+    : /\bexecutor:human\b/.test(q)
+      ? 'humans'
+      : 'all'
+  function setIdentityFacet(f: 'all' | 'humans' | 'bots') {
+    const stripped = q
+      .replace(/\bexecutor:(llm_agent|human)\b/g, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+    if (f === 'all') {
+      setQ(stripped)
+      return
+    }
+    const atom = f === 'humans' ? 'executor:human' : 'executor:llm_agent'
+    setQ(stripped ? `${stripped} ${atom}` : atom)
+  }
   // Filter DSL: free text matches title or tag name (existing
   // behaviour); ``@tagname`` / ``state:in_progress`` / ``due:today``
   // / ``priority:<=3`` / ``!@done`` / ``A | B`` cover the Todoist-
@@ -522,6 +544,27 @@ export function TasksRoute() {
           onChange={(e) => setQ(e.target.value)}
           style={{ flex: 1, minWidth: '12rem' }}
         />
+        <span
+          className="idfacet"
+          role="group"
+          aria-label={t('tasks.identityFacet')}
+        >
+          {(['all', 'humans', 'bots'] as const).map((f) => (
+            <button
+              type="button"
+              key={f}
+              role="radio"
+              aria-checked={identityFacet === f}
+              className={
+                'toggle-pill' + (identityFacet === f ? ' toggle-pill--on' : '')
+              }
+              onClick={() => setIdentityFacet(f)}
+              title={t(`tasks.identity.${f}Hint`)}
+            >
+              {t(`tasks.identity.${f}`)}
+            </button>
+          ))}
+        </span>
         <label>
           {t('tasks.filterTag')}
           <select value={filter} onChange={(e) => setFilter(e.target.value)}>
@@ -709,11 +752,18 @@ export function TasksRoute() {
                   aria-label={t('tasks.select')}
                 />
                 <Link to={`/tasks/${tk.id}`} className="taskrow__title">
-                  {tk.executor_kind === 'llm_agent' && (
+                  {tk.assignee_kind ? (
+                    <IdentityBadge
+                      kind={tk.assignee_kind}
+                      handle={tk.assignee_handle ?? null}
+                    />
+                  ) : tk.executor_kind === 'llm_agent' ? (
+                    // Unassigned but routed to the bot pool: keep the
+                    // legacy aibadge marker (no handle to show).
                     <span className="aibadge" title={t('tasks.aiTitle')}>
                       {t('tasks.aiBadge')}
                     </span>
-                  )}
+                  ) : null}
                   {tk.title}
                 </Link>
                 <span className="taskrow__tags">

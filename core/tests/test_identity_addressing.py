@@ -232,3 +232,69 @@ async def test_unassigned_task_kind_falls_back_to_executor_kind_hint() -> None:
         )
     assert task.assignee_id is None
     assert task.executor_kind is ExecKind.llm_agent
+
+
+async def test_list_tasks_filters_by_assignee_kind_and_handles() -> None:
+    """Punto 4 (docs/adr/0028): ``list_tasks`` exposes identity-axis
+    filters. ``assignee_kind=ai_assistant`` returns only bot tasks;
+    ``assignee_handles=[h]`` narrows to one specific handle.
+    Unassigned tasks never match an identity filter."""
+    org, user = await _signup_with_handle()
+    bot_handle = f"bot-{uuid.uuid4().hex[:6]}"
+    async with tenant_session(str(org), str(user)) as s:
+        assistant = AiAssistant(
+            org_id=org,
+            user_id=user,
+            label="bot",
+            handle=bot_handle,
+            scope=[],
+            is_active=True,
+        )
+        s.add(assistant)
+        await s.flush()
+        bot_identity = (
+            await s.execute(
+                select(Identity).where(
+                    Identity.org_id == org,
+                    Identity.ai_assistant_id == assistant.id,
+                )
+            )
+        ).scalar_one()
+        user_identity = (
+            await s.execute(
+                select(Identity).where(
+                    Identity.org_id == org,
+                    Identity.user_id == user,
+                )
+            )
+        ).scalar_one()
+        bot_task = await tasks_svc.create_task(
+            s, org_id=org, actor_id=user, title="bot-task", assignee_id=bot_identity.id
+        )
+        human_task = await tasks_svc.create_task(
+            s, org_id=org, actor_id=user, title="human-task", assignee_id=user_identity.id
+        )
+        unassigned_task = await tasks_svc.create_task(
+            s, org_id=org, actor_id=user, title="unassigned-task"
+        )
+
+        bots = await tasks_svc.list_tasks(s, org_id=org, assignee_kind=IdentityKind.ai_assistant)
+        humans = await tasks_svc.list_tasks(s, org_id=org, assignee_kind=IdentityKind.user)
+        by_handle = await tasks_svc.list_tasks(
+            s, org_id=org, assignee_handles=[bot_identity.handle]
+        )
+        unfiltered = await tasks_svc.list_tasks(s, org_id=org)
+
+        bot_ids = {t.id for t in bots}
+        human_ids = {t.id for t in humans}
+        handle_ids = {t.id for t in by_handle}
+        all_ids = {t.id for t in unfiltered}
+
+    assert bot_task.id in bot_ids
+    assert human_task.id not in bot_ids
+    assert unassigned_task.id not in bot_ids
+    assert human_task.id in human_ids
+    assert bot_task.id not in human_ids
+    assert unassigned_task.id not in human_ids
+    assert handle_ids == {bot_task.id}
+    assert {bot_task.id, human_task.id, unassigned_task.id}.issubset(all_ids)

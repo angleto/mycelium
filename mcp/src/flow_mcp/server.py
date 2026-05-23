@@ -485,13 +485,29 @@ async def create_task(
 
 
 @mcp.tool()
-async def list_tasks(token: str, org_id: str, state_id: str | None = None) -> list[dict[str, Any]]:
+async def list_tasks(
+    token: str,
+    org_id: str,
+    state_id: str | None = None,
+    assignee_kind: str | None = None,
+    assignee_handles: list[str] | None = None,
+    owner_handles: list[str] | None = None,
+) -> list[dict[str, Any]]:
     """List tasks, optionally filtered by workflow state id."""
+    # docs/adr/0028 Punto 4: identity-axis filters. ``assignee_kind``
+    # accepts ``user`` or ``ai_assistant``; ``assignee_handles`` /
+    # ``owner_handles`` are multi-select on the respective handles.
+    from flow_core.models.identity import IdentityKind
+
+    kind: IdentityKind | None = IdentityKind(assignee_kind) if assignee_kind else None
     async with _tenant(token, org_id) as (s, org, _user):
         rows = await tasks.list_tasks(
             s,
             org_id=org,
             state_id=uuid.UUID(state_id) if state_id else None,
+            assignee_kind=kind,
+            assignee_handles=assignee_handles,
+            owner_handles=owner_handles,
         )
         tagmap = await tasks.tags_by_task(s, task_ids=[t.id for t in rows])
         return [_task(t, tagmap.get(t.id, [])) for t in rows]

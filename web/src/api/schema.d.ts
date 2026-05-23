@@ -6578,6 +6578,8 @@ export interface components {
             assignee_id?: string | null;
             /** Assignee Handle */
             assignee_handle?: string | null;
+            /** Assignee Kind */
+            assignee_kind?: string | null;
             /**
              * Owner Id
              * Format: uuid
@@ -8494,6 +8496,10 @@ export interface operations {
                 state_id?: string | null;
                 tag_id?: string | null;
                 assignee_id?: string | null;
+                /** Identity Kind (user | ai_assistant) */
+                assignee_kind?: "user" | "ai_assistant" | null;
+                assignee_handles?: string[] | null;
+                owner_handles?: string[] | null;
                 parent_task_id?: string | null;
                 include_archived?: boolean;
                 include_deleted?: boolean;

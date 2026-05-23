@@ -510,6 +510,15 @@ export const it: Catalog = {
     urgLabels: ['Adesso', 'Alta', 'Presto', 'Bassa', 'Quando capita'],
     aiBadge: 'IA',
     aiTitle: "Creato/gestito dall'agente IA",
+    identityFacet: 'Filtra per chi è assegnatario del task',
+    identity: {
+      all: 'Tutti',
+      humans: 'Umani',
+      bots: 'Bot',
+      allHint: 'Mostra task assegnati a umani o bot',
+      humansHint: 'Solo task assegnati a un utente umano',
+      botsHint: 'Solo task assegnati a un agente IA',
+    },
     search: 'Cerca titolo, @tag, state:in_progress, due:today, priority:<=4...',
     searchHint:
       'Testo libero su titolo o nome tag. Filtri: @tagname (o !@tagname per escludere), state:NAME, state:!NAME, due:today | tomorrow | overdue | none | +Nd | -Nd | YYYY-MM-DD, priority:<=N (o <,>,>=,=), executor:human | llm_agent | offered. Spazi = AND, | = OR.',

@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy import select
 
 from flow_api.deps import TenantCtx, tenant_ctx
@@ -31,6 +31,7 @@ from flow_api.schemas import (
     VersionOut,
 )
 from flow_core.models.comment import Comment
+from flow_core.models.identity import IdentityKind
 from flow_core.models.note import Note
 from flow_core.models.tag import Tag
 from flow_core.models.task import Task
@@ -80,6 +81,7 @@ def _out(
         parent_task_id=t.parent_task_id,
         assignee_id=t.assignee_id,
         assignee_handle=assignee_handle,
+        assignee_kind=assignee_kind,
         owner_id=t.owner_id,
         executor_kind=eff_kind,
         estimate_effort_h=t.estimate_effort_h,
@@ -133,22 +135,26 @@ def _note_out(
     )
 
 
-async def _assignee_handles(ctx: TenantCtx, task_ids: set[uuid.UUID]) -> dict[uuid.UUID, str]:
-    """docs/adr/0028: ``assignee_handle`` is denormalised from
-    ``identities`` for the SPA's task card. Batch-loaded so a list
-    endpoint pays one query, not one per task."""
+async def _assignee_idents(
+    ctx: TenantCtx, task_ids: set[uuid.UUID]
+) -> dict[uuid.UUID, tuple[str, str]]:
+    """docs/adr/0028: per-task (handle, kind) of the assignee identity,
+    denormalised for the SPA's task card and the IdentityBadge in the
+    list rows (Punto 4). Batch-loaded so a list endpoint pays one
+    query, not one per task. Returns an empty mapping for unassigned
+    tasks; callers default to ``None`` / fallback in the serializer."""
     if not task_ids:
         return {}
     from flow_core.models.identity import Identity
 
     rows = (
         await ctx.session.execute(
-            select(Task.id, Identity.handle)
+            select(Task.id, Identity.handle, Identity.kind)
             .join(Identity, Identity.id == Task.assignee_id)
             .where(Task.id.in_(task_ids))
         )
     ).all()
-    return {tid: handle for tid, handle in rows}
+    return {tid: (handle, kind.value) for tid, handle, kind in rows}
 
 
 async def _state_names(ctx: TenantCtx, state_ids: set[uuid.UUID]) -> dict[uuid.UUID, str]:
@@ -194,12 +200,14 @@ async def create_task(
     )
     names = await _state_names(ctx, {task.state_id})
     tagmap = await svc.tags_by_task(ctx.session, task_ids=[task.id])
-    handles = await _assignee_handles(ctx, {task.id})
+    idents = await _assignee_idents(ctx, {task.id})
+    h, k = idents.get(task.id, (None, None))
     return _out(
         task,
         names.get(task.state_id, ""),
         tagmap.get(task.id, []),
-        assignee_handle=handles.get(task.id),
+        assignee_handle=h,
+        assignee_kind=k,
     )
 
 
@@ -209,6 +217,13 @@ async def list_tasks(
     state_id: uuid.UUID | None = None,
     tag_id: uuid.UUID | None = None,
     assignee_id: uuid.UUID | None = None,
+    # docs/adr/0028 Punto 4: identity-axis facets. ``assignee_kind``
+    # narrows the polymorphism (user/ai_assistant); ``assignee_handles``
+    # is multi-select on the assignee identity handle; ``owner_handles``
+    # is multi-select on the owner user handle.
+    assignee_kind: IdentityKind | None = None,
+    assignee_handles: Annotated[list[str] | None, Query()] = None,
+    owner_handles: Annotated[list[str] | None, Query()] = None,
     parent_task_id: uuid.UUID | None = None,
     include_archived: bool = False,
     include_deleted: bool = False,
@@ -219,22 +234,29 @@ async def list_tasks(
         state_id=state_id,
         tag_id=tag_id,
         assignee_id=assignee_id,
+        assignee_kind=assignee_kind,
+        assignee_handles=assignee_handles,
+        owner_handles=owner_handles,
         parent_task_id=parent_task_id,
         include_archived=include_archived,
         include_deleted=include_deleted,
     )
     names = await _state_names(ctx, {t.state_id for t in rows})
     tagmap = await svc.tags_by_task(ctx.session, task_ids=[t.id for t in rows])
-    handles = await _assignee_handles(ctx, {t.id for t in rows})
-    return [
-        _out(
-            t,
-            names.get(t.state_id, ""),
-            tagmap.get(t.id, []),
-            assignee_handle=handles.get(t.id),
+    idents = await _assignee_idents(ctx, {t.id for t in rows})
+    out: list[TaskOut] = []
+    for t in rows:
+        h, k = idents.get(t.id, (None, None))
+        out.append(
+            _out(
+                t,
+                names.get(t.state_id, ""),
+                tagmap.get(t.id, []),
+                assignee_handle=h,
+                assignee_kind=k,
+            )
         )
-        for t in rows
-    ]
+    return out
 
 
 @router.get("/{task_id}", response_model=TaskOut)
@@ -245,12 +267,14 @@ async def get_task(task_id: uuid.UUID, ctx: Annotated[TenantCtx, Depends(tenant_
     task = await svc.get_task(ctx.session, org_id=ctx.org_id, task_id=task_id, include_deleted=True)
     names = await _state_names(ctx, {task.state_id})
     tagmap = await svc.tags_by_task(ctx.session, task_ids=[task.id])
-    handles = await _assignee_handles(ctx, {task.id})
+    idents = await _assignee_idents(ctx, {task.id})
+    h, k = idents.get(task.id, (None, None))
     return _out(
         task,
         names.get(task.state_id, ""),
         tagmap.get(task.id, []),
-        assignee_handle=handles.get(task.id),
+        assignee_handle=h,
+        assignee_kind=k,
     )
 
 
@@ -603,12 +627,14 @@ def _handoff_out(h: TaskHandoff) -> HandoffOut:
 async def _task_out(ctx: TenantCtx, task: Task) -> TaskOut:
     names = await _state_names(ctx, {task.state_id})
     tagmap = await svc.tags_by_task(ctx.session, task_ids=[task.id])
-    handles = await _assignee_handles(ctx, {task.id})
+    idents = await _assignee_idents(ctx, {task.id})
+    h, k = idents.get(task.id, (None, None))
     return _out(
         task,
         names.get(task.state_id, ""),
         tagmap.get(task.id, []),
-        assignee_handle=handles.get(task.id),
+        assignee_handle=h,
+        assignee_kind=k,
     )
 
 
