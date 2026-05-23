@@ -58,11 +58,10 @@ from flow_core.errors import DomainError, ForbiddenError
 from flow_core.models.dependency import DependencyType
 from flow_core.models.executor import Executor, ExecutorKind
 from flow_core.models.membership import Membership, Role
-from flow_core.models.note import Note
 from flow_core.models.notification import Notification
 from flow_core.models.schedule import Schedule
 from flow_core.models.task import ExecKind
-from flow_core.models.task_assignee import TaskAssignee
+from flow_core.models.task_collaborator import TaskCollaborator
 from flow_core.models.task_handoff import HandoffStatus, TaskHandoff
 from flow_core.security import decode_token
 from flow_core.services import agent_runtime as runtime
@@ -259,9 +258,21 @@ async def test_human_to_human_handoff_delivered_with_artifact_link(
         assert len(notifs) == 1
 
         # The artifact note is now linked to the successor task (context
-        # for the human) -- the Proposal-A note<->task link.
-        linked = (await s.execute(select(Note).where(Note.id == art.id))).scalar_one()
-        assert linked.task_id == succ.id
+        # for the human) -- ADR-0029 P3 stores this as a polymorphic
+        # ``NoteTaskLink`` of kind=artifact. The predecessor keeps its
+        # own artifact link to the same note; both coexist.
+        from flow_core.models.note_link import NoteTaskLink
+
+        link = (
+            await s.execute(
+                select(NoteTaskLink).where(
+                    NoteTaskLink.note_id == art.id,
+                    NoteTaskLink.task_id == succ.id,
+                    NoteTaskLink.kind == "artifact",
+                )
+            )
+        ).scalar_one_or_none()
+        assert link is not None
 
 
 # --- (b) -> LLM: pending, surfaced in context, consumed on run --------
@@ -335,7 +346,7 @@ async def test_handoff_to_llm_pending_then_in_context_then_consumed(
         # _build_context for the successor surfaces the handoff
         # (predecessor title + message + artifact body), deterministic.
         succ_obj = await tasks_svc.get_task(s, org_id=org, task_id=succ.id)
-        ctx = await runtime._build_context(s, task=succ_obj)
+        ctx = await runtime._build_context(s, org_id=org, task=succ_obj)
         blob = ctx[0][1]
         assert "Handoff from [UpstreamWork]:" in blob
         assert "UpstreamWork" in ho.message and ho.message in blob
@@ -351,7 +362,7 @@ async def test_handoff_to_llm_pending_then_in_context_then_consumed(
         assert ho.consumed_at is not None
         # Idempotent: it is no longer pending, so it is no longer in a
         # fresh context build, and a second consume finds nothing.
-        ctx2 = await runtime._build_context(s, task=succ_obj)
+        ctx2 = await runtime._build_context(s, org_id=org, task=succ_obj)
         assert "Handoff from [UpstreamWork]:" not in ctx2[0][1]
         again = await coord.mark_incoming_consumed(s, org_id=org, actor_id=user, task_id=succ.id)
         assert again == 0
@@ -575,7 +586,9 @@ async def test_contract_net_offer_claim_decline_via_api() -> None:
         assignees = (
             (
                 await s.execute(
-                    select(TaskAssignee.user_id).where(TaskAssignee.task_id == uuid.UUID(tid))
+                    select(TaskCollaborator.user_id).where(
+                        TaskCollaborator.task_id == uuid.UUID(tid)
+                    )
                 )
             )
             .scalars()
@@ -636,8 +649,8 @@ async def test_contract_net_offer_claim_decline_via_api() -> None:
         assert (
             await s.execute(
                 select(func.count())
-                .select_from(TaskAssignee)
-                .where(TaskAssignee.task_id == uuid.UUID(t2["id"]))
+                .select_from(TaskCollaborator)
+                .where(TaskCollaborator.task_id == uuid.UUID(t2["id"]))
             )
         ).scalar_one() == 0
 
