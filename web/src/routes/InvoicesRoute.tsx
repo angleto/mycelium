@@ -294,11 +294,13 @@ export function InvoicesRoute() {
   async function saveInvoice() {
     if (!sel) return
     setErr(null)
+    // client_tag_id / issuer_profile_id are intentionally omitted:
+    // they are frozen at create_draft on the backend and the SPA shows
+    // them as read-only. Sending them would 400 against the tightened
+    // _DRAFT_UPDATABLE whitelist.
     const { error } = await api.PATCH('/invoices/{invoice_id}', {
       params: { header: workspaceHeader(), path: { invoice_id: sel.id } },
       body: {
-        client_tag_id: dClient,
-        issuer_profile_id: dIssuer || null,
         series: dSeries,
         causale: dCausale || null,
         notes: dNotes || null,
@@ -776,13 +778,15 @@ export function InvoicesRoute() {
           )}
 
           <div className="row">
+            {/* Issuer and client are frozen at create_draft: changing
+                either on an existing draft would silently rewire the
+                per-client sezionale + the (issuer, series, year)
+                counter underneath. To change them, delete this draft
+                and create a fresh one (the choice lives on the "new
+                invoice" form above the list). */}
             <label>
               {t('invoices.issuer')}
-              <select
-                value={dIssuer}
-                disabled={!isDraft}
-                onChange={(e) => dField(setDIssuer)(e.target.value)}
-              >
+              <select value={dIssuer} disabled>
                 {profiles.map((p) => (
                   <option key={p.id} value={p.id}>
                     {p.label}
@@ -792,11 +796,7 @@ export function InvoicesRoute() {
             </label>
             <label>
               {t('invoices.client')}
-              <select
-                value={dClient}
-                disabled={!isDraft}
-                onChange={(e) => dField(setDClient)(e.target.value)}
-              >
+              <select value={dClient} disabled>
                 {clients.map((c) => (
                   <option key={c.id} value={c.id}>
                     {c.name}

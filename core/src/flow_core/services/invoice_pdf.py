@@ -274,9 +274,19 @@ def build_pdf(
     client: ClientProfile | None,
     lines: Sequence[InvoiceLine],
     totals: Totals,
+    *,
+    number: str | None = None,
+    is_draft: bool = False,
 ) -> bytes:
     """Render the courtesy A4 invoice. Tolerant of a still-incomplete
-    draft (missing fields render blank) so it can preview a draft."""
+    draft (missing fields render blank) so it can preview a draft.
+
+    ``number`` is the resolved invoice identifier (e.g. ``"CYLOCK-2"``).
+    On a transmitted invoice it equals the real allocated value; on a
+    draft it is the would-be number (counter+1) so the user always
+    sees the prospective code instead of a bare "BOZZA" placeholder.
+    ``is_draft`` adds a small DRAFT/BOZZA marker next to it so the
+    page is still visibly non-emitted."""
     loc = _locale(client)
     buf = BytesIO()
     doc = SimpleDocTemplate(
@@ -286,9 +296,8 @@ def build_pdf(
         bottomMargin=18 * mm,
         leftMargin=18 * mm,
         rightMargin=18 * mm,
-        title=(
-            f"{invoice.series}-{invoice.number}" if invoice.number is not None else invoice.series
-        ),
+        title=number
+        or (f"{invoice.series}-{invoice.number}" if invoice.number is not None else invoice.series),
     )
     ss = getSampleStyleSheet()
     base = ss["Normal"]
@@ -310,13 +319,30 @@ def build_pdf(
     flow: list[object] = []
 
     is_forf = _is_forfettario(issuer)
-    number = (
-        f"{invoice.series}-{invoice.number}" if invoice.number is not None else _L(loc, "draft")
-    )
+    # ``number`` (the would-be code, e.g. "CYLOCK-2") is the value the
+    # caller resolved in InvoicePreview. We display it verbatim and add
+    # a small DRAFT/BOZZA marker only when the document is not yet
+    # transmitted — the user wants to see "which number am I about to
+    # emit", a bare "BOZZA" placeholder hides that information.
+    if number:
+        display_number = number
+    elif invoice.number is not None:
+        display_number = f"{invoice.series}-{invoice.number}"
+    else:
+        # Legacy fallback: no preview number passed AND not yet
+        # allocated. Show only the sezionale so the placeholder is
+        # short and unambiguous.
+        display_number = invoice.series
     issued = (invoice.issued_at or dt.datetime.now(tz=dt.UTC)).date().isoformat()
 
     flow.append(Paragraph(_L(loc, "invoice"), h_title))
-    flow.append(Paragraph(f"{_L(loc, 'number')}: {number}  ·  {issued}", h_number))
+    draft_tag = f"  ({_L(loc, 'draft')})" if is_draft else ""
+    flow.append(
+        Paragraph(
+            f"{_L(loc, 'number')}: {display_number}{draft_tag}  ·  {issued}",
+            h_number,
+        )
+    )
     flow.append(Spacer(1, 4 * mm))
 
     # --- cedente (issuer) / cessionario (client) side by side ---

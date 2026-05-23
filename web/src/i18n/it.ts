@@ -142,6 +142,16 @@ export const it: Catalog = {
     download: 'Scarica',
     confirmDelete: 'Eliminare questo allegato?',
     zoom: 'Clic per ingrandire',
+    preview: 'Anteprima',
+    previewLoading: 'Caricamento anteprima…',
+    previewError: 'Anteprima non disponibile.',
+    previewTooLarge:
+      'File troppo grande per l’anteprima (oltre 50 MiB) — usa Scarica.',
+    pdfMobileTitle: 'Anteprima PDF',
+    pdfMobileHint:
+      'I browser mobili non mostrano i PDF in modo affidabile inline. Aprilo in una nuova scheda.',
+    pdfOpenInNewTab: 'Apri in nuova scheda',
+    close: 'Chiudi',
   },
   exec: {
     title: 'Executor',

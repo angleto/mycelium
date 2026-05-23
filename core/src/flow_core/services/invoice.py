@@ -655,8 +655,14 @@ async def create_draft(
 
 _DRAFT_UPDATABLE = frozenset(
     {
-        "client_tag_id",
-        "issuer_profile_id",
+        # client_tag_id and issuer_profile_id are intentionally NOT in
+        # this set: a draft's billing identity (which client is billed,
+        # under which VAT subject) is frozen at create_draft. Mutating
+        # either after the fact would silently rewire the per-client
+        # sezionale + the (issuer, series, year) counter underneath an
+        # existing draft, which is exactly the source of confusion the
+        # product owner asked us to remove. The supported workflow is:
+        # delete the draft and create a fresh one.
         "series",
         "currency",
         "causale",
@@ -1472,5 +1478,12 @@ async def render_pdf(
     p = await _gather_preview(session, org_id=org_id, inv=inv)
     _validate(p.issuer, p.client or ClientProfile(), p.lines)
     assert p.issuer is not None and p.client is not None  # _validate raised  # noqa: S101
-    pdf = build_pdf(inv, p.issuer, p.client, p.lines, p.totals)
+    # Pass the resolved would-be number (e.g. "CYLOCK2") so the PDF
+    # shows what the document will become, with the state as a smaller
+    # tag — a transmitted invoice prints the real number; a draft
+    # prints the prospective number + a DRAFT/BOZZA marker. Surfacing
+    # "BOZZA" alone hides the information the user actually needs
+    # (which number am I about to emit?).
+    is_draft = inv.state == InvoiceState.draft
+    pdf = build_pdf(inv, p.issuer, p.client, p.lines, p.totals, number=p.number, is_draft=is_draft)
     return p.number, pdf

@@ -824,7 +824,10 @@ export function TaskDetailRoute() {
         <ul className="list">
           {dependsOn.map((d) => (
             <li key={d.id}>
-              <strong>{t('tasks.dependsOn')}:</strong> {titleOf(d.predecessor_id)}
+              <strong>{t('tasks.dependsOn')}:</strong>{' '}
+              <Link to={`/tasks/${d.predecessor_id}`}>
+                {titleOf(d.predecessor_id)}
+              </Link>
               <button
                 type="button"
                 className="btn--ghost btn--sm"
@@ -836,7 +839,10 @@ export function TaskDetailRoute() {
           ))}
           {blocks.map((d) => (
             <li key={d.id}>
-              <strong>{t('tasks.blocksL')}:</strong> {titleOf(d.successor_id)}
+              <strong>{t('tasks.blocksL')}:</strong>{' '}
+              <Link to={`/tasks/${d.successor_id}`}>
+                {titleOf(d.successor_id)}
+              </Link>
               <button
                 type="button"
                 className="btn--ghost btn--sm"
@@ -968,9 +974,14 @@ export function TaskDetailRoute() {
       />
 
       <h2>{t('tasks.workNotes')}</h2>
+      {/* The TaskTimer at the top of this view (next to the state
+          select) is the canonical timer for the task; the section-
+          level ⏱▶ / ⏱▶▶ buttons that used to sit here read as
+          unrelated to "Work notes" and confused users into thinking
+          they started a per-note timer — they didn't. Removed in the
+          UX pass; the per-note timer (inside RichEditor's note shell)
+          still carries the note_id provenance. */}
       <div className="row">
-        <TaskTimer taskId={id} />
-        <span className="modal__sp" />
         <button type="button" onClick={() => void newWorkNote()}>
           {t('tasks.newWorkNote')}
         </button>

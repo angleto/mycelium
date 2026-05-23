@@ -1,12 +1,25 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { authFetch, errMessage } from '../api/client'
+import { useMediaQuery, MOBILE_QUERY } from '../lib/useMediaQuery'
 
 // Attachments on a note OR a task (exactly one parent). Binary
 // upload/download go through authFetch (raw, authenticated) since the
-// typed JSON client does not fit multipart/blob. Images get an inline
-// thumbnail + click-to-zoom lightbox; other files are a chip with a
-// download action. Mirrors the costa_associati UX.
+// typed JSON client does not fit multipart/blob.
+//
+// Preview affordances (ported from bitvision_phoenix's DocumentPreview):
+//   - Images: inline 44x44 thumbnail (fetched eagerly), click opens a
+//     lightbox with the full-size blob — same as before.
+//   - PDFs: clickable "PDF" tile; on click we fetch the binary lazily,
+//     wrap it in an iframe on desktop, or surface an "Open in new tab"
+//     CTA on mobile (Safari/Chrome on phones do not render PDFs in
+//     iframes reliably).
+//   - Anything else: 📎 icon + download-only, as today.
+//
+// Object URLs never escape this component: the eager thumbs are
+// revoked when the list refetches, and the modal-owned blob (PDF) is
+// revoked when the modal closes. The bearer token is on authFetch's
+// Authorization header — never on a DOM `src` attribute.
 
 type AttachmentMeta = {
   id: string
@@ -16,6 +29,11 @@ type AttachmentMeta = {
   created_at: string
 }
 
+// Hard cap mirroring bitvision's "binary" branch. Pulling >50 MiB
+// through the browser to render a preview is wasteful even when the
+// blob would render fine; force the user through Download instead.
+const MAX_PREVIEW_BYTES = 50 * 1024 * 1024
+
 function humanSize(n: number): string {
   if (n < 1024) return `${n} B`
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`
@@ -23,6 +41,15 @@ function humanSize(n: number): string {
 }
 
 const isImage = (m: string) => m.startsWith('image/')
+const isPdf = (m: string, fn: string) =>
+  m === 'application/pdf' || fn.toLowerCase().endsWith('.pdf')
+
+type Preview =
+  | { kind: 'image'; url: string; name: string; owned: false }
+  | { kind: 'pdf'; url: string; name: string; owned: true }
+  | { kind: 'loading'; name: string }
+  | { kind: 'error'; name: string; message: string }
+  | { kind: 'too-large'; name: string }
 
 export function Attachments({
   noteId,
@@ -32,6 +59,7 @@ export function Attachments({
   taskId?: string
 }) {
   const { t } = useTranslation()
+  const isMobile = useMediaQuery(MOBILE_QUERY)
   const base = noteId
     ? `/notes/${noteId}/attachments`
     : `/tasks/${taskId}/attachments`
@@ -40,13 +68,15 @@ export function Attachments({
   const [err, setErr] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [thumbs, setThumbs] = useState<Record<string, string>>({})
-  const [zoom, setZoom] = useState<{ url: string; name: string } | null>(null)
+  const [preview, setPreview] = useState<Preview | null>(null)
   const [tick, setTick] = useState(0)
   const fileInput = useRef<HTMLInputElement>(null)
 
   // List + image thumbnails. Re-runs on parent change or after a
   // mutation (tick). Object URLs are revoked on cleanup so a long
-  // editing session does not leak blobs.
+  // editing session does not leak blobs. Images over the preview cap
+  // are skipped here — the user still sees the row + Download, just
+  // not an eagerly-fetched thumbnail.
   useEffect(() => {
     let active = true
     const made: string[] = []
@@ -62,7 +92,9 @@ export function Attachments({
       setErr(null)
       setItems(rows)
       const next: Record<string, string> = {}
-      for (const r of rows.filter((x) => isImage(x.mime_type))) {
+      for (const r of rows.filter(
+        (x) => isImage(x.mime_type) && x.size_bytes <= MAX_PREVIEW_BYTES,
+      )) {
         const b = await authFetch(`/attachments/${r.id}/download`)
         if (!active) break
         if (b.ok) {
@@ -78,6 +110,52 @@ export function Attachments({
       for (const u of made) URL.revokeObjectURL(u)
     }
   }, [base, tick])
+
+  // Close + revoke any preview-owned blob URL. Images reuse the
+  // thumbs[id] URL that the list-effect already owns, so the modal
+  // must never revoke them — only the `owned` branch revokes.
+  const closePreview = useCallback(() => {
+    setPreview((p) => {
+      if (p && 'owned' in p && p.owned) URL.revokeObjectURL(p.url)
+      return null
+    })
+  }, [])
+
+  // Escape key closes the preview. Attached only while a preview is
+  // open to avoid grabbing the key in other contexts.
+  useEffect(() => {
+    if (!preview) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') closePreview()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [preview, closePreview])
+
+  function openImagePreview(it: AttachmentMeta) {
+    const url = thumbs[it.id]
+    if (!url) return
+    setPreview({ kind: 'image', url, name: it.filename, owned: false })
+  }
+
+  async function openPdfPreview(it: AttachmentMeta) {
+    if (it.size_bytes > MAX_PREVIEW_BYTES) {
+      setPreview({ kind: 'too-large', name: it.filename })
+      return
+    }
+    setPreview({ kind: 'loading', name: it.filename })
+    const res = await authFetch(`/attachments/${it.id}/download`)
+    if (!res.ok) {
+      setPreview({
+        kind: 'error',
+        name: it.filename,
+        message: `HTTP ${res.status}`,
+      })
+      return
+    }
+    const url = URL.createObjectURL(await res.blob())
+    setPreview({ kind: 'pdf', url, name: it.filename, owned: true })
+  }
 
   async function onPick(f: File) {
     setBusy(true)
@@ -150,11 +228,19 @@ export function Attachments({
                   type="button"
                   className="att__thumb"
                   title={t('attach.zoom')}
-                  onClick={() =>
-                    setZoom({ url: thumbs[it.id], name: it.filename })
-                  }
+                  onClick={() => openImagePreview(it)}
                 >
                   <img src={thumbs[it.id]} alt={it.filename} />
+                </button>
+              ) : isPdf(it.mime_type, it.filename) ? (
+                <button
+                  type="button"
+                  className="att__thumb att__thumb--pdf"
+                  title={t('attach.preview')}
+                  aria-label={t('attach.preview')}
+                  onClick={() => void openPdfPreview(it)}
+                >
+                  PDF
                 </button>
               ) : (
                 <span className="att__icon" aria-hidden>
@@ -183,14 +269,94 @@ export function Attachments({
           ))}
         </ul>
       )}
-      {zoom && (
+      {preview && (
         <div
           className="lightbox"
           role="dialog"
-          aria-label={zoom.name}
-          onClick={() => setZoom(null)}
+          aria-label={preview.name}
+          onClick={closePreview}
         >
-          <img src={zoom.url} alt={zoom.name} />
+          {preview.kind === 'image' && (
+            <img src={preview.url} alt={preview.name} />
+          )}
+          {preview.kind === 'pdf' && !isMobile && (
+            // Clicks INSIDE the iframe do not bubble (browser
+            // isolates the document); clicks on the iframe element
+            // itself (border, scrollbar) would, so stop propagation
+            // here to keep the backdrop-click-to-close UX without the
+            // PDF chrome closing the modal accidentally.
+            <iframe
+              src={preview.url}
+              title={preview.name}
+              className="lightbox__pdf"
+              onClick={(e) => e.stopPropagation()}
+            />
+          )}
+          {preview.kind === 'pdf' && isMobile && (
+            <div
+              className="lightbox__panel"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <p>
+                <strong>{t('attach.pdfMobileTitle')}</strong>
+              </p>
+              <p className="hint">{t('attach.pdfMobileHint')}</p>
+              <a
+                href={preview.url}
+                target="_blank"
+                rel="noreferrer noopener"
+                className="btn--sm"
+              >
+                {t('attach.pdfOpenInNewTab')}
+              </a>
+              <button
+                type="button"
+                className="btn--sm btn--ghost"
+                onClick={closePreview}
+              >
+                {t('attach.close')}
+              </button>
+            </div>
+          )}
+          {preview.kind === 'loading' && (
+            <div
+              className="lightbox__panel"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <p>{t('attach.previewLoading')}</p>
+            </div>
+          )}
+          {preview.kind === 'error' && (
+            <div
+              className="lightbox__panel"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <p className="err">{t('attach.previewError')}</p>
+              <p className="hint">{preview.message}</p>
+              <button
+                type="button"
+                className="btn--sm"
+                onClick={closePreview}
+              >
+                {t('attach.close')}
+              </button>
+            </div>
+          )}
+          {preview.kind === 'too-large' && (
+            <div
+              className="lightbox__panel"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <p>{t('attach.previewTooLarge')}</p>
+              <button
+                type="button"
+                className="btn--sm"
+                onClick={closePreview}
+              >
+                {t('attach.close')}
+              </button>
+            </div>
+          )}
         </div>
       )}
     </div>

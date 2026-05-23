@@ -143,6 +143,15 @@ export const en = {
     download: 'Download',
     confirmDelete: 'Delete this attachment?',
     zoom: 'Click to enlarge',
+    preview: 'Preview',
+    previewLoading: 'Loading preview…',
+    previewError: 'Could not load preview.',
+    previewTooLarge: 'File too large to preview (over 50 MiB) — use Download.',
+    pdfMobileTitle: 'PDF preview',
+    pdfMobileHint:
+      "Mobile browsers don't render PDFs reliably inline. Open it in a new tab.",
+    pdfOpenInNewTab: 'Open in new tab',
+    close: 'Close',
   },
   exec: {
     title: 'Executors',

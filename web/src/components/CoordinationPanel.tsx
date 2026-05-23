@@ -78,17 +78,24 @@ export function CoordinationPanel({
   const incoming = items.filter((h) => h.successor_task_id === taskId)
   const outgoing = items.filter((h) => h.predecessor_task_id === taskId)
 
-  const row = (h: Handoff, other: string) => (
+  // ``otherId`` is the task on the other side of the handoff (the
+  // predecessor for an incoming envelope, the successor for an
+  // outgoing one). The title becomes a Link so the user can navigate
+  // the coordination graph the same way the Related tasks block
+  // already supports — reported as task #1 in the v1.2.74 UX pass.
+  const row = (h: Handoff, otherId: string) => (
     <li key={h.id}>
       <span
         className={'tag ' + (BAD.has(h.status) ? 'tag--danger' : 'tag--muted')}
       >
         {t(`coord.status.${h.status}`)}
       </span>{' '}
-      <span className="muted">
-        {other}
-        {h.delivered_at ? ` · ${fmtDateTime(h.delivered_at)}` : ''}
-      </span>
+      <Link to={`/tasks/${otherId}`} className="muted">
+        {titleOf(otherId)}
+      </Link>
+      {h.delivered_at && (
+        <span className="muted"> · {fmtDateTime(h.delivered_at)}</span>
+      )}
       {h.message && <div>{h.message}</div>}
       {h.artifact_note_id && (
         <Link to={`/notes?open=${h.artifact_note_id}`}>
@@ -140,7 +147,7 @@ export function CoordinationPanel({
         <p className="hint">{t('coord.none')}</p>
       ) : (
         <ul className="list">
-          {incoming.map((h) => row(h, titleOf(h.predecessor_task_id)))}
+          {incoming.map((h) => row(h, h.predecessor_task_id))}
         </ul>
       )}
       <strong>{t('coord.outgoing')}</strong>
@@ -148,7 +155,7 @@ export function CoordinationPanel({
         <p className="hint">{t('coord.none')}</p>
       ) : (
         <ul className="list">
-          {outgoing.map((h) => row(h, titleOf(h.successor_task_id)))}
+          {outgoing.map((h) => row(h, h.successor_task_id))}
         </ul>
       )}
     </div>
