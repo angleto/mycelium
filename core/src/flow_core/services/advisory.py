@@ -30,7 +30,7 @@ from flow_core.models.identity import Identity, IdentityKind
 from flow_core.models.membership import Role
 from flow_core.models.tag import Tag, TagKind
 from flow_core.models.task import Necessity, Task
-from flow_core.models.task_assignee import TaskAssignee
+from flow_core.models.task_collaborator import TaskCollaborator
 from flow_core.models.task_tag import TaskTag
 from flow_core.models.workflow import WorkflowState
 from flow_core.services.budgets import get_budget
@@ -105,7 +105,7 @@ async def _owned_actionable(
     assignee_ids = (
         (
             await session.execute(
-                select(TaskAssignee.task_id).where(TaskAssignee.user_id == actor_id)
+                select(TaskCollaborator.task_id).where(TaskCollaborator.user_id == actor_id)
             )
         )
         .scalars()

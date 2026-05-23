@@ -14,7 +14,7 @@ LLM<->human, human<->human, human<->LLM):
   valid) and create/refresh a ``TaskHandoff`` to the successor. Then
   deliver it by the successor's RESOLVED executor:
     - human executor (or no executor row -> the successor's
-      ``TaskAssignee`` users): a ``task_handoff`` notification per user
+      ``TaskCollaborator`` users): a ``task_handoff`` notification per user
       + the artifact note linked to the successor task (idempotent);
       status -> ``delivered``.
     - llm_agent executor: stays ``pending`` (no notification); it is
@@ -33,7 +33,7 @@ LLM<->human, human<->human, human<->LLM):
   ``task_offer`` notification to the eligible human members (capability
   match against ``Task.required_capabilities`` ⊆ a human Executor's
   ``capability_tags``, else all members). ``claim`` (member) awards the
-  task to the caller (becomes a ``TaskAssignee``), clears ``offered``,
+  task to the caller (becomes a ``TaskCollaborator``), clears ``offered``,
   notifies the offerer. ``decline`` (member) is lightweight: an audit
   record + a notification back to the offerer (no bid table).
 
@@ -60,7 +60,7 @@ from flow_core.models.note import Note
 from flow_core.models.notification import NotificationChannelKind
 from flow_core.models.schedule import Schedule
 from flow_core.models.task import Task
-from flow_core.models.task_assignee import TaskAssignee
+from flow_core.models.task_collaborator import TaskCollaborator
 from flow_core.models.task_handoff import HandoffStatus, TaskHandoff
 from flow_core.services import audit
 from flow_core.services import note_links as note_links_svc
@@ -140,7 +140,7 @@ async def _human_recipients(
     """The human users a handoff/notification for ``task_id`` is
     delivered to: the resolved human executor's ``user_id`` if the
     executor is a human, else (no executor row, or a human executor
-    with no user) the successor task's ``TaskAssignee`` users. An
+    with no user) the successor task's ``TaskCollaborator`` users. An
     llm_agent executor yields NO human recipient (it consumes via the
     P3 context path). Deterministic order: sorted by ``str(uuid)``."""
     if executor is not None and executor.kind is ExecutorKind.human:
@@ -150,7 +150,11 @@ async def _human_recipients(
     elif executor is not None and executor.kind is ExecutorKind.llm_agent:
         return []
     rows = (
-        (await session.execute(select(TaskAssignee.user_id).where(TaskAssignee.task_id == task_id)))
+        (
+            await session.execute(
+                select(TaskCollaborator.user_id).where(TaskCollaborator.task_id == task_id)
+            )
+        )
         .scalars()
         .all()
     )
@@ -543,7 +547,7 @@ async def claim_task(
     task_id: uuid.UUID,
 ) -> Task:
     """Member: claim an offered task (contract-net award). The caller
-    becomes a ``TaskAssignee``, ``offered`` is cleared, the offerer is
+    becomes a ``TaskCollaborator``, ``offered`` is cleared, the offerer is
     notified. Rejects a non-offered task (TASK_NOT_OFFERED) or one
     already claimed (TASK_ALREADY_CLAIMED -- offered but the caller is
     already an assignee, or any assignee exists)."""
@@ -556,7 +560,11 @@ async def claim_task(
     if not task.offered:
         raise DomainError(MessageCode.TASK_NOT_OFFERED)
     existing_assignees = (
-        (await session.execute(select(TaskAssignee.user_id).where(TaskAssignee.task_id == task_id)))
+        (
+            await session.execute(
+                select(TaskCollaborator.user_id).where(TaskCollaborator.task_id == task_id)
+            )
+        )
         .scalars()
         .all()
     )
@@ -564,7 +572,7 @@ async def claim_task(
         # An offered task that already has an assignee was already
         # awarded (claimed); a second claim is rejected.
         raise DomainError(MessageCode.TASK_ALREADY_CLAIMED)
-    session.add(TaskAssignee(org_id=org_id, task_id=task_id, user_id=actor_id))
+    session.add(TaskCollaborator(org_id=org_id, task_id=task_id, user_id=actor_id))
     task.offered = False
     task.version += 1
     await session.flush()

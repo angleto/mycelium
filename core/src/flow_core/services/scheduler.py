@@ -48,7 +48,7 @@ from flow_core.models.identity import Identity, IdentityKind
 from flow_core.models.membership import Role
 from flow_core.models.schedule import Schedule
 from flow_core.models.task import ExecKind, ScheduleMode, SchedulePolicy, Task
-from flow_core.models.task_assignee import TaskAssignee
+from flow_core.models.task_collaborator import TaskCollaborator
 from flow_core.models.task_tag import TaskTag
 from flow_core.models.workflow import WorkflowState
 from flow_core.services import audit
@@ -291,7 +291,9 @@ class Scheduler:
         )
         assignee_rows = (
             await self._s.execute(
-                select(TaskAssignee.task_id, TaskAssignee.user_id).order_by(TaskAssignee.user_id)
+                select(TaskCollaborator.task_id, TaskCollaborator.user_id).order_by(
+                    TaskCollaborator.user_id
+                )
             )
         ).all()
         first_assignee: dict[uuid.UUID, uuid.UUID] = {}

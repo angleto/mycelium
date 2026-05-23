@@ -110,7 +110,7 @@ from flow_core.models.task import (
     ScheduleMode,
     Task,
 )
-from flow_core.models.task_assignee import TaskAssignee
+from flow_core.models.task_collaborator import TaskCollaborator
 from flow_core.models.task_handoff import HandoffStatus, TaskHandoff
 from flow_core.models.task_relation import TaskRelation
 from flow_core.models.task_tag import TaskTag
@@ -213,7 +213,7 @@ __all__ = [
     "TagKind",
     "TagScope",
     "Task",
-    "TaskAssignee",
+    "TaskCollaborator",
     "TaskDependency",
     "TaskHandoff",
     "TaskRecurrence",

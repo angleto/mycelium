@@ -22,7 +22,7 @@ from flow_core.models.membership import Role
 from flow_core.models.project_profile import ProjectProfile
 from flow_core.models.tag import Tag, TagKind
 from flow_core.models.task import ExecKind, Necessity, Task
-from flow_core.models.task_assignee import TaskAssignee
+from flow_core.models.task_collaborator import TaskCollaborator
 from flow_core.models.task_tag import TaskTag
 from flow_core.models.workflow import WorkflowState
 from flow_core.services import audit, lifecycle, taxonomy
@@ -204,7 +204,7 @@ async def create_task(
         await _require_tag(session, tag_id)
         session.add(TaskTag(org_id=org_id, task_id=task.id, tag_id=tag_id))
     for user_id in assignee_ids:
-        session.add(TaskAssignee(org_id=org_id, task_id=task.id, user_id=user_id))
+        session.add(TaskCollaborator(org_id=org_id, task_id=task.id, user_id=user_id))
     await session.flush()
     await audit.log(
         session,
@@ -240,8 +240,8 @@ async def list_tasks(
     if tag_id is not None:
         stmt = stmt.join(TaskTag, TaskTag.task_id == Task.id).where(TaskTag.tag_id == tag_id)
     if assignee_id is not None:
-        stmt = stmt.join(TaskAssignee, TaskAssignee.task_id == Task.id).where(
-            TaskAssignee.user_id == assignee_id
+        stmt = stmt.join(TaskCollaborator, TaskCollaborator.task_id == Task.id).where(
+            TaskCollaborator.user_id == assignee_id
         )
     # Default order: most prioritary first (priority asc, 1 = top),
     # newest as tiebreak. The number is always "smaller = sooner".
@@ -595,7 +595,7 @@ async def assign(
     await get_task(session, org_id=org_id, task_id=task_id)
     try:
         async with session.begin_nested():
-            session.add(TaskAssignee(org_id=org_id, task_id=task_id, user_id=user_id))
+            session.add(TaskCollaborator(org_id=org_id, task_id=task_id, user_id=user_id))
             await session.flush()
     except IntegrityError:
         return
@@ -619,9 +619,9 @@ async def unassign(
 ) -> None:
     await require_role(session, org_id, actor_id, Role.member)
     await session.execute(
-        delete(TaskAssignee).where(
-            TaskAssignee.task_id == task_id,
-            TaskAssignee.user_id == user_id,
+        delete(TaskCollaborator).where(
+            TaskCollaborator.task_id == task_id,
+            TaskCollaborator.user_id == user_id,
         )
     )
     await audit.log(

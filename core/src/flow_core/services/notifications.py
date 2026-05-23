@@ -33,7 +33,7 @@ from flow_core.models.notification import (
     TaskReminder,
 )
 from flow_core.models.task import Task
-from flow_core.models.task_assignee import TaskAssignee
+from flow_core.models.task_collaborator import TaskCollaborator
 from flow_core.models.task_tag import TaskTag
 from flow_core.models.workflow import WorkflowState
 from flow_core.notification_channel import NotificationSender, get_sender
@@ -332,7 +332,7 @@ async def spawn_due(
         assignee_ids = (
             (
                 await session.execute(
-                    select(TaskAssignee.user_id).where(TaskAssignee.task_id == rec.task_id)
+                    select(TaskCollaborator.user_id).where(TaskCollaborator.task_id == rec.task_id)
                 )
             )
             .scalars()
@@ -414,7 +414,7 @@ async def scan_reminders(
         assignees = (
             (
                 await session.execute(
-                    select(TaskAssignee.user_id).where(TaskAssignee.task_id == t.id)
+                    select(TaskCollaborator.user_id).where(TaskCollaborator.task_id == t.id)
                 )
             )
             .scalars()
