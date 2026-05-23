@@ -24,12 +24,17 @@ type NoteWithLinks = components['schemas']['NoteWithLinksOut']
 
 type Tab = 'inbox' | 'garden' | 'cemetery'
 
-const MATURITY_OPTIONS: { value: string; key: string }[] = [
-  { value: 'seed', key: 'garden.maturity.seed' },
-  { value: 'growing', key: 'garden.maturity.growing' },
-  { value: 'mature', key: 'garden.maturity.mature' },
-  { value: 'dormant', key: 'garden.maturity.dormant' },
-]
+const MATURITY_OPTIONS = ['seed', 'growing', 'mature', 'dormant'] as const
+
+// Garden glyphs: the maturity stage is the row's identity, so render
+// it as a single emoji + accessible label rather than a chip + text.
+// (The keys map to garden.maturity.* in the i18n catalog.)
+const MATURITY_GLYPH: Record<string, string> = {
+  seed: '🌱',
+  growing: '🌿',
+  mature: '🌳',
+  dormant: '🍂',
+}
 
 function bucketOf(n: Note): Tab {
   if (n.promoted_at) return 'cemetery'
@@ -42,7 +47,13 @@ function shortPreview(n: Note): string {
   const body = (n.transcript || n.summary || '').trim()
   if (!body) return ''
   const first = body.split('\n').find((l) => l.trim().length > 0) || ''
-  return first.length > 160 ? first.slice(0, 159) + '…' : first
+  return first.length > 220 ? first.slice(0, 219) + '…' : first
+}
+
+const TAB_GLYPH: Record<Tab, string> = {
+  inbox: '🌱',
+  garden: '🌿',
+  cemetery: '🍂',
 }
 
 export function GardenRoute() {
@@ -90,7 +101,7 @@ export function GardenRoute() {
   }, [notes])
 
   const titleOf = (n: Note) =>
-    (n.title && n.title.trim()) || shortPreview(n) || n.id.slice(0, 8)
+    (n.title && n.title.trim()) || shortPreview(n).slice(0, 80) || n.id.slice(0, 8)
 
   async function setMaturity(noteId: string, maturity: string) {
     setBusy(true)
@@ -121,7 +132,6 @@ export function GardenRoute() {
       return
     }
     await reload()
-    // Navigate to the freshly created task.
     window.location.href = `/tasks/${data.task_id}`
   }
 
@@ -161,6 +171,16 @@ export function GardenRoute() {
     setOpenData(null)
   }
 
+  // Esc closes the modal — same convention as /notes.
+  useEffect(() => {
+    if (!openId) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') closePlant()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [openId])
+
   const tabs: { id: Tab; label: string }[] = [
     { id: 'inbox', label: t('garden.tab.inbox') },
     { id: 'garden', label: t('garden.tab.garden') },
@@ -169,83 +189,116 @@ export function GardenRoute() {
   const visible = buckets[tab]
 
   return (
-    <div className="garden">
+    <section className="card garden">
       <h1>{t('garden.title')}</h1>
       <p className="hint">{t('garden.intro')}</p>
-      <div className="tabs">
+
+      <div className="garden__tabs" role="tablist">
         {tabs.map((x) => (
           <button
             key={x.id}
             type="button"
-            className={tab === x.id ? 'tab tab--active' : 'tab'}
+            role="tab"
+            aria-selected={tab === x.id}
+            className={
+              'garden__tab' + (tab === x.id ? ' garden__tab--active' : '')
+            }
             onClick={() => setTab(x.id)}
           >
-            {x.label} <span className="badge">{buckets[x.id].length}</span>
+            <span aria-hidden="true">{TAB_GLYPH[x.id]}</span>
+            <span className="garden__tab-label">{x.label}</span>
+            <span className="garden__tab-count">{buckets[x.id].length}</span>
           </button>
         ))}
       </div>
+
       {err && <p className="err">{err}</p>}
+
       {visible.length === 0 ? (
-        <p className="hint">{t(`garden.empty.${tab}`)}</p>
+        <p className="hint garden__empty">{t(`garden.empty.${tab}`)}</p>
       ) : (
-        <ul className="plants">
+        <ul className="garden__list">
           {visible.map((n) => (
             <li key={n.id} className="plant">
-              <div className="plant__head">
-                <button
-                  type="button"
-                  className="plant__title"
-                  onClick={() => void openPlant(n.id)}
+              <button
+                type="button"
+                className="plant__open"
+                onClick={() => void openPlant(n.id)}
+                title={t('garden.openPlant')}
+              >
+                <span
+                  className={`plant__glyph plant__glyph--${n.maturity}`}
+                  aria-hidden="true"
                 >
-                  {titleOf(n)}
-                </button>
-                <span className={`chip chip--maturity chip--${n.maturity}`}>
-                  {t(`garden.maturity.${n.maturity}`)}
+                  {MATURITY_GLYPH[n.maturity] ?? '🌱'}
                 </span>
-                {n.promoted_at && (
-                  <span className="chip chip--promoted">
-                    {t('garden.promotedChip')}
-                  </span>
-                )}
-              </div>
-              <p className="plant__preview">{shortPreview(n)}</p>
+                <span className="plant__body">
+                  <span className="plant__title">{titleOf(n)}</span>
+                  {shortPreview(n) && (
+                    <span className="plant__preview">{shortPreview(n)}</span>
+                  )}
+                  {n.promoted_at && (
+                    <span className="plant__chip plant__chip--promoted">
+                      {t('garden.promotedChip')}
+                    </span>
+                  )}
+                </span>
+              </button>
               <div className="plant__actions">
                 {!n.promoted_at && (
                   <>
-                    <label className="plant__matpick">
-                      {t('garden.changeMaturity')}
-                      <select
-                        value={n.maturity}
-                        disabled={busy}
-                        onChange={(e) => void setMaturity(n.id, e.target.value)}
-                      >
-                        {MATURITY_OPTIONS.map((m) => (
-                          <option key={m.value} value={m.value}>
-                            {t(m.key)}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
+                    <select
+                      className="plant__maturity"
+                      value={n.maturity}
+                      disabled={busy}
+                      aria-label={t('garden.changeMaturity')}
+                      title={t('garden.changeMaturity')}
+                      onChange={(e) => void setMaturity(n.id, e.target.value)}
+                    >
+                      {MATURITY_OPTIONS.map((m) => (
+                        <option key={m} value={m}>
+                          {MATURITY_GLYPH[m]} {t(`garden.maturity.${m}`)}
+                        </option>
+                      ))}
+                    </select>
                     <button
                       type="button"
-                      className="btn--sm"
+                      className="plant__btn"
                       disabled={busy}
+                      title={t('garden.promote')}
+                      aria-label={t('garden.promote')}
                       onClick={() => void onPromote(n.id)}
                     >
-                      {t('garden.promote')}
+                      <span aria-hidden="true">🌸</span>
+                      <span className="plant__btn-label">
+                        {t('garden.promote')}
+                      </span>
                     </button>
                     <button
                       type="button"
-                      className="btn--sm btn--ghost"
+                      className="plant__btn plant__btn--ghost"
                       disabled={busy}
+                      title={t('garden.derive')}
+                      aria-label={t('garden.derive')}
                       onClick={() => void onDerive(n.id)}
                     >
-                      {t('garden.derive')}
+                      <span aria-hidden="true">🍎</span>
+                      <span className="plant__btn-label">
+                        {t('garden.derive')}
+                      </span>
                     </button>
                   </>
                 )}
-                <Link to={`/notes?open=${n.id}`} className="btn--sm btn--ghost">
-                  {t('garden.openNote')}
+                <Link
+                  to={`/notes?open=${n.id}`}
+                  className="plant__btn plant__btn--ghost"
+                  title={t('garden.openNote')}
+                  aria-label={t('garden.openNote')}
+                >
+                  <span aria-hidden="true">↗</span>
+                  <span className="plant__btn-label">
+                    {t('garden.openNote')}
+                  </span>
                 </Link>
               </div>
             </li>
@@ -254,37 +307,63 @@ export function GardenRoute() {
       )}
 
       {openId && (
-        <div className="plant-modal" role="dialog" aria-modal="true">
-          <div className="plant-modal__body">
-            <button
-              type="button"
-              className="plant-modal__close"
-              onClick={closePlant}
-            >
-              ✕
-            </button>
-            {openData === null ? (
-              <p className="hint">{t('garden.loading')}</p>
-            ) : (
-              <PlantDetail
-                data={openData}
-                allNotes={notes}
-                onUnlink={async (childId, kind) => {
-                  await api.DELETE('/notes/{note_id}/links', {
-                    params: {
-                      header: workspaceHeader(),
-                      path: { note_id: openId },
-                      query: { child_note_id: childId, kind },
-                    },
-                  })
-                  await openPlant(openId)
-                }}
-              />
-            )}
+        <div
+          className="modal__backdrop"
+          role="dialog"
+          aria-modal="true"
+          aria-label={t('garden.title')}
+          onClick={(e) => {
+            if (e.target === e.currentTarget) closePlant()
+          }}
+        >
+          <div className="modal__panel">
+            <div className="modal__head">
+              <strong>
+                {openData
+                  ? openData.note.title || t('notes.untitled')
+                  : t('garden.loading')}
+              </strong>
+              {openData && (
+                <span
+                  className={`plant__glyph plant__glyph--${openData.note.maturity}`}
+                  aria-hidden="true"
+                >
+                  {MATURITY_GLYPH[openData.note.maturity] ?? '🌱'}
+                </span>
+              )}
+              <span className="modal__sp" />
+              <button
+                type="button"
+                className="btn--ghost btn--sm"
+                onClick={closePlant}
+              >
+                {t('notes.close')}
+              </button>
+            </div>
+            <div className="modal__body">
+              {openData === null ? (
+                <p className="hint">{t('garden.loading')}</p>
+              ) : (
+                <PlantDetail
+                  data={openData}
+                  allNotes={notes}
+                  onUnlink={async (childId, kind) => {
+                    await api.DELETE('/notes/{note_id}/links', {
+                      params: {
+                        header: workspaceHeader(),
+                        path: { note_id: openId },
+                        query: { child_note_id: childId, kind },
+                      },
+                    })
+                    await openPlant(openId)
+                  }}
+                />
+              )}
+            </div>
           </div>
         </div>
       )}
-    </div>
+    </section>
   )
 }
 
@@ -303,9 +382,9 @@ function PlantDetail({
   const n = data.note
   return (
     <div className="plant-detail">
-      <h2>{n.title || n.id.slice(0, 8)}</h2>
-      <div className="row">
+      <div className="plant-detail__chips">
         <span className={`chip chip--maturity chip--${n.maturity}`}>
+          <span aria-hidden="true">{MATURITY_GLYPH[n.maturity] ?? '🌱'}</span>{' '}
           {t(`garden.maturity.${n.maturity}`)}
         </span>
         {n.promoted_at && (
@@ -313,60 +392,68 @@ function PlantDetail({
         )}
       </div>
       {n.transcript && (
-        <div className="plant-detail__body">
+        <div className="plant-detail__body md">
           <MarkdownView text={n.transcript} />
         </div>
       )}
-      <h3>{t('garden.outgoing')}</h3>
-      {data.outgoing.length === 0 ? (
-        <p className="hint">{t('garden.none')}</p>
-      ) : (
-        <ul>
-          {data.outgoing.map((l) => (
-            <li key={l.id}>
-              <span className="chip chip--linkkind">{l.kind}</span>{' '}
-              <Link to={`/notes?open=${l.child_note_id}`}>
-                {titleById(l.child_note_id)}
-              </Link>{' '}
-              <button
-                type="button"
-                className="btn--ghost btn--sm"
-                onClick={() => void onUnlink(l.child_note_id, l.kind)}
-              >
-                {t('garden.unlink')}
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-      <h3>{t('garden.incoming')}</h3>
-      {data.incoming.length === 0 ? (
-        <p className="hint">{t('garden.none')}</p>
-      ) : (
-        <ul>
-          {data.incoming.map((l) => (
-            <li key={l.id}>
-              <span className="chip chip--linkkind">{l.kind}</span>{' '}
-              <Link to={`/notes?open=${l.parent_note_id}`}>
-                {titleById(l.parent_note_id)}
-              </Link>
-            </li>
-          ))}
-        </ul>
-      )}
-      <h3>{t('garden.fruits')}</h3>
-      {data.task_links.length === 0 ? (
-        <p className="hint">{t('garden.none')}</p>
-      ) : (
-        <ul>
-          {data.task_links.map((l) => (
-            <li key={l.id}>
-              <span className="chip chip--linkkind">{l.kind}</span>{' '}
-              <Link to={`/tasks/${l.task_id}`}>{l.task_id.slice(0, 8)}</Link>
-            </li>
-          ))}
-        </ul>
-      )}
+      <section className="plant-detail__section">
+        <h3>{t('garden.outgoing')}</h3>
+        {data.outgoing.length === 0 ? (
+          <p className="hint">{t('garden.none')}</p>
+        ) : (
+          <ul className="plant-detail__links">
+            {data.outgoing.map((l) => (
+              <li key={l.id}>
+                <span className="chip chip--linkkind">{l.kind}</span>{' '}
+                <Link to={`/notes?open=${l.child_note_id}`}>
+                  {titleById(l.child_note_id)}
+                </Link>{' '}
+                <button
+                  type="button"
+                  className="btn--ghost btn--sm"
+                  onClick={() => void onUnlink(l.child_note_id, l.kind)}
+                >
+                  {t('garden.unlink')}
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+      <section className="plant-detail__section">
+        <h3>{t('garden.incoming')}</h3>
+        {data.incoming.length === 0 ? (
+          <p className="hint">{t('garden.none')}</p>
+        ) : (
+          <ul className="plant-detail__links">
+            {data.incoming.map((l) => (
+              <li key={l.id}>
+                <span className="chip chip--linkkind">{l.kind}</span>{' '}
+                <Link to={`/notes?open=${l.parent_note_id}`}>
+                  {titleById(l.parent_note_id)}
+                </Link>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+      <section className="plant-detail__section">
+        <h3>{t('garden.fruits')}</h3>
+        {data.task_links.length === 0 ? (
+          <p className="hint">{t('garden.none')}</p>
+        ) : (
+          <ul className="plant-detail__links">
+            {data.task_links.map((l) => (
+              <li key={l.id}>
+                <span className="chip chip--linkkind">{l.kind}</span>{' '}
+                <Link to={`/tasks/${l.task_id}`}>
+                  {l.task_id.slice(0, 8)}
+                </Link>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
     </div>
   )
 }

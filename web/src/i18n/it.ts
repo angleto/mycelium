@@ -567,6 +567,7 @@ export const it: Catalog = {
     promote: 'Promuovi a task',
     promoteConfirm: 'Promuovere questa nota a task? La nota diventerà sola lettura.',
     derive: 'Genera task',
+    openPlant: 'Apri nel dettaglio del giardino',
     derivePrompt: 'Titolo del task derivato:',
     openNote: 'Apri',
     promotedChip: 'trapiantata',

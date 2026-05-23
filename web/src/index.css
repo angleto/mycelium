@@ -2803,3 +2803,234 @@ button.btn--danger:hover {
   border-color: #7e57c266;
   color: #7e57c2;
 }
+.chip--maturity {
+  text-transform: capitalize;
+}
+.chip--seed { color: #4caf50; border-color: #4caf5066; background: #4caf5014; }
+.chip--growing { color: #2e7d32; border-color: #2e7d3266; background: #2e7d3214; }
+.chip--mature { color: #1b5e20; border-color: #1b5e2066; background: #1b5e2014; }
+.chip--dormant { color: #8d6e63; border-color: #8d6e6366; background: #8d6e6314; }
+.chip--linkkind {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.72rem;
+  letter-spacing: 0.02em;
+}
+
+/* ============================================================
+   /garden — note maturity lifecycle view (ADR-0029 P2)
+   ============================================================
+   Three tab strips over the same data set; each plant is a card
+   with a leading maturity glyph, title + preview, and compact
+   actions. Responsive: on mobile the actions wrap below the
+   card body and the textual button labels collapse to glyphs.
+*/
+.garden__tabs {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  margin: 0.6rem 0 1rem 0;
+}
+.garden__tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.35rem 0.7rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text-h);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.garden__tab:hover {
+  border-color: var(--accent);
+}
+.garden__tab--active {
+  background: var(--accent);
+  color: var(--surface);
+  border-color: var(--accent);
+}
+.garden__tab-count {
+  display: inline-flex;
+  min-width: 1.4rem;
+  height: 1.2rem;
+  align-items: center;
+  justify-content: center;
+  padding: 0 0.35rem;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.12);
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1;
+}
+.garden__tab--active .garden__tab-count {
+  background: rgba(255, 255, 255, 0.28);
+  color: inherit;
+}
+.garden__empty {
+  margin: 1.2rem 0;
+}
+.garden__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.plant {
+  display: flex;
+  align-items: stretch;
+  gap: 0.7rem;
+  padding: 0.7rem 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  transition: border-color 0.15s, transform 0.15s;
+}
+.plant:hover { border-color: var(--accent); }
+.plant__open {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.7rem;
+  background: none;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  min-width: 0;
+}
+.plant__glyph {
+  flex: 0 0 auto;
+  font-size: 1.4rem;
+  line-height: 1.2;
+  user-select: none;
+}
+.plant__body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 0;
+}
+.plant__title {
+  font-weight: 600;
+  color: var(--text-h);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.plant__open:hover .plant__title { color: var(--accent); }
+.plant__preview {
+  color: var(--muted);
+  font-size: 0.85rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+.plant__chip {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  padding: 0.05rem 0.45rem;
+  border-radius: 4px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  border: 1px solid #7e57c266;
+  background: #7e57c214;
+  color: #7e57c2;
+  margin-top: 0.2rem;
+}
+.plant__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem;
+  flex: 0 0 auto;
+}
+.plant__maturity {
+  font: inherit;
+  font-size: 0.8rem;
+  padding: 0.2rem 0.4rem;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  max-width: 10rem;
+}
+.plant__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.3rem 0.55rem;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text-h);
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: none;
+}
+.plant__btn:hover { border-color: var(--accent); color: var(--accent); }
+.plant__btn--ghost { background: transparent; }
+.plant__btn[disabled] { opacity: 0.5; cursor: not-allowed; }
+
+/* Mobile (<= 640px): stack the actions on a second row and collapse
+   button labels to their leading glyph. The select keeps its full
+   label (the glyph alone wouldn't disambiguate four maturity states). */
+@media (max-width: 640px) {
+  .plant {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.5rem;
+  }
+  .plant__actions {
+    justify-content: flex-end;
+  }
+  .plant__btn-label {
+    display: none;
+  }
+  .plant__btn {
+    padding: 0.35rem 0.45rem;
+    font-size: 0.95rem;
+  }
+}
+
+.plant-detail__chips {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.6rem;
+}
+.plant-detail__body {
+  margin: 0.4rem 0 1rem 0;
+}
+.plant-detail__section {
+  margin-top: 1rem;
+}
+.plant-detail__section h3 {
+  font-size: 0.95rem;
+  margin: 0.6rem 0 0.3rem 0;
+}
+.plant-detail__links {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+.plant-detail__links li {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
