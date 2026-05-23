@@ -37,3 +37,4 @@ Format: Status, Context, Decision, Consequences, Alternatives rejected.
 - [0026 Telegram as an in-process LLM assistant channel](0026-telegram-llm-assistant-channel.md)
 - [0027 Adjudication framework for multi-agent convergence](0027-adjudication-framework.md)
 - [0028 Identity-first addressing and explicit task ownership](0028-identity-first-addressing.md)
+- [0029 Note garden ecosystem and typed note/task relations](0029-note-garden-ecosystem.md)
