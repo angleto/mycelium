@@ -33,3 +33,6 @@ Format: Status, Context, Decision, Consequences, Alternatives rejected.
 - [0022 Hands-free activation (headphone button): native/OS-assistant](0022-handsfree-activation-native.md)
 - [0023 Email connector abstraction and idempotent sync](0023-email-connector-abstraction.md)
 - [0024 "Workspace": user-facing name of the tenant; personal-first](0024-workspace-user-facing-tenant-name.md)
+- [0025 Resource-aware scheduling and human/LLM work orchestration](0025-work-orchestration-resource-scheduling.md)
+- [0026 Telegram as an in-process LLM assistant channel](0026-telegram-llm-assistant-channel.md)
+- [0027 Adjudication framework for multi-agent convergence](0027-adjudication-framework.md)
