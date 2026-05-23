@@ -340,7 +340,11 @@ async def update_client(
 ) -> dict[str, Any]:
     """Edit a client's name and invoicing card. Only the given fields
     are changed."""
-    fields: dict[str, str | None] = {}
+    # Widened to match the taxonomy.update_client signature (dict is
+    # invariant: dict[str, str | None] is not a subtype of dict[str,
+    # object]). The MCP tool still only exposes string fields, so the
+    # widened type is over-permissive in this caller — that's fine.
+    fields: dict[str, object] = {}
     for key, val in (
         ("ragione_sociale", ragione_sociale),
         ("id_paese", id_paese),
