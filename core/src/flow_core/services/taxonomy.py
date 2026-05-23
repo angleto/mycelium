@@ -59,6 +59,10 @@ class ClientInput:
     tariffa: Decimal | None = None
     valuta: str = "EUR"
     timezone: str | None = None
+    default_condizioni_pagamento: str | None = None
+    default_modalita_pagamento: str | None = None
+    default_payment_terms_days: int | None = None
+    invoice_language: str | None = None
 
 
 # Tag kinds any member may create/rename (free-form facets): the
@@ -153,6 +157,10 @@ async def create_client(
             tariffa=profile.tariffa,
             valuta=profile.valuta,
             timezone=profile.timezone,
+            default_condizioni_pagamento=profile.default_condizioni_pagamento,
+            default_modalita_pagamento=profile.default_modalita_pagamento,
+            default_payment_terms_days=profile.default_payment_terms_days,
+            invoice_language=profile.invoice_language,
         )
     )
     await session.flush()
@@ -575,7 +583,10 @@ async def update_client(
     actor_id: uuid.UUID,
     tag_id: uuid.UUID,
     name: str | None = None,
-    fields: dict[str, str | None] | None = None,
+    # Widened from ``str | None`` (the historical shape: client text
+    # fields) to accept the typed payment defaults (int for net-days,
+    # bool for default_billable) introduced in migration 0080.
+    fields: dict[str, object] | None = None,
 ) -> None:
     """Edit a client's name and its invoicing card (ClientProfile)."""
     await require_role(session, org_id, actor_id, Role.admin)
@@ -591,6 +602,21 @@ async def update_client(
         tag.name = name
         tag.version += 1
     flds = fields or {}
+    # Payment-method enums (FatturaPA TPxx/MPxx) and net-days range are
+    # validated before they touch the row; the XML build never sees a
+    # value outside the SdI table.
+    if "default_condizioni_pagamento" in flds:
+        from flow_core.services.payment_methods import validate_condizioni as _vc
+
+        flds["default_condizioni_pagamento"] = _vc(flds["default_condizioni_pagamento"])  # type: ignore[arg-type]
+    if "default_modalita_pagamento" in flds:
+        from flow_core.services.payment_methods import validate_modalita as _vm
+
+        flds["default_modalita_pagamento"] = _vm(flds["default_modalita_pagamento"])  # type: ignore[arg-type]
+    if "default_payment_terms_days" in flds:
+        from flow_core.services.payment_methods import validate_terms_days as _vt
+
+        flds["default_payment_terms_days"] = _vt(flds["default_payment_terms_days"])  # type: ignore[arg-type]
     for k, v in flds.items():
         setattr(prof, k, v)
     if "id_codice" in flds or "id_paese" in flds:

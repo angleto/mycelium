@@ -64,3 +64,17 @@ class ClientProfile(OrgScopedMixin, TimestampMixin, VersionMixin, Base):
     # Preferred IANA timezone name (e.g. "Europe/Rome"); lets the SPA
     # render this client's time entries / report in its local time.
     timezone: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Per-client invoice payment defaults. NULL means "inherit": the
+    # resolver falls back to the issuer, then to system defaults
+    # (TP02 / MP05). Values are SdI enum codes (TPxx / MPxx) validated
+    # at the service layer before they reach the XML build.
+    default_condizioni_pagamento: Mapped[str | None] = mapped_column(String(4), nullable=True)
+    default_modalita_pagamento: Mapped[str | None] = mapped_column(String(4), nullable=True)
+    # Net payment days. NULL = inherit (issuer default or none). When set
+    # and an invoice carries no explicit due date, the draft service
+    # computes payment_due_date = issued_or_today + days.
+    default_payment_terms_days: Mapped[int | None] = mapped_column(nullable=True)
+    # Locale for the courtesy PDF (BCP47 tag, e.g. "it", "en"). NULL ->
+    # "it". The FatturaPA XML is not translated: SdI ignores the field
+    # and the legally mandated causale/dicitura stay verbatim Italian.
+    invoice_language: Mapped[str | None] = mapped_column(String(8), nullable=True)

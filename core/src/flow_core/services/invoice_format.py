@@ -23,6 +23,7 @@ from decimal import ROUND_HALF_UP, Decimal
 from flow_core.models.client_profile import ClientProfile
 from flow_core.models.invoice import Invoice, InvoiceLine, IssuerProfile
 from flow_core.sdi_channel import IntermediaryIdentity
+from flow_core.services.payment_methods import resolve_payment
 
 _NS = "http://ivaservizi.agenziaentrate.gov.it/docs/xsd/fatture/v1.2"
 
@@ -59,8 +60,9 @@ FORFETTARIO_CAUSALE = (
 )
 # Free-text dicitura printed on the human-readable PDF when the virtual
 # stamp duty applies (it is not transmitted in the XML, only the
-# structured DatiBollo is).
-BOLLO_DICITURA = "Imposta di bollo assolta in modo virtuale"
+# structured DatiBollo is). Wording follows DM 17/06/2014 art.6 c.3 (the
+# formula AdE itself uses on the courtesy PDF of a forfettario invoice).
+BOLLO_DICITURA = "Bollo assolto ai sensi del decreto MEF 17 GIUGNO 2014 (ART. 6)"
 # DatiRiepilogo/RiferimentoNormativo default for the forfettario regime when
 # the issuer profile sets none (max 100 latin chars, XSD String100LatinType).
 FORFETTARIO_RIFERIMENTO_NORMATIVO = (
@@ -223,6 +225,17 @@ def _build_xml(
     if fiscal.provincia:
         _sub(sede, "Provincia", fiscal.provincia)
     _sub(sede, "Nazione", fiscal.nazione)
+    # Optional Contatti (XSD: Telefono, Fax, Email, in that order). Emitted
+    # only when at least one channel is set; SdI ignores them, but they are
+    # standard FatturaPA and show up in viewers / on a printed PDF.
+    if fiscal.telefono or fiscal.fax or fiscal.email:
+        contatti = _sub(cedente, "Contatti")
+        if fiscal.telefono:
+            _sub(contatti, "Telefono", fiscal.telefono)
+        if fiscal.fax:
+            _sub(contatti, "Fax", fiscal.fax)
+        if fiscal.email:
+            _sub(contatti, "Email", fiscal.email)
     cess = _sub(header, "CessionarioCommittente")
     canag = _sub(cess, "DatiAnagrafici")
     if client.id_codice:
@@ -310,12 +323,29 @@ def _build_xml(
         _sub(rie, "Imposta", _money(_q2(imp * rate / Decimal(100))))
         if natura and rif_normativo:
             _sub(rie, "RiferimentoNormativo", rif_normativo)
-    if inv.payment_iban or inv.payment_due_date:
-        # MP05 = bonifico; TP02 = pagamento completo (single payment).
+    # DatiPagamento is emitted whenever ANY payment metadata is present
+    # (IBAN, due date, terms days, or an explicit override of
+    # CondizioniPagamento / ModalitaPagamento). When everything is
+    # default and no IBAN/due date is set, we still skip the block (no
+    # information to carry); the resolver provides system defaults
+    # (TP02 / MP05) only when the block is actually emitted.
+    if (
+        inv.payment_iban
+        or inv.payment_due_date
+        or inv.payment_terms_days is not None
+        or inv.condizioni_pagamento
+        or inv.modalita_pagamento
+    ):
+        resolved = resolve_payment(inv, client, fiscal)
         pay = _sub(body, "DatiPagamento")
-        _sub(pay, "CondizioniPagamento", "TP02")
+        _sub(pay, "CondizioniPagamento", resolved.condizioni)
         det = _sub(pay, "DettaglioPagamento")
-        _sub(det, "ModalitaPagamento", "MP05")
+        # XSD DettaglioPagamento order: ModalitaPagamento,
+        # DataRiferimentoTerminiPagamento, GiorniTerminiPagamento,
+        # DataScadenzaPagamento, ImportoPagamento, [..., IBAN, ...].
+        _sub(det, "ModalitaPagamento", resolved.modalita)
+        if resolved.terms_days is not None:
+            _sub(det, "GiorniTerminiPagamento", str(resolved.terms_days))
         if inv.payment_due_date is not None:
             _sub(det, "DataScadenzaPagamento", inv.payment_due_date.isoformat())
         _sub(det, "ImportoPagamento", _money(inv.total))

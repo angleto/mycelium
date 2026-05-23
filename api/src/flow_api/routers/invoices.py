@@ -20,6 +20,8 @@ from flow_api.deps import TenantCtx, tenant_ctx
 from flow_api.schemas import (
     ConservationAdhesionIn,
     CreditNoteIn,
+    InvoiceCounterOut,
+    InvoiceCounterPatchIn,
     InvoiceCreateIn,
     InvoiceLineIn,
     InvoiceLineOut,
@@ -65,6 +67,9 @@ def _inv_out(i: Invoice) -> InvoiceOut:
         notes=i.notes,
         payment_iban=i.payment_iban,
         payment_due_date=i.payment_due_date,
+        condizioni_pagamento=i.condizioni_pagamento,
+        modalita_pagamento=i.modalita_pagamento,
+        payment_terms_days=i.payment_terms_days,
         taxable=i.taxable,
         vat=i.vat,
         bollo=i.bollo,
@@ -108,6 +113,13 @@ def _ip_out(p: IssuerProfile) -> IssuerProfileOut:
         riferimento_normativo=p.riferimento_normativo,
         nome=p.nome,
         cognome=p.cognome,
+        pec=p.pec,
+        email=p.email,
+        telefono=p.telefono,
+        fax=p.fax,
+        default_condizioni_pagamento=p.default_condizioni_pagamento,
+        default_modalita_pagamento=p.default_modalita_pagamento,
+        default_payment_terms_days=p.default_payment_terms_days,
         is_default=p.is_default,
         conservation_adhesion=p.conservation_adhesion.value,
         version=p.version,
@@ -164,6 +176,13 @@ async def create_issuer_profile(
         riferimento_normativo=body.riferimento_normativo,
         nome=body.nome,
         cognome=body.cognome,
+        pec=body.pec,
+        email=body.email,
+        telefono=body.telefono,
+        fax=body.fax,
+        default_condizioni_pagamento=body.default_condizioni_pagamento,
+        default_modalita_pagamento=body.default_modalita_pagamento,
+        default_payment_terms_days=body.default_payment_terms_days,
         is_default=body.is_default,
     )
     return _ip_out(p)
@@ -234,6 +253,66 @@ async def delete_issuer_profile(
     ensure_role(ctx.role, Role.owner)
     await svc.delete_issuer_profile(
         ctx.session, org_id=ctx.org_id, actor_id=ctx.user_id, profile_id=profile_id
+    )
+
+
+# --- invoice counter override (migration from another billing system) ---
+
+
+@router.get(
+    "/issuer-profiles/{profile_id}/counters",
+    response_model=list[InvoiceCounterOut],
+)
+async def list_counters(
+    profile_id: uuid.UUID,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+) -> list[InvoiceCounterOut]:
+    """Counters owned by this issuer, with ``max_emitted`` as the lower
+    bound for any override. The UI uses it to disable an out-of-range
+    input before the user hits Save."""
+    rows = await svc.list_counters(ctx.session, org_id=ctx.org_id, issuer_profile_id=profile_id)
+    return [
+        InvoiceCounterOut(
+            issuer_profile_id=r.issuer_profile_id,
+            series=r.series,
+            year=r.year,
+            last_number=r.last_number,
+            max_emitted=r.max_emitted,
+        )
+        for r in rows
+    ]
+
+
+@router.put(
+    "/issuer-profiles/{profile_id}/counters/{series}/{year}",
+    response_model=InvoiceCounterOut,
+)
+async def set_counter(
+    profile_id: uuid.UUID,
+    series: str,
+    year: int,
+    body: InvoiceCounterPatchIn,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+) -> InvoiceCounterOut:
+    """Override the next number for (issuer, series, year). Admin only.
+    The service rejects any value below ``max(invoices.number)`` for
+    the same key with a conflict error."""
+    ensure_role(ctx.role, Role.owner)
+    r = await svc.set_counter(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        issuer_profile_id=profile_id,
+        series=series,
+        year=year,
+        last_number=body.last_number,
+    )
+    return InvoiceCounterOut(
+        issuer_profile_id=r.issuer_profile_id,
+        series=r.series,
+        year=r.year,
+        last_number=r.last_number,
+        max_emitted=r.max_emitted,
     )
 
 

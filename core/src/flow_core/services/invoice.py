@@ -64,6 +64,11 @@ from flow_core.services.invoice_format import (
     _resolve_line_tax,
 )
 from flow_core.services.invoice_xsd import validate_fatturapa
+from flow_core.services.payment_methods import (
+    validate_condizioni,
+    validate_modalita,
+    validate_terms_days,
+)
 from flow_core.services.rbac import require_role
 from flow_core.services.sdi_mandate import get_active_mandate
 from flow_core.services.sdi_transport import fatturapa_filename, transmission_progressivo
@@ -89,6 +94,13 @@ _PROFILE_FIELDS = frozenset(
         "riferimento_normativo",
         "nome",
         "cognome",
+        "pec",
+        "email",
+        "telefono",
+        "fax",
+        "default_condizioni_pagamento",
+        "default_modalita_pagamento",
+        "default_payment_terms_days",
     }
 )
 
@@ -157,6 +169,13 @@ async def create_issuer_profile(
     riferimento_normativo: str | None = None,
     nome: str | None = None,
     cognome: str | None = None,
+    pec: str | None = None,
+    email: str | None = None,
+    telefono: str | None = None,
+    fax: str | None = None,
+    default_condizioni_pagamento: str | None = None,
+    default_modalita_pagamento: str | None = None,
+    default_payment_terms_days: int | None = None,
     is_default: bool = False,
 ) -> IssuerProfile:
     await require_role(session, org_id, actor_id, Role.admin)
@@ -173,6 +192,11 @@ async def create_issuer_profile(
     paese = new_paese or paese
     if not is_valid_vat_code(piva, paese):
         raise DomainError(MessageCode.FISCAL_PROFILE_REQUIRED, detail=f"piva '{piva}'")
+    # Closed enums (FatturaPA tables TPxx/MPxx) and a sane integer range
+    # for the net-days default: catch typos here before they reach SdI.
+    default_condizioni_pagamento = validate_condizioni(default_condizioni_pagamento)
+    default_modalita_pagamento = validate_modalita(default_modalita_pagamento)
+    default_payment_terms_days = validate_terms_days(default_payment_terms_days)
     p = IssuerProfile(
         org_id=org_id,
         label=label,
@@ -191,6 +215,13 @@ async def create_issuer_profile(
         riferimento_normativo=riferimento_normativo,
         nome=nome,
         cognome=cognome,
+        pec=pec,
+        email=email,
+        telefono=telefono,
+        fax=fax,
+        default_condizioni_pagamento=default_condizioni_pagamento,
+        default_modalita_pagamento=default_modalita_pagamento,
+        default_payment_terms_days=default_payment_terms_days,
         is_default=make_default,
     )
     session.add(p)
@@ -220,6 +251,21 @@ async def update_issuer_profile(
     unknown = set(values) - _PROFILE_FIELDS
     if unknown:
         raise DomainError(MessageCode.DOMAIN_ERROR, detail=", ".join(sorted(unknown)))
+    # Closed-enum validation BEFORE we apply the update: SdI rejects an
+    # unknown TPxx/MPxx so we never let one land in the row. ``None``
+    # passes through (clearing the override).
+    if "default_condizioni_pagamento" in values:
+        values["default_condizioni_pagamento"] = validate_condizioni(
+            values["default_condizioni_pagamento"]  # type: ignore[arg-type]
+        )
+    if "default_modalita_pagamento" in values:
+        values["default_modalita_pagamento"] = validate_modalita(
+            values["default_modalita_pagamento"]  # type: ignore[arg-type]
+        )
+    if "default_payment_terms_days" in values:
+        values["default_payment_terms_days"] = validate_terms_days(
+            values["default_payment_terms_days"]  # type: ignore[arg-type]
+        )
     for field, value in values.items():
         setattr(p, field, value)
     if "piva" in values or "paese" in values:
@@ -329,6 +375,148 @@ async def set_conservation_adhesion(
         diff={"adhesion": adhesion},
     )
     return p
+
+
+# --- invoice counter management (import from another system) ---
+
+
+@dataclass(frozen=True)
+class InvoiceCounterRow:
+    """A counter row plus the maximum number already emitted under the
+    same key. The UI needs both to make the lower bound obvious."""
+
+    issuer_profile_id: uuid.UUID
+    series: str
+    year: int
+    last_number: int
+    max_emitted: int
+
+
+async def list_counters(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    issuer_profile_id: uuid.UUID,
+) -> list[InvoiceCounterRow]:
+    """Every counter row owned by this issuer, decorated with the
+    ``max_emitted`` number for that (series, year). ``max_emitted`` is the
+    floor any override must respect (we never decrement below an already
+    issued number, otherwise the next allocation collides with the unique
+    constraint on ``invoices``)."""
+    await get_issuer_profile(session, org_id=org_id, profile_id=issuer_profile_id)
+    rows = list(
+        (
+            await session.execute(
+                select(InvoiceCounter)
+                .where(InvoiceCounter.issuer_profile_id == issuer_profile_id)
+                .order_by(InvoiceCounter.year.desc(), InvoiceCounter.series)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    out: list[InvoiceCounterRow] = []
+    for c in rows:
+        max_n = (
+            await session.execute(
+                select(func.coalesce(func.max(Invoice.number), 0)).where(
+                    Invoice.issuer_profile_id == issuer_profile_id,
+                    Invoice.series == c.series,
+                    Invoice.year == c.year,
+                )
+            )
+        ).scalar_one()
+        out.append(
+            InvoiceCounterRow(
+                issuer_profile_id=issuer_profile_id,
+                series=c.series,
+                year=c.year,
+                last_number=c.last_number,
+                max_emitted=int(max_n or 0),
+            )
+        )
+    return out
+
+
+async def set_counter(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    issuer_profile_id: uuid.UUID,
+    series: str,
+    year: int,
+    last_number: int,
+) -> InvoiceCounterRow:
+    """Override the progressive counter for a (issuer, series, year)
+    triple. Used when migrating from another billing system: typically
+    the tenant has already emitted N invoices elsewhere and wants Flow
+    to continue from N+1, so we set ``last_number = N``.
+
+    Hard invariant: the new value MUST be ``>= max(number)`` already
+    persisted on ``invoices`` under the same key. Going below would let
+    the next allocation reuse an existing number, breaking both
+    ``uq_invoices_issuer`` AND the legal "never reused" promise. We
+    raise ``ConflictError`` (with the floor as detail) instead.
+
+    Locks the counter ``FOR UPDATE`` like ``_allocate_number`` so a
+    concurrent transmit cannot interleave between the floor check and
+    the assignment."""
+    await require_role(session, org_id, actor_id, Role.admin)
+    if last_number < 0:
+        raise DomainError(MessageCode.DOMAIN_ERROR, detail=f"last_number '{last_number}'")
+    issuer = await get_issuer_profile(session, org_id=org_id, profile_id=issuer_profile_id)
+    counter = (
+        await session.execute(
+            select(InvoiceCounter)
+            .where(
+                InvoiceCounter.issuer_profile_id == issuer_profile_id,
+                InvoiceCounter.series == series,
+                InvoiceCounter.year == year,
+            )
+            .with_for_update()
+        )
+    ).scalar_one_or_none()
+    max_n = (
+        await session.execute(
+            select(func.coalesce(func.max(Invoice.number), 0)).where(
+                Invoice.issuer_profile_id == issuer_profile_id,
+                Invoice.series == series,
+                Invoice.year == year,
+            )
+        )
+    ).scalar_one()
+    floor = int(max_n or 0)
+    if last_number < floor:
+        raise ConflictError(MessageCode.INVOICE_INVALID, detail=f"last_number<{floor}")
+    if counter is None:
+        counter = InvoiceCounter(
+            org_id=issuer.org_id,
+            issuer_profile_id=issuer_profile_id,
+            series=series,
+            year=year,
+            last_number=last_number,
+        )
+        session.add(counter)
+    else:
+        counter.last_number = last_number
+    await session.flush()
+    await audit.log(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        entity="invoice_counter",
+        entity_id=issuer_profile_id,
+        action="set_counter",
+        diff={"series": series, "year": year, "last_number": last_number},
+    )
+    return InvoiceCounterRow(
+        issuer_profile_id=issuer_profile_id,
+        series=series,
+        year=year,
+        last_number=last_number,
+        max_emitted=floor,
+    )
 
 
 # --- invoice draft lifecycle ---
@@ -475,6 +663,9 @@ _DRAFT_UPDATABLE = frozenset(
         "notes",
         "payment_iban",
         "payment_due_date",
+        "condizioni_pagamento",
+        "modalita_pagamento",
+        "payment_terms_days",
     }
 )
 
@@ -499,22 +690,46 @@ async def update_draft(
     unknown = set(values) - _DRAFT_UPDATABLE
     if unknown:
         raise DomainError(MessageCode.DOMAIN_ERROR, detail=", ".join(sorted(unknown)))
+    # Validate the closed-enum / range fields before we touch the row.
+    if "condizioni_pagamento" in values:
+        values["condizioni_pagamento"] = validate_condizioni(
+            values["condizioni_pagamento"]  # type: ignore[arg-type]
+        )
+    if "modalita_pagamento" in values:
+        values["modalita_pagamento"] = validate_modalita(
+            values["modalita_pagamento"]  # type: ignore[arg-type]
+        )
+    if "payment_terms_days" in values:
+        values["payment_terms_days"] = validate_terms_days(
+            values["payment_terms_days"]  # type: ignore[arg-type]
+        )
     for field, value in values.items():
         setattr(inv, field, value)
     await session.flush()
     issuer = await _resolve_issuer(session, org_id=org_id, inv=inv)
+    cp = (
+        await session.execute(
+            select(ClientProfile).where(ClientProfile.tag_id == inv.client_tag_id)
+        )
+    ).scalar_one_or_none()
     # Re-resolve the effective IBAN only while still empty (an explicit
     # invoice IBAN, once set, is never overwritten by client/issuer
     # defaults). The issuer/client may have changed in this same patch.
     if not inv.payment_iban:
-        cp = (
-            await session.execute(
-                select(ClientProfile).where(ClientProfile.tag_id == inv.client_tag_id)
-            )
-        ).scalar_one_or_none()
         iban, _src = _effective_iban(inv, cp, issuer)
         if iban is not None:
             inv.payment_iban = iban
+    # When the user set net-days but no explicit due date, materialize
+    # the due date now so the draft preview shows it. The resolver picks
+    # up the days from the client / issuer too; auto-fill only when the
+    # field is empty (an explicit user-set date is never overwritten).
+    if inv.payment_due_date is None:
+        from flow_core.services.payment_methods import resolve_payment as _rp
+
+        resolved = _rp(inv, cp, issuer)
+        if resolved.terms_days is not None:
+            base = (inv.issued_at or dt.datetime.now(tz=dt.UTC)).date()
+            inv.payment_due_date = base + dt.timedelta(days=resolved.terms_days)
     # The issuer (hence regime, bollo and forfettario-ness) may have
     # changed: keep taxable/vat/bollo/total consistent.
     await _persist_totals(session, org_id=org_id, inv=inv)

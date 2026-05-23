@@ -300,6 +300,16 @@ class ClientCreateIn(BaseModel):
     valuta: str = Field(default="EUR", max_length=3)
     # IANA timezone name (e.g. "Europe/Rome"); optional.
     timezone: str | None = Field(default=None, max_length=64)
+    # Per-client payment defaults (FatturaPA TPxx / MPxx). NULL = inherit
+    # from the issuer (then system default TP02 / MP05).
+    default_condizioni_pagamento: str | None = Field(default=None, max_length=4)
+    default_modalita_pagamento: str | None = Field(default=None, max_length=4)
+    default_payment_terms_days: int | None = Field(default=None, ge=0, le=365)
+    # Locale for the courtesy PDF when the client is foreign (BCP47 tag,
+    # e.g. "it", "en", "de"). NULL -> "it". The FatturaPA XML stays
+    # untouched (SdI ignores this field; legal causale/dicitura remain
+    # in Italian regardless).
+    invoice_language: str | None = Field(default=None, max_length=8)
 
 
 class ProjectCreateIn(BaseModel):
@@ -332,6 +342,10 @@ class ClientPatchIn(BaseModel):
     tariffa: Decimal | None = None
     valuta: str | None = Field(default=None, max_length=3)
     timezone: str | None = Field(default=None, max_length=64)
+    default_condizioni_pagamento: str | None = Field(default=None, max_length=4)
+    default_modalita_pagamento: str | None = Field(default=None, max_length=4)
+    default_payment_terms_days: int | None = Field(default=None, ge=0, le=365)
+    invoice_language: str | None = Field(default=None, max_length=8)
 
 
 class ClientOut(BaseModel):
@@ -359,6 +373,10 @@ class ClientOut(BaseModel):
     tariffa: Decimal | None
     valuta: str
     timezone: str | None
+    default_condizioni_pagamento: str | None
+    default_modalita_pagamento: str | None
+    default_payment_terms_days: int | None
+    invoice_language: str | None
 
 
 class ProjectPatchIn(BaseModel):
@@ -1480,6 +1498,18 @@ class IssuerProfileIn(BaseModel):
     riferimento_normativo: str | None = Field(default=None, max_length=100)
     nome: str | None = Field(default=None, max_length=60)
     cognome: str | None = Field(default=None, max_length=60)
+    # Optional contact channels. PEC prints on the PDF; the rest go in
+    # CedentePrestatore/Contatti (Telefono/Fax/Email).
+    pec: str | None = Field(default=None, max_length=320)
+    email: str | None = Field(default=None, max_length=320)
+    telefono: str | None = Field(default=None, max_length=20)
+    fax: str | None = Field(default=None, max_length=20)
+    # Issuer-level fallbacks for payment metadata (used only when the
+    # client carries no own default). Closed-enum codes (TPxx / MPxx);
+    # validated server-side.
+    default_condizioni_pagamento: str | None = Field(default=None, max_length=4)
+    default_modalita_pagamento: str | None = Field(default=None, max_length=4)
+    default_payment_terms_days: int | None = Field(default=None, ge=0, le=365)
     is_default: bool = False
 
 
@@ -1500,6 +1530,13 @@ class IssuerProfilePatchIn(BaseModel):
     riferimento_normativo: str | None = Field(default=None, max_length=100)
     nome: str | None = Field(default=None, max_length=60)
     cognome: str | None = Field(default=None, max_length=60)
+    pec: str | None = Field(default=None, max_length=320)
+    email: str | None = Field(default=None, max_length=320)
+    telefono: str | None = Field(default=None, max_length=20)
+    fax: str | None = Field(default=None, max_length=20)
+    default_condizioni_pagamento: str | None = Field(default=None, max_length=4)
+    default_modalita_pagamento: str | None = Field(default=None, max_length=4)
+    default_payment_terms_days: int | None = Field(default=None, ge=0, le=365)
     is_default: bool | None = None
 
 
@@ -1521,9 +1558,33 @@ class IssuerProfileOut(BaseModel):
     riferimento_normativo: str | None
     nome: str | None
     cognome: str | None
+    pec: str | None
+    email: str | None
+    telefono: str | None
+    fax: str | None
+    default_condizioni_pagamento: str | None
+    default_modalita_pagamento: str | None
+    default_payment_terms_days: int | None
     is_default: bool
     conservation_adhesion: str
     version: int
+
+
+class InvoiceCounterOut(BaseModel):
+    """A counter row for the admin override UI. ``max_emitted`` is the
+    floor (the highest number already on an invoice under the same key);
+    the new ``last_number`` must be >= ``max_emitted`` or the override is
+    rejected."""
+
+    issuer_profile_id: uuid.UUID
+    series: str
+    year: int
+    last_number: int
+    max_emitted: int
+
+
+class InvoiceCounterPatchIn(BaseModel):
+    last_number: int = Field(ge=0)
 
 
 class ConservationAdhesionIn(BaseModel):
@@ -1564,6 +1625,12 @@ class InvoicePatchIn(BaseModel):
     notes: str | None = None
     payment_iban: str | None = Field(default=None, max_length=34)
     payment_due_date: datetime.date | None = None
+    # Per-document overrides of the client/issuer payment defaults
+    # (FatturaPA TPxx / MPxx + net days). NULL = inherit (and the XML
+    # falls through to the client, then issuer, then TP02 / MP05).
+    condizioni_pagamento: str | None = Field(default=None, max_length=4)
+    modalita_pagamento: str | None = Field(default=None, max_length=4)
+    payment_terms_days: int | None = Field(default=None, ge=0, le=365)
 
 
 class InvoiceLineIn(BaseModel):
@@ -1603,6 +1670,9 @@ class InvoiceOut(BaseModel):
     notes: str | None
     payment_iban: str | None
     payment_due_date: datetime.date | None
+    condizioni_pagamento: str | None
+    modalita_pagamento: str | None
+    payment_terms_days: int | None
     taxable: Decimal
     vat: Decimal
     bollo: Decimal

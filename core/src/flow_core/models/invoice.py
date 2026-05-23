@@ -121,6 +121,20 @@ class IssuerProfile(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, B
     # DatiRiepilogo/RiferimentoNormativo for lines carrying a Natura (max 100
     # latin chars, XSD String100LatinType). NULL -> a default for RF19.
     riferimento_normativo: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    # Contact channels. PEC is printed on the courtesy PDF; the others go
+    # in optional CedentePrestatore/Contatti (XSD: Telefono/Fax/Email).
+    # All facoltative; none are emitted when NULL.
+    pec: Mapped[str | None] = mapped_column(String(320), nullable=True)
+    email: Mapped[str | None] = mapped_column(String(320), nullable=True)
+    telefono: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    fax: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # Issuer-level defaults for payment metadata; the resolver falls back
+    # to these only when the client (and the invoice itself) carry none.
+    # Resolution precedence: invoice > client > issuer > system default
+    # (TP02 for CondizioniPagamento, MP05 for ModalitaPagamento).
+    default_condizioni_pagamento: Mapped[str | None] = mapped_column(String(4), nullable=True)
+    default_modalita_pagamento: Mapped[str | None] = mapped_column(String(4), nullable=True)
+    default_payment_terms_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
     is_default: Mapped[bool] = mapped_column(nullable=False, server_default="false")
     conservation_adhesion: Mapped[ConservationAdhesion] = mapped_column(
         SAEnum(
@@ -207,6 +221,13 @@ class Invoice(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, Base):
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     payment_iban: Mapped[str | None] = mapped_column(String(34), nullable=True)
     payment_due_date: Mapped[datetime.date | None] = mapped_column(Date, nullable=True)
+    # Per-document override of CondizioniPagamento / ModalitaPagamento /
+    # GiorniTerminiPagamento. NULL = inherit from the client (then issuer,
+    # then system default). Whitelisted to the SdI enums at the service
+    # layer; the XML build never sees a value outside the FatturaPA tables.
+    condizioni_pagamento: Mapped[str | None] = mapped_column(String(4), nullable=True)
+    modalita_pagamento: Mapped[str | None] = mapped_column(String(4), nullable=True)
+    payment_terms_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
     taxable: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False, server_default="0")
     vat: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False, server_default="0")
     # Virtual stamp duty (imposta di bollo): EUR 2.00 on a forfettario

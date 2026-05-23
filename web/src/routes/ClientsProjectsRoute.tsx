@@ -12,20 +12,66 @@ import type { components } from '../api/schema'
 type Client = components['schemas']['ClientOut']
 type Project = components['schemas']['ProjectOut']
 
-const CLIENT_FIELDS: Array<keyof Client> = [
-  'ragione_sociale',
-  'codice_fiscale',
-  'id_paese',
-  'id_codice',
-  'indirizzo',
-  'cap',
-  'comune',
-  'provincia',
-  'nazione',
-  'codice_destinatario',
-  'pec',
-  'invoice_series',
-  'description',
+type ClientFieldDef = {
+  name: keyof Client
+  kind?: 'text' | 'number' | 'select-condizioni' | 'select-modalita' | 'select-language'
+}
+
+// FatturaPA closed enums (kept in sync with
+// flow_core.services.payment_methods); only the most common subset
+// in the dropdowns (the backend accepts the full table).
+const CP_CONDIZIONI: ReadonlyArray<readonly [string, string]> = [
+  ['TP01', 'a rate'],
+  ['TP02', 'completo'],
+  ['TP03', 'anticipo'],
+]
+const CP_MODALITA: ReadonlyArray<readonly [string, string]> = [
+  ['MP01', 'contanti'],
+  ['MP02', 'assegno'],
+  ['MP03', 'assegno circolare'],
+  ['MP05', 'bonifico'],
+  ['MP07', 'bollettino bancario'],
+  ['MP08', 'carta'],
+  ['MP12', 'RIBA'],
+  ['MP13', 'MAV'],
+  ['MP18', 'bollettino c/c postale'],
+  ['MP19', 'SEPA DD'],
+  ['MP20', 'SEPA DD CORE'],
+  ['MP21', 'SEPA DD B2B'],
+  ['MP23', 'PagoPA'],
+]
+// Supported PDF locales (kept in sync with
+// flow_core.services.invoice_pdf._LABELS). The XML stays Italian; this
+// only affects the courtesy PDF the customer reads.
+const CP_LANGUAGES: ReadonlyArray<readonly [string, string]> = [
+  ['it', 'italiano'],
+  ['en', 'English'],
+  ['de', 'Deutsch'],
+  ['fr', 'français'],
+  ['es', 'español'],
+]
+
+const CLIENT_FIELDS: ClientFieldDef[] = [
+  { name: 'ragione_sociale' },
+  { name: 'codice_fiscale' },
+  { name: 'id_paese' },
+  { name: 'id_codice' },
+  { name: 'indirizzo' },
+  { name: 'cap' },
+  { name: 'comune' },
+  { name: 'provincia' },
+  { name: 'nazione' },
+  { name: 'codice_destinatario' },
+  { name: 'pec' },
+  { name: 'invoice_series' },
+  { name: 'description' },
+  // Payment defaults: NULL means "inherit from the issuer (then system
+  // default)". A blank selection in the UI sends NULL.
+  { name: 'default_condizioni_pagamento', kind: 'select-condizioni' },
+  { name: 'default_modalita_pagamento', kind: 'select-modalita' },
+  { name: 'default_payment_terms_days', kind: 'number' },
+  // Locale for the PDF only; XML is always Italian.
+  { name: 'invoice_language', kind: 'select-language' },
 ]
 
 // Add-a-project row, scoped to one client (its own input state so
@@ -509,8 +555,16 @@ export function ClientsProjectsRoute() {
                           tariffa: (fd.get('tariffa') as string) || null,
                           valuta: (fd.get('valuta') as string) || 'EUR',
                         }
-                        for (const f of CLIENT_FIELDS)
-                          patch[f] = (fd.get(f) as string) || null
+                        for (const f of CLIENT_FIELDS) {
+                          const raw = (fd.get(f.name) as string) || null
+                          // Number fields parse to int; blank stays null
+                          // (which means "inherit from the issuer").
+                          if (f.kind === 'number') {
+                            patch[f.name] = raw ? Number(raw) : null
+                          } else {
+                            patch[f.name] = raw
+                          }
+                        }
                         void saveClient(c, patch)
                       }}
                     >
@@ -539,20 +593,61 @@ export function ClientsProjectsRoute() {
                         />
                         {t('cp.defaultBillable')}
                       </label>
-                      {CLIENT_FIELDS.map((f) => (
-                        <label
-                          key={f}
-                          className={
-                            f === 'description' ? 'cpform__wide' : ''
-                          }
-                        >
-                          {t(`cp.f.${f}`)}
-                          <input
-                            name={f}
-                            defaultValue={(c[f] as string | null) ?? ''}
-                          />
-                        </label>
-                      ))}
+                      {CLIENT_FIELDS.map((f) => {
+                        const v = c[f.name]
+                        const dv =
+                          v == null
+                            ? ''
+                            : typeof v === 'number'
+                              ? String(v)
+                              : (v as string)
+                        return (
+                          <label
+                            key={f.name}
+                            className={
+                              f.name === 'description' ? 'cpform__wide' : ''
+                            }
+                          >
+                            {t(`cp.f.${f.name}`)}
+                            {f.kind === 'select-condizioni' ? (
+                              <select name={f.name} defaultValue={dv}>
+                                <option value="">{t('cp.inherit')}</option>
+                                {CP_CONDIZIONI.map(([code, lbl]) => (
+                                  <option key={code} value={code}>
+                                    {code} - {lbl}
+                                  </option>
+                                ))}
+                              </select>
+                            ) : f.kind === 'select-modalita' ? (
+                              <select name={f.name} defaultValue={dv}>
+                                <option value="">{t('cp.inherit')}</option>
+                                {CP_MODALITA.map(([code, lbl]) => (
+                                  <option key={code} value={code}>
+                                    {code} - {lbl}
+                                  </option>
+                                ))}
+                              </select>
+                            ) : f.kind === 'select-language' ? (
+                              <select name={f.name} defaultValue={dv}>
+                                <option value="">{t('cp.languageDefault')}</option>
+                                {CP_LANGUAGES.map(([code, lbl]) => (
+                                  <option key={code} value={code}>
+                                    {code} - {lbl}
+                                  </option>
+                                ))}
+                              </select>
+                            ) : (
+                              <input
+                                name={f.name}
+                                type={f.kind === 'number' ? 'number' : 'text'}
+                                min={f.kind === 'number' ? 0 : undefined}
+                                max={f.kind === 'number' ? 365 : undefined}
+                                defaultValue={dv}
+                              />
+                            )}
+                          </label>
+                        )
+                      })}
                       <div className="cpform__actions">
                         <button type="submit" className="btn--sm">
                           {t('cp.save')}

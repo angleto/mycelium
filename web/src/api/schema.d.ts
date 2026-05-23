@@ -487,7 +487,10 @@ export interface paths {
          *     selection/filter surface; the Tag manager passes
          *     ``include_archived=true`` to still un-archive one. ``for_project`` /
          *     ``for_client`` scope the list to the SPA's current focus (global +
-         *     in-scope tags only).
+         *     in-scope tags only). ``manage=true`` marks the Tag-manager surface:
+         *     under a focus it still surfaces GLOBAL generic tags (no scope rows)
+         *     so an unrestricted tag stays reachable to add a "Restrict to..." —
+         *     filter/selection surfaces keep the stricter focus rule.
          */
         get: operations["list_tags_tags_get"];
         put?: never;
@@ -2889,6 +2892,86 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/issuer-profiles/{profile_id}/counters": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Counters
+         * @description Counters owned by this issuer, with ``max_emitted`` as the lower
+         *     bound for any override. The UI uses it to disable an out-of-range
+         *     input before the user hits Save.
+         */
+        get: operations["list_counters_issuer_profiles__profile_id__counters_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/issuer-profiles/{profile_id}/counters/{series}/{year}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Counter
+         * @description Override the next number for (issuer, series, year). Admin only.
+         *     The service rejects any value below ``max(invoices.number)`` for
+         *     the same key with a conflict error.
+         */
+        put: operations["set_counter_issuer_profiles__profile_id__counters__series___year__put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/issuer-profiles/{profile_id}/mandate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Mandate */
+        get: operations["get_mandate_issuer_profiles__profile_id__mandate_get"];
+        put?: never;
+        /** Grant Mandate */
+        post: operations["grant_mandate_issuer_profiles__profile_id__mandate_post"];
+        /** Revoke Mandate */
+        delete: operations["revoke_mandate_issuer_profiles__profile_id__mandate_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/issuer-profiles/{profile_id}/mandates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Mandates */
+        get: operations["list_mandates_issuer_profiles__profile_id__mandates_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/invoices": {
         parameters: {
             query?: never;
@@ -3779,6 +3862,10 @@ export interface components {
             name: string;
             /** Ragione Sociale */
             ragione_sociale: string;
+            /** Nome */
+            nome?: string | null;
+            /** Cognome */
+            cognome?: string | null;
             /** Id Paese */
             id_paese?: string | null;
             /** Id Codice */
@@ -3819,6 +3906,14 @@ export interface components {
             valuta: string;
             /** Timezone */
             timezone?: string | null;
+            /** Default Condizioni Pagamento */
+            default_condizioni_pagamento?: string | null;
+            /** Default Modalita Pagamento */
+            default_modalita_pagamento?: string | null;
+            /** Default Payment Terms Days */
+            default_payment_terms_days?: number | null;
+            /** Invoice Language */
+            invoice_language?: string | null;
         };
         /** ClientOut */
         ClientOut: {
@@ -3835,6 +3930,10 @@ export interface components {
             version: number;
             /** Ragione Sociale */
             ragione_sociale: string;
+            /** Nome */
+            nome: string | null;
+            /** Cognome */
+            cognome: string | null;
             /** Id Paese */
             id_paese: string | null;
             /** Id Codice */
@@ -3869,6 +3968,14 @@ export interface components {
             valuta: string;
             /** Timezone */
             timezone: string | null;
+            /** Default Condizioni Pagamento */
+            default_condizioni_pagamento: string | null;
+            /** Default Modalita Pagamento */
+            default_modalita_pagamento: string | null;
+            /** Default Payment Terms Days */
+            default_payment_terms_days: number | null;
+            /** Invoice Language */
+            invoice_language: string | null;
         };
         /** ClientPatchIn */
         ClientPatchIn: {
@@ -3876,6 +3983,10 @@ export interface components {
             name?: string | null;
             /** Ragione Sociale */
             ragione_sociale?: string | null;
+            /** Nome */
+            nome?: string | null;
+            /** Cognome */
+            cognome?: string | null;
             /** Id Paese */
             id_paese?: string | null;
             /** Id Codice */
@@ -3910,6 +4021,14 @@ export interface components {
             valuta?: string | null;
             /** Timezone */
             timezone?: string | null;
+            /** Default Condizioni Pagamento */
+            default_condizioni_pagamento?: string | null;
+            /** Default Modalita Pagamento */
+            default_modalita_pagamento?: string | null;
+            /** Default Payment Terms Days */
+            default_payment_terms_days?: number | null;
+            /** Invoice Language */
+            invoice_language?: string | null;
         };
         /** CommandIn */
         CommandIn: {
@@ -4622,6 +4741,33 @@ export interface components {
              */
             day: string;
         };
+        /**
+         * InvoiceCounterOut
+         * @description A counter row for the admin override UI. ``max_emitted`` is the
+         *     floor (the highest number already on an invoice under the same key);
+         *     the new ``last_number`` must be >= ``max_emitted`` or the override is
+         *     rejected.
+         */
+        InvoiceCounterOut: {
+            /**
+             * Issuer Profile Id
+             * Format: uuid
+             */
+            issuer_profile_id: string;
+            /** Series */
+            series: string;
+            /** Year */
+            year: number;
+            /** Last Number */
+            last_number: number;
+            /** Max Emitted */
+            max_emitted: number;
+        };
+        /** InvoiceCounterPatchIn */
+        InvoiceCounterPatchIn: {
+            /** Last Number */
+            last_number: number;
+        };
         /** InvoiceCreateIn */
         InvoiceCreateIn: {
             /**
@@ -4714,6 +4860,12 @@ export interface components {
             payment_iban: string | null;
             /** Payment Due Date */
             payment_due_date: string | null;
+            /** Condizioni Pagamento */
+            condizioni_pagamento: string | null;
+            /** Modalita Pagamento */
+            modalita_pagamento: string | null;
+            /** Payment Terms Days */
+            payment_terms_days: number | null;
             /** Taxable */
             taxable: string;
             /** Vat */
@@ -4748,6 +4900,12 @@ export interface components {
             payment_iban?: string | null;
             /** Payment Due Date */
             payment_due_date?: string | null;
+            /** Condizioni Pagamento */
+            condizioni_pagamento?: string | null;
+            /** Modalita Pagamento */
+            modalita_pagamento?: string | null;
+            /** Payment Terms Days */
+            payment_terms_days?: number | null;
         };
         /** InvoicePreviewLine */
         InvoicePreviewLine: {
@@ -4904,6 +5062,26 @@ export interface components {
             rea?: string | null;
             /** Default Iban */
             default_iban?: string | null;
+            /** Riferimento Normativo */
+            riferimento_normativo?: string | null;
+            /** Nome */
+            nome?: string | null;
+            /** Cognome */
+            cognome?: string | null;
+            /** Pec */
+            pec?: string | null;
+            /** Email */
+            email?: string | null;
+            /** Telefono */
+            telefono?: string | null;
+            /** Fax */
+            fax?: string | null;
+            /** Default Condizioni Pagamento */
+            default_condizioni_pagamento?: string | null;
+            /** Default Modalita Pagamento */
+            default_modalita_pagamento?: string | null;
+            /** Default Payment Terms Days */
+            default_payment_terms_days?: number | null;
             /**
              * Is Default
              * @default false
@@ -4943,6 +5121,26 @@ export interface components {
             rea: string | null;
             /** Default Iban */
             default_iban: string | null;
+            /** Riferimento Normativo */
+            riferimento_normativo: string | null;
+            /** Nome */
+            nome: string | null;
+            /** Cognome */
+            cognome: string | null;
+            /** Pec */
+            pec: string | null;
+            /** Email */
+            email: string | null;
+            /** Telefono */
+            telefono: string | null;
+            /** Fax */
+            fax: string | null;
+            /** Default Condizioni Pagamento */
+            default_condizioni_pagamento: string | null;
+            /** Default Modalita Pagamento */
+            default_modalita_pagamento: string | null;
+            /** Default Payment Terms Days */
+            default_payment_terms_days: number | null;
             /** Is Default */
             is_default: boolean;
             /** Conservation Adhesion */
@@ -4978,6 +5176,26 @@ export interface components {
             rea?: string | null;
             /** Default Iban */
             default_iban?: string | null;
+            /** Riferimento Normativo */
+            riferimento_normativo?: string | null;
+            /** Nome */
+            nome?: string | null;
+            /** Cognome */
+            cognome?: string | null;
+            /** Pec */
+            pec?: string | null;
+            /** Email */
+            email?: string | null;
+            /** Telefono */
+            telefono?: string | null;
+            /** Fax */
+            fax?: string | null;
+            /** Default Condizioni Pagamento */
+            default_condizioni_pagamento?: string | null;
+            /** Default Modalita Pagamento */
+            default_modalita_pagamento?: string | null;
+            /** Default Payment Terms Days */
+            default_payment_terms_days?: number | null;
             /** Is Default */
             is_default?: boolean | null;
         };
@@ -5821,6 +6039,39 @@ export interface components {
             label: string;
             /** Description */
             description: string;
+        };
+        /** SdiMandateIn */
+        SdiMandateIn: {
+            /** Reference */
+            reference?: string | null;
+        };
+        /** SdiMandateOut */
+        SdiMandateOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Issuer Profile Id
+             * Format: uuid
+             */
+            issuer_profile_id: string;
+            /** Status */
+            status: string;
+            /** Scope */
+            scope: string;
+            /** Reference */
+            reference: string | null;
+            /**
+             * Granted At
+             * Format: date-time
+             */
+            granted_at: string;
+            /** Revoked At */
+            revoked_at: string | null;
+            /** Version */
+            version: number;
         };
         /**
          * SdiStatus
@@ -14008,6 +14259,232 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["IssuerProfileOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_counters_issuer_profiles__profile_id__counters_get: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                profile_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvoiceCounterOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_counter_issuer_profiles__profile_id__counters__series___year__put: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                profile_id: string;
+                series: string;
+                year: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InvoiceCounterPatchIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvoiceCounterOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_mandate_issuer_profiles__profile_id__mandate_get: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                profile_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SdiMandateOut"] | null;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    grant_mandate_issuer_profiles__profile_id__mandate_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                profile_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SdiMandateIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SdiMandateOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    revoke_mandate_issuer_profiles__profile_id__mandate_delete: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                profile_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SdiMandateOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_mandates_issuer_profiles__profile_id__mandates_get: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                profile_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SdiMandateOut"][];
                 };
             };
             /** @description Validation Error */

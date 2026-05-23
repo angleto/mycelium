@@ -26,6 +26,29 @@ const EMPTY_LINE = {
   vat_rate: 22,
   natura: '',
 }
+
+// FatturaPA 1.2 closed enums for the per-invoice payment overrides.
+// Kept in sync with flow_core.services.payment_methods.
+const INV_CONDIZIONI: ReadonlyArray<readonly [string, string]> = [
+  ['TP01', 'a rate'],
+  ['TP02', 'completo'],
+  ['TP03', 'anticipo'],
+]
+const INV_MODALITA: ReadonlyArray<readonly [string, string]> = [
+  ['MP01', 'contanti'],
+  ['MP02', 'assegno'],
+  ['MP03', 'assegno circolare'],
+  ['MP05', 'bonifico'],
+  ['MP07', 'bollettino bancario'],
+  ['MP08', 'carta'],
+  ['MP12', 'RIBA'],
+  ['MP13', 'MAV'],
+  ['MP18', 'bollettino c/c postale'],
+  ['MP19', 'SEPA DD'],
+  ['MP20', 'SEPA DD CORE'],
+  ['MP21', 'SEPA DD B2B'],
+  ['MP23', 'PagoPA'],
+]
 type LineForm = typeof EMPTY_LINE
 
 // Forfettario invoices must default lines to 0% + Natura N2.2 (the
@@ -83,6 +106,10 @@ export function InvoicesRoute() {
   const [dNotes, setDNotes] = useState('')
   const [dIban, setDIban] = useState('')
   const [dDue, setDDue] = useState('')
+  // Per-document payment overrides (NULL = inherit from client/issuer).
+  const [dCondizioni, setDCondizioni] = useState('')
+  const [dModalita, setDModalita] = useState('')
+  const [dTermsDays, setDTermsDays] = useState('')
   const [dirty, setDirty] = useState(false)
 
   // line add / edit
@@ -175,6 +202,11 @@ export function InvoicesRoute() {
     setDNotes(inv.notes ?? '')
     setDIban(inv.payment_iban ?? '')
     setDDue(inv.payment_due_date ?? '')
+    setDCondizioni(inv.condizioni_pagamento ?? '')
+    setDModalita(inv.modalita_pagamento ?? '')
+    setDTermsDays(
+      inv.payment_terms_days != null ? String(inv.payment_terms_days) : '',
+    )
     setDirty(false)
     setLEditId(null)
     setLAdd(blankLine(!!pv.data?.is_forfettario))
@@ -227,6 +259,10 @@ export function InvoicesRoute() {
         notes: dNotes || null,
         payment_iban: dIban || null,
         payment_due_date: dDue || null,
+        condizioni_pagamento: dCondizioni || null,
+        modalita_pagamento: dModalita || null,
+        payment_terms_days:
+          dTermsDays.trim() === '' ? null : Number(dTermsDays),
       },
     })
     if (error) {
@@ -1025,6 +1061,53 @@ export function InvoicesRoute() {
                 value={dDue}
                 disabled={!isDraft}
                 onChange={(e) => dField(setDDue)(e.target.value)}
+              />
+            </label>
+          </div>
+          {/* Per-document overrides of payment metadata. Blank means
+              "inherit from client (then issuer, then TP02 / MP05 / no
+              terms)". Terms-days auto-materializes due-date when the
+              latter is empty (computed server-side at save). */}
+          <div className="row">
+            <label>
+              {t('invoices.condizioni')}
+              <select
+                value={dCondizioni}
+                disabled={!isDraft}
+                onChange={(e) => dField(setDCondizioni)(e.target.value)}
+              >
+                <option value="">{t('invoices.inherit')}</option>
+                {INV_CONDIZIONI.map(([code, lbl]) => (
+                  <option key={code} value={code}>
+                    {code} - {lbl}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              {t('invoices.modalita')}
+              <select
+                value={dModalita}
+                disabled={!isDraft}
+                onChange={(e) => dField(setDModalita)(e.target.value)}
+              >
+                <option value="">{t('invoices.inherit')}</option>
+                {INV_MODALITA.map(([code, lbl]) => (
+                  <option key={code} value={code}>
+                    {code} - {lbl}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              {t('invoices.termsDays')}
+              <input
+                type="number"
+                min={0}
+                max={365}
+                value={dTermsDays}
+                disabled={!isDraft}
+                onChange={(e) => dField(setDTermsDays)(e.target.value)}
               />
             </label>
           </div>
