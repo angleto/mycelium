@@ -30,4 +30,9 @@ web/.vite/
 # Production deploy is an independent git repository (own history,
 # its own remote). Flow tracks only deploy/local/ (dev infra, used by CI).
 /deploy/prod/
-ReportMaggio.pdf
+
+# Local working files dropped in the repo root: PDFs we read for spec
+# or invoice samples, and Claude Code's per-session metadata. Never
+# part of the project.
+*.pdf
+.claude/
