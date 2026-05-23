@@ -1453,6 +1453,10 @@ class NoteDeriveTaskIn(BaseModel):
     title: str = Field(min_length=1, max_length=300)
     description: str | None = None
     estimate_effort_h: Decimal | None = None
+    # Optional tag inheritance: the SPA passes the note's tags (client
+    # + project) so the derived task lands under the same project /
+    # client as its parent note instead of the workspace default.
+    extra_tag_ids: list[uuid.UUID] = Field(default_factory=list)
 
 
 class NoteLinkIn(BaseModel):

@@ -5636,6 +5636,8 @@ export interface components {
             description?: string | null;
             /** Estimate Effort H */
             estimate_effort_h?: number | string | null;
+            /** Extra Tag Ids */
+            extra_tag_ids?: string[];
         };
         /** NoteEraseOut */
         NoteEraseOut: {

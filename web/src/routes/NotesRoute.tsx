@@ -7,7 +7,6 @@ import {
 } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { mentionLink } from '../lib/mentions'
 import { api, authFetch, errMessage, workspaceHeader } from '../api/client'
 import { useSession } from '../auth/useSession'
 import { RichEditor } from '../components/RichEditor'
@@ -53,7 +52,6 @@ export function NotesRoute() {
   const [err, setErr] = useState<string | null>(null)
   const [made, setMade] = useState<{ id: string; title: string } | null>(null)
   const [converting, setConverting] = useState<string | null>(null)
-  const [convertedIds, setConvertedIds] = useState<Set<string>>(new Set())
 
   // Modal: a note open for edit (or a fresh draft being created).
   const [sel, setSel] = useState<Note | null>(null)
@@ -467,48 +465,58 @@ export function NotesRoute() {
     await openEdit(sel)
   }
 
-  function inheritedTagIds(n: Note): string[] {
-    return (n.tags ?? []).map((g) => g.id)
+  // Inherit the note's client tag (always present, added by
+  // create_note) plus its project (carried on Note.project_id, not in
+  // tags) so the derived task lands under the same project/client as
+  // its parent note.
+  function inheritedExtraTagIds(n: Note): string[] {
+    const tagIds = (n.tags ?? []).map((g) => g.id)
+    if (n.project_id && !tagIds.includes(n.project_id)) tagIds.push(n.project_id)
+    return tagIds
   }
 
-  // Case 1 — the note IS the actionable: a task with the note's title +
-  // body, inheriting its tags (the backend adds a default project if
-  // none, so the task still resolves to a project/client), then the
-  // note is archived (it has become the task).
+  // The note generates a task (ADR-0029 P1, kind=derived_from): a
+  // typed note↔task link is created and the note stays alive, so the
+  // same note can spawn many tasks ("fruit"). The task title defaults
+  // to the note's title (or the first transcript line / kind as
+  // fallback); the user can rename it on the task page. The note is
+  // NOT archived: deriving is repeatable.
   async function onConvert(n: Note) {
-    if (converting !== null || convertedIds.has(n.id)) return
+    if (converting !== null) return
     setErr(null)
     setConverting(n.id)
-    const label = n.title || n.kind
-    const body = (n.transcript ?? '').trim()
-    const { data, error } = await api.POST('/tasks', {
-      params: { header: workspaceHeader() },
-      body: {
-        title: label,
-        description:
-          (body ? body + '\n\n' : '') +
-          `From note: ${mentionLink('note', n.id, label)}`,
-        priority: 3,
-        executor_kind: 'human',
-        necessity: 'should',
-        tag_ids: inheritedTagIds(n),
+    const label =
+      n.title?.trim() ||
+      (n.transcript ?? '').split('\n').find((l) => l.trim()) ||
+      n.kind
+    const title = label.slice(0, 290)
+    const { data, error } = await api.POST(
+      '/notes/{note_id}/derive-task',
+      {
+        params: { header: workspaceHeader(), path: { note_id: n.id } },
+        body: {
+          title,
+          description: null,
+          extra_tag_ids: inheritedExtraTagIds(n),
+        },
       },
-    })
+    )
     if (error || !data) {
       setConverting(null)
       setErr(errMessage(error))
       return
     }
-    setConvertedIds((s) => new Set(s).add(n.id))
-    setMade({ id: data.id, title: label })
-    // The note has become the task: archive it (also closes the modal
-    // when open, which disarms the autosave so it cannot race).
-    await archiveNote(n)
+    setMade({ id: data.task_id, title })
+    // Refresh notes so primary_task_id_for_note (and any list-side
+    // chips) reflect the new link.
+    await loadNotes()
     setConverting(null)
   }
 
   // Case 2 — a long/structured note: spin a task off the current text
-  // selection (note stays, repeatable), inheriting the note's tags.
+  // selection. Uses derive-task too (typed link, note stays alive,
+  // repeatable) so this path is symmetric with the bare "Derive task"
+  // action.
   async function onTaskFromSelection(n: Note) {
     if (converting !== null) return
     const selText = (window.getSelection()?.toString() ?? '').trim()
@@ -519,25 +527,24 @@ export function NotesRoute() {
     setErr(null)
     setConverting(n.id)
     const title = selText.split('\n')[0].slice(0, 80)
-    const { data, error } = await api.POST('/tasks', {
-      params: { header: workspaceHeader() },
-      body: {
-        title,
-        description:
-          selText +
-          `\n\nFrom note: ${mentionLink('note', n.id, n.title || n.kind)}`,
-        priority: 3,
-        executor_kind: 'human',
-        necessity: 'should',
-        tag_ids: inheritedTagIds(n),
+    const { data, error } = await api.POST(
+      '/notes/{note_id}/derive-task',
+      {
+        params: { header: workspaceHeader(), path: { note_id: n.id } },
+        body: {
+          title,
+          description: selText,
+          extra_tag_ids: inheritedExtraTagIds(n),
+        },
       },
-    })
+    )
     setConverting(null)
     if (error || !data) {
       setErr(errMessage(error))
       return
     }
-    setMade({ id: data.id, title })
+    setMade({ id: data.task_id, title })
+    await loadNotes()
   }
 
   const modalOpen = sel !== null || creating
@@ -600,7 +607,6 @@ export function NotesRoute() {
               key={n.id}
               note={n}
               converting={converting === n.id}
-              converted={convertedIds.has(n.id)}
               onOpen={() => void openEdit(n)}
               onConvert={() => void onConvert(n)}
               onArchive={() => void archiveNote(n)}
@@ -782,12 +788,10 @@ export function NotesRoute() {
                   type="button"
                   className="btn--ghost"
                   title={t('notes.toTaskHint')}
-                  disabled={converting !== null || convertedIds.has(sel.id)}
+                  disabled={converting !== null}
                   onClick={() => void onConvert(sel)}
                 >
-                  {convertedIds.has(sel.id)
-                    ? t('notes.convertedShort')
-                    : t('notes.toTask')}
+                  {t('notes.toTask')}
                 </button>
                 <button
                   type="button"

@@ -9,7 +9,6 @@ type Note = components['schemas']['NoteOut']
 export function NoteListItem({
   note,
   converting,
-  converted,
   onOpen,
   onConvert,
   onArchive,
@@ -18,7 +17,6 @@ export function NoteListItem({
 }: {
   note: Note
   converting: boolean
-  converted: boolean
   onOpen: () => void
   onConvert: () => void
   onArchive: () => void
@@ -49,14 +47,10 @@ export function NoteListItem({
             type="button"
             className="btn--sm"
             title={t('notes.toTaskHint')}
-            disabled={converting || converted}
+            disabled={converting}
             onClick={onConvert}
           >
-            {converting
-              ? t('notes.converting')
-              : converted
-                ? t('notes.convertedShort')
-                : t('notes.toTask')}
+            {converting ? t('notes.converting') : t('notes.toTask')}
           </button>
           <button
             type="button"

@@ -641,6 +641,7 @@ async def derive_task(
         title=body.title,
         description=body.description,
         estimate_effort_h=body.estimate_effort_h,
+        extra_tag_ids=list(body.extra_tag_ids),
     )
     return DerivedTaskOut(task_id=task.id, link=_task_link_out(link))
 
