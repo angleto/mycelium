@@ -3,6 +3,12 @@
 from __future__ import annotations
 
 from flow_core.models.activity_log import ActivityLog
+from flow_core.models.adjudication import (
+    Adjudication,
+    AdjudicationStatus,
+    AdjudicationStep,
+    AdjudicationStepKind,
+)
 from flow_core.models.agent_run import AgentRun, AgentRunStatus
 from flow_core.models.agent_token import AgentToken
 from flow_core.models.attachment import Attachment
@@ -108,6 +114,10 @@ __all__ = [
     "ACTIVE_DISPATCH_STATUSES",
     "DEFAULT_AUTONOMOUS_DISPATCH",
     "ActivityLog",
+    "Adjudication",
+    "AdjudicationStatus",
+    "AdjudicationStep",
+    "AdjudicationStepKind",
     "AgentRun",
     "AgentRunStatus",
     "AgentToken",

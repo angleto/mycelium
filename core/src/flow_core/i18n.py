@@ -44,6 +44,7 @@ class MessageCode(enum.StrEnum):
     CONFLICT_STALE_VERSION = "concurrency.stale_version"
     TASK_NOT_FOUND = "task.not_found"
     TAG_NOT_FOUND = "tag.not_found"
+    ADJUDICATION_NOT_FOUND = "adjudication.not_found"
     TAG_DUPLICATE = "tag.duplicate"
     TAG_AMBIGUOUS = "tag.ambiguous"
     TAG_KIND_MISMATCH = "tag.kind_mismatch"
