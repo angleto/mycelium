@@ -431,6 +431,13 @@ export const it: Catalog = {
     subtasksNone: 'Nessun sotto-task',
     parentLabel: 'Padre:',
     archivedSuffix: 'archiviato',
+    ownerLabel: 'Responsabile',
+    ownerHint: 'Chi risponde di questo task. Sempre una persona reale; cambiare per trasferire la responsabilità.',
+  },
+  ownerPicker: {
+    none: 'Nessun responsabile',
+    search: 'Cerca un utente…',
+    noMatch: 'Nessun utente corrispondente',
   },
   garden: {
     nav: 'Giardino',

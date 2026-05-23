@@ -23,7 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from flow_core import __version__
 from flow_core.db import admin_session, tenant_session
 from flow_core.embedder import embedder_available
-from flow_core.errors import AuthError, ForbiddenError
+from flow_core.errors import AuthError, DomainError, ForbiddenError, NotFoundError
 from flow_core.i18n import MessageCode
 from flow_core.models.agent_run import AgentRun
 from flow_core.models.billing import CostBasis, RateCard, UsageRecord
@@ -3586,3 +3586,91 @@ async def record_task_artifact(
             note_id=uuid.UUID(note_id),
         )
         return {"link_id": str(link.id), "kind": link.kind}
+
+
+# ---------------------------------------------------------------------------
+# Identity-first task ownership / assignment (docs/adr/0028 D5 follow-up):
+# explicit primitives that wrap ``update_task``. Useful for Telegram chat
+# ("assegna @marco al task X") and the conversational assistant: a named
+# operation reads better than a generic update.
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+async def set_task_owner(
+    token: str,
+    org_id: str,
+    task_id: str,
+    expected_version: int,
+    owner_id: str | None = None,
+    owner_handle: str | None = None,
+) -> dict[str, Any]:
+    """Reassign accountability for a task (docs/adr/0028 D2). Owner
+    is always a real user. Pass either ``owner_id`` (uuid) or
+    ``owner_handle`` (resolved against ``identities`` under the
+    current org; the identity must be ``kind=user``)."""
+    async with _tenant(token, org_id) as (s, org, user):
+        if owner_id is None and owner_handle:
+            from flow_core.models.identity import Identity, IdentityKind
+
+            row = (
+                await s.execute(
+                    select(Identity).where(
+                        Identity.org_id == org,
+                        Identity.handle == owner_handle,
+                        Identity.kind == IdentityKind.user,
+                    )
+                )
+            ).scalar_one_or_none()
+            if row is None or row.user_id is None:
+                raise NotFoundError(MessageCode.USER_NOT_FOUND)
+            resolved = row.user_id
+        elif owner_id is not None:
+            resolved = uuid.UUID(owner_id)
+        else:
+            raise DomainError(MessageCode.DOMAIN_ERROR)
+        version = await tasks.update_task(
+            s,
+            org_id=org,
+            actor_id=user,
+            task_id=uuid.UUID(task_id),
+            expected_version=expected_version,
+            values={"owner_id": resolved},
+        )
+        return {"task_id": task_id, "owner_id": str(resolved), "version": version}
+
+
+@mcp.tool()
+async def set_task_assignee(
+    token: str,
+    org_id: str,
+    task_id: str,
+    expected_version: int,
+    assignee_id: str | None = None,
+    assignee_handle: str | None = None,
+    clear: bool = False,
+) -> dict[str, Any]:
+    """Set or clear who should work on the task (docs/adr/0028 D2).
+    Pass ``assignee_id`` (uuid into identities) or ``assignee_handle``
+    (resolved under the current org). ``clear=True`` unassigns the
+    task; the routing kind then falls back to ``task.executor_kind``
+    (ADR-0028)."""
+    async with _tenant(token, org_id) as (s, org, user):
+        values: dict[str, Any] = {}
+        if clear:
+            values["assignee_id"] = None
+        elif assignee_id is not None:
+            values["assignee_id"] = uuid.UUID(assignee_id)
+        elif assignee_handle:
+            values["assignee_handle"] = assignee_handle
+        else:
+            raise DomainError(MessageCode.DOMAIN_ERROR)
+        version = await tasks.update_task(
+            s,
+            org_id=org,
+            actor_id=user,
+            task_id=uuid.UUID(task_id),
+            expected_version=expected_version,
+            values=values,
+        )
+        return {"task_id": task_id, "version": version, "cleared": clear}

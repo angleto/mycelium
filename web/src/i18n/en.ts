@@ -430,6 +430,13 @@ export const en = {
     subtasksNone: 'No subtasks',
     parentLabel: 'Parent:',
     archivedSuffix: 'archived',
+    ownerLabel: 'Owner',
+    ownerHint: 'Who is accountable for this task. Always a real person; reassign to transfer responsibility.',
+  },
+  ownerPicker: {
+    none: 'No owner',
+    search: 'Search a user…',
+    noMatch: 'No matching user',
   },
   garden: {
     nav: 'Garden',

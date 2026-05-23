@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { api, errMessage, workspaceHeader } from '../api/client'
 import { RichEditor } from '../components/RichEditor'
 import { AssigneePicker } from '../components/AssigneePicker'
+import { OwnerPicker } from '../components/OwnerPicker'
 import { TagPicker } from '../components/TagPicker'
 import { PriorityChip } from '../components/PriorityChip'
 import { ScaleSelect } from '../components/ScaleSelect'
@@ -681,6 +682,16 @@ export function TaskDetailRoute() {
           <AssigneePicker
             value={task.assignee_handle ?? null}
             onChange={(next) => void autosave({ assignee_handle: next ?? '' })}
+          />
+        </fieldset>
+        <fieldset className="taskdetail__owner">
+          <legend>{t('tasks.ownerLabel')}</legend>
+          <p className="hint">{t('tasks.ownerHint')}</p>
+          <OwnerPicker
+            value={task.owner_id ?? null}
+            onChange={(nextOwnerId) =>
+              void autosave({ owner_id: nextOwnerId })
+            }
           />
         </fieldset>
         <label>
