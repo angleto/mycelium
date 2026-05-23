@@ -105,13 +105,39 @@ def _make_lifespan(mcp_app: Any) -> Any:
 
     @contextlib.asynccontextmanager
     async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
+        import asyncio
+        import logging
+
+        from flow_mcp.gateway import prewarm as prewarm_mcp_gateway
+
         settings = get_settings()
         if settings.smtp_configured:
             set_mailer(build_system_mailer(settings))
         # Drive the mounted MCP app's lifespan (starts the streamable
         # HTTP session manager's task group).
         async with mcp_app.router.lifespan_context(mcp_app):
-            yield
+            # Warm the embedding index for the MCP search/describe/execute
+            # gateway off the request path. Without this, the first
+            # ``search_tools`` call after a roll pays the model load +
+            # ~140-text encode inline (10-20s worst case), long enough
+            # that the MCP client reports "connection lost". Fired as a
+            # background task so a missing optional dep or a slow load
+            # never blocks app boot or the readiness probe.
+            async def _prewarm() -> None:
+                try:
+                    await prewarm_mcp_gateway()
+                except Exception:  # pragma: no cover - defensive
+                    logging.getLogger(__name__).exception(
+                        "mcp gateway prewarm failed; first search_tools will pay the cost"
+                    )
+
+            # Keep a reference so the task is not garbage-collected
+            # while it runs (asyncio holds only weakrefs to tasks).
+            prewarm_task = asyncio.create_task(_prewarm())
+            try:
+                yield
+            finally:
+                prewarm_task.cancel()
 
     return _lifespan
 

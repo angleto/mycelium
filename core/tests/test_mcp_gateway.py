@@ -125,3 +125,38 @@ async def test_http_app_builds_and_serves_the_gateway() -> None:
     assert gateway.settings.streamable_http_path == "/"
     names = {t.name for t in await gateway.list_tools()}
     assert "execute_tool" in names and "create_task" not in names
+
+
+async def test_prewarm_builds_the_index_off_request_path() -> None:
+    # Prewarm is what the API lifespan calls so the first search_tools
+    # does not pay the ~140-text encode inline. Guards that it actually
+    # builds the index (regression on the "appears hung" bug fixed by
+    # this PR) and is safely a no-op on second invocation.
+    set_embedder_override(FakeEmbedder)
+    try:
+        assert gw._index is None
+        await gw.prewarm()
+        assert gw._index is not None
+        snapshot = gw._index
+        await gw.prewarm()  # idempotent
+        assert gw._index is snapshot
+    finally:
+        set_embedder_override(None)
+
+
+def test_get_embedder_returns_singleton_in_prod_path() -> None:
+    # Pre-fix shape returned a fresh LocalEmbedder per call, so every
+    # search_tools paid the in-memory model load again and inflated the
+    # working set toward the pod memory limit. Guards the cache.
+    import flow_core.embedder as emb_mod
+    from flow_core.embedder import LocalEmbedder, get_embedder, set_embedder_override
+
+    set_embedder_override(None)
+    emb_mod._singleton = None  # ensure cold start for this assertion
+    try:
+        first = get_embedder()
+        second = get_embedder()
+        assert isinstance(first, LocalEmbedder)
+        assert first is second
+    finally:
+        emb_mod._singleton = None

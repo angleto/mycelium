@@ -33,7 +33,7 @@ from typing import Any
 from mcp.server.fastmcp import FastMCP
 
 from flow_core import __version__
-from flow_core.embedder import embedder_available, get_embedder
+from flow_core.embedder import embed_batch, embedder_available, get_embedder
 from flow_mcp.server import mcp as _registry
 
 gateway: FastMCP = FastMCP("flow")
@@ -137,11 +137,25 @@ async def _ensure_index() -> None:
     async with _index_lock:
         if _index is None:  # still unbuilt after acquiring the lock
             emb = get_embedder()
-            idx: dict[str, list[float]] = {}
-            for meta in _catalog():
-                res = await emb.embed(meta["text"])
-                idx[meta["name"]] = _normalize(res.vector)
-            _index = idx
+            cat = _catalog()
+            # Single batched forward pass: SentenceTransformer handles
+            # ~140 short strings in one encode() call. The per-call
+            # Python+tokenizer overhead dominated the previous sequential
+            # loop and the first ``search_tools`` paid all of it inline,
+            # making the request appear hung to the MCP client.
+            results = await embed_batch(emb, [m["text"] for m in cat])
+            _index = {m["name"]: _normalize(r.vector) for m, r in zip(cat, results, strict=True)}
+
+
+async def prewarm() -> None:
+    """Warm the embedding index off the request path so the first
+    ``search_tools`` does not pay the ~140-embed startup cost inline.
+    Safe to call multiple times (no-op after the first build) and from
+    a server startup hook; failures are surfaced to the caller so the
+    lifespan can decide whether to log-and-continue or fail boot."""
+    if not embedder_available():
+        return
+    await _ensure_index()
 
 
 def _strip_auth(schema: dict[str, Any] | None) -> dict[str, Any]:
@@ -241,4 +255,4 @@ async def execute_tool(name: str, arguments: dict[str, Any] | None = None) -> An
     return result
 
 
-__all__ = ["describe_tools", "execute_tool", "gateway", "ping", "search_tools"]
+__all__ = ["describe_tools", "execute_tool", "gateway", "ping", "prewarm", "search_tools"]
