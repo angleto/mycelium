@@ -583,10 +583,27 @@ export function TaskDetailRoute() {
         <p className="hint">
           <Link to="/tasks">{t('tasks.back')}</Link>
         </p>
-        {/* Quick start/stop for this task, opposite the back link.
-            Server-authoritative, so it stays in sync with the work-notes
-            timer below. */}
-        <TaskTimer taskId={id} />
+        {/* State select sits immediately left of the timer: the two
+            most-used actions on this surface (advance the state,
+            start/stop the clock) are now adjacent in the same top row
+            instead of buried below the form. Server-authoritative
+            timer stays in sync with the work-notes timer below. */}
+        <div className="taskdetail__topright">
+          <label className="taskdetail__state">
+            <span className="hint">{t('tasks.state')}</span>
+            <select
+              value={stateId}
+              onChange={(e) => void onChangeState(e.target.value)}
+            >
+              {states.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <TaskTimer taskId={id} />
+        </div>
       </div>
       {task.deleted_at != null && (
         <p className="banner">
@@ -784,22 +801,6 @@ export function TaskDetailRoute() {
           </button>
         </div>
       </form>
-
-      <div className="row">
-        <label>
-          {t('tasks.state')}
-          <select
-            value={stateId}
-            onChange={(e) => void onChangeState(e.target.value)}
-          >
-            {states.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.name}
-              </option>
-            ))}
-          </select>
-        </label>
-      </div>
 
       <div className="row">
         <button type="button" onClick={() => void openWorkNote()}>
