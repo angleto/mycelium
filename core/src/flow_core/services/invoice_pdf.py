@@ -286,7 +286,9 @@ def build_pdf(
         bottomMargin=18 * mm,
         leftMargin=18 * mm,
         rightMargin=18 * mm,
-        title=f"{invoice.series}{invoice.number or ''}",
+        title=(
+            f"{invoice.series}-{invoice.number}" if invoice.number is not None else invoice.series
+        ),
     )
     ss = getSampleStyleSheet()
     base = ss["Normal"]
@@ -297,15 +299,25 @@ def build_pdf(
         "h_title", parent=base, fontSize=16, leading=19, fontName="Helvetica-Bold"
     )
     h_sec = ParagraphStyle("h_sec", parent=base, fontSize=9, leading=12, fontName="Helvetica-Bold")
+    # Document identifier — sized to match the AdE-rendered invoice
+    # ("Numero: CYLOCK-0001" in large bold). The user explicitly cited
+    # the AdE PDF as the reference: the invoice code must be readable
+    # at a glance from the page header, not buried in a 3-column table.
+    h_number = ParagraphStyle(
+        "h_number", parent=base, fontSize=14, leading=18, fontName="Helvetica-Bold"
+    )
     right = ParagraphStyle("right", parent=base, alignment=2)
     flow: list[object] = []
 
     is_forf = _is_forfettario(issuer)
-    number = f"{invoice.series}{invoice.number}" if invoice.number is not None else _L(loc, "draft")
+    number = (
+        f"{invoice.series}-{invoice.number}" if invoice.number is not None else _L(loc, "draft")
+    )
     issued = (invoice.issued_at or dt.datetime.now(tz=dt.UTC)).date().isoformat()
 
     flow.append(Paragraph(_L(loc, "invoice"), h_title))
-    flow.append(Spacer(1, 2 * mm))
+    flow.append(Paragraph(f"{_L(loc, 'number')}: {number}  ·  {issued}", h_number))
+    flow.append(Spacer(1, 4 * mm))
 
     # --- cedente (issuer) / cessionario (client) side by side ---
     def _party(
@@ -388,39 +400,15 @@ def build_pdf(
         )
     )
     flow.append(parties)
-    flow.append(Spacer(1, 6 * mm))
+    flow.append(Spacer(1, 4 * mm))
 
-    # --- document header (Numero / Data / Tipo) ---
-    doc_tbl = Table(
-        [
-            [
-                Paragraph(_L(loc, "number"), h_sec),
-                Paragraph(_L(loc, "date"), h_sec),
-                Paragraph(_L(loc, "doc_type"), h_sec),
-            ],
-            [
-                Paragraph(number, base),
-                Paragraph(issued, base),
-                Paragraph(invoice.document_type.value, base),
-            ],
-        ],
-        colWidths=[58 * mm, 58 * mm, 58 * mm],
-    )
-    doc_tbl.setStyle(
-        TableStyle(
-            [
-                ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#888888")),
-                ("INNERGRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#cccccc")),
-                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#f0f0f0")),
-                ("LEFTPADDING", (0, 0), (-1, -1), 5),
-                ("RIGHTPADDING", (0, 0), (-1, -1), 5),
-                ("TOPPADDING", (0, 0), (-1, -1), 4),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
-            ]
-        )
-    )
-    flow.append(doc_tbl)
-    flow.append(Spacer(1, 6 * mm))
+    # Document type stays as a fiscal footnote here — the Numero and
+    # Data are already shown in the prominent header above. Dropping
+    # the previous Numero/Data/Tipo 3-column table avoided duplicating
+    # the identifier and freed vertical space without losing the
+    # TipoDocumento code (TD01/TD06/…) needed for fiscal traceability.
+    flow.append(Paragraph(f"{_L(loc, 'doc_type')}: {invoice.document_type.value}", small))
+    flow.append(Spacer(1, 4 * mm))
 
     # --- lines table ---
     header = [

@@ -2262,14 +2262,6 @@ button.btn--danger:hover {
   align-items: center;
   gap: 0.6rem;
 }
-.taskdetail__state {
-  display: flex;
-  align-items: center;
-  gap: 0.3rem;
-}
-.taskdetail__state .hint {
-  margin: 0;
-}
 /* Running stop button carries the live readout; tabular figures keep
    its width from jittering as the seconds tick. */
 .tasktimer__stop {

@@ -155,6 +155,8 @@ async def list_entries(
     start_from: datetime.datetime | None = None,
     start_to: datetime.datetime | None = None,
     billable: bool | None = None,
+    client_tag_id: uuid.UUID | None = None,
+    project_tag_id: uuid.UUID | None = None,
     limit: int | None = None,
     offset: int = 0,
 ) -> list[TimeEntryOut]:
@@ -166,6 +168,8 @@ async def list_entries(
         start_from=start_from,
         start_to=start_to,
         billable=billable,
+        client_tag_id=client_tag_id,
+        project_tag_id=project_tag_id,
         limit=limit,
         offset=offset,
     )
@@ -355,6 +359,8 @@ async def entries_csv(
     start_from: datetime.datetime | None = None,
     start_to: datetime.datetime | None = None,
     billable: bool | None = None,
+    client_tag_id: uuid.UUID | None = None,
+    project_tag_id: uuid.UUID | None = None,
 ) -> Response:
     """Detail-level CSV: one row per time entry, with started_at /
     ended_at / duration_seconds / task title / client+project / memo.
@@ -367,6 +373,8 @@ async def entries_csv(
         start_from=start_from,
         start_to=start_to,
         billable=billable,
+        client_tag_id=client_tag_id,
+        project_tag_id=project_tag_id,
         limit=None,
         offset=0,
     )

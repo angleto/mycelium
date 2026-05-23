@@ -144,7 +144,7 @@ async def test_forfettario_draft_lines_causale_bollo_and_xml_preview() -> None:
         assert _FORFETTARIO_CAUSALE in xml
         # ANTEPRIMA progressivo + would-be number, no allocation.
         assert "<ProgressivoInvio>ANTEPRIMA</ProgressivoInvio>" in xml
-        assert "<Numero>A1</Numero>" in xml
+        assert "<Numero>A-1</Numero>" in xml
         still = (await c.get(f"/invoices/{inv['id']}", headers=h)).json()
         assert still["number"] is None  # preview did not allocate
 
@@ -163,7 +163,7 @@ async def test_forfettario_draft_lines_causale_bollo_and_xml_preview() -> None:
         assert prev["iban_source"] == "issuer"
         assert prev["totals"]["bollo"] == "2.00"
         assert prev["totals"]["total"] == "3733.00"
-        assert prev["number"] == "A1"
+        assert prev["number"] == "A-1"
 
         # Transmit freezes the same conformant document.
         tx = await c.post(f"/invoices/{inv['id']}/transmit", headers=h, json={})
@@ -173,7 +173,7 @@ async def test_forfettario_draft_lines_causale_bollo_and_xml_preview() -> None:
         assert body["bollo"] == "2.00"
         assert body["total"] == "3733.00"
         sent = (await c.get(f"/invoices/{inv['id']}/xml", headers=h)).json()["xml"]
-        assert "<Numero>A1</Numero>" in sent
+        assert "<Numero>A-1</Numero>" in sent
         assert "ANTEPRIMA" not in sent  # real progressivo now
 
 

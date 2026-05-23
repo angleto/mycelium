@@ -290,18 +290,18 @@ export function TimeRoute() {
 
   const downloadEntriesCsv = useCallback(async () => {
     // Detail CSV: one row per time entry with started_at / ended_at /
-    // duration / task / client / project. Uses the same date filters
-    // as the report (client/project filters apply on the report side
-    // only because /time/entries does not currently take them; if you
-    // want a per-client detail CSV, filter on the client column post-
-    // hoc in your spreadsheet).
+    // duration / task / client / project. Honours the same client /
+    // project focus as the on-screen Entries list and the report so a
+    // CSV export of /time matches what's visible above the button.
     const q: Record<string, string | boolean> = {}
     if (from) q.start_from = `${from}T00:00:00`
     if (to) q.start_to = `${to}T23:59:59`
     if (billableF !== 'all') q.billable = billableF === 'yes'
+    if (clientId) q.client_tag_id = clientId
+    if (projectId) q.project_tag_id = projectId
     const today = new Date().toISOString().slice(0, 10)
     await downloadCsv('/time/entries.csv', q, `flow-time-entries-${today}.csv`)
-  }, [downloadCsv, from, to, billableF])
+  }, [downloadCsv, from, to, billableF, clientId, projectId])
 
   const loadReport = useCallback(async () => {
     const r = await api.GET('/time/report', {
@@ -325,15 +325,27 @@ export function TimeRoute() {
     if (pr.data) setPieReport(pr.data)
   }, [reportQuery, from, to, pieGroup])
 
+  // Entries query reads the same focus (client + project) as the
+  // report / pie / by-task pulls. Without these the Entries list
+  // ignored the focus selector entirely and showed unrelated rows
+  // alongside the filtered report — reported as "Entries doesn't
+  // refilter when I change focus".
+  const entriesQuery = useCallback((): Record<string, string | number> => {
+    const q: Record<string, string | number> = { limit: ENT_PAGE }
+    if (clientId) q.client_tag_id = clientId
+    if (projectId) q.project_tag_id = projectId
+    return q
+  }, [clientId, projectId])
+
   const resetEntries = useCallback(async () => {
     const { data } = await api.GET('/time/entries', {
-      params: { header: workspaceHeader(), query: { limit: ENT_PAGE, offset: 0 } },
+      params: { header: workspaceHeader(), query: { ...entriesQuery(), offset: 0 } },
     })
     if (!data) return
     setEntries(data)
     setEntOffset(data.length)
     setEntMore(data.length === ENT_PAGE)
-  }, [])
+  }, [entriesQuery])
 
   const loadMore = useCallback(async () => {
     if (entLoading || !entMore) return
@@ -341,7 +353,7 @@ export function TimeRoute() {
     const { data } = await api.GET('/time/entries', {
       params: {
         header: workspaceHeader(),
-        query: { limit: ENT_PAGE, offset: entOffset },
+        query: { ...entriesQuery(), offset: entOffset },
       },
     })
     setEntLoading(false)
@@ -349,7 +361,7 @@ export function TimeRoute() {
     setEntries((p) => [...p, ...data])
     setEntOffset((o) => o + data.length)
     setEntMore(data.length === ENT_PAGE)
-  }, [entLoading, entMore, entOffset])
+  }, [entLoading, entMore, entOffset, entriesQuery])
 
   const reloadEntries = useCallback(async () => {
     await resetEntries()
@@ -376,12 +388,15 @@ export function TimeRoute() {
     }
   }, [activeId])
 
+  // Bootstrap data (tasks, clients/projects tags, projects, all tags)
+  // only needs to be (re)loaded when the workspace changes, not every
+  // time the focus selector flips — keep this effect keyed on
+  // ``activeId`` only and let a second effect refresh the entries list
+  // when the focus changes.
   useEffect(() => {
     let active = true
     void (async () => {
       const h = workspaceHeader()
-      // Workflow states loaded via useWorkflowStates() hook — no
-      // need to refetch them here.
       const [tk, cl, pr, pp, allTagsRes] = await Promise.all([
         api.GET('/tasks', { params: { header: h } }),
         api.GET('/tags', { params: { header: h, query: { kind: 'client' } } }),
@@ -395,12 +410,29 @@ export function TimeRoute() {
       if (pr.data) setProjects(pr.data)
       if (pp.data) setProjectProfiles(pp.data)
       if (allTagsRes.data) setAllTags(allTagsRes.data)
+    })()
+    return () => {
+      active = false
+    }
+  }, [activeId])
+
+  // Refresh the Entries list whenever the focus filter changes.
+  // resetEntries closes over clientId / projectId, so this re-fires
+  // when the focus selector flips. Without this, the Entries list
+  // showed stale rows that didn't match the focus above it. The
+  // setState happens inside resetEntries' async IIFE, not directly
+  // in the effect body — same pattern used by the report/by-task
+  // effects above (avoids the cascading-renders lint).
+  useEffect(() => {
+    let active = true
+    void (async () => {
+      if (!active) return
       await resetEntries()
     })()
     return () => {
       active = false
     }
-  }, [activeId, resetEntries])
+  }, [resetEntries])
 
   useEffect(() => {
     let active = true
@@ -465,11 +497,31 @@ export function TimeRoute() {
 
   async function saveEntry(en: Entry) {
     setErr(null)
+    // A time entry belongs to a task. The project a row reports under
+    // is *derived* from that task (the task's earliest project tag,
+    // resolved server-side). So to "move an entry to a different
+    // project" the user must pick a task that lives in that project —
+    // the Project dropdown above only filters the Task choices, it
+    // cannot itself set the project. The previous implementation tried
+    // to fake direct project assignment by auto-promoting "the first
+    // task with this project tag" on project-dropdown change, which
+    // failed silently when:
+    //   - no task in the picked project existed (PATCH still carried
+    //     the old task_id and nothing visibly changed);
+    //   - the auto-promoted task belonged to a different client.
+    // The fix is to require an explicit task pick. If the user blanks
+    // the task, we refuse to save and surface a clear error instead of
+    // sending a no-op PATCH. Reported repeatedly as "I change the
+    // project, press Save, and nothing happens".
+    if (!eTask) {
+      setErr(t('time.errPickTask'))
+      return
+    }
     const { error } = await api.PATCH('/time/entries/{entry_id}', {
       params: { header: workspaceHeader(), path: { entry_id: en.id } },
       body: {
         expected_version: en.version,
-        task_id: eTask || undefined,
+        task_id: eTask,
         started_at: eStart ? fromLocalInput(eStart) : undefined,
         ended_at: eEnd ? fromLocalInput(eEnd) : null,
       },
@@ -647,46 +699,58 @@ export function TimeRoute() {
                   {fmtClockTz(en.ended_at, en.client_timezone)}
                   {en.client_timezone ? ` (${en.client_timezone})` : ''}
                 </span>
-                {editId === en.id && (
-                  <span className="entryedit">
-                    <select
-                      value={eProject}
-                      onChange={(e) => {
-                        const newProj = e.target.value
-                        setEProject(newProj)
-                        // Real bug fix: changing the project dropdown
-                        // now ALSO promotes a task in that project as
-                        // the new ``eTask`` so the PATCH actually
-                        // moves the entry. Without this the dropdown
-                        // was a filter-only widget and Save still
-                        // sent the old task_id.
-                        if (newProj) {
-                          const inProj = tasks.find((tk) =>
-                            (tk.tags ?? []).some((g) => g.id === newProj),
-                          )
-                          if (inProj) setETask(inProj.id)
-                        }
+                {editId === en.id && (() => {
+                  // Project dropdown = pure filter for the Task select
+                  // below. Picking a project narrows the Task choices;
+                  // the Task select is the real control that moves
+                  // the entry. When the project filter changes such
+                  // that the current task no longer matches, blank
+                  // eTask so the Save button surfaces the "pick a
+                  // task" guard rather than silently re-saving the
+                  // old task_id.
+                  const tasksInProj = tasks.filter(
+                    (tk) => !eProject || (tk.tags ?? []).some((g) => g.id === eProject),
+                  )
+                  return (
+                    <form
+                      className="entryedit"
+                      onSubmit={(e) => {
+                        e.preventDefault()
+                        void saveEntry(en)
                       }}
-                      title={t('time.editProject')}
                     >
-                      <option value="">{t('time.editAnyProject')}</option>
-                      {projects.map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {p.name}
+                      <select
+                        value={eProject}
+                        onChange={(e) => {
+                          const newProj = e.target.value
+                          setEProject(newProj)
+                          if (newProj) {
+                            const cur = tasks.find((tk) => tk.id === eTask)
+                            const stillFits =
+                              cur &&
+                              (cur.tags ?? []).some((g) => g.id === newProj)
+                            if (!stillFits) setETask('')
+                          }
+                        }}
+                        title={t('time.editProject')}
+                      >
+                        <option value="">{t('time.editAnyProject')}</option>
+                        {projects.map((p) => (
+                          <option key={p.id} value={p.id}>
+                            {p.name}
+                          </option>
+                        ))}
+                      </select>
+                      <select
+                        value={eTask}
+                        onChange={(e) => setETask(e.target.value)}
+                      >
+                        <option value="">
+                          {tasksInProj.length === 0
+                            ? t('time.editNoTaskInProject')
+                            : t('time.editPickTask')}
                         </option>
-                      ))}
-                    </select>
-                    <select
-                      value={eTask}
-                      onChange={(e) => setETask(e.target.value)}
-                    >
-                      {tasks
-                        .filter(
-                          (tk) =>
-                            !eProject ||
-                            (tk.tags ?? []).some((g) => g.id === eProject),
-                        )
-                        .map((tk) => {
+                        {tasksInProj.map((tk) => {
                           const dupe = tasks.filter(
                             (x) => x.title === tk.title && x.id !== tk.id,
                           ).length
@@ -698,33 +762,34 @@ export function TimeRoute() {
                             </option>
                           )
                         })}
-                    </select>
-                    <input
-                      type="datetime-local"
-                      value={eStart}
-                      onChange={(e) => setEStart(e.target.value)}
-                    />
-                    <input
-                      type="datetime-local"
-                      value={eEnd}
-                      onChange={(e) => setEEnd(e.target.value)}
-                    />
-                    <button
-                      type="button"
-                      className="btn--sm"
-                      onClick={() => void saveEntry(en)}
-                    >
-                      {t('time.save')}
-                    </button>
-                    <button
-                      type="button"
-                      className="btn--ghost btn--sm"
-                      onClick={() => setEditId(null)}
-                    >
-                      {t('notes.close')}
-                    </button>
-                  </span>
-                )}
+                      </select>
+                      <input
+                        type="datetime-local"
+                        value={eStart}
+                        onChange={(e) => setEStart(e.target.value)}
+                      />
+                      <input
+                        type="datetime-local"
+                        value={eEnd}
+                        onChange={(e) => setEEnd(e.target.value)}
+                      />
+                      <button
+                        type="submit"
+                        className="btn--sm"
+                        disabled={!eTask}
+                      >
+                        {t('time.save')}
+                      </button>
+                      <button
+                        type="button"
+                        className="btn--ghost btn--sm"
+                        onClick={() => setEditId(null)}
+                      >
+                        {t('notes.close')}
+                      </button>
+                    </form>
+                  )
+                })()}
               </span>
               <span className="taskrow__meta">
                 <button

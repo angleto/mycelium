@@ -587,21 +587,22 @@ export function TaskDetailRoute() {
             most-used actions on this surface (advance the state,
             start/stop the clock) are now adjacent in the same top row
             instead of buried below the form. Server-authoritative
-            timer stays in sync with the work-notes timer below. */}
+            timer stays in sync with the work-notes timer below. The
+            visible "State" caption is dropped — the dropdown's options
+            (the state names themselves) already identify the control,
+            so the aria-label carries the semantic for screen readers. */}
         <div className="taskdetail__topright">
-          <label className="taskdetail__state">
-            <span className="hint">{t('tasks.state')}</span>
-            <select
-              value={stateId}
-              onChange={(e) => void onChangeState(e.target.value)}
-            >
-              {states.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name}
-                </option>
-              ))}
-            </select>
-          </label>
+          <select
+            aria-label={t('tasks.state')}
+            value={stateId}
+            onChange={(e) => void onChangeState(e.target.value)}
+          >
+            {states.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.name}
+              </option>
+            ))}
+          </select>
           <TaskTimer taskId={id} />
         </div>
       </div>

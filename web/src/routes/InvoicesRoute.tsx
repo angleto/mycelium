@@ -610,10 +610,20 @@ export function InvoicesRoute() {
         </ul>
       )}
 
-      {sel && (
+      {sel && (() => {
+        // On a draft the persisted ``sel.number`` is null until SdI
+        // transmit; the resolved progressive lives on preview.number
+        // formatted as ``<sezionale>-<counter>`` (e.g. ``CYLOCK-2``).
+        // Strip the prefix to get the integer counter so the H2 reads
+        // ``CYLOCK/2026/2`` (the user-facing slash format) rather than
+        // ``CYLOCK/2026/–`` — the user specifically asked that the
+        // would-be number show prominently in the heading.
+        const counter =
+          sel.number ?? preview?.number?.match(/(\d+)$/)?.[1] ?? '–'
+        return (
         <div className="card card--running">
           <h2>
-            {t('invoices.title')} {sel.series}/{sel.year}/{sel.number ?? '–'}
+            {t('invoices.title')} {sel.series}/{sel.year}/{counter}
           </h2>
           <p className="hint">
             {isDraft ? t('invoices.draftEditable') : t('invoices.emitted')}
@@ -794,40 +804,48 @@ export function InvoicesRoute() {
                 ))}
               </select>
             </label>
-            {/* Document number (resolved): preview.number is the
-                ``would-be'' number (series + counter+1) on a draft, or
-                the real allocated number on a transmitted invoice. The
-                sezionale itself (e.g. CYLOCK) is a client property, NOT
-                shown as an input here — that confused the user into
-                editing the client. On a draft, an inline "Change
-                number" button lets the user raise the counter directly
-                from this page (e.g. start from #2 when #1 was emitted
-                on another system). */}
+            {/* Document number (resolved). preview.number formats as
+                ``<sezionale>-<counter>`` (e.g. ``CYLOCK-2``); the
+                sezionale itself is a client property, never an input.
+                On a draft, ``Change number`` raises the counter
+                directly (e.g. start from #2 when #1 was emitted on
+                another system). The value + button sit on the same
+                row as Issuer / Client and the button is inline next
+                to the value — stacking it underneath split the
+                identifier from its control and read as a layout bug. */}
             <label>
               {t('invoices.numberLabel')}
               <span
                 style={{
-                  display: 'inline-block',
-                  fontWeight: 600,
-                  padding: '0.25rem 0.5rem',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.5rem',
                 }}
               >
-                {preview?.number ?? '—'}
-              </span>
-              {isDraft && !editingNum && (
-                <button
-                  type="button"
-                  className="btn--sm btn--ghost"
-                  onClick={() => {
-                    setNewNextN(
-                      preview?.number?.replace(/^\D+/, '') || '1',
-                    )
-                    setEditingNum(true)
+                <span
+                  style={{
+                    fontWeight: 700,
+                    fontSize: '1.05rem',
+                    fontVariantNumeric: 'tabular-nums',
                   }}
                 >
-                  {t('invoices.changeNumber')}
-                </button>
-              )}
+                  {preview?.number ?? '—'}
+                </span>
+                {isDraft && !editingNum && (
+                  <button
+                    type="button"
+                    className="btn--sm btn--ghost"
+                    onClick={() => {
+                      setNewNextN(
+                        preview?.number?.match(/(\d+)$/)?.[1] || '1',
+                      )
+                      setEditingNum(true)
+                    }}
+                  >
+                    {t('invoices.changeNumber')}
+                  </button>
+                )}
+              </span>
             </label>
           </div>
           {editingNum && (
@@ -1361,7 +1379,8 @@ export function InvoicesRoute() {
             </pre>
           )}
         </div>
-      )}
+        )
+      })()}
     </section>
   )
 }

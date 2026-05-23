@@ -1094,7 +1094,11 @@ async def _resolve_collegata(
     if inv.parent_invoice_id is None:
         return None
     parent = await get_invoice(session, org_id=org_id, invoice_id=inv.parent_invoice_id)
-    numero = f"{parent.series}{parent.number}" if parent.number is not None else str(parent.series)
+    # Match the prominent ``<sezionale>-<counter>`` formatting used in
+    # the parent's own <Numero> / PDF header; without the hyphen the
+    # IdDocumento on a TD04 doesn't match the human-readable identifier
+    # on the corrected invoice (confusing on the receiving side).
+    numero = f"{parent.series}-{parent.number}" if parent.number is not None else str(parent.series)
     data = (parent.issued_at or dt.datetime.now(tz=dt.UTC)).date()
     return numero, data
 
@@ -1195,7 +1199,7 @@ async def transmit(
         entity="invoice",
         entity_id=inv.id,
         action="transmit",
-        diff={"number": f"{inv.series}{number}", "channel": res.channel},
+        diff={"number": f"{inv.series}-{number}", "channel": res.channel},
     )
     return inv
 
@@ -1403,7 +1407,13 @@ async def _gather_preview(
         effective_iban=iban,
         iban_source=src,
         is_forfettario=_is_forfettario(issuer),
-        number=f"{inv.series}{n}",
+        # ``<sezionale>-<counter>`` (e.g. ``CYLOCK-2``). The hyphen
+        # separator is mirrored verbatim into FatturaPA ``<Numero>`` and
+        # the PDF header so a human reader can tell where the per-
+        # client series ends and the progressive starts; without it,
+        # a customer code ending in a digit (e.g. ``ACME2026``) ran
+        # straight into the counter and read as one opaque token.
+        number=f"{inv.series}-{n}",
     )
 
 

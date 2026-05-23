@@ -11391,6 +11391,8 @@ export interface operations {
                 start_from?: string | null;
                 start_to?: string | null;
                 billable?: boolean | null;
+                client_tag_id?: string | null;
+                project_tag_id?: string | null;
                 limit?: number | null;
                 offset?: number;
             };
@@ -11702,6 +11704,8 @@ export interface operations {
                 start_from?: string | null;
                 start_to?: string | null;
                 billable?: boolean | null;
+                client_tag_id?: string | null;
+                project_tag_id?: string | null;
             };
             header: {
                 "x-workspace-id": string;

@@ -284,7 +284,7 @@ async def test_td04_credit_note_links_parent() -> None:
         # DatiFattureCollegate links the parent by its FISCAL number + date,
         # never the internal UUID (the bug this guards against).
         assert "<DatiFattureCollegate>" in (ntx.xml or "")
-        assert f"<IdDocumento>{parent.series}{parent.number}</IdDocumento>" in (ntx.xml or "")
+        assert f"<IdDocumento>{parent.series}-{parent.number}</IdDocumento>" in (ntx.xml or "")
         assert str(parent.id) not in (ntx.xml or "")
 
 

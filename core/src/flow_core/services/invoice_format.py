@@ -273,7 +273,7 @@ def _build_xml(
     _sub(dgd, "TipoDocumento", inv.document_type.value)
     _sub(dgd, "Divisa", inv.currency)
     _sub(dgd, "Data", (inv.issued_at or dt.datetime.now(tz=dt.UTC)).date().isoformat())
-    _sub(dgd, "Numero", numero_override or f"{inv.series}{inv.number}")
+    _sub(dgd, "Numero", numero_override or f"{inv.series}-{inv.number}")
     # Virtual stamp duty: DatiBollo goes AFTER Numero and BEFORE
     # ImportoTotaleDocumento (FatturaPA 1.2 element order). Only when it
     # applies (forfettario with taxable >= threshold); ordinary regime
