@@ -343,6 +343,7 @@ export function AppShell() {
       title: t('nav.groups.knowledge'),
       items: [
         { to: '/notes', label: t('notes.nav'), icon: 'notes' },
+        { to: '/garden', label: t('garden.nav'), icon: 'notes' },
         { to: '/memory', label: t('memory.nav'), icon: 'memory' },
       ],
     },

@@ -51,7 +51,19 @@ def _out(
     state_name: str,
     tags: list[Tag] | None = None,
     assignee_handle: str | None = None,
+    assignee_kind: str | None = None,
 ) -> TaskOut:
+    from flow_core.models.task import ExecKind
+
+    # docs/adr/0029 P2: derive executor_kind for SPA backward compat.
+    # If the assignee is an ai_assistant identity (looked up by the
+    # caller), kind is llm_agent; otherwise the task's fallback
+    # ``executor_kind`` hint is authoritative (ADR-0028).
+    eff_kind = (
+        ExecKind.llm_agent
+        if assignee_kind == "ai_assistant"
+        else (ExecKind.human if assignee_kind == "user" else t.executor_kind)
+    )
     return TaskOut(
         tags=[TagBrief(id=g.id, kind=g.kind, name=g.name, color=g.color) for g in (tags or [])],
         id=t.id,
@@ -65,14 +77,10 @@ def _out(
         start_date=t.start_date,
         due_date=t.due_date,
         parent_task_id=t.parent_task_id,
-        # docs/adr/0028: identity-first addressing. ``assignee_handle``
-        # is denormalised by the caller via ``assignee_handle_map``
-        # (a {task_id: handle} lookup) when a list endpoint pre-loads
-        # identities in batch; single-task endpoints fall back to a
-        # direct join (see ``_one_assignee_handle``).
         assignee_id=t.assignee_id,
         assignee_handle=assignee_handle,
         owner_id=t.owner_id,
+        executor_kind=eff_kind,
         estimate_effort_h=t.estimate_effort_h,
         required_capabilities=list(t.required_capabilities or []),
         monetary_cost=t.monetary_cost,

@@ -19,14 +19,22 @@ from flow_api.schemas import (
     AttachmentOut,
     CommandIn,
     ConversationStartIn,
+    DerivedTaskOut,
     ExpectedVersionIn,
     NoteCreateIn,
+    NoteDeriveTaskIn,
     NoteEraseOut,
+    NoteLinkIn,
+    NoteLinkOut,
     NoteOut,
     NotePatchIn,
+    NotePromoteIn,
+    NoteSetMaturityIn,
     NoteTagIn,
+    NoteTaskLinkOut,
     NoteTranscribeIn,
     NoteTurnOut,
+    NoteWithLinksOut,
     SynthesizeIn,
     SynthOut,
     TagBrief,
@@ -38,6 +46,7 @@ from flow_core.models.project_profile import ProjectProfile
 from flow_core.models.tag import Tag, TagKind
 from flow_core.services import agent_tokens as agent_tokens_svc
 from flow_core.services import attachments as att_svc
+from flow_core.services import note_links as note_links_svc
 from flow_core.services import notes as svc
 
 router = APIRouter(prefix="/notes", tags=["notes"])
@@ -62,6 +71,30 @@ def _out(n: Note, tags: list[Tag] | None = None) -> NoteOut:
         deleted_at=n.deleted_at,
         tags=[_brief(t) for t in (tags or [])],
         version=n.version,
+        maturity=n.maturity,
+        promoted_at=n.promoted_at,
+    )
+
+
+def _link_out(link: Any) -> NoteLinkOut:
+    return NoteLinkOut(
+        id=link.id,
+        parent_note_id=link.parent_note_id,
+        child_note_id=link.child_note_id,
+        kind=link.kind,
+        created_by=link.created_by,
+        created_at=link.created_at,
+    )
+
+
+def _task_link_out(link: Any) -> NoteTaskLinkOut:
+    return NoteTaskLinkOut(
+        id=link.id,
+        note_id=link.note_id,
+        task_id=link.task_id,
+        kind=link.kind,
+        created_by=link.created_by,
+        created_at=link.created_at,
     )
 
 
@@ -514,3 +547,147 @@ async def quick_create(
         )
         await session.commit()
     return QuickCreateOut(id=note.id, project_id=note.project_id, kind=note.kind)
+
+
+# ---------------------------------------------------------------------------
+# Garden ecosystem (docs/adr/0029 P1) endpoints. Set maturity, promote,
+# derive a fruit task, link notes to notes/tasks. Tags every endpoint
+# with "garden" so the OpenAPI surface stays grouped.
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/{note_id}/maturity",
+    response_model=NoteOut,
+    tags=["garden"],
+)
+async def set_note_maturity(
+    note_id: uuid.UUID,
+    body: NoteSetMaturityIn,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+) -> NoteOut:
+    n = await note_links_svc.set_maturity(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        note_id=note_id,
+        maturity=body.maturity,
+    )
+    tagmap = await svc.tags_by_note(ctx.session, note_ids=[n.id])
+    return _out(n, tagmap.get(n.id, []))
+
+
+@router.post(
+    "/{note_id}/promote",
+    response_model=DerivedTaskOut,
+    tags=["garden"],
+)
+async def promote_note(
+    note_id: uuid.UUID,
+    body: NotePromoteIn,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+) -> DerivedTaskOut:
+    task, link = await note_links_svc.promote_note_to_task(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        note_id=note_id,
+        title=body.title,
+    )
+    return DerivedTaskOut(task_id=task.id, link=_task_link_out(link))
+
+
+@router.post(
+    "/{note_id}/derive-task",
+    response_model=DerivedTaskOut,
+    tags=["garden"],
+)
+async def derive_task(
+    note_id: uuid.UUID,
+    body: NoteDeriveTaskIn,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+) -> DerivedTaskOut:
+    task, link = await note_links_svc.derive_task_from_note(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        note_id=note_id,
+        title=body.title,
+        description=body.description,
+        estimate_effort_h=body.estimate_effort_h,
+    )
+    return DerivedTaskOut(task_id=task.id, link=_task_link_out(link))
+
+
+@router.post(
+    "/{note_id}/links",
+    response_model=NoteLinkOut,
+    tags=["garden"],
+)
+async def link_notes(
+    note_id: uuid.UUID,
+    body: NoteLinkIn,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+) -> NoteLinkOut:
+    # ``note_id`` from the URL is the parent (the link's "from"); the
+    # body carries the child and the kind. We accept the parent in
+    # both places defensively.
+    if body.parent_note_id != note_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST)
+    link = await note_links_svc.link_notes(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        parent_note_id=body.parent_note_id,
+        child_note_id=body.child_note_id,
+        kind=body.kind,
+    )
+    return _link_out(link)
+
+
+@router.delete(
+    "/{note_id}/links",
+    status_code=204,
+    tags=["garden"],
+)
+async def unlink_notes(
+    note_id: uuid.UUID,
+    child_note_id: uuid.UUID,
+    kind: str,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+) -> None:
+    removed = await note_links_svc.unlink_notes(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        parent_note_id=note_id,
+        child_note_id=child_note_id,
+        kind=kind,
+    )
+    if not removed:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+
+
+@router.get(
+    "/{note_id}/links",
+    response_model=NoteWithLinksOut,
+    tags=["garden"],
+)
+async def list_note_links(
+    note_id: uuid.UUID,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+) -> NoteWithLinksOut:
+    n = await svc.get_note(ctx.session, org_id=ctx.org_id, note_id=note_id)
+    tagmap = await svc.tags_by_note(ctx.session, note_ids=[n.id])
+    outgoing, incoming = await note_links_svc.list_note_links(
+        ctx.session, org_id=ctx.org_id, note_id=note_id
+    )
+    task_links = await note_links_svc.list_note_task_links(
+        ctx.session, org_id=ctx.org_id, note_id=note_id
+    )
+    return NoteWithLinksOut(
+        note=_out(n, tagmap.get(n.id, [])),
+        outgoing=[_link_out(o) for o in outgoing],
+        incoming=[_link_out(o) for o in incoming],
+        task_links=[_task_link_out(o) for o in task_links],
+    )

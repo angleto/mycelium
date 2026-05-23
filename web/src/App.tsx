@@ -25,6 +25,7 @@ import { EmailRoute } from './routes/EmailRoute'
 import { BillingRoute } from './routes/BillingRoute'
 import { MemoryRoute } from './routes/MemoryRoute'
 import { NotesRoute } from './routes/NotesRoute'
+import { GardenRoute } from './routes/GardenRoute'
 import { InvoicesRoute } from './routes/InvoicesRoute'
 import { NotificationsRoute } from './routes/NotificationsRoute'
 import { TagManagerRoute } from './routes/TagManagerRoute'
@@ -60,6 +61,7 @@ function App() {
             <Route path="/billing" element={<BillingRoute />} />
             <Route path="/memory" element={<MemoryRoute />} />
             <Route path="/notes" element={<NotesRoute />} />
+            <Route path="/garden" element={<GardenRoute />} />
             <Route path="/invoices" element={<InvoicesRoute />} />
             <Route path="/notifications" element={<NotificationsRoute />} />
             <Route path="/tags" element={<TagManagerRoute />} />

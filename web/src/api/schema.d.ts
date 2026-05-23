@@ -2822,6 +2822,76 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/notes/{note_id}/maturity": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Set Note Maturity */
+        post: operations["set_note_maturity_notes__note_id__maturity_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/notes/{note_id}/promote": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Promote Note */
+        post: operations["promote_note_notes__note_id__promote_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/notes/{note_id}/derive-task": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Derive Task */
+        post: operations["derive_task_notes__note_id__derive_task_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/notes/{note_id}/links": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Note Links */
+        get: operations["list_note_links_notes__note_id__links_get"];
+        put?: never;
+        /** Link Notes */
+        post: operations["link_notes_notes__note_id__links_post"];
+        /** Unlink Notes */
+        delete: operations["unlink_notes_notes__note_id__links_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/attachments/{attachment_id}/download": {
         parameters: {
             query?: never;
@@ -4212,6 +4282,15 @@ export interface components {
          * @enum {string}
          */
         DependencyType: "FS" | "SS" | "FF" | "SF";
+        /** DerivedTaskOut */
+        DerivedTaskOut: {
+            /**
+             * Task Id
+             * Format: uuid
+             */
+            task_id: string;
+            link: components["schemas"]["NoteTaskLinkOut"];
+        };
         /** DispatchDecisionIn */
         DispatchDecisionIn: {
             /** Expected Version */
@@ -5549,6 +5628,15 @@ export interface components {
             /** Audio Seconds */
             audio_seconds?: number | null;
         };
+        /** NoteDeriveTaskIn */
+        NoteDeriveTaskIn: {
+            /** Title */
+            title: string;
+            /** Description */
+            description?: string | null;
+            /** Estimate Effort H */
+            estimate_effort_h?: number | string | null;
+        };
         /** NoteEraseOut */
         NoteEraseOut: {
             /** Audio Ref */
@@ -5561,6 +5649,48 @@ export interface components {
          * @enum {string}
          */
         NoteKind: "voice" | "text" | "conversation";
+        /** NoteLinkIn */
+        NoteLinkIn: {
+            /**
+             * Parent Note Id
+             * Format: uuid
+             */
+            parent_note_id: string;
+            /**
+             * Child Note Id
+             * Format: uuid
+             */
+            child_note_id: string;
+            /** Kind */
+            kind: string;
+        };
+        /** NoteLinkOut */
+        NoteLinkOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Parent Note Id
+             * Format: uuid
+             */
+            parent_note_id: string;
+            /**
+             * Child Note Id
+             * Format: uuid
+             */
+            child_note_id: string;
+            /** Kind */
+            kind: string;
+            /** Created By */
+            created_by?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
         /** NoteOut */
         NoteOut: {
             /**
@@ -5596,6 +5726,13 @@ export interface components {
             tags: components["schemas"]["TagBrief"][];
             /** Version */
             version: number;
+            /**
+             * Maturity
+             * @default seed
+             */
+            maturity: string;
+            /** Promoted At */
+            promoted_at?: string | null;
         };
         /** NotePatchIn */
         NotePatchIn: {
@@ -5610,6 +5747,16 @@ export interface components {
             /** Audio Ref */
             audio_ref?: string | null;
         };
+        /** NotePromoteIn */
+        NotePromoteIn: {
+            /** Title */
+            title?: string | null;
+        };
+        /** NoteSetMaturityIn */
+        NoteSetMaturityIn: {
+            /** Maturity */
+            maturity: string;
+        };
         /**
          * NoteStatus
          * @enum {string}
@@ -5622,6 +5769,33 @@ export interface components {
              * Format: uuid
              */
             tag_id: string;
+        };
+        /** NoteTaskLinkOut */
+        NoteTaskLinkOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Note Id
+             * Format: uuid
+             */
+            note_id: string;
+            /**
+             * Task Id
+             * Format: uuid
+             */
+            task_id: string;
+            /** Kind */
+            kind: string;
+            /** Created By */
+            created_by?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
         };
         /** NoteTranscribeIn */
         NoteTranscribeIn: {
@@ -5645,6 +5819,25 @@ export interface components {
             content: string;
             /** Ord */
             ord: number;
+        };
+        /** NoteWithLinksOut */
+        NoteWithLinksOut: {
+            note: components["schemas"]["NoteOut"];
+            /**
+             * Outgoing
+             * @default []
+             */
+            outgoing: components["schemas"]["NoteLinkOut"][];
+            /**
+             * Incoming
+             * @default []
+             */
+            incoming: components["schemas"]["NoteLinkOut"][];
+            /**
+             * Task Links
+             * @default []
+             */
+            task_links: components["schemas"]["NoteTaskLinkOut"][];
         };
         /**
          * NotificationChannelKind
@@ -6313,8 +6506,10 @@ export interface components {
             parent_task_id?: string | null;
             /** @default human */
             executor_kind: components["schemas"]["ExecKind"];
-            /** Executor User Id */
-            executor_user_id?: string | null;
+            /** Assignee Id */
+            assignee_id?: string | null;
+            /** Owner Id */
+            owner_id?: string | null;
             /** Assignee Handle */
             assignee_handle?: string | null;
             /** Estimate Effort H */
@@ -6379,9 +6574,16 @@ export interface components {
             due_date: string | null;
             /** Parent Task Id */
             parent_task_id: string | null;
-            executor_kind: components["schemas"]["ExecKind"];
+            /** Assignee Id */
+            assignee_id?: string | null;
             /** Assignee Handle */
             assignee_handle?: string | null;
+            /**
+             * Owner Id
+             * Format: uuid
+             */
+            owner_id: string;
+            executor_kind: components["schemas"]["ExecKind"];
             /** Estimate Effort H */
             estimate_effort_h: string | null;
             /** Required Capabilities */
@@ -6441,9 +6643,10 @@ export interface components {
             billable?: boolean | null;
             /** Estimate Effort H */
             estimate_effort_h?: number | string | null;
-            executor_kind?: components["schemas"]["ExecKind"] | null;
-            /** Executor User Id */
-            executor_user_id?: string | null;
+            /** Assignee Id */
+            assignee_id?: string | null;
+            /** Owner Id */
+            owner_id?: string | null;
             /** Assignee Handle */
             assignee_handle?: string | null;
             /** Required Capabilities */
@@ -14112,6 +14315,239 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["QuickCreateOut"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_note_maturity_notes__note_id__maturity_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                note_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NoteSetMaturityIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NoteOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    promote_note_notes__note_id__promote_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                note_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NotePromoteIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DerivedTaskOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    derive_task_notes__note_id__derive_task_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                note_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NoteDeriveTaskIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DerivedTaskOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_note_links_notes__note_id__links_get: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                note_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NoteWithLinksOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    link_notes_notes__note_id__links_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                note_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NoteLinkIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NoteLinkOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    unlink_notes_notes__note_id__links_delete: {
+        parameters: {
+            query: {
+                child_note_id: string;
+                kind: string;
+            };
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                note_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

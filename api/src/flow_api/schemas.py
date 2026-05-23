@@ -504,6 +504,12 @@ class TaskOut(BaseModel):
     assignee_id: uuid.UUID | None = None
     assignee_handle: str | None = None
     owner_id: uuid.UUID
+    # ``executor_kind`` is re-exposed for SPA backward compat
+    # (cards/filters/graph still consume it). The serializer fills it
+    # from the resolved identity when ``assignee_id`` is set, else
+    # from the task's fallback ``executor_kind`` hint (docs/adr/0029
+    # SPA P2 follow-up).
+    executor_kind: ExecKind
     estimate_effort_h: Decimal | None
     required_capabilities: list[str] = Field(default_factory=list)
     monetary_cost: Decimal | None
@@ -1422,6 +1428,62 @@ class NoteOut(BaseModel):
     deleted_at: datetime.datetime | None = None
     tags: list[TagBrief] = []
     version: int
+    # docs/adr/0029 P1: garden lifecycle. ``maturity`` defaults to
+    # ``seed`` (the migration backfilled every existing note). When
+    # ``promoted_at`` is set the note is read-only at the service
+    # layer (transplanted to a task).
+    maturity: str = "seed"
+    promoted_at: datetime.datetime | None = None
+
+
+class NoteSetMaturityIn(BaseModel):
+    maturity: str = Field(pattern="^(seed|growing|mature|dormant)$")
+
+
+class NotePromoteIn(BaseModel):
+    title: str | None = Field(default=None, max_length=300)
+
+
+class NoteDeriveTaskIn(BaseModel):
+    title: str = Field(min_length=1, max_length=300)
+    description: str | None = None
+    estimate_effort_h: Decimal | None = None
+
+
+class NoteLinkIn(BaseModel):
+    parent_note_id: uuid.UUID
+    child_note_id: uuid.UUID
+    kind: str = Field(pattern="^(atom_of|references|replies_to|supersedes)$")
+
+
+class NoteLinkOut(BaseModel):
+    id: uuid.UUID
+    parent_note_id: uuid.UUID
+    child_note_id: uuid.UUID
+    kind: str
+    created_by: uuid.UUID | None = None
+    created_at: datetime.datetime
+
+
+class NoteTaskLinkOut(BaseModel):
+    id: uuid.UUID
+    note_id: uuid.UUID
+    task_id: uuid.UUID
+    kind: str
+    created_by: uuid.UUID | None = None
+    created_at: datetime.datetime
+
+
+class NoteWithLinksOut(BaseModel):
+    note: NoteOut
+    outgoing: list[NoteLinkOut] = []
+    incoming: list[NoteLinkOut] = []
+    task_links: list[NoteTaskLinkOut] = []
+
+
+class DerivedTaskOut(BaseModel):
+    task_id: uuid.UUID
+    link: NoteTaskLinkOut
 
 
 class NotePatchIn(BaseModel):
