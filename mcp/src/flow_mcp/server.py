@@ -67,6 +67,7 @@ from flow_core.services import events as events_svc
 from flow_core.services import executors as executors_svc
 from flow_core.services import invoice as invoice_svc
 from flow_core.services import memory as memory_svc
+from flow_core.services import note_links as note_links_svc
 from flow_core.services import notes as notes_svc
 from flow_core.services import notifications as notif_svc
 from flow_core.services import time_tracking as time_svc
@@ -3397,3 +3398,176 @@ async def set_project_workflow(
             expected_version=expected_version,
         )
         return {"project_tag_id": project_tag_id, "version": version}
+
+
+# ---------------------------------------------------------------------------
+# Garden ecosystem (docs/adr/0029 P1): typed note links + named lifecycle
+# operations + maturity setter. Wraps services/note_links.py.
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+async def set_note_maturity(
+    token: str,
+    org_id: str,
+    note_id: str,
+    maturity: str,
+) -> dict[str, Any]:
+    """Manual override of a note's garden lifecycle (seed | growing |
+    mature | dormant). Cannot run on a note already transplanted
+    (``promoted_at`` set)."""
+    async with _tenant(token, org_id) as (s, org, user):
+        note = await note_links_svc.set_maturity(
+            s,
+            org_id=org,
+            actor_id=user,
+            note_id=uuid.UUID(note_id),
+            maturity=maturity,
+        )
+        return {"note_id": str(note.id), "maturity": note.maturity}
+
+
+@mcp.tool()
+async def link_notes(
+    token: str,
+    org_id: str,
+    parent_note_id: str,
+    child_note_id: str,
+    kind: str,
+) -> dict[str, Any]:
+    """Link two notes with a typed relation: ``atom_of`` (atomic child
+    of an index parent), ``references`` (citation backlink),
+    ``replies_to`` (threaded elaboration), ``supersedes``."""
+    async with _tenant(token, org_id) as (s, org, user):
+        link = await note_links_svc.link_notes(
+            s,
+            org_id=org,
+            actor_id=user,
+            parent_note_id=uuid.UUID(parent_note_id),
+            child_note_id=uuid.UUID(child_note_id),
+            kind=kind,
+        )
+        return {
+            "link_id": str(link.id),
+            "parent_note_id": str(link.parent_note_id),
+            "child_note_id": str(link.child_note_id),
+            "kind": link.kind,
+        }
+
+
+@mcp.tool()
+async def unlink_notes(
+    token: str,
+    org_id: str,
+    parent_note_id: str,
+    child_note_id: str,
+    kind: str,
+) -> dict[str, Any]:
+    """Remove a typed note-to-note link. Returns ``removed`` true/false
+    (false when the link did not exist)."""
+    async with _tenant(token, org_id) as (s, org, user):
+        removed = await note_links_svc.unlink_notes(
+            s,
+            org_id=org,
+            actor_id=user,
+            parent_note_id=uuid.UUID(parent_note_id),
+            child_note_id=uuid.UUID(child_note_id),
+            kind=kind,
+        )
+        return {"removed": removed}
+
+
+@mcp.tool()
+async def derive_task_from_note(
+    token: str,
+    org_id: str,
+    note_id: str,
+    title: str,
+    description: str | None = None,
+    estimate_effort_h: float | None = None,
+) -> dict[str, Any]:
+    """Create a task as a fruit of this note. The note stays alive
+    (no transplant). A ``derived_from`` link is recorded."""
+    async with _tenant(token, org_id) as (s, org, user):
+        from decimal import Decimal
+
+        eff = Decimal(str(estimate_effort_h)) if estimate_effort_h is not None else None
+        task, link = await note_links_svc.derive_task_from_note(
+            s,
+            org_id=org,
+            actor_id=user,
+            note_id=uuid.UUID(note_id),
+            title=title,
+            description=description,
+            estimate_effort_h=eff,
+        )
+        return {
+            "task_id": str(task.id),
+            "link_id": str(link.id),
+            "kind": link.kind,
+        }
+
+
+@mcp.tool()
+async def promote_note_to_task(
+    token: str,
+    org_id: str,
+    note_id: str,
+    title: str | None = None,
+) -> dict[str, Any]:
+    """Transplant the note to a task. The note becomes read-only
+    (``promoted_at`` set); a ``promoted_from`` link records the
+    provenance."""
+    async with _tenant(token, org_id) as (s, org, user):
+        task, link = await note_links_svc.promote_note_to_task(
+            s,
+            org_id=org,
+            actor_id=user,
+            note_id=uuid.UUID(note_id),
+            title=title,
+        )
+        return {
+            "task_id": str(task.id),
+            "link_id": str(link.id),
+            "kind": link.kind,
+        }
+
+
+@mcp.tool()
+async def start_task_on_note(
+    token: str,
+    org_id: str,
+    task_id: str,
+    note_id: str,
+) -> dict[str, Any]:
+    """Watering: this task is the work of growing the note. Records a
+    ``subject`` link."""
+    async with _tenant(token, org_id) as (s, org, user):
+        link = await note_links_svc.start_task_on_note(
+            s,
+            org_id=org,
+            actor_id=user,
+            task_id=uuid.UUID(task_id),
+            note_id=uuid.UUID(note_id),
+        )
+        return {"link_id": str(link.id), "kind": link.kind}
+
+
+@mcp.tool()
+async def record_task_artifact(
+    token: str,
+    org_id: str,
+    task_id: str,
+    note_id: str,
+) -> dict[str, Any]:
+    """The task produced (or updated) this note. Records an
+    ``artifact`` link (Proposal A semantics, surfaced explicitly)."""
+    async with _tenant(token, org_id) as (s, org, user):
+        link = await note_links_svc.record_task_artifact(
+            s,
+            org_id=org,
+            actor_id=user,
+            task_id=uuid.UUID(task_id),
+            note_id=uuid.UUID(note_id),
+        )
+        return {"link_id": str(link.id), "kind": link.kind}

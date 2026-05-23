@@ -74,7 +74,20 @@ from flow_core.models.invoice import (
 )
 from flow_core.models.membership import Membership, Role
 from flow_core.models.memory_blob import BlobSource, MemoryBlob, Tier
-from flow_core.models.note import Note, NoteKind, NoteStatus, NoteTurn, TurnRole
+from flow_core.models.note import (
+    Note,
+    NoteKind,
+    NoteMaturity,
+    NoteStatus,
+    NoteTurn,
+    TurnRole,
+)
+from flow_core.models.note_link import (
+    NOTE_NOTE_LINK_KINDS,
+    NOTE_TASK_LINK_KINDS,
+    NoteNoteLink,
+    NoteTaskLink,
+)
 from flow_core.models.note_tag import NoteTag
 from flow_core.models.notification import (
     Notification,
@@ -113,6 +126,8 @@ from flow_core.models.workflow import (
 __all__ = [
     "ACTIVE_DISPATCH_STATUSES",
     "DEFAULT_AUTONOMOUS_DISPATCH",
+    "NOTE_NOTE_LINK_KINDS",
+    "NOTE_TASK_LINK_KINDS",
     "ActivityLog",
     "Adjudication",
     "AdjudicationStatus",
@@ -167,8 +182,11 @@ __all__ = [
     "Necessity",
     "Note",
     "NoteKind",
+    "NoteMaturity",
+    "NoteNoteLink",
     "NoteStatus",
     "NoteTag",
+    "NoteTaskLink",
     "NoteTurn",
     "Notification",
     "NotificationChannelKind",

@@ -46,6 +46,23 @@ class NoteStatus(enum.StrEnum):
     error = "error"
 
 
+class NoteMaturity(enum.StrEnum):
+    """Garden lifecycle of a note (docs/adr/0029 D2).
+
+    Plants grow, bloom, may wither, may recover. ``seed`` is fresh
+    capture; ``growing`` is "I'm touching it"; ``mature`` is the
+    user's explicit crystallisation; ``dormant`` is "untouched long
+    enough that I might have forgotten about it". Transitions to
+    ``dormant`` and from ``seed``/``dormant`` to ``growing`` are
+    automatic (a worker tick); ``mature`` is always manual.
+    """
+
+    seed = "seed"
+    growing = "growing"
+    mature = "mature"
+    dormant = "dormant"
+
+
 class TurnRole(enum.StrEnum):
     user = "user"
     assistant = "assistant"
@@ -84,6 +101,13 @@ class Note(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, Base):
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     is_archived: Mapped[bool] = mapped_column(nullable=False, server_default="false")
     deleted_at: Mapped[datetime.datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # docs/adr/0029 D2: garden lifecycle. ``promoted_at`` is set when
+    # the note is transplanted to a task (kind='promoted_from'); at
+    # that point the service layer treats the note as read-only.
+    maturity: Mapped[str] = mapped_column(String(16), nullable=False, server_default="seed")
+    promoted_at: Mapped[datetime.datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
 
