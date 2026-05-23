@@ -1131,6 +1131,7 @@ export const it: Catalog = {
       title: 'Anteprima documento',
       pdf: 'PDF',
       xml: 'XML',
+      xmlDownload: 'Scarica .xml',
       forfettario: 'forfettario (RF19)',
       cedente: 'Cedente',
       cessionario: 'Cessionario',

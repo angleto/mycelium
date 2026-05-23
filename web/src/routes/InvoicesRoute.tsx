@@ -378,13 +378,44 @@ export function InvoicesRoute() {
     setErr(null)
     const { data, error } = await api.GET('/invoices/{invoice_id}/xml', {
       params: { header: workspaceHeader(), path: { invoice_id: id } },
-      parseAs: 'text',
     })
-    if (error || data == null) {
+    if (error || !data) {
       setErr(errMessage(error))
       return
     }
-    setXml(String(data))
+    setXml(data.xml)
+  }
+
+  // Filename for the preview .xml. We do not try to mirror the SdI
+  // file-name convention (IT{piva}_{progressivo}.xml): the preview
+  // progressivo is the ANTEPRIMA placeholder, and the cedente/trasmittente
+  // IDs are not exposed to the SPA. A human-readable name is enough for
+  // a verification download.
+  function xmlFilename(): string {
+    if (!preview) return 'fattura.xml'
+    const { series, year, number } = preview
+    if (number != null) return `fattura-${series}-${year}-${number}.xml`
+    return `fattura-bozza-${series}-${year}.xml`
+  }
+
+  async function downloadXml(id: string) {
+    setErr(null)
+    const { data, error } = await api.GET('/invoices/{invoice_id}/xml', {
+      params: { header: workspaceHeader(), path: { invoice_id: id } },
+    })
+    if (error || !data) {
+      setErr(errMessage(error))
+      return
+    }
+    const blob = new Blob([data.xml], { type: 'application/xml;charset=utf-8' })
+    const u = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = u
+    a.download = xmlFilename()
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    window.setTimeout(() => URL.revokeObjectURL(u), 60000)
   }
 
   async function openPdf(id: string) {
@@ -500,6 +531,13 @@ export function InvoicesRoute() {
                   onClick={() => void showXml(sel.id)}
                 >
                   {t('invoices.doc.xml')}
+                </button>
+                <button
+                  type="button"
+                  className="btn--sm btn--ghost"
+                  onClick={() => void downloadXml(sel.id)}
+                >
+                  {t('invoices.doc.xmlDownload')}
                 </button>
                 {preview.is_forfettario && (
                   <span className="tag tag--muted">

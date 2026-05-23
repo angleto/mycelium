@@ -1130,6 +1130,7 @@ export const en = {
       title: 'Document preview',
       pdf: 'PDF',
       xml: 'XML',
+      xmlDownload: 'Download .xml',
       forfettario: 'flat-rate (RF19)',
       cedente: 'Issuer',
       cessionario: 'Client',
