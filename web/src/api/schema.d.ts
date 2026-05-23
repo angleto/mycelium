@@ -5735,6 +5735,11 @@ export interface components {
             maturity: string;
             /** Promoted At */
             promoted_at?: string | null;
+            /**
+             * Derived Task Ids
+             * @default []
+             */
+            derived_task_ids?: string[];
         };
         /** NotePatchIn */
         NotePatchIn: {

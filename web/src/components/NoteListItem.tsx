@@ -9,22 +9,32 @@ type Note = components['schemas']['NoteOut']
 export function NoteListItem({
   note,
   converting,
+  derivedTaskTitles,
   onOpen,
   onConvert,
+  onPromote,
   onArchive,
   onDelete,
   onErase,
 }: {
   note: Note
   converting: boolean
+  // Titles of the tasks generated from this note
+  // (derived_from + promoted_from). Resolved by the parent route from
+  // its already-loaded task list, so the chip never triggers an
+  // extra request. Empty when no task has been spawned yet.
+  derivedTaskTitles?: string[]
   onOpen: () => void
   onConvert: () => void
+  onPromote: () => void
   onArchive: () => void
   onDelete: () => void
   onErase: () => void
 }) {
   const { t } = useTranslation()
   const preview = (note.transcript ?? '').split('\n')[0].trim()
+  const tasks = derivedTaskTitles ?? []
+  const isPromoted = !!note.promoted_at
   return (
     <li className="noteitem">
       <div className="noteitem__main">
@@ -34,6 +44,20 @@ export function NoteListItem({
         <span className="muted">
           {note.kind} · {note.status}
         </span>
+        {tasks.length > 0 && (
+          <span
+            className="chip chip--derived"
+            title={tasks.join('\n')}
+            aria-label={t('notes.derivedTasksAria', { count: tasks.length })}
+          >
+            {t('notes.derivedTasksCount', { count: tasks.length })}
+          </span>
+        )}
+        {isPromoted && (
+          <span className="chip chip--promoted" title={t('notes.promotedHint')}>
+            {t('notes.promotedShort')}
+          </span>
+        )}
         {preview && <span className="noteitem__preview">{preview}</span>}
       </div>
       <div className="noteitem__meta">
@@ -51,6 +75,15 @@ export function NoteListItem({
             onClick={onConvert}
           >
             {converting ? t('notes.converting') : t('notes.toTask')}
+          </button>
+          <button
+            type="button"
+            className="btn--ghost btn--sm"
+            title={t('notes.promoteHint')}
+            disabled={converting || isPromoted}
+            onClick={onPromote}
+          >
+            {isPromoted ? t('notes.promotedShort') : t('notes.promote')}
           </button>
           <button
             type="button"

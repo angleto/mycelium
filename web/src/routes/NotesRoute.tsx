@@ -513,6 +513,37 @@ export function NotesRoute() {
     setConverting(null)
   }
 
+  // Transplant the note into a task (ADR-0029 P1, kind=promoted_from):
+  // the note is marked ``promoted_at`` (service-layer read-only). This
+  // is the 1:1 alternative to "Derive task" — pick it when the
+  // thought IS the action, not when it spawns one.
+  async function onPromote(n: Note) {
+    if (n.promoted_at) return
+    if (converting !== null) return
+    if (!window.confirm(t('notes.promoteConfirm'))) return
+    setErr(null)
+    setConverting(n.id)
+    const { data, error } = await api.POST(
+      '/notes/{note_id}/promote',
+      {
+        params: { header: workspaceHeader(), path: { note_id: n.id } },
+        body: { title: null },
+      },
+    )
+    if (error || !data) {
+      setConverting(null)
+      setErr(errMessage(error))
+      return
+    }
+    const title =
+      n.title?.trim() ||
+      (n.transcript ?? '').split('\n').find((l) => l.trim()) ||
+      t('notes.untitled')
+    setMade({ id: data.task_id, title })
+    await loadNotes()
+    setConverting(null)
+  }
+
   // Case 2 — a long/structured note: spin a task off the current text
   // selection. Uses derive-task too (typed link, note stays alive,
   // repeatable) so this path is symmetric with the bare "Derive task"
@@ -607,8 +638,12 @@ export function NotesRoute() {
               key={n.id}
               note={n}
               converting={converting === n.id}
+              derivedTaskTitles={(n.derived_task_ids ?? [])
+                .map((id) => linkTasks.find((tk) => tk.id === id)?.title)
+                .filter((s): s is string => Boolean(s))}
               onOpen={() => void openEdit(n)}
               onConvert={() => void onConvert(n)}
+              onPromote={() => void onPromote(n)}
               onArchive={() => void archiveNote(n)}
               onDelete={() => void delNote(n)}
               onErase={() => void eraseNote(n)}
@@ -792,6 +827,17 @@ export function NotesRoute() {
                   onClick={() => void onConvert(sel)}
                 >
                   {t('notes.toTask')}
+                </button>
+                <button
+                  type="button"
+                  className="btn--ghost"
+                  title={t('notes.promoteHint')}
+                  disabled={converting !== null || !!sel.promoted_at}
+                  onClick={() => void onPromote(sel)}
+                >
+                  {sel.promoted_at
+                    ? t('notes.promotedShort')
+                    : t('notes.promote')}
                 </button>
                 <button
                   type="button"

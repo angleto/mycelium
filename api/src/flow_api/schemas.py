@@ -1439,6 +1439,11 @@ class NoteOut(BaseModel):
     # layer (transplanted to a task).
     maturity: str = "seed"
     promoted_at: datetime.datetime | None = None
+    # docs/adr/0029 P1: every task generated from this note
+    # (kind ∈ {derived_from, promoted_from}), in emission order. The
+    # SPA renders an "N tasks" chip on the note row from this list;
+    # ``task_id`` above stays the SPA-canonical "primary".
+    derived_task_ids: list[uuid.UUID] = Field(default_factory=list)
 
 
 class NoteSetMaturityIn(BaseModel):

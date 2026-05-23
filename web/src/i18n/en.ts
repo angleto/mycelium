@@ -1149,6 +1149,17 @@ export const en = {
     converting: 'Deriving...',
     convertedShort: 'Derived',
     converted: 'Task derived from note',
+    promote: 'Promote',
+    promoteHint:
+      'Transplant: the note becomes the task and is marked read-only. Use Derive task when the note should keep spawning fruit.',
+    promoteConfirm:
+      'Promote this note to a task? The note will become read-only (transplanted).',
+    promotedShort: 'Transplanted',
+    promotedHint: 'This note was transplanted to a task and is read-only.',
+    derivedTasksCount_one: '{{count}} task',
+    derivedTasksCount_other: '{{count}} tasks',
+    derivedTasksAria_one: 'One task generated from this note',
+    derivedTasksAria_other: '{{count}} tasks generated from this note',
     meteredNote: 'Conversation replies use the LLM (metered); transcription needs a provider.',
     focusOn:
       'Focus active (set in the sidebar): showing {{shown}} of {{total}} notes for the focused client/project.',

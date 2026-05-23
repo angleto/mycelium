@@ -1151,6 +1151,17 @@ export const it: Catalog = {
     converting: 'Generazione...',
     convertedShort: 'Generato',
     converted: 'Task generato dalla nota',
+    promote: 'Trapianta',
+    promoteHint:
+      'Trapianto: la nota diventa il task e viene marcata read-only. Usa "Genera task" se vuoi che la nota continui a generare frutti.',
+    promoteConfirm:
+      'Trapiantare questa nota in un task? La nota diventerà read-only.',
+    promotedShort: 'Trapiantata',
+    promotedHint: 'Questa nota è stata trapiantata in un task ed è read-only.',
+    derivedTasksCount_one: '{{count}} task',
+    derivedTasksCount_other: '{{count}} task',
+    derivedTasksAria_one: 'Un task generato da questa nota',
+    derivedTasksAria_other: '{{count}} task generati da questa nota',
     meteredNote: 'Le risposte di conversazione usano il LLM (a consumo); la trascrizione richiede un provider.',
     focusOn:
       'Focus attivo (impostato nella sidebar): mostro {{shown}} di {{total}} note del cliente/progetto in focus.',

@@ -2787,3 +2787,19 @@ button.btn--danger:hover {
   align-items: center;
   gap: 0.2rem;
 }
+
+/* Chip variants used on note rows:
+   - chip--derived: counter "{n} task" on the note row when the note
+     has spawned tasks (kind=derived_from / promoted_from).
+   - chip--promoted: the note has been transplanted (read-only). */
+.chip--derived {
+  background: #2e7d3214;
+  border-color: #2e7d3266;
+  color: #2e7d32;
+  cursor: help;
+}
+.chip--promoted {
+  background: #7e57c214;
+  border-color: #7e57c266;
+  color: #7e57c2;
+}

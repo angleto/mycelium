@@ -357,6 +357,37 @@ async def test_create_note_for_task_writes_artifact_link() -> None:
         assert pid == task.id
 
 
+async def test_derived_task_ids_for_notes_batches_and_filters() -> None:
+    """`derived_task_ids_for_notes` returns the fruit/transplant tasks
+    grouped per note. Subject/artifact links are excluded; the SPA's
+    "N tasks" chip counts only what the note has generated."""
+    org, user = await _make_workspace()
+    async with tenant_session(str(org), str(user)) as s:
+        n_with = await _make_note(s, org, user, "with-fruits")
+        n_empty = await _make_note(s, org, user, "no-fruits")
+        # Two derived tasks (fruit) on the first note...
+        t1, _ = await note_links.derive_task_from_note(
+            s, org_id=org, actor_id=user, note_id=n_with.id, title="fruit 1"
+        )
+        t2, _ = await note_links.derive_task_from_note(
+            s, org_id=org, actor_id=user, note_id=n_with.id, title="fruit 2"
+        )
+        # ...and a subject link too, which must NOT appear in the result.
+        subject_task = await tasks_svc.create_task(
+            s, org_id=org, actor_id=user, title="working on it"
+        )
+        await note_links.start_task_on_note(
+            s, org_id=org, actor_id=user, task_id=subject_task.id, note_id=n_with.id
+        )
+
+        out = await note_links.derived_task_ids_for_notes(
+            s, org_id=org, note_ids=[n_with.id, n_empty.id]
+        )
+
+    assert set(out.get(n_with.id, [])) == {t1.id, t2.id}
+    assert n_empty.id not in out
+
+
 # ---------------------------------------------------------------------------
 # Schema integrity sampler (a sanity tail)
 # ---------------------------------------------------------------------------

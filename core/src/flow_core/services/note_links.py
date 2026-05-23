@@ -439,6 +439,41 @@ async def primary_task_ids_for_notes(
     return out
 
 
+async def derived_task_ids_for_notes(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    note_ids: list[uuid.UUID],
+) -> dict[uuid.UUID, list[uuid.UUID]]:
+    """Batched ``{note_id: [task_id, ...]}`` for the tasks generated
+    from each note (link kinds ``derived_from`` and ``promoted_from``).
+    Powers the "N tasks" chip in the note list (Punto 4 follow-up):
+    one task is the canonical "primary"; the rest are extra fruits.
+    Sorted by ``created_at`` so the list reflects emission order.
+    Returns an empty mapping for notes with no generated task."""
+    if not note_ids:
+        return {}
+    rows = (
+        await session.execute(
+            select(
+                NoteTaskLink.note_id,
+                NoteTaskLink.task_id,
+                NoteTaskLink.created_at,
+            )
+            .where(
+                NoteTaskLink.org_id == org_id,
+                NoteTaskLink.note_id.in_(note_ids),
+                NoteTaskLink.kind.in_(("derived_from", "promoted_from")),
+            )
+            .order_by(NoteTaskLink.created_at.asc())
+        )
+    ).all()
+    out: dict[uuid.UUID, list[uuid.UUID]] = {}
+    for nid, tid, _ in rows:
+        out.setdefault(nid, []).append(tid)
+    return out
+
+
 async def notes_for_task(
     session: AsyncSession,
     *,
@@ -797,6 +832,7 @@ async def tick_maturity_transitions(
 
 __all__ = [
     "derive_task_from_note",
+    "derived_task_ids_for_notes",
     "link_notes",
     "list_note_links",
     "list_note_task_links",
