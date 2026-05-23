@@ -1200,6 +1200,12 @@ export const en = {
     countersAdd: 'New counter (e.g. import from another system)',
     seriesReadOnlyHint:
       "The sezionale is a client property. Edit it on the client's card.",
+    numberLabel: 'Number',
+    changeNumber: 'Change number',
+    newNextNumber: 'Next number',
+    changeNumberHint:
+      "Set the number of the next invoice emitted for this client/year. Use it when you have already emitted invoices elsewhere (e.g. set 2 if #1 was emitted on another system). You cannot lower it below the highest number already emitted in Flow for the same sezionale/year.",
+    startingNumberInvalid: 'Invalid number.',
     taxable: 'Taxable',
     vatTotal: 'VAT',
     total: 'Total',

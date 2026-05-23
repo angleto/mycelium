@@ -116,6 +116,12 @@ export function InvoicesRoute() {
   const [dModalita, setDModalita] = useState('')
   const [dTermsDays, setDTermsDays] = useState('')
   const [dirty, setDirty] = useState(false)
+  // Inline "change starting number" widget on a draft. Lets the user
+  // raise the counter for (issuer, sezionale, year) without leaving
+  // /invoices when they realise the prev system already used the
+  // current number. last_number = N - 1 so the next allocation = N.
+  const [editingNum, setEditingNum] = useState(false)
+  const [newNextN, setNewNextN] = useState('')
 
   // line add / edit
   const [lAdd, setLAdd] = useState<LineForm>(EMPTY_LINE)
@@ -223,6 +229,40 @@ export function InvoicesRoute() {
   async function reloadSel() {
     if (sel) await openInvoice(sel.id)
     await loadList()
+  }
+
+  // Override the per-(issuer, series, year) counter so the next number
+  // allocated for this client/year is N. Used when the user has
+  // already emitted invoice #N elsewhere and wants Flow to continue
+  // from #(N+1). The backend rejects any value below the max already
+  // emitted in Flow under the same key — that error is surfaced.
+  async function saveStartingNumber() {
+    if (!sel || !dIssuer) return
+    setErr(null)
+    setMsg(null)
+    const n = Number(newNextN)
+    if (!Number.isFinite(n) || n < 1) {
+      setErr(t('invoices.startingNumberInvalid'))
+      return
+    }
+    const { error } = await api.PUT(
+      '/issuer-profiles/{profile_id}/counters/{series}/{year}',
+      {
+        params: {
+          header: workspaceHeader(),
+          path: { profile_id: dIssuer, series: dSeries, year: sel.year },
+        },
+        // last_number = N - 1 so the next allocated number is N.
+        body: { last_number: n - 1 },
+      },
+    )
+    if (error) {
+      setErr(errMessage(error))
+      return
+    }
+    setEditingNum(false)
+    setMsg(t('invoices.saved'))
+    await reloadSel()
   }
 
   // Issuer profiles are managed in Settings (read-only here for the
@@ -754,28 +794,70 @@ export function InvoicesRoute() {
                 ))}
               </select>
             </label>
+            {/* Document number (resolved): preview.number is the
+                ``would-be'' number (series + counter+1) on a draft, or
+                the real allocated number on a transmitted invoice. The
+                sezionale itself (e.g. CYLOCK) is a client property, NOT
+                shown as an input here — that confused the user into
+                editing the client. On a draft, an inline "Change
+                number" button lets the user raise the counter directly
+                from this page (e.g. start from #2 when #1 was emitted
+                on another system). */}
             <label>
-              {t('invoices.series')}
-              {/* The sezionale is a CLIENT-level property (the client's
-                  per-client invoice series, persisted on the client
-                  profile and shared by every invoice for that client).
-                  Editing it here would only affect this single document
-                  AND would confuse the user into thinking they're
-                  editing the client; we expose it as read-only with a
-                  hint pointing to the client config. To start the
-                  numbering at N for a given client, use the per-client
-                  starting-number input on the client form. */}
-              <input
-                value={dSeries}
-                readOnly
-                style={{ width: '5rem' }}
-                title={t('invoices.seriesReadOnlyHint')}
-              />
-              <span className="hint">
-                {t('invoices.seriesReadOnlyHint')}
+              {t('invoices.numberLabel')}
+              <span
+                style={{
+                  display: 'inline-block',
+                  fontWeight: 600,
+                  padding: '0.25rem 0.5rem',
+                }}
+              >
+                {preview?.number ?? '—'}
               </span>
+              {isDraft && !editingNum && (
+                <button
+                  type="button"
+                  className="btn--sm btn--ghost"
+                  onClick={() => {
+                    setNewNextN(
+                      preview?.number?.replace(/^\D+/, '') || '1',
+                    )
+                    setEditingNum(true)
+                  }}
+                >
+                  {t('invoices.changeNumber')}
+                </button>
+              )}
             </label>
           </div>
+          {editingNum && (
+            <div className="row">
+              <label>
+                {t('invoices.newNextNumber')}
+                <input
+                  type="number"
+                  min={1}
+                  value={newNextN}
+                  onChange={(e) => setNewNextN(e.target.value)}
+                />
+              </label>
+              <button
+                type="button"
+                className="btn--sm"
+                onClick={() => void saveStartingNumber()}
+              >
+                {t('invoices.save')}
+              </button>
+              <button
+                type="button"
+                className="btn--sm btn--ghost"
+                onClick={() => setEditingNum(false)}
+              >
+                {t('invoices.cancel')}
+              </button>
+              <span className="hint">{t('invoices.changeNumberHint')}</span>
+            </div>
+          )}
 
           <h3>{t('invoices.lines')}</h3>
           {lines.length === 0 ? (

@@ -1201,6 +1201,12 @@ export const it: Catalog = {
     countersAdd: 'Nuovo contatore (es. import da altro sistema)',
     seriesReadOnlyHint:
       'Il sezionale è una proprietà del cliente. Modificalo nella scheda cliente.',
+    numberLabel: 'Numero',
+    changeNumber: 'Cambia numero',
+    newNextNumber: 'Prossimo numero',
+    changeNumberHint:
+      'Imposta il numero della prossima fattura emessa per questo cliente in questo anno. Usalo se hai già emesso fatture su un altro sistema (es. metti 2 se hai già emesso la #1 altrove). Non puoi scendere sotto il massimo già emesso in Flow per lo stesso sezionale/anno.',
+    startingNumberInvalid: 'Numero non valido.',
     taxable: 'Imponibile',
     vatTotal: 'IVA',
     total: 'Totale',
