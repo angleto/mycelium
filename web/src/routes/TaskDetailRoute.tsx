@@ -537,6 +537,9 @@ export function TaskDetailRoute() {
 
   const titleOf = (tid: string) =>
     allTasks.find((x) => x.id === tid)?.title ?? tid.slice(0, 8)
+  const subtasks = allTasks
+    .filter((x) => x.parent_task_id === id && !x.deleted_at)
+    .sort((a, b) => a.title.localeCompare(b.title))
   const dependsOn = deps.filter((d) => d.successor_id === id)
   const blocks = deps.filter((d) => d.predecessor_id === id)
   const depQ = depQuery.trim().toLowerCase()
@@ -907,6 +910,34 @@ export function TaskDetailRoute() {
         </button>
       </div>
       <p className="hint">{t('tasks.relatedTo')}</p>
+
+      {(task.parent_task_id || subtasks.length > 0) && (
+        <>
+          <h2>{t('tasks.subtasks')}</h2>
+          {task.parent_task_id && (
+            <p className="hint">
+              {t('tasks.parentLabel')}{' '}
+              <Link to={`/tasks/${task.parent_task_id}`}>
+                {titleOf(task.parent_task_id)}
+              </Link>
+            </p>
+          )}
+          {subtasks.length === 0 ? (
+            <p className="hint">{t('tasks.subtasksNone')}</p>
+          ) : (
+            <ul className="subtasks">
+              {subtasks.map((s) => (
+                <li key={s.id}>
+                  <Link to={`/tasks/${s.id}`}>{s.title}</Link>
+                  {s.is_archived && (
+                    <span className="hint"> ({t('tasks.archivedSuffix')})</span>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </>
+      )}
 
       <h2>{t('tasks.related')}</h2>
       {rels.length === 0 ? (
