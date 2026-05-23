@@ -248,14 +248,10 @@ async def test_delete_notification_dismisses_own_only() -> None:
         )
         # Unknown id -> domain error (not silently ignored).
         with pytest.raises(DomainError):
-            await nf.delete_notification(
-                s, org_id=org, actor_id=user, notification_id=uuid.uuid4()
-            )
+            await nf.delete_notification(s, org_id=org, actor_id=user, notification_id=uuid.uuid4())
         # A notification addressed to someone else is not deletable by the
         # actor (scoped to user_id == actor_id).
         with pytest.raises(DomainError):
-            await nf.delete_notification(
-                s, org_id=org, actor_id=uuid.uuid4(), notification_id=n.id
-            )
+            await nf.delete_notification(s, org_id=org, actor_id=uuid.uuid4(), notification_id=n.id)
         await nf.delete_notification(s, org_id=org, actor_id=user, notification_id=n.id)
         assert await nf.list_notifications(s, org_id=org, user_id=user) == []

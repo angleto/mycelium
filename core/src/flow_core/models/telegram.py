@@ -220,9 +220,7 @@ class TelegramConversation(TimestampMixin, Base):
     __tablename__ = "telegram_conversations"
 
     chat_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    turns: Mapped[list[dict[str, Any]]] = mapped_column(
-        JSONB, nullable=False, server_default="[]"
-    )
+    turns: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False, server_default="[]")
 
 
 __all__ = [
