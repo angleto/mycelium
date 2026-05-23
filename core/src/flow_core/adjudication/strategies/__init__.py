@@ -7,6 +7,7 @@ entry-point group (see ``registry.load_entry_points``).
 from __future__ import annotations
 
 from flow_core.adjudication.registry import get_registry
+from flow_core.adjudication.strategies.debate import DebateConfig, DebateStrategy
 from flow_core.adjudication.strategies.human_in_loop import HumanInLoopStrategy
 from flow_core.adjudication.strategies.single_shot import SingleShotStrategy
 
@@ -20,6 +21,13 @@ def register_builtins() -> None:
     reg = get_registry()
     reg.register(SingleShotStrategy())
     reg.register(HumanInLoopStrategy())
+    reg.register(DebateStrategy())
 
 
-__all__ = ["HumanInLoopStrategy", "SingleShotStrategy", "register_builtins"]
+__all__ = [
+    "DebateConfig",
+    "DebateStrategy",
+    "HumanInLoopStrategy",
+    "SingleShotStrategy",
+    "register_builtins",
+]
