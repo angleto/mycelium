@@ -95,23 +95,39 @@ class Task(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, Base):
         nullable=True,
         index=True,
     )
+    # docs/adr/0028 Stage C: identity-first addressing.
+    # ``assignee_id`` is the FK into ``identities`` — single source of
+    # truth for *who* should work on the task (user or ai_assistant).
+    # The legacy ``executor_user_id`` and ``assignee_handle`` columns
+    # are gone (resolved through Identity instead).
+    assignee_id: Mapped[uuid.UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("identities.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    # ``executor_kind`` stays as the *fallback routing hint* used by
+    # the scheduler ONLY when the task has no ``assignee_id``: it
+    # tells the dispatcher whether an unassigned task should be
+    # routed to the human pool (default) or to the llm_agent pool
+    # (so an "unassigned llm task" can still be picked up by an
+    # agent). When ``assignee_id`` is set, the kind is derived from
+    # the joined ``identities.kind`` and this column is ignored. We
+    # do **not** keep it in sync with the assignee.
     executor_kind: Mapped[ExecKind] = mapped_column(
         SAEnum(ExecKind, name="exec_kind", native_enum=True, create_type=False),
         nullable=False,
         server_default="human",
     )
-    executor_user_id: Mapped[uuid.UUID | None] = mapped_column(
+    # Accountability (docs/adr/0028): always a real user, never an
+    # AI. Default at creation = ``created_by``. ``ON DELETE RESTRICT``
+    # forces a transfer before deleting the user.
+    owner_id: Mapped[uuid.UUID] = mapped_column(
         PG_UUID(as_uuid=True),
-        ForeignKey("users.id", ondelete="SET NULL"),
-        nullable=True,
+        ForeignKey("users.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
     )
-    # Human-readable assignee (migration 0060). Backfilled from
-    # ``executor_user_id`` -> users.handle. NULL when the task has no
-    # human executor (LLM agent or unassigned). Stage A of the
-    # "kill Executor" refactor: ``executor_user_id`` and ``executor_kind``
-    # remain authoritative for the scheduler/dispatch; ``assignee_handle``
-    # is the new addressable surface for UI / MCP picker.
-    assignee_handle: Mapped[str | None] = mapped_column(String(40), nullable=True)
     # Capabilities this task needs from its executor (docs/adr/0025 P2
     # admission control). An llm task is eligible for an ``llm_agent``
     # executor iff this set is a subset of the executor's

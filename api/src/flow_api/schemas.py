@@ -408,8 +408,13 @@ class TaskCreateIn(BaseModel):
     due_date: datetime.date | None = None
     billable: bool | None = None
     parent_task_id: uuid.UUID | None = None
+    # docs/adr/0028: ``executor_kind`` kept as an optional input for
+    # API consumers that did not migrate yet; it is ignored by the
+    # service (the routing kind comes from the resolved identity).
+    # ``executor_user_id`` removed.
     executor_kind: ExecKind = ExecKind.human
-    executor_user_id: uuid.UUID | None = None
+    assignee_id: uuid.UUID | None = None
+    owner_id: uuid.UUID | None = None
     # Handle-based assignee (#21 Stage B). When set, the service
     # resolves the handle to a user / ai_assistant and writes the
     # legacy executor_kind / executor_user_id mirror columns too.
@@ -437,11 +442,13 @@ class TaskPatchIn(BaseModel):
     due_date: datetime.date | None = None
     billable: bool | None = None
     estimate_effort_h: Decimal | None = None
-    executor_kind: ExecKind | None = None
-    executor_user_id: uuid.UUID | None = None
-    # Handle-based assignee (#21 Stage B). Empty string clears the
-    # assignment; ``None`` means "no change". The service resolves to
-    # the legacy mirror columns synchronously.
+    # docs/adr/0028: ``executor_kind`` is no longer persisted (read
+    # via identity), ``executor_user_id`` is removed. Updates set
+    # ``assignee_id`` (or ``assignee_handle`` which is resolved
+    # service-side) and optionally ``owner_id`` to reassign
+    # accountability. Empty assignee_handle clears the assignment.
+    assignee_id: uuid.UUID | None = None
+    owner_id: uuid.UUID | None = None
     assignee_handle: str | None = Field(default=None, max_length=40)
     required_capabilities: list[str] | None = None
     parent_task_id: uuid.UUID | None = None
@@ -487,12 +494,16 @@ class TaskOut(BaseModel):
     start_date: datetime.date | None
     due_date: datetime.date | None
     parent_task_id: uuid.UUID | None
-    executor_kind: ExecKind
-    # Handle-based assignee (#21 Stage B). Surfaces the resolved
-    # ``@handle`` the SPA's AssigneePicker uses. NULL when the task
-    # has no assignee or when it was created before migration 0060
-    # (no backfill for tasks without executor_user_id).
+    # docs/adr/0028 Stage C: identity-based addressing.
+    # ``assignee_id`` is the FK into ``identities``; ``assignee_handle``
+    # is the denormalised display handle for the SPA's task card
+    # (resolved at serialisation, NULL when unassigned). ``owner_id``
+    # is the accountability axis (always a real user). The legacy
+    # ``executor_kind`` is no longer carried; the SPA can derive it
+    # via the identity payload when needed.
+    assignee_id: uuid.UUID | None = None
     assignee_handle: str | None = None
+    owner_id: uuid.UUID
     estimate_effort_h: Decimal | None
     required_capabilities: list[str] = Field(default_factory=list)
     monetary_cost: Decimal | None

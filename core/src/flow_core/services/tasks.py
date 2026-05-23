@@ -26,6 +26,7 @@ from flow_core.models.task_assignee import TaskAssignee
 from flow_core.models.task_tag import TaskTag
 from flow_core.models.workflow import WorkflowState
 from flow_core.services import audit, lifecycle, taxonomy
+from flow_core.services import identities as identities_svc
 from flow_core.services import workflow as wf
 from flow_core.services.rbac import require_role
 
@@ -51,9 +52,8 @@ _UPDATABLE = frozenset(
         "start_date",
         "due_date",
         "estimate_effort_h",
-        "executor_kind",
-        "executor_user_id",
-        "assignee_handle",
+        "assignee_id",
+        "owner_id",
         "required_capabilities",
         "parent_task_id",
         "monetary_cost",
@@ -98,9 +98,17 @@ async def create_task(
     due_date: dt.date | None = None,
     billable: bool | None = None,
     parent_task_id: uuid.UUID | None = None,
-    executor_kind: ExecKind = ExecKind.human,
-    executor_user_id: uuid.UUID | None = None,
+    # docs/adr/0028: pass either ``assignee_id`` (uuid into identities)
+    # or ``assignee_handle`` (we resolve it to the identity in this
+    # org). The two are mutually exclusive; if both are passed,
+    # ``assignee_id`` wins. ``executor_kind`` is still accepted as a
+    # convenience for callers that previously routed by kind without
+    # picking a specific assignee (it sets the human/agent intent
+    # before any identity exists); resolution happens via Identity.
+    assignee_id: uuid.UUID | None = None,
     assignee_handle: str | None = None,
+    executor_kind: ExecKind = ExecKind.human,
+    owner_id: uuid.UUID | None = None,
     estimate_effort_h: Decimal | None = None,
     required_capabilities: Sequence[str] | None = None,
     monetary_cost: Decimal | None = None,
@@ -147,35 +155,26 @@ async def create_task(
     initial = await wf.get_initial_state(session, workflow.id)
     if importance is not None and urgency is not None:
         priority = derive_priority(importance, urgency)
-    # #21 Stage B: when the SPA sends ``assignee_handle`` it wins over
-    # the legacy executor_kind / executor_user_id pair. Resolve the
-    # handle against users + AI assistants and mirror the result into
-    # the legacy columns so the scheduler / dispatch keep working
-    # unchanged. Stage C drops the mirror columns entirely.
-    if assignee_handle:
-        from flow_core.models.ai_assistant import AiAssistant
-        from flow_core.models.user import User
-
-        user_row = (
-            await session.execute(select(User.id).where(User.handle == assignee_handle))
-        ).scalar_one_or_none()
-        if user_row is not None:
-            executor_kind = ExecKind.human
-            executor_user_id = user_row
-        else:
-            assistant_row = (
-                await session.execute(
-                    select(AiAssistant.id).where(
-                        AiAssistant.handle == assignee_handle,
-                        AiAssistant.org_id == org_id,
-                    )
-                )
-            ).scalar_one_or_none()
-            if assistant_row is not None:
-                executor_kind = ExecKind.llm_agent
-                executor_user_id = None
-            else:
-                raise DomainError(MessageCode.DOMAIN_ERROR)
+    # docs/adr/0028 Stage C: resolve assignee through identities.
+    # Either an explicit ``assignee_id`` or a handle to look up.
+    if assignee_id is None and assignee_handle:
+        identity = await identities_svc.lookup_by_handle(
+            session, org_id=org_id, handle=assignee_handle
+        )
+        if identity is None:
+            raise DomainError(MessageCode.DOMAIN_ERROR)
+        assignee_id = identity.id
+    elif assignee_id is not None:
+        # Validate the identity belongs to this org (FK alone does not
+        # enforce org match).
+        await identities_svc.get_identity(session, org_id=org_id, identity_id=assignee_id)
+    # ``owner_id`` defaults to the creator. Same rule as the
+    # migration backfill: every task has an explicit human owner.
+    effective_owner = owner_id or actor_id
+    # docs/adr/0028: ``executor_kind`` is the routing hint used only
+    # when ``assignee_id`` is NULL; when an assignee is set the kind
+    # is derived from the joined identity. Persisted regardless so
+    # the unassigned-fallback path keeps working.
     task = Task(
         org_id=org_id,
         title=title,
@@ -188,9 +187,9 @@ async def create_task(
         billable=billable,
         state_id=initial.id,
         parent_task_id=parent_task_id,
+        owner_id=effective_owner,
+        assignee_id=assignee_id,
         executor_kind=executor_kind,
-        executor_user_id=executor_user_id,
-        assignee_handle=assignee_handle or None,
         estimate_effort_h=estimate_effort_h,
         required_capabilities=list(required_capabilities or []),
         monetary_cost=monetary_cost,
@@ -277,7 +276,10 @@ async def update_task(
     expected_version: int,
     values: dict[str, Any],
 ) -> int:
-    unknown = set(values) - _UPDATABLE
+    # ``assignee_handle`` is a convenience input that we resolve to
+    # ``assignee_id`` below; it is not a column itself but we tolerate
+    # it here so callers don't have to do the lookup themselves.
+    unknown = set(values) - _UPDATABLE - {"assignee_handle"}
     if unknown:
         raise DomainError(MessageCode.DOMAIN_ERROR)
     await require_role(session, org_id, actor_id, Role.member)
@@ -287,41 +289,23 @@ async def update_task(
         urg = values.get("urgency", current.urgency)
         if imp is not None and urg is not None:
             values["priority"] = derive_priority(imp, urg)
-    # #21 Stage B: assignee_handle is the authoritative assignee from
-    # v1.2.27 onward. To keep the legacy scheduler / dispatch happy we
-    # ALSO update the executor_kind / executor_user_id mirror columns
-    # synchronously here: the resolver looks the handle up in users
-    # vs ai_assistants and writes the appropriate exec_kind. Stage C
-    # will drop the mirror columns entirely and rewire the scheduler.
+    # docs/adr/0028 Stage C: a caller can either pass ``assignee_id``
+    # directly (uuid into identities) or ``assignee_handle`` (a
+    # convenience we resolve here). Both are merged onto the single
+    # authoritative ``assignee_id`` column.
     if "assignee_handle" in values:
-        handle = values["assignee_handle"]
+        handle = values.pop("assignee_handle")
         if handle:
-            from flow_core.models.ai_assistant import AiAssistant
-            from flow_core.models.user import User
-
-            user_row = (
-                await session.execute(select(User.id).where(User.handle == handle))
-            ).scalar_one_or_none()
-            if user_row is not None:
-                values["executor_kind"] = ExecKind.human
-                values["executor_user_id"] = user_row
-            else:
-                assistant_row = (
-                    await session.execute(
-                        select(AiAssistant.id).where(
-                            AiAssistant.handle == handle,
-                            AiAssistant.org_id == org_id,
-                        )
-                    )
-                ).scalar_one_or_none()
-                if assistant_row is not None:
-                    values["executor_kind"] = ExecKind.llm_agent
-                    values["executor_user_id"] = None
-                else:
-                    raise DomainError(MessageCode.DOMAIN_ERROR)
+            identity = await identities_svc.lookup_by_handle(session, org_id=org_id, handle=handle)
+            if identity is None:
+                raise DomainError(MessageCode.DOMAIN_ERROR)
+            values["assignee_id"] = identity.id
         else:
-            # Explicit clear: drop the human binding too.
-            values["executor_user_id"] = None
+            values["assignee_id"] = None
+    if "assignee_id" in values and values["assignee_id"] is not None:
+        # Defensive: the FK alone is org-agnostic; validate the
+        # identity is in this tenant.
+        await identities_svc.get_identity(session, org_id=org_id, identity_id=values["assignee_id"])
     new_version = await optimistic_update(
         session,
         Task,

@@ -46,7 +46,12 @@ from flow_core.services import workflow as wf
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
 
-def _out(t: Task, state_name: str, tags: list[Tag] | None = None) -> TaskOut:
+def _out(
+    t: Task,
+    state_name: str,
+    tags: list[Tag] | None = None,
+    assignee_handle: str | None = None,
+) -> TaskOut:
     return TaskOut(
         tags=[TagBrief(id=g.id, kind=g.kind, name=g.name, color=g.color) for g in (tags or [])],
         id=t.id,
@@ -60,8 +65,14 @@ def _out(t: Task, state_name: str, tags: list[Tag] | None = None) -> TaskOut:
         start_date=t.start_date,
         due_date=t.due_date,
         parent_task_id=t.parent_task_id,
-        executor_kind=t.executor_kind,
-        assignee_handle=t.assignee_handle,
+        # docs/adr/0028: identity-first addressing. ``assignee_handle``
+        # is denormalised by the caller via ``assignee_handle_map``
+        # (a {task_id: handle} lookup) when a list endpoint pre-loads
+        # identities in batch; single-task endpoints fall back to a
+        # direct join (see ``_one_assignee_handle``).
+        assignee_id=t.assignee_id,
+        assignee_handle=assignee_handle,
+        owner_id=t.owner_id,
         estimate_effort_h=t.estimate_effort_h,
         required_capabilities=list(t.required_capabilities or []),
         monetary_cost=t.monetary_cost,
@@ -108,6 +119,24 @@ def _note_out(n: Note, tags: list[Tag] | None = None) -> NoteOut:
     )
 
 
+async def _assignee_handles(ctx: TenantCtx, task_ids: set[uuid.UUID]) -> dict[uuid.UUID, str]:
+    """docs/adr/0028: ``assignee_handle`` is denormalised from
+    ``identities`` for the SPA's task card. Batch-loaded so a list
+    endpoint pays one query, not one per task."""
+    if not task_ids:
+        return {}
+    from flow_core.models.identity import Identity
+
+    rows = (
+        await ctx.session.execute(
+            select(Task.id, Identity.handle)
+            .join(Identity, Identity.id == Task.assignee_id)
+            .where(Task.id.in_(task_ids))
+        )
+    ).all()
+    return {tid: handle for tid, handle in rows}
+
+
 async def _state_names(ctx: TenantCtx, state_ids: set[uuid.UUID]) -> dict[uuid.UUID, str]:
     if not state_ids:
         return {}
@@ -137,8 +166,9 @@ async def create_task(
         billable=body.billable,
         parent_task_id=body.parent_task_id,
         executor_kind=body.executor_kind,
-        executor_user_id=body.executor_user_id,
+        assignee_id=body.assignee_id,
         assignee_handle=body.assignee_handle,
+        owner_id=body.owner_id,
         estimate_effort_h=body.estimate_effort_h,
         required_capabilities=body.required_capabilities,
         monetary_cost=body.monetary_cost,
@@ -150,7 +180,13 @@ async def create_task(
     )
     names = await _state_names(ctx, {task.state_id})
     tagmap = await svc.tags_by_task(ctx.session, task_ids=[task.id])
-    return _out(task, names.get(task.state_id, ""), tagmap.get(task.id, []))
+    handles = await _assignee_handles(ctx, {task.id})
+    return _out(
+        task,
+        names.get(task.state_id, ""),
+        tagmap.get(task.id, []),
+        assignee_handle=handles.get(task.id),
+    )
 
 
 @router.get("", response_model=list[TaskOut])
@@ -175,7 +211,16 @@ async def list_tasks(
     )
     names = await _state_names(ctx, {t.state_id for t in rows})
     tagmap = await svc.tags_by_task(ctx.session, task_ids=[t.id for t in rows])
-    return [_out(t, names.get(t.state_id, ""), tagmap.get(t.id, [])) for t in rows]
+    handles = await _assignee_handles(ctx, {t.id for t in rows})
+    return [
+        _out(
+            t,
+            names.get(t.state_id, ""),
+            tagmap.get(t.id, []),
+            assignee_handle=handles.get(t.id),
+        )
+        for t in rows
+    ]
 
 
 @router.get("/{task_id}", response_model=TaskOut)
@@ -186,7 +231,13 @@ async def get_task(task_id: uuid.UUID, ctx: Annotated[TenantCtx, Depends(tenant_
     task = await svc.get_task(ctx.session, org_id=ctx.org_id, task_id=task_id, include_deleted=True)
     names = await _state_names(ctx, {task.state_id})
     tagmap = await svc.tags_by_task(ctx.session, task_ids=[task.id])
-    return _out(task, names.get(task.state_id, ""), tagmap.get(task.id, []))
+    handles = await _assignee_handles(ctx, {task.id})
+    return _out(
+        task,
+        names.get(task.state_id, ""),
+        tagmap.get(task.id, []),
+        assignee_handle=handles.get(task.id),
+    )
 
 
 @router.get("/{task_id}/states", response_model=list[StateOut])
@@ -532,7 +583,13 @@ def _handoff_out(h: TaskHandoff) -> HandoffOut:
 async def _task_out(ctx: TenantCtx, task: Task) -> TaskOut:
     names = await _state_names(ctx, {task.state_id})
     tagmap = await svc.tags_by_task(ctx.session, task_ids=[task.id])
-    return _out(task, names.get(task.state_id, ""), tagmap.get(task.id, []))
+    handles = await _assignee_handles(ctx, {task.id})
+    return _out(
+        task,
+        names.get(task.state_id, ""),
+        tagmap.get(task.id, []),
+        assignee_handle=handles.get(task.id),
+    )
 
 
 @router.get("/{task_id}/handoffs", response_model=list[HandoffOut])

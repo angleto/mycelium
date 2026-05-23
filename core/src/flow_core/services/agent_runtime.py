@@ -58,6 +58,7 @@ from flow_core.i18n import MessageCode
 from flow_core.models.agent_run import AgentRun, AgentRunStatus
 from flow_core.models.billing import CostBasis
 from flow_core.models.executor import Executor
+from flow_core.models.identity import Identity, IdentityKind
 from flow_core.models.membership import Role
 from flow_core.models.note import Note
 from flow_core.models.schedule import Schedule
@@ -361,7 +362,18 @@ async def start_run(
     ).scalar_one_or_none()
     if task is None:
         raise NotFoundError(MessageCode.AGENT_RUN_NOT_FOUND)
-    if task.executor_kind is not ExecKind.llm_agent:
+    # docs/adr/0028: a task is dispatchable to an agent run iff its
+    # assignee identity is an ai_assistant, OR (unassigned) the
+    # ``executor_kind`` hint is ``llm_agent`` (a llm task that has
+    # not been bound to a specific assistant yet).
+    if task.assignee_id is not None:
+        identity = (
+            await session.execute(select(Identity).where(Identity.id == task.assignee_id))
+        ).scalar_one_or_none()
+        is_llm = identity is not None and identity.kind is IdentityKind.ai_assistant
+    else:
+        is_llm = task.executor_kind is ExecKind.llm_agent
+    if not is_llm:
         raise DomainError(MessageCode.AGENT_RUN_NOT_DISPATCHABLE)
     executor = await _assigned_executor(session, task_id=task_id)
     if executor is None:

@@ -21,14 +21,15 @@ import uuid
 from dataclasses import dataclass
 from decimal import Decimal
 
-from sqlalchemy import or_, select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from flow_core.models.budget import Budget
 from flow_core.models.event import Event, EventParticipant
+from flow_core.models.identity import Identity, IdentityKind
 from flow_core.models.membership import Role
 from flow_core.models.tag import Tag, TagKind
-from flow_core.models.task import ExecKind, Necessity, Task
+from flow_core.models.task import Necessity, Task
 from flow_core.models.task_assignee import TaskAssignee
 from flow_core.models.task_tag import TaskTag
 from flow_core.models.workflow import WorkflowState
@@ -113,18 +114,27 @@ async def _owned_actionable(
     stmt = (
         select(Task)
         .join(WorkflowState, WorkflowState.id == Task.state_id)
+        # docs/adr/0028: ``executor_user_id`` is gone. The actor's
+        # "my tasks" view joins through identities (the actor's user
+        # identity in the current org) plus the legacy M:N assignees.
+        .outerjoin(Identity, Identity.id == Task.assignee_id)
         .where(
             Task.deleted_at.is_(None),
             Task.is_archived.is_(False),
             WorkflowState.is_terminal.is_(False),
             or_(
                 Task.id.in_(assignee_ids),
-                Task.executor_user_id == actor_id,
+                and_(Identity.user_id == actor_id, Identity.kind == IdentityKind.user),
             ),
         )
     )
     if human_only:
-        stmt = stmt.where(Task.executor_kind == ExecKind.human)
+        stmt = stmt.where(
+            or_(
+                Task.assignee_id.is_(None),
+                and_(Identity.kind == IdentityKind.user),
+            )
+        )
     return list((await session.execute(stmt)).scalars().unique().all())
 
 

@@ -71,6 +71,7 @@ from flow_core.models.dispatch_request import (
     DispatchStatus,
 )
 from flow_core.models.executor import Executor
+from flow_core.models.identity import Identity, IdentityKind
 from flow_core.models.membership import Role
 from flow_core.models.organization import Organization
 from flow_core.models.schedule import Schedule
@@ -237,10 +238,14 @@ async def _admitted_agent_rows(
     scheduling). Deterministic order: the leveled placement
     (``scheduled_start``, NULLs last) then ``str(task_id)`` final
     tie-break (the scheduler's own deterministic-core contract)."""
+    # docs/adr/0028: kind comes from the assignee identity when set,
+    # else from the task's ``executor_kind`` hint. The dispatcher
+    # picks tasks routed to the llm_agent pool either way.
     rows = (
         await session.execute(
-            select(Schedule, Task)
+            select(Schedule, Task, Identity.kind)
             .join(Task, Task.id == Schedule.task_id)
+            .outerjoin(Identity, Identity.id == Task.assignee_id)
             .where(
                 Schedule.unassignable.is_(False),
                 Schedule.assigned_executor_id.is_not(None),
@@ -249,7 +254,13 @@ async def _admitted_agent_rows(
             )
         )
     ).all()
-    agent_rows = [(sch, task) for sch, task in rows if task.executor_kind is ExecKind.llm_agent]
+
+    def _is_agent(task: Task, ikind: IdentityKind | None) -> bool:
+        if ikind is not None:
+            return ikind == IdentityKind.ai_assistant
+        return task.executor_kind is ExecKind.llm_agent
+
+    agent_rows = [(sch, task) for sch, task, ikind in rows if _is_agent(task, ikind)]
     _far = dt.datetime.max.replace(tzinfo=dt.UTC)
     agent_rows.sort(key=lambda st: (st[0].scheduled_start or _far, str(st[1].id)))
     return agent_rows

@@ -153,6 +153,8 @@ __all__ = [
     "ExecutorKind",
     "GoogleCalendarStatus",
     "HandoffStatus",
+    "Identity",
+    "IdentityKind",
     "Invoice",
     "InvoiceCounter",
     "InvoiceKind",

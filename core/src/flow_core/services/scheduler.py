@@ -44,6 +44,7 @@ from flow_core.i18n import MessageCode
 from flow_core.models.dependency import DependencyType, TaskDependency
 from flow_core.models.event import Event, EventParticipant
 from flow_core.models.executor import Executor, ExecutorKind
+from flow_core.models.identity import Identity, IdentityKind
 from flow_core.models.membership import Role
 from flow_core.models.schedule import Schedule
 from flow_core.models.task import ExecKind, ScheduleMode, SchedulePolicy, Task
@@ -71,6 +72,12 @@ class _Node:
     assignee: uuid.UUID | None
     duration_min: int
     terminal: bool
+    # docs/adr/0028: the routing kind (human vs llm_agent) is no
+    # longer stored on the task; it comes from the joined
+    # ``identities.kind``. We materialise it here so the rest of the
+    # scheduler logic reads ``n.kind`` instead of
+    # ``n.task.executor_kind``.
+    kind: ExecKind = ExecKind.human
     es: dt.datetime = field(default=dt.datetime.min)
     ef: dt.datetime = field(default=dt.datetime.min)
     ls: dt.datetime = field(default=dt.datetime.min)
@@ -291,6 +298,30 @@ class Scheduler:
         for tid, uid in assignee_rows:
             first_assignee.setdefault(tid, uid)
 
+        # docs/adr/0028: resolve the task's primary assignee through
+        # identities. ``assignee_kind`` per task is derived from
+        # ``identities.kind``; ``assignee_human_user_id`` is the
+        # ``identities.user_id`` for human identities (NULL for
+        # ai_assistants and for unassigned tasks).
+        identity_rows = (
+            await self._s.execute(
+                select(
+                    Task.id,
+                    Identity.kind,
+                    Identity.user_id,
+                ).join(Identity, Identity.id == Task.assignee_id)
+            )
+        ).all()
+        task_kind: dict[uuid.UUID, ExecKind] = {}
+        task_human_user: dict[uuid.UUID, uuid.UUID | None] = {}
+        for tid, ikind, iuser in identity_rows:
+            if ikind == IdentityKind.ai_assistant:
+                task_kind[tid] = ExecKind.llm_agent
+                task_human_user[tid] = None
+            else:
+                task_kind[tid] = ExecKind.human
+                task_human_user[tid] = iuser
+
         prev = {
             row.task_id: row
             for row in (await self._s.execute(select(Schedule))).scalars().all()
@@ -299,13 +330,21 @@ class Scheduler:
 
         nodes: dict[uuid.UUID, _Node] = {}
         for t in tasks:
-            assignee = first_assignee.get(t.id) or t.executor_user_id
+            # Three fallbacks for the human executor id (used by the
+            # calendar resolver / serial-resource scheduler): the
+            # first task_assignee row -> the identity-resolved human
+            # user -> NULL (unassigned, off-calendar).
+            assignee = first_assignee.get(t.id) or task_human_user.get(t.id)
             dur = 0 if t.is_milestone else _effort_minutes(t)
+            # Kind via identity when an assignee is set, else fall
+            # back to the task's ``executor_kind`` hint (docs/adr/0028).
+            n_kind = task_kind.get(t.id, t.executor_kind)
             nodes[t.id] = _Node(
                 task=t,
                 assignee=assignee,
                 duration_min=dur,
                 terminal=t.state_id in terminal_state_ids,
+                kind=n_kind,
             )
 
         incoming: dict[uuid.UUID, list[TaskDependency]] = {i: [] for i in ids}
@@ -428,7 +467,7 @@ class Scheduler:
             # Policy-key rate proxy: an llm task's projected rate is the
             # cheapest eligible agent's rate (the dispatcher prefers the
             # lowest rate); 0 for human work or no eligible agent.
-            if n.task.executor_kind is not ExecKind.llm_agent:
+            if n.kind is not ExecKind.llm_agent:
                 return Decimal(0)
             elig = _eligible_agents(n)
             if not elig:
@@ -449,15 +488,13 @@ class Scheduler:
         llm_nodes: list[_Node] = []
         for n in nodes.values():
             if (
-                n.task.executor_kind is ExecKind.human
+                n.kind is ExecKind.human
                 and n.assignee is not None
                 and not n.terminal
                 and n.duration_min > 0
             ):
                 by_person.setdefault(n.assignee, []).append(n)
-            elif (
-                n.task.executor_kind is ExecKind.llm_agent and not n.terminal and n.duration_min > 0
-            ):
+            elif n.kind is ExecKind.llm_agent and not n.terminal and n.duration_min > 0:
                 llm_nodes.append(n)
             else:
                 sched[n.task.id] = (n.es, n.ef)
@@ -695,11 +732,7 @@ class Scheduler:
             # Projected cost = effort_h * the ASSIGNED agent's rate
             # (0 for human work or an unassignable llm task -- no
             # executor, no cost).
-            if (
-                n.task.executor_kind is ExecKind.llm_agent
-                and n.assigned is not None
-                and not is_unassignable
-            ):
+            if n.kind is ExecKind.llm_agent and n.assigned is not None and not is_unassignable:
                 pcost = _effort_hours(n) * agent_rate_by_id.get(n.assigned, Decimal(0))
             else:
                 pcost = Decimal(0)

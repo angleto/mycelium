@@ -1,0 +1,177 @@
+"""Identity service: lookups + lifecycle (docs/adr/0028).
+
+Identity rows are populated lazily by the layers that create the
+underlying subject:
+
+- ``ensure_for_user(org, user)`` is called from signup /
+  add-member flows (Stage 1 wires it into auth.signup; future
+  invitation flows will call it too).
+- ``ensure_for_ai_assistant(org, assistant)`` is called from
+  ``services.ai_assistants.create``.
+
+Idempotent by ``(org_id, handle)``: a second call with the same
+identifier returns the existing row instead of conflicting.
+"""
+
+from __future__ import annotations
+
+import uuid
+
+from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from flow_core.errors import DomainError, NotFoundError
+from flow_core.i18n import MessageCode
+from flow_core.models.ai_assistant import AiAssistant
+from flow_core.models.identity import Identity, IdentityKind
+from flow_core.models.user import User
+
+
+async def ensure_for_user(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    user_id: uuid.UUID,
+) -> Identity:
+    """Create or fetch the identity row for ``(org x user)``.
+
+    Requires the user to have a non-empty handle (Flow signup
+    enforces it). Idempotent: subsequent calls with the same
+    ``(org, user)`` return the existing row.
+    """
+    user = (await session.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
+    if user is None:
+        raise NotFoundError(MessageCode.USER_NOT_FOUND)
+    if not user.handle:
+        raise DomainError(MessageCode.DOMAIN_ERROR)
+
+    existing = (
+        await session.execute(
+            select(Identity).where(
+                Identity.org_id == org_id,
+                Identity.user_id == user_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if existing is not None:
+        return existing
+
+    identity = Identity(
+        org_id=org_id,
+        kind=IdentityKind.user,
+        handle=user.handle,
+        user_id=user_id,
+    )
+    session.add(identity)
+    try:
+        async with session.begin_nested():
+            await session.flush()
+    except IntegrityError:
+        # Lost the race against a concurrent insert (same org, same
+        # handle): fetch and return the winner.
+        return (
+            await session.execute(
+                select(Identity).where(
+                    Identity.org_id == org_id,
+                    Identity.user_id == user_id,
+                )
+            )
+        ).scalar_one()
+    return identity
+
+
+async def ensure_for_ai_assistant(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    assistant_id: uuid.UUID,
+) -> Identity:
+    """Create or fetch the identity row for an ai_assistant.
+
+    Idempotent. Requires a non-empty handle on the assistant row.
+    """
+    assistant = (
+        await session.execute(
+            select(AiAssistant).where(
+                AiAssistant.id == assistant_id,
+                AiAssistant.org_id == org_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if assistant is None:
+        raise NotFoundError(MessageCode.DOMAIN_ERROR)
+    if not assistant.handle:
+        raise DomainError(MessageCode.DOMAIN_ERROR)
+
+    existing = (
+        await session.execute(
+            select(Identity).where(
+                Identity.org_id == org_id,
+                Identity.ai_assistant_id == assistant_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if existing is not None:
+        return existing
+
+    identity = Identity(
+        org_id=org_id,
+        kind=IdentityKind.ai_assistant,
+        handle=assistant.handle,
+        ai_assistant_id=assistant_id,
+    )
+    session.add(identity)
+    try:
+        async with session.begin_nested():
+            await session.flush()
+    except IntegrityError:
+        return (
+            await session.execute(
+                select(Identity).where(
+                    Identity.org_id == org_id,
+                    Identity.ai_assistant_id == assistant_id,
+                )
+            )
+        ).scalar_one()
+    return identity
+
+
+async def lookup_by_handle(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    handle: str,
+) -> Identity | None:
+    """Resolve ``@handle`` to an Identity row in the current org, or
+    None when not found. Empty handle returns None defensively (the
+    caller should not pass an empty string)."""
+    if not handle:
+        return None
+    return (
+        await session.execute(
+            select(Identity).where(
+                Identity.org_id == org_id,
+                Identity.handle == handle,
+            )
+        )
+    ).scalar_one_or_none()
+
+
+async def get_identity(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    identity_id: uuid.UUID,
+) -> Identity:
+    row = (
+        await session.execute(
+            select(Identity).where(
+                Identity.id == identity_id,
+                Identity.org_id == org_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if row is None:
+        raise NotFoundError(MessageCode.DOMAIN_ERROR)
+    return row
