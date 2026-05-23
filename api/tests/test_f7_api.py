@@ -95,7 +95,14 @@ async def test_f7_api_flow() -> None:
             )
         ).json()
 
-        # No issuer given -> the default (prof2) is pre-selected.
+        # No issuer given -> the default (prof2) is pre-selected. We
+        # immediately delete that draft because we want this test to
+        # exercise the prof1 issuer's identity in the XML below — and
+        # a draft's billing identity (client + issuer) is FROZEN at
+        # create_draft now (see _DRAFT_UPDATABLE): switching issuer
+        # would silently re-key the (issuer, series, year) counter
+        # under an existing draft, so the supported workflow is to
+        # delete and recreate with the desired issuer.
         inv = (
             await c.post(
                 "/invoices",
@@ -105,13 +112,28 @@ async def test_f7_api_flow() -> None:
         ).json()
         assert inv["number"] is None  # not allocated until transmit
         assert inv["issuer_profile_id"] == prof2["id"]
+        rm = await c.delete(f"/invoices/{inv['id']}", headers=h)
+        assert rm.status_code == 204
 
-        # Pick a specific issuer + fill the draft-only fields.
+        # Re-create pinned to prof1 from the start; fill the remaining
+        # draft-only fields via PATCH (notes / IBAN / due — none of
+        # these is in the immutable identity set).
+        inv = (
+            await c.post(
+                "/invoices",
+                headers=h,
+                json={
+                    "client_tag_id": client["id"],
+                    "year": 2026,
+                    "issuer_profile_id": prof1["id"],
+                },
+            )
+        ).json()
+        assert inv["issuer_profile_id"] == prof1["id"]
         patched = await c.patch(
             f"/invoices/{inv['id']}",
             headers=h,
             json={
-                "issuer_profile_id": prof1["id"],
                 "notes": "Grazie per la collaborazione",
                 "payment_iban": "IT60X0542811101000000123456",
                 "payment_due_date": "2026-07-31",
