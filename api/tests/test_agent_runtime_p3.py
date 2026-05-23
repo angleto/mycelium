@@ -215,9 +215,22 @@ async def test_happy_path_metered_artifact_and_determinism(
         assert run.blocked_reason is None and run.error is None
 
         # The artifact is a Proposal-A work note LINKED to the task.
+        # ADR-0029 P3: the link is a NoteTaskLink (kind=artifact),
+        # not ``note.task_id`` which was dropped.
         assert run.artifact_note_id is not None
         note = (await s.execute(select(Note).where(Note.id == run.artifact_note_id))).scalar_one()
-        assert note.task_id == task.id
+        from flow_core.models.note_link import NoteTaskLink
+
+        art_link = (
+            await s.execute(
+                select(NoteTaskLink).where(
+                    NoteTaskLink.note_id == run.artifact_note_id,
+                    NoteTaskLink.task_id == task.id,
+                    NoteTaskLink.kind == "artifact",
+                )
+            )
+        ).scalar_one_or_none()
+        assert art_link is not None
         assert "Investigated and resolved." in (note.transcript or "")
 
     # Determinism: two fresh workspaces + the SAME script -> identical
@@ -410,8 +423,16 @@ async def test_tool_not_allowed_blocks_with_no_side_effect(
 
     async with tenant_session(str(org), str(user)) as s:
         task, _ex = await _dispatched_llm_task(s, org=org, user=user)
+        # ADR-0029 P3: notes are linked to tasks via NoteTaskLink
+        # (any kind), not the dropped ``Note.task_id`` column.
+        from flow_core.models.note_link import NoteTaskLink
+
         notes_before = (
-            await s.execute(select(func.count()).select_from(Note).where(Note.task_id == task.id))
+            await s.execute(
+                select(func.count())
+                .select_from(NoteTaskLink)
+                .where(NoteTaskLink.task_id == task.id)
+            )
         ).scalar_one()
         _use_llm(script)
         run = await runtime.start_run(s, org_id=org, actor_id=user, task_id=task.id)
@@ -421,7 +442,11 @@ async def test_tool_not_allowed_blocks_with_no_side_effect(
         assert run.blocked_reason == "tool_not_allowed"
         assert run.artifact_note_id is None  # NO artifact produced
         notes_after = (
-            await s.execute(select(func.count()).select_from(Note).where(Note.task_id == task.id))
+            await s.execute(
+                select(func.count())
+                .select_from(NoteTaskLink)
+                .where(NoteTaskLink.task_id == task.id)
+            )
         ).scalar_one()
         assert notes_after == notes_before  # NO side effect
         # The disallowed tool was step 1; the loop stopped there.
