@@ -67,7 +67,7 @@ async def run_once() -> int:
         return 0
     for sub_id, org_id, user_id in subs:
         try:
-            async with tenant_session(str(org_id), str(user_id)) as s:
+            async with tenant_session(str(org_id), str(user_id), actor_kind="system") as s:
                 res = await gcal_svc.sync_subscription(
                     s,
                     org_id=org_id,

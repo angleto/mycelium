@@ -98,7 +98,7 @@ async def run_once() -> int:
             owner = await _owner_of(org_id)
             if owner is None:
                 continue
-            async with tenant_session(str(org_id), str(owner)) as s:
+            async with tenant_session(str(org_id), str(owner), actor_kind="system") as s:
                 res = await dispatch_loop.tick(s, org_id=org_id, actor_id=owner)
             if res.created or res.dispatched or res.skipped or res.failed:
                 _log.info(

@@ -430,7 +430,9 @@ async def run_turn(
     last_answer = ""
 
     try:
-        async with tenant_session(str(org_id), str(user_id)) as session:
+        async with tenant_session(
+            str(org_id), str(user_id), actor_kind="human_telegram"
+        ) as session:
             for step in range(max_steps):
                 if budget > 0 and spent >= budget:
                     return last_answer or render(MessageCode.TELEGRAM_ASSISTANT_BUDGET)

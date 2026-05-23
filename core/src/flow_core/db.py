@@ -52,16 +52,33 @@ def get_sessionmaker() -> async_sessionmaker[AsyncSession]:
     return _sessionmaker
 
 
+# Closed set of actor kinds; mirrored at the DB level by the
+# ``ck_activity_log_actor_kind`` CHECK constraint (migration 0083).
+# Kept as a literal type rather than an Enum so it remains a plain
+# string at the GUC boundary.
+ActorKind = str  # human_direct | human_api | human_telegram | agent_run | mcp_token | system
+
+
 @asynccontextmanager
 async def tenant_session(
     org_id: str,
     user_id: str,
     project_id: str | None = None,
+    *,
+    actor_kind: ActorKind = "human_direct",
+    actor_subject_id: str | None = None,
 ) -> AsyncIterator[AsyncSession]:
     """A transactional session with the tenant GUCs set for RLS.
 
     The GUCs are ``set_config(..., is_local => true)``: they apply only
     to the current transaction, no leak across pool connections.
+
+    ``actor_kind`` and ``actor_subject_id`` propagate the **type of
+    caller** down to ``audit.log``, which reads them via
+    ``current_setting`` and persists them on ``activity_log``. The
+    default ``human_direct`` keeps every existing call site
+    backward-compatible (the test suite and the SPA's REST paths still
+    work without changes).
     """
     sm = get_sessionmaker()
     async with sm() as session:
@@ -70,21 +87,89 @@ async def tenant_session(
                 text(
                     "SELECT set_config('app.current_org', :org, true),"
                     "       set_config('app.current_user', :usr, true),"
-                    "       set_config('app.current_project', :prj, true)"
+                    "       set_config('app.current_project', :prj, true),"
+                    "       set_config('app.current_actor_kind', :ak, true),"
+                    "       set_config('app.current_actor_subject', :asubj, true)"
                 ),
-                {"org": org_id, "usr": user_id, "prj": project_id or ""},
+                {
+                    "org": org_id,
+                    "usr": user_id,
+                    "prj": project_id or "",
+                    "ak": actor_kind,
+                    "asubj": actor_subject_id or "",
+                },
             )
             yield session
 
 
 @asynccontextmanager
-async def admin_session() -> AsyncIterator[AsyncSession]:
+async def admin_session(*, actor_kind: ActorKind = "system") -> AsyncIterator[AsyncSession]:
     """A session with no tenant context. Bootstrap/migrations/tests only.
 
     Do not use in application paths: RLS stays active and, without
-    GUCs, sees no org-scoped rows (fail-closed).
+    GUCs, sees no org-scoped rows (fail-closed). ``actor_kind``
+    defaults to ``system`` so any audit emitted from this path is
+    attributed to a system actor; callers can override (e.g. a CLI
+    tool acting on behalf of a specific operator).
     """
     sm = get_sessionmaker()
     async with sm() as session:
         async with session.begin():
+            await session.execute(
+                text(
+                    "SELECT set_config('app.current_actor_kind', :ak, true),"
+                    "       set_config('app.current_actor_subject', '', true)"
+                ),
+                {"ak": actor_kind},
+            )
             yield session
+
+
+@asynccontextmanager
+async def with_actor(
+    session: AsyncSession,
+    *,
+    actor_kind: ActorKind,
+    actor_subject_id: str | None = None,
+) -> AsyncIterator[None]:
+    """Temporarily shift the GUC ``actor_kind`` + ``actor_subject``
+    within an already-open session.
+
+    Use case: ``services/agent_runtime.start_run`` opens nothing of
+    its own (the caller hands it a tenant session), yet the audit
+    rows it produces should read ``actor_kind='agent_run'`` rather
+    than the caller's kind. The contextmanager saves the current
+    GUC values, sets the new ones, and restores them on exit so the
+    rest of the caller's transaction is unaffected.
+
+    Because ``set_config(..., true)`` is transaction-local, the
+    restore-on-exit pattern is safe: we never leak across connections,
+    we only narrow a window inside one transaction.
+    """
+    saved = (
+        await session.execute(
+            text(
+                "SELECT current_setting('app.current_actor_kind', true),"
+                "       current_setting('app.current_actor_subject', true)"
+            )
+        )
+    ).one()
+    saved_kind = saved[0] or "human_direct"
+    saved_subj = saved[1] or ""
+    await session.execute(
+        text(
+            "SELECT set_config('app.current_actor_kind', :ak, true),"
+            "       set_config('app.current_actor_subject', :asubj, true)"
+        ),
+        {"ak": actor_kind, "asubj": actor_subject_id or ""},
+    )
+    try:
+        yield
+    finally:
+        await session.execute(
+            text(
+                "SELECT set_config('app.current_actor_kind', :ak, true),"
+                "       set_config('app.current_actor_subject', :asubj, true)"
+            ),
+            {"ak": saved_kind, "asubj": saved_subj},
+        )

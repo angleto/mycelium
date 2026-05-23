@@ -75,7 +75,7 @@ class _BearerAuthMiddleware(BaseHTTPMiddleware):
                 {"error": "Unknown / revoked / expired token"},
                 status_code=401,
             )
-        token = _PRINCIPAL.set((principal.user_id, principal.org_id))
+        token = _PRINCIPAL.set((principal.user_id, principal.org_id, principal.token_id))
         try:
             response: Response = await call_next(request)
             return response

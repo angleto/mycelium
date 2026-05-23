@@ -81,12 +81,17 @@ mcp: FastMCP = FastMCP("flow")
 
 # Per-request principal published by the HTTP transport's bearer
 # middleware (``server_http.py``). When set, ``_tenant`` reads
-# ``(user_id, org_id)`` from here and skips both the JWT decode and the
-# claims/positional org resolution — the bearer was already validated
-# at the HTTP boundary via ``authenticate_agent_token`` (migration
-# 0059) so the principal is trustworthy. ``None`` for the stdio
-# transport, which keeps using the legacy positional-args flow.
-_PRINCIPAL: ContextVar[tuple[uuid.UUID, uuid.UUID] | None] = ContextVar("_PRINCIPAL", default=None)
+# ``(user_id, org_id, token_id)`` from here and skips both the JWT
+# decode and the claims/positional org resolution — the bearer was
+# already validated at the HTTP boundary via
+# ``authenticate_agent_token`` (migration 0059) so the principal is
+# trustworthy. The third element is the ``agent_tokens.id`` of the
+# token used (always populated under HTTP; the bearer must be a
+# ``flow_at_…`` agent token). ``None`` for the stdio transport, which
+# keeps using the legacy positional-args flow with a plain JWT.
+_PRINCIPAL: ContextVar[tuple[uuid.UUID, uuid.UUID, uuid.UUID | None] | None] = ContextVar(
+    "_PRINCIPAL", default=None
+)
 
 
 @asynccontextmanager
@@ -97,17 +102,18 @@ async def _tenant(
 
     Two code paths:
     - HTTP transport: the bearer middleware in ``server_http`` populated
-      ``_PRINCIPAL`` with the authenticated ``(user_id, org_id)``; we
-      ignore the positional args (the client may send empty strings
-      since the bearer header IS the credential).
-    - stdio transport (legacy): the caller passes a session JWT or a
-      ``flow_at_…`` agent token plus ``org_id`` as positional args; we
-      decode the token (claims-provided org wins for agent tokens, the
-      arg is the fallback for plain JWTs).
+      ``_PRINCIPAL`` with the authenticated ``(user_id, org_id,
+      token_id)``; the agent-token nature lets us tag the audit log
+      as ``actor_kind='mcp_token'`` with ``actor_subject_id`` = token id.
+    - stdio transport (legacy): the caller passes a session JWT (a
+      human's bearer used outside the SPA) plus ``org_id`` as
+      positional args; tagged ``actor_kind='human_api'``.
     """
     principal = _PRINCIPAL.get()
     if principal is not None:
-        user_id, org = principal[0], principal[1]
+        user_id, org, token_id = principal
+        actor_kind = "mcp_token"
+        actor_subject = str(token_id) if token_id is not None else None
     else:
         claims = await decode_token_async(token)
         sub = claims.get("sub")
@@ -119,7 +125,14 @@ async def _tenant(
             org = uuid.UUID(token_org)
         else:
             org = uuid.UUID(org_id)
-    async with tenant_session(str(org), str(user_id)) as session:
+        actor_kind = "human_api"
+        actor_subject = None
+    async with tenant_session(
+        str(org),
+        str(user_id),
+        actor_kind=actor_kind,
+        actor_subject_id=actor_subject,
+    ) as session:
         await get_role(session, org, user_id)  # raises if not a member
         yield session, org, user_id
 

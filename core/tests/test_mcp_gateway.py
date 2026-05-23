@@ -98,7 +98,7 @@ async def test_describe_unknown_tool_is_soft_error() -> None:
 
 async def test_execute_dispatches_with_injected_principal() -> None:
     user_id, org_id = await _signup_principal()
-    tok = _PRINCIPAL.set((user_id, org_id))
+    tok = _PRINCIPAL.set((user_id, org_id, None))
     try:
         # No token/org_id passed: execute_tool injects them from the
         # principal, exactly as the HTTP bearer path does.

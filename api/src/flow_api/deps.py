@@ -169,7 +169,10 @@ async def tenant_ctx(
     org_id = uuid.UUID(x_workspace_id)
     project_id = uuid.UUID(x_project_id) if x_project_id else None
     async with tenant_session(
-        str(org_id), str(user.id), str(project_id) if project_id else None
+        str(org_id),
+        str(user.id),
+        str(project_id) if project_id else None,
+        actor_kind="human_api",
     ) as session:
         try:
             membership: Role | None = await get_role(session, org_id, user.id)

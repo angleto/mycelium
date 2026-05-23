@@ -51,6 +51,7 @@ from decimal import Decimal
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from flow_core import db as db_ctx
 from flow_core.ai_providers import LLMProvider, get_llm
 from flow_core.errors import DomainError, NotFoundError
 from flow_core.i18n import MessageCode
@@ -390,36 +391,43 @@ async def start_run(
     session.add(run)
     await session.flush()
 
-    await _drive(
-        session,
-        org_id=org_id,
-        actor_id=actor_id,
-        run=run,
-        task=task,
-        executor=executor,
-        provider=provider or get_llm(),
-    )
-    # The run has begun and its context was built from the task's
-    # PENDING incoming handoffs (the P4 LLM-recipient delivery path):
-    # mark them consumed so a later run does not re-inject them
-    # (idempotent -- a second start finds none). Non-fatal: a
-    # bookkeeping failure here is logged (audit boundary, like
-    # coordination.on_task_completed) and must not undo a finished run.
-    try:
-        await coordination_svc.mark_incoming_consumed(
-            session, org_id=org_id, actor_id=actor_id, task_id=task_id
-        )
-    except Exception as exc:  # coordination boundary: never fail the run
-        await audit.log(
+    # From this point on, every audit row produced inside ``_drive``,
+    # the post-drive bookkeeping, and the run-level audit must attribute
+    # the change to the agent run as actor, not to the human caller
+    # who triggered the dispatch. ``with_actor`` shifts the GUC for
+    # the rest of this transaction and restores it on exit.
+    async with db_ctx.with_actor(session, actor_kind="agent_run", actor_subject_id=str(run.id)):
+        await _drive(
             session,
             org_id=org_id,
             actor_id=actor_id,
-            entity="task_handoff",
-            entity_id=task_id,
-            action="consume_failed",
-            diff={"error": str(exc)[:200]},
+            run=run,
+            task=task,
+            executor=executor,
+            provider=provider or get_llm(),
         )
-    await _audit_run(session, org_id=org_id, actor_id=actor_id, run=run)
+        # The run has begun and its context was built from the task's
+        # PENDING incoming handoffs (the P4 LLM-recipient delivery
+        # path): mark them consumed so a later run does not re-inject
+        # them (idempotent -- a second start finds none). Non-fatal: a
+        # bookkeeping failure here is logged (audit boundary, like
+        # coordination.on_task_completed) and must not undo a
+        # finished run.
+        try:
+            await coordination_svc.mark_incoming_consumed(
+                session, org_id=org_id, actor_id=actor_id, task_id=task_id
+            )
+        except Exception as exc:  # coordination boundary
+            await audit.log(
+                session,
+                org_id=org_id,
+                actor_id=actor_id,
+                entity="task_handoff",
+                entity_id=task_id,
+                action="consume_failed",
+                diff={"error": str(exc)[:200]},
+            )
+        await _audit_run(session, org_id=org_id, actor_id=actor_id, run=run)
     return run
 
 
