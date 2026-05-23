@@ -626,6 +626,16 @@ export const it: Catalog = {
     rateOnClient: 'Tariffa e fatturabilita si impostano sul cliente.',
     inherit: 'eredita da emittente',
     languageDefault: 'predefinita (italiano)',
+    startingNumber: 'Numero da cui partire (anno corrente)',
+    startingNumberHint:
+      'Sezionale "{{series}}" anno {{year}}: imposta il numero della prossima fattura. Utile se hai già emesso fatture per questo cliente su un altro sistema (es. imposta 2 se hai già emesso la #1 altrove).',
+    startingNumberFloor:
+      'Hai già emesso fatture in Flow sotto questo sezionale: il minimo accettato è {{n}}.',
+    startingNumberInvalid: 'Numero non valido.',
+    startingNumberNoSeries:
+      'Imposta prima il sezionale del cliente (verrà generato automaticamente alla prima fattura).',
+    startingNumberNoIssuer:
+      'Crea prima un profilo emittente in Impostazioni.',
     f: {
       ragione_sociale: 'Ragione sociale',
       codice_fiscale: 'Codice fiscale',
@@ -1183,6 +1193,8 @@ export const it: Catalog = {
     countersFloor: 'Min. consentito (max già emesso)',
     countersSave: 'Aggiorna',
     countersAdd: 'Nuovo contatore (es. import da altro sistema)',
+    seriesReadOnlyHint:
+      'Il sezionale è una proprietà del cliente. Modificalo nella scheda cliente.',
     taxable: 'Imponibile',
     vatTotal: 'IVA',
     total: 'Totale',

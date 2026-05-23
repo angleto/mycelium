@@ -656,6 +656,10 @@ export function ClientsProjectsRoute() {
                     </form>
                   )}
 
+                  {editC === c.id && (
+                    <ClientStartingNumber client={c} />
+                  )}
+
                   {open && (
                     <div className="cpchildren">
                       {projs.length === 0 ? (
@@ -677,5 +681,130 @@ export function ClientsProjectsRoute() {
         )}
       </section>
     </>
+  )
+}
+
+// Per-client starting-number widget on the client form. Sets the
+// (default_issuer, client.invoice_series, current_year) counter so the
+// next invoice for this client gets the chosen N (sets last_number =
+// N - 1). Used when migrating from another system: e.g. you already
+// emitted #1 elsewhere, you want Flow to start from #2.
+//
+// Constraints surfaced to the user:
+// - The client must have an invoice_series (sezionale) and a default
+//   issuer profile must exist. Otherwise the widget tells the user to
+//   set those first instead of silently failing.
+// - The backend rejects any N below max(invoices.number) already
+//   emitted under the same key; the resulting 409 is surfaced.
+type CounterRow = components['schemas']['InvoiceCounterOut']
+
+function ClientStartingNumber({ client }: { client: Client }) {
+  const { t } = useTranslation()
+  const [issuerId, setIssuerId] = useState<string | null>(null)
+  const [counter, setCounter] = useState<CounterRow | null>(null)
+  const [next, setNext] = useState<string>('')
+  const [err, setErr] = useState<string | null>(null)
+  const [msg, setMsg] = useState<string | null>(null)
+  const year = new Date().getFullYear()
+  const series = client.invoice_series ?? null
+
+  useEffect(() => {
+    let active = true
+    void (async () => {
+      const h = workspaceHeader()
+      const { data } = await api.GET('/issuer-profiles', {
+        params: { header: h },
+      })
+      if (!active) return
+      const def = data?.find((p) => p.is_default) ?? data?.[0]
+      const iid = def?.id ?? null
+      setIssuerId(iid)
+      if (iid && series) {
+        const cnt = await api.GET('/issuer-profiles/{profile_id}/counters', {
+          params: { header: h, path: { profile_id: iid } },
+        })
+        if (!active) return
+        const row =
+          cnt.data?.find((r) => r.series === series && r.year === year) ??
+          null
+        setCounter(row)
+        // Pre-fill with "next allocation": last_number + 1, defaulting
+        // to 1 when no counter exists yet.
+        setNext(String((row?.last_number ?? 0) + 1))
+      }
+    })()
+    return () => {
+      active = false
+    }
+  }, [client.id, series, year])
+
+  if (!series) {
+    return (
+      <p className="hint">
+        {t('cp.startingNumberNoSeries')}
+      </p>
+    )
+  }
+  if (!issuerId) {
+    return (
+      <p className="hint">
+        {t('cp.startingNumberNoIssuer')}
+      </p>
+    )
+  }
+
+  async function save() {
+    setErr(null)
+    setMsg(null)
+    const n = Number(next)
+    if (!Number.isFinite(n) || n < 1) {
+      setErr(t('cp.startingNumberInvalid'))
+      return
+    }
+    const { error, data } = await api.PUT(
+      '/issuer-profiles/{profile_id}/counters/{series}/{year}',
+      {
+        params: {
+          header: workspaceHeader(),
+          // issuerId and series guaranteed non-null by the guards above.
+          path: { profile_id: issuerId!, series: series!, year },
+        },
+        // last_number = N - 1 so the next allocated number is N.
+        body: { last_number: n - 1 },
+      },
+    )
+    if (error) {
+      setErr(errMessage(error))
+      return
+    }
+    if (data) setCounter(data)
+    setMsg(t('cp.saved'))
+  }
+
+  return (
+    <div className="cpform" style={{ marginTop: '0.5rem' }}>
+      <p className="hint">
+        {t('cp.startingNumberHint', { series, year })}
+      </p>
+      {err && <p className="err">{err}</p>}
+      {msg && <p className="ok">{msg}</p>}
+      <label>
+        {t('cp.startingNumber')}
+        <input
+          type="number"
+          min={Math.max(1, (counter?.max_emitted ?? 0) + 1)}
+          value={next}
+          onChange={(e) => setNext(e.target.value)}
+        />
+      </label>
+      {counter && counter.max_emitted > 0 && (
+        <p className="hint">
+          {t('cp.startingNumberFloor', { n: counter.max_emitted + 1 })}
+        </p>
+      )}
+      <button type="button" className="btn--sm" onClick={() => void save()}>
+        {t('cp.save')}
+      </button>
+    </div>
   )
 }

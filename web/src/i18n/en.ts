@@ -626,6 +626,16 @@ export const en = {
     rateOnClient: 'Rate & billable are set on the client.',
     inherit: 'inherit from issuer',
     languageDefault: 'default (Italian)',
+    startingNumber: 'Starting number (current year)',
+    startingNumberHint:
+      'Series "{{series}}" year {{year}}: set the number of the next invoice. Use it when you have already emitted invoices for this client elsewhere (e.g. set 2 if #1 was emitted on another system).',
+    startingNumberFloor:
+      'You have already emitted invoices in Flow under this series: the minimum accepted is {{n}}.',
+    startingNumberInvalid: 'Invalid number.',
+    startingNumberNoSeries:
+      "Set the client's sezionale first (it is auto-generated on the first invoice).",
+    startingNumberNoIssuer:
+      'Create an issuer profile in Settings first.',
     f: {
       ragione_sociale: 'Legal name',
       codice_fiscale: 'Tax code',
@@ -1182,6 +1192,8 @@ export const en = {
     countersFloor: 'Floor (highest already emitted)',
     countersSave: 'Update',
     countersAdd: 'New counter (e.g. import from another system)',
+    seriesReadOnlyHint:
+      "The sezionale is a client property. Edit it on the client's card.",
     taxable: 'Taxable',
     vatTotal: 'VAT',
     total: 'Total',

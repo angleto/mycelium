@@ -10,7 +10,12 @@ import type { components } from '../api/schema'
 type Invoice = components['schemas']['InvoiceOut']
 type Line = components['schemas']['InvoiceLineOut']
 type Profile = components['schemas']['IssuerProfileOut']
-type Tag = components['schemas']['TagOut']
+// /clients returns full ClientOut (with tariffa + default payment fields);
+// we use those for (a) the addSelectedLines rate (NEVER recompute it as
+// amount/hours, that picks up the server-side .quantize() rounding) and
+// (b) showing the *effective inherited* payment defaults in the editor
+// dropdowns instead of a generic "inherit" placeholder.
+type Client = components['schemas']['ClientOut']
 type ReportRow = components['schemas']['ReportRowOut']
 type Preview = components['schemas']['InvoicePreviewOut']
 // Granularity of the "bill from tracked time" report. 'task' bills one
@@ -83,7 +88,7 @@ export function InvoicesRoute() {
   const activeId = session?.workspaceId
 
   const [profiles, setProfiles] = useState<Profile[]>([])
-  const [clients, setClients] = useState<Tag[]>([])
+  const [clients, setClients] = useState<Client[]>([])
   const [list, setList] = useState<Invoice[]>([])
   const [err, setErr] = useState<string | null>(null)
   const [msg, setMsg] = useState<string | null>(null)
@@ -145,7 +150,7 @@ export function InvoicesRoute() {
     const h = workspaceHeader()
     const [pr, cl, iv] = await Promise.all([
       api.GET('/issuer-profiles', { params: { header: h } }),
-      api.GET('/tags', { params: { header: h, query: { kind: 'client' } } }),
+      api.GET('/clients', { params: { header: h } }),
       api.GET('/invoices', { params: { header: h } }),
     ])
     if (pr.data) setProfiles(pr.data)
@@ -159,7 +164,7 @@ export function InvoicesRoute() {
       const h = workspaceHeader()
       const [pr, cl, iv] = await Promise.all([
         api.GET('/issuer-profiles', { params: { header: h } }),
-        api.GET('/tags', { params: { header: h, query: { kind: 'client' } } }),
+        api.GET('/clients', { params: { header: h } }),
         api.GET('/invoices', { params: { header: h } }),
       ])
       if (!active) return
@@ -372,11 +377,36 @@ export function InvoicesRoute() {
     // Forfettario invoices bill at 0% + Natura N2.2 (same default as
     // manual lines via blankLine); ordinary regimes default to 22%.
     const forfettario = !!preview?.is_forfettario
+    // The client's hourly rate is the authoritative source for the
+    // invoice line unit_price. The previous code recomputed it as
+    // ``amount / hours`` — that rounds twice (the server already
+    // quantizes ``amount`` to 2 decimals, and hours rounded to 2
+    // decimals lose up to ~36 seconds): with a 62.50 €/h rate and a
+    // 3599-second entry you got 62.48 instead of 62.50. We now take
+    // the rate verbatim from the client and use hours at minute
+    // precision (4 decimals = 0.36 s).
+    const client = clients.find((c) => c.id === dClient)
+    const clientRate =
+      client?.tariffa != null ? Number(client.tariffa) : null
     const picked = triRows.filter((r) => r.key && triSel.has(r.key))
     for (const r of picked) {
-      const hours = Math.round((r.billable_seconds / 3600) * 100) / 100
+      // Time is rounded to the nearest minute before billing: the timer
+      // has second-level resolution, so a "1 hour" entry can come out
+      // as 3599s and produce an amount of 62.4826 → 62.48 €, which
+      // surfaces as ugly cents on the invoice. Rounding up/down to the
+      // nearest minute gives clean amounts (3599s → 3600s → 1.0000h)
+      // and is the standard convention in professional time trackers.
+      const seconds = Math.round(r.billable_seconds / 60) * 60
+      const hours = Math.round((seconds / 3600) * 10000) / 10000
       if (hours <= 0) continue
-      const rate = Math.round((Number(r.amount) / hours) * 100) / 100
+      // Rate is the client's hourly rate, verbatim. It is NEVER
+      // recomputed as amount/hours (that propagates the quantize
+      // rounding of the server-side amount, and contradicts the user
+      // rule "rate is fixed, what I type is what I bill"). When the
+      // client has no tariffa we leave unit_price at 0 so the user
+      // notices and sets it on the line manually — a derived rate from
+      // a misconfigured client would silently invent a wrong value.
+      const rate = clientRate ?? 0
       const { error } = await api.POST('/invoices/{invoice_id}/lines', {
         params: { header: workspaceHeader(), path: { invoice_id: sel.id } },
         body: {
@@ -726,12 +756,24 @@ export function InvoicesRoute() {
             </label>
             <label>
               {t('invoices.series')}
+              {/* The sezionale is a CLIENT-level property (the client's
+                  per-client invoice series, persisted on the client
+                  profile and shared by every invoice for that client).
+                  Editing it here would only affect this single document
+                  AND would confuse the user into thinking they're
+                  editing the client; we expose it as read-only with a
+                  hint pointing to the client config. To start the
+                  numbering at N for a given client, use the per-client
+                  starting-number input on the client form. */}
               <input
                 value={dSeries}
-                disabled={!isDraft}
-                style={{ width: '3rem' }}
-                onChange={(e) => dField(setDSeries)(e.target.value)}
+                readOnly
+                style={{ width: '5rem' }}
+                title={t('invoices.seriesReadOnlyHint')}
               />
+              <span className="hint">
+                {t('invoices.seriesReadOnlyHint')}
+              </span>
             </label>
           </div>
 
@@ -1064,10 +1106,37 @@ export function InvoicesRoute() {
               />
             </label>
           </div>
-          {/* Per-document overrides of payment metadata. Blank means
-              "inherit from client (then issuer, then TP02 / MP05 / no
-              terms)". Terms-days auto-materializes due-date when the
-              latter is empty (computed server-side at save). */}
+          {/* Per-document overrides of payment metadata. The "empty"
+              option shows the effective resolved value (invoice >
+              client > issuer > TP02/MP05) so the user always sees what
+              will actually be transmitted instead of a generic
+              "inherit" label. Terms-days auto-materializes due-date
+              when the latter is empty (computed server-side at save). */}
+          {(() => {
+            // Resolved defaults if the user leaves the override blank.
+            const c = clients.find((x) => x.id === dClient)
+            const isr = profiles.find((p) => p.id === dIssuer)
+            const effCondizioni =
+              c?.default_condizioni_pagamento ||
+              isr?.default_condizioni_pagamento ||
+              'TP02'
+            const effModalita =
+              c?.default_modalita_pagamento ||
+              isr?.default_modalita_pagamento ||
+              'MP05'
+            const effTerms =
+              c?.default_payment_terms_days ??
+              isr?.default_payment_terms_days ??
+              null
+            const labelCond = (code: string) => {
+              const row = INV_CONDIZIONI.find(([k]) => k === code)
+              return row ? `${row[0]} - ${row[1]}` : code
+            }
+            const labelMod = (code: string) => {
+              const row = INV_MODALITA.find(([k]) => k === code)
+              return row ? `${row[0]} - ${row[1]}` : code
+            }
+            return (
           <div className="row">
             <label>
               {t('invoices.condizioni')}
@@ -1076,7 +1145,7 @@ export function InvoicesRoute() {
                 disabled={!isDraft}
                 onChange={(e) => dField(setDCondizioni)(e.target.value)}
               >
-                <option value="">{t('invoices.inherit')}</option>
+                <option value="">{labelCond(effCondizioni)}</option>
                 {INV_CONDIZIONI.map(([code, lbl]) => (
                   <option key={code} value={code}>
                     {code} - {lbl}
@@ -1091,7 +1160,7 @@ export function InvoicesRoute() {
                 disabled={!isDraft}
                 onChange={(e) => dField(setDModalita)(e.target.value)}
               >
-                <option value="">{t('invoices.inherit')}</option>
+                <option value="">{labelMod(effModalita)}</option>
                 {INV_MODALITA.map(([code, lbl]) => (
                   <option key={code} value={code}>
                     {code} - {lbl}
@@ -1106,11 +1175,16 @@ export function InvoicesRoute() {
                 min={0}
                 max={365}
                 value={dTermsDays}
+                placeholder={
+                  effTerms != null ? String(effTerms) : t('invoices.inherit')
+                }
                 disabled={!isDraft}
                 onChange={(e) => dField(setDTermsDays)(e.target.value)}
               />
             </label>
           </div>
+            )
+          })()}
           <label>
             {t('invoices.notes')}
             <textarea
