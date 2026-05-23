@@ -783,26 +783,20 @@ export function InvoicesRoute() {
                 per-client sezionale + the (issuer, series, year)
                 counter underneath. To change them, delete this draft
                 and create a fresh one (the choice lives on the "new
-                invoice" form above the list). */}
+                invoice" form above the list). We render them as plain
+                read-only text — a disabled dropdown is just visual
+                clutter for a single immutable value. */}
             <label>
               {t('invoices.issuer')}
-              <select value={dIssuer} disabled>
-                {profiles.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.label}
-                  </option>
-                ))}
-              </select>
+              <span className="ro-value">
+                {profiles.find((p) => p.id === dIssuer)?.label ?? '—'}
+              </span>
             </label>
             <label>
               {t('invoices.client')}
-              <select value={dClient} disabled>
-                {clients.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
-              </select>
+              <span className="ro-value">
+                {clients.find((c) => c.id === dClient)?.name ?? '—'}
+              </span>
             </label>
             {/* Document number (resolved). preview.number formats as
                 ``<sezionale>-<counter>`` (e.g. ``CYLOCK-2``); the

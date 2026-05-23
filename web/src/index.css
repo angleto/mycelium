@@ -527,6 +527,19 @@ label > select,
   min-width: 0;
 }
 
+/* A read-only "value" rendered as plain text inside a form label,
+   sized to line up vertically with the adjacent inputs/selects. Used
+   for fields that are immutable on the current entity (e.g. invoice
+   Issuer + Client once the draft exists). A disabled <select>/<input>
+   would carry pointless chrome and an inactive caret. */
+.ro-value {
+  display: inline-block;
+  padding: 0.46rem 0;
+  font-weight: 600;
+  color: var(--fg);
+  word-break: break-word;
+}
+
 button,
 .btn {
   font: inherit;
