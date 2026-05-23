@@ -455,11 +455,20 @@ export function AppShell() {
           <Logo /> {t('app.title')}
         </div>
         <div className="topbar__actions">
-          <RunningIndicator />
+          {!isMobile && <RunningIndicator />}
           <PomodoroTimer />
           {!isMobile && utilities}
         </div>
       </header>
+      {/* Mobile: the running indicator lives below the topbar on its
+          own sticky row so the topbar stays compact for the pomodoro.
+          When no timer is running the component returns null and the
+          wrapper collapses via :empty (CSS), occupying no space. */}
+      {isMobile && (
+        <div className="topbar__row2">
+          <RunningIndicator />
+        </div>
+      )}
       {isMobile && sidebarOpen && (
         <div
           className="sidebar__backdrop"

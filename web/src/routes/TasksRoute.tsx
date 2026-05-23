@@ -17,19 +17,27 @@ import type { components } from '../api/schema'
 type View = 'kanban' | 'list'
 const VIEW_KEY = 'flow.tasks.view'
 
-// Default view per viewport: desktop favours the kanban board, mobile
-// favours the dense list (small screens can't fit multiple columns
-// side-by-side legibly). Once the user picks a view it's persisted, so
-// subsequent visits respect their choice across viewports.
+// Default view per viewport. Mobile (≤768px) ALWAYS starts on the
+// dense list: a single kanban column on a phone is just a vertical
+// scroll with extra chrome — the list does the same in less space. The
+// user can still toggle to kanban for the current visit via the
+// view-tabs, but the choice is not persisted on mobile (see save
+// effect below) so a future visit comes back to list. Desktop respects
+// the saved preference and falls back to kanban.
+function isMobileViewport(): boolean {
+  return (
+    typeof window !== 'undefined' &&
+    !!window.matchMedia &&
+    window.matchMedia('(max-width: 768px)').matches
+  )
+}
 function defaultView(): View {
+  if (isMobileViewport()) return 'list'
   try {
     const saved = localStorage.getItem(VIEW_KEY)
     if (saved === 'kanban' || saved === 'list') return saved
   } catch {
     /* private mode / quota: fall through to viewport default */
-  }
-  if (typeof window !== 'undefined' && window.matchMedia) {
-    return window.matchMedia('(max-width: 768px)').matches ? 'list' : 'kanban'
   }
   return 'kanban'
 }
@@ -91,6 +99,11 @@ export function TasksRoute() {
   const [hideTerminal, setHideTerminal] = useState(true)
   const [view, setView] = useState<View>(defaultView)
   useEffect(() => {
+    // Mobile toggling is ephemeral by design (see defaultView): saving
+    // a mobile kanban excursion to localStorage would override the
+    // user's desktop default the next time they open the app on a
+    // laptop, which is not what they asked for.
+    if (isMobileViewport()) return
     try {
       localStorage.setItem(VIEW_KEY, view)
     } catch {

@@ -365,6 +365,31 @@ a:hover {
   textarea {
     font-size: 16px;
   }
+
+  /* Mobile second-row bar under the topbar: hosts the task running
+     indicator on its own line so the topbar can stay compact for the
+     pomodoro. Sticky just below the topbar; when no timer is running
+     RunningIndicator returns null and ``:empty`` collapses the bar to
+     zero height (no extra reserved space). */
+  .topbar__row2 {
+    position: sticky;
+    top: var(--topbar-h);
+    z-index: 19;
+    display: flex;
+    justify-content: center;
+    padding: 0.3rem 0.65rem;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+  }
+  .topbar__row2:empty {
+    display: none;
+  }
+  .topbar__row2 .running {
+    max-width: 100%;
+  }
+  .topbar__row2 .running__title {
+    max-width: 12rem;
+  }
 }
 
 /* Drawer scrim: dims and intercepts taps on the page behind the open
@@ -2587,8 +2612,30 @@ button.btn--danger:hover {
 }
 @media (max-width: 640px) {
   .pomodoro__bar { width: 2.4rem; }
-  .pomodoro__pop {
-    width: min(20rem, calc(100vw - 1rem));
-    right: -0.2rem;
-  }
+}
+/* On phones the popover would either spill off-screen on the right or
+   pin the user against a corner. ``.pomodoro--modal`` (set by the
+   trigger when below POMODORO_MODAL_QUERY) re-positions the existing
+   popover as a centred fixed dialog with its own backdrop. The
+   anchored markup is unchanged: only the placement differs.
+   Threshold kept slightly above the 640 small-phone breakpoint so
+   landscape phones also get the modal. */
+.pomodoro__backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 999;
+  background: rgba(8, 9, 13, 0.45);
+  border: 0;
+  cursor: pointer;
+}
+.pomodoro--modal .pomodoro__pop {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  right: auto;
+  transform: translate(-50%, -50%);
+  width: min(22rem, calc(100vw - 1.5rem));
+  max-height: min(85vh, 36rem);
+  overflow-y: auto;
+  z-index: 1000;
 }

@@ -1,6 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { formatMmSs, usePomodoro, type Phase } from '../lib/pomodoro'
+import { useMediaQuery } from '../lib/useMediaQuery'
+
+// Below this width the popover would either spill off-screen or pin
+// the user against a corner; switch to a centred fixed modal instead.
+// Larger than the 640 small-phone breakpoint so phones in landscape
+// (~700px wide) also get the modal — anything narrow enough to make
+// the anchored popover feel cramped goes through here.
+const POMODORO_MODAL_QUERY = '(max-width: 720px)'
 
 const PHASE_LABEL_KEY: Record<Phase, string> = {
   idle: 'pomodoro.idle',
@@ -24,6 +32,9 @@ export function PomodoroTimer() {
   const p = usePomodoro()
   const [open, setOpen] = useState(false)
   const wrapRef = useRef<HTMLDivElement | null>(null)
+  // Below the phone width the popover renders as a centred modal with
+  // a backdrop instead of an anchored dropdown; see POMODORO_MODAL_QUERY.
+  const asModal = useMediaQuery(POMODORO_MODAL_QUERY)
 
   // Close popover on outside click / Escape.
   useEffect(() => {
@@ -51,7 +62,10 @@ export function PomodoroTimer() {
   const progressPct = Math.round(p.progress * 100)
 
   return (
-    <div className="pomodoro" ref={wrapRef}>
+    <div
+      className={'pomodoro' + (open && asModal ? ' pomodoro--modal' : '')}
+      ref={wrapRef}
+    >
       <button
         type="button"
         className={
@@ -83,6 +97,13 @@ export function PomodoroTimer() {
           <span className="pomodoro__count">{p.session.completedFocusToday}</span>
         )}
       </button>
+      {open && asModal && (
+        <div
+          className="pomodoro__backdrop"
+          aria-hidden="true"
+          onClick={() => setOpen(false)}
+        />
+      )}
       {open && <PomodoroPopover phaseLabel={phaseLabel} p={p} />}
     </div>
   )
