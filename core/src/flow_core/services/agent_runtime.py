@@ -66,6 +66,7 @@ from flow_core.models.task import ExecKind, Task
 from flow_core.services import audit, billing
 from flow_core.services import coordination as coordination_svc
 from flow_core.services import memory as memory_svc
+from flow_core.services import note_links as note_links_svc
 from flow_core.services import notes as notes_svc
 from flow_core.services import tasks as tasks_svc
 from flow_core.services.rbac import require_role
@@ -147,7 +148,9 @@ async def _assigned_executor(session: AsyncSession, *, task_id: uuid.UUID) -> Ex
     ).scalar_one_or_none()
 
 
-async def _build_context(session: AsyncSession, *, task: Task) -> list[tuple[str, str]]:
+async def _build_context(
+    session: AsyncSession, *, org_id: uuid.UUID, task: Task
+) -> list[tuple[str, str]]:
     """Small, deterministic context: the task title/description, the
     titles/bodies of the notes already linked to it, and (docs/adr/0025
     P4 -- the LLM-recipient handoff delivery path) the PENDING incoming
@@ -167,16 +170,23 @@ async def _build_context(session: AsyncSession, *, task: Task) -> list[tuple[str
         if note is not None:
             body = (note.transcript or "").strip()[:500]
             lines.append(f"Handoff artifact[{note.title or 'untitled'}]: {body}")
-    linked = list(
-        (
-            await session.execute(
-                select(Note)
-                .where(Note.task_id == task.id, Note.deleted_at.is_(None))
-                .order_by(Note.created_at, Note.id)
+    # docs/adr/0029 P3: notes linked to the task come through the
+    # typed link (any kind) instead of the legacy ``Note.task_id``.
+    linked_ids = await note_links_svc.notes_for_task(session, org_id=org_id, task_id=task.id)
+    linked = (
+        list(
+            (
+                await session.execute(
+                    select(Note)
+                    .where(Note.id.in_(linked_ids), Note.deleted_at.is_(None))
+                    .order_by(Note.created_at, Note.id)
+                )
             )
+            .scalars()
+            .all()
         )
-        .scalars()
-        .all()
+        if linked_ids
+        else []
     )
     for n in linked:
         body = (n.transcript or "").strip()
@@ -207,16 +217,21 @@ async def _run_tool(
     if tool == "read_task":
         return f"task:{task.title}|state:{task.state_id}"
     if tool == "read_task_notes":
-        linked = list(
-            (
-                await session.execute(
-                    select(Note)
-                    .where(Note.task_id == task.id, Note.deleted_at.is_(None))
-                    .order_by(Note.created_at, Note.id)
+        linked_ids = await note_links_svc.notes_for_task(session, org_id=org_id, task_id=task.id)
+        linked = (
+            list(
+                (
+                    await session.execute(
+                        select(Note)
+                        .where(Note.id.in_(linked_ids), Note.deleted_at.is_(None))
+                        .order_by(Note.created_at, Note.id)
+                    )
                 )
+                .scalars()
+                .all()
             )
-            .scalars()
-            .all()
+            if linked_ids
+            else []
         )
         return f"notes:{len(linked)}"
     if tool == "recall_memory":
@@ -457,7 +472,7 @@ async def _drive(
     state (succeeded|failed|cancelled|blocked). Never raises for a
     provider error (captured as status=failed) or a guardrail stop."""
     budget: Decimal | None = executor.credit_budget
-    history: list[tuple[str, str]] = await _build_context(session, task=task)
+    history: list[tuple[str, str]] = await _build_context(session, org_id=org_id, task=task)
     system = (
         "You are a Flow work agent executing a single assigned task. "
         'Respond with a JSON object {"tool": name, "args": {...}}. '

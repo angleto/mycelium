@@ -321,12 +321,11 @@ async def test_tick_resurrects_dormant_on_recent_touch() -> None:
 # ---------------------------------------------------------------------------
 
 
-async def test_legacy_task_id_does_not_block_new_links() -> None:
-    """Notes created via the legacy ``task_id`` FK keep working
-    alongside the typed link table. We don't rely on the backfill
-    here (this test workspace is fresh), but we verify the two paths
-    coexist: a note with ``task_id`` set can ALSO have explicit
-    ``note_task_link`` rows of different kinds."""
+async def test_create_note_for_task_writes_artifact_link() -> None:
+    """docs/adr/0029 P3: ``create_note_for_task`` now writes a typed
+    ``artifact`` link instead of setting the legacy ``note.task_id``
+    column (dropped in migration 0089). The artifact link is the
+    canonical Proposal A surface."""
     org, user = await _make_workspace()
     async with tenant_session(str(org), str(user)) as s:
         task = await tasks_svc.create_task(
@@ -336,24 +335,26 @@ async def test_legacy_task_id_does_not_block_new_links() -> None:
             title="legacy task",
             estimate_effort_h=Decimal(1),
         )
-        # Use the legacy path: ``create_note_for_task`` writes
-        # ``note.task_id``.
         note = await notes_svc.create_note_for_task(
             s,
             org_id=org,
             actor_id=user,
             task_id=task.id,
-            text="legacy work note",
+            text="work note",
         )
-        # Explicit typed link, different kind from artifact, must
-        # coexist.
-        link = await note_links.start_task_on_note(
+        # Explicit typed link of a *different* kind must coexist with
+        # the artifact link auto-written by create_note_for_task.
+        sub = await note_links.start_task_on_note(
             s, org_id=org, actor_id=user, task_id=task.id, note_id=note.id
         )
-        assert link.kind == "subject"
-        # And the legacy task_id is still set on the note.
-        reloaded = (await s.execute(select(Note).where(Note.id == note.id))).scalar_one()
-        assert reloaded.task_id == task.id
+        assert sub.kind == "subject"
+        links = await note_links.list_note_task_links(s, org_id=org, note_id=note.id)
+        kinds = {lk.kind for lk in links}
+        assert {"artifact", "subject"}.issubset(kinds)
+        # And primary_task_id_for_note resolves to this task via the
+        # priority order.
+        pid = await note_links.primary_task_id_for_note(s, org_id=org, note_id=note.id)
+        assert pid == task.id
 
 
 # ---------------------------------------------------------------------------

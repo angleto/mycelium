@@ -43,6 +43,7 @@ from flow_core.models.task import Task
 from flow_core.models.task_tag import TaskTag
 from flow_core.services import audit, billing, lifecycle, taxonomy
 from flow_core.services import memory as memory_svc
+from flow_core.services import note_links as note_links_svc
 from flow_core.services.rbac import require_role
 
 
@@ -299,6 +300,9 @@ async def update_note(
         values["transcript"] = text
     eff_title = title if (title and title.strip()) else _derive_title(text)
     values["title"] = eff_title
+    # docs/adr/0029 P3: ``note.task_id`` is gone. The same setter API
+    # now writes (or clears) the ``artifact`` typed link.
+    pending_task_link: tuple[bool, uuid.UUID | None] = (False, None)
     if not isinstance(task_id, _Unset):
         if task_id is not None:
             exists = (
@@ -308,14 +312,14 @@ async def update_note(
             ).scalar_one_or_none()
             if exists is None:
                 raise NotFoundError(MessageCode.TASK_NOT_FOUND)
-        values["task_id"] = task_id
+        pending_task_link = (True, task_id)
     if not isinstance(audio_ref, _Unset):
         # Voice-note capture (Telegram bot / PWA recorder) sets
         # ``audio_ref`` after the row exists -- the attachment id is
         # known only after the upload completes. Same sentinel semantic
         # as task_id: omit = no change, ``None`` = clear.
         values["audio_ref"] = audio_ref
-    return await _note_set(
+    new_version = await _note_set(
         session,
         org_id=org_id,
         actor_id=actor_id,
@@ -324,6 +328,21 @@ async def update_note(
         values=values,
         action="update",
     )
+    if pending_task_link[0]:
+        new_task_id = pending_task_link[1]
+        if new_task_id is None:
+            await note_links_svc.clear_artifact_links(
+                session, org_id=org_id, actor_id=actor_id, note_id=note_id
+            )
+        else:
+            await note_links_svc.ensure_artifact_link(
+                session,
+                org_id=org_id,
+                actor_id=actor_id,
+                note_id=note_id,
+                task_id=new_task_id,
+            )
+    return new_version
 
 
 async def archive_note(
@@ -465,13 +484,19 @@ async def get_or_create_work_note(
     task = (await session.execute(select(Task).where(Task.id == task_id))).scalar_one_or_none()
     if task is None:
         raise NotFoundError(MessageCode.TASK_NOT_FOUND)
-    existing = (
-        await session.execute(
-            select(Note).where(Note.task_id == task_id, Note.deleted_at.is_(None))
-        )
-    ).scalar_one_or_none()
-    if existing is not None:
-        return existing
+    # docs/adr/0029 P3: search through the typed artifact link
+    # instead of the legacy ``Note.task_id`` column.
+    note_ids = await note_links_svc.notes_for_task(
+        session, org_id=org_id, task_id=task_id, kinds=("artifact",)
+    )
+    if note_ids:
+        existing = (
+            await session.execute(
+                select(Note).where(Note.id.in_(note_ids), Note.deleted_at.is_(None))
+            )
+        ).scalar_one_or_none()
+        if existing is not None:
+            return existing
     # Derive the task's project tag the same way create_task does (its
     # first project-kind tag), so the work note lands under the task's
     # project/client; otherwise create_note attaches the Personal client.
@@ -492,8 +517,16 @@ async def get_or_create_work_note(
         title=task.title or "Work note",
         text=None,
     )
-    note.task_id = task_id
     await session.flush()
+    # docs/adr/0029 P3: the Proposal A link is the typed
+    # ``artifact`` row, not a column on the note.
+    await note_links_svc.ensure_artifact_link(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        note_id=note.id,
+        task_id=task_id,
+    )
     return note
 
 
@@ -537,8 +570,16 @@ async def create_note_for_task(
         title=title if (title and title.strip()) else (task.title or "Work note"),
         text=text,
     )
-    note.task_id = task_id
     await session.flush()
+    # docs/adr/0029 P3: the Proposal A link is the typed
+    # ``artifact`` row, not a column on the note.
+    await note_links_svc.ensure_artifact_link(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        note_id=note.id,
+        task_id=task_id,
+    )
     return note
 
 

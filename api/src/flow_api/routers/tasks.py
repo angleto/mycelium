@@ -38,6 +38,7 @@ from flow_core.models.task_handoff import TaskHandoff
 from flow_core.models.workflow import WorkflowState
 from flow_core.services import attachments as att_svc
 from flow_core.services import coordination as coord_svc
+from flow_core.services import note_links as note_links_svc
 from flow_core.services import notes as notes_svc
 from flow_core.services import notifications as notif_svc
 from flow_core.services import tasks as svc
@@ -107,13 +108,18 @@ def _comment_out(c: Comment) -> CommentOut:
     )
 
 
-def _note_out(n: Note, tags: list[Tag] | None = None) -> NoteOut:
+def _note_out(
+    n: Note,
+    tags: list[Tag] | None = None,
+    primary_task_id: uuid.UUID | None = None,
+) -> NoteOut:
     # Built exactly like routers/notes.py::_out so the SPA gets the same
     # NoteOut shape (incl. tags + task_id) from either entry point.
+    # docs/adr/0029 P3: task_id is derived from the typed link table.
     return NoteOut(
         id=n.id,
         project_id=n.project_id,
-        task_id=n.task_id,
+        task_id=primary_task_id,
         kind=n.kind,
         status=n.status,
         title=n.title,
@@ -544,7 +550,10 @@ async def get_or_create_task_note(
         task_id=task_id,
     )
     tagmap = await notes_svc.tags_by_note(ctx.session, note_ids=[n.id])
-    return _note_out(n, tagmap.get(n.id, []))
+    pid = await note_links_svc.primary_task_id_for_note(
+        ctx.session, org_id=ctx.org_id, note_id=n.id
+    )
+    return _note_out(n, tagmap.get(n.id, []), primary_task_id=pid)
 
 
 @router.post("/{task_id}/notes", response_model=NoteOut)
@@ -566,7 +575,10 @@ async def create_task_note(
         text=body.text,
     )
     tagmap = await notes_svc.tags_by_note(ctx.session, note_ids=[n.id])
-    return _note_out(n, tagmap.get(n.id, []))
+    pid = await note_links_svc.primary_task_id_for_note(
+        ctx.session, org_id=ctx.org_id, note_id=n.id
+    )
+    return _note_out(n, tagmap.get(n.id, []), primary_task_id=pid)
 
 
 # --- P4: coordination handoffs + contract-net (docs/adr/0025) ---

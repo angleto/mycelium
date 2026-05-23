@@ -56,11 +56,19 @@ def _brief(tag: Tag) -> TagBrief:
     return TagBrief(id=tag.id, kind=tag.kind, name=tag.name, color=tag.color)
 
 
-def _out(n: Note, tags: list[Tag] | None = None) -> NoteOut:
+def _out(
+    n: Note,
+    tags: list[Tag] | None = None,
+    primary_task_id: uuid.UUID | None = None,
+) -> NoteOut:
+    # docs/adr/0029 P3: ``task_id`` exposed in the API is derived
+    # from the typed link table (primary_task_id_for_note). Callers
+    # batch-load the map for list endpoints; the single-note path
+    # may pass the value explicitly.
     return NoteOut(
         id=n.id,
         project_id=n.project_id,
-        task_id=n.task_id,
+        task_id=primary_task_id,
         kind=n.kind,
         status=n.status,
         title=n.title,
@@ -121,7 +129,10 @@ async def create_note(
     # Return the note with its tags: create() enforces a client
     # (default "Personal"), so the response must reflect it.
     tagmap = await svc.tags_by_note(ctx.session, note_ids=[n.id])
-    return _out(n, tagmap.get(n.id, []))
+    pid = await note_links_svc.primary_task_id_for_note(
+        ctx.session, org_id=ctx.org_id, note_id=n.id
+    )
+    return _out(n, tagmap.get(n.id, []), primary_task_id=pid)
 
 
 @router.get("", response_model=list[NoteOut])
@@ -141,7 +152,10 @@ async def list_notes(
         tag_id=tag_id,
     )
     tagmap = await svc.tags_by_note(ctx.session, note_ids=[n.id for n in rows])
-    return [_out(n, tagmap.get(n.id, [])) for n in rows]
+    pid_map = await note_links_svc.primary_task_ids_for_notes(
+        ctx.session, org_id=ctx.org_id, note_ids=[n.id for n in rows]
+    )
+    return [_out(n, tagmap.get(n.id, []), primary_task_id=pid_map.get(n.id)) for n in rows]
 
 
 @router.get("/{note_id}", response_model=NoteOut)
@@ -151,7 +165,10 @@ async def get_note(
 ) -> NoteOut:
     n = await svc.get_note(ctx.session, org_id=ctx.org_id, note_id=note_id)
     tagmap = await svc.tags_by_note(ctx.session, note_ids=[n.id])
-    return _out(n, tagmap.get(n.id, []))
+    pid = await note_links_svc.primary_task_id_for_note(
+        ctx.session, org_id=ctx.org_id, note_id=n.id
+    )
+    return _out(n, tagmap.get(n.id, []), primary_task_id=pid)
 
 
 @router.post("/{note_id}/tags", status_code=204)
@@ -325,7 +342,10 @@ async def transcribe(
         operation_id=body.operation_id,
         embed=body.embed,
     )
-    return _out(n)
+    pid = await note_links_svc.primary_task_id_for_note(
+        ctx.session, org_id=ctx.org_id, note_id=n.id
+    )
+    return _out(n, primary_task_id=pid)
 
 
 @router.post("/conversations", response_model=NoteOut)
@@ -396,7 +416,10 @@ async def command(
         actor_id=ctx.user_id,
         text=body.text,
     )
-    return _out(n)
+    pid = await note_links_svc.primary_task_id_for_note(
+        ctx.session, org_id=ctx.org_id, note_id=n.id
+    )
+    return _out(n, primary_task_id=pid)
 
 
 @router.post("/{note_id}/erase", response_model=NoteEraseOut)
@@ -574,7 +597,10 @@ async def set_note_maturity(
         maturity=body.maturity,
     )
     tagmap = await svc.tags_by_note(ctx.session, note_ids=[n.id])
-    return _out(n, tagmap.get(n.id, []))
+    pid = await note_links_svc.primary_task_id_for_note(
+        ctx.session, org_id=ctx.org_id, note_id=n.id
+    )
+    return _out(n, tagmap.get(n.id, []), primary_task_id=pid)
 
 
 @router.post(
@@ -685,8 +711,11 @@ async def list_note_links(
     task_links = await note_links_svc.list_note_task_links(
         ctx.session, org_id=ctx.org_id, note_id=note_id
     )
+    pid = await note_links_svc.primary_task_id_for_note(
+        ctx.session, org_id=ctx.org_id, note_id=n.id
+    )
     return NoteWithLinksOut(
-        note=_out(n, tagmap.get(n.id, [])),
+        note=_out(n, tagmap.get(n.id, []), primary_task_id=pid),
         outgoing=[_link_out(o) for o in outgoing],
         incoming=[_link_out(o) for o in incoming],
         task_links=[_task_link_out(o) for o in task_links],

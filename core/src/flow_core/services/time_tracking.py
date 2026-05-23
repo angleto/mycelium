@@ -38,6 +38,7 @@ from flow_core.models.task_tag import TaskTag
 from flow_core.models.time_entry import TimeEntry, TimeSource
 from flow_core.models.user import User
 from flow_core.services import audit
+from flow_core.services import note_links as note_links_svc
 from flow_core.services.rbac import require_role
 from flow_core.services.tasks import get_task
 
@@ -51,16 +52,20 @@ async def _task_id_for_note(
     note RLS-scoped in-org (NOTE_NOT_FOUND if absent / cross-org). The
     note MUST already be linked to a task, else NOTE_NOT_LINKED_TO_TASK
     (you cannot bill time to a note that has no task to roll up to).
-    Returns the note's ``task_id`` so the entry's billing task can be
-    derived from it."""
+
+    docs/adr/0029 P3: the link comes through the typed
+    ``note_task_link`` (resolved via ``primary_task_id_for_note``)
+    instead of the legacy ``Note.task_id`` column.
+    """
     note = (
         await session.execute(select(Note).where(Note.id == note_id, Note.deleted_at.is_(None)))
     ).scalar_one_or_none()
     if note is None:
         raise NotFoundError(MessageCode.NOTE_NOT_FOUND)
-    if note.task_id is None:
+    task_id = await note_links_svc.primary_task_id_for_note(session, org_id=org_id, note_id=note_id)
+    if task_id is None:
         raise DomainError(MessageCode.NOTE_NOT_LINKED_TO_TASK)
-    return note.task_id
+    return task_id
 
 
 async def _resolve_billing_task(

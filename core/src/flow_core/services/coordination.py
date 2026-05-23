@@ -63,6 +63,7 @@ from flow_core.models.task import Task
 from flow_core.models.task_assignee import TaskAssignee
 from flow_core.models.task_handoff import HandoffStatus, TaskHandoff
 from flow_core.services import audit
+from flow_core.services import note_links as note_links_svc
 from flow_core.services import notifications as notif_svc
 from flow_core.services.rbac import require_role
 
@@ -82,7 +83,7 @@ _ACTIVE_STATUSES = (HandoffStatus.pending, HandoffStatus.delivered)
 
 
 async def _producer_artifact_note_id(
-    session: AsyncSession, *, task_id: uuid.UUID
+    session: AsyncSession, *, org_id: uuid.UUID, task_id: uuid.UUID
 ) -> uuid.UUID | None:
     """The predecessor's produced artifact: its latest agent-run
     artifact note (P3 producer) if any, else its latest work note
@@ -101,10 +102,18 @@ async def _producer_artifact_note_id(
     ).scalar_one_or_none()
     if run_artifact is not None:
         return run_artifact
+    # docs/adr/0029 P3: resolve the producer's artifact note through
+    # the typed link (kind='artifact') instead of the legacy
+    # ``Note.task_id`` column.
+    note_ids = await note_links_svc.notes_for_task(
+        session, org_id=org_id, task_id=task_id, kinds=("artifact",)
+    )
+    if not note_ids:
+        return None
     return (
         await session.execute(
             select(Note.id)
-            .where(Note.task_id == task_id, Note.deleted_at.is_(None))
+            .where(Note.id.in_(note_ids), Note.deleted_at.is_(None))
             .order_by(Note.created_at.desc(), Note.id.desc())
             .limit(1)
         )
@@ -183,7 +192,7 @@ async def on_task_completed(
     )
     if not deps:
         return
-    artifact_note_id = await _producer_artifact_note_id(session, task_id=task.id)
+    artifact_note_id = await _producer_artifact_note_id(session, org_id=org_id, task_id=task.id)
     from_exec = await _resolved_executor(session, task_id=task.id)
     message = f"Handoff from completed task: {task.title}"[:1000]
 
@@ -300,19 +309,23 @@ async def _deliver_one(
             dedupe_key=f"task_handoff:{ho.id}:{uid}",
         )
     # Give the human context: link the artifact note to the successor
-    # task (the bidirectional Proposal-A note<->task link -- the same
-    # idempotent ``note.task_id`` write the notes service performs
-    # internally in create_note_for_task/get_or_create_work_note; a
-    # no-op if already linked to this task or the note is absent).
+    # task as a typed artifact link (docs/adr/0029 P3: replaces the
+    # legacy ``note.task_id`` write). Idempotent; a no-op if the link
+    # already exists for this (note, task, artifact) triple.
     if artifact_note_id is not None:
         note = (
             await session.execute(
                 select(Note).where(Note.id == artifact_note_id, Note.deleted_at.is_(None))
             )
         ).scalar_one_or_none()
-        if note is not None and note.task_id != successor_id:
-            note.task_id = successor_id
-            await session.flush()
+        if note is not None:
+            await note_links_svc.ensure_artifact_link(
+                session,
+                org_id=org_id,
+                actor_id=actor_id,
+                note_id=artifact_note_id,
+                task_id=successor_id,
+            )
     ho.status = HandoffStatus.delivered
     ho.delivered_at = dt.datetime.now(tz=dt.UTC)
     await session.flush()

@@ -2616,11 +2616,16 @@ async def memory_channel_delete(token: str, org_id: str, channel_id: str) -> dic
 # --- F6b: notes / conversation / canonical intent (FR-16) ---
 
 
-def _note(n: Note, tags: list[Tag] | None = None) -> dict[str, Any]:
+def _note(
+    n: Note,
+    tags: list[Tag] | None = None,
+    primary_task_id: uuid.UUID | None = None,
+) -> dict[str, Any]:
+    # docs/adr/0029 P3: ``task_id`` comes from the typed link table.
     return {
         "id": str(n.id),
         "project_id": str(n.project_id) if n.project_id else None,
-        "task_id": str(n.task_id) if n.task_id else None,
+        "task_id": str(primary_task_id) if primary_task_id else None,
         "kind": n.kind.value,
         "status": n.status.value,
         "title": n.title,
@@ -2660,7 +2665,8 @@ async def create_note(
             text=text,
         )
         tagmap = await notes_svc.tags_by_note(s, note_ids=[n.id])
-        return _note(n, tagmap.get(n.id, []))
+        pid = await note_links_svc.primary_task_id_for_note(s, org_id=org, note_id=n.id)
+        return _note(n, tagmap.get(n.id, []), primary_task_id=pid)
 
 
 @mcp.tool()
@@ -2684,7 +2690,10 @@ async def list_notes(
             include_deleted=include_deleted,
         )
         tagmap = await notes_svc.tags_by_note(s, note_ids=[n.id for n in rows])
-        return [_note(n, tagmap.get(n.id, [])) for n in rows]
+        pid_map = await note_links_svc.primary_task_ids_for_notes(
+            s, org_id=org, note_ids=[n.id for n in rows]
+        )
+        return [_note(n, tagmap.get(n.id, []), primary_task_id=pid_map.get(n.id)) for n in rows]
 
 
 @mcp.tool()
@@ -2693,7 +2702,8 @@ async def get_note(token: str, org_id: str, note_id: str) -> dict[str, Any]:
     async with _tenant(token, org_id) as (s, org, _user):
         note = await notes_svc.get_note(s, org_id=org, note_id=uuid.UUID(note_id))
         tagmap = await notes_svc.tags_by_note(s, note_ids=[note.id])
-        return _note(note, tagmap.get(note.id, []))
+        pid = await note_links_svc.primary_task_id_for_note(s, org_id=org, note_id=note.id)
+        return _note(note, tagmap.get(note.id, []), primary_task_id=pid)
 
 
 @mcp.tool()
@@ -2709,7 +2719,8 @@ async def get_or_create_task_note(token: str, org_id: str, task_id: str) -> dict
             task_id=uuid.UUID(task_id),
         )
         tagmap = await notes_svc.tags_by_note(s, note_ids=[n.id])
-        return _note(n, tagmap.get(n.id, []))
+        pid = await note_links_svc.primary_task_id_for_note(s, org_id=org, note_id=n.id)
+        return _note(n, tagmap.get(n.id, []), primary_task_id=pid)
 
 
 @mcp.tool()
@@ -2734,7 +2745,8 @@ async def create_task_note(
             text=text,
         )
         tagmap = await notes_svc.tags_by_note(s, note_ids=[n.id])
-        return _note(n, tagmap.get(n.id, []))
+        pid = await note_links_svc.primary_task_id_for_note(s, org_id=org, note_id=n.id)
+        return _note(n, tagmap.get(n.id, []), primary_task_id=pid)
 
 
 @mcp.tool()
@@ -2880,7 +2892,8 @@ async def start_conversation_session(
             title=title,
         )
         tagmap = await notes_svc.tags_by_note(s, note_ids=[n.id])
-        return _note(n, tagmap.get(n.id, []))
+        pid = await note_links_svc.primary_task_id_for_note(s, org_id=org, note_id=n.id)
+        return _note(n, tagmap.get(n.id, []), primary_task_id=pid)
 
 
 @mcp.tool()
@@ -2914,7 +2927,8 @@ async def transcribe_note(
             operation_id=operation_id,
         )
         tagmap = await notes_svc.tags_by_note(s, note_ids=[n.id])
-        return _note(n, tagmap.get(n.id, []))
+        pid = await note_links_svc.primary_task_id_for_note(s, org_id=org, note_id=n.id)
+        return _note(n, tagmap.get(n.id, []), primary_task_id=pid)
 
 
 @mcp.tool()
@@ -2923,7 +2937,8 @@ async def run_command(token: str, org_id: str, text: str) -> dict[str, Any]:
     async with _tenant(token, org_id) as (s, org, user):
         n = await notes_svc.run_command(s, org_id=org, actor_id=user, text=text)
         tagmap = await notes_svc.tags_by_note(s, note_ids=[n.id])
-        return _note(n, tagmap.get(n.id, []))
+        pid = await note_links_svc.primary_task_id_for_note(s, org_id=org, note_id=n.id)
+        return _note(n, tagmap.get(n.id, []), primary_task_id=pid)
 
 
 @mcp.tool()

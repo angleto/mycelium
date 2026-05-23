@@ -74,16 +74,13 @@ class Note(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, Base):
     project_id: Mapped[uuid.UUID | None] = mapped_column(
         PG_UUID(as_uuid=True), nullable=True, index=True
     )
-    # A note may be the "work note" of a task: opened/written from the
-    # task, time spent there billed to the task (time entries stay
-    # task-scoped). Same-org (enforced in the service). ON DELETE SET
-    # NULL so deleting/erasing the task keeps the note, link cleared.
-    task_id: Mapped[uuid.UUID | None] = mapped_column(
-        PG_UUID(as_uuid=True),
-        ForeignKey("tasks.id", ondelete="SET NULL"),
-        nullable=True,
-        index=True,
-    )
+    # docs/adr/0029 P3: ``notes.task_id`` (Proposal A's single FK) is
+    # gone. The bidirectional note <-> task relation lives in
+    # ``note_task_link`` with one of four typed kinds (subject,
+    # artifact, derived_from, promoted_from). Use
+    # ``services.note_links.primary_task_id_for_note`` /
+    # ``primary_task_ids_for_notes`` to recover the canonical task
+    # for a note.
     kind: Mapped[NoteKind] = mapped_column(
         SAEnum(NoteKind, name="note_kind", native_enum=True, create_type=False),
         nullable=False,

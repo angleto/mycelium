@@ -354,6 +354,171 @@ async def _link_note_task(
     return link
 
 
+# Priority order used by ``primary_task_id_for_note`` to pick the
+# canonical task for a note when more than one kind links them
+# (e.g. a note that is both ``subject`` of an ongoing task and
+# ``artifact`` of a closed previous one). Mirrors Proposal A's
+# original intent: the active work link wins; artifact is the
+# historical record; the rest are weaker pointers.
+_TASK_LINK_PRIORITY: tuple[str, ...] = (
+    "subject",
+    "artifact",
+    "promoted_from",
+    "derived_from",
+)
+
+
+async def primary_task_id_for_note(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    note_id: uuid.UUID,
+) -> uuid.UUID | None:
+    """Resolve the canonical task for a note across the four typed
+    relations (docs/adr/0029 P3 replaces ``note.task_id``). Priority:
+    subject > artifact > promoted_from > derived_from. Returns the
+    earliest match's ``task_id`` or None.
+    """
+    raw = list(
+        (
+            await session.execute(
+                select(NoteTaskLink.task_id, NoteTaskLink.kind, NoteTaskLink.created_at).where(
+                    NoteTaskLink.org_id == org_id,
+                    NoteTaskLink.note_id == note_id,
+                )
+            )
+        ).all()
+    )
+    if not raw:
+        return None
+    raw.sort(
+        key=lambda r: (
+            _TASK_LINK_PRIORITY.index(r[1]) if r[1] in _TASK_LINK_PRIORITY else 999,
+            r[2],
+        )
+    )
+    return uuid.UUID(str(raw[0][0]))
+
+
+async def primary_task_ids_for_notes(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    note_ids: list[uuid.UUID],
+) -> dict[uuid.UUID, uuid.UUID]:
+    """Batch counterpart used by list endpoints to avoid N+1: returns
+    a ``{note_id: primary_task_id}`` mapping, applying the same
+    priority as ``primary_task_id_for_note``."""
+    if not note_ids:
+        return {}
+    rows = (
+        await session.execute(
+            select(
+                NoteTaskLink.note_id,
+                NoteTaskLink.task_id,
+                NoteTaskLink.kind,
+                NoteTaskLink.created_at,
+            ).where(
+                NoteTaskLink.org_id == org_id,
+                NoteTaskLink.note_id.in_(note_ids),
+            )
+        )
+    ).all()
+    bucket: dict[uuid.UUID, list[tuple[str, object, uuid.UUID]]] = {}
+    for nid, tid, kind, created_at in rows:
+        bucket.setdefault(nid, []).append((kind, created_at, tid))
+    out: dict[uuid.UUID, uuid.UUID] = {}
+    for nid, candidates in bucket.items():
+        candidates.sort(
+            key=lambda c: (
+                _TASK_LINK_PRIORITY.index(c[0]) if c[0] in _TASK_LINK_PRIORITY else 999,
+                c[1],
+            )
+        )
+        out[nid] = uuid.UUID(str(candidates[0][2]))
+    return out
+
+
+async def notes_for_task(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    task_id: uuid.UUID,
+    kinds: tuple[str, ...] | None = None,
+) -> list[uuid.UUID]:
+    """All note ids linked to the given task. Optional ``kinds`` filter
+    restricts to specific relation types; default returns every kind.
+    Replaces the legacy ``WHERE Note.task_id = task_id`` pattern.
+    """
+    stmt = select(NoteTaskLink.note_id).where(
+        NoteTaskLink.org_id == org_id,
+        NoteTaskLink.task_id == task_id,
+    )
+    if kinds:
+        stmt = stmt.where(NoteTaskLink.kind.in_(kinds))
+    return list((await session.execute(stmt)).scalars().all())
+
+
+async def ensure_artifact_link(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    note_id: uuid.UUID,
+    task_id: uuid.UUID,
+) -> NoteTaskLink:
+    """Idempotent: writes a ``kind='artifact'`` link between note and
+    task. Used by the Proposal-A migration shims (``create_note_for_task``,
+    coordination handoff write-back) to replace the legacy
+    ``note.task_id`` setter."""
+    return await _link_note_task(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        note_id=note_id,
+        task_id=task_id,
+        kind="artifact",
+    )
+
+
+async def clear_artifact_links(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    note_id: uuid.UUID,
+) -> int:
+    """Remove every ``kind='artifact'`` link for the given note.
+    Replaces ``note.task_id = None`` (clear). Returns the count
+    removed; emits one ``unlink`` audit entry per row removed."""
+    rows = list(
+        (
+            await session.execute(
+                select(NoteTaskLink).where(
+                    NoteTaskLink.org_id == org_id,
+                    NoteTaskLink.note_id == note_id,
+                    NoteTaskLink.kind == "artifact",
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    for r in rows:
+        await session.delete(r)
+        await audit.log(
+            session,
+            org_id=org_id,
+            actor_id=actor_id,
+            entity="note_task_link",
+            entity_id=r.id,
+            action="delete",
+        )
+    if rows:
+        await session.flush()
+    return len(rows)
+
+
 async def list_note_task_links(
     session: AsyncSession,
     *,
