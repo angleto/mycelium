@@ -10,6 +10,7 @@ import { ScaleSelect } from '../components/ScaleSelect'
 import { TaskKanban } from '../components/TaskKanban'
 import { RecentTasks } from '../components/RecentTasks'
 import { TaskTimer } from '../components/TaskTimer'
+import { TagPickerGrid } from '../components/TagPickerGrid'
 import { useFocus } from '../lib/focus'
 import { useLinkedClientProject } from '../lib/linkedClientProject'
 import { parseFilter } from '../lib/taskFilter'
@@ -448,7 +449,6 @@ export function TasksRoute() {
     setBulkMsg(t('tasks.bulkResult', { applied: done, skipped: picked.length - done }))
   }
 
-  const activeTag = tags.find((x) => x.id === filter)
   const hiddenStateIds = new Set(
     wfStates.filter((s) => s.is_hidden).map((s) => s.id),
   )
@@ -646,9 +646,9 @@ export function TasksRoute() {
           onChange={(e) => setQ(e.target.value)}
           style={{ flex: 1, minWidth: '12rem' }}
         />
-        <span
-          className="idfacet"
-          role="group"
+        <div
+          className="viewtabs"
+          role="radiogroup"
           aria-label={t('tasks.identityFacet')}
         >
           {(['all', 'humans', 'bots'] as const).map((f) => (
@@ -658,7 +658,8 @@ export function TasksRoute() {
               role="radio"
               aria-checked={identityFacet === f}
               className={
-                'toggle-pill' + (identityFacet === f ? ' toggle-pill--on' : '')
+                'viewtabs__tab' +
+                (identityFacet === f ? ' viewtabs__tab--active' : '')
               }
               onClick={() => setIdentityFacet(f)}
               title={t(`tasks.identity.${f}Hint`)}
@@ -666,79 +667,72 @@ export function TasksRoute() {
               {t(`tasks.identity.${f}`)}
             </button>
           ))}
-        </span>
-        <label>
-          {t('tasks.filterTag')}
-          <select value={filter} onChange={(e) => setFilter(e.target.value)}>
-            <option value="">{t('tasks.all')}</option>
-            {tags.map((tg) => (
-              <option key={tg.id} value={tg.id}>
-                {tg.kind}: {tg.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        {activeTag && (
-          <TagChip name={activeTag.name} color={activeTag.color} kind={activeTag.kind} />
-        )}
-        {view === 'kanban' && (
-          <button
-            type="button"
-            role="switch"
-            aria-checked={showHidden}
-            className={
-              'toggle-pill' + (showHidden ? ' toggle-pill--on' : '')
-            }
-            onClick={() => setShowHidden((v) => !v)}
-          >
-            {t('tasks.showHidden')}: {showHidden ? t('common.on') : t('common.off')}
-          </button>
-        )}
-        {view === 'list' && (
-          <button
-            type="button"
-            role="switch"
-            aria-checked={hideTerminal}
-            className={
-              'toggle-pill' + (hideTerminal ? ' toggle-pill--on' : '')
-            }
-            onClick={() => setHideTerminal((v) => !v)}
-          >
-            {t('tasks.hideTerminal')}:{' '}
-            {hideTerminal ? t('common.on') : t('common.off')}
-          </button>
-        )}
+        </div>
         <div
-          className="viewtabs"
-          role="radiogroup"
+          className="filterbar__group"
+          role="group"
           aria-label={t('tasks.scope.label')}
         >
-          {SCOPES.map((s) => (
+          <div
+            className="viewtabs"
+            role="radiogroup"
+            aria-label={t('tasks.scope.label')}
+          >
+            {SCOPES.map((s) => (
+              <button
+                key={s}
+                type="button"
+                role="radio"
+                aria-checked={scope === s}
+                className={
+                  'viewtabs__tab' + (scope === s ? ' viewtabs__tab--active' : '')
+                }
+                onClick={() => setScope(s)}
+              >
+                {t(`tasks.scope.${s}`)}
+              </button>
+            ))}
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={dateFocus}
+            className={'toggle-pill' + (dateFocus ? ' toggle-pill--on' : '')}
+            onClick={() => setDateFocus((v) => !v)}
+            title={t('tasks.dateFocusHint')}
+          >
+            {t('tasks.dateFocus')}:{' '}
+            {dateFocus ? t('common.on') : t('common.off')}
+          </button>
+          {view === 'kanban' && (
             <button
-              key={s}
               type="button"
-              role="radio"
-              aria-checked={scope === s}
+              role="switch"
+              aria-checked={showHidden}
               className={
-                'viewtabs__tab' + (scope === s ? ' viewtabs__tab--active' : '')
+                'toggle-pill' + (showHidden ? ' toggle-pill--on' : '')
               }
-              onClick={() => setScope(s)}
+              onClick={() => setShowHidden((v) => !v)}
             >
-              {t(`tasks.scope.${s}`)}
+              {t('tasks.showHidden')}:{' '}
+              {showHidden ? t('common.on') : t('common.off')}
             </button>
-          ))}
+          )}
+          {view === 'list' && (
+            <button
+              type="button"
+              role="switch"
+              aria-checked={hideTerminal}
+              className={
+                'toggle-pill' + (hideTerminal ? ' toggle-pill--on' : '')
+              }
+              onClick={() => setHideTerminal((v) => !v)}
+            >
+              {t('tasks.hideTerminal')}:{' '}
+              {hideTerminal ? t('common.on') : t('common.off')}
+            </button>
+          )}
         </div>
-        <button
-          type="button"
-          role="switch"
-          aria-checked={dateFocus}
-          className={'toggle-pill' + (dateFocus ? ' toggle-pill--on' : '')}
-          onClick={() => setDateFocus((v) => !v)}
-          title={t('tasks.dateFocusHint')}
-        >
-          {t('tasks.dateFocus')}:{' '}
-          {dateFocus ? t('common.on') : t('common.off')}
-        </button>
         <div className="viewtabs" role="tablist" aria-label={t('tasks.viewSwitch')}>
           <button
             type="button"
@@ -766,12 +760,33 @@ export function TasksRoute() {
           </button>
         </div>
       </div>
+      {tags.length > 0 && (
+        <div className="filterbar__tags">
+          <span className="muted">{t('tasks.filterByTagLabel')}</span>
+          <TagPickerGrid
+            tags={tags}
+            selected={filter ? [filter] : []}
+            // Single-select: clicking the active chip clears the filter,
+            // clicking another swaps it. Matches /notes' fTag behaviour
+            // and the backend's single ``tag_id`` query param.
+            onToggle={(id) => setFilter((cur) => (cur === id ? '' : id))}
+            searchable={tags.length > 20}
+          />
+        </div>
+      )}
 
       {err && <p className="err">{err}</p>}
       {bulkMsg && <p className="ok">{bulkMsg}</p>}
 
       {listShown.length > 0 && (
-        <div className="row">
+        <div
+          className="filterbar__bulk"
+          role="group"
+          aria-label={t('tasks.bulkSection')}
+        >
+          <span className="filterbar__bulk-label">
+            {t('tasks.bulkSection')}
+          </span>
           {(() => {
             const allOn = sel.size > 0 && listShown.every((x) => sel.has(x.id))
             return (
@@ -817,9 +832,9 @@ export function TasksRoute() {
               <select
                 value={bulkTag}
                 onChange={(e) => setBulkTag(e.target.value)}
-                aria-label={t('tasks.filterTag')}
+                aria-label={t('tasks.bulkTagPick')}
               >
-                <option value="">{t('tasks.filterTag')}</option>
+                <option value="">{t('tasks.bulkTagPick')}</option>
                 {tags.map((g) => (
                   <option key={g.id} value={g.id}>
                     {g.kind}: {g.name}

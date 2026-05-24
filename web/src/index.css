@@ -513,6 +513,50 @@ textarea {
   flex-wrap: wrap;
   margin: 0.5rem 0;
 }
+/* Grouped filter widgets that must stay together on a single line, even
+   when the parent .row wraps. Used on /tasks to keep the date scope
+   (All/Today/Week/Month + Date focus + Show hidden) glued as one unit
+   instead of breaking mid-group when the viewport shrinks. The group
+   itself is shrink-eligible so it can co-exist on the same row as the
+   search input on wide screens, but stays atomic on narrow ones. */
+.filterbar__group {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: nowrap;
+  min-width: 0;
+}
+/* A second row below the main filter row, hosting the TagPickerGrid
+   (chip grid). Mirrors what /notes does so the tag-filter widget reads
+   identically across routes. */
+.filterbar__tags {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin: 0.3rem 0 0.5rem;
+}
+.filterbar__tags > .tagpickgrid { flex: 1; min-width: 0; }
+/* Bulk-actions panel: only visible when selection > 0. Styled as a
+   distinct subdued strip so it doesn't read as a second filter bar. */
+.filterbar__bulk {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin: 0.3rem 0;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface-2);
+}
+.filterbar__bulk-label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
 /* A select captioned by a label/.field fills its group and shrinks with
    it, rather than widening to its longest <option>: long task titles in
    the scheduler/notifications task pickers were otherwise spilling the
