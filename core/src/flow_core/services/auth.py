@@ -42,6 +42,7 @@ from flow_core.models.auth_tokens import (
 )
 from flow_core.models.user import User
 from flow_core.security import create_access_token, hash_password, verify_password
+from flow_core.services import actors as actors_svc
 from flow_core.services.mailer import OutboundEmail, get_mailer
 
 
@@ -110,6 +111,14 @@ async def signup(
     user = User(email=email.lower(), password_hash=hash_password(password))
     session.add(user)
     await session.flush()  # populate user.id
+    # Mint the actor handle BEFORE provisioning the org. provision_organization
+    # inserts the membership, which fires trg_sync_identity_on_membership_insert
+    # (migration 0085) — that trigger only creates the identity row when
+    # users.handle is non-empty. Without this call the user would be visible
+    # in the assignee picker (it sources users.handle) but unassignable
+    # (lookup_by_handle queries the identities table) → DomainError on
+    # self-assign.
+    await actors_svc.mint_user_handle(session, user_id=user.id, seed=email)
     org_id = await _provision_org(session, name=org_name, user_id=user.id)
     require_verify = get_settings().require_email_verification
     token: str | None = None
@@ -128,6 +137,12 @@ async def signup(
 async def create_org_for_user(session: AsyncSession, *, user_id: uuid.UUID, name: str) -> uuid.UUID:
     """Create an additional org for an existing authenticated user (they
     become its owner). Powers in-app workspace creation, no re-auth."""
+    # Defensive: pre-Stage-A users may still carry the empty-string
+    # handle sentinel. Ensure it before the membership insert so the
+    # identity-sync trigger has a real handle to copy.
+    user = (await session.execute(select(User).where(User.id == user_id))).scalar_one()
+    if not user.handle:
+        await actors_svc.mint_user_handle(session, user_id=user_id, seed=user.email)
     return await _provision_org(session, name=name, user_id=user_id)
 
 

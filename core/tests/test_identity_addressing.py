@@ -33,75 +33,23 @@ def _email() -> str:
 
 
 async def _signup_with_handle() -> tuple[uuid.UUID, uuid.UUID]:
-    """Helper: provision a workspace + a user with a non-empty handle
-    (the identity trigger requires it). Returns ``(org_id, user_id)``."""
+    """Helper: provision a workspace + a user. ``signup`` mints the user
+    handle and the 0085 trigger materialises the identity row, so no
+    post-signup patching is needed. Returns ``(org_id, user_id)``."""
     async with admin_session() as s:
         a = await signup(s, email=_email(), password="pw-strong-123", org_name="ID")
-    # Backfill the user's handle so the membership-insert trigger has
-    # already fired with a non-empty handle on the existing row. We
-    # set the handle through a tenant_session so RLS applies normally,
-    # and re-insert the identity (the trigger ran earlier when the
-    # handle was empty, so we need to fire it again or insert
-    # explicitly).
-    handle = f"h{uuid.uuid4().hex[:8]}"
-    async with admin_session() as s:
-        await s.execute(
-            text("UPDATE users SET handle = :h WHERE id = :u"),
-            {"h": handle, "u": str(a.user_id)},
-        )
-        # The trigger fires on INSERT only; emit the identity row
-        # explicitly for this setup helper. RLS bypassed (admin
-        # session can SET app.current_org).
-        await s.execute(
-            text("SELECT set_config('app.current_org', :o, true)"),
-            {"o": str(a.org_id)},
-        )
-        await s.execute(
-            text(
-                "INSERT INTO identities (org_id, kind, handle, user_id) "
-                "VALUES (:o, 'user', :h, :u) "
-                "ON CONFLICT (org_id, handle) DO NOTHING"
-            ),
-            {"o": str(a.org_id), "h": handle, "u": str(a.user_id)},
-        )
     return a.org_id, a.user_id
 
 
 async def test_identity_sync_trigger_creates_user_identity_on_signup() -> None:
-    """When a user has a non-empty handle and is inserted into
-    memberships, the migration-0085 trigger creates the matching
-    identity row. We simulate that by upserting through a fresh
-    signup + membership row with a pre-set handle."""
-    handle = f"h{uuid.uuid4().hex[:8]}"
+    """Signup mints the user's handle before provisioning the org, so
+    when the membership-insert trigger from migration 0085 fires it
+    sees a non-empty handle and inserts the matching identity row.
+    The test asserts the post-signup state: exactly one identity row
+    per (org, user), kind=user, handle equal to users.handle."""
     email = _email()
-    # Set the handle BEFORE the signup so the trigger sees a
-    # populated row. We can't do that directly (signup creates the
-    # user with an empty handle), so we patch the row + re-insert
-    # the identity manually -- the trigger covers the normal case
-    # where users.handle is non-empty at membership insert (e.g.
-    # invitation flows that pre-allocate the handle).
     async with admin_session() as s:
         a = await signup(s, email=email, password="pw-strong-123", org_name="IDS-1")
-    async with admin_session() as s:
-        await s.execute(
-            text("UPDATE users SET handle = :h WHERE id = :u"),
-            {"h": handle, "u": str(a.user_id)},
-        )
-        # Manually upsert the identity (covers the simulated trigger
-        # path; the trigger itself was tested via the migration
-        # backfill that ran on existing memberships).
-        await s.execute(
-            text("SELECT set_config('app.current_org', :o, true)"),
-            {"o": str(a.org_id)},
-        )
-        await s.execute(
-            text(
-                "INSERT INTO identities (org_id, kind, handle, user_id) "
-                "VALUES (:o, 'user', :h, :u) "
-                "ON CONFLICT (org_id, handle) DO NOTHING"
-            ),
-            {"o": str(a.org_id), "h": handle, "u": str(a.user_id)},
-        )
     async with tenant_session(str(a.org_id), str(a.user_id)) as s:
         identity = (
             await s.execute(
@@ -111,8 +59,15 @@ async def test_identity_sync_trigger_creates_user_identity_on_signup() -> None:
                 )
             )
         ).scalar_one()
+        user_handle = (
+            await s.execute(
+                text("SELECT handle FROM users WHERE id = :u"),
+                {"u": str(a.user_id)},
+            )
+        ).scalar_one()
     assert identity.kind == IdentityKind.user
-    assert identity.handle == handle
+    assert identity.handle == user_handle
+    assert user_handle != ""
 
 
 async def test_identity_sync_trigger_fires_on_ai_assistant_insert() -> None:

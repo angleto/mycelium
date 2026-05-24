@@ -39,29 +39,12 @@ def _email() -> str:
 
 
 async def _make_workspace() -> tuple[uuid.UUID, uuid.UUID]:
+    # ``signup`` mints the user handle and (via the 0085 membership-insert
+    # trigger) materialises the matching identity row, so the downstream
+    # ``created_by`` lookup that set_maturity / link_notes do already
+    # resolves. We no longer need to patch the handle after the fact.
     async with admin_session() as s:
         a = await signup(s, email=_email(), password="pw-strong-123", org_name="GRD")
-    # Give the user a handle so the identity sync trigger populates an
-    # ``identities`` row (set_maturity / link_notes look it up to
-    # attribute ``created_by``).
-    handle = f"h{uuid.uuid4().hex[:8]}"
-    async with admin_session() as s:
-        await s.execute(
-            text("UPDATE users SET handle = :h WHERE id = :u"),
-            {"h": handle, "u": str(a.user_id)},
-        )
-        await s.execute(
-            text("SELECT set_config('app.current_org', :o, true)"),
-            {"o": str(a.org_id)},
-        )
-        await s.execute(
-            text(
-                "INSERT INTO identities (org_id, kind, handle, user_id) "
-                "VALUES (:o, 'user', :h, :u) "
-                "ON CONFLICT (org_id, handle) DO NOTHING"
-            ),
-            {"o": str(a.org_id), "h": handle, "u": str(a.user_id)},
-        )
     return a.org_id, a.user_id
 
 

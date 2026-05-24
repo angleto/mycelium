@@ -31,7 +31,8 @@ from flow_core.mcp_scopes import DEFAULT_SCOPES, VALID_SCOPE_KEYS
 from flow_core.models.agent_token import AgentToken
 from flow_core.models.ai_assistant import AiAssistant
 from flow_core.models.membership import Role
-from flow_core.services import agent_tokens, audit
+from flow_core.services import actors as actors_svc
+from flow_core.services import agent_tokens, audit, identities
 from flow_core.services.rbac import require_role
 
 
@@ -92,6 +93,14 @@ async def create_assistant(
     )
     session.add(row)
     await session.flush()
+    # Mint the actor handle and materialise the identity row. The
+    # ai_assistant insert trigger (migration 0085) only fires once and
+    # short-circuits on the empty handle the row carries at first flush;
+    # we mint + ensure_for_ai_assistant explicitly so the assistant is
+    # both selectable (picker reads ai_assistants.handle) and
+    # assignable (update_task resolves through identities.handle).
+    await actors_svc.mint_assistant_handle(session, org_id=org_id, assistant_id=row.id, seed=label)
+    await identities.ensure_for_ai_assistant(session, org_id=org_id, assistant_id=row.id)
     mint = await agent_tokens.mint(
         session,
         org_id=org_id,
