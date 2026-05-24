@@ -7,6 +7,7 @@ import) at zero cost.
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 
@@ -49,11 +50,20 @@ _CASES = [
 def test_help_runs(argv: list[str], needle: str) -> None:
     # S603: argv is a static list of literals defined above; sys.executable
     # is trusted (the current interpreter). No shell, no user input.
+    # NO_COLOR + TERM=dumb keep Typer/Click/Rich from inserting ANSI
+    # SGR escapes between characters of an option name (e.g.
+    # ``\x1b[36m-\x1b[0m\x1b[36m-sort`` for ``--sort``). With the
+    # escapes interleaved the ``needle in stdout`` substring check
+    # would miss every option name and the test would be a no-op in
+    # any environment where Rich detects color (CI does, since uv /
+    # GitHub Actions set FORCE_COLOR=1 by default).
+    env = {**os.environ, "NO_COLOR": "1", "TERM": "dumb"}
     result = subprocess.run(  # noqa: S603
         [sys.executable, "-m", "flow_cli", *argv],
         check=False,
         capture_output=True,
         text=True,
+        env=env,
     )
     assert result.returncode == 0, (
         f"`flow {' '.join(argv)}` exited {result.returncode}:\n{result.stderr}"
