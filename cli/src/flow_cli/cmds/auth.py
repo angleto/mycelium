@@ -8,6 +8,7 @@ from typing import Any
 
 import typer
 
+from flow_cli.cmds.mfa import app as mfa_app
 from flow_cli.config import Profile, load_config, save_config
 from flow_cli.credentials import (
     Credential,
@@ -27,6 +28,7 @@ from flow_cli.http import (
 from flow_cli.ui import emit_json, fail, info, json_mode, out, success, warn
 
 app = typer.Typer(no_args_is_help=True, help="Authenticate this machine to a Flow workspace.")
+app.add_typer(mfa_app, name="mfa")
 
 
 @app.command()

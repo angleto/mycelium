@@ -43,6 +43,11 @@ select = ["E", "F", "I", "UP", "B", "ASYNC", "S", "RUF"]
 # Alembic migrations build static, authored DDL/DML strings (never
 # user input); S608's SQL-injection premise does not apply.
 "core/migrations/**" = ["S608"]
+# Typer's idiomatic ``param = typer.Option(...) / typer.Argument(...)``
+# pattern trips B008 on every command signature. The mutable default
+# is also fine: Typer parses each invocation independently and does
+# not mutate the sentinel.
+"cli/src/flow_cli/cmds/**" = ["B008"]
 
 [tool.mypy]
 python_version = "3.12"

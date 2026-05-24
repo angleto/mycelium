@@ -124,6 +124,23 @@ def raise_for_response(resp: httpx.Response) -> None:
         if isinstance(detail, dict):
             code = _opt(detail.get("code"))
             message = _opt(detail.get("message"))
+        elif isinstance(detail, list):
+            # Pydantic 422 envelope: list of {loc, msg, type, ...}. We
+            # drop the leading "body" segment from loc (always there on
+            # FastAPI body validation) and join the remaining path so
+            # the user sees ``title: Field required`` instead of a wall
+            # of JSON.
+            parts: list[str] = []
+            for item in detail:
+                if not isinstance(item, dict):
+                    continue
+                raw_loc = item.get("loc") or []
+                loc = ".".join(
+                    str(x) for x in (raw_loc[1:] if raw_loc and raw_loc[0] == "body" else raw_loc)
+                )
+                msg = str(item.get("msg") or "invalid")
+                parts.append(f"{loc}: {msg}" if loc else msg)
+            message = "; ".join(parts) or None
         elif isinstance(detail, str):
             message = detail
         message = message or _opt(body.get("message"))

@@ -1,10 +1,12 @@
-"""``flow note`` — add (text or voice), list, show."""
+"""``flow note`` — add (text/voice), list, show, edit, tag, attach, archive/restore."""
 
 from __future__ import annotations
 
+import mimetypes
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import time
 from pathlib import Path
@@ -12,11 +14,38 @@ from typing import Any
 
 import typer
 
-from flow_cli.cmds._common import client, short_id
+from flow_cli.cmds._common import client, get_json, resolve_id, short_id
 from flow_cli.http import CLIError, raise_for_response
-from flow_cli.ui import edit_in_editor, emit_json, emit_table, info, json_mode, out, success, warn
+from flow_cli.ui import (
+    edit_in_editor,
+    emit_json,
+    emit_table,
+    info,
+    json_mode,
+    out,
+    success,
+    warn,
+)
 
 app = typer.Typer(no_args_is_help=True, help="Notes: capture text or voice memos.")
+
+
+def _resolve_note(c: Any, partial: str) -> str:
+    return resolve_id(c, partial, endpoint="/notes", kind="note")
+
+
+def _resolve_tag(c: Any, name_or_id: str) -> str:
+    if len(name_or_id) >= 32:
+        return name_or_id
+    rows = get_json(c.get("/tags"))
+    matches = [t for t in rows if str(t.get("name")).lower() == name_or_id.lower()]
+    if not matches:
+        raise CLIError(f"no tag named '{name_or_id}'.")
+    return str(matches[0]["id"])
+
+
+def _resolve_task(c: Any, partial: str) -> str:
+    return resolve_id(c, partial, endpoint="/tasks", kind="task")
 
 
 @app.command()
@@ -29,44 +58,68 @@ def add(
         help="Note body. Use '-' to read from stdin; omit to open $EDITOR.",
     ),
     no_editor: bool = typer.Option(False, "--no-editor"),
-    kind: str = typer.Option("text", "--kind", help="Note kind: text | voice | conversation."),
+    task: str | None = typer.Option(
+        None,
+        "--task",
+        help="Link the note to this task (Proposal A: note → task pre-bind).",
+    ),
+    tag: list[str] = typer.Option([], "--tag", help="Tag name or UUID; pass multiple times."),
 ) -> None:
     """Create a text note. With no -m/--text, opens $EDITOR."""
     if text == "-":
-        import sys as _sys
-
-        text = _sys.stdin.read().strip() or None
+        text = sys.stdin.read().strip() or None
     elif text is None and not no_editor:
         text = edit_in_editor("").strip() or None
-    if not text and kind == "text":
+    if not text:
         raise CLIError(
-            "Empty note body, aborting.",
+            "empty note body, aborting.",
             hint="Pass --text or write something in $EDITOR.",
         )
-    payload: dict[str, Any] = {"kind": kind}
+    payload: dict[str, Any] = {"kind": "text"}
     if title:
         payload["title"] = title
-    if text:
-        payload["text"] = text
+    payload["text"] = text
     with client() as c:
-        created = _get_json(c.post("/notes", json=payload))
+        created = get_json(c.post("/notes", json=payload))
+        note_id = str(created["id"])
+        # Optional task link is a follow-up PATCH so we keep one write
+        # per concept (no atomicity needed, the note is already saved).
+        if task:
+            full_task = _resolve_task(c, task)
+            patch = {
+                "expected_version": created["version"],
+                "task_id": full_task,
+            }
+            get_json(c.patch(f"/notes/{note_id}", json=patch))
+        for t in tag:
+            tag_id = _resolve_tag(c, t)
+            resp = c.post(f"/notes/{note_id}/tags", json={"tag_id": tag_id})
+            if resp.status_code not in (200, 204):
+                get_json(resp)
     if json_mode():
         emit_json(created)
         return
-    success(f"Created note [bold]{short_id(created['id'])}[/bold]")
+    success(f"created note [bold]{short_id(note_id)}[/bold]")
 
 
 @app.command("list")
 def list_(
     limit: int = typer.Option(30, "--limit", "-n", min=1, max=500),
     archived: bool = typer.Option(False, "--archived/--no-archived"),
+    tag: str | None = typer.Option(None, "--tag", help="Filter by tag name or UUID."),
 ) -> None:
     """List recent notes."""
+    params: dict[str, str] = {"include_archived": str(archived).lower()}
     with client() as c:
-        rows = _get_json(c.get("/notes", params={"include_archived": str(archived).lower()}))
+        if tag:
+            params["tag_id"] = _resolve_tag(c, tag)
+        rows = get_json(c.get("/notes", params=params))
     rows = rows[:limit]
     if json_mode():
         emit_json(rows)
+        return
+    if not rows:
+        info("[dim]no notes.[/dim]")
         return
     emit_table(
         None,
@@ -89,7 +142,7 @@ def show(note_id: str = typer.Argument(...)) -> None:
     """Print a note's title and full body."""
     with client() as c:
         full = _resolve_note(c, note_id)
-        note = _get_json(c.get(f"/notes/{full}"))
+        note = get_json(c.get(f"/notes/{full}"))
     if json_mode():
         emit_json(note)
         return
@@ -102,6 +155,141 @@ def show(note_id: str = typer.Argument(...)) -> None:
 
 
 @app.command()
+def edit(
+    note_id: str = typer.Argument(...),
+    title: str | None = typer.Option(None, "--title"),
+    text: str | None = typer.Option(
+        None,
+        "--text",
+        "-m",
+        help="New body. Use '-' for stdin; '@' to open $EDITOR pre-loaded with the current text.",
+    ),
+    task: str | None = typer.Option(
+        None,
+        "--task",
+        help="Set the note→task link. Use '-' to unlink.",
+    ),
+) -> None:
+    """Patch title/text/task-link on an existing note."""
+    with client() as c:
+        full = _resolve_note(c, note_id)
+        current = get_json(c.get(f"/notes/{full}"))
+        payload: dict[str, Any] = {"expected_version": current["version"]}
+        if title is not None:
+            payload["title"] = title
+        if text == "-":
+            payload["text"] = sys.stdin.read()
+        elif text == "@":
+            payload["text"] = edit_in_editor(current.get("transcript") or "")
+        elif text is not None:
+            payload["text"] = text
+        if task == "-":
+            payload["task_id"] = None
+        elif task is not None:
+            payload["task_id"] = _resolve_task(c, task)
+        result = get_json(c.patch(f"/notes/{full}", json=payload))
+    if json_mode():
+        emit_json(result)
+        return
+    success(f"updated note {short_id(full)} (v{result.get('version')})")
+
+
+@app.command()
+def archive(note_id: str = typer.Argument(...)) -> None:
+    _action(note_id, "archive")
+
+
+@app.command()
+def unarchive(note_id: str = typer.Argument(...)) -> None:
+    _action(note_id, "unarchive")
+
+
+@app.command("delete")
+def delete_(note_id: str = typer.Argument(...)) -> None:
+    """Soft-delete a note (recoverable)."""
+    _action(note_id, "delete")
+
+
+@app.command()
+def restore(note_id: str = typer.Argument(...)) -> None:
+    _action(note_id, "restore")
+
+
+# --- tag / attach sub-groups -----------------------------------------
+
+tag_app = typer.Typer(no_args_is_help=True, help="Add/remove tags on a note.")
+app.add_typer(tag_app, name="tag")
+
+attach_app = typer.Typer(no_args_is_help=True, help="Attachments on a note.")
+app.add_typer(attach_app, name="attach")
+
+
+@tag_app.command("add")
+def tag_add(note_id: str = typer.Argument(...), tag: str = typer.Argument(...)) -> None:
+    with client() as c:
+        full = _resolve_note(c, note_id)
+        tag_id = _resolve_tag(c, tag)
+        resp = c.post(f"/notes/{full}/tags", json={"tag_id": tag_id})
+        if resp.status_code not in (200, 204):
+            get_json(resp)
+    success(f"tagged note {short_id(full)} with '{tag}'")
+
+
+@tag_app.command("rm")
+def tag_rm(note_id: str = typer.Argument(...), tag: str = typer.Argument(...)) -> None:
+    with client() as c:
+        full = _resolve_note(c, note_id)
+        tag_id = _resolve_tag(c, tag)
+        resp = c.delete(f"/notes/{full}/tags/{tag_id}")
+        if resp.status_code not in (200, 204):
+            get_json(resp)
+    success(f"detached '{tag}' from note {short_id(full)}")
+
+
+@attach_app.command("add")
+def attach_add(
+    note_id: str = typer.Argument(...),
+    path: Path = typer.Argument(..., exists=True, dir_okay=False, readable=True),
+) -> None:
+    """Upload a file (image, PDF, ...) as an attachment on a note."""
+    with client() as c:
+        full = _resolve_note(c, note_id)
+        with path.open("rb") as fh:
+            files = {"file": (path.name, fh, _guess_mime(path))}
+            res = get_json(c.post(f"/notes/{full}/attachments", files=files))
+    if json_mode():
+        emit_json(res)
+        return
+    success(f"uploaded '{path.name}' to note {short_id(full)}")
+
+
+@attach_app.command("list")
+def attach_list(note_id: str = typer.Argument(...)) -> None:
+    with client() as c:
+        full = _resolve_note(c, note_id)
+        rows = get_json(c.get(f"/notes/{full}/attachments"))
+    if json_mode():
+        emit_json(rows)
+        return
+    emit_table(
+        None,
+        ["id", "filename", "size", "mime"],
+        [
+            (
+                short_id(r.get("id")),
+                r.get("filename"),
+                r.get("size_bytes"),
+                r.get("mime_type"),
+            )
+            for r in rows
+        ],
+    )
+
+
+# --- voice ----------------------------------------------------------
+
+
+@app.command()
 def voice(
     seconds: int | None = typer.Option(
         None,
@@ -110,6 +298,7 @@ def voice(
         help="Auto-stop after N seconds (default: record until Ctrl-C).",
     ),
     title: str | None = typer.Option(None, "--title", "-t"),
+    task: str | None = typer.Option(None, "--task", help="Link to this task."),
     keep_audio: bool = typer.Option(
         False, "--keep-audio", help="Keep the local recording after upload."
     ),
@@ -118,7 +307,7 @@ def voice(
     recorder = _find_recorder()
     if recorder is None:
         raise CLIError(
-            "Neither 'sox' (rec) nor 'ffmpeg' is on PATH.",
+            "neither 'sox' (rec) nor 'ffmpeg' is on PATH.",
             hint="brew install sox  # or  brew install ffmpeg",
         )
     out_path = Path(tempfile.mkstemp(suffix=".wav", prefix="flow-voice-")[1])
@@ -131,22 +320,23 @@ def voice(
         pass
     elapsed = max(1, int(time.monotonic() - t0))
     if not out_path.exists() or out_path.stat().st_size == 0:
-        raise CLIError("Recording produced no audio; aborting.")
+        raise CLIError("recording produced no audio; aborting.")
     info(f"[dim]recorded {elapsed}s, uploading…[/dim]")
 
     with client() as c:
-        # Create the note shell first (kind=voice). The audio is then
-        # attached via /notes/{id}/attachments, mirroring the SPA's
-        # capture flow which separates the row from the binary upload.
         payload: dict[str, Any] = {"kind": "voice", "audio_seconds": elapsed}
         if title:
             payload["title"] = title
-        note = _get_json(c.post("/notes", json=payload))
+        note = get_json(c.post("/notes", json=payload))
         note_id = str(note["id"])
         with out_path.open("rb") as fh:
             files = {"file": (out_path.name, fh, "audio/wav")}
             resp = c.post(f"/notes/{note_id}/attachments", files=files)
             raise_for_response(resp)
+        if task:
+            full_task = _resolve_task(c, task)
+            patch = {"expected_version": note["version"], "task_id": full_task}
+            get_json(c.patch(f"/notes/{note_id}", json=patch))
     if not keep_audio:
         try:
             os.unlink(out_path)
@@ -155,7 +345,23 @@ def voice(
     if json_mode():
         emit_json({"id": note_id, "audio_seconds": elapsed})
         return
-    success(f"Captured voice note [bold]{short_id(note_id)}[/bold] ({elapsed}s)")
+    success(f"captured voice note [bold]{short_id(note_id)}[/bold] ({elapsed}s)")
+
+
+# --- internals ------------------------------------------------------
+
+
+def _action(note_id: str, action: str) -> None:
+    with client() as c:
+        full = _resolve_note(c, note_id)
+        current = get_json(c.get(f"/notes/{full}"))
+        get_json(
+            c.post(
+                f"/notes/{full}/{action}",
+                json={"expected_version": current["version"]},
+            )
+        )
+    success(f"note {short_id(full)} {action}d")
 
 
 def _find_recorder() -> str | None:
@@ -170,19 +376,13 @@ def _find_recorder() -> str | None:
 
 def _build_record_cmd(recorder: str, out_path: Path, *, seconds: int | None) -> list[str]:
     if recorder in ("rec", "sox"):
-        # sox/rec: mono, 16 kHz, signed 16-bit — small and friendly to
-        # speech-to-text. ``-q`` suppresses the verbose meter that fights
-        # the user's Rich output.
         base = [recorder, "-q", "-c", "1", "-r", "16000", str(out_path)]
         if seconds:
             base += ["trim", "0", str(seconds)]
         return base
-    # ffmpeg input device varies per OS; ``avfoundation`` is the macOS
-    # default, ``alsa`` for Linux. The user can override via env var if
-    # this guess is wrong.
     if "FLOW_FFMPEG_INPUT" in os.environ:
         spec = os.environ["FLOW_FFMPEG_INPUT"].split(",")
-    elif _is_macos():
+    elif sys.platform == "darwin":
         spec = ["-f", "avfoundation", "-i", ":0"]
     else:
         spec = ["-f", "alsa", "-i", "default"]
@@ -193,28 +393,9 @@ def _build_record_cmd(recorder: str, out_path: Path, *, seconds: int | None) -> 
     return cmd
 
 
-def _is_macos() -> bool:
-    import sys
-
-    return sys.platform == "darwin"
-
-
-def _resolve_note(c: Any, partial: str) -> str:
-    if len(partial) >= 32:
-        return partial
-    rows = _get_json(c.get("/notes", params={"include_archived": "true"}))
-    matches = [n for n in rows if str(n.get("id", "")).startswith(partial)]
-    if len(matches) == 1:
-        return str(matches[0]["id"])
-    if not matches:
-        raise CLIError(f"No note matches '{partial}'.")
-    raise CLIError(f"Ambiguous note prefix '{partial}' ({len(matches)} matches).")
+def _guess_mime(path: Path) -> str:
+    return mimetypes.guess_type(str(path))[0] or "application/octet-stream"
 
 
 def _truncate(s: str, n: int) -> str:
     return s if len(s) <= n else s[: n - 1] + "…"
-
-
-def _get_json(resp: Any) -> Any:
-    raise_for_response(resp)
-    return resp.json()

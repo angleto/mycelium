@@ -1,17 +1,59 @@
-"""``flow task`` — list, show, add, done, verify, edit."""
+"""``flow task`` — list, show, add, edit, transition, tag, comment, attach, remind."""
 
 from __future__ import annotations
 
 import datetime as dt
+from pathlib import Path
 from typing import Any
 
 import typer
 
-from flow_cli.cmds._common import client, short_id
-from flow_cli.http import CLIError, raise_for_response
-from flow_cli.ui import edit_in_editor, emit_json, emit_table, info, json_mode, out, success
+from flow_cli.cmds._common import client, get_json, resolve_id, short_id
+from flow_cli.http import CLIError
+from flow_cli.ui import (
+    edit_in_editor,
+    emit_json,
+    emit_table,
+    info,
+    json_mode,
+    out,
+    success,
+)
 
-app = typer.Typer(no_args_is_help=True, help="Tasks: list, show, create, transition.")
+app = typer.Typer(no_args_is_help=True, help="Tasks: list, show, create, edit, transition.")
+
+
+# Terminal states are hidden from the default `flow task list` (and from
+# the today view). We can't fetch the full workflow per call so the
+# heuristic is name-based: any of these is considered "closed".
+_TERMINAL_NAMES = {"done", "verified", "cancelled", "archived", "rejected"}
+
+# Default sort: due first (nulls last), then priority desc, then most
+# recently updated. Stable so paging looks predictable.
+_SORT_KEYS = {
+    "due": lambda t: (
+        t.get("due_date") or "9999-12-31",
+        -int(t.get("priority") or 0),
+        t.get("updated_at") or "",
+    ),
+    "priority": lambda t: (-int(t.get("priority") or 0), t.get("due_date") or "9999-12-31"),
+    "updated": lambda t: (t.get("updated_at") or "",),
+    "title": lambda t: (str(t.get("title") or "").lower(),),
+}
+
+
+def _resolve_task(c: Any, partial: str) -> str:
+    return resolve_id(c, partial, endpoint="/tasks", kind="task")
+
+
+def _resolve_tag(c: Any, name_or_id: str) -> str:
+    if len(name_or_id) >= 32:
+        return name_or_id
+    rows = get_json(c.get("/tags"))
+    matches = [t for t in rows if str(t.get("name")).lower() == name_or_id.lower()]
+    if not matches:
+        raise CLIError(f"no tag named '{name_or_id}'.")
+    return str(matches[0]["id"])
 
 
 @app.command("list")
@@ -19,41 +61,61 @@ def list_(
     state: str | None = typer.Option(
         None, "--state", "-s", help="Filter by state name (e.g. todo, in_progress, done)."
     ),
-    tag: str | None = typer.Option(None, "--tag", "-t", help="Filter by tag name."),
+    tag: str | None = typer.Option(None, "--tag", "-t", help="Filter by tag name or UUID."),
     archived: bool = typer.Option(
         False, "--archived/--no-archived", help="Include archived tasks."
     ),
+    all_states: bool = typer.Option(
+        False,
+        "--all",
+        help="Include terminal states (done/verified/...); off by default.",
+    ),
+    sort: str = typer.Option(
+        "due", "--sort", help="Sort key: due | priority | updated | title.", show_default=True
+    ),
+    reverse: bool = typer.Option(False, "--reverse", "-r", help="Reverse the sort order."),
     limit: int = typer.Option(50, "--limit", "-n", min=1, max=500),
 ) -> None:
-    """List tasks in the active workspace."""
+    """List tasks in the active workspace (open tasks only by default)."""
+    params: dict[str, str] = {"include_archived": str(archived).lower()}
+    if state:
+        # When a state name is requested we still need its UUID; tag/state
+        # query goes server-side via tag_id when possible.
+        pass
     with client() as c:
-        rows = _get_json(c.get("/tasks", params={"include_archived": str(archived).lower()}))
         if tag:
-            tag_id = _resolve_tag(c, tag)
-            rows = [
-                t for t in rows if any(str(tg.get("id")) == tag_id for tg in t.get("tags") or [])
-            ]
+            params["tag_id"] = _resolve_tag(c, tag)
+        rows = get_json(c.get("/tasks", params=params))
         if state:
             rows = [t for t in rows if str(t.get("state")) == state]
+        elif not all_states:
+            rows = [t for t in rows if str(t.get("state")) not in _TERMINAL_NAMES]
+    keyfn = _SORT_KEYS.get(sort)
+    if keyfn is None:
+        raise CLIError(f"unknown --sort '{sort}'. Valid: {', '.join(_SORT_KEYS)}.")
+    rows.sort(key=keyfn, reverse=reverse)
     rows = rows[:limit]
     _render_tasks(rows)
 
 
 @app.command()
 def show(
-    task_id: str = typer.Argument(
-        ..., help="Task UUID (short prefixes accepted if unique among listed)."
-    ),
+    task_id: str = typer.Argument(..., help="Task UUID (short prefixes accepted if unique)."),
 ) -> None:
-    """Show one task with its description and tags."""
+    """Show one task with its description, tags, comments and reminders."""
     with client() as c:
         full = _resolve_task(c, task_id)
-        task = _get_json(c.get(f"/tasks/{full}"))
+        task = get_json(c.get(f"/tasks/{full}"))
+        comments = get_json(c.get(f"/tasks/{full}/comments"))
+        reminders = get_json(c.get(f"/tasks/{full}/reminders"))
     if json_mode():
-        emit_json(task)
+        emit_json({"task": task, "comments": comments, "reminders": reminders})
         return
     out().print(f"[bold]{task['title']}[/bold]  [dim]({task['state']})[/dim]")
-    out().print(f"id: {task['id']}  pri: {task['priority']}  ver: {task['version']}")
+    out().print(
+        f"id: {task['id']}  pri: {task['priority']}  ver: {task['version']}"
+        f"  assignee: {task.get('assignee_handle') or '-'}"
+    )
     if task.get("due_date"):
         out().print(f"due: {task['due_date']}")
     if task.get("start_at"):
@@ -62,6 +124,14 @@ def show(
         out().print("tags: " + ", ".join(t.get("name", "") for t in task["tags"]))
     if task.get("description"):
         out().print("\n" + task["description"])
+    if reminders:
+        out().print("\n[bold]reminders[/bold]")
+        for r in reminders:
+            out().print(f"  -{r.get('offset_minutes')}m  id={short_id(r.get('id'))}")
+    if comments:
+        out().print("\n[bold]comments[/bold]")
+        for cm in comments:
+            out().print(f"  [{short_id(cm.get('id'))}] {cm.get('body')}")
 
 
 @app.command()
@@ -77,6 +147,7 @@ def add(
         None, "--due", help="Due date (YYYY-MM-DD or 'today'/'tomorrow')."
     ),
     priority: int = typer.Option(3, "--priority", "-p", min=1, max=25),
+    tag: list[str] = typer.Option([], "--tag", "-t", help="Tag name or UUID; pass multiple times."),
     no_editor: bool = typer.Option(
         False, "--no-editor", help="Do not open $EDITOR even if description is empty."
     ),
@@ -96,7 +167,9 @@ def add(
     if due_date:
         payload["due_date"] = due_date.isoformat()
     with client() as c:
-        created = _get_json(c.post("/tasks", json=payload))
+        if tag:
+            payload["tag_ids"] = [_resolve_tag(c, t) for t in tag]
+        created = get_json(c.post("/tasks", json=payload))
     if json_mode():
         emit_json(created)
         return
@@ -104,9 +177,62 @@ def add(
 
 
 @app.command()
-def done(
-    task_id: str = typer.Argument(..., help="Task to mark as done."),
+def edit(
+    task_id: str = typer.Argument(...),
+    title: str | None = typer.Option(None, "--title"),
+    description: str | None = typer.Option(
+        None,
+        "--description",
+        "-d",
+        help="New description. '-' = stdin; '@' = open $EDITOR pre-loaded with current body.",
+    ),
+    due: str | None = typer.Option(
+        None, "--due", help="YYYY-MM-DD, 'today', 'tomorrow', or '-' to clear."
+    ),
+    priority: int | None = typer.Option(None, "--priority", "-p", min=1, max=25),
+    importance: int | None = typer.Option(None, "--importance", min=1, max=5),
+    urgency: int | None = typer.Option(None, "--urgency", min=1, max=5),
+    billable: bool | None = typer.Option(None, "--billable/--unbillable"),
+    location: str | None = typer.Option(None, "--location"),
 ) -> None:
+    """Patch task fields. Only fields you pass are changed."""
+    with client() as c:
+        full = _resolve_task(c, task_id)
+        current = get_json(c.get(f"/tasks/{full}"))
+        payload: dict[str, Any] = {"expected_version": current["version"]}
+        if title is not None:
+            payload["title"] = title
+        if description == "-":
+            import sys as _sys
+
+            payload["description"] = _sys.stdin.read()
+        elif description == "@":
+            payload["description"] = edit_in_editor(current.get("description") or "")
+        elif description is not None:
+            payload["description"] = description
+        if due == "-":
+            payload["due_date"] = None
+        elif due is not None:
+            d = _parse_due(due)
+            payload["due_date"] = d.isoformat() if d else None
+        for key, val in (
+            ("priority", priority),
+            ("importance", importance),
+            ("urgency", urgency),
+            ("billable", billable),
+            ("location", location),
+        ):
+            if val is not None:
+                payload[key] = val
+        result = get_json(c.patch(f"/tasks/{full}", json=payload))
+    if json_mode():
+        emit_json(result)
+        return
+    success(f"updated task {short_id(full)} (v{result.get('version')})")
+
+
+@app.command()
+def done(task_id: str = typer.Argument(..., help="Task to mark as done.")) -> None:
     """Transition the task to the 'done' state."""
     _transition(task_id, target_name="done")
 
@@ -128,19 +254,201 @@ def to(
     _transition(task_id, target_name=state)
 
 
+@app.command()
+def archive(task_id: str = typer.Argument(...)) -> None:
+    """Archive (soft-hide) a task."""
+    _versioned_action(task_id, "archive")
+
+
+@app.command()
+def unarchive(task_id: str = typer.Argument(...)) -> None:
+    """Restore an archived task to the active list."""
+    _versioned_action(task_id, "unarchive")
+
+
+@app.command("delete")
+def delete_(task_id: str = typer.Argument(...)) -> None:
+    """Soft-delete a task (recoverable from trash)."""
+    _versioned_action(task_id, "delete")
+
+
+@app.command()
+def restore(task_id: str = typer.Argument(...)) -> None:
+    """Restore a soft-deleted task."""
+    _versioned_action(task_id, "restore")
+
+
+# --- tag / comment / remind / attach sub-groups -----------------------
+
+tag_app = typer.Typer(no_args_is_help=True, help="Add/remove tags on a task.")
+app.add_typer(tag_app, name="tag")
+
+comment_app = typer.Typer(no_args_is_help=True, help="Comments on a task.")
+app.add_typer(comment_app, name="comment")
+
+remind_app = typer.Typer(no_args_is_help=True, help="Reminders on a task.")
+app.add_typer(remind_app, name="remind")
+
+attach_app = typer.Typer(no_args_is_help=True, help="Attachments on a task.")
+app.add_typer(attach_app, name="attach")
+
+
+@tag_app.command("add")
+def tag_add(task_id: str = typer.Argument(...), tag: str = typer.Argument(...)) -> None:
+    """Attach a tag (by name or UUID) to a task."""
+    with client() as c:
+        full = _resolve_task(c, task_id)
+        tag_id = _resolve_tag(c, tag)
+        resp = c.post(f"/tasks/{full}/tags", json={"tag_id": tag_id})
+        if resp.status_code not in (200, 204):
+            get_json(resp)
+    success(f"tagged {short_id(full)} with '{tag}'")
+
+
+@tag_app.command("rm")
+def tag_rm(task_id: str = typer.Argument(...), tag: str = typer.Argument(...)) -> None:
+    """Detach a tag from a task."""
+    with client() as c:
+        full = _resolve_task(c, task_id)
+        tag_id = _resolve_tag(c, tag)
+        resp = c.delete(f"/tasks/{full}/tags/{tag_id}")
+        if resp.status_code not in (200, 204):
+            get_json(resp)
+    success(f"detached '{tag}' from {short_id(full)}")
+
+
+@comment_app.command("add")
+def comment_add(
+    task_id: str = typer.Argument(...),
+    body: str | None = typer.Option(
+        None, "--body", "-m", help="Comment body. Use '-' for stdin; omit to open $EDITOR."
+    ),
+) -> None:
+    """Post a comment on a task."""
+    if body == "-":
+        import sys as _sys
+
+        body = _sys.stdin.read().strip()
+    elif body is None:
+        body = edit_in_editor("").strip()
+    if not body:
+        raise CLIError("empty comment body, aborting.")
+    with client() as c:
+        full = _resolve_task(c, task_id)
+        cm = get_json(c.post(f"/tasks/{full}/comments", json={"body": body}))
+    if json_mode():
+        emit_json(cm)
+        return
+    success(f"comment {short_id(cm.get('id'))} added on {short_id(full)}")
+
+
+@comment_app.command("list")
+def comment_list(task_id: str = typer.Argument(...)) -> None:
+    """List comments on a task."""
+    with client() as c:
+        full = _resolve_task(c, task_id)
+        rows = get_json(c.get(f"/tasks/{full}/comments"))
+    if json_mode():
+        emit_json(rows)
+        return
+    if not rows:
+        info("[dim]no comments.[/dim]")
+        return
+    emit_table(
+        None,
+        ["id", "user", "body"],
+        [(short_id(r.get("id")), short_id(r.get("user_id")), r.get("body")) for r in rows],
+    )
+
+
+@remind_app.command("add")
+def remind_add(
+    task_id: str = typer.Argument(...),
+    offset_minutes: int = typer.Argument(
+        ..., help="Minutes before due_date to fire (e.g. 60 = 1h, 1440 = 1 day)."
+    ),
+) -> None:
+    """Add a pre-due reminder."""
+    with client() as c:
+        full = _resolve_task(c, task_id)
+        r = get_json(c.post(f"/tasks/{full}/reminders", json={"offset_minutes": offset_minutes}))
+    if json_mode():
+        emit_json(r)
+        return
+    success(f"reminder {short_id(r.get('id'))} set -{offset_minutes}m on {short_id(full)}")
+
+
+@remind_app.command("rm")
+def remind_rm(
+    task_id: str = typer.Argument(...),
+    reminder_id: str = typer.Argument(...),
+) -> None:
+    """Remove a reminder."""
+    with client() as c:
+        full = _resolve_task(c, task_id)
+        resp = c.delete(f"/tasks/{full}/reminders/{reminder_id}")
+        if resp.status_code not in (200, 204):
+            get_json(resp)
+    success(f"reminder {short_id(reminder_id)} removed.")
+
+
+@attach_app.command("add")
+def attach_add(
+    task_id: str = typer.Argument(...),
+    path: Path = typer.Argument(..., exists=True, dir_okay=False, readable=True),
+) -> None:
+    """Upload a file attachment to a task."""
+    with client() as c:
+        full = _resolve_task(c, task_id)
+        with path.open("rb") as fh:
+            files = {"file": (path.name, fh, _guess_mime(path))}
+            res = get_json(c.post(f"/tasks/{full}/attachments", files=files))
+    if json_mode():
+        emit_json(res)
+        return
+    success(f"uploaded '{path.name}' to task {short_id(full)}")
+
+
+@attach_app.command("list")
+def attach_list(task_id: str = typer.Argument(...)) -> None:
+    """List attachments on a task."""
+    with client() as c:
+        full = _resolve_task(c, task_id)
+        rows = get_json(c.get(f"/tasks/{full}/attachments"))
+    if json_mode():
+        emit_json(rows)
+        return
+    emit_table(
+        None,
+        ["id", "filename", "size", "mime"],
+        [
+            (
+                short_id(r.get("id")),
+                r.get("filename"),
+                r.get("size_bytes"),
+                r.get("mime_type"),
+            )
+            for r in rows
+        ],
+    )
+
+
+# --- internals -------------------------------------------------------
+
+
 def _transition(task_id: str, *, target_name: str) -> None:
     with client() as c:
         full = _resolve_task(c, task_id)
-        task = _get_json(c.get(f"/tasks/{full}"))
-        states = _get_json(c.get(f"/tasks/{full}/states"))
+        task = get_json(c.get(f"/tasks/{full}"))
+        states = get_json(c.get(f"/tasks/{full}/states"))
         target = next((s for s in states if str(s.get("name")) == target_name), None)
         if target is None:
             available = ", ".join(str(s.get("name")) for s in states)
-            raise CLIError(f"No reachable state '{target_name}'. Available: {available}")
+            raise CLIError(f"no reachable state '{target_name}'. Available: {available}")
         if str(target["id"]) == str(task["state_id"]):
             info(f"already in state '{target_name}'.")
             return
-        _get_json(
+        get_json(
             c.post(
                 f"/tasks/{full}/state",
                 json={"state_id": target["id"], "expected_version": task["version"]},
@@ -149,9 +457,25 @@ def _transition(task_id: str, *, target_name: str) -> None:
     success(f"task {short_id(task_id)} → [bold]{target_name}[/bold]")
 
 
+def _versioned_action(task_id: str, action: str) -> None:
+    with client() as c:
+        full = _resolve_task(c, task_id)
+        current = get_json(c.get(f"/tasks/{full}"))
+        get_json(
+            c.post(
+                f"/tasks/{full}/{action}",
+                json={"expected_version": current["version"]},
+            )
+        )
+    success(f"task {short_id(full)} {action}d")
+
+
 def _render_tasks(rows: list[dict[str, Any]]) -> None:
     if json_mode():
         emit_json(rows)
+        return
+    if not rows:
+        info("[dim]no tasks.[/dim]")
         return
     emit_table(
         None,
@@ -170,31 +494,6 @@ def _render_tasks(rows: list[dict[str, Any]]) -> None:
     )
 
 
-def _resolve_task(c: Any, partial: str) -> str:
-    """Accept either a full UUID or a unique short prefix (against /tasks)."""
-    if len(partial) >= 32:
-        return partial
-    rows = _get_json(c.get("/tasks", params={"include_archived": "true"}))
-    matches = [t for t in rows if str(t.get("id", "")).startswith(partial)]
-    if len(matches) == 1:
-        return str(matches[0]["id"])
-    if not matches:
-        raise CLIError(f"No task matches '{partial}'.")
-    raise CLIError(
-        f"Ambiguous task prefix '{partial}' ({len(matches)} matches). Use more characters."
-    )
-
-
-def _resolve_tag(c: Any, name_or_id: str) -> str:
-    if len(name_or_id) >= 32:
-        return name_or_id
-    rows = _get_json(c.get("/tags"))
-    matches = [t for t in rows if str(t.get("name")).lower() == name_or_id.lower()]
-    if not matches:
-        raise CLIError(f"No tag named '{name_or_id}'.")
-    return str(matches[0]["id"])
-
-
 def _parse_due(spec: str | None) -> dt.date | None:
     if not spec:
         return None
@@ -206,13 +505,14 @@ def _parse_due(spec: str | None) -> dt.date | None:
     try:
         return dt.date.fromisoformat(spec)
     except ValueError as exc:
-        raise CLIError(f"Invalid --due '{spec}'. Use YYYY-MM-DD, 'today', or 'tomorrow'.") from exc
+        raise CLIError(f"invalid --due '{spec}'. Use YYYY-MM-DD, 'today', or 'tomorrow'.") from exc
 
 
 def _truncate(s: str, n: int) -> str:
     return s if len(s) <= n else s[: n - 1] + "…"
 
 
-def _get_json(resp: Any) -> Any:
-    raise_for_response(resp)
-    return resp.json()
+def _guess_mime(path: Path) -> str:
+    import mimetypes
+
+    return mimetypes.guess_type(str(path))[0] or "application/octet-stream"
