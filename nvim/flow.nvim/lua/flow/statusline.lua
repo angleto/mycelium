@@ -18,12 +18,11 @@ local function refresh()
     cache.ts = os.time()
     return
   end
-  local argv = { cfg.bin }
-  if cfg.profile then
-    table.insert(argv, "--profile")
-    table.insert(argv, cfg.profile)
-  end
-  vim.list_extend(argv, { "timer", "status", "--json" })
+  -- ``--json`` is a top-level flag (see cli.lua), so it must come
+  -- before the sub-command. ``--profile`` is not top-level and the
+  -- subcommands the plugin invokes do not accept it; profile
+  -- selection flows through ``current_profile`` in config.toml.
+  local argv = { cfg.bin, "--json", "timer", "status" }
   vim.system(argv, { text = true }, function(res)
     vim.schedule(function()
       cache.ts = os.time()

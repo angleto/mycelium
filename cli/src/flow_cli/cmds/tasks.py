@@ -398,12 +398,29 @@ def remind_add(
 @remind_app.command("rm")
 def remind_rm(
     task_id: str = typer.Argument(..., autocompletion=complete_task_id),
-    reminder_id: str = typer.Argument(...),
+    reminder_id: str = typer.Argument(..., help="Reminder UUID (full or unique short prefix)."),
 ) -> None:
     """Remove a reminder."""
     with client() as c:
         full = _resolve_task(c, task_id)
-        resp = c.delete(f"/tasks/{full}/reminders/{reminder_id}")
+        # Reminders live under a nested collection, so we cannot use the
+        # generic ``resolve_id`` helper (which assumes a top-level list
+        # endpoint). Do the prefix match against the task's own reminder
+        # list instead.
+        rem_full = reminder_id
+        if len(reminder_id) < 32:
+            rows = get_json(c.get(f"/tasks/{full}/reminders"))
+            matches = [r for r in rows if str(r.get("id", "")).startswith(reminder_id)]
+            if len(matches) == 1:
+                rem_full = str(matches[0]["id"])
+            elif not matches:
+                raise CLIError(f"no reminder matches '{reminder_id}' on this task.")
+            else:
+                raise CLIError(
+                    f"ambiguous reminder prefix '{reminder_id}' "
+                    f"({len(matches)} matches). Use more characters."
+                )
+        resp = c.delete(f"/tasks/{full}/reminders/{rem_full}")
         if resp.status_code not in (200, 204):
             get_json(resp)
     success(f"reminder {short_id(reminder_id)} removed.")

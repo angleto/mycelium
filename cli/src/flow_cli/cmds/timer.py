@@ -192,7 +192,7 @@ def entry_list(
 
 @entry_app.command("edit")
 def entry_edit(
-    entry_id: str = typer.Argument(..., help="Entry UUID (full)."),
+    entry_id: str = typer.Argument(..., help="Entry UUID (full or unique short prefix)."),
     task: str | None = typer.Option(None, "--task"),
     memo: str | None = typer.Option(None, "--memo", "-m"),
     billable: bool | None = typer.Option(None, "--billable/--unbillable"),
@@ -201,7 +201,8 @@ def entry_edit(
 ) -> None:
     """Patch a time entry. Only fields you pass change."""
     with client() as c:
-        current = get_json(c.get(f"/time/entries/{entry_id}"))
+        full = resolve_id(c, entry_id, endpoint="/time/entries", kind="time entry")
+        current = get_json(c.get(f"/time/entries/{full}"))
         payload: dict[str, Any] = {"expected_version": current["version"]}
         if task is not None:
             payload["task_id"] = _resolve_task(c, task)
@@ -213,7 +214,7 @@ def entry_edit(
             payload["started_at"] = _parse_iso(start).isoformat()
         if end is not None:
             payload["ended_at"] = _parse_iso(end).isoformat()
-        result = get_json(c.patch(f"/time/entries/{entry_id}", json=payload))
+        result = get_json(c.patch(f"/time/entries/{full}", json=payload))
     if json_mode():
         emit_json(result)
         return
@@ -222,9 +223,10 @@ def entry_edit(
 
 @entry_app.command("rm")
 def entry_rm(entry_id: str = typer.Argument(...)) -> None:
-    """Delete a time entry."""
+    """Delete a time entry. Accepts a full UUID or a unique short prefix."""
     with client() as c:
-        resp = c.delete(f"/time/entries/{entry_id}")
+        full = resolve_id(c, entry_id, endpoint="/time/entries", kind="time entry")
+        resp = c.delete(f"/time/entries/{full}")
         if resp.status_code not in (200, 204):
             get_json(resp)
     success(f"entry {short_id(entry_id)} deleted.")

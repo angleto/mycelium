@@ -19,12 +19,25 @@ local function ensure_bin(bin)
   return true
 end
 
-local function build_argv(args)
+-- Build ``{ bin, [top-level flags...], <args>... }``.
+-- ``--json`` is a top-level flag on the CLI (registered on
+-- ``flow_cli.main.root``), not a sub-command flag, so it MUST appear
+-- before the sub-command name. Same shape regardless of how deep the
+-- sub-command nesting goes (``flow task list`` etc.).
+--
+-- ``--profile`` deliberately NOT injected here: it is registered only
+-- on a handful of auth/workspace commands (``auth login`` etc.), not
+-- as a top-level flag, and the profile-selection for every other
+-- command flows through ``current_profile`` in ~/.config/flow/config.toml.
+-- If the plugin ever needs to drive a per-call profile, the calling
+-- site has to put ``--profile`` into ``args`` at the position the
+-- specific sub-command expects.
+local function build_argv(args, opts)
+  opts = opts or {}
   local cfg = config()
   local argv = { cfg.bin }
-  if cfg.profile then
-    table.insert(argv, "--profile")
-    table.insert(argv, cfg.profile)
+  if opts.json then
+    table.insert(argv, "--json")
   end
   for _, a in ipairs(args) do
     table.insert(argv, a)
@@ -32,15 +45,14 @@ local function build_argv(args)
   return argv
 end
 
--- Run ``flow <args>`` with ``--json`` appended, decode stdout as JSON,
--- and invoke ``on_done(ok, value_or_err)`` on the main loop.
+-- Run ``flow --json <args>``, decode stdout as JSON, and invoke
+-- ``on_done(ok, value_or_err)`` on the main loop.
 function M.json(args, on_done)
   if not ensure_bin(config().bin) then
     on_done(false, "flow-cli not on PATH")
     return
   end
-  local argv = build_argv(args)
-  table.insert(argv, "--json")
+  local argv = build_argv(args, { json = true })
   vim.system(argv, { text = true }, function(res)
     vim.schedule(function()
       if res.code ~= 0 then

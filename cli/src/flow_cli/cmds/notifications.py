@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import typer
 
-from flow_cli.cmds._common import client, get_json, short_id
+from flow_cli.cmds._common import client, get_json, resolve_id, short_id
 from flow_cli.ui import emit_json, emit_table, info, json_mode, success
 
 app = typer.Typer(no_args_is_help=True, help="Notifications: list, dismiss.")
@@ -42,10 +42,11 @@ def list_(
 
 
 @app.command()
-def dismiss(notification_id: str = typer.Argument(...)) -> None:
+def dismiss(notification_id: str = typer.Argument(..., help="Notification UUID (full or unique short prefix).")) -> None:
     """Mark a notification as dismissed (deletes the dispatch row)."""
     with client() as c:
-        resp = c.delete(f"/notifications/{notification_id}")
+        full = resolve_id(c, notification_id, endpoint="/notifications", kind="notification")
+        resp = c.delete(f"/notifications/{full}")
         if resp.status_code not in (200, 204):
             get_json(resp)
     success(f"dismissed {short_id(notification_id)}")
