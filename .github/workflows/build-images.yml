@@ -82,7 +82,14 @@ jobs:
         # The Dockerfiles reference `docker/nginx.conf` etc. relative to
         # the build context; past tags (e.g. v1.0.0) do not yet carry
         # `docker/` in-tree. Copy from workflow-ref so any flow_ref builds.
-        run: cp -r workflow-ref/docker flow-src/docker
+        # `cp -r SRC DST` when DST exists nests SRC inside DST (e.g.
+        # docker/docker/sdi-inbound.Dockerfile), which silently breaks
+        # any Dockerfile added on the workflow ref but not yet on the
+        # source ref. `cp -r SRC/. DST/` copies the CONTENTS and merges
+        # over DST in-place — the only correct shape here.
+        run: |
+          mkdir -p flow-src/docker
+          cp -r workflow-ref/docker/. flow-src/docker/
 
       - name: Resolve source SHA
         id: src
