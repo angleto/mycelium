@@ -17,12 +17,6 @@ import { CoordinationPanel } from '../components/CoordinationPanel'
 import { TaskTimer } from '../components/TaskTimer'
 import { formatHours } from '../lib/estimate'
 
-// Mirrors backend derive_priority. importance/urgency are 1..5 where
-// 1 = most pressing (Critical / Now); priority = importance*urgency,
-// 1 (Critical+Now) .. 25 (Trivial+Whenever).
-function derivePriority(imp: number, urg: number): number {
-  return Math.max(1, Math.min(25, imp * urg))
-}
 import type { components } from '../api/schema'
 
 type Task = components['schemas']['TaskOut']
@@ -42,8 +36,15 @@ export function TaskDetailRoute() {
   const [tags, setTags] = useState<Tag[]>([])
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
-  const [importance, setImportance] = useState(4)
-  const [urgency, setUrgency] = useState(4)
+  // null when the task has no importance/urgency persisted (MCP-created
+  // tasks usually skip the Eisenhower inputs and rely on the priority
+  // default). Rendering them as "Bassa" (4) was misleading: it implied
+  // the user had set them, and combined with the now-removed JS
+  // derivePriority it made the chip show P16 against a DB priority of
+  // P3. The select carries an explicit "Non impostato" option so the
+  // missing-value state is visible.
+  const [importance, setImportance] = useState<number | null>(null)
+  const [urgency, setUrgency] = useState<number | null>(null)
   const [estimate, setEstimate] = useState('')
   const [due, setDue] = useState('')
   // Appointment editor (migration 0094, ADR-0008 addendum). The task
@@ -91,8 +92,8 @@ export function TaskDetailRoute() {
     setTask(tk)
     setTitle(tk.title)
     setDescription(tk.description ?? '')
-    setImportance(tk.importance ?? 4)
-    setUrgency(tk.urgency ?? 4)
+    setImportance(tk.importance ?? null)
+    setUrgency(tk.urgency ?? null)
     setEstimate(tk.estimate_effort_h ?? '')
     setDue(tk.due_date ?? '')
     // Hydrate the appointment block. The datetime-local input wants
@@ -293,8 +294,10 @@ export function TaskDetailRoute() {
 
   // Auto-save (no Save button) for the non-text fields: importance/
   // urgency (backend re-derives priority), estimate, due. On success
-  // we only bump the local version — never reload(), which would
-  // clobber an unsaved title/description edit.
+  // we replace ``task`` with the canonical TaskOut from the PATCH
+  // response so server-derived fields (priority above all) stay in
+  // sync without a reload() — which would clobber an unsaved
+  // title/description edit by overwriting the corresponding inputs.
   async function autosave(patch: Record<string, unknown>) {
     if (!task) return
     setErr(null)
@@ -311,22 +314,14 @@ export function TaskDetailRoute() {
       setErr(errMessage(error))
       return
     }
-    // Merge the patch keys into the local task so ``dirty`` clears
-    // and the debounced text-autosave effect short-circuits on the
-    // next render. Just bumping ``version`` (as before) left
-    // task.title pointing at the pre-save value, so dirty stayed
-    // true forever and the user saw "unsaved" with no way to clear.
-    setTask((p) => {
-      if (!p) return p
-      const next: typeof p = { ...p, version: data.version }
-      for (const [k, v] of Object.entries(patch)) {
-        // The PATCH body keys are a strict subset of TaskOut keys
-        // (``_UPDATABLE`` in the backend service); cast through Record
-        // for the type-system, the runtime stays a 1:1 copy.
-        ;(next as unknown as Record<string, unknown>)[k] = v
-      }
-      return next
-    })
+    // PATCH /tasks/{id} now returns the full canonical TaskOut so we
+    // can drop the local re-derivation: in particular ``task.priority``
+    // is whatever the service computed (importance x urgency when both
+    // are set, otherwise the persisted value). The text-autosave's
+    // ``dirty`` check (title/description compared against ``task.*``)
+    // still clears correctly: the response reflects what the server
+    // just persisted, which is what the user just typed.
+    setTask(data)
   }
 
   // Title + description autosave: debounce 1s after the last change.
@@ -361,13 +356,17 @@ export function TaskDetailRoute() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [title, description, task?.version])
 
+  // Send only the changed axis: if the other axis was unset (NULL in
+  // the DB) we must not silently push the local default. The backend
+  // re-derives ``priority`` whenever both axes end up non-NULL after
+  // the patch (and leaves it untouched otherwise).
   function onImp(n: number) {
     setImportance(n)
-    void autosave({ importance: n, urgency })
+    void autosave({ importance: n })
   }
   function onUrg(n: number) {
     setUrgency(n)
-    void autosave({ importance, urgency: n })
+    void autosave({ urgency: n })
   }
   function onDue(v: string) {
     setDue(v)
@@ -782,15 +781,32 @@ export function TaskDetailRoute() {
         <div className="row">
           <label>
             {t('tasks.importance')}
-            <ScaleSelect value={importance} onChange={onImp} labelsKey="tasks.impLabels" />
+            <ScaleSelect
+              value={importance}
+              onChange={onImp}
+              labelsKey="tasks.impLabels"
+              nullable
+            />
           </label>
           <label>
             {t('tasks.urgency')}
-            <ScaleSelect value={urgency} onChange={onUrg} labelsKey="tasks.urgLabels" />
+            <ScaleSelect
+              value={urgency}
+              onChange={onUrg}
+              labelsKey="tasks.urgLabels"
+              nullable
+            />
           </label>
+          {/* priority comes from the server, never derived in JS. When
+              both axes are set we surface the Eisenhower score in the
+              tooltip; otherwise the chip falls back to "priority N". */}
           <PriorityChip
-            priority={derivePriority(importance, urgency)}
-            score={importance * urgency}
+            priority={task.priority}
+            score={
+              task.importance != null && task.urgency != null
+                ? task.importance * task.urgency
+                : null
+            }
           />
         </div>
         <label>

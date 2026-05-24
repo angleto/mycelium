@@ -8794,7 +8794,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["VersionOut"];
+                    "application/json": components["schemas"]["TaskOut"];
                 };
             };
             /** @description Validation Error */

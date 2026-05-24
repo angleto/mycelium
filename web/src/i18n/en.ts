@@ -522,6 +522,7 @@ export const en = {
     cpManaged: 'Clients and projects are configured in their own view:',
     impLabels: ['Critical', 'High', 'Medium', 'Low', 'Trivial'],
     urgLabels: ['Now', 'High', 'Soon', 'Low', 'Whenever'],
+    notSet: 'Not set',
     aiBadge: 'AI',
     aiTitle: 'Created/owned by the AI agent',
     aiCreatedTitle: 'Created by AI agent {{handle}}',

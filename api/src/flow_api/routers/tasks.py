@@ -438,14 +438,22 @@ async def task_states(
     ]
 
 
-@router.patch("/{task_id}", response_model=VersionOut)
+@router.patch("/{task_id}", response_model=TaskOut)
 async def patch_task(
     task_id: uuid.UUID,
     body: TaskPatchIn,
     ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
-) -> VersionOut:
+) -> TaskOut:
+    # Returns the full canonical TaskOut (not just {id, version}) so any
+    # caller (SPA, CLI, MCP, nvim) sees server-derived fields without an
+    # extra GET. priority is the motivating one: it is recomputed from
+    # importance x urgency by the service whenever both axes are present,
+    # and there must be a single source of truth across surfaces (we used
+    # to also derive it in JS in TaskDetailRoute, which lied for tasks
+    # that had NULL importance/urgency and showed a different priority
+    # than the list/kanban — bug fixed by deleting the JS derive).
     values: dict[str, Any] = body.model_dump(exclude_unset=True, exclude={"expected_version"})
-    version = await svc.update_task(
+    await svc.update_task(
         ctx.session,
         org_id=ctx.org_id,
         actor_id=ctx.user_id,
@@ -453,7 +461,26 @@ async def patch_task(
         expected_version=body.expected_version,
         values=values,
     )
-    return VersionOut(id=task_id, version=version)
+    task = await svc.get_task(ctx.session, org_id=ctx.org_id, task_id=task_id, include_deleted=True)
+    names = await _state_names(ctx, {task.state_id})
+    tagmap = await svc.tags_by_task(ctx.session, task_ids=[task.id])
+    idents = await _assignee_idents(ctx, {task.id})
+    creators = await _creator_idents(ctx, {task.id})
+    ctokens = await _creator_tokens(ctx, {task.id})
+    items_map = await checklist_svc.items_by_task(ctx.session, task_ids=[task.id])
+    h, k = idents.get(task.id, (None, None))
+    ch, ck, cl = _resolve_creator(task, creators, ctokens)
+    return _out(
+        task,
+        names.get(task.state_id, ""),
+        tagmap.get(task.id, []),
+        assignee_handle=h,
+        assignee_kind=k,
+        created_by_handle=ch,
+        created_by_kind=ck,
+        created_by_label=cl,
+        checklist=items_map.get(task.id, []),
+    )
 
 
 @router.post("/{task_id}/state", response_model=VersionOut)
