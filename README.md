@@ -92,3 +92,17 @@ service, you must make the complete corresponding source of your
 version available to its users. See [`LICENSE`](LICENSE).
 
 SPDX-License-Identifier: AGPL-3.0-or-later
+
+## Trademark
+
+"Flow" and the Flow logo are trademarks of Angelo Leto. The AGPL grant
+above covers the source code; it does not grant permission to use the
+project name or logo. Forks and derivative distributions must be
+released under a different name and a different mark. You may describe
+your project as "based on Flow" or "compatible with Flow", but you may
+not redistribute it under the "Flow" name, nor use the logo, in a way
+that would suggest endorsement by or affiliation with the upstream
+project.
+
+Contributions to the upstream project must be signed off under the
+[Developer Certificate of Origin](CONTRIBUTING.md#developer-certificate-of-origin-dco).
