@@ -34,10 +34,10 @@ app.add_typer(mfa_app, name="mfa")
 @app.command()
 def login(
     base_url: str = typer.Option(
-        "http://localhost:8000",
+        "https://flow.xeno.garden",
         "--base-url",
         "-u",
-        help="Flow API base URL (e.g. https://flow.xeno.garden).",
+        help="Flow API base URL (override for local dev / staging).",
     ),
     email: str | None = typer.Option(None, "--email", "-e", help="Account email."),
     password: str | None = typer.Option(
