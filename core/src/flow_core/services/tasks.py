@@ -15,7 +15,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from flow_core.concurrency import optimistic_update
-from flow_core.errors import DomainError, NotFoundError
+from flow_core.errors import ConflictError, DomainError, NotFoundError
 from flow_core.i18n import MessageCode
 from flow_core.models.comment import Comment
 from flow_core.models.identity import Identity, IdentityKind
@@ -63,8 +63,22 @@ _UPDATABLE = frozenset(
         "necessity",
         "budget_id",
         "billable",
+        # Appointment unification (migration 0094, ADR-0008 addendum).
+        # ``start_at`` + ``duration_minutes`` are paired (CHECK
+        # constraint); ``recurrence`` is independent.
+        "start_at",
+        "duration_minutes",
+        "recurrence",
     }
 )
+
+
+def _validate_event_pairing(start_at: Any, duration_minutes: Any) -> None:
+    """Enforce the ``(start_at, duration_minutes)`` pairing before the
+    DB CHECK does (so the API returns 422 with a clean message rather
+    than a generic IntegrityError). Either both set or both NULL."""
+    if (start_at is None) != (duration_minutes is None):
+        raise DomainError(MessageCode.DOMAIN_ERROR)
 
 
 async def _require_tag(session: AsyncSession, tag_id: uuid.UUID) -> None:
@@ -131,7 +145,14 @@ async def create_task(
     # ``assistant_id`` bound), so a bare token still surfaces AI
     # authorship through ``agent_tokens.name`` in the serializer.
     created_by_token_id: uuid.UUID | None = None,
+    # Appointment unification (migration 0094, ADR-0008 addendum).
+    # ``start_at`` + ``duration_minutes`` together promote the task to
+    # a calendar appointment subject to no-overlap on assignee.
+    start_at: dt.datetime | None = None,
+    duration_minutes: int | None = None,
+    recurrence: dict[str, Any] | None = None,
 ) -> Task:
+    _validate_event_pairing(start_at, duration_minutes)
     await require_role(session, org_id, actor_id, Role.member)
     if parent_task_id is not None:
         await get_task(session, org_id=org_id, task_id=parent_task_id)
@@ -227,9 +248,20 @@ async def create_task(
         budget_id=budget_id,
         created_by_identity_id=created_by_identity_id,
         created_by_token_id=created_by_token_id,
+        start_at=start_at,
+        duration_minutes=duration_minutes,
+        recurrence=recurrence,
     )
     session.add(task)
-    await session.flush()
+    try:
+        await session.flush()
+    except IntegrityError as exc:
+        # The GiST EXCLUDE constraint on (assignee_id, tstzrange(...))
+        # rejects an appointment that overlaps another appointment of
+        # the same assignee (migration 0094, ADR-0008 addendum).
+        if "no_overlap_event_tasks_per_assignee" in str(exc.orig):
+            raise ConflictError(MessageCode.EVENT_OVERLAP) from exc
+        raise
     for tag_id in eff_tag_ids:
         await _require_tag(session, tag_id)
         session.add(TaskTag(org_id=org_id, task_id=task.id, tag_id=tag_id))
@@ -354,13 +386,26 @@ async def update_task(
         # Defensive: the FK alone is org-agnostic; validate the
         # identity is in this tenant.
         await identities_svc.get_identity(session, org_id=org_id, identity_id=values["assignee_id"])
-    new_version = await optimistic_update(
-        session,
-        Task,
-        pk=task_id,
-        expected_version=expected_version,
-        values=values,
-    )
+    # Pre-validate the event pairing using current + patched values, so
+    # callers can patch one of the two as long as the other is already
+    # set on the row. (Both NULL after patch = revert to plain task;
+    # both non-NULL after patch = appointment; mixed = 422.)
+    if "start_at" in values or "duration_minutes" in values:
+        eff_start = values.get("start_at", current.start_at)
+        eff_dur = values.get("duration_minutes", current.duration_minutes)
+        _validate_event_pairing(eff_start, eff_dur)
+    try:
+        new_version = await optimistic_update(
+            session,
+            Task,
+            pk=task_id,
+            expected_version=expected_version,
+            values=values,
+        )
+    except IntegrityError as exc:
+        if "no_overlap_event_tasks_per_assignee" in str(exc.orig):
+            raise ConflictError(MessageCode.EVENT_OVERLAP) from exc
+        raise
     await audit.log(
         session,
         org_id=org_id,

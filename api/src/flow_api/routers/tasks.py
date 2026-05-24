@@ -104,6 +104,9 @@ def _out(
         created_at=t.created_at,
         updated_at=t.updated_at,
         version=t.version,
+        start_at=t.start_at,
+        duration_minutes=t.duration_minutes,
+        recurrence=t.recurrence,
     )
 
 
@@ -270,6 +273,9 @@ async def create_task(
         budget_id=body.budget_id,
         tag_ids=body.tag_ids,
         assignee_ids=body.assignee_ids,
+        start_at=body.start_at,
+        duration_minutes=body.duration_minutes,
+        recurrence=body.recurrence,
     )
     names = await _state_names(ctx, {task.state_id})
     tagmap = await svc.tags_by_task(ctx.session, task_ids=[task.id])

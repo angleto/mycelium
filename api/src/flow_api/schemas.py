@@ -566,6 +566,14 @@ class TaskOut(BaseModel):
     updated_at: datetime.datetime
     version: int
     tags: list[TagBrief] = Field(default_factory=list)
+    # Appointment unification (migration 0094, ADR-0008 addendum). When
+    # both are set the task is a calendar appointment; the calendar
+    # view filters on ``duration_minutes IS NOT NULL`` and the SPA
+    # renders an event badge. ``due_date`` (date) remains the legacy
+    # deadline; reminders use it alone, appointments use ``start_at``.
+    start_at: datetime.datetime | None = None
+    duration_minutes: int | None = None
+    recurrence: dict[str, Any] | None = None
 
 
 class CommentCreateIn(BaseModel):
