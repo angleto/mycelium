@@ -8,7 +8,7 @@ class FlowCli < Formula
   url "https://github.com/angleto/flow/archive/refs/tags/cli-v0.1.0.tar.gz"
   sha256 "REPLACE_WITH_RELEASE_SHA256"
   license "AGPL-3.0-or-later"
-  head "https://github.com/angleto/flow.git", branch: "v1.2"
+  head "https://github.com/angleto/flow.git", branch: "v2.0"
 
   depends_on "python@3.12"
 
