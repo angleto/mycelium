@@ -49,6 +49,7 @@ from flow_core.models.membership import Role
 from flow_core.models.schedule import Schedule
 from flow_core.models.task import ExecKind, ScheduleMode, SchedulePolicy, Task
 from flow_core.models.task_collaborator import TaskCollaborator
+from flow_core.models.task_participant import TaskParticipant
 from flow_core.models.task_tag import TaskTag
 from flow_core.models.workflow import WorkflowState
 from flow_core.services import audit
@@ -496,15 +497,38 @@ class Scheduler:
         # is scheduled around them, just like legacy Event rows did
         # before the unification.
         appt_busy_by_user: dict[uuid.UUID, list[tuple[dt.datetime, dt.datetime]]] = {}
+        # Migration 0095/0096: every participant of an appointment-task
+        # (including the assignee, mirrored by the 0096 trigger) lives
+        # in ``task_participants`` with the denormalised window. Pull
+        # them all in one query and bucket by ``users.id`` (resolved
+        # through ``identities`` -- AI assistants have no users.id and
+        # are not put on the human serialization timeline). This way
+        # the scheduler sees N-way appointments: every participant has
+        # the slot in their busy list, not just the assignee.
+        participant_rows = (
+            await self._s.execute(
+                select(
+                    Identity.user_id,
+                    TaskParticipant.start_at,
+                    TaskParticipant.duration_minutes,
+                )
+                .join(Identity, Identity.id == TaskParticipant.identity_id)
+                .where(Identity.user_id.is_not(None))
+            )
+        ).all()
+        for uid, p_start, p_dur in participant_rows:
+            p_end = p_start + dt.timedelta(minutes=p_dur)
+            appt_busy_by_user.setdefault(uid, []).append((p_start, p_end))
         for n in nodes.values():
             t = n.task
             if t.start_at is not None and t.duration_minutes is not None:
-                # Pre-placed: fixed window, never moves.
+                # Pre-placed: fixed window, never moves. Busy list is
+                # populated above from task_participants (covers the
+                # assignee via the 0096 mirror trigger and every extra
+                # participant), so we only place the row in ``sched``.
                 appt_end = t.start_at + dt.timedelta(minutes=t.duration_minutes)
                 sched[t.id] = (t.start_at, appt_end)
                 n.ss, n.se = t.start_at, appt_end
-                if n.assignee is not None:
-                    appt_busy_by_user.setdefault(n.assignee, []).append((t.start_at, appt_end))
                 continue
             if (
                 n.kind is ExecKind.human
