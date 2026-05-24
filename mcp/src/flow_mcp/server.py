@@ -69,6 +69,7 @@ from flow_core.services import note_links as note_links_svc
 from flow_core.services import notes as notes_svc
 from flow_core.services import notifications as notif_svc
 from flow_core.services import participants as part_svc
+from flow_core.services import task_checklist as checklist_svc
 from flow_core.services import time_tracking as time_svc
 from flow_core.services import workflow as workflow_svc
 from flow_core.services.rbac import get_role
@@ -3767,3 +3768,137 @@ async def set_task_assignee(
             values=values,
         )
         return {"task_id": task_id, "version": version, "cleared": clear}
+
+
+# ---------------------------------------------------------------------------
+# Checklist tools: the second tab next to the markdown description in the
+# SPA task view. Voice / agent automations dispatch through these instead
+# of patching the description's text — every add / remove / check / uncheck
+# is an atomic API call against a stable item id.
+# ---------------------------------------------------------------------------
+
+
+def _checklist_item(it: Any) -> dict[str, Any]:
+    return {
+        "id": str(it.id),
+        "task_id": str(it.task_id),
+        "text": it.text,
+        "done": it.done,
+        "position": it.position,
+        "done_at": it.done_at.isoformat() if it.done_at else None,
+        "done_by": str(it.done_by) if it.done_by else None,
+        "created_by": str(it.created_by) if it.created_by else None,
+        "version": it.version,
+    }
+
+
+@mcp.tool()
+async def list_checklist(token: str, org_id: str, task_id: str) -> list[dict[str, Any]]:
+    """List a task's checklist items, ordered by position."""
+    async with _tenant(token, org_id) as (s, org, _user):
+        rows = await checklist_svc.list_items(s, org_id=org, task_id=uuid.UUID(task_id))
+        return [_checklist_item(r) for r in rows]
+
+
+@mcp.tool()
+async def add_checklist_item(
+    token: str,
+    org_id: str,
+    task_id: str,
+    text: str,
+    position: int | None = None,
+) -> dict[str, Any]:
+    """Append a checklist item to a task ("alexa, add bread to the
+    shopping list"). When ``position`` is omitted the item lands at
+    the end; pass an explicit integer to insert at a specific slot."""
+    async with _tenant(token, org_id) as (s, org, user):
+        item = await checklist_svc.add_item(
+            s,
+            org_id=org,
+            actor_id=user,
+            task_id=uuid.UUID(task_id),
+            text=text,
+            position=position,
+        )
+        return _checklist_item(item)
+
+
+@mcp.tool()
+async def check_item(
+    token: str,
+    org_id: str,
+    task_id: str,
+    item_id: str,
+    expected_version: int,
+) -> dict[str, Any]:
+    """Mark a checklist item as done. Stamps ``done_at`` / ``done_by``."""
+    async with _tenant(token, org_id) as (s, org, user):
+        item = await checklist_svc.update_item(
+            s,
+            org_id=org,
+            actor_id=user,
+            task_id=uuid.UUID(task_id),
+            item_id=uuid.UUID(item_id),
+            expected_version=expected_version,
+            done=True,
+        )
+        return _checklist_item(item)
+
+
+@mcp.tool()
+async def uncheck_item(
+    token: str,
+    org_id: str,
+    task_id: str,
+    item_id: str,
+    expected_version: int,
+) -> dict[str, Any]:
+    """Un-tick a checklist item (clears ``done_at`` / ``done_by``)."""
+    async with _tenant(token, org_id) as (s, org, user):
+        item = await checklist_svc.update_item(
+            s,
+            org_id=org,
+            actor_id=user,
+            task_id=uuid.UUID(task_id),
+            item_id=uuid.UUID(item_id),
+            expected_version=expected_version,
+            done=False,
+        )
+        return _checklist_item(item)
+
+
+@mcp.tool()
+async def remove_item(
+    token: str,
+    org_id: str,
+    task_id: str,
+    item_id: str,
+) -> dict[str, Any]:
+    """Remove an item from the task's checklist."""
+    async with _tenant(token, org_id) as (s, org, user):
+        await checklist_svc.delete_item(
+            s,
+            org_id=org,
+            actor_id=user,
+            task_id=uuid.UUID(task_id),
+            item_id=uuid.UUID(item_id),
+        )
+        return {"task_id": task_id, "item_id": item_id, "removed": True}
+
+
+@mcp.tool()
+async def clear_done_items(
+    token: str,
+    org_id: str,
+    task_id: str,
+) -> dict[str, Any]:
+    """Remove every item already ticked done. Returns the count for
+    the UX layer (e.g. "Removed N completed items")."""
+    async with _tenant(token, org_id) as (s, org, user):
+        removed = await checklist_svc.clear_done(
+            s,
+            org_id=org,
+            actor_id=user,
+            task_id=uuid.UUID(task_id),
+        )
+        return {"task_id": task_id, "removed": removed}

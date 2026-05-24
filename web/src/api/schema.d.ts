@@ -867,6 +867,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/tasks/{task_id}/participants": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Participants Endpoint */
+        get: operations["list_participants_endpoint_tasks__task_id__participants_get"];
+        put?: never;
+        /** Add Participant Endpoint */
+        post: operations["add_participant_endpoint_tasks__task_id__participants_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tasks/{task_id}/participants/{identity_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Remove Participant Endpoint */
+        delete: operations["remove_participant_endpoint_tasks__task_id__participants__identity_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/tasks/{task_id}/attachments": {
         parameters: {
             query?: never;
@@ -1000,6 +1035,76 @@ export interface paths {
          *     + audit; no assignment). 400 if not offered.
          */
         post: operations["decline_task_tasks__task_id__decline_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tasks/{task_id}/checklist": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Checklist */
+        get: operations["list_checklist_tasks__task_id__checklist_get"];
+        put?: never;
+        /** Add Checklist Item */
+        post: operations["add_checklist_item_tasks__task_id__checklist_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tasks/{task_id}/checklist/{item_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete Checklist Item */
+        delete: operations["delete_checklist_item_tasks__task_id__checklist__item_id__delete"];
+        options?: never;
+        head?: never;
+        /** Update Checklist Item */
+        patch: operations["update_checklist_item_tasks__task_id__checklist__item_id__patch"];
+        trace?: never;
+    };
+    "/tasks/{task_id}/checklist/clear-done": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Clear Checklist Done */
+        post: operations["clear_checklist_done_tasks__task_id__checklist_clear_done_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tasks/{task_id}/checklist/reorder": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reorder Checklist */
+        post: operations["reorder_checklist_tasks__task_id__checklist_reorder_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1265,43 +1370,6 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
-        trace?: never;
-    };
-    "/events": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List Events */
-        get: operations["list_events_events_get"];
-        put?: never;
-        /** Create Event */
-        post: operations["create_event_events_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/events/{event_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get Event */
-        get: operations["get_event_events__event_id__get"];
-        put?: never;
-        post?: never;
-        /** Delete Event */
-        delete: operations["delete_event_events__event_id__delete"];
-        options?: never;
-        head?: never;
-        /** Reschedule Event */
-        patch: operations["reschedule_event_events__event_id__patch"];
         trace?: never;
     };
     "/schedule/recompute": {
@@ -4571,72 +4639,6 @@ export interface components {
             /** Context */
             context?: string | null;
         };
-        /** EventCreateIn */
-        EventCreateIn: {
-            /** Title */
-            title: string;
-            /**
-             * Start At
-             * Format: date-time
-             */
-            start_at: string;
-            /**
-             * End At
-             * Format: date-time
-             */
-            end_at: string;
-            /** Participant Ids */
-            participant_ids?: string[];
-            /** Project Tag Id */
-            project_tag_id?: string | null;
-            /** Client Tag Id */
-            client_tag_id?: string | null;
-            /** Location */
-            location?: string | null;
-        };
-        /** EventOut */
-        EventOut: {
-            /**
-             * Id
-             * Format: uuid
-             */
-            id: string;
-            /** Title */
-            title: string;
-            /**
-             * Start At
-             * Format: date-time
-             */
-            start_at: string;
-            /**
-             * End At
-             * Format: date-time
-             */
-            end_at: string;
-            /** Location */
-            location: string | null;
-            /** Project Tag Id */
-            project_tag_id: string | null;
-            /** Client Tag Id */
-            client_tag_id: string | null;
-            /** Version */
-            version: number;
-        };
-        /** EventRescheduleIn */
-        EventRescheduleIn: {
-            /** Expected Version */
-            expected_version: number;
-            /**
-             * Start At
-             * Format: date-time
-             */
-            start_at: string;
-            /**
-             * End At
-             * Format: date-time
-             */
-            end_at: string;
-        };
         /**
          * ExecKind
          * @enum {string}
@@ -4855,6 +4857,11 @@ export interface components {
              */
             day: string;
         };
+        /**
+         * IdentityKind
+         * @enum {string}
+         */
+        IdentityKind: "user" | "ai_assistant";
         /**
          * InvoiceCounterOut
          * @description A counter row for the admin override UI. ``max_emitted`` is the
@@ -5735,10 +5742,7 @@ export interface components {
             maturity: string;
             /** Promoted At */
             promoted_at?: string | null;
-            /**
-             * Derived Task Ids
-             * @default []
-             */
+            /** Derived Task Ids */
             derived_task_ids?: string[];
         };
         /** NotePatchIn */
@@ -5922,6 +5926,44 @@ export interface components {
             authorize_url: string;
             /** State */
             state: string;
+        };
+        /**
+         * ParticipantIn
+         * @description Body of POST /tasks/{id}/participants. Pass either
+         *     ``identity_id`` (UUID into ``identities``) or ``handle`` (the
+         *     user/assistant handle the picker carries); the service resolves
+         *     the handle through ``identities`` in the workspace's org. At
+         *     least one must be set; ``identity_id`` wins if both are passed.
+         */
+        ParticipantIn: {
+            /** Identity Id */
+            identity_id?: string | null;
+            /** Handle */
+            handle?: string | null;
+        };
+        /**
+         * ParticipantOut
+         * @description One row of GET /tasks/{id}/participants. The identity ``handle``
+         *     and ``kind`` are denormalised for the SPA so it can render the
+         *     badge without a second /identities lookup. Migration 0095.
+         */
+        ParticipantOut: {
+            /**
+             * Identity Id
+             * Format: uuid
+             */
+            identity_id: string;
+            /** Handle */
+            handle: string;
+            /** Kind */
+            kind: string;
+            /**
+             * Start At
+             * Format: date-time
+             */
+            start_at: string;
+            /** Duration Minutes */
+            duration_minutes: number;
         };
         /**
          * PaymentStatus
@@ -6488,6 +6530,82 @@ export interface components {
              */
             target_ids: string[];
         };
+        /** TaskChecklistClearDoneOut */
+        TaskChecklistClearDoneOut: {
+            /** Removed */
+            removed: number;
+        };
+        /** TaskChecklistItemCreateIn */
+        TaskChecklistItemCreateIn: {
+            /** Text */
+            text: string;
+            /** Position */
+            position?: number | null;
+        };
+        /**
+         * TaskChecklistItemOut
+         * @description One row of a task's checklist (the second tab in the SPA task
+         *     view, next to the markdown description). Lightweight: not a
+         *     sub-task. ``version`` enables optimistic concurrency on per-item
+         *     updates; ``done_by``/``done_at`` are stamped on toggle.
+         */
+        TaskChecklistItemOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Task Id
+             * Format: uuid
+             */
+            task_id: string;
+            /** Text */
+            text: string;
+            /** Done */
+            done: boolean;
+            /** Position */
+            position: number;
+            /** Done At */
+            done_at?: string | null;
+            /** Done By */
+            done_by?: string | null;
+            /** Created By */
+            created_by?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /** Version */
+            version: number;
+        };
+        /** TaskChecklistItemPatchIn */
+        TaskChecklistItemPatchIn: {
+            /** Expected Version */
+            expected_version: number;
+            /** Text */
+            text?: string | null;
+            /** Done */
+            done?: boolean | null;
+            /** Position */
+            position?: number | null;
+        };
+        /**
+         * TaskChecklistReorderIn
+         * @description Full-set rewrite of the position column. ``ids`` must list the
+         *     current items of the task in the desired order; mismatch raises
+         *     409-ish (DomainError, code task.checklist.reorder_mismatch).
+         */
+        TaskChecklistReorderIn: {
+            /** Ids */
+            ids: string[];
+        };
         /** TaskCreateIn */
         TaskCreateIn: {
             /** Title */
@@ -6540,7 +6658,9 @@ export interface components {
             /** Duration Minutes */
             duration_minutes?: number | null;
             /** Recurrence */
-            recurrence?: Record<string, unknown> | null;
+            recurrence?: {
+                [key: string]: unknown;
+            } | null;
         };
         /** TaskIdOut */
         TaskIdOut: {
@@ -6648,7 +6768,11 @@ export interface components {
             /** Duration Minutes */
             duration_minutes?: number | null;
             /** Recurrence */
-            recurrence?: Record<string, unknown> | null;
+            recurrence?: {
+                [key: string]: unknown;
+            } | null;
+            /** Checklist */
+            checklist?: components["schemas"]["TaskChecklistItemOut"][];
         };
         /** TaskPatchIn */
         TaskPatchIn: {
@@ -6694,7 +6818,9 @@ export interface components {
             /** Duration Minutes */
             duration_minutes?: number | null;
             /** Recurrence */
-            recurrence?: Record<string, unknown> | null;
+            recurrence?: {
+                [key: string]: unknown;
+            } | null;
         };
         /** TaskRelationCreateIn */
         TaskRelationCreateIn: {
@@ -8529,13 +8655,13 @@ export interface operations {
                 state_id?: string | null;
                 tag_id?: string | null;
                 assignee_id?: string | null;
-                /** Identity Kind (user | ai_assistant) */
-                assignee_kind?: "user" | "ai_assistant" | null;
+                assignee_kind?: components["schemas"]["IdentityKind"] | null;
                 assignee_handles?: string[] | null;
                 owner_handles?: string[] | null;
                 parent_task_id?: string | null;
                 include_archived?: boolean;
                 include_deleted?: boolean;
+                include_checklist?: boolean;
             };
             header: {
                 "x-workspace-id": string;
@@ -9251,6 +9377,117 @@ export interface operations {
             };
         };
     };
+    list_participants_endpoint_tasks__task_id__participants_get: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ParticipantOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    add_participant_endpoint_tasks__task_id__participants_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ParticipantIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ParticipantOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    remove_participant_endpoint_tasks__task_id__participants__identity_id__delete: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                task_id: string;
+                identity_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_task_attachments_tasks__task_id__attachments_get: {
         parameters: {
             query?: never;
@@ -9534,6 +9771,234 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TaskOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_checklist_tasks__task_id__checklist_get: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskChecklistItemOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    add_checklist_item_tasks__task_id__checklist_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TaskChecklistItemCreateIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskChecklistItemOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_checklist_item_tasks__task_id__checklist__item_id__delete: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                task_id: string;
+                item_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_checklist_item_tasks__task_id__checklist__item_id__patch: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                task_id: string;
+                item_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TaskChecklistItemPatchIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskChecklistItemOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    clear_checklist_done_tasks__task_id__checklist_clear_done_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskChecklistClearDoneOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reorder_checklist_tasks__task_id__checklist_reorder_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TaskChecklistReorderIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskChecklistItemOut"][];
                 };
             };
             /** @description Validation Error */
@@ -10296,192 +10761,6 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    list_events_events_get: {
-        parameters: {
-            query?: {
-                user_id?: string | null;
-                start_from?: string | null;
-                start_to?: string | null;
-            };
-            header: {
-                "x-workspace-id": string;
-                "x-project-id"?: string | null;
-                "x-workspace-role"?: string | null;
-                "x-admin-mode"?: string | null;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["EventOut"][];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    create_event_events_post: {
-        parameters: {
-            query?: never;
-            header: {
-                "x-workspace-id": string;
-                "x-project-id"?: string | null;
-                "x-workspace-role"?: string | null;
-                "x-admin-mode"?: string | null;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["EventCreateIn"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["EventOut"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_event_events__event_id__get: {
-        parameters: {
-            query?: never;
-            header: {
-                "x-workspace-id": string;
-                "x-project-id"?: string | null;
-                "x-workspace-role"?: string | null;
-                "x-admin-mode"?: string | null;
-            };
-            path: {
-                event_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["EventOut"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    delete_event_events__event_id__delete: {
-        parameters: {
-            query?: never;
-            header: {
-                "x-workspace-id": string;
-                "x-project-id"?: string | null;
-                "x-workspace-role"?: string | null;
-                "x-admin-mode"?: string | null;
-            };
-            path: {
-                event_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    reschedule_event_events__event_id__patch: {
-        parameters: {
-            query?: never;
-            header: {
-                "x-workspace-id": string;
-                "x-project-id"?: string | null;
-                "x-workspace-role"?: string | null;
-                "x-admin-mode"?: string | null;
-            };
-            path: {
-                event_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["EventRescheduleIn"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["VersionOut"];
-                };
             };
             /** @description Validation Error */
             422: {

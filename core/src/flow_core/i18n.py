@@ -43,6 +43,9 @@ class MessageCode(enum.StrEnum):
     ORG_NOT_FOUND = "org.not_found"
     CONFLICT_STALE_VERSION = "concurrency.stale_version"
     TASK_NOT_FOUND = "task.not_found"
+    CHECKLIST_ITEM_NOT_FOUND = "task.checklist_item.not_found"
+    CHECKLIST_ITEM_TEXT_EMPTY = "task.checklist_item.text_empty"
+    CHECKLIST_REORDER_MISMATCH = "task.checklist.reorder_mismatch"
     TAG_NOT_FOUND = "tag.not_found"
     ADJUDICATION_NOT_FOUND = "adjudication.not_found"
     TAG_DUPLICATE = "tag.duplicate"
@@ -184,6 +187,11 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
         MessageCode.ORG_NOT_FOUND: "Workspace not found",
         MessageCode.CONFLICT_STALE_VERSION: "Stale version write",
         MessageCode.TASK_NOT_FOUND: "Task not found",
+        MessageCode.CHECKLIST_ITEM_NOT_FOUND: "Checklist item not found",
+        MessageCode.CHECKLIST_ITEM_TEXT_EMPTY: "Checklist item text must not be empty",
+        MessageCode.CHECKLIST_REORDER_MISMATCH: (
+            "Reorder payload does not match the task's checklist items"
+        ),
         MessageCode.TAG_NOT_FOUND: "Tag not found",
         MessageCode.TAG_DUPLICATE: "A tag with this name already exists",
         MessageCode.TAG_AMBIGUOUS: "Ambiguous tag name: {name}",

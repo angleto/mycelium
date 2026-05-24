@@ -109,6 +109,7 @@ from flow_core.models.task import (
     ScheduleMode,
     Task,
 )
+from flow_core.models.task_checklist_item import TaskChecklistItem
 from flow_core.models.task_collaborator import TaskCollaborator
 from flow_core.models.task_handoff import HandoffStatus, TaskHandoff
 from flow_core.models.task_participant import TaskParticipant
@@ -211,6 +212,7 @@ __all__ = [
     "TagKind",
     "TagScope",
     "Task",
+    "TaskChecklistItem",
     "TaskCollaborator",
     "TaskDependency",
     "TaskHandoff",

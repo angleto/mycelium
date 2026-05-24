@@ -521,6 +521,51 @@ class ParticipantOut(BaseModel):
     duration_minutes: int
 
 
+class TaskChecklistItemOut(BaseModel):
+    """One row of a task's checklist (the second tab in the SPA task
+    view, next to the markdown description). Lightweight: not a
+    sub-task. ``version`` enables optimistic concurrency on per-item
+    updates; ``done_by``/``done_at`` are stamped on toggle."""
+
+    id: uuid.UUID
+    task_id: uuid.UUID
+    text: str
+    done: bool
+    position: int
+    done_at: datetime.datetime | None = None
+    done_by: uuid.UUID | None = None
+    created_by: uuid.UUID | None = None
+    created_at: datetime.datetime
+    updated_at: datetime.datetime
+    version: int
+
+
+class TaskChecklistItemCreateIn(BaseModel):
+    text: str = Field(min_length=1, max_length=2000)
+    # When NULL, append at the end. Explicit positions are accepted so
+    # an MCP/voice caller can insert at an arbitrary slot.
+    position: int | None = None
+
+
+class TaskChecklistItemPatchIn(BaseModel):
+    expected_version: int = Field(ge=1)
+    text: str | None = Field(default=None, min_length=1, max_length=2000)
+    done: bool | None = None
+    position: int | None = None
+
+
+class TaskChecklistReorderIn(BaseModel):
+    """Full-set rewrite of the position column. ``ids`` must list the
+    current items of the task in the desired order; mismatch raises
+    409-ish (DomainError, code task.checklist.reorder_mismatch)."""
+
+    ids: list[uuid.UUID]
+
+
+class TaskChecklistClearDoneOut(BaseModel):
+    removed: int
+
+
 class TaskOut(BaseModel):
     id: uuid.UUID
     title: str
@@ -597,6 +642,14 @@ class TaskOut(BaseModel):
     start_at: datetime.datetime | None = None
     duration_minutes: int | None = None
     recurrence: dict[str, Any] | None = None
+    # Embedded checklist (the second tab in the SPA task view). Populated
+    # only by single-task endpoints (``GET /tasks/{id}`` and ``POST
+    # /tasks``); list endpoints leave it empty so a hundred-row list
+    # doesn't fan out one extra query per task. Mutations go through
+    # the dedicated ``/tasks/{id}/checklist/*`` sub-resource so a stale
+    # ``PATCH /tasks/{id}`` payload can never overwrite the checklist
+    # by accident.
+    checklist: list[TaskChecklistItemOut] = Field(default_factory=list)
 
 
 class CommentCreateIn(BaseModel):

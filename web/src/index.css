@@ -3119,3 +3119,68 @@ button.btn--danger:hover {
   gap: 0.4rem;
   flex-wrap: wrap;
 }
+
+/* Task body tabs: description vs checklist. Both fields are always
+   available on every task (no modality); the tab strip just decides
+   which one the user is looking at right now. */
+.taskdetail__body .tabs {
+  display: flex;
+  gap: 0.25rem;
+  border-bottom: 1px solid var(--border, #ccc);
+  margin-bottom: 0.5rem;
+}
+.taskdetail__body .tabs__tab {
+  background: transparent;
+  border: none;
+  padding: 0.35rem 0.75rem;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  color: inherit;
+  font: inherit;
+}
+.taskdetail__body .tabs__tab.is-active {
+  border-bottom-color: var(--accent, #5b8cff);
+  font-weight: 600;
+}
+
+.checklist {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.checklist__items {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.checklist__row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.checklist__row.is-done .checklist__text {
+  text-decoration: line-through;
+  opacity: 0.6;
+}
+.checklist__text {
+  flex: 1;
+  min-width: 0;
+}
+.checklist__add {
+  display: flex;
+  gap: 0.4rem;
+}
+.checklist__add input {
+  flex: 1;
+}
+.checklist__footer {
+  display: flex;
+  justify-content: flex-end;
+}
+.checklist .ghost.icon {
+  padding: 0.15rem 0.4rem;
+  line-height: 1;
+}

@@ -25,6 +25,11 @@ from flow_api.schemas import (
     StateOut,
     TagBrief,
     TagRefIn,
+    TaskChecklistClearDoneOut,
+    TaskChecklistItemCreateIn,
+    TaskChecklistItemOut,
+    TaskChecklistItemPatchIn,
+    TaskChecklistReorderIn,
     TaskCreateIn,
     TaskNoteCreateIn,
     TaskOut,
@@ -37,6 +42,7 @@ from flow_core.models.identity import IdentityKind
 from flow_core.models.note import Note
 from flow_core.models.tag import Tag
 from flow_core.models.task import Task
+from flow_core.models.task_checklist_item import TaskChecklistItem
 from flow_core.models.task_handoff import TaskHandoff
 from flow_core.models.workflow import WorkflowState
 from flow_core.services import attachments as att_svc
@@ -45,10 +51,27 @@ from flow_core.services import note_links as note_links_svc
 from flow_core.services import notes as notes_svc
 from flow_core.services import notifications as notif_svc
 from flow_core.services import participants as part_svc
+from flow_core.services import task_checklist as checklist_svc
 from flow_core.services import tasks as svc
 from flow_core.services import workflow as wf
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
+
+
+def _checklist_item_out(it: TaskChecklistItem) -> TaskChecklistItemOut:
+    return TaskChecklistItemOut(
+        id=it.id,
+        task_id=it.task_id,
+        text=it.text,
+        done=it.done,
+        position=it.position,
+        done_at=it.done_at,
+        done_by=it.done_by,
+        created_by=it.created_by,
+        created_at=it.created_at,
+        updated_at=it.updated_at,
+        version=it.version,
+    )
 
 
 def _out(
@@ -60,6 +83,7 @@ def _out(
     created_by_handle: str | None = None,
     created_by_kind: str | None = None,
     created_by_label: str | None = None,
+    checklist: list[TaskChecklistItem] | None = None,
 ) -> TaskOut:
     from flow_core.models.task import ExecKind
 
@@ -110,6 +134,7 @@ def _out(
         start_at=t.start_at,
         duration_minutes=t.duration_minutes,
         recurrence=t.recurrence,
+        checklist=[_checklist_item_out(it) for it in (checklist or [])],
     )
 
 
@@ -315,6 +340,12 @@ async def list_tasks(
     parent_task_id: uuid.UUID | None = None,
     include_archived: bool = False,
     include_deleted: bool = False,
+    # Opt-in checklist embedding for the list endpoint. Off by default
+    # (callers that don't search/render the checklist don't pay the
+    # extra batch query). The SPA's TasksRoute turns it on so the
+    # free-text filter can match item text alongside title / tags /
+    # description.
+    include_checklist: bool = False,
 ) -> list[TaskOut]:
     rows = await svc.list_tasks(
         ctx.session,
@@ -335,6 +366,11 @@ async def list_tasks(
     idents = await _assignee_idents(ctx, ids)
     creators = await _creator_idents(ctx, ids)
     ctokens = await _creator_tokens(ctx, ids)
+    items_map = (
+        await checklist_svc.items_by_task(ctx.session, task_ids=list(ids))
+        if include_checklist
+        else {}
+    )
     out: list[TaskOut] = []
     for t in rows:
         h, k = idents.get(t.id, (None, None))
@@ -349,6 +385,7 @@ async def list_tasks(
                 created_by_handle=ch,
                 created_by_kind=ck,
                 created_by_label=cl,
+                checklist=items_map.get(t.id, []) if include_checklist else None,
             )
         )
     return out
@@ -365,6 +402,7 @@ async def get_task(task_id: uuid.UUID, ctx: Annotated[TenantCtx, Depends(tenant_
     idents = await _assignee_idents(ctx, {task.id})
     creators = await _creator_idents(ctx, {task.id})
     ctokens = await _creator_tokens(ctx, {task.id})
+    items_map = await checklist_svc.items_by_task(ctx.session, task_ids=[task.id])
     h, k = idents.get(task.id, (None, None))
     ch, ck, cl = _resolve_creator(task, creators, ctokens)
     return _out(
@@ -376,6 +414,7 @@ async def get_task(task_id: uuid.UUID, ctx: Annotated[TenantCtx, Depends(tenant_
         created_by_handle=ch,
         created_by_kind=ck,
         created_by_label=cl,
+        checklist=items_map.get(task.id, []),
     )
 
 
@@ -803,6 +842,10 @@ async def _task_out(ctx: TenantCtx, task: Task) -> TaskOut:
     ctokens = await _creator_tokens(ctx, {task.id})
     h, k = idents.get(task.id, (None, None))
     ch, ck, cl = _resolve_creator(task, creators, ctokens)
+    # Single-task endpoints embed the checklist (the SPA task view
+    # consumes it inline as the second tab). The list endpoint deliberately
+    # leaves ``checklist=[]`` to avoid fan-out queries on large lists.
+    items_map = await checklist_svc.items_by_task(ctx.session, task_ids=[task.id])
     return _out(
         task,
         names.get(task.state_id, ""),
@@ -812,6 +855,7 @@ async def _task_out(ctx: TenantCtx, task: Task) -> TaskOut:
         created_by_handle=ch,
         created_by_kind=ck,
         created_by_label=cl,
+        checklist=items_map.get(task.id, []),
     )
 
 
@@ -866,3 +910,122 @@ async def decline_task(
         ctx.session, org_id=ctx.org_id, actor_id=ctx.user_id, task_id=task_id
     )
     return await _task_out(ctx, task)
+
+
+# ---------------------------------------------------------------------------
+# Checklist sub-resource: the second tab next to the markdown description
+# in the SPA task view. Items are lightweight (text + done + position),
+# never sub-tasks. Mutations are atomic per item so voice / agent
+# automations don't have to patch the description's text.
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/{task_id}/checklist",
+    response_model=list[TaskChecklistItemOut],
+)
+async def list_checklist(
+    task_id: uuid.UUID,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+) -> list[TaskChecklistItemOut]:
+    rows = await checklist_svc.list_items(ctx.session, org_id=ctx.org_id, task_id=task_id)
+    return [_checklist_item_out(r) for r in rows]
+
+
+@router.post(
+    "/{task_id}/checklist",
+    response_model=TaskChecklistItemOut,
+    status_code=status.HTTP_201_CREATED,
+)
+async def add_checklist_item(
+    task_id: uuid.UUID,
+    body: TaskChecklistItemCreateIn,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+) -> TaskChecklistItemOut:
+    item = await checklist_svc.add_item(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        task_id=task_id,
+        text=body.text,
+        position=body.position,
+    )
+    return _checklist_item_out(item)
+
+
+@router.patch(
+    "/{task_id}/checklist/{item_id}",
+    response_model=TaskChecklistItemOut,
+)
+async def update_checklist_item(
+    task_id: uuid.UUID,
+    item_id: uuid.UUID,
+    body: TaskChecklistItemPatchIn,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+) -> TaskChecklistItemOut:
+    item = await checklist_svc.update_item(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        task_id=task_id,
+        item_id=item_id,
+        expected_version=body.expected_version,
+        text=body.text,
+        done=body.done,
+        position=body.position,
+    )
+    return _checklist_item_out(item)
+
+
+@router.delete(
+    "/{task_id}/checklist/{item_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def delete_checklist_item(
+    task_id: uuid.UUID,
+    item_id: uuid.UUID,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+) -> None:
+    await checklist_svc.delete_item(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        task_id=task_id,
+        item_id=item_id,
+    )
+
+
+@router.post(
+    "/{task_id}/checklist/clear-done",
+    response_model=TaskChecklistClearDoneOut,
+)
+async def clear_checklist_done(
+    task_id: uuid.UUID,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+) -> TaskChecklistClearDoneOut:
+    removed = await checklist_svc.clear_done(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        task_id=task_id,
+    )
+    return TaskChecklistClearDoneOut(removed=removed)
+
+
+@router.post(
+    "/{task_id}/checklist/reorder",
+    response_model=list[TaskChecklistItemOut],
+)
+async def reorder_checklist(
+    task_id: uuid.UUID,
+    body: TaskChecklistReorderIn,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+) -> list[TaskChecklistItemOut]:
+    rows = await checklist_svc.reorder_items(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        task_id=task_id,
+        ordered_ids=body.ids,
+    )
+    return [_checklist_item_out(r) for r in rows]

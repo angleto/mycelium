@@ -230,7 +230,16 @@ export function TasksRoute() {
   const loadTasks = useCallback(async () => {
     setErr(null)
     const { data, error } = await api.GET('/tasks', {
-      params: { header: workspaceHeader(), query: filter ? { tag_id: filter } : {} },
+      params: {
+        header: workspaceHeader(),
+        // include_checklist=true so the free-text filter in
+        // lib/taskFilter can match item text (e.g. "pane") on a
+        // task whose title is just "Shopping list".
+        query: {
+          ...(filter ? { tag_id: filter } : {}),
+          include_checklist: true,
+        },
+      },
     })
     if (error || !data) {
       setErr(errMessage(error))
@@ -245,7 +254,13 @@ export function TasksRoute() {
       const h = workspaceHeader()
       const [tk, tg, pj, cl] = await Promise.all([
         api.GET('/tasks', {
-          params: { header: h, query: filter ? { tag_id: filter } : {} },
+          params: {
+            header: h,
+            query: {
+              ...(filter ? { tag_id: filter } : {}),
+              include_checklist: true,
+            },
+          },
         }),
         api.GET('/tags', { params: { header: h } }),
         api.GET('/projects', { params: { header: h } }),

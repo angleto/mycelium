@@ -12,6 +12,7 @@ import { IdentityBadge } from '../components/IdentityBadge'
 import { ScaleSelect } from '../components/ScaleSelect'
 import { Attachments } from '../components/Attachments'
 import { AgentRunPanel } from '../components/AgentRunPanel'
+import { ChecklistPanel } from '../components/ChecklistPanel'
 import { CoordinationPanel } from '../components/CoordinationPanel'
 import { TaskTimer } from '../components/TaskTimer'
 import { formatHours } from '../lib/estimate'
@@ -76,6 +77,15 @@ export function TaskDetailRoute() {
   const [workNotes, setWorkNotes] = useState<
     { id: string; title: string | null }[]
   >([])
+  // Two tabs in the task body: markdown description and checklist
+  // (no modality, both always available; the user picks what to use).
+  const [activeTab, setActiveTab] = useState<'description' | 'checklist'>(
+    'description',
+  )
+  const [checklistCount, setChecklistCount] = useState<{
+    done: number
+    total: number
+  }>({ done: 0, total: 0 })
 
   const apply = useCallback((tk: Task) => {
     setTask(tk)
@@ -711,9 +721,54 @@ export function TaskDetailRoute() {
             onChange={(e) => setTitle(e.target.value)}
           />
         </label>
-        <div className="field">
-          {t('tasks.description')}
-          <RichEditor value={description} onChange={setDescription} />
+        <div className="field taskdetail__body">
+          {/* Two tabs side by side: markdown body and structured checklist.
+              Both fields live on every task; the user picks what to use.
+              Voice / agent automations target the checklist via the
+              dedicated /tasks/{id}/checklist endpoints. */}
+          <div
+            className="tabs"
+            role="tablist"
+            aria-label={t('tasks.description')}
+          >
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeTab === 'description'}
+              className={`tabs__tab${activeTab === 'description' ? ' is-active' : ''}`}
+              onClick={() => setActiveTab('description')}
+            >
+              {t('tasks.descriptionTab')}
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeTab === 'checklist'}
+              className={`tabs__tab${activeTab === 'checklist' ? ' is-active' : ''}`}
+              onClick={() => setActiveTab('checklist')}
+            >
+              {t('tasks.checklistTab')}{' '}
+              <span className="muted">
+                {t('tasks.checklistCount', {
+                  done: checklistCount.done,
+                  total: checklistCount.total,
+                })}
+              </span>
+            </button>
+          </div>
+          <div role="tabpanel" hidden={activeTab !== 'description'}>
+            <RichEditor value={description} onChange={setDescription} />
+          </div>
+          <div role="tabpanel" hidden={activeTab !== 'checklist'}>
+            <ChecklistPanel
+              taskId={task.id}
+              initial={task.checklist ?? []}
+              onCountChange={(done, total) =>
+                setChecklistCount({ done, total })
+              }
+              disabled={task.deleted_at != null || task.is_archived}
+            />
+          </div>
         </div>
         <div className="row">
           <button type="submit" disabled={busy || !dirty}>

@@ -84,10 +84,18 @@ function compileAtom(token: string, ctx: FilterCtx): FilterPredicate {
     if (key === 'created') return compileCreated(value, ctx)
     if (key === 'executor') return compileExecutor(value)
   }
-  // free text → match title or any tag name
+  // free text → match title, description, checklist item text, or any
+  // tag name. Description/checklist coverage is what lets "pane"
+  // surface a "Shopping list" task whose item is "pane" without
+  // having to remember the parent title. ``checklist`` is populated
+  // only when the caller asked for ``include_checklist`` on /tasks
+  // (TasksRoute does). Other callers see ``checklist=[]`` and the
+  // .some() simply yields false — no behaviour change for them.
   const needle = token.toLowerCase()
   return (t) =>
     t.title.toLowerCase().includes(needle) ||
+    (t.description ?? '').toLowerCase().includes(needle) ||
+    (t.checklist ?? []).some((it) => it.text.toLowerCase().includes(needle)) ||
     (t.tags ?? []).some((g) => g.name.toLowerCase().includes(needle))
 }
 
