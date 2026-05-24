@@ -503,18 +503,24 @@ export function TasksRoute() {
         (tk.tags ?? []).some((g) => focusIds.includes(g.id)),
       )
     : matched
-  // Date lens (scope + date focus). Applied on top of focus, before the
-  // view-specific gating below. ``scope=all`` + ``dateFocus=false`` is
-  // a no-op (avoids the predicate per row).
+  // Date lens (scope + date focus). Two orthogonal axes:
+  //   - scope (Today/Week/Month) narrows DATED tasks to the window;
+  //   - dateFocus on/off decides whether UNDATED tasks are hidden.
+  // So scope=Month + dateFocus=off must show every undated task plus
+  // dated tasks whose date falls in the current month (the previous
+  // implementation incorrectly hid undated tasks whenever a scope was
+  // set, regardless of dateFocus).
   const dateWindow = scopeWindow(scope, new Date())
   const dateLensed =
     !dateWindow && !dateFocus
       ? focused
       : focused.filter((tk) => {
           const d = taskDate(tk)
-          if (dateFocus && d === null) return false
+          if (d === null) {
+            // Undated tasks: visible iff date focus is off.
+            return !dateFocus
+          }
           if (!dateWindow) return true
-          if (d === null) return false
           return d >= dateWindow[0] && d < dateWindow[1]
         })
   // ``shown`` feeds the kanban (full set; its columns are gated by
