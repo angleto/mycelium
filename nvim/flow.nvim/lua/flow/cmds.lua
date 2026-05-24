@@ -4,10 +4,13 @@ local M = {}
 
 local subcommands = {
   "today",
+  "week",
   "tasks",
   "notes",
   "note-new",
   "task-new",
+  "search",
+  "open",
   "status",
 }
 
@@ -33,11 +36,8 @@ local function today()
   local cli = require("flow.cli")
   local ui = require("flow.ui")
   cli.json({ "today" }, function(ok, data)
-    if not ok then
-      notify_err(data)
-      return
-    end
-    local lines = { "# Today (" .. (data.today or "") .. ")", "" }
+    if not ok then notify_err(data) return end
+    local lines = { "# Today (" .. (data.date or "") .. ")", "" }
     local running = data.running or {}
     if #running > 0 then
       table.insert(lines, "## Running")
@@ -48,15 +48,26 @@ local function today()
       end
       table.insert(lines, "")
     end
-    table.insert(lines, "## Tasks")
-    local tasks = data.tasks or {}
-    if #tasks == 0 then
-      table.insert(lines, "_nothing scheduled_")
+    local appts = data.appointments or {}
+    if #appts > 0 then
+      table.insert(lines, "## Appointments")
+      for _, t in ipairs(appts) do
+        local start = (t.start_at or ""):sub(12, 16)
+        table.insert(lines, ("- %s  **%s** _(%sm, pri %s)_"):format(
+          start, t.title or "?", tostring(t.duration_minutes or "?"), tostring(t.priority or "?")
+        ))
+      end
+      table.insert(lines, "")
+    end
+    local deadlines = data.deadlines or {}
+    table.insert(lines, "## Due / scheduled")
+    if #deadlines == 0 then
+      table.insert(lines, "_nothing else_")
     else
-      for _, t in ipairs(tasks) do
-        local due = t.due_date or "-"
+      for _, t in ipairs(deadlines) do
         table.insert(lines, ("- [%s] **%s** _(%s, due %s, pri %s)_"):format(
-          ui.short_id(t.id), t.title or "?", t.state or "?", due, tostring(t.priority or "?")
+          ui.short_id(t.id), t.title or "?", t.state or "?",
+          t.due_date or "-", tostring(t.priority or "?")
         ))
       end
     end
@@ -64,21 +75,58 @@ local function today()
   end)
 end
 
--- Per-row actions: the picker invokes ``fn(value, bufnr)`` with the
--- currently selected task, so the closure must read it from the
--- argument, not from outer scope.
-local function task_actions()
+local function week()
+  local cli = require("flow.cli")
+  local ui = require("flow.ui")
+  cli.json({ "week" }, function(ok, data)
+    if not ok then notify_err(data) return end
+    local lines = { "# Week (" .. (data["from"] or "") .. " → " .. (data["to"] or "") .. ")", "" }
+    local by_day = data.by_day or {}
+    -- Stable day order: sorted ISO date keys.
+    local keys = {}
+    for k, _ in pairs(by_day) do table.insert(keys, k) end
+    table.sort(keys)
+    for _, day in ipairs(keys) do
+      table.insert(lines, "## " .. day)
+      for _, t in ipairs(by_day[day]) do
+        local when = ""
+        if t.start_at and t.duration_minutes then
+          when = " " .. (t.start_at or ""):sub(12, 16)
+        end
+        table.insert(lines, ("- [%s]%s **%s** _(%s, pri %s)_"):format(
+          ui.short_id(t.id), when, t.title or "?", t.state or "?", tostring(t.priority or "?")
+        ))
+      end
+      table.insert(lines, "")
+    end
+    ui.open_text_buffer("week", lines)
+  end)
+end
+
+-- Per-row picker actions. The picker invokes ``fn(value)`` with the
+-- selected task; after the action we re-run the view so the picker
+-- reflects the new state (e.g. a marked-done task disappears).
+local function task_actions(reopen)
   local cli = require("flow.cli")
   return {
     ["<C-d>"] = function(task)
       cli.run({ "task", "done", task.id }, function(ok)
-        if ok then notify_ok("done " .. (task.title or task.id)) end
+        if ok then
+          notify_ok("done " .. (task.title or task.id))
+          if reopen then reopen() end
+        end
       end)
     end,
     ["<C-s>"] = function(task)
       cli.run({ "timer", "start", task.id }, function(ok)
-        if ok then notify_ok("timer started on " .. (task.title or task.id)) end
+        if ok then
+          notify_ok("timer started on " .. (task.title or task.id))
+          pcall(function() require("flow.statusline").refresh() end)
+        end
       end)
+    end,
+    ["<C-o>"] = function(task)
+      cli.run({ "open", task.id }, function() end)
     end,
   }
 end
@@ -86,24 +134,22 @@ end
 local function tasks_view()
   local cli = require("flow.cli")
   cli.json({ "task", "list" }, function(ok, data)
-    if not ok then
-      notify_err(data)
-      return
-    end
+    if not ok then notify_err(data) return end
     require("flow.pickers").pick_task(data, function(task)
       cli.json({ "task", "show", task.id }, function(ok2, full)
         if not ok2 then notify_err(full) return end
+        local t = (full.task or full)  -- show returns {task, comments, reminders}
         local lines = {
-          "# " .. (full.title or "<untitled>"),
+          "# " .. (t.title or "<untitled>"),
           ("_state: %s  due: %s  pri: %s_"):format(
-            full.state or "?", full.due_date or "-", tostring(full.priority or "?")
+            t.state or "?", t.due_date or "-", tostring(t.priority or "?")
           ),
           "",
-          full.description or "",
+          t.description or "",
         }
-        require("flow.ui").open_text_buffer("task/" .. task.id, vim.split(table.concat(lines, "\n"), "\n"))
+        require("flow.ui").open_text_buffer("task/" .. task.id, lines)
       end)
-    end, task_actions())
+    end, task_actions(tasks_view))
   end)
 end
 
@@ -134,15 +180,16 @@ local function note_new()
     "<!-- write your note below; :w to save, :q! to discard -->",
     "",
   }, function(text, on_done)
-    local cli = require("flow.cli")
-    -- Strip the leading HTML comment instruction line(s).
     local body = text:gsub("^<!%-%-.-%-%->\n*", "")
-    cli.run_stdin({ "note", "add", "--no-editor", "--text", "-" }, body, function(ok)
-      if ok then
-        notify_ok("note saved")
-        on_done()
+    require("flow.cli").run_stdin(
+      { "note", "add", "--no-editor", "--text", "-" }, body,
+      function(ok)
+        if ok then
+          notify_ok("note saved")
+          on_done()
+        end
       end
-    end)
+    )
   end)
 end
 
@@ -154,14 +201,51 @@ local function task_new()
       "",
     }, function(text, on_done)
       local body = text:gsub("^<!%-%-.-%-%->\n*", "")
-      require("flow.cli").run({ "task", "add", title, "--description", body, "--no-editor" }, function(ok)
-        if ok then
-          notify_ok("task saved")
-          on_done()
+      require("flow.cli").run(
+        { "task", "add", title, "--description", body, "--no-editor" },
+        function(ok)
+          if ok then
+            notify_ok("task saved")
+            on_done()
+          end
+        end
+      )
+    end)
+  end)
+end
+
+local function search()
+  vim.ui.input({ prompt = "Search: " }, function(query)
+    if not query or query == "" then return end
+    require("flow.cli").json({ "search", query }, function(ok, hits)
+      if not ok then notify_err(hits) return end
+      local items = {}
+      for _, h in ipairs(hits) do
+        local blob = h.blob or {}
+        local text = (blob.text or blob.summary or ""):gsub("\n", " ")
+        table.insert(items, {
+          id = blob.id,
+          rrf = h.rrf,
+          snippet = text:sub(1, 120),
+        })
+      end
+      vim.ui.select(items, {
+        prompt = "Hits (" .. #items .. ")",
+        format_item = function(it)
+          return ("%.3f  %s  %s"):format(it.rrf or 0, tostring(it.id):sub(1, 8), it.snippet or "")
+        end,
+      }, function(picked)
+        if picked then
+          require("flow.cli").run({ "open", tostring(picked.id) }, function() end)
         end
       end)
     end)
   end)
+end
+
+local function open_url(args)
+  local target = args[2] or "today"
+  require("flow.cli").run({ "open", target }, function() end)
 end
 
 local function status_view()
@@ -176,10 +260,13 @@ end
 
 local handlers = {
   today = today,
+  week = week,
   tasks = tasks_view,
   notes = notes_view,
   ["note-new"] = note_new,
   ["task-new"] = task_new,
+  search = search,
+  open = open_url,
   status = status_view,
 }
 
@@ -193,7 +280,13 @@ function M.dispatch(args)
     notify_err("unknown subcommand '" .. tostring(sub) .. "'. Try: " .. table.concat(subcommands, ", "))
     return
   end
-  handler()
+  -- ``open`` takes a positional ref; pass the args through so the
+  -- caller can write ``:Flow open <task-id>``.
+  if sub == "open" then
+    handler(args)
+  else
+    handler()
+  end
 end
 
 return M

@@ -34,4 +34,8 @@ function M.pickers()
   return require("flow.pickers")
 end
 
+function M.statusline()
+  return require("flow.statusline")
+end
+
 return M

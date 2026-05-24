@@ -38,18 +38,60 @@ flow auth logout     # forget + server-side revoke
 ## Daily flow
 
 ```sh
-flow today                        # running timer + tasks due today
-flow task list --state todo
-flow task add "Write release notes" --due tomorrow
-flow task done a1b2               # short prefixes work when unique
-flow note add -m "remember to bump cli version"
-flow note voice -s 30             # 30s voice memo
-flow timer start a1b2
+# Browse + capture
+flow today                              # running timer + appointments + deadlines
+flow today --date tomorrow              # any day, including +N / -N offsets
+flow week                               # next 7 days grouped per day
+flow task list                          # open tasks only, sorted by due/priority
+flow task list --tag client-acme --all  # include terminal states; filter by tag
+flow task add "Write release notes" --due tomorrow --tag client-acme
+flow note add -m "remember to bump cli version" --task a1b2  # link note → task
+flow note voice -s 30                   # 30s voice memo (sox/ffmpeg)
+flow timer start a1b2 --memo "fixing bug"
 flow timer stop
+flow timer status                       # running timers + today's billable total
+
+# Edit existing entities
+flow task edit a1b2 --priority 8 --due tomorrow
+flow task edit a1b2 --description @     # opens $EDITOR pre-loaded with current body
+flow task tag add a1b2 urgent
+flow task comment add a1b2 -m "blocked on staging"
+flow task remind add a1b2 60            # 60 min before due
+flow task attach add a1b2 ./scan.pdf
+flow note edit n9z3 --task -            # '-' clears the link
+
+# Search + advisor
+flow search "release v1.2"
+flow what-now --duration 25 --location office
+flow schedule list                      # AI-computed plan
+
+# Browsing
+flow client list
+flow project list --client acme
+flow workspace list
+flow notif list
+flow open today                         # SPA fallback (browser)
+flow open a1b2                          # open task detail in the SPA
+
+# Multi-factor (the existing login already prompts for TOTP if 401 mfa_required)
+flow auth mfa setup                     # prints otpauth URI + ASCII QR + secret
+flow auth mfa activate 123456           # confirm, then save the backup codes
+flow auth mfa status
 ```
 
 Every command supports `--json` for piping into `jq`, scripts, or the
 `flow.nvim` plugin which shells out to the same binary.
+
+## What's left in the browser (deliberately)
+
+- **Invoicing** (issuer profiles, line items, SDI XML/PDF). Visual and
+  monthly; the CLI deliberately doesn't replicate it.
+- **MFA QR scan** when an authenticator can't take a paste of the
+  otpauth URI. `flow auth mfa setup` renders an ASCII QR; fall back to
+  the browser SPA if your authenticator is on the same device.
+
+For everything else, run `flow open <ref>` to jump to the SPA when you
+need a richer view.
 
 ## Profiles
 

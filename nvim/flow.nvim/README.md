@@ -57,12 +57,32 @@ return {
 
 | Command | What it does |
 | --- | --- |
-| `:Flow today` | Open a buffer with the running timer and today's tasks. |
-| `:Flow tasks` | Picker over open tasks. `<cr>` opens detail; `<C-d>` marks done; `<C-s>` starts a timer. |
+| `:Flow today` | Open a buffer with today's running timer, appointments and deadlines. |
+| `:Flow week` | Next 7 days grouped by day. |
+| `:Flow tasks` | Picker over open tasks. `<cr>` opens detail; `<C-d>` marks done; `<C-s>` starts a timer; `<C-o>` opens in the SPA. The picker re-runs after `<C-d>` so the list stays accurate. |
 | `:Flow notes` | Picker over recent notes; `<cr>` opens the body in a buffer. |
 | `:Flow note-new` | Open a Markdown buffer; on `:w` the body is sent to `flow note add`. |
 | `:Flow task-new` | Prompt for title, then open a description buffer; `:w` calls `flow task add`. |
+| `:Flow search <q>` | Prompt for a query, run hybrid search, pick a hit to open in the SPA. |
+| `:Flow open <ref>` | Open the SPA on a task/note id or shortcut (`today`, `notes`, `invoices`, ...). |
 | `:Flow status` | Notification with profile + server build info. |
+
+### Lualine integration
+
+```lua
+require("lualine").setup({
+  sections = {
+    lualine_x = {
+      function() return require("flow").statusline().timer() end,
+      "encoding", "filetype",
+    },
+  },
+})
+```
+
+The function returns `⏱ <task-prefix> since HH:MM` while a timer is
+running, empty otherwise. A background poll refreshes it every 30s; the
+function itself is cheap and never blocks the redraw.
 
 `:Flow` with no arg is equivalent to `:Flow today`.
 

@@ -1,0 +1,60 @@
+"""Surface smoke tests: every registered command and sub-app responds to
+``--help`` without crashing. Run offline; no backend required.
+
+This catches the dumbest regressions (typo in a Typer signature, broken
+import) at zero cost.
+"""
+
+from __future__ import annotations
+
+import subprocess
+import sys
+
+import pytest
+
+# (argv, expected substring in help output)
+_CASES = [
+    (["task", "--help"], "edit"),
+    (["task", "list", "--help"], "--sort"),
+    (["task", "edit", "--help"], "--priority"),
+    (["task", "tag", "--help"], "add"),
+    (["task", "comment", "--help"], "add"),
+    (["task", "remind", "--help"], "add"),
+    (["task", "attach", "--help"], "add"),
+    (["note", "--help"], "edit"),
+    (["note", "edit", "--help"], "--task"),
+    (["note", "tag", "--help"], "add"),
+    (["note", "attach", "--help"], "add"),
+    (["timer", "--help"], "entry"),
+    (["timer", "entry", "--help"], "add"),
+    (["auth", "--help"], "mfa"),
+    (["auth", "mfa", "--help"], "setup"),
+    (["auth", "mfa", "setup", "--help"], "--no-qr"),
+    (["search", "--help"], "query"),
+    (["what-now", "--help"], "--duration"),
+    (["today", "--help"], "--date"),
+    (["week", "--help"], "--from"),
+    (["open", "--help"], "ref"),
+    (["client", "list", "--help"], "Personal"),
+    (["project", "list", "--help"], "--client"),
+    (["workspace", "list", "--help"], ""),
+    (["notif", "list", "--help"], ""),
+    (["schedule", "list", "--help"], ""),
+]
+
+
+@pytest.mark.parametrize("argv,needle", _CASES)
+def test_help_runs(argv: list[str], needle: str) -> None:
+    # S603: argv is a static list of literals defined above; sys.executable
+    # is trusted (the current interpreter). No shell, no user input.
+    result = subprocess.run(  # noqa: S603
+        [sys.executable, "-m", "flow_cli", *argv],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, (
+        f"`flow {' '.join(argv)}` exited {result.returncode}:\n{result.stderr}"
+    )
+    if needle:
+        assert needle in result.stdout, f"`flow {' '.join(argv)}` help did not mention '{needle}'."
