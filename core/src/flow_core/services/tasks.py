@@ -537,9 +537,16 @@ async def set_state(
     # to avoid a tasks<->notifications<->coordination import cycle.
     if now_terminal and not was_terminal:
         from flow_core.services import coordination as _coord
+        from flow_core.services import recurrence as _rec
 
         await session.refresh(task)
         await _coord.on_task_completed(session, org_id=org_id, actor_id=actor_id, task=task)
+        # Recurrence spawn (migration 0094 ``tasks.recurrence``): if the
+        # just-completed task carries a recurrence spec, materialise the
+        # next occurrence as a fresh row in the initial state with the
+        # window shifted forward. No-op when ``recurrence`` is NULL or
+        # the chain has ended (past ``until``).
+        await _rec.maybe_spawn_next(session, org_id=org_id, actor_id=actor_id, task=task)
     return new_version
 
 
