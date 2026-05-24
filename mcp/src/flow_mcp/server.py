@@ -138,6 +138,36 @@ async def _tenant(
         yield session, org, user_id
 
 
+async def _resolve_agent_identity(session: AsyncSession, org: uuid.UUID) -> uuid.UUID | None:
+    """Return the ai_assistant identity bound to the agent token used
+    by the current MCP call, or ``None`` for stdio / human-bearer
+    requests. The lookup walks ``agent_tokens.assistant_id ->
+    ai_assistants -> identities`` so the principal that just signed
+    in is the row that owns the action being audited."""
+    principal = _PRINCIPAL.get()
+    if principal is None:
+        return None
+    _user_id, _org, token_id = principal
+    if token_id is None:
+        return None
+    from sqlalchemy import select as _sel
+
+    from flow_core.models.agent_token import AgentToken
+    from flow_core.models.ai_assistant import AiAssistant
+    from flow_core.models.identity import Identity
+
+    row = await session.execute(
+        _sel(Identity.id)
+        .join(AiAssistant, AiAssistant.id == Identity.ai_assistant_id)
+        .join(AgentToken, AgentToken.assistant_id == AiAssistant.id)
+        .where(
+            AgentToken.id == token_id,
+            Identity.org_id == org,
+        )
+    )
+    return row.scalar_one_or_none()
+
+
 @mcp.tool()
 def ping() -> str:
     """Liveness probe; returns the flow-core version."""
@@ -461,6 +491,11 @@ async def create_task(
     ``required_capabilities`` (docs/adr/0025 P2) are the capabilities the
     task needs from its executor (empty = any enabled agent)."""
     async with _tenant(token, org_id) as (s, org, user):
+        # When the MCP call is authenticated with an agent token bound
+        # to an ai_assistant (HTTP transport), record the ai_assistant
+        # as the task's creator identity so /tasks can tell apart
+        # AI-created tasks from human-created ones (ADR-0028 Punto 4).
+        creator_identity_id = await _resolve_agent_identity(s, org)
         task = await tasks.create_task(
             s,
             org_id=org,
@@ -480,6 +515,7 @@ async def create_task(
             budget_id=uuid.UUID(budget_id) if budget_id else None,
             tag_ids=[uuid.UUID(t) for t in (tag_ids or [])],
             assignee_ids=[uuid.UUID(u) for u in (assignee_ids or [])],
+            created_by_identity_id=creator_identity_id,
         )
         return _task(task)
 

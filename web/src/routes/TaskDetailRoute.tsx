@@ -7,6 +7,7 @@ import { AssigneePicker } from '../components/AssigneePicker'
 import { OwnerPicker } from '../components/OwnerPicker'
 import { TagPicker } from '../components/TagPicker'
 import { PriorityChip } from '../components/PriorityChip'
+import { IdentityBadge } from '../components/IdentityBadge'
 import { ScaleSelect } from '../components/ScaleSelect'
 import { Attachments } from '../components/Attachments'
 import { AgentRunPanel } from '../components/AgentRunPanel'
@@ -626,13 +627,30 @@ export function TaskDetailRoute() {
           </button>
         </p>
       )}
-      {task.executor_kind === 'llm_agent' && (
+      {task.assignee_kind ? (
+        <p>
+          <IdentityBadge
+            kind={task.assignee_kind}
+            handle={task.assignee_handle ?? null}
+          />
+        </p>
+      ) : task.created_by_kind === 'ai_assistant' ? (
+        <p>
+          <IdentityBadge
+            kind={task.created_by_kind}
+            handle={task.created_by_handle ?? null}
+            title={t('tasks.aiCreatedTitle', {
+              handle: task.created_by_handle ?? '',
+            })}
+          />
+        </p>
+      ) : task.executor_kind === 'llm_agent' ? (
         <p>
           <span className="aibadge" title={t('tasks.aiTitle')}>
             {t('tasks.aiBadge')}
           </span>
         </p>
-      )}
+      ) : null}
       <form onSubmit={(e) => void onSave(e)}>
         <label>
           {t('tasks.newTitle')}

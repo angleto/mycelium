@@ -1,5 +1,6 @@
 import Markdown from 'react-markdown'
 import type { Components } from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
 import rehypeKatex from 'rehype-katex'
 import { Link } from 'react-router-dom'
@@ -36,7 +37,7 @@ export function MarkdownView({ text }: { text: string }) {
     <div className="md">
       <Markdown
         components={components}
-        remarkPlugins={[remarkMath]}
+        remarkPlugins={[remarkGfm, remarkMath]}
         rehypePlugins={[rehypeKatex]}
       >
         {text}

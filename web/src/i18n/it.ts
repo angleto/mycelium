@@ -510,6 +510,7 @@ export const it: Catalog = {
     urgLabels: ['Adesso', 'Alta', 'Presto', 'Bassa', 'Quando capita'],
     aiBadge: 'IA',
     aiTitle: "Creato/gestito dall'agente IA",
+    aiCreatedTitle: "Creato dall'agente IA {{handle}}",
     identityFacet: 'Filtra per chi è assegnatario del task',
     identity: {
       all: 'Tutti',

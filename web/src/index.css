@@ -1460,6 +1460,47 @@ button.btn--danger:hover {
 .md a.chip {
   text-decoration: none;
 }
+/* GFM tables: render them as readable tables with subtle borders.
+   ``.md`` is the wrapper produced by MarkdownView (the single
+   markdown renderer in the codebase). */
+.md table {
+  border-collapse: collapse;
+  margin: 0.6rem 0;
+  width: 100%;
+  max-width: 100%;
+  display: block;
+  overflow-x: auto;
+  font-size: 0.88rem;
+}
+.md table th,
+.md table td {
+  border: 1px solid var(--border);
+  padding: 0.35rem 0.6rem;
+  vertical-align: top;
+  text-align: left;
+}
+.md table thead th {
+  background: var(--surface-2);
+  font-weight: 600;
+}
+.md table tbody tr:nth-child(even) td {
+  background: var(--surface-2);
+}
+.md blockquote {
+  margin: 0.4rem 0;
+  padding: 0.1rem 0.8rem;
+  border-left: 3px solid var(--border);
+  color: var(--muted);
+}
+.md ul[data-task-list],
+.md ul.contains-task-list {
+  list-style: none;
+  padding-left: 1rem;
+}
+.md ul[data-task-list] li input[type='checkbox'],
+.md ul.contains-task-list li input[type='checkbox'] {
+  margin-right: 0.4rem;
+}
 
 /* ---- WYSIWYG (TipTap) ---- */
 .rte__bar {

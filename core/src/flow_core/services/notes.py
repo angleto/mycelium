@@ -480,7 +480,9 @@ async def get_or_create_work_note(
     model). Idempotent: the second call returns the same note. The note
     is created via ``create_note`` so the client/Personal enforcement
     runs; it inherits the task's project (hence its client) when one
-    can be derived from the task's tags."""
+    can be derived from the task's tags. ALL task tags (project,
+    client, generic) are then propagated onto the note so filters and
+    /focus see them on the same axes."""
     task = (await session.execute(select(Task).where(Task.id == task_id))).scalar_one_or_none()
     if task is None:
         raise NotFoundError(MessageCode.TASK_NOT_FOUND)
@@ -526,6 +528,9 @@ async def get_or_create_work_note(
         actor_id=actor_id,
         note_id=note.id,
         task_id=task_id,
+    )
+    await _copy_task_tags_to_note(
+        session, org_id=org_id, actor_id=actor_id, note_id=note.id, task_id=task_id
     )
     return note
 
@@ -580,7 +585,61 @@ async def create_note_for_task(
         note_id=note.id,
         task_id=task_id,
     )
+    await _copy_task_tags_to_note(
+        session, org_id=org_id, actor_id=actor_id, note_id=note.id, task_id=task_id
+    )
     return note
+
+
+async def _copy_task_tags_to_note(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    note_id: uuid.UUID,
+    task_id: uuid.UUID,
+) -> None:
+    """Propagate every tag of ``task_id`` onto ``note_id``. Skips rows
+    already present (the project tag becomes ``notes.project_id`` and
+    the client tag is auto-attached by ``create_note``). Audit logs one
+    ``attach_tag`` per newly-added row."""
+    task_tag_ids = list(
+        (
+            await session.execute(
+                select(TaskTag.tag_id).where(TaskTag.task_id == task_id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if not task_tag_ids:
+        return
+    existing = set(
+        (
+            await session.execute(
+                select(NoteTag.tag_id).where(NoteTag.note_id == note_id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    for tag_id in task_tag_ids:
+        if tag_id in existing:
+            continue
+        try:
+            async with session.begin_nested():
+                session.add(NoteTag(org_id=org_id, note_id=note_id, tag_id=tag_id))
+                await session.flush()
+        except IntegrityError:
+            continue
+        await audit.log(
+            session,
+            org_id=org_id,
+            actor_id=actor_id,
+            entity="note",
+            entity_id=note_id,
+            action="attach_tag",
+        )
 
 
 async def run_command(

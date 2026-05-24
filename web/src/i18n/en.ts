@@ -509,6 +509,7 @@ export const en = {
     urgLabels: ['Now', 'High', 'Soon', 'Low', 'Whenever'],
     aiBadge: 'AI',
     aiTitle: 'Created/owned by the AI agent',
+    aiCreatedTitle: 'Created by AI agent {{handle}}',
     identityFacet: 'Filter by who the task is assigned to',
     identity: {
       all: 'All',

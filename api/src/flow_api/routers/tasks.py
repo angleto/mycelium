@@ -54,6 +54,8 @@ def _out(
     tags: list[Tag] | None = None,
     assignee_handle: str | None = None,
     assignee_kind: str | None = None,
+    created_by_handle: str | None = None,
+    created_by_kind: str | None = None,
 ) -> TaskOut:
     from flow_core.models.task import ExecKind
 
@@ -82,6 +84,9 @@ def _out(
         assignee_id=t.assignee_id,
         assignee_handle=assignee_handle,
         assignee_kind=assignee_kind,
+        created_by_identity_id=t.created_by_identity_id,
+        created_by_handle=created_by_handle,
+        created_by_kind=created_by_kind,
         owner_id=t.owner_id,
         executor_kind=eff_kind,
         estimate_effort_h=t.estimate_effort_h,
@@ -157,6 +162,26 @@ async def _assignee_idents(
     return {tid: (handle, kind.value) for tid, handle, kind in rows}
 
 
+async def _creator_idents(
+    ctx: TenantCtx, task_ids: set[uuid.UUID]
+) -> dict[uuid.UUID, tuple[str, str]]:
+    """Per-task (handle, kind) of the ``created_by_identity_id``
+    identity (migration 0091). Lets the SPA tag AI-created tasks even
+    when the assignee is empty."""
+    if not task_ids:
+        return {}
+    from flow_core.models.identity import Identity
+
+    rows = (
+        await ctx.session.execute(
+            select(Task.id, Identity.handle, Identity.kind)
+            .join(Identity, Identity.id == Task.created_by_identity_id)
+            .where(Task.id.in_(task_ids))
+        )
+    ).all()
+    return {tid: (handle, kind.value) for tid, handle, kind in rows}
+
+
 async def _state_names(ctx: TenantCtx, state_ids: set[uuid.UUID]) -> dict[uuid.UUID, str]:
     if not state_ids:
         return {}
@@ -201,13 +226,17 @@ async def create_task(
     names = await _state_names(ctx, {task.state_id})
     tagmap = await svc.tags_by_task(ctx.session, task_ids=[task.id])
     idents = await _assignee_idents(ctx, {task.id})
+    creators = await _creator_idents(ctx, {task.id})
     h, k = idents.get(task.id, (None, None))
+    ch, ck = creators.get(task.id, (None, None))
     return _out(
         task,
         names.get(task.state_id, ""),
         tagmap.get(task.id, []),
         assignee_handle=h,
         assignee_kind=k,
+        created_by_handle=ch,
+        created_by_kind=ck,
     )
 
 
@@ -243,10 +272,13 @@ async def list_tasks(
     )
     names = await _state_names(ctx, {t.state_id for t in rows})
     tagmap = await svc.tags_by_task(ctx.session, task_ids=[t.id for t in rows])
-    idents = await _assignee_idents(ctx, {t.id for t in rows})
+    ids = {t.id for t in rows}
+    idents = await _assignee_idents(ctx, ids)
+    creators = await _creator_idents(ctx, ids)
     out: list[TaskOut] = []
     for t in rows:
         h, k = idents.get(t.id, (None, None))
+        ch, ck = creators.get(t.id, (None, None))
         out.append(
             _out(
                 t,
@@ -254,6 +286,8 @@ async def list_tasks(
                 tagmap.get(t.id, []),
                 assignee_handle=h,
                 assignee_kind=k,
+                created_by_handle=ch,
+                created_by_kind=ck,
             )
         )
     return out
@@ -268,13 +302,17 @@ async def get_task(task_id: uuid.UUID, ctx: Annotated[TenantCtx, Depends(tenant_
     names = await _state_names(ctx, {task.state_id})
     tagmap = await svc.tags_by_task(ctx.session, task_ids=[task.id])
     idents = await _assignee_idents(ctx, {task.id})
+    creators = await _creator_idents(ctx, {task.id})
     h, k = idents.get(task.id, (None, None))
+    ch, ck = creators.get(task.id, (None, None))
     return _out(
         task,
         names.get(task.state_id, ""),
         tagmap.get(task.id, []),
         assignee_handle=h,
         assignee_kind=k,
+        created_by_handle=ch,
+        created_by_kind=ck,
     )
 
 
@@ -628,13 +666,17 @@ async def _task_out(ctx: TenantCtx, task: Task) -> TaskOut:
     names = await _state_names(ctx, {task.state_id})
     tagmap = await svc.tags_by_task(ctx.session, task_ids=[task.id])
     idents = await _assignee_idents(ctx, {task.id})
+    creators = await _creator_idents(ctx, {task.id})
     h, k = idents.get(task.id, (None, None))
+    ch, ck = creators.get(task.id, (None, None))
     return _out(
         task,
         names.get(task.state_id, ""),
         tagmap.get(task.id, []),
         assignee_handle=h,
         assignee_kind=k,
+        created_by_handle=ch,
+        created_by_kind=ck,
     )
 
 

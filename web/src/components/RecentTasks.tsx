@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { PriorityChip } from './PriorityChip'
+import { IdentityBadge } from './IdentityBadge'
 import { relTime } from '../lib/time'
 import type { components } from '../api/schema'
 
@@ -118,11 +119,24 @@ export function RecentTasks({ tasks }: { tasks: Task[] }) {
               return (
                 <li key={tk.id} className="recentrow">
                   <Link to={`/tasks/${tk.id}`} className="recentrow__title">
-                    {tk.executor_kind === 'llm_agent' && (
+                    {tk.assignee_kind ? (
+                      <IdentityBadge
+                        kind={tk.assignee_kind}
+                        handle={tk.assignee_handle ?? null}
+                      />
+                    ) : tk.created_by_kind === 'ai_assistant' ? (
+                      <IdentityBadge
+                        kind={tk.created_by_kind}
+                        handle={tk.created_by_handle ?? null}
+                        title={t('tasks.aiCreatedTitle', {
+                          handle: tk.created_by_handle ?? '',
+                        })}
+                      />
+                    ) : tk.executor_kind === 'llm_agent' ? (
                       <span className="aibadge" title={t('tasks.aiTitle')}>
                         {t('tasks.aiBadge')}
                       </span>
-                    )}
+                    ) : null}
                     {tk.title}
                   </Link>
                   <span className="recentrow__meta">

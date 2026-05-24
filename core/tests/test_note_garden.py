@@ -357,6 +357,49 @@ async def test_create_note_for_task_writes_artifact_link() -> None:
         assert pid == task.id
 
 
+async def test_work_note_inherits_task_tags() -> None:
+    """v1.2.85: a work note created from a task must inherit every tag
+    of that task (project + client + generic), not just the project
+    derived through ProjectProfile. This keeps tag-driven filters and
+    /focus in sync between the task and its work note."""
+    from sqlalchemy import select as _select
+
+    from flow_core.models.tag import Tag, TagKind
+    from flow_core.models.task_tag import TaskTag
+    from flow_core.services import taxonomy
+
+    org, user = await _make_workspace()
+    async with tenant_session(str(org), str(user)) as s:
+        generic = await taxonomy.create_tag(
+            s, org_id=org, actor_id=user, kind=TagKind.generic, name="research"
+        )
+        task = await tasks_svc.create_task(
+            s,
+            org_id=org,
+            actor_id=user,
+            title="task with custom tag",
+            estimate_effort_h=Decimal(1),
+            tag_ids=[generic.id],
+        )
+        task_tag_ids = set(
+            (await s.execute(_select(TaskTag.tag_id).where(TaskTag.task_id == task.id)))
+            .scalars()
+            .all()
+        )
+        wn = await notes_svc.get_or_create_work_note(s, org_id=org, actor_id=user, task_id=task.id)
+        note_tags = await notes_svc.tags_by_note(s, note_ids=[wn.id])
+        note_tag_ids = {t.id for t in note_tags.get(wn.id, [])}
+
+    # Every task tag (project, client, generic) must be on the note.
+    assert generic.id in note_tag_ids
+    assert task_tag_ids.issubset(note_tag_ids)
+    # Sanity: there is exactly one of each kind from the task chain.
+    kinds = {t.kind for t in note_tags.get(wn.id, [])}
+    assert {TagKind.project, TagKind.client, TagKind.generic}.issubset(kinds)
+    # The Tag model is imported to land the symbol once tests rely on it.
+    _ = Tag
+
+
 async def test_derived_task_ids_for_notes_batches_and_filters() -> None:
     """`derived_task_ids_for_notes` returns the fruit/transplant tasks
     grouped per note. Subject/artifact links are excluded; the SPA's

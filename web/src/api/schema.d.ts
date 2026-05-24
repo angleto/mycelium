@@ -6587,6 +6587,12 @@ export interface components {
             assignee_handle?: string | null;
             /** Assignee Kind */
             assignee_kind?: string | null;
+            /** Created By Identity Id */
+            created_by_identity_id?: string | null;
+            /** Created By Handle */
+            created_by_handle?: string | null;
+            /** Created By Kind */
+            created_by_kind?: string | null;
             /**
              * Owner Id
              * Format: uuid

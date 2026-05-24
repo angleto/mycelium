@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { PriorityChip } from './PriorityChip'
 import { TagChip } from './TagChip'
 import { TaskTimer } from './TaskTimer'
+import { IdentityBadge } from './IdentityBadge'
 import type { components } from '../api/schema'
 
 type Task = components['schemas']['TaskOut']
@@ -162,14 +163,27 @@ export function TaskKanban({
                         className="kanban__title"
                         draggable={false}
                       >
-                        {tk.executor_kind === 'llm_agent' && (
+                        {tk.assignee_kind ? (
+                          <IdentityBadge
+                            kind={tk.assignee_kind}
+                            handle={tk.assignee_handle ?? null}
+                          />
+                        ) : tk.created_by_kind === 'ai_assistant' ? (
+                          <IdentityBadge
+                            kind={tk.created_by_kind}
+                            handle={tk.created_by_handle ?? null}
+                            title={t('tasks.aiCreatedTitle', {
+                              handle: tk.created_by_handle ?? '',
+                            })}
+                          />
+                        ) : tk.executor_kind === 'llm_agent' ? (
                           <span
                             className="aibadge"
                             title={t('tasks.aiTitle')}
                           >
                             {t('tasks.aiBadge')}
                           </span>
-                        )}
+                        ) : null}
                         {tk.title}
                       </Link>
                       {/* Shared timer widget, pinned top-right. The

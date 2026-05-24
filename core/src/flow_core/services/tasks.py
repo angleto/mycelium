@@ -119,6 +119,12 @@ async def create_task(
     budget_id: uuid.UUID | None = None,
     tag_ids: Sequence[uuid.UUID] = (),
     assignee_ids: Sequence[uuid.UUID] = (),
+    # docs/adr/0028 + migration 0091: identity (user | ai_assistant)
+    # that actually created the task. When None we default to the
+    # ``user`` identity of ``actor_id``; the MCP layer overrides this
+    # with the ai_assistant identity when the principal is an agent
+    # token, so AI-created tasks are identifiable.
+    created_by_identity_id: uuid.UUID | None = None,
 ) -> Task:
     await require_role(session, org_id, actor_id, Role.member)
     if parent_task_id is not None:
@@ -173,6 +179,21 @@ async def create_task(
     # ``owner_id`` defaults to the creator. Same rule as the
     # migration backfill: every task has an explicit human owner.
     effective_owner = owner_id or actor_id
+    # Default ``created_by_identity_id`` to the user identity of the
+    # actor. Callers (notably the MCP server) can override this with
+    # the ai_assistant identity when the request came in through an
+    # agent token.
+    if created_by_identity_id is None:
+        user_ident = (
+            await session.execute(
+                select(Identity.id).where(
+                    Identity.org_id == org_id,
+                    Identity.user_id == actor_id,
+                    Identity.kind == IdentityKind.user,
+                )
+            )
+        ).scalar_one_or_none()
+        created_by_identity_id = user_ident
     # docs/adr/0028: ``executor_kind`` is the routing hint used only
     # when ``assignee_id`` is NULL; when an assignee is set the kind
     # is derived from the joined identity. Persisted regardless so
@@ -198,7 +219,7 @@ async def create_task(
         location=location,
         necessity=necessity,
         budget_id=budget_id,
-        created_by=actor_id,
+        created_by_identity_id=created_by_identity_id,
     )
     session.add(task)
     await session.flush()

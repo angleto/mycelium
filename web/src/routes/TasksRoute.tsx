@@ -757,6 +757,17 @@ export function TasksRoute() {
                       kind={tk.assignee_kind}
                       handle={tk.assignee_handle ?? null}
                     />
+                  ) : tk.created_by_kind === 'ai_assistant' ? (
+                    // Created by an AI assistant through MCP; show the
+                    // creator badge so the row stays identifiable even
+                    // when no assignee is set.
+                    <IdentityBadge
+                      kind={tk.created_by_kind}
+                      handle={tk.created_by_handle ?? null}
+                      title={t('tasks.aiCreatedTitle', {
+                        handle: tk.created_by_handle ?? '',
+                      })}
+                    />
                   ) : tk.executor_kind === 'llm_agent' ? (
                     // Unassigned but routed to the bot pool: keep the
                     // legacy aibadge marker (no handle to show).

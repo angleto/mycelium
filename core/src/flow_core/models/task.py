@@ -150,9 +150,16 @@ class Task(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, Base):
     deleted_at: Mapped[datetime.datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
-    created_by: Mapped[uuid.UUID | None] = mapped_column(
+    # docs/adr/0028 + migrations 0091/0092: single creator pointer.
+    # Identity is polymorphic (user | ai_assistant), so this one column
+    # tells the full story: who actually clicked "create" — the human
+    # in SPA, or the AI assistant via MCP. The human accountability
+    # ground stays on ``owner_id`` (always a real user); the human
+    # under an AI-created task is derivable through
+    # ``identities.ai_assistant_id → ai_assistants.user_id``.
+    created_by_identity_id: Mapped[uuid.UUID | None] = mapped_column(
         PG_UUID(as_uuid=True),
-        ForeignKey("users.id", ondelete="SET NULL"),
+        ForeignKey("identities.id", ondelete="SET NULL"),
         nullable=True,
     )
     # Scheduler fields (F3). Defaults keep earlier phases unaffected.

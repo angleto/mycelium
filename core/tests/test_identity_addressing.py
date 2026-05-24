@@ -234,6 +234,59 @@ async def test_unassigned_task_kind_falls_back_to_executor_kind_hint() -> None:
     assert task.executor_kind is ExecKind.llm_agent
 
 
+async def test_create_task_defaults_created_by_identity_to_actor_user() -> None:
+    """v1.2.85 (migrations 0091/0092): ``created_by_identity_id``
+    replaces the legacy ``created_by`` user FK. When the service is
+    called without an explicit identity (the human-in-SPA path), it
+    must default to the user identity of the actor."""
+    org, user = await _signup_with_handle()
+    async with tenant_session(str(org), str(user)) as s:
+        task = await tasks_svc.create_task(s, org_id=org, actor_id=user, title="human-created")
+        # Resolve back the identity row to assert kind=user and that
+        # ``ai_assistant_id`` is NULL (not an AI).
+        ident_id = task.created_by_identity_id
+        assert ident_id is not None
+        identity = (await s.execute(select(Identity).where(Identity.id == ident_id))).scalar_one()
+    assert identity.kind is IdentityKind.user
+    assert identity.user_id == user
+    assert identity.ai_assistant_id is None
+
+
+async def test_create_task_records_ai_assistant_as_creator_when_passed() -> None:
+    """v1.2.85: callers (notably the MCP server when a request comes
+    in through an agent token) can override ``created_by_identity_id``
+    with the AI assistant identity, so AI-authored tasks are
+    identifiable in /tasks even when no assignee is set."""
+    org, user = await _signup_with_handle()
+    async with tenant_session(str(org), str(user)) as s:
+        assistant = AiAssistant(
+            org_id=org,
+            user_id=user,
+            label="bot",
+            handle=f"bot-{uuid.uuid4().hex[:6]}",
+            scope=[],
+            is_active=True,
+        )
+        s.add(assistant)
+        await s.flush()
+        ai_ident = (
+            await s.execute(
+                select(Identity).where(
+                    Identity.org_id == org,
+                    Identity.ai_assistant_id == assistant.id,
+                )
+            )
+        ).scalar_one()
+        task = await tasks_svc.create_task(
+            s,
+            org_id=org,
+            actor_id=user,
+            title="ai-created",
+            created_by_identity_id=ai_ident.id,
+        )
+    assert task.created_by_identity_id == ai_ident.id
+
+
 async def test_list_tasks_filters_by_assignee_kind_and_handles() -> None:
     """Punto 4 (docs/adr/0028): ``list_tasks`` exposes identity-axis
     filters. ``assignee_kind=ai_assistant`` returns only bot tasks;

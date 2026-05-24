@@ -508,6 +508,15 @@ class TaskOut(BaseModel):
     # task is unassigned. The SPA renders an IdentityBadge from this
     # without re-querying ``/identities`` per row.
     assignee_kind: str | None = None
+    # migration 0091: identity that created the task. The MCP layer
+    # sets this to the ai_assistant when the call comes through an
+    # agent token, otherwise it defaults to the user identity of
+    # ``created_by``. ``created_by_kind`` is the denormalised
+    # ``identities.kind`` so the SPA can flag AI-created tasks even
+    # when the assignee is empty.
+    created_by_identity_id: uuid.UUID | None = None
+    created_by_handle: str | None = None
+    created_by_kind: str | None = None
     owner_id: uuid.UUID
     # ``executor_kind`` is re-exposed for SPA backward compat
     # (cards/filters/graph still consume it). The serializer fills it

@@ -17,10 +17,12 @@ import { useTranslation } from 'react-i18next'
 
 import { api, errMessage, workspaceHeader } from '../api/client'
 import { MarkdownView } from '../components/Markdown'
+import { useFocus } from '../lib/focus'
 import type { components } from '../api/schema'
 
 type Note = components['schemas']['NoteOut']
 type NoteWithLinks = components['schemas']['NoteWithLinksOut']
+type TaskBrief = { id: string; title: string }
 
 type Tab = 'inbox' | 'garden' | 'cemetery'
 
@@ -59,11 +61,22 @@ const TAB_GLYPH: Record<Tab, string> = {
 export function GardenRoute() {
   const { t } = useTranslation()
   const [notes, setNotes] = useState<Note[]>([])
+  const [allTasks, setAllTasks] = useState<TaskBrief[]>([])
   const [tab, setTab] = useState<Tab>('inbox')
   const [openId, setOpenId] = useState<string | null>(null)
   const [openData, setOpenData] = useState<NoteWithLinks | null>(null)
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
+
+  // Focus (sidebar): a client (all its projects) or one project.
+  // Same predicate as NotesRoute so /garden and /notes always agree
+  // on what "in scope" means.
+  const {
+    projectId: focusProject,
+    clientId: focusClient,
+    focusIds,
+    active: focusActive,
+  } = useFocus()
 
   const reload = useCallback(async () => {
     const { data, error } = await api.GET('/notes', {
@@ -79,26 +92,52 @@ export function GardenRoute() {
   useEffect(() => {
     let active = true
     void (async () => {
-      const { data, error } = await api.GET('/notes', {
-        params: { header: workspaceHeader() },
-      })
+      const [n, tk] = await Promise.all([
+        api.GET('/notes', { params: { header: workspaceHeader() } }),
+        api.GET('/tasks', { params: { header: workspaceHeader() } }),
+      ])
       if (!active) return
-      if (error) setErr(errMessage(error))
-      else setNotes(data ?? [])
+      if (n.error) setErr(errMessage(n.error))
+      else setNotes(n.data ?? [])
+      if (tk.data)
+        setAllTasks(tk.data.map((x) => ({ id: x.id, title: x.title })))
     })()
     return () => {
       active = false
     }
   }, [])
 
+  const inFocus = useCallback(
+    (n: Note): boolean => {
+      if (!focusActive) return true
+      if (n.project_id != null && focusIds.includes(n.project_id)) return true
+      const tagIds = (n.tags ?? []).map((g) => g.id)
+      if (tagIds.some((id) => focusIds.includes(id))) return true
+      // Client-only notes (no project) belong to /garden only when the
+      // sidebar focuses the whole client — narrowing to one project
+      // hides them, same rule as /notes.
+      if (
+        !focusProject &&
+        focusClient &&
+        (n.tags ?? []).some(
+          (g) => g.kind === 'client' && g.id === focusClient,
+        )
+      )
+        return true
+      return false
+    },
+    [focusActive, focusIds, focusProject, focusClient],
+  )
+
   const buckets = useMemo(() => {
     const out: Record<Tab, Note[]> = { inbox: [], garden: [], cemetery: [] }
     for (const n of notes) {
       if (n.deleted_at || n.is_archived) continue
+      if (!inFocus(n)) continue
       out[bucketOf(n)].push(n)
     }
     return out
-  }, [notes])
+  }, [notes, inFocus])
 
   const titleOf = (n: Note) =>
     (n.title && n.title.trim()) || shortPreview(n).slice(0, 80) || n.id.slice(0, 8)
@@ -347,6 +386,7 @@ export function GardenRoute() {
                 <PlantDetail
                   data={openData}
                   allNotes={notes}
+                  allTasks={allTasks}
                   onUnlink={async (childId, kind) => {
                     await api.DELETE('/notes/{note_id}/links', {
                       params: {
@@ -370,15 +410,19 @@ export function GardenRoute() {
 function PlantDetail({
   data,
   allNotes,
+  allTasks,
   onUnlink,
 }: {
   data: NoteWithLinks
   allNotes: Note[]
+  allTasks: TaskBrief[]
   onUnlink: (childNoteId: string, kind: string) => Promise<void>
 }) {
   const { t } = useTranslation()
   const titleById = (id: string) =>
     allNotes.find((x) => x.id === id)?.title?.trim() || id.slice(0, 8)
+  const taskTitleById = (id: string) =>
+    allTasks.find((x) => x.id === id)?.title?.trim() || id.slice(0, 8)
   const n = data.note
   return (
     <div className="plant-detail">
@@ -447,7 +491,7 @@ function PlantDetail({
               <li key={l.id}>
                 <span className="chip chip--linkkind">{l.kind}</span>{' '}
                 <Link to={`/tasks/${l.task_id}`}>
-                  {l.task_id.slice(0, 8)}
+                  {taskTitleById(l.task_id)}
                 </Link>
               </li>
             ))}
