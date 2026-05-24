@@ -42,7 +42,11 @@ def list_(
 
 
 @app.command()
-def dismiss(notification_id: str = typer.Argument(..., help="Notification UUID (full or unique short prefix).")) -> None:
+def dismiss(
+    notification_id: str = typer.Argument(
+        ..., help="Notification UUID (full or unique short prefix)."
+    ),
+) -> None:
     """Mark a notification as dismissed (deletes the dispatch row)."""
     with client() as c:
         full = resolve_id(c, notification_id, endpoint="/notifications", kind="notification")
