@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+# Render the templated Homebrew formula for a concrete tag.
+#
+# The committed ``Formula/flow-cli.rb`` carries ``__TAG__`` and
+# ``__SHA256__`` placeholders; this script downloads the release
+# tarball from GitHub, computes its sha256, and prints a fully
+# resolved formula to stdout.
+#
+# Usage:
+#   bin/render-formula v2.0.6 > /tmp/flow-cli.rb        # local smoke
+#   bin/render-formula v2.0.6 --in-place                # rewrite Formula/flow-cli.rb
+#
+# Source of truth: the ``mirror-homebrew-tap`` GitHub Actions workflow
+# runs the same logic at every ``v*`` tag push.
+set -euo pipefail
+
+if [[ $# -lt 1 ]]; then
+  echo "usage: $0 <tag> [--in-place]" >&2
+  echo "       <tag> is the git tag, e.g. v2.0.6" >&2
+  exit 2
+fi
+
+TAG="$1"
+IN_PLACE="${2:-}"
+
+case "$TAG" in
+  v*) ;;
+  *)
+    echo "error: tag '$TAG' must start with 'v' (e.g. v2.0.6)" >&2
+    exit 2
+    ;;
+esac
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+FORMULA="${SCRIPT_DIR%/bin}/Formula/flow-cli.rb"
+TARBALL_URL="https://github.com/angleto/flow/archive/refs/tags/${TAG}.tar.gz"
+
+if [[ ! -f "$FORMULA" ]]; then
+  echo "error: cannot find formula at $FORMULA" >&2
+  exit 1
+fi
+
+tmp=$(mktemp)
+trap 'rm -f "$tmp"' EXIT
+
+echo "Fetching $TARBALL_URL ..." >&2
+if ! curl -fSL "$TARBALL_URL" -o "$tmp"; then
+  echo "error: tarball not available at $TARBALL_URL" >&2
+  echo "       (tag may not be pushed yet, or GitHub release missing)" >&2
+  exit 1
+fi
+
+SHA=$(shasum -a 256 "$tmp" | awk '{print $1}')
+
+rendered=$(sed \
+  -e "s|__TAG__|${TAG}|g" \
+  -e "s|__SHA256__|${SHA}|g" \
+  "$FORMULA")
+
+if [[ "$IN_PLACE" == "--in-place" ]]; then
+  printf '%s\n' "$rendered" > "$FORMULA"
+  echo "Patched $FORMULA in place." >&2
+else
+  printf '%s\n' "$rendered"
+fi

@@ -2,9 +2,9 @@
 
 Homebrew tap for the Flow personal-productivity tools. The canonical
 contents live in this directory; the actual tap repository at
-`github.com/angleto/homebrew-tap` is a mirror, refreshed by the
+`github.com/angleto/homebrew-tap` is a public mirror, refreshed by the
 [`mirror-homebrew-tap`](../../.github/workflows/mirror-homebrew-tap.yml)
-GitHub Actions workflow on every `cli-v*` tag.
+GitHub Actions workflow on every `v*` tag of the monorepo.
 
 ## Usage
 
@@ -23,46 +23,85 @@ brew install angleto/tap/flow-cli
 
 | Formula | Source | Notes |
 | --- | --- | --- |
-| `Formula/flow-cli.rb` | `cli/` (monorepo) | Installs the `flow` binary in an isolated Python venv under `libexec`. Requires `rust` as a build-only dep (for `pydantic-core`). |
+| `Formula/flow-cli.rb` | `cli/` (monorepo) | **Template**. Installs the `flow` binary in an isolated Python venv under `libexec`. Requires `rust` as a build-only dep (for `pydantic-core`). |
+| `bin/render-formula` | — | Resolves the template against a concrete `v*` tag (downloads the tarball, fills in `__TAG__` + `__SHA256__`). |
+
+## Versioning
+
+`flow-cli` shares the monorepo's release tag: when you cut Flow `v2.0.6`,
+the CLI is also `2.0.6`. Single source of truth:
+
+- `cli/pyproject.toml` → `version = "2.0.6"`
+- `cli/src/flow_cli/__init__.py` → reads the same string via
+  `importlib.metadata.version("flow-cli")` at runtime.
+
+No per-tool version files. Bump only `pyproject.toml`.
 
 ## Cutting a release
 
-1. Bump `version` in `cli/pyproject.toml` and commit.
-2. Tag the release: `git tag cli-v0.1.1 && git push --tags`.
-3. Once the GitHub release tarball is available, get its URL + sha256:
-   ```sh
-   packaging/homebrew-tap/bin/release-formula 0.1.1
-   ```
-   Paste the printed `url` + `sha256` into `Formula/flow-cli.rb`.
-4. If runtime deps changed, refresh the `resource` blocks. The standard
-   `homebrew-pypi-poet` invocation cannot resolve `flow-cli` from PyPI
-   (we don't publish there), so we install it locally and run `poet`
-   against its dependency closure. Note that recent `setuptools` (>=81)
-   dropped `pkg_resources`, so pin it:
-   ```sh
-   uv venv /tmp/poet-env --python 3.12
-   VIRTUAL_ENV=/tmp/poet-env uv pip install \
-     homebrew-pypi-poet 'setuptools<81' /path/to/flow/cli
-   /tmp/poet-env/bin/poet --resources typer \
-     --also rich --also httpx --also platformdirs \
-     --also tomli-w --also pydantic > /tmp/flow-cli-resources.rb
-   ```
-   Then replace the `resource "..." do ... end` blocks in the formula
-   with the contents of `/tmp/flow-cli-resources.rb`.
-5. Smoke locally:
-   ```sh
-   cd packaging/homebrew-tap
-   git init && git add -A && git commit -m smoke   # brew needs a git repo
-   brew tap --force angleto/tap "file://$PWD"
-   HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALL_CLEANUP=1 \
-     brew install --build-from-source angleto/tap/flow-cli
-   flow --version && flow auth status               # round-trip
-   brew test angleto/tap/flow-cli                   # formula's own test block
-   rm -rf .git && brew untap angleto/tap            # cleanup
-   ```
-6. Commit the updated formula on the monorepo and push the tag. The
-   `mirror-homebrew-tap` workflow then syncs `packaging/homebrew-tap/`
-   into `github.com/angleto/homebrew-tap` automatically.
+The monorepo workflow is:
+
+1. Bump `version` in `cli/pyproject.toml` (e.g. `2.0.5` → `2.0.6`).
+2. Commit on the default branch.
+3. Tag the release: `git tag v2.0.6 && git push --follow-tags`.
+
+That tag push triggers, in parallel:
+
+- `ci.yml` (ruff + mypy + tests),
+- `build-images.yml` (Docker images → GHCR),
+- [`mirror-homebrew-tap`](../../.github/workflows/mirror-homebrew-tap.yml)
+  (renders the formula for `v2.0.6` and pushes it into
+  `angleto/homebrew-tap`),
+- [`mirror-flow-nvim`](../../.github/workflows/mirror-flow-nvim.yml)
+  (mirrors `nvim/flow.nvim/` into `angleto/flow.nvim` and tags it
+  `v2.0.6` too).
+
+Users `brew install angleto/tap/flow-cli` and get the new version.
+No manual mirror step.
+
+## Local smoke (before tagging)
+
+```sh
+cd packaging/homebrew-tap
+
+# Resolve the template against an existing tag (any v* works).
+bin/render-formula v2.0.5 > /tmp/flow-cli.rb
+
+# brew now requires a tap to be a git repo; ad-hoc init is fine.
+mkdir /tmp/smoke-tap && cd /tmp/smoke-tap
+git init -q -b main
+mkdir Formula && cp /tmp/flow-cli.rb Formula/
+git add -A && git -c user.email=. -c user.name=. commit -q -m smoke
+
+HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALL_CLEANUP=1 \
+  brew tap --force angleto/tap "file://$PWD"
+HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALL_CLEANUP=1 \
+  brew install --build-from-source angleto/tap/flow-cli
+flow --version && flow auth status
+brew test angleto/tap/flow-cli
+brew uninstall flow-cli && brew untap angleto/tap
+```
+
+## Refreshing Python resources
+
+The `resource "..." do ... end` blocks pin every transitive Python
+dep. They need a refresh only when `cli/pyproject.toml` changes its
+direct runtime deps. `homebrew-pypi-poet` cannot resolve `flow-cli`
+from PyPI (we don't publish there), so install the CLI locally first.
+Recent `setuptools` (>=81) dropped `pkg_resources`, so pin it:
+
+```sh
+uv venv /tmp/poet-env --python 3.12
+VIRTUAL_ENV=/tmp/poet-env uv pip install \
+  homebrew-pypi-poet 'setuptools<81' /path/to/flow/cli
+/tmp/poet-env/bin/poet --resources typer \
+  --also rich --also httpx --also platformdirs \
+  --also tomli-w --also pydantic > /tmp/flow-cli-resources.rb
+```
+
+Paste the contents into `Formula/flow-cli.rb`, replacing the existing
+`resource "..."` blocks. Re-run the local smoke above to verify the
+new closure builds.
 
 ## Why not `homebrew-core`?
 

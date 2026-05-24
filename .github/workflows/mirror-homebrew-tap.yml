@@ -1,28 +1,35 @@
 # Mirror packaging/homebrew-tap/ into github.com/angleto/homebrew-tap
-# on every cli-v* tag. The tap repo is a public mirror used by
-# `brew tap angleto/tap`; the monorepo (this one) is the source of
-# truth for the formula.
+# on every v* tag (the unified Flow release tag). The tap repo is a
+# public mirror used by `brew tap angleto/tap`; the monorepo is the
+# source of truth for the formula template.
+#
+# The committed `Formula/flow-cli.rb` is a TEMPLATE with `__TAG__` and
+# `__SHA256__` placeholders. This workflow resolves them against the
+# tarball produced by the tag, then pushes the rendered formula to the
+# tap repo so users see a versioned, ready-to-install formula.
 #
 # Setup (one-time):
-#   1. Create a fine-grained Personal Access Token with `Contents: read+write`
-#      on the `angleto/homebrew-tap` repository only.
-#   2. Save it as a repository secret named `TAP_PUSH_TOKEN` in this repo.
+#   1. Create a fine-grained Personal Access Token with `Contents:
+#      read+write` on the `angleto/homebrew-tap` repository only.
+#   2. Save it as a repository secret named `TAP_PUSH_TOKEN` in this
+#      repo.
 #
-# Without that secret the workflow's push step fails (auth error); the
-# rest of the workflow is harmless to run.
+# Without that secret the first step fails fast with a clear error.
 
 name: mirror-homebrew-tap
 
 on:
   push:
     tags:
-      - "cli-v*"
+      - "v*"
   workflow_dispatch:
     inputs:
-      message:
-        description: "Commit message to use in the tap repo"
+      tag:
+        description: "Tag to mirror (e.g. v2.0.6). Defaults to the latest v* tag."
         required: false
-        default: "Manual sync from monorepo"
+      message:
+        description: "Override commit message to use in the tap repo"
+        required: false
 
 jobs:
   mirror:
@@ -30,32 +37,77 @@ jobs:
     permissions:
       contents: read
     steps:
-      - name: Checkout monorepo
+      - name: Resolve target tag
+        id: tag
+        env:
+          INPUT_TAG: ${{ github.event.inputs.tag }}
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_EVENT_NAME}" == "push" ]]; then
+            TAG="${GITHUB_REF_NAME}"
+          elif [[ -n "${INPUT_TAG}" ]]; then
+            TAG="${INPUT_TAG}"
+          else
+            # workflow_dispatch with no tag input: take the latest v*
+            # tag reachable from the default branch.
+            git ls-remote --tags --refs "https://github.com/${GITHUB_REPOSITORY}.git" \
+              | awk -F/ '/refs\/tags\/v[0-9]/{print $NF}' \
+              | sort -V | tail -1 > /tmp/latest-tag
+            TAG=$(cat /tmp/latest-tag)
+            if [[ -z "${TAG}" ]]; then
+              echo "::error::no v* tag found"
+              exit 1
+            fi
+          fi
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "Mirroring tag: ${TAG}"
+
+      - name: Checkout monorepo @ tag
         uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.tag.outputs.tag }}
+
+      - name: Render formula (resolve __TAG__ + __SHA256__)
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          set -euo pipefail
+          packaging/homebrew-tap/bin/render-formula "${TAG}" --in-place
+          # Sanity: placeholders must be gone now.
+          if grep -qE '__TAG__|__SHA256__' packaging/homebrew-tap/Formula/flow-cli.rb; then
+            echo "::error::render-formula left placeholders unresolved"
+            grep -nE '__TAG__|__SHA256__' packaging/homebrew-tap/Formula/flow-cli.rb
+            exit 1
+          fi
 
       - name: Clone tap repo
         env:
           TAP_PUSH_TOKEN: ${{ secrets.TAP_PUSH_TOKEN }}
         run: |
+          set -euo pipefail
           if [[ -z "${TAP_PUSH_TOKEN}" ]]; then
-            echo "::error::TAP_PUSH_TOKEN secret is not set; cannot mirror."
+            echo "::error::TAP_PUSH_TOKEN secret is not set; cannot push to the tap repo."
             exit 1
           fi
           git clone --depth=1 \
             "https://x-access-token:${TAP_PUSH_TOKEN}@github.com/angleto/homebrew-tap.git" \
             tap-repo
 
-      - name: Sync content
+      - name: Sync content into tap
         run: |
-          # Wipe what we own and re-copy from the monorepo, so removals
-          # propagate too.
+          set -euo pipefail
+          # Wipe what we own and re-copy, so removals propagate too.
           rm -rf tap-repo/Formula tap-repo/bin tap-repo/README.md
           cp -r packaging/homebrew-tap/Formula tap-repo/
           cp -r packaging/homebrew-tap/bin tap-repo/
           cp packaging/homebrew-tap/README.md tap-repo/
 
       - name: Commit + push if changed
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+          OVERRIDE_MSG: ${{ github.event.inputs.message }}
         run: |
+          set -euo pipefail
           cd tap-repo
           git config user.email "ci@flow.xeno.garden"
           git config user.name "Flow CI"
@@ -64,10 +116,10 @@ jobs:
             exit 0
           fi
           git add -A
-          if [[ "${GITHUB_EVENT_NAME}" == "push" ]]; then
-            MSG="Sync from monorepo: ${GITHUB_REF_NAME}"
+          if [[ -n "${OVERRIDE_MSG}" ]]; then
+            MSG="${OVERRIDE_MSG}"
           else
-            MSG="${{ github.event.inputs.message }}"
+            MSG="Release ${TAG}"
           fi
           git commit -m "${MSG}"
           git push origin HEAD:main

@@ -3,10 +3,15 @@ class FlowCli < Formula
 
   desc "Keyboard-first CLI for Flow (tasks, notes, time, calendar)"
   homepage "https://github.com/angleto/flow"
-  # Update url + sha256 on each release. ``bin/release-formula`` in
-  # this repo prints the block ready to paste.
-  url "https://github.com/angleto/flow/archive/refs/tags/cli-v0.1.0.tar.gz"
-  sha256 "e31d817116e1c4de10502b8c0b3beb12deac30ed7a0da6d37a4bdd6ddba38e72"
+  # NOTE: this file is a template. The url + sha256 below carry tag
+  # and digest placeholders, resolved at release time by either:
+  #   - ``bin/render-formula <version>`` (local smoke test), or
+  #   - the ``mirror-homebrew-tap`` GitHub Actions workflow on every
+  #     ``v*`` tag push (canonical publication path).
+  # Do not commit a real url/sha256 here; the workflow rewrites them
+  # against the tag being released.
+  url "https://github.com/angleto/flow/archive/refs/tags/__TAG__.tar.gz"
+  sha256 "__SHA256__"
   license "AGPL-3.0-or-later"
   head "https://github.com/angleto/flow.git", branch: "v2.0"
 

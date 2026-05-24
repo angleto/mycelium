@@ -50,12 +50,22 @@ server-side (`DELETE /agent-tokens/{id}`) and deletes the local file.
 
 ## Packaging
 
-The Homebrew tap source of truth lives at
-[`packaging/homebrew-tap/`](../packaging/homebrew-tap/) in this monorepo.
-On every `cli-v*` tag, the
-[`mirror-homebrew-tap`](../.github/workflows/mirror-homebrew-tap.yml)
-GitHub Actions workflow copies the formula + helper bin into
-`github.com/angleto/homebrew-tap`, which is what `brew tap angleto/tap`
-fetches. `Formula/flow-cli.rb` installs the CLI in an isolated `libexec`
-venv (keeps system Python tidy and lets us pin deps without colliding
-with other formulae).
+CLI and plugin share **the monorepo's release tag**. When you cut
+Flow `v2.0.6`, two mirror workflows fire on the tag push:
+
+- [`mirror-homebrew-tap`](../.github/workflows/mirror-homebrew-tap.yml)
+  renders [`packaging/homebrew-tap/Formula/flow-cli.rb`](../packaging/homebrew-tap/Formula/flow-cli.rb)
+  for `v2.0.6` (downloads the tarball, computes the sha256, substitutes
+  the `__TAG__` / `__SHA256__` placeholders) and pushes the result into
+  `github.com/angleto/homebrew-tap`. Users `brew install
+  angleto/tap/flow-cli` and pick up the new version.
+- [`mirror-flow-nvim`](../.github/workflows/mirror-flow-nvim.yml)
+  copies [`nvim/flow.nvim/`](../nvim/flow.nvim/) into
+  `github.com/angleto/flow.nvim` and re-tags it `v2.0.6` too, so
+  lazy.nvim can pin a version.
+
+The CLI version is single-sourced in `cli/pyproject.toml` (read at
+runtime via `importlib.metadata`), so a tag bump is the only edit
+required for a release. `Formula/flow-cli.rb` installs the CLI in an
+isolated `libexec` venv (keeps system Python tidy and pins deps
+without colliding with other formulae).
