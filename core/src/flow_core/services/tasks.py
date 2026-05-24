@@ -254,12 +254,24 @@ async def create_task(
     )
     session.add(task)
     try:
-        await session.flush()
+        # Savepoint so the outer transaction survives an overlap
+        # rejection (the test / caller can keep using the session).
+        async with session.begin_nested():
+            await session.flush()
     except IntegrityError as exc:
-        # The GiST EXCLUDE constraint on (assignee_id, tstzrange(...))
-        # rejects an appointment that overlaps another appointment of
-        # the same assignee (migration 0094, ADR-0008 addendum).
-        if "no_overlap_event_tasks_per_assignee" in str(exc.orig):
+        # Detach the half-inserted task if the savepoint rollback did
+        # not already evict it. Some SQLAlchemy versions leave the
+        # Python instance attached and that trips later flushes.
+        if task in session:
+            session.expunge(task)
+        # The GiST EXCLUDE on task_participants (migration 0096) rejects
+        # an appointment that would put any identity in two overlapping
+        # windows. Migration 0094 originally lived on tasks
+        # (no_overlap_event_tasks_per_assignee); both names are matched
+        # so a manual rollback to 0095 still surfaces a clean 409.
+        if "no_overlap_event_tasks_per_assignee" in str(
+            exc.orig
+        ) or "no_overlap_task_participants" in str(exc.orig):
             raise ConflictError(MessageCode.EVENT_OVERLAP) from exc
         raise
     for tag_id in eff_tag_ids:
@@ -395,15 +407,18 @@ async def update_task(
         eff_dur = values.get("duration_minutes", current.duration_minutes)
         _validate_event_pairing(eff_start, eff_dur)
     try:
-        new_version = await optimistic_update(
-            session,
-            Task,
-            pk=task_id,
-            expected_version=expected_version,
-            values=values,
-        )
+        async with session.begin_nested():
+            new_version = await optimistic_update(
+                session,
+                Task,
+                pk=task_id,
+                expected_version=expected_version,
+                values=values,
+            )
     except IntegrityError as exc:
-        if "no_overlap_event_tasks_per_assignee" in str(exc.orig):
+        if "no_overlap_event_tasks_per_assignee" in str(
+            exc.orig
+        ) or "no_overlap_task_participants" in str(exc.orig):
             raise ConflictError(MessageCode.EVENT_OVERLAP) from exc
         raise
     await audit.log(
