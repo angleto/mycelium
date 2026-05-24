@@ -15,11 +15,18 @@ import typer
 
 from flow_cli import __version__
 from flow_cli.cmds import auth as auth_cmd
+from flow_cli.cmds import clients as clients_cmd
 from flow_cli.cmds import notes as notes_cmd
+from flow_cli.cmds import notifications as notif_cmd
+from flow_cli.cmds import open_url as open_cmd
+from flow_cli.cmds import schedule as schedule_cmd
+from flow_cli.cmds import search as search_cmd
 from flow_cli.cmds import tags as tags_cmd
 from flow_cli.cmds import tasks as tasks_cmd
 from flow_cli.cmds import timer as timer_cmd
 from flow_cli.cmds import today as today_cmd
+from flow_cli.cmds import what_now as what_now_cmd
+from flow_cli.cmds import workspace as workspace_cmd
 from flow_cli.http import CLIError
 from flow_cli.ui import fail, set_json_mode
 
@@ -44,7 +51,9 @@ def root(
     json: Annotated[
         bool,
         typer.Option(
-            "--json", help="Emit machine-readable JSON (suppresses tables/colour).", is_flag=True
+            "--json",
+            help="Emit machine-readable JSON (suppresses tables/colour).",
+            is_flag=True,
         ),
     ] = False,
     version: Annotated[
@@ -61,12 +70,26 @@ def root(
     set_json_mode(json)
 
 
+# Sub-apps
 app.add_typer(auth_cmd.app, name="auth")
 app.add_typer(tasks_cmd.app, name="task")
 app.add_typer(notes_cmd.app, name="note")
 app.add_typer(timer_cmd.app, name="timer")
 app.add_typer(tags_cmd.app, name="tag")
-app.command(name="today", help="Show today's running timer and due tasks.")(today_cmd.today)
+app.add_typer(clients_cmd.clients_app, name="client")
+app.add_typer(clients_cmd.projects_app, name="project")
+app.add_typer(workspace_cmd.app, name="workspace")
+app.add_typer(notif_cmd.app, name="notif")
+app.add_typer(schedule_cmd.app, name="schedule")
+
+# Top-level single commands
+app.command(name="today", help="Today's running timer + tasks (+ --date / --tz).")(today_cmd.today)
+app.command(name="week", help="Next 7 days of scheduled work.")(today_cmd.week)
+app.command(name="search", help="Hybrid (keyword + semantic) search.")(search_cmd.search)
+app.command(name="what-now", help="Advisor: feasible tasks for a window/location.")(
+    what_now_cmd.what_now
+)
+app.command(name="open", help="Open the SPA on a resource (browser fallback).")(open_cmd.open_url)
 
 
 def _entrypoint() -> int:
