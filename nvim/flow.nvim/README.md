@@ -27,8 +27,15 @@ Drop the following into `~/.config/nvim/lua/plugins/flow.lua`:
 ```lua
 return {
   "angleto/flow.nvim",
-  cmd = "Flow",
-  keys = {
+  version = "*",            -- resolves to the latest v* tag (matches Flow's release)
+  keys = {                  -- keys alone are a valid lazy.nvim trigger; we deliberately
+                            -- avoid `cmd = "Flow"` because that keeps the plugin off
+                            -- runtimepath until first invocation, which breaks
+                            -- `:checkhealth flow` and any other rtp-walking lookup.
+                            -- `plugin/flow.lua` is already minimal: it only registers
+                            -- the `:Flow` user command and defers the rest via
+                            -- `require` on first call, so loading the plugin on
+                            -- startup costs essentially nothing.
     { "<leader>fo", "<cmd>Flow today<cr>",     desc = "Flow: today" },
     { "<leader>ft", "<cmd>Flow tasks<cr>",     desc = "Flow: tasks" },
     { "<leader>fN", "<cmd>Flow notes<cr>",     desc = "Flow: notes" },
