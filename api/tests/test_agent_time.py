@@ -6,8 +6,10 @@ from __future__ import annotations
 import uuid
 
 from httpx import ASGITransport, AsyncClient
+from tests_helpers import seed_ai_assistant_identity
 
 from flow_api.main import app
+from flow_core.db import tenant_session
 
 
 def _email() -> str:
@@ -35,11 +37,20 @@ async def test_executor_kind_snapshot_and_report_split() -> None:
         assert human["executor_kind"] == "human"
         assert human["estimate_effort_h"] is not None
 
+        org_id = uuid.UUID(a["workspace_id"])
+        async with tenant_session(str(org_id), a["user_id"]) as s:
+            ai_ident = await seed_ai_assistant_identity(
+                s, org_id=org_id, user_id=uuid.UUID(a["user_id"])
+            )
         ai = (
             await c.post(
                 "/tasks",
                 headers=h,
-                json={"title": "ai", "executor_kind": "llm_agent"},
+                json={
+                    "title": "ai",
+                    "assignee_id": str(ai_ident.id),
+                    "executor_kind": "llm_agent",
+                },
             )
         ).json()
         assert ai["executor_kind"] == "llm_agent"

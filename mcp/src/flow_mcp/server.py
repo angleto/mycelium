@@ -492,9 +492,8 @@ async def create_task(
     org_id: str,
     title: str,
     description: str | None = None,
-    priority: int = 3,
-    importance: int | None = None,
-    urgency: int | None = None,
+    importance: int = 4,
+    urgency: int = 4,
     tag_ids: list[str] | None = None,
     estimate_effort_h: float | None = None,
     required_capabilities: list[str] | None = None,
@@ -508,16 +507,17 @@ async def create_task(
     duration_minutes: int | None = None,
     recurrence: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Create a task, optionally tagged. Supports personal-domain
-    attributes (cost/location/necessity/budget) for the advisory layer.
-    ``necessity`` is MoSCoW: ``must`` | ``should`` | ``could`` (default
-    ``should`` when omitted). ``required_capabilities`` (docs/adr/0025
-    P2) are the capabilities the task needs from its executor (empty =
-    any enabled agent). Pass ``start_at`` + ``duration_minutes`` to
-    create an appointment-task (migration 0094 + ADR-0008 addendum):
-    the task becomes a calendar block subject to no-overlap on
-    ``assignee_id`` (and any explicit participants added via
-    ``add_task_participant``)."""
+    """Create a task, optionally tagged. ``importance`` / ``urgency``
+    are the Eisenhower axes (1..5, 1 = most pressing); default Low/Low
+    (4/4). ``priority`` is a calculated field (importance x urgency,
+    1..25) and is never settable by the caller. ``necessity`` is
+    MoSCoW: ``must`` | ``should`` | ``could`` (default ``should`` when
+    omitted). ``required_capabilities`` (docs/adr/0025 P2) are the
+    capabilities the task needs from its executor (empty = any enabled
+    agent). Pass ``start_at`` + ``duration_minutes`` to create an
+    appointment-task (migration 0094 + ADR-0008 addendum): the task
+    becomes a calendar block subject to no-overlap on ``assignee_id``
+    (and any explicit participants added via ``add_task_participant``)."""
     async with _tenant(token, org_id) as (s, org, user):
         # When the MCP call is authenticated with an agent token
         # (HTTP transport), record the ai_assistant identity (if the
@@ -532,7 +532,6 @@ async def create_task(
             actor_id=user,
             title=title,
             description=description,
-            priority=priority,
             importance=importance,
             urgency=urgency,
             estimate_effort_h=(
@@ -699,7 +698,6 @@ async def update_task(
     expected_version: int,
     title: str | None = None,
     description: str | None = None,
-    priority: int | None = None,
     importance: int | None = None,
     urgency: int | None = None,
     start_date: str | None = None,
@@ -713,8 +711,9 @@ async def update_task(
     necessity: str | None = None,
     budget_id: str | None = None,
 ) -> dict[str, Any]:
-    """Edit task fields (only the given ones). Priority is re-derived
-    when both importance and urgency are present (Eisenhower).
+    """Edit task fields (only the given ones). ``priority`` is a
+    calculated field and is not accepted here --- patch ``importance``
+    / ``urgency`` (1..5) and the service re-derives priority.
     ``necessity`` is MoSCoW: ``must`` | ``should`` | ``could``.
     ``required_capabilities`` is the P2 executor capability requirement
     (docs/adr/0025); pass [] to clear it."""
@@ -723,8 +722,6 @@ async def update_task(
         values["title"] = title
     if description is not None:
         values["description"] = description
-    if priority is not None:
-        values["priority"] = priority
     if importance is not None:
         values["importance"] = importance
     if urgency is not None:

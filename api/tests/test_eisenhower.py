@@ -1,5 +1,7 @@
 """Eisenhower priority: importance x urgency persisted, priority
-derived (1 = highest, ADR-0004), and it round-trips."""
+derived (1 = highest, ADR-0004), and it round-trips. Since migration
+0102 both axes are NOT NULL with Low/Low (4/4) as the default, and
+``priority`` is a calculated field --- never an input."""
 
 from __future__ import annotations
 
@@ -61,14 +63,26 @@ async def test_priority_derived_from_importance_urgency() -> None:
         assert got["urgency"] == 3
         assert got["priority"] == 9
 
-        # legacy path: explicit priority, no importance/urgency
+        # Default path: no axes passed -> Low/Low (4/4) -> priority 16
         t3 = (
             await c.post(
                 "/tasks",
                 headers=h,
-                json={"title": "legacy", "priority": 2},
+                json={"title": "default"},
             )
         ).json()
-        assert t3["priority"] == 2
-        assert t3["importance"] is None
-        assert t3["urgency"] is None
+        assert t3["priority"] == 16
+        assert t3["importance"] == 4
+        assert t3["urgency"] == 4
+
+        # ``priority`` is not an input field: a caller that tries to set
+        # it gets the value silently dropped by the schema. The stored
+        # priority stays derived from the axes.
+        ignored = await c.patch(
+            f"/tasks/{t3['id']}",
+            headers=h,
+            json={"expected_version": 1, "priority": 1},
+        )
+        assert ignored.status_code == 200
+        got_after = (await c.get(f"/tasks/{t3['id']}", headers=h)).json()
+        assert got_after["priority"] == 16

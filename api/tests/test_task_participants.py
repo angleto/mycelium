@@ -329,7 +329,6 @@ async def test_participants_http_round_trip() -> None:
                 "duration_minutes": 30,
                 "executor_kind": "human",
                 "necessity": "should",
-                "priority": 3,
             },
         )
         assert appt_resp.status_code == 200, appt_resp.text
@@ -363,7 +362,6 @@ async def test_participants_http_round_trip() -> None:
                 "title": "Plain",
                 "executor_kind": "human",
                 "necessity": "should",
-                "priority": 3,
             },
         )
         plain_id = plain_resp.json()["id"]

@@ -344,7 +344,10 @@ async def spawn_due(
             actor_id=actor_id,
             title=tmpl.title,
             description=tmpl.description,
-            priority=tmpl.priority,
+            # ``priority`` is derived from importance x urgency by the
+            # service; copy the axes (mandatory since 0102) instead.
+            importance=tmpl.importance,
+            urgency=tmpl.urgency,
             estimate_effort_h=tmpl.estimate_effort_h,
             executor_kind=tmpl.executor_kind,
             necessity=tmpl.necessity,

@@ -77,11 +77,12 @@ class Task(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, Base):
     title: Mapped[str] = mapped_column(String(300), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     priority: Mapped[int] = mapped_column(SmallInteger, nullable=False, server_default="3")
-    # Eisenhower inputs (1..5); priority is derived from them in the
-    # service. Nullable: the legacy priority path (or pre-migration
-    # tasks) leaves them unset.
-    importance: Mapped[int | None] = mapped_column(SmallInteger, nullable=True)
-    urgency: Mapped[int | None] = mapped_column(SmallInteger, nullable=True)
+    # Eisenhower inputs (1..5, 1 = most pressing). Mandatory since
+    # migration 0102 with Low/Low (4/4) as the server default ---
+    # every task carries a position on the matrix, and ``priority``
+    # is the derived view of it (importance * urgency, clamped 1..25).
+    importance: Mapped[int] = mapped_column(SmallInteger, nullable=False, server_default="4")
+    urgency: Mapped[int] = mapped_column(SmallInteger, nullable=False, server_default="4")
     start_date: Mapped[datetime.date | None] = mapped_column(Date, nullable=True)
     due_date: Mapped[datetime.date | None] = mapped_column(Date, nullable=True)
     state_id: Mapped[uuid.UUID] = mapped_column(

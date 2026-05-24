@@ -402,9 +402,11 @@ class ProjectOut(BaseModel):
 class TaskCreateIn(BaseModel):
     title: str = Field(min_length=1, max_length=300)
     description: str | None = None
-    priority: int = Field(default=3, ge=1, le=25)
-    importance: int | None = Field(default=None, ge=1, le=5)
-    urgency: int | None = Field(default=None, ge=1, le=5)
+    # Eisenhower axes drive ``priority``. Low/Low (4/4) is the default
+    # since migration 0102. ``priority`` is intentionally not an input:
+    # it is exclusively a calculated field (importance x urgency).
+    importance: int = Field(default=4, ge=1, le=5)
+    urgency: int = Field(default=4, ge=1, le=5)
     start_date: datetime.date | None = None
     due_date: datetime.date | None = None
     billable: bool | None = None
@@ -445,7 +447,9 @@ class TaskPatchIn(BaseModel):
     expected_version: int = Field(ge=1)
     title: str | None = Field(default=None, min_length=1, max_length=300)
     description: str | None = None
-    priority: int | None = Field(default=None, ge=1, le=25)
+    # ``priority`` is intentionally absent (calculated field). Patch
+    # importance/urgency to move on the Eisenhower matrix; the service
+    # re-derives priority on the next save.
     importance: int | None = Field(default=None, ge=1, le=5)
     urgency: int | None = Field(default=None, ge=1, le=5)
     start_date: datetime.date | None = None
@@ -572,9 +576,11 @@ class TaskOut(BaseModel):
     description: str | None
     state_id: uuid.UUID
     state: str
+    # ``priority`` is a calculated field, derived server-side from
+    # importance x urgency (migration 0102 made the axes mandatory).
     priority: int
-    importance: int | None
-    urgency: int | None
+    importance: int
+    urgency: int
     start_date: datetime.date | None
     due_date: datetime.date | None
     parent_task_id: uuid.UUID | None

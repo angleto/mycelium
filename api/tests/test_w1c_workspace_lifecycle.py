@@ -92,7 +92,7 @@ async def test_delete_workspace_cascades_and_safeguards() -> None:
         hdr = {**_bearer(ta), "X-Workspace-Id": sid}
 
         # Tenant data in the second workspace, to prove the cascade.
-        task = await c.post("/tasks", headers=hdr, json={"title": "doomed", "priority": 3})
+        task = await c.post("/tasks", headers=hdr, json={"title": "doomed"})
         assert task.status_code == 200
         assert len((await c.get("/tasks", headers=hdr)).json()) == 1
 

@@ -233,7 +233,11 @@ async def test_event_task_overlap_unassigned_allowed() -> None:
         a = await signup(s, email=_email(), password="pw-strong-123", org_name="EV")
     org, user = a.org_id, a.user_id
     async with tenant_session(str(org), str(user)) as s:
-        await tasks.create_task(
+        # The create_task default auto-assigns to the creator's identity
+        # which would trigger the per-assignee no-overlap EXCLUDE; this
+        # test specifically wants the unassigned (NULL assignee_id) path,
+        # so unwire the assignee right after each create.
+        t_a = await tasks.create_task(
             s,
             org_id=org,
             actor_id=user,
@@ -241,14 +245,30 @@ async def test_event_task_overlap_unassigned_allowed() -> None:
             start_at=_T0,
             duration_minutes=60,
         )
+        await tasks.update_task(
+            s,
+            org_id=org,
+            actor_id=user,
+            task_id=t_a.id,
+            expected_version=t_a.version,
+            values={"assignee_id": None},
+        )
         # Same window, no assignee -> not blocked.
-        await tasks.create_task(
+        t_b = await tasks.create_task(
             s,
             org_id=org,
             actor_id=user,
             title="Open B",
             start_at=_T0 + dt.timedelta(minutes=15),
             duration_minutes=30,
+        )
+        await tasks.update_task(
+            s,
+            org_id=org,
+            actor_id=user,
+            task_id=t_b.id,
+            expected_version=t_b.version,
+            values={"assignee_id": None},
         )
 
 

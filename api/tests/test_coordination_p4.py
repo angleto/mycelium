@@ -49,6 +49,7 @@ from _fake_embedder import FakeEmbedder
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from tests_helpers import seed_ai_assistant_identity
 
 from flow_api.main import app
 from flow_core.ai_providers import LLMResult, set_llm_override
@@ -60,7 +61,6 @@ from flow_core.models.executor import Executor, ExecutorKind
 from flow_core.models.membership import Membership, Role
 from flow_core.models.notification import Notification
 from flow_core.models.schedule import Schedule
-from flow_core.models.task import ExecKind
 from flow_core.models.task_collaborator import TaskCollaborator
 from flow_core.models.task_handoff import HandoffStatus, TaskHandoff
 from flow_core.security import decode_token
@@ -291,6 +291,7 @@ async def test_handoff_to_llm_pending_then_in_context_then_consumed(
 
     async with tenant_session(str(org), str(user)) as s:
         agent = await _capable_agent(s, org=org, user=user)
+        ai_ident = await seed_ai_assistant_identity(s, org_id=org, user_id=user)
         pred = await tasks_svc.create_task(
             s, org_id=org, actor_id=user, title="UpstreamWork", estimate_effort_h=Decimal(1)
         )
@@ -300,7 +301,7 @@ async def test_handoff_to_llm_pending_then_in_context_then_consumed(
             actor_id=user,
             title="AgentDownstream",
             estimate_effort_h=Decimal(2),
-            executor_kind=ExecKind.llm_agent,
+            assignee_id=ai_ident.id,
             required_capabilities=["x"],
         )
         await deps.add_dependency(

@@ -15,9 +15,11 @@ import uuid
 from decimal import Decimal
 from zoneinfo import ZoneInfo
 
+from tests_helpers import seed_ai_assistant_identity
+
 from flow_core.db import admin_session, tenant_session
 from flow_core.models.dependency import DependencyType
-from flow_core.models.task import ExecKind, ScheduleMode
+from flow_core.models.task import ScheduleMode
 from flow_core.services import calendar as cal_svc
 from flow_core.services import dependencies as deps
 from flow_core.services import scheduler as sch
@@ -44,6 +46,7 @@ async def test_scheduler_adr0004_core_scenarios() -> None:
     org, user = a.org_id, a.user_id
 
     async with tenant_session(str(org), str(user)) as s:
+        ai_ident = await seed_ai_assistant_identity(s, org_id=org, user_id=user)
         # A: two human tasks, same assignee, no dependency -> serialized.
         # Distinct priority makes the order deterministic by the rule
         # itself (P1 before P4), not by the uuid tie-break.
@@ -52,7 +55,8 @@ async def test_scheduler_adr0004_core_scenarios() -> None:
             org_id=org,
             actor_id=user,
             title="H1",
-            priority=1,
+            importance=1,
+            urgency=1,
             estimate_effort_h=Decimal(4),
             assignee_ids=[user],
         )
@@ -61,18 +65,20 @@ async def test_scheduler_adr0004_core_scenarios() -> None:
             org_id=org,
             actor_id=user,
             title="H2",
-            priority=4,
+            importance=1,
+            urgency=4,
             estimate_effort_h=Decimal(4),
             assignee_ids=[user],
         )
-        # B: an LLM-delegated task (no assignee) is parallel.
+        # B: an LLM-delegated task pinned to an ai_assistant identity
+        # runs in parallel with the human serial calendar.
         ai = await tasks.create_task(
             s,
             org_id=org,
             actor_id=user,
             title="AI",
             estimate_effort_h=Decimal(4),
-            executor_kind=ExecKind.llm_agent,
+            assignee_id=ai_ident.id,
         )
         await sch.recompute(s, org_id=org, actor_id=user, as_of=_AS_OF)
         rows = {r.task_id: r for r in await sch.list_schedule(s, org_id=org)}

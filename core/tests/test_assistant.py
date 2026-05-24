@@ -239,7 +239,7 @@ async def test_update_task_priority_persists() -> None:
     org, user = await _signup()
     async with tenant_session(str(org), str(user)) as s:
         task = await tasks_svc.create_task(
-            s, org_id=org, actor_id=user, title="reprioritize me", priority=3
+            s, org_id=org, actor_id=user, title="reprioritize me", importance=3, urgency=3
         )
         tid = task.id
     steps: list[_Step] = [

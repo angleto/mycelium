@@ -43,7 +43,8 @@ async def test_what_can_i_do_now_feasibility_and_ranking() -> None:
         ta = await tasks.create_task(
             s,
             title="A-must",
-            priority=2,
+            importance=1,
+            urgency=2,
             estimate_effort_h=Decimal("0.5"),
             necessity=Necessity.must,
             **common,
@@ -51,7 +52,8 @@ async def test_what_can_i_do_now_feasibility_and_ranking() -> None:
         tb = await tasks.create_task(
             s,
             title="B-should-p1",
-            priority=1,
+            importance=1,
+            urgency=1,
             estimate_effort_h=Decimal(1),
             necessity=Necessity.should,
             **common,
@@ -59,7 +61,8 @@ async def test_what_can_i_do_now_feasibility_and_ranking() -> None:
         await tasks.create_task(
             s,
             title="C-too-big",
-            priority=1,
+            importance=1,
+            urgency=1,
             estimate_effort_h=Decimal(4),
             necessity=Necessity.should,
             **common,
@@ -67,7 +70,8 @@ async def test_what_can_i_do_now_feasibility_and_ranking() -> None:
         td = await tasks.create_task(
             s,
             title="D-needs-ctx",
-            priority=1,
+            importance=1,
+            urgency=1,
             estimate_effort_h=Decimal("0.5"),
             necessity=Necessity.should,
             tag_ids=[ctx_tag.id],
@@ -76,7 +80,8 @@ async def test_what_can_i_do_now_feasibility_and_ranking() -> None:
         te = await tasks.create_task(
             s,
             title="E-office",
-            priority=3,
+            importance=1,
+            urgency=3,
             estimate_effort_h=Decimal("0.5"),
             necessity=Necessity.should,
             location="office",
@@ -183,7 +188,8 @@ async def test_prioritize_within_budget_knapsack_and_determinism() -> None:
         m1 = await tasks.create_task(
             s,
             title="m1",
-            priority=2,
+            importance=1,
+            urgency=2,
             monetary_cost=Decimal(40),
             necessity=Necessity.must,
             **mk,
@@ -191,7 +197,8 @@ async def test_prioritize_within_budget_knapsack_and_determinism() -> None:
         m2 = await tasks.create_task(
             s,
             title="m2",
-            priority=1,
+            importance=1,
+            urgency=1,
             monetary_cost=Decimal(30),
             necessity=Necessity.must,
             **mk,
@@ -199,7 +206,8 @@ async def test_prioritize_within_budget_knapsack_and_determinism() -> None:
         s1 = await tasks.create_task(
             s,
             title="s1",
-            priority=1,
+            importance=1,
+            urgency=1,
             monetary_cost=Decimal(50),
             necessity=Necessity.should,
             **mk,
@@ -207,7 +215,8 @@ async def test_prioritize_within_budget_knapsack_and_determinism() -> None:
         s2 = await tasks.create_task(
             s,
             title="s2",
-            priority=3,
+            importance=1,
+            urgency=3,
             monetary_cost=Decimal(20),
             necessity=Necessity.should,
             **mk,
@@ -215,7 +224,8 @@ async def test_prioritize_within_budget_knapsack_and_determinism() -> None:
         n1 = await tasks.create_task(
             s,
             title="n1",
-            priority=3,
+            importance=1,
+            urgency=3,
             monetary_cost=Decimal(10),
             necessity=Necessity.could,
             **mk,

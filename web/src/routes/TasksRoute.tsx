@@ -6,7 +6,6 @@ import { useSession } from '../auth/useSession'
 import { TagChip } from '../components/TagChip'
 import { PriorityChip } from '../components/PriorityChip'
 import { IdentityBadge } from '../components/IdentityBadge'
-import { ScaleSelect } from '../components/ScaleSelect'
 import { TaskKanban } from '../components/TaskKanban'
 import { RecentTasks } from '../components/RecentTasks'
 import { TaskTimer } from '../components/TaskTimer'
@@ -113,10 +112,11 @@ type State = components['schemas']['StateOut']
 type Wf = components['schemas']['WorkflowOut']
 type Client = components['schemas']['ClientOut']
 
-// Tasks surface: quick-add with the Eisenhower inputs (importance/
-// urgency default 4 -> score 16 -> P1) and client/project pickers with
-// inline create; rows are title-left / actions-right with a colored
-// priority chip and a clock-play/clock-stop timer.
+// Tasks surface: quick-add (title + due + client/project) with inline
+// create; the rows are title-left / actions-right with a colored
+// priority chip and a clock-play/clock-stop timer. Importance/urgency
+// are set on the detail view --- the quick-add lets the backend apply
+// its Low/Low default so the SPA never duplicates a default value.
 export function TasksRoute() {
   const { t } = useTranslation()
   const navigate = useNavigate()
@@ -138,9 +138,10 @@ export function TasksRoute() {
   const [clientsList, setClientsList] = useState<Client[]>([])
   const [filter, setFilter] = useState('')
   const [title, setTitle] = useState('')
-  // Default Low/Low (value 4 on the 1=Critical..5=Trivial scale).
-  const [importance, setImportance] = useState(4)
-  const [urgency, setUrgency] = useState(4)
+  // Eisenhower axes are NOT exposed in quick-add: the backend supplies
+  // the Low/Low default (migration 0102), and the policy is that any
+  // default lives in the service, not in the SPA. The user picks the
+  // axes from the task detail view when needed.
   const [due, setDue] = useState('')
   const [q, setQ] = useState('')
   const [busy, setBusy] = useState(false)
@@ -322,11 +323,10 @@ export function TasksRoute() {
       params: { header: workspaceHeader() },
       body: {
         title,
-        // priority is required by the schema but the backend derives it
-        // from importance x urgency when both are provided.
-        priority: 3,
-        importance,
-        urgency,
+        // Quick-add intentionally omits importance/urgency: the backend
+        // defaults to Low/Low (4/4 -> derived priority 16) and that is
+        // the single source of truth for the default. ``priority`` is
+        // a calculated field and is never an input.
         executor_kind: 'human',
         necessity: 'should',
         // Always emit the client tag (a task is never client-less; the
@@ -572,22 +572,6 @@ export function TasksRoute() {
           onChange={(e) => setTitle(e.target.value)}
           className="quickadd__title"
         />
-        <label>
-          {t('tasks.importance')}
-          <ScaleSelect
-            value={importance}
-            onChange={setImportance}
-            labelsKey="tasks.impLabels"
-          />
-        </label>
-        <label>
-          {t('tasks.urgency')}
-          <ScaleSelect
-            value={urgency}
-            onChange={setUrgency}
-            labelsKey="tasks.urgLabels"
-          />
-        </label>
         <label>
           {t('tasks.due')}
           <input
@@ -905,10 +889,7 @@ export function TasksRoute() {
       ) : (
         <ul className="list tasklist">
           {listShown.map((tk) => {
-            const score =
-              tk.importance != null && tk.urgency != null
-                ? tk.importance * tk.urgency
-                : null
+            const score = tk.importance * tk.urgency
             return (
               <li key={tk.id} className="taskrow">
                 <input

@@ -17,7 +17,7 @@ import pytest
 _CASES = [
     (["task", "--help"], "edit"),
     (["task", "list", "--help"], "--sort"),
-    (["task", "edit", "--help"], "--priority"),
+    (["task", "edit", "--help"], "--importance"),
     (["task", "tag", "--help"], "add"),
     (["task", "comment", "--help"], "add"),
     (["task", "remind", "--help"], "add"),

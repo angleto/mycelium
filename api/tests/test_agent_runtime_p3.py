@@ -42,6 +42,7 @@ from _fake_embedder import FakeEmbedder
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from tests_helpers import seed_ai_assistant_identity
 
 from flow_api.main import app
 from flow_core.ai_providers import LLMResult, set_llm_override
@@ -52,7 +53,6 @@ from flow_core.models.agent_run import AgentRun, AgentRunStatus
 from flow_core.models.executor import Executor, ExecutorKind
 from flow_core.models.note import Note
 from flow_core.models.schedule import Schedule
-from flow_core.models.task import ExecKind
 from flow_core.services import agent_runtime as runtime
 from flow_core.services import billing
 from flow_core.services import executors as exec_svc
@@ -155,13 +155,14 @@ async def _dispatched_llm_task(
         credit_budget=budget,
         capability_tags=["x"],
     )
+    ai_ident = await seed_ai_assistant_identity(s, org_id=org, user_id=user)
     task = await tasks_svc.create_task(
         s,
         org_id=org,
         actor_id=user,
         title=title,
         estimate_effort_h=Decimal(2),
-        executor_kind=ExecKind.llm_agent,
+        assignee_id=ai_ident.id,
         required_capabilities=["x"],
     )
     await sch.recompute(s, org_id=org, actor_id=user, as_of=_AS_OF)
@@ -322,6 +323,7 @@ async def test_not_dispatchable_no_schedule_or_unassignable(
     org, user = a.org_id, a.user_id
 
     async with tenant_session(str(org), str(user)) as s:
+        ai_ident = await seed_ai_assistant_identity(s, org_id=org, user_id=user)
         # (i) llm task, never scheduled -> no Schedule row at all.
         t1 = await tasks_svc.create_task(
             s,
@@ -329,7 +331,7 @@ async def test_not_dispatchable_no_schedule_or_unassignable(
             actor_id=user,
             title="Unscheduled",
             estimate_effort_h=Decimal(2),
-            executor_kind=ExecKind.llm_agent,
+            assignee_id=ai_ident.id,
         )
         with pytest.raises(DomainError) as ei:
             await runtime.start_run(s, org_id=org, actor_id=user, task_id=t1.id)
@@ -344,7 +346,7 @@ async def test_not_dispatchable_no_schedule_or_unassignable(
             actor_id=user,
             title="NoCapableAgent",
             estimate_effort_h=Decimal(2),
-            executor_kind=ExecKind.llm_agent,
+            assignee_id=ai_ident.id,
             required_capabilities=["rare"],
         )
         await sch.recompute(s, org_id=org, actor_id=user, as_of=_AS_OF)

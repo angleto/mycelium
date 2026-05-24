@@ -171,22 +171,33 @@ async def test_kind_derives_from_identity_when_assignee_set() -> None:
     assert reloaded.assignee_id == identity.id
 
 
-async def test_unassigned_task_kind_falls_back_to_executor_kind_hint() -> None:
-    """An unassigned task carries its ``executor_kind`` hint (the
-    fallback channel for the scheduler) — used until an identity is
-    bound."""
+async def test_create_task_defaults_assignee_to_creator_user_identity() -> None:
+    """Default rule: when neither ``assignee_id`` nor ``assignee_handle``
+    is supplied, ``create_task`` auto-assigns to the creator. For a
+    human-driven call that is the actor's ``user`` identity (and
+    ``executor_kind`` is forced to ``human`` to match the identity
+    kind, even when the caller passed ``llm_agent`` as a hint)."""
     org, user = await _signup_with_handle()
     async with tenant_session(str(org), str(user)) as s:
         task = await tasks_svc.create_task(
             s,
             org_id=org,
             actor_id=user,
-            title="unassigned-llm",
+            title="auto-assign-to-creator",
             estimate_effort_h=Decimal(1),
             executor_kind=ExecKind.llm_agent,
         )
-    assert task.assignee_id is None
-    assert task.executor_kind is ExecKind.llm_agent
+        user_ident = (
+            await s.execute(
+                select(Identity.id).where(
+                    Identity.org_id == org,
+                    Identity.user_id == user,
+                    Identity.kind == IdentityKind.user,
+                )
+            )
+        ).scalar_one()
+    assert task.assignee_id == user_ident
+    assert task.executor_kind is ExecKind.human
 
 
 async def test_create_task_defaults_created_by_identity_to_actor_user() -> None:
@@ -282,9 +293,22 @@ async def test_list_tasks_filters_by_assignee_kind_and_handles() -> None:
         human_task = await tasks_svc.create_task(
             s, org_id=org, actor_id=user, title="human-task", assignee_id=user_identity.id
         )
+        # ``create_task`` now defaults the assignee to the creator
+        # (a user identity in this path), so explicitly null it post-
+        # create to land in the legacy unassigned regime that the
+        # identity-axis filters must still skip.
         unassigned_task = await tasks_svc.create_task(
             s, org_id=org, actor_id=user, title="unassigned-task"
         )
+        await tasks_svc.update_task(
+            s,
+            org_id=org,
+            actor_id=user,
+            task_id=unassigned_task.id,
+            expected_version=unassigned_task.version,
+            values={"assignee_id": None},
+        )
+        unassigned_task = await tasks_svc.get_task(s, org_id=org, task_id=unassigned_task.id)
 
         bots = await tasks_svc.list_tasks(s, org_id=org, assignee_kind=IdentityKind.ai_assistant)
         humans = await tasks_svc.list_tasks(s, org_id=org, assignee_kind=IdentityKind.user)

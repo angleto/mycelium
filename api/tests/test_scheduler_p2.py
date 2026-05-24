@@ -31,6 +31,7 @@ from decimal import Decimal
 
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
+from tests_helpers import seed_ai_assistant_identity
 
 from flow_api.main import app
 from flow_core.db import admin_session, tenant_session
@@ -215,6 +216,7 @@ async def test_capability_match_routes_only_to_capable_agent() -> None:
     org, user = a.org_id, a.user_id
 
     async with tenant_session(str(org), str(user)) as s:
+        ai_ident = await seed_ai_assistant_identity(s, org_id=org, user_id=user)
         # Disable the seeded default agent (no tags) so only the capable
         # one is eligible; create one capable agent.
         await exec_svc.ensure_default_agent(s, org_id=org)
@@ -243,7 +245,7 @@ async def test_capability_match_routes_only_to_capable_agent() -> None:
             actor_id=user,
             title="NeedsX",
             estimate_effort_h=Decimal(2),
-            executor_kind=ExecKind.llm_agent,
+            assignee_id=ai_ident.id,
             required_capabilities=["x"],
         )
         summary = await sch.recompute(s, org_id=org, actor_id=user, as_of=_AS_OF)
@@ -267,6 +269,7 @@ async def test_budget_exhaustion_marks_excess_unassignable() -> None:
     org, user = a.org_id, a.user_id
 
     async with tenant_session(str(org), str(user)) as s:
+        ai_ident = await seed_ai_assistant_identity(s, org_id=org, user_id=user)
         await exec_svc.ensure_default_agent(s, org_id=org)
         default_agent = (
             await s.execute(select(Executor).where(Executor.kind == ExecutorKind.llm_agent))
@@ -296,9 +299,10 @@ async def test_budget_exhaustion_marks_excess_unassignable() -> None:
                 org_id=org,
                 actor_id=user,
                 title=f"B{i}",
-                priority=i + 1,
+                importance=1,
+                urgency=i + 1,
                 estimate_effort_h=Decimal(2),
-                executor_kind=ExecKind.llm_agent,
+                assignee_id=ai_ident.id,
                 required_capabilities=["x"],
             )
             tids.append(t.id)
@@ -345,6 +349,11 @@ async def test_no_capable_agent_marks_unassignable_and_count_matches() -> None:
             "X-Workspace-Id": a["workspace_id"],
             "X-Workspace-Role": "owner",
         }
+        org_id = uuid.UUID(a["workspace_id"])
+        async with tenant_session(str(org_id), a["user_id"]) as s:
+            ai_ident = await seed_ai_assistant_identity(
+                s, org_id=org_id, user_id=uuid.UUID(a["user_id"])
+            )
         # Default agent has no capability tags; this task needs "rare".
         r = await c.post(
             "/tasks",
@@ -352,7 +361,7 @@ async def test_no_capable_agent_marks_unassignable_and_count_matches() -> None:
             json={
                 "title": "Rare",
                 "estimate_effort_h": "2",
-                "executor_kind": "llm_agent",
+                "assignee_id": str(ai_ident.id),
                 "required_capabilities": ["rare"],
             },
         )
@@ -389,6 +398,7 @@ async def test_multiple_agents_respect_per_agent_max_parallel() -> None:
     org, user = a.org_id, a.user_id
 
     async with tenant_session(str(org), str(user)) as s:
+        ai_ident = await seed_ai_assistant_identity(s, org_id=org, user_id=user)
         # Disable the seeded default; two capable agents, K=2 each.
         await exec_svc.ensure_default_agent(s, org_id=org)
         default_agent = (
@@ -427,7 +437,7 @@ async def test_multiple_agents_respect_per_agent_max_parallel() -> None:
                 actor_id=user,
                 title=f"M{i}",
                 estimate_effort_h=Decimal(3),
-                executor_kind=ExecKind.llm_agent,
+                assignee_id=ai_ident.id,
                 required_capabilities=["x"],
             )
         summary = await sch.recompute(s, org_id=org, actor_id=user, as_of=_AS_OF)
@@ -481,7 +491,8 @@ async def test_determinism_same_inputs_registry_policy() -> None:
                 org_id=org,
                 actor_id=user,
                 title=f"D{i}",
-                priority=(i % 4) + 1,
+                importance=1,
+                urgency=(i % 4) + 1,
                 estimate_effort_h=Decimal(2),
                 executor_kind=ExecKind.llm_agent,
                 required_capabilities=["x"],
@@ -527,6 +538,7 @@ async def test_registry_change_reschedules_via_fingerprint() -> None:
     org, user = a.org_id, a.user_id
 
     async with tenant_session(str(org), str(user)) as s:
+        ai_ident = await seed_ai_assistant_identity(s, org_id=org, user_id=user)
         ag = await exec_svc.create_executor(
             s,
             org_id=org,
@@ -541,7 +553,7 @@ async def test_registry_change_reschedules_via_fingerprint() -> None:
             actor_id=user,
             title="T",
             estimate_effort_h=Decimal(2),
-            executor_kind=ExecKind.llm_agent,
+            assignee_id=ai_ident.id,
             required_capabilities=["x"],
         )
         await sch.recompute(s, org_id=org, actor_id=user, as_of=_AS_OF)
@@ -585,7 +597,8 @@ async def test_human_task_unaffected_by_admission() -> None:
             org_id=org,
             actor_id=user,
             title="H1",
-            priority=1,
+            importance=1,
+            urgency=1,
             estimate_effort_h=Decimal(2),
             assignee_ids=[user],
         )
@@ -594,7 +607,8 @@ async def test_human_task_unaffected_by_admission() -> None:
             org_id=org,
             actor_id=user,
             title="H2",
-            priority=2,
+            importance=1,
+            urgency=2,
             estimate_effort_h=Decimal(2),
             assignee_ids=[user],
         )

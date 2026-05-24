@@ -137,10 +137,7 @@ export function TaskKanban({
             </header>
             <ul className="kanban__cards">
               {cards.map((tk) => {
-                const score =
-                  tk.importance != null && tk.urgency != null
-                    ? tk.importance * tk.urgency
-                    : null
+                const score = tk.importance * tk.urgency
                 return (
                   <li
                     key={tk.id}

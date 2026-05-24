@@ -36,15 +36,12 @@ export function TaskDetailRoute() {
   const [tags, setTags] = useState<Tag[]>([])
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
-  // null when the task has no importance/urgency persisted (MCP-created
-  // tasks usually skip the Eisenhower inputs and rely on the priority
-  // default). Rendering them as "Bassa" (4) was misleading: it implied
-  // the user had set them, and combined with the now-removed JS
-  // derivePriority it made the chip show P16 against a DB priority of
-  // P3. The select carries an explicit "Non impostato" option so the
-  // missing-value state is visible.
-  const [importance, setImportance] = useState<number | null>(null)
-  const [urgency, setUrgency] = useState<number | null>(null)
+  // Eisenhower axes are mandatory since migration 0102 (Low/Low default
+  // applied at the backend). The initial render happens before ``task``
+  // is loaded, hence the placeholder 4/4 here; ``apply()`` immediately
+  // hydrates from the loaded TaskOut. The select is never nullable.
+  const [importance, setImportance] = useState<number>(4)
+  const [urgency, setUrgency] = useState<number>(4)
   const [estimate, setEstimate] = useState('')
   const [due, setDue] = useState('')
   // Appointment editor (migration 0094, ADR-0008 addendum). The task
@@ -92,8 +89,8 @@ export function TaskDetailRoute() {
     setTask(tk)
     setTitle(tk.title)
     setDescription(tk.description ?? '')
-    setImportance(tk.importance ?? null)
-    setUrgency(tk.urgency ?? null)
+    setImportance(tk.importance)
+    setUrgency(tk.urgency)
     setEstimate(tk.estimate_effort_h ?? '')
     setDue(tk.due_date ?? '')
     // Hydrate the appointment block. The datetime-local input wants
@@ -221,7 +218,12 @@ export function TaskDetailRoute() {
       params: { header: workspaceHeader() },
       body: {
         title: t('tasks.newChildPlaceholder'),
-        priority: task.priority ?? 3,
+        // Inherit the parent's Eisenhower axes: a child of a high-imp/
+        // high-urg parent should not silently fall back to the Low/Low
+        // backend default. ``priority`` is a calculated field and is
+        // never an input.
+        importance: task.importance,
+        urgency: task.urgency,
         executor_kind: 'human',
         necessity: 'should',
         parent_task_id: task.id,
@@ -785,7 +787,6 @@ export function TaskDetailRoute() {
               value={importance}
               onChange={onImp}
               labelsKey="tasks.impLabels"
-              nullable
             />
           </label>
           <label>
@@ -794,19 +795,15 @@ export function TaskDetailRoute() {
               value={urgency}
               onChange={onUrg}
               labelsKey="tasks.urgLabels"
-              nullable
             />
           </label>
-          {/* priority comes from the server, never derived in JS. When
-              both axes are set we surface the Eisenhower score in the
-              tooltip; otherwise the chip falls back to "priority N". */}
+          {/* priority comes from the server (importance x urgency); the
+              SPA never derives it in JS. Both axes are mandatory since
+              migration 0102, so the score is always surfaced in the
+              tooltip. */}
           <PriorityChip
             priority={task.priority}
-            score={
-              task.importance != null && task.urgency != null
-                ? task.importance * task.urgency
-                : null
-            }
+            score={task.importance * task.urgency}
           />
         </div>
         <label>

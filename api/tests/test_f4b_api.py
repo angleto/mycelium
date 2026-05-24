@@ -53,7 +53,8 @@ async def test_f4b_api_flow() -> None:
                 headers=h,
                 json={
                     "title": "fix boiler",
-                    "priority": 1,
+                    "importance": 1,
+                    "urgency": 1,
                     "estimate_effort_h": "0.5",
                     "monetary_cost": "60",
                     "necessity": "must",
@@ -69,7 +70,8 @@ async def test_f4b_api_flow() -> None:
             headers=h,
             json={
                 "title": "could lamp",
-                "priority": 3,
+                "importance": 2,
+                "urgency": 2,
                 "estimate_effort_h": "0.5",
                 "monetary_cost": "70",
                 "necessity": "could",

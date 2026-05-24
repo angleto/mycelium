@@ -117,10 +117,11 @@ export function EventsRoute() {
       params: { header: workspaceHeader() },
       body: {
         title: evTitle,
-        // Required pydantic discriminants (also defaulted server-side).
+        // executor_kind/necessity have backend defaults but are written
+        // here for the discriminator. importance/urgency/priority are
+        // backend-only (Low/Low default, priority derived).
         executor_kind: 'human',
         necessity: 'should',
-        priority: 3,
         start_at: start.toISOString(),
         duration_minutes: minutes,
       },

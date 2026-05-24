@@ -523,7 +523,6 @@ export const it: Catalog = {
     cpManaged: 'Clienti e progetti si configurano nella loro vista dedicata:',
     impLabels: ['Critica', 'Alta', 'Media', 'Bassa', 'Banale'],
     urgLabels: ['Adesso', 'Alta', 'Presto', 'Bassa', 'Quando capita'],
-    notSet: 'Non impostato',
     aiBadge: 'IA',
     aiTitle: "Creato/gestito dall'agente IA",
     aiCreatedTitle: "Creato dall'agente IA {{handle}}",

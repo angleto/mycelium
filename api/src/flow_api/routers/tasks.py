@@ -282,7 +282,6 @@ async def create_task(
         actor_id=ctx.user_id,
         title=body.title,
         description=body.description,
-        priority=body.priority,
         importance=body.importance,
         urgency=body.urgency,
         start_date=body.start_date,

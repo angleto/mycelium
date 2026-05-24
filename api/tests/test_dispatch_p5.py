@@ -45,6 +45,7 @@ from _fake_embedder import FakeEmbedder
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from tests_helpers import seed_ai_assistant_identity
 
 from flow_api.main import app
 from flow_core.ai_providers import LLMResult, set_llm_override
@@ -60,7 +61,6 @@ from flow_core.models.dispatch_request import (
 from flow_core.models.executor import Executor, ExecutorKind
 from flow_core.models.membership import Membership, Role
 from flow_core.models.organization import Organization
-from flow_core.models.task import ExecKind
 from flow_core.security import decode_token
 from flow_core.services import billing
 from flow_core.services import dispatch_loop as loop
@@ -178,14 +178,22 @@ async def _llm_task(
     title: str,
     tag: str = "x",
     effort: Decimal = Decimal(2),
+    assignee_id: uuid.UUID | None = None,
 ) -> object:
+    # Without an explicit ai_assistant assignee, ``create_task`` would
+    # default to the calling user (forcing ExecKind.human). Seed one
+    # in-line if the caller did not supply it so the task lands on the
+    # llm dispatch path.
+    if assignee_id is None:
+        ident = await seed_ai_assistant_identity(s, org_id=org, user_id=user)
+        assignee_id = ident.id
     return await tasks_svc.create_task(
         s,
         org_id=org,
         actor_id=user,
         title=title,
         estimate_effort_h=effort,
-        executor_kind=ExecKind.llm_agent,
+        assignee_id=assignee_id,
         required_capabilities=[tag],
     )
 

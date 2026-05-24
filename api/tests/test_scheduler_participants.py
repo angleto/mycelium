@@ -63,7 +63,8 @@ async def test_participant_appointment_pushes_plain_work() -> None:
             org_id=org,
             actor_id=owner,
             title="Collab work",
-            priority=1,
+            importance=1,
+            urgency=1,
             estimate_effort_h=Decimal(1),
             assignee_id=collab_ident.id,
             assignee_ids=[b.user_id],  # populates task_collaborators so the

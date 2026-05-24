@@ -309,19 +309,29 @@ async def _run_tool(
         if not title:
             return "error: create_task needs args.title"
         description = str(args["description"]) if args.get("description") else None
+        # Assistant exposes a 1..5 ``priority`` axis (1 = top). Under
+        # the hood it maps to the Eisenhower diagonal (importance =
+        # urgency = N), so the service-derived ``priority`` lands on
+        # N*N (1, 4, 9, 16, 25). When the caller omits ``priority`` we
+        # let the service apply its Low/Low default (4/4 -> 16).
         prio_raw = args.get("priority")
-        priority = (
+        axis = (
             max(1, min(5, int(prio_raw)))
             if isinstance(prio_raw, int | str) and str(prio_raw).isdigit()
-            else 3
+            else None
         )
+        kwargs: dict[str, Any] = {
+            "title": title[:300],
+            "description": description,
+        }
+        if axis is not None:
+            kwargs["importance"] = axis
+            kwargs["urgency"] = axis
         task = await tasks_svc.create_task(
             session,
             org_id=org_id,
             actor_id=actor_id,
-            title=title[:300],
-            description=description,
-            priority=priority,
+            **kwargs,
         )
         return f"created task id={task.id}"
 
@@ -341,7 +351,11 @@ async def _run_tool(
             values["description"] = str(args["description"])
         prio = args.get("priority")
         if isinstance(prio, int | str) and str(prio).isdigit():
-            values["priority"] = max(1, min(5, int(prio)))
+            # Same diagonal mapping as create_task: priority N -> both
+            # axes set to N, service re-derives priority = N * N.
+            axis = max(1, min(5, int(prio)))
+            values["importance"] = axis
+            values["urgency"] = axis
         if not values:
             return "error: update_task needs at least one of title/description/priority"
         await tasks_svc.update_task(

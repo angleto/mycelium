@@ -22,6 +22,7 @@ from zoneinfo import ZoneInfo
 
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select, update
+from tests_helpers import seed_ai_assistant_identity
 
 from flow_api.main import app
 from flow_core.db import admin_session, tenant_session
@@ -84,7 +85,8 @@ async def test_human_context_switch_pushes_back_to_back_task() -> None:
             org_id=org,
             actor_id=user,
             title="H1",
-            priority=1,
+            importance=1,
+            urgency=1,
             estimate_effort_h=Decimal(2),
             assignee_ids=[user],
         )
@@ -93,7 +95,8 @@ async def test_human_context_switch_pushes_back_to_back_task() -> None:
             org_id=org,
             actor_id=user,
             title="H2",
-            priority=4,
+            importance=1,
+            urgency=4,
             estimate_effort_h=Decimal(2),
             assignee_ids=[user],
         )
@@ -132,6 +135,7 @@ async def test_llm_pool_caps_concurrency_at_max_parallel() -> None:
     org, user = a.org_id, a.user_id
 
     async with tenant_session(str(org), str(user)) as s:
+        ai_ident = await seed_ai_assistant_identity(s, org_id=org, user_id=user)
         # 6 independent agent tasks, default pool max_parallel = 4.
         for i in range(6):
             await tasks.create_task(
@@ -140,7 +144,7 @@ async def test_llm_pool_caps_concurrency_at_max_parallel() -> None:
                 actor_id=user,
                 title=f"AI{i}",
                 estimate_effort_h=Decimal(3),
-                executor_kind=ExecKind.llm_agent,
+                assignee_id=ai_ident.id,
             )
         await sch.recompute(s, org_id=org, actor_id=user, as_of=_AS_OF)
         rows = await sch.list_schedule(s, org_id=org)
@@ -164,6 +168,7 @@ async def test_policy_cheapest_defers_llm_vs_fastest() -> None:
     org, user = a.org_id, a.user_id
 
     async with tenant_session(str(org), str(user)) as s:
+        ai_ident = await seed_ai_assistant_identity(s, org_id=org, user_id=user)
         # One human task and one paid-LLM task, no dependency. They are
         # on different resources, so the policy ordering shows up in the
         # priority key (cheapest pushes the paid agent task last).
@@ -172,7 +177,8 @@ async def test_policy_cheapest_defers_llm_vs_fastest() -> None:
             org_id=org,
             actor_id=user,
             title="HU",
-            priority=4,
+            importance=1,
+            urgency=4,
             estimate_effort_h=Decimal(2),
             assignee_ids=[user],
         )
@@ -181,9 +187,10 @@ async def test_policy_cheapest_defers_llm_vs_fastest() -> None:
             org_id=org,
             actor_id=user,
             title="AI",
-            priority=1,
+            importance=1,
+            urgency=1,
             estimate_effort_h=Decimal(2),
-            executor_kind=ExecKind.llm_agent,
+            assignee_id=ai_ident.id,
         )
         # Give the agent a non-zero credit rate so `cheapest` defers it.
         await exec_svc.ensure_default_agent(s, org_id=org)
@@ -229,18 +236,21 @@ async def test_recompute_out_makespan_and_projected_credit_cost() -> None:
             "X-Workspace-Id": a["workspace_id"],
             "X-Workspace-Role": "owner",
         }
+        org_id = uuid.UUID(a["workspace_id"])
+        async with tenant_session(str(org_id), a["user_id"]) as s:
+            ai_ident = await seed_ai_assistant_identity(
+                s, org_id=org_id, user_id=uuid.UUID(a["user_id"])
+            )
         # Two agent tasks: 3h + 5h = 8 effort-hours.
         for title, eff in (("A1", "3"), ("A2", "5")):
             r = await c.post(
                 "/tasks",
                 headers=h,
-                json={"title": title, "estimate_effort_h": eff, "executor_kind": "llm_agent"},
+                json={"title": title, "estimate_effort_h": eff, "assignee_id": str(ai_ident.id)},
             )
             assert r.status_code == 200
 
     # Set the default agent's rate to 1.5 credits / effort-hour.
-    async with admin_session() as s:
-        org_id = uuid.UUID(a["workspace_id"])
     async with tenant_session(str(org_id), a["user_id"]) as s:
         await exec_svc.ensure_default_agent(s, org_id=org_id)
         await s.execute(
@@ -295,7 +305,8 @@ async def test_critical_chain_superset_under_resource_contention() -> None:
             org_id=org,
             actor_id=user,
             title="A",
-            priority=1,
+            importance=1,
+            urgency=1,
             estimate_effort_h=Decimal(6),
             assignee_ids=[user],
         )
@@ -304,7 +315,8 @@ async def test_critical_chain_superset_under_resource_contention() -> None:
             org_id=org,
             actor_id=user,
             title="B",
-            priority=4,
+            importance=1,
+            urgency=4,
             estimate_effort_h=Decimal(2),
             assignee_ids=[user],
         )

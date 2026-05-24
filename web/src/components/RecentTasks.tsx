@@ -112,10 +112,7 @@ export function RecentTasks({ tasks }: { tasks: Task[] }) {
         ) : (
           <ul className="list recentlist">
             {recent.map((tk) => {
-              const score =
-                tk.importance != null && tk.urgency != null
-                  ? tk.importance * tk.urgency
-                  : null
+              const score = tk.importance * tk.urgency
               return (
                 <li key={tk.id} className="recentrow">
                   <Link to={`/tasks/${tk.id}`} className="recentrow__title">

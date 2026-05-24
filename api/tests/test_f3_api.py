@@ -114,7 +114,6 @@ async def test_f3_api_flow() -> None:
                 "assignee_id": str(me_ident),
                 "executor_kind": "human",
                 "necessity": "should",
-                "priority": 3,
             },
         )
         assert ev.status_code == 200, ev.text
@@ -128,7 +127,6 @@ async def test_f3_api_flow() -> None:
                 "assignee_id": str(me_ident),
                 "executor_kind": "human",
                 "necessity": "should",
-                "priority": 3,
             },
         )
         assert clash.status_code in (400, 409) and clash.json()["code"] == "event.overlap"

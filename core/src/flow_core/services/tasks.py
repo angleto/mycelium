@@ -48,7 +48,11 @@ _UPDATABLE = frozenset(
     {
         "title",
         "description",
-        "priority",
+        # ``priority`` is intentionally absent: since migration 0102
+        # every task carries Eisenhower axes (Low/Low by default), and
+        # the service derives ``priority`` from importance x urgency.
+        # Letting callers patch ``priority`` directly would re-introduce
+        # the duplication this enforces against.
         "importance",
         "urgency",
         "start_date",
@@ -107,9 +111,11 @@ async def create_task(
     actor_id: uuid.UUID,
     title: str,
     description: str | None = None,
-    priority: int = 3,
-    importance: int | None = None,
-    urgency: int | None = None,
+    # Eisenhower axes drive ``priority``. Low/Low (4/4) is the default
+    # since migration 0102 --- ``priority`` is never settable by the
+    # caller, the service derives it through ``derive_priority``.
+    importance: int = 4,
+    urgency: int = 4,
     start_date: dt.date | None = None,
     due_date: dt.date | None = None,
     billable: bool | None = None,
@@ -188,8 +194,7 @@ async def create_task(
         eff_tag_ids.append(client_tag_id)
     workflow = await wf.resolve_effective_workflow(session, org_id, project_tag_id)
     initial = await wf.get_initial_state(session, workflow.id)
-    if importance is not None and urgency is not None:
-        priority = derive_priority(importance, urgency)
+    priority = derive_priority(importance, urgency)
     # docs/adr/0028 Stage C: resolve assignee through identities.
     # Either an explicit ``assignee_id`` or a handle to look up.
     if assignee_id is None and assignee_handle:
@@ -221,6 +226,27 @@ async def create_task(
             )
         ).scalar_one_or_none()
         created_by_identity_id = user_ident
+    # Default assignee = creator. When the caller leaves both
+    # ``assignee_id`` and ``assignee_handle`` unset, the task is
+    # auto-assigned to whoever created it: the user identity for
+    # human-driven calls, the ai_assistant identity for MCP/agent
+    # calls (the MCP layer resolves ``created_by_identity_id`` to the
+    # assistant). Callers that want an unassigned task (e.g. to feed
+    # the autonomous-dispatch queue from ADR-0025) must pass an
+    # explicit value distinct from the creator.
+    if assignee_id is None and created_by_identity_id is not None:
+        assignee_id = created_by_identity_id
+        # Align ``executor_kind`` with the resolved identity's kind so
+        # the persisted routing hint stays coherent with the assignee.
+        creator_kind = (
+            await session.execute(
+                select(Identity.kind).where(Identity.id == created_by_identity_id)
+            )
+        ).scalar_one_or_none()
+        if creator_kind == IdentityKind.ai_assistant:
+            executor_kind = ExecKind.llm_agent
+        elif creator_kind == IdentityKind.user:
+            executor_kind = ExecKind.human
     # docs/adr/0028: ``executor_kind`` is the routing hint used only
     # when ``assignee_id`` is NULL; when an assignee is set the kind
     # is derived from the joined identity. Persisted regardless so
@@ -377,10 +403,14 @@ async def update_task(
     await require_role(session, org_id, actor_id, Role.member)
     current = await get_task(session, org_id=org_id, task_id=task_id)
     if "importance" in values or "urgency" in values:
+        # importance/urgency are NOT NULL since migration 0102, so the
+        # service can re-derive ``priority`` unconditionally from the
+        # patched axes (or the row's current value when one is left
+        # untouched). ``priority`` is never patched directly --- see
+        # _UPDATABLE.
         imp = values.get("importance", current.importance)
         urg = values.get("urgency", current.urgency)
-        if imp is not None and urg is not None:
-            values["priority"] = derive_priority(imp, urg)
+        values["priority"] = derive_priority(imp, urg)
     # docs/adr/0028 Stage C: a caller can either pass ``assignee_id``
     # directly (uuid into identities) or ``assignee_handle`` (a
     # convenience we resolve here). Both are merged onto the single

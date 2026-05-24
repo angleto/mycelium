@@ -151,7 +151,22 @@ def add(
     due: str | None = typer.Option(
         None, "--due", help="Due date (YYYY-MM-DD or 'today'/'tomorrow')."
     ),
-    priority: int = typer.Option(3, "--priority", "-p", min=1, max=25),
+    importance: int | None = typer.Option(
+        None,
+        "--importance",
+        "-I",
+        min=1,
+        max=5,
+        help="Eisenhower importance (1..5, 1=Critical). Default Low (4).",
+    ),
+    urgency: int | None = typer.Option(
+        None,
+        "--urgency",
+        "-U",
+        min=1,
+        max=5,
+        help="Eisenhower urgency (1..5, 1=Now). Default Low (4).",
+    ),
     tag: list[str] = typer.Option([], "--tag", "-t", help="Tag name or UUID; pass multiple times."),
     no_editor: bool = typer.Option(
         False, "--no-editor", help="Do not open $EDITOR even if description is empty."
@@ -165,7 +180,15 @@ def add(
     elif description is None and not no_editor:
         body_text = edit_in_editor(f"# {title}\n\n").strip()
         description = body_text or None
-    payload: dict[str, Any] = {"title": title, "priority": priority}
+    # ``priority`` is intentionally not a CLI option: it is a calculated
+    # field (importance x urgency, clamped 1..25). Pass --importance /
+    # --urgency instead; defaults to Low/Low (4/4 -> priority 16) at the
+    # backend when omitted.
+    payload: dict[str, Any] = {"title": title}
+    if importance is not None:
+        payload["importance"] = importance
+    if urgency is not None:
+        payload["urgency"] = urgency
     if description:
         payload["description"] = description
     due_date = _parse_due(due)
@@ -194,13 +217,13 @@ def edit(
     due: str | None = typer.Option(
         None, "--due", help="YYYY-MM-DD, 'today', 'tomorrow', or '-' to clear."
     ),
-    priority: int | None = typer.Option(None, "--priority", "-p", min=1, max=25),
-    importance: int | None = typer.Option(None, "--importance", min=1, max=5),
-    urgency: int | None = typer.Option(None, "--urgency", min=1, max=5),
+    importance: int | None = typer.Option(None, "--importance", "-I", min=1, max=5),
+    urgency: int | None = typer.Option(None, "--urgency", "-U", min=1, max=5),
     billable: bool | None = typer.Option(None, "--billable/--unbillable"),
     location: str | None = typer.Option(None, "--location"),
 ) -> None:
-    """Patch task fields. Only fields you pass are changed."""
+    """Patch task fields. Only fields you pass are changed. ``priority``
+    is a calculated field (importance x urgency); patch the axes."""
     with client() as c:
         full = _resolve_task(c, task_id)
         current = get_json(c.get(f"/tasks/{full}"))
@@ -221,7 +244,6 @@ def edit(
             d = _parse_due(due)
             payload["due_date"] = d.isoformat() if d else None
         for key, val in (
-            ("priority", priority),
             ("importance", importance),
             ("urgency", urgency),
             ("billable", billable),

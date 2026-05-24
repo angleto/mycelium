@@ -6613,14 +6613,15 @@ export interface components {
             /** Description */
             description?: string | null;
             /**
-             * Priority
-             * @default 3
+             * Importance
+             * @default 4
              */
-            priority: number;
-            /** Importance */
-            importance?: number | null;
-            /** Urgency */
-            urgency?: number | null;
+            importance?: number;
+            /**
+             * Urgency
+             * @default 4
+             */
+            urgency?: number;
             /** Start Date */
             start_date?: string | null;
             /** Due Date */
@@ -6698,9 +6699,9 @@ export interface components {
             /** Priority */
             priority: number;
             /** Importance */
-            importance: number | null;
+            importance: number;
             /** Urgency */
-            urgency: number | null;
+            urgency: number;
             /** Start Date */
             start_date: string | null;
             /** Due Date */
@@ -6782,8 +6783,6 @@ export interface components {
             title?: string | null;
             /** Description */
             description?: string | null;
-            /** Priority */
-            priority?: number | null;
             /** Importance */
             importance?: number | null;
             /** Urgency */
