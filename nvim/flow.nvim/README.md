@@ -19,7 +19,7 @@ pipx install flow-cli
 Log in once:
 
 ```sh
-flow auth login --base-url https://flow.leto.blue
+flow auth login --base-url https://flow.xeno.garden
 ```
 
 ### 2. Install the plugin (LazyVim / lazy.nvim)
@@ -63,6 +63,19 @@ return {
 | `:Flow notes` | Picker over recent notes; `<cr>` opens the body in a buffer. |
 | `:Flow note-new` | Open a Markdown buffer; on `:w` the body is sent to `flow note add`. |
 | `:Flow task-new` | Prompt for title, then open a description buffer; `:w` calls `flow task add`. |
+
+### Editing tasks / notes inline
+
+Buffers opened by `:Flow tasks`/`:Flow notes` (`flow://task/<id>` and
+`flow://note/<id>`) are **writable**. On `:w` the plugin parses the
+first `# heading` as the title and everything after it as the
+description/body, and shells out to `flow task edit <id>` /
+`flow note edit <id>` to PATCH. The header metadata line (`_state:
+... v3_`) is stripped before parsing, so you can leave it visible.
+
+Optimistic concurrency: the CLI fetches the current version right
+before the PATCH, so a stale buffer triggers a clean 409 instead of
+silently overwriting.
 | `:Flow search <q>` | Prompt for a query, run hybrid search, pick a hit to open in the SPA. |
 | `:Flow open <ref>` | Open the SPA on a task/note id or shortcut (`today`, `notes`, `invoices`, ...). |
 | `:Flow status` | Notification with profile + server build info. |

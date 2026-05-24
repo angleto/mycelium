@@ -138,16 +138,26 @@ local function tasks_view()
     require("flow.pickers").pick_task(data, function(task)
       cli.json({ "task", "show", task.id }, function(ok2, full)
         if not ok2 then notify_err(full) return end
-        local t = (full.task or full)  -- show returns {task, comments, reminders}
-        local lines = {
-          "# " .. (t.title or "<untitled>"),
-          ("_state: %s  due: %s  pri: %s_"):format(
-            t.state or "?", t.due_date or "-", tostring(t.priority or "?")
-          ),
-          "",
-          t.description or "",
-        }
-        require("flow.ui").open_text_buffer("task/" .. task.id, lines)
+        local t = (full.task or full)
+        local header = ("_state: %s  due: %s  pri: %s  v%s_"):format(
+          t.state or "?", t.due_date or "-",
+          tostring(t.priority or "?"), tostring(t.version or "?")
+        )
+        require("flow.ui").open_editable_resource(
+          "task/" .. task.id, header, t.title, t.description or "",
+          function(new_title, new_body, on_done)
+            -- The CLI's ``flow task edit`` reads the description from
+            -- stdin when given ``--description -``; we pass the title
+            -- as a flag.
+            local args = { "task", "edit", task.id, "--title", new_title, "--description", "-" }
+            cli.run_stdin(args, new_body, function(ok3)
+              if ok3 then
+                notify_ok("task " .. (task.id):sub(1, 8) .. " saved")
+                on_done()
+              end
+            end)
+          end
+        )
       end)
     end, task_actions(tasks_view))
   end)
@@ -160,16 +170,21 @@ local function notes_view()
     require("flow.pickers").pick_note(data, function(note)
       cli.json({ "note", "show", note.id }, function(ok2, full)
         if not ok2 then notify_err(full) return end
-        local body = full.transcript or ""
-        local lines = {
-          "# " .. (full.title or "<untitled>"),
-          ("_kind: %s  task: %s_"):format(full.kind or "?", full.task_id or "-"),
-          "",
-        }
-        for _, l in ipairs(vim.split(body, "\n")) do
-          table.insert(lines, l)
-        end
-        require("flow.ui").open_text_buffer("note/" .. note.id, lines)
+        local header = ("_kind: %s  task: %s  v%s_"):format(
+          full.kind or "?", full.task_id or "-", tostring(full.version or "?")
+        )
+        require("flow.ui").open_editable_resource(
+          "note/" .. note.id, header, full.title or "", full.transcript or "",
+          function(new_title, new_body, on_done)
+            local args = { "note", "edit", note.id, "--title", new_title, "--text", "-" }
+            cli.run_stdin(args, new_body, function(ok3)
+              if ok3 then
+                notify_ok("note " .. (note.id):sub(1, 8) .. " saved")
+                on_done()
+              end
+            end)
+          end
+        )
       end)
     end)
   end)
