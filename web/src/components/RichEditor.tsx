@@ -12,6 +12,7 @@ import Suggestion, {
   type SuggestionKeyDownProps,
   type SuggestionProps,
 } from '@tiptap/suggestion'
+import { InlineMath, BlockMath } from './MarkdownMath'
 import { api, workspaceHeader } from '../api/client'
 import { formatMentionHref, type MentionKind } from '../lib/mentions'
 
@@ -218,6 +219,11 @@ export function RichEditor({
       TableHeader,
       TableCell,
       Markdown.configure({ html: false }),
+      // LaTeX math (``$inline$`` and ``$$block$$``): KaTeX NodeView in
+      // the editor + markdown-it round-trip, so what /garden's
+      // MarkdownView renders read-side is what the author saw write-side.
+      InlineMath,
+      BlockMath,
       MentionExt,
     ],
     content: value,
