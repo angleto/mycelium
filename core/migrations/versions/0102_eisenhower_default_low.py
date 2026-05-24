@@ -44,6 +44,12 @@ def upgrade() -> None:
     # whose axes were unset (priority = 1..25 clamp on importance *
     # urgency). Rows that already carried both axes keep their stored
     # priority --- the service derived it on create/update.
+    #
+    # tasks has FORCE ROW LEVEL SECURITY (no app.current_org GUC inside
+    # a migration -> RLS hides every row, the UPDATE touches zero,
+    # the subsequent SET NOT NULL fails). Disable RLS around the
+    # backfill exactly like 0099 / 0104 do for the same reason.
+    op.execute("ALTER TABLE tasks DISABLE ROW LEVEL SECURITY")
     op.execute(
         """
         UPDATE tasks
@@ -63,6 +69,8 @@ def upgrade() -> None:
     op.execute("ALTER TABLE tasks ALTER COLUMN urgency SET NOT NULL")
     op.execute("ALTER TABLE tasks ALTER COLUMN importance SET DEFAULT 4")
     op.execute("ALTER TABLE tasks ALTER COLUMN urgency SET DEFAULT 4")
+    op.execute("ALTER TABLE tasks ENABLE ROW LEVEL SECURITY")
+    op.execute("ALTER TABLE tasks FORCE ROW LEVEL SECURITY")
 
 
 def downgrade() -> None:
