@@ -208,6 +208,18 @@ def _task(t: Task, tags: list[Tag] | None = None) -> dict[str, Any]:
         "priority": t.priority,
         "version": t.version,
         "tags": [_tag_brief(g) for g in (tags or [])],
+        # docs/adr/0028 + migrations 0091/0093: who actually created
+        # the task. Polymorphic via ``created_by_identity_id``;
+        # ``created_by_token_id`` is the bare-MCP-token fallback.
+        # Identities/token are uuid-or-None; the SPA-side richer
+        # serializer (REST TaskOut) joins the rows to render kind +
+        # handle + label. MCP exposes raw ids so a debug caller can
+        # cross-check without a follow-up tool.
+        "created_by_identity_id": (
+            str(t.created_by_identity_id) if t.created_by_identity_id else None
+        ),
+        "created_by_token_id": (str(t.created_by_token_id) if t.created_by_token_id else None),
+        "assignee_id": str(t.assignee_id) if t.assignee_id else None,
     }
 
 

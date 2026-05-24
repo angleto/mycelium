@@ -94,17 +94,11 @@ async def test_mcp_task_participants() -> None:
     from flow_core.services import memberships as mem_svc
 
     async with tenant_session(org, str(owner)) as s:
-        await mem_svc.add_member(
-            s, org_id=org_uuid, actor_id=owner, email=b_email, role="member"
-        )
+        await mem_svc.add_member(s, org_id=org_uuid, actor_id=owner, email=b_email, role="member")
         await actors_svc.mint_user_handle(s, user_id=owner, seed=a_email)
         await actors_svc.mint_user_handle(s, user_id=b.user_id, seed=b_email)
-        owner_ident = await identities_svc.ensure_for_user(
-            s, org_id=org_uuid, user_id=owner
-        )
-        collab_ident = await identities_svc.ensure_for_user(
-            s, org_id=org_uuid, user_id=b.user_id
-        )
+        owner_ident = await identities_svc.ensure_for_user(s, org_id=org_uuid, user_id=owner)
+        collab_ident = await identities_svc.ensure_for_user(s, org_id=org_uuid, user_id=b.user_id)
 
     # Create appointment-task through MCP.
     appt = await create_task(
