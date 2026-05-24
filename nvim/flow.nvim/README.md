@@ -27,15 +27,16 @@ Drop the following into `~/.config/nvim/lua/plugins/flow.lua`:
 ```lua
 return {
   "angleto/flow.nvim",
-  version = "*",            -- resolves to the latest v* tag (matches Flow's release)
-  keys = {                  -- keys alone are a valid lazy.nvim trigger; we deliberately
-                            -- avoid `cmd = "Flow"` because that keeps the plugin off
-                            -- runtimepath until first invocation, which breaks
-                            -- `:checkhealth flow` and any other rtp-walking lookup.
-                            -- `plugin/flow.lua` is already minimal: it only registers
-                            -- the `:Flow` user command and defers the rest via
-                            -- `require` on first call, so loading the plugin on
-                            -- startup costs essentially nothing.
+  version = "*",           -- resolves to the latest v* tag (matches Flow's release)
+  event = "VeryLazy",      -- load after the UI is ready. We avoid `cmd = "Flow"`
+                           -- and key-only lazy triggers because both keep the
+                           -- plugin off `runtimepath` until first invocation,
+                           -- which breaks `:checkhealth flow` and any other
+                           -- rtp-walking lookup. `plugin/flow.lua` is minimal
+                           -- (registers the `:Flow` user command, defers the
+                           -- rest via `require` on first call), so loading at
+                           -- VeryLazy has no startup penalty.
+  keys = {
     { "<leader>fo", "<cmd>Flow today<cr>",     desc = "Flow: today" },
     { "<leader>ft", "<cmd>Flow tasks<cr>",     desc = "Flow: tasks" },
     { "<leader>fN", "<cmd>Flow notes<cr>",     desc = "Flow: notes" },
