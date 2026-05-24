@@ -52,7 +52,6 @@ from flow_core.models.email import (
     EmailMessage,
     EmailProvider,
 )
-from flow_core.models.event import Event, EventParticipant
 from flow_core.models.executor import Executor, ExecutorKind
 from flow_core.models.google_calendar import (
     CalendarSubscription,
@@ -162,8 +161,6 @@ __all__ = [
     "EmailMessage",
     "EmailProvider",
     "EmailVerificationToken",
-    "Event",
-    "EventParticipant",
     "ExecKind",
     "Executor",
     "ExecutorKind",
@@ -215,9 +212,9 @@ __all__ = [
     "TagScope",
     "Task",
     "TaskCollaborator",
-    "TaskParticipant",
     "TaskDependency",
     "TaskHandoff",
+    "TaskParticipant",
     "TaskRecurrence",
     "TaskRelation",
     "TaskTag",

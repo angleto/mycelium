@@ -32,7 +32,6 @@ from flow_core.models.client_profile import ClientProfile
 from flow_core.models.dependency import DependencyType, TaskDependency
 from flow_core.models.dispatch_request import DispatchRequest
 from flow_core.models.email import EmailAccount, EmailMessage, EmailProvider
-from flow_core.models.event import Event
 from flow_core.models.executor import Executor, ExecutorKind
 from flow_core.models.invoice import Invoice
 from flow_core.models.memory_blob import MemoryBlob
@@ -63,7 +62,6 @@ from flow_core.services import coordination as coordination_svc
 from flow_core.services import dependencies, scheduler, tasks, taxonomy
 from flow_core.services import dispatch_loop as dispatch_loop_svc
 from flow_core.services import email as email_svc
-from flow_core.services import events as events_svc
 from flow_core.services import executors as executors_svc
 from flow_core.services import invoice as invoice_svc
 from flow_core.services import memory as memory_svc
@@ -491,11 +489,19 @@ async def create_task(
     necessity: str | None = None,
     budget_id: str | None = None,
     assignee_ids: list[str] | None = None,
+    assignee_id: str | None = None,
+    start_at: str | None = None,
+    duration_minutes: int | None = None,
+    recurrence: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Create a task, optionally tagged. Supports personal-domain
     attributes (cost/location/necessity/budget) for the advisory layer.
     ``required_capabilities`` (docs/adr/0025 P2) are the capabilities the
-    task needs from its executor (empty = any enabled agent)."""
+    task needs from its executor (empty = any enabled agent). Pass
+    ``start_at`` + ``duration_minutes`` to create an appointment-task
+    (migration 0094 + ADR-0008 addendum): the task becomes a calendar
+    block subject to no-overlap on ``assignee_id`` (and any explicit
+    participants added via ``add_task_participant``)."""
     async with _tenant(token, org_id) as (s, org, user):
         # When the MCP call is authenticated with an agent token
         # (HTTP transport), record the ai_assistant identity (if the
@@ -523,8 +529,12 @@ async def create_task(
             budget_id=uuid.UUID(budget_id) if budget_id else None,
             tag_ids=[uuid.UUID(t) for t in (tag_ids or [])],
             assignee_ids=[uuid.UUID(u) for u in (assignee_ids or [])],
+            assignee_id=uuid.UUID(assignee_id) if assignee_id else None,
             created_by_identity_id=creator_identity_id,
             created_by_token_id=creator_token_id,
+            start_at=dt.datetime.fromisoformat(start_at) if start_at else None,
+            duration_minutes=duration_minutes,
+            recurrence=recurrence,
         )
         return _task(task)
 
@@ -931,17 +941,10 @@ async def remove_dependency(token: str, org_id: str, dependency_id: str) -> dict
         return {"dependency_id": dependency_id, "removed": True}
 
 
-# --- F3: calendars, events, deterministic schedule (FR-4) ---
-
-
-def _event(e: Event) -> dict[str, Any]:
-    return {
-        "id": str(e.id),
-        "title": e.title,
-        "start_at": e.start_at.isoformat(),
-        "end_at": e.end_at.isoformat(),
-        "version": e.version,
-    }
+# --- F3: calendars + deterministic schedule (FR-4) ---
+# Events were unified into tasks in migration 0094; their MCP surface
+# (the four ``*_event`` tools and the ``_event`` helper) is gone.
+# Appointments are tasks with ``start_at`` + ``duration_minutes``.
 
 
 def _schedule(s: Schedule) -> dict[str, Any]:
@@ -1058,75 +1061,11 @@ async def set_user_calendar(
         return {"user_id": user_id, "calendar_id": calendar_id}
 
 
-@mcp.tool()
-async def create_event(
-    token: str,
-    org_id: str,
-    title: str,
-    start_at: str,
-    end_at: str,
-    participant_ids: list[str] | None = None,
-    project_tag_id: str | None = None,
-    location: str | None = None,
-) -> dict[str, Any]:
-    """Create an appointment. Overlap for any participant is rejected
-    (no-ubiquity)."""
-    async with _tenant(token, org_id) as (s, org, user):
-        e = await events_svc.create_event(
-            s,
-            org_id=org,
-            actor_id=user,
-            title=title,
-            start_at=dt.datetime.fromisoformat(start_at),
-            end_at=dt.datetime.fromisoformat(end_at),
-            participant_ids=[uuid.UUID(p) for p in (participant_ids or [])],
-            project_tag_id=(uuid.UUID(project_tag_id) if project_tag_id else None),
-            location=location,
-        )
-        return _event(e)
-
-
-@mcp.tool()
-async def list_events(token: str, org_id: str, user_id: str | None = None) -> list[dict[str, Any]]:
-    """List appointments, optionally filtered by participant."""
-    async with _tenant(token, org_id) as (s, org, _user):
-        rows = await events_svc.list_events(
-            s,
-            org_id=org,
-            user_id=uuid.UUID(user_id) if user_id else None,
-        )
-        return [_event(e) for e in rows]
-
-
-@mcp.tool()
-async def reschedule_event(
-    token: str,
-    org_id: str,
-    event_id: str,
-    start_at: str,
-    end_at: str,
-    expected_version: int,
-) -> dict[str, Any]:
-    """Move an appointment; overlap for any participant is rejected."""
-    async with _tenant(token, org_id) as (s, org, user):
-        version = await events_svc.reschedule_event(
-            s,
-            org_id=org,
-            actor_id=user,
-            event_id=uuid.UUID(event_id),
-            start_at=dt.datetime.fromisoformat(start_at),
-            end_at=dt.datetime.fromisoformat(end_at),
-            expected_version=expected_version,
-        )
-        return {"event_id": event_id, "version": version}
-
-
-@mcp.tool()
-async def delete_event(token: str, org_id: str, event_id: str) -> dict[str, Any]:
-    """Delete an appointment."""
-    async with _tenant(token, org_id) as (s, org, user):
-        await events_svc.delete_event(s, org_id=org, actor_id=user, event_id=uuid.UUID(event_id))
-        return {"event_id": event_id, "deleted": True}
+# Migration 0097 dropped the standalone events table. Appointments are
+# tasks with ``start_at`` + ``duration_minutes`` -- AI agents create
+# them through ``create_task`` and the participants endpoint /
+# add_participant tool. The four legacy ``*_event`` MCP tools were
+# removed in this commit.
 
 
 @mcp.tool()

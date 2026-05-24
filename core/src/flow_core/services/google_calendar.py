@@ -23,13 +23,16 @@ from flow_core.crypto import decrypt_secret, encrypt_secret
 from flow_core.errors import DomainError, NotFoundError
 from flow_core.google_api import GoogleApiClient, google_api_client
 from flow_core.i18n import MessageCode
-from flow_core.models.event import Event
 from flow_core.models.google_calendar import (
     CalendarSubscription,
     GoogleCalendarStatus,
 )
 from flow_core.models.membership import Role
+from flow_core.models.task import Task
+from flow_core.models.workflow import WorkflowState
 from flow_core.services import audit
+from flow_core.services import taxonomy as taxonomy_svc
+from flow_core.services import workflow as wf_svc
 from flow_core.services.rbac import require_role
 
 _EXTERNAL_PROVIDER = "google"
@@ -277,16 +280,39 @@ async def sync_subscription(
             error=str(exc),
         )
 
+    # Migration 0097: ingested rows are appointment-tasks. Look up by
+    # the same natural key (subscription + external_id) but on the
+    # tasks table; the unique partial index ``ux_tasks_external_sync``
+    # is the storage analog of the old events natural key.
     existing = {
-        e.external_id: e
-        for e in (
+        t.external_id: t
+        for t in (
             await session.execute(
-                select(Event).where(Event.external_subscription_id == subscription_id)
+                select(Task).where(
+                    Task.external_subscription_id == subscription_id,
+                    Task.external_id.is_not(None),
+                )
             )
         )
         .scalars()
         .all()
     }
+    # Resolve the workflow's initial state once per sync (same project
+    # ⇒ same workflow). Ingested rows have no project_id linked yet;
+    # we use the org default project so the rows land somewhere
+    # navigable and inherit the right workflow.
+    project_tag_id = await taxonomy_svc.ensure_default_project(
+        session, org_id=org_id, actor_id=actor_id
+    )
+    workflow = await wf_svc.resolve_effective_workflow(session, org_id, project_tag_id)
+    initial = (
+        await session.execute(
+            select(WorkflowState).where(
+                WorkflowState.workflow_id == workflow.id,
+                WorkflowState.is_initial.is_(True),
+            )
+        )
+    ).scalar_one()
     ingested = 0
     updated = 0
     skipped = 0
@@ -302,36 +328,39 @@ async def sync_subscription(
             skipped += 1
             continue
         title = (ge.summary or "(no title)")[:300]
+        duration_minutes = max(1, int((end_at - start_at).total_seconds() // 60))
         if ge.id in existing:
             row = existing[ge.id]
             if (
                 row.title == title
                 and row.start_at == start_at
-                and row.end_at == end_at
+                and row.duration_minutes == duration_minutes
                 and row.location == ge.location
             ):
                 skipped += 1
                 continue
             await optimistic_update(
                 session,
-                Event,
+                Task,
                 pk=row.id,
                 expected_version=row.version,
                 values={
                     "title": title,
                     "start_at": start_at,
-                    "end_at": end_at,
+                    "duration_minutes": duration_minutes,
                     "location": ge.location,
                 },
             )
             updated += 1
         else:
             session.add(
-                Event(
+                Task(
                     org_id=org_id,
                     title=title,
+                    state_id=initial.id,
+                    owner_id=sub.user_id,
                     start_at=start_at,
-                    end_at=end_at,
+                    duration_minutes=duration_minutes,
                     location=ge.location,
                     external_provider=_EXTERNAL_PROVIDER,
                     external_id=ge.id,
@@ -380,26 +409,28 @@ async def push_event(
     subscription_id: uuid.UUID,
     client: GoogleApiClient | None = None,
 ) -> str:
-    """Push a Flow event up to Google under the given subscription.
-    Returns the Google event id. Subsequent ingests will reconcile it
-    (the row gets ``external_*`` set so future syncs deduplicate)."""
+    """Push a Flow appointment-task up to Google under the given
+    subscription. ``event_id`` is the task id (the parameter name is
+    kept for API compatibility). Returns the Google event id;
+    subsequent ingests reconcile via ``external_*``."""
     await require_role(session, org_id, actor_id, Role.member)
-    ev = (await session.execute(select(Event).where(Event.id == event_id))).scalar_one_or_none()
-    if ev is None:
+    task = (await session.execute(select(Task).where(Task.id == event_id))).scalar_one_or_none()
+    if task is None or task.start_at is None or task.duration_minutes is None:
         raise NotFoundError(MessageCode.EVENT_NOT_FOUND)
     sub = await get_subscription(session, org_id=org_id, subscription_id=subscription_id)
     api = client or google_api_client()
+    end_at = task.start_at + dt.timedelta(minutes=task.duration_minutes)
     try:
         access_token = await _refresh_access_token(
             refresh_token=decrypt_secret(sub.refresh_token_encrypted), client=api
         )
         body = {
-            "summary": ev.title,
-            "start": {"dateTime": ev.start_at.astimezone(dt.UTC).isoformat()},
-            "end": {"dateTime": ev.end_at.astimezone(dt.UTC).isoformat()},
+            "summary": task.title,
+            "start": {"dateTime": task.start_at.astimezone(dt.UTC).isoformat()},
+            "end": {"dateTime": end_at.astimezone(dt.UTC).isoformat()},
         }
-        if ev.location:
-            body["location"] = ev.location
+        if task.location:
+            body["location"] = task.location
         result = await api.insert_event(
             access_token=access_token,
             calendar_id=sub.google_calendar_id,
@@ -411,9 +442,9 @@ async def push_event(
         raise DomainError(MessageCode.GOOGLE_CALENDAR_API_ERROR, detail=str(exc)) from exc
     await optimistic_update(
         session,
-        Event,
-        pk=ev.id,
-        expected_version=ev.version,
+        Task,
+        pk=task.id,
+        expected_version=task.version,
         values={
             "external_provider": _EXTERNAL_PROVIDER,
             "external_id": result.id,
@@ -424,7 +455,7 @@ async def push_event(
         session,
         org_id=org_id,
         actor_id=actor_id,
-        entity="event",
+        entity="task",
         entity_id=event_id,
         action="push_google",
         diff={"google_event_id": result.id},

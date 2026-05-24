@@ -25,7 +25,6 @@ from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from flow_core.models.budget import Budget
-from flow_core.models.event import Event, EventParticipant
 from flow_core.models.identity import Identity, IdentityKind
 from flow_core.models.membership import Role
 from flow_core.models.tag import Tag, TagKind
@@ -162,14 +161,29 @@ async def _user_busy(
     start_at: dt.datetime,
     end_at: dt.datetime,
 ) -> bool:
+    # Migration 0094/0095/0097: appointment-tasks live on ``tasks`` and
+    # additional participants live on ``task_participants``. An identity
+    # is busy iff it has a participant row whose window overlaps. The
+    # 0096 assignee-mirror trigger means the assignee shows up here too,
+    # so a single participant query covers both axes.
+    from sqlalchemy import func
+
+    from flow_core.models.identity import Identity
+    from flow_core.models.task import Task
+    from flow_core.models.task_participant import TaskParticipant
+
+    end_expr = func.tasks_event_end(TaskParticipant.start_at, TaskParticipant.duration_minutes)
     return (
         await session.execute(
-            select(EventParticipant.user_id)
-            .join(Event, Event.id == EventParticipant.event_id)
+            select(TaskParticipant.identity_id)
+            .join(Identity, Identity.id == TaskParticipant.identity_id)
+            .join(Task, Task.id == TaskParticipant.task_id)
             .where(
-                EventParticipant.user_id == user_id,
-                Event.start_at < end_at,
-                Event.end_at > start_at,
+                Identity.user_id == user_id,
+                TaskParticipant.start_at < end_at,
+                end_expr > start_at,
+                Task.is_archived.is_(False),
+                Task.deleted_at.is_(None),
             )
             .limit(1)
         )

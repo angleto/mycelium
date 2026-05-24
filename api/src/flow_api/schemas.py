@@ -749,33 +749,6 @@ class UserCalendarIn(BaseModel):
     daily_capacity_h: Decimal = Field(gt=0, le=24)
 
 
-class EventCreateIn(BaseModel):
-    title: str = Field(min_length=1, max_length=300)
-    start_at: datetime.datetime
-    end_at: datetime.datetime
-    participant_ids: list[uuid.UUID] = Field(default_factory=list)
-    project_tag_id: uuid.UUID | None = None
-    client_tag_id: uuid.UUID | None = None
-    location: str | None = Field(default=None, max_length=200)
-
-
-class EventRescheduleIn(BaseModel):
-    expected_version: int = Field(ge=1)
-    start_at: datetime.datetime
-    end_at: datetime.datetime
-
-
-class EventOut(BaseModel):
-    id: uuid.UUID
-    title: str
-    start_at: datetime.datetime
-    end_at: datetime.datetime
-    location: str | None
-    project_tag_id: uuid.UUID | None
-    client_tag_id: uuid.UUID | None
-    version: int
-
-
 class TaskScheduleIn(BaseModel):
     """Drag/write-back of scheduler fields (FR-4). Only provided fields
     are changed; recompute then respects manual/constraint pins."""

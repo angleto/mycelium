@@ -42,8 +42,8 @@ from flow_core.google_oauth_state import (
 )
 from flow_core.models.calendar import WorkingCalendar
 from flow_core.models.email import EmailAccount, EmailProvider
-from flow_core.models.event import Event
 from flow_core.models.google_calendar import CalendarSubscription
+from flow_core.models.task import Task
 from flow_core.services import google_calendar as gcal_svc
 from flow_core.services.auth import signup
 
@@ -407,13 +407,19 @@ async def test_ingest_is_idempotent(_configure_google_oauth) -> None:
         r2 = await gcal_svc.sync_subscription(
             s, org_id=org_id, actor_id=user_id, subscription_id=sub_id
         )
-        rows = (await s.execute(select(Event))).scalars().all()
+        rows = (
+            (await s.execute(select(Task).where(Task.external_provider == "google")))
+            .scalars()
+            .all()
+        )
     assert (r1.ingested, r1.updated, r1.skipped) == (2, 0, 0)
     assert (r2.ingested, r2.updated, r2.skipped) == (0, 0, 2)
     assert len(rows) == 2
     assert {r.external_id for r in rows} == {"evt-1", "evt-2"}
     assert all(r.external_provider == "google" for r in rows)
     assert all(r.external_subscription_id == sub_id for r in rows)
+    # Ingested rows are appointment-tasks (migration 0097).
+    assert all(r.start_at is not None and r.duration_minutes is not None for r in rows)
 
 
 async def test_ingest_updates_changed_event(_configure_google_oauth) -> None:
@@ -446,12 +452,20 @@ async def test_ingest_updates_changed_event(_configure_google_oauth) -> None:
         r2 = await gcal_svc.sync_subscription(
             s, org_id=org_id, actor_id=user_id, subscription_id=sub_id
         )
-        row = (await s.execute(select(Event).where(Event.external_id == "evt-1"))).scalar_one()
+        row = (await s.execute(select(Task).where(Task.external_id == "evt-1"))).scalar_one()
     assert r2.updated == 1
     assert row.title == "New title"
 
 
 async def test_push_event_round_trip(_configure_google_oauth) -> None:
+    """Push a local appointment-task up to Google and confirm the
+    external_* trio is written back. The next ingest of the same
+    Google id must NOT duplicate the row (idempotency via the
+    UNIQUE partial index on (external_subscription_id, external_id))."""
+    from flow_core.services import actors as actors_svc
+    from flow_core.services import identities as identities_svc
+    from flow_core.services import tasks as tasks_svc
+
     org_id, user_id = await _signup_owner("OauthPush")
     sub_id = await _connect_subscription(org_id, user_id)
 
@@ -459,22 +473,25 @@ async def test_push_event_round_trip(_configure_google_oauth) -> None:
     set_google_api_client_override(lambda: fake)
 
     async with tenant_session(str(org_id), str(user_id)) as s:
-        ev = Event(
+        await actors_svc.mint_user_handle(s, user_id=user_id, seed="push")
+        ident = await identities_svc.ensure_for_user(s, org_id=org_id, user_id=user_id)
+        task = await tasks_svc.create_task(
+            s,
             org_id=org_id,
+            actor_id=user_id,
             title="Demo",
+            assignee_id=ident.id,
             start_at=dt.datetime(2026, 5, 21, 9, 0, tzinfo=dt.UTC),
-            end_at=dt.datetime(2026, 5, 21, 10, 0, tzinfo=dt.UTC),
+            duration_minutes=60,
         )
-        s.add(ev)
-        await s.flush()
         google_event_id = await gcal_svc.push_event(
             s,
             org_id=org_id,
             actor_id=user_id,
-            event_id=ev.id,
+            event_id=task.id,
             subscription_id=sub_id,
         )
-        refreshed = (await s.execute(select(Event).where(Event.id == ev.id))).scalar_one()
+        refreshed = (await s.execute(select(Task).where(Task.id == task.id))).scalar_one()
     assert google_event_id == "g-1"
     assert refreshed.external_id == "g-1"
     assert refreshed.external_subscription_id == sub_id
@@ -492,7 +509,11 @@ async def test_push_event_round_trip(_configure_google_oauth) -> None:
         r = await gcal_svc.sync_subscription(
             s, org_id=org_id, actor_id=user_id, subscription_id=sub_id
         )
-        rows = (await s.execute(select(Event))).scalars().all()
+        rows = (
+            (await s.execute(select(Task).where(Task.external_subscription_id == sub_id)))
+            .scalars()
+            .all()
+        )
     assert r.ingested == 0
     assert len(rows) == 1
 

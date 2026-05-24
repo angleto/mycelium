@@ -42,7 +42,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from flow_core.errors import DomainError
 from flow_core.i18n import MessageCode
 from flow_core.models.dependency import DependencyType, TaskDependency
-from flow_core.models.event import Event, EventParticipant
 from flow_core.models.executor import Executor, ExecutorKind
 from flow_core.models.identity import Identity, IdentityKind
 from flow_core.models.membership import Role
@@ -494,8 +493,8 @@ class Scheduler:
         # hard constraints. They never enter the placement loop:
         # ``start_at`` is the fixed pin, ``start_at + duration`` the
         # end. They also feed the per-person busy list so plain work
-        # is scheduled around them, just like legacy Event rows did
-        # before the unification.
+        # is scheduled around them. The legacy ``events`` table was
+        # dropped in migration 0097.
         appt_busy_by_user: dict[uuid.UUID, list[tuple[dt.datetime, dt.datetime]]] = {}
         # Migration 0095/0096: every participant of an appointment-task
         # (including the assignee, mirrored by the 0096 trigger) lives
@@ -553,27 +552,12 @@ class Scheduler:
             switch_min = (
                 human_exec[user_id].context_switch_cost_minutes if user_id in human_exec else 0
             )
-            # Hard constraints on the person's timeline: legacy Event
-            # rows AND appointment-tasks of the same user (migration
-            # 0094 / ADR-0008 addendum). Both feed the same overlap
-            # avoidance: ``base = cal.snap_forward(clash[1])`` below.
-            busy: list[tuple[dt.datetime, dt.datetime]] = [
-                (e.start_at, e.end_at)
-                for e in (
-                    await self._s.execute(
-                        select(Event)
-                        .join(
-                            EventParticipant,
-                            EventParticipant.event_id == Event.id,
-                        )
-                        .where(EventParticipant.user_id == user_id)
-                    )
-                )
-                .scalars()
-                .all()
-            ]
-            busy.extend(appt_busy_by_user.get(user_id, []))
-            busy.sort()
+            # Hard constraints on the person's timeline: appointment-
+            # tasks (migration 0094) collected above into
+            # ``appt_busy_by_user`` via task_participants (the 0096
+            # trigger mirrors the assignee so the loop sees both the
+            # primary owner and every extra participant).
+            busy: list[tuple[dt.datetime, dt.datetime]] = sorted(appt_busy_by_user.get(user_id, []))
             plist.sort(key=key)
             cursor = now
             placed_first = False

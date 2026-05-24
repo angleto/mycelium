@@ -232,3 +232,15 @@ class Task(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, Base):
     # intentionally not constrained at the column level (jsonb): the
     # engine validates it. Empty / NULL = one-shot.
     recurrence: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    # External-sync provenance for appointment-tasks mirrored from a
+    # remote calendar (migration 0097 moved these off the legacy
+    # ``events`` table). NULL on native rows; ``external_provider`` +
+    # ``external_id`` form the natural ingest key under
+    # ``external_subscription_id`` (UNIQUE partial index). Currently
+    # only "google" is used; left as varchar(20) so other providers
+    # (e.g. iCal subscriptions) can land without a schema change.
+    external_provider: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    external_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    external_subscription_id: Mapped[uuid.UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True), nullable=True
+    )

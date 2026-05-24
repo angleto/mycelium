@@ -54,7 +54,7 @@ async def connector_info(
 ) -> ConnectorInfoOut:
     # Same-origin: SPA at /, API at /api, MCP at /mcp. The frontend
     # prefixes window.location.origin so the operator gets the full
-    # public URL (e.g. https://flow.leto.blue/mcp).
+    # public URL (e.g. https://xenoflow.dev/mcp).
     return ConnectorInfoOut(mcp_url="/mcp", instructions_md=_INSTRUCTIONS_MD)
 
 

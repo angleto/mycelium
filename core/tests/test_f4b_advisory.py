@@ -18,9 +18,10 @@ from flow_core.models.budget import BudgetPeriod
 from flow_core.models.dependency import DependencyType
 from flow_core.models.tag import TagKind
 from flow_core.models.task import Necessity
+from flow_core.services import actors as actors_svc
 from flow_core.services import advisory, budgets, tasks, taxonomy
 from flow_core.services import dependencies as deps
-from flow_core.services import events as events_svc
+from flow_core.services import identities as identities_svc
 from flow_core.services.auth import signup
 
 _WIN = dt.datetime(2026, 1, 12, 9, 0, tzinfo=dt.UTC)
@@ -101,15 +102,20 @@ async def test_what_can_i_do_now_feasibility_and_ranking() -> None:
         )
         assert td.id in {x.task_id for x in r2}
 
-        # An overlapping event makes the claimed free window not free.
-        await events_svc.create_event(
+        # An overlapping appointment-task (migration 0094 + 0097) makes
+        # the claimed free window not free. The advisory ``_user_busy``
+        # check reads task_participants; the 0096 trigger mirrors the
+        # assignee into a participant row so a single create suffices.
+        await actors_svc.mint_user_handle(s, user_id=user, seed="adv")
+        ident = await identities_svc.ensure_for_user(s, org_id=org, user_id=user)
+        await tasks.create_task(
             s,
             org_id=org,
             actor_id=user,
             title="Busy",
+            assignee_id=ident.id,
             start_at=_WIN + dt.timedelta(minutes=30),
-            end_at=_WIN + dt.timedelta(minutes=90),
-            participant_ids=[user],
+            duration_minutes=60,
         )
         assert (
             await advisory.what_can_i_do_now(

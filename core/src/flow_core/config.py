@@ -116,7 +116,7 @@ class Settings(BaseSettings):
 
     # CORS. Comma-separated allowed origins for the browser SPA when it
     # is served from a different origin than the API (production splits
-    # flow.leto.blue → SPA and api.flow.leto.blue → API). Empty disables
+    # xenoflow.dev → SPA and api.xenoflow.dev → API). Empty disables
     # the middleware (same-origin dev/proxy needs no CORS).
     cors_origins: str = "http://localhost:5173"
 

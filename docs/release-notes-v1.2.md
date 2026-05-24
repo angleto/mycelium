@@ -14,7 +14,7 @@ Workflow:
    write / danger split, default = everything except danger).
 2. The reveal card shows the **client secret exactly once**, copy it.
 3. In Claude Desktop / Cursor / any MCP client, add a custom MCP
-   server pointing at `https://flow.leto.blue/mcp` with the secret as
+   server pointing at `https://xenoflow.dev/mcp` with the secret as
    the bearer token (streamable-http transport).
 4. The assistant can now call every `@mcp.tool` on Flow on your
    behalf, scoped to the workspace it was minted in.

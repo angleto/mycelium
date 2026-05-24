@@ -85,30 +85,53 @@ async def test_f3_api_flow() -> None:
         assert sched[t1["id"]]["scheduled_end"] <= sched[t2["id"]]["scheduled_start"]
         pinned = sched[t1["id"]]["scheduled_start"]
 
-        # No-ubiquity: a participant cannot hold two overlapping events.
+        # No-ubiquity: an identity cannot hold two overlapping
+        # appointment-tasks (migration 0094, ADR-0008 addendum). The
+        # legacy /events router is gone; create appointment-tasks via
+        # /tasks with start_at + duration_minutes. The /tasks response
+        # exposes ``assignee_id`` as the identity, so use that as the
+        # axis for the conflict.
+        from flow_core.db import tenant_session as _ts
+        from flow_core.services import actors as _actors_svc
+        from flow_core.services import identities as _identities_svc
+
+        async with _ts(a["workspace_id"], a["user_id"]) as _s:
+            await _actors_svc.mint_user_handle(_s, user_id=uuid.UUID(a["user_id"]), seed="f3")
+            me_ident = (
+                await _identities_svc.ensure_for_user(
+                    _s,
+                    org_id=uuid.UUID(a["workspace_id"]),
+                    user_id=uuid.UUID(a["user_id"]),
+                )
+            ).id
         ev = await c.post(
-            "/events",
+            "/tasks",
             headers=h,
             json={
                 "title": "Call",
                 "start_at": "2026-01-12T09:00:00+00:00",
-                "end_at": "2026-01-12T10:00:00+00:00",
-                "participant_ids": [me],
+                "duration_minutes": 60,
+                "assignee_id": str(me_ident),
+                "executor_kind": "human",
+                "necessity": "should",
+                "priority": 3,
             },
         )
-        assert ev.status_code == 200
+        assert ev.status_code == 200, ev.text
         clash = await c.post(
-            "/events",
+            "/tasks",
             headers=h,
             json={
                 "title": "Overlap",
                 "start_at": "2026-01-12T09:30:00+00:00",
-                "end_at": "2026-01-12T10:30:00+00:00",
-                "participant_ids": [me],
+                "duration_minutes": 60,
+                "assignee_id": str(me_ident),
+                "executor_kind": "human",
+                "necessity": "should",
+                "priority": 3,
             },
         )
-        assert clash.status_code == 400 and clash.json()["code"] == "event.overlap"
-        assert len((await c.get("/events", headers=h)).json()) == 1
+        assert clash.status_code in (400, 409) and clash.json()["code"] == "event.overlap"
 
         # Drag write-back: pin T1 manual; an unrelated recompute keeps it.
         patched = await c.patch(

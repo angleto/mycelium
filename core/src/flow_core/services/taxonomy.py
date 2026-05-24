@@ -20,7 +20,6 @@ from flow_core.errors import DomainError, NotFoundError
 from flow_core.i18n import MessageCode
 from flow_core.models.attachment import Attachment
 from flow_core.models.client_profile import ClientProfile
-from flow_core.models.event import Event
 from flow_core.models.invoice import Invoice
 from flow_core.models.membership import Role
 from flow_core.models.memory_blob import MemoryBlob, MemoryBlobTag
@@ -1088,7 +1087,8 @@ async def _purge_project_subgraph(
     if note_ids:
         await session.execute(delete(Note).where(Note.id.in_(note_ids)))
     await session.execute(delete(MemoryBlob).where(MemoryBlob.project_id == project_tag_id))
-    await session.execute(delete(Event).where(Event.project_tag_id == project_tag_id))
+    # Migration 0097: legacy ``events`` table is gone; appointment-tasks
+    # are tasks tagged with the project (cascaded through Task above).
 
 
 async def purge_project(
@@ -1184,7 +1184,9 @@ async def purge_client(
         await _purge_project_subgraph(session, project_tag_id=project_tag_id)
     if project_ids:
         await session.execute(delete(Tag).where(Tag.id.in_(project_ids)))
-    await session.execute(delete(Event).where(Event.client_tag_id == tag_id))
+    # Migration 0097: legacy ``events.client_tag_id`` is gone; tasks
+    # tagged with this client are already removed by the per-project
+    # cascade above (task_tags points at the client tag too).
     await session.execute(delete(Tag).where(Tag.id == tag_id))
     await session.flush()
     await audit.log(
