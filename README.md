@@ -43,6 +43,12 @@ system exactly like the web UI.
 - **Clients &amp; projects, workflows, invoicing**, tag scoping, a
   dependency graph, scheduler, email-to-task, notifications.
 - **MCP server** (100+ tools) mirroring the API for agent control.
+- **Keyboard-first CLI + Neovim plugin.** `brew install
+  angleto/tap/flow-cli` for the terminal client (`flow today`, `flow
+  task add`, `flow timer start`, `flow note voice`, …) and
+  [`nvim/flow.nvim`](nvim/flow.nvim/README.md) for the in-editor
+  surface. Both shell out to the same REST API; see
+  [`docs/cli.md`](docs/cli.md).
 - **Tested.** Backend pytest + a Playwright end-to-end suite.
 
 ## Stack

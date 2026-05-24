@@ -10,9 +10,6 @@ browser.
 # macOS / Linuxbrew
 brew install angleto/tap/flow-cli
 
-# Anywhere with Python 3.12+
-pipx install flow-cli
-
 # From this monorepo
 uv sync --all-packages && uv run flow --help
 ```

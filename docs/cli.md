@@ -5,7 +5,7 @@ the REST API** (no business logic):
 
 | Surface | Source | Install |
 | --- | --- | --- |
-| `flow` CLI | [`cli/`](../cli/README.md) | `brew install angleto/tap/flow-cli` (or `pipx install flow-cli`) |
+| `flow` CLI | [`cli/`](../cli/README.md) | `brew install angleto/tap/flow-cli` |
 | `flow.nvim` plugin | [`nvim/flow.nvim/`](../nvim/flow.nvim/README.md) | `lazy.nvim` block, see plugin README |
 
 ## Why a CLI
@@ -50,9 +50,12 @@ server-side (`DELETE /agent-tokens/{id}`) and deletes the local file.
 
 ## Packaging
 
-The Homebrew tap lives at
-[`packaging/homebrew-tap/`](../packaging/homebrew-tap/) in this monorepo and is
-mirrored to `github.com/angleto/homebrew-tap` on tag push.
-`Formula/flow-cli.rb` installs the CLI in an isolated `libexec` venv,
-which keeps system Python tidy and lets us pin Python deps without
-collisions with other formulae.
+The Homebrew tap source of truth lives at
+[`packaging/homebrew-tap/`](../packaging/homebrew-tap/) in this monorepo.
+On every `cli-v*` tag, the
+[`mirror-homebrew-tap`](../.github/workflows/mirror-homebrew-tap.yml)
+GitHub Actions workflow copies the formula + helper bin into
+`github.com/angleto/homebrew-tap`, which is what `brew tap angleto/tap`
+fetches. `Formula/flow-cli.rb` installs the CLI in an isolated `libexec`
+venv (keeps system Python tidy and lets us pin deps without colliding
+with other formulae).

@@ -1,0 +1,73 @@
+# Mirror packaging/homebrew-tap/ into github.com/angleto/homebrew-tap
+# on every cli-v* tag. The tap repo is a public mirror used by
+# `brew tap angleto/tap`; the monorepo (this one) is the source of
+# truth for the formula.
+#
+# Setup (one-time):
+#   1. Create a fine-grained Personal Access Token with `Contents: read+write`
+#      on the `angleto/homebrew-tap` repository only.
+#   2. Save it as a repository secret named `TAP_PUSH_TOKEN` in this repo.
+#
+# Without that secret the workflow's push step fails (auth error); the
+# rest of the workflow is harmless to run.
+
+name: mirror-homebrew-tap
+
+on:
+  push:
+    tags:
+      - "cli-v*"
+  workflow_dispatch:
+    inputs:
+      message:
+        description: "Commit message to use in the tap repo"
+        required: false
+        default: "Manual sync from monorepo"
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout monorepo
+        uses: actions/checkout@v4
+
+      - name: Clone tap repo
+        env:
+          TAP_PUSH_TOKEN: ${{ secrets.TAP_PUSH_TOKEN }}
+        run: |
+          if [[ -z "${TAP_PUSH_TOKEN}" ]]; then
+            echo "::error::TAP_PUSH_TOKEN secret is not set; cannot mirror."
+            exit 1
+          fi
+          git clone --depth=1 \
+            "https://x-access-token:${TAP_PUSH_TOKEN}@github.com/angleto/homebrew-tap.git" \
+            tap-repo
+
+      - name: Sync content
+        run: |
+          # Wipe what we own and re-copy from the monorepo, so removals
+          # propagate too.
+          rm -rf tap-repo/Formula tap-repo/bin tap-repo/README.md
+          cp -r packaging/homebrew-tap/Formula tap-repo/
+          cp -r packaging/homebrew-tap/bin tap-repo/
+          cp packaging/homebrew-tap/README.md tap-repo/
+
+      - name: Commit + push if changed
+        run: |
+          cd tap-repo
+          git config user.email "ci@flow.xeno.garden"
+          git config user.name "Flow CI"
+          if [[ -z "$(git status --porcelain)" ]]; then
+            echo "No changes to mirror."
+            exit 0
+          fi
+          git add -A
+          if [[ "${GITHUB_EVENT_NAME}" == "push" ]]; then
+            MSG="Sync from monorepo: ${GITHUB_REF_NAME}"
+          else
+            MSG="${{ github.event.inputs.message }}"
+          fi
+          git commit -m "${MSG}"
+          git push origin HEAD:main

@@ -12,8 +12,6 @@ does not embed an HTTP client. Install `flow` first.
 
 ```sh
 brew install angleto/tap/flow-cli
-# or
-pipx install flow-cli
 ```
 
 Log in once:
@@ -110,8 +108,8 @@ profile management stays a single source of truth.
 
 `:checkhealth flow` covers the common cases:
 
-- **`flow` not on PATH** — Homebrew shim missing or `pipx` venv not
-  exported. Run the install one-liner.
+- **`flow` not on PATH** — Homebrew shim missing. Run the install
+  one-liner above (`brew install angleto/tap/flow-cli`).
 - **`flow auth status` fails** — token expired, server unreachable, or
   wrong base URL. Re-run `flow auth login`.
 
