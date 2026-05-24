@@ -467,25 +467,29 @@ export function TasksRoute() {
   const hiddenStateIds = new Set(
     wfStates.filter((s) => s.is_hidden).map((s) => s.id),
   )
-  // Identity facet (Punto 4, ADR-0028): three-way toggle on top of
-  // the existing ``executor:`` DSL atom. The facet derives its active
-  // state from ``q`` so the user-typed DSL and the toggle stay in
-  // sync (typing ``executor:llm_agent`` lights the Bots pill).
-  const identityFacet: 'all' | 'humans' | 'bots' = /\bexecutor:llm_agent\b/.test(q)
+  // Identity facet (Punto 4, ADR-0028): three-way toggle on top of the
+  // ``actor:`` DSL atom — broader than ``executor:`` because it matches
+  // the badge predicate on the cards (assignee → AI creator → executor
+  // fallback). The previous implementation wrote ``executor:llm_agent``,
+  // which filtered on assignee identity only and hid MCP-created tasks
+  // that were never assigned to an ai_assistant identity (their
+  // executor_kind stays at the human column default), so "Bots"
+  // returned an empty list even when the cards showed an AI badge.
+  const identityFacet: 'all' | 'humans' | 'bots' = /\bactor:bot\b/.test(q)
     ? 'bots'
-    : /\bexecutor:human\b/.test(q)
+    : /\bactor:human\b/.test(q)
       ? 'humans'
       : 'all'
   function setIdentityFacet(f: 'all' | 'humans' | 'bots') {
     const stripped = q
-      .replace(/\bexecutor:(llm_agent|human)\b/g, '')
+      .replace(/\bactor:(bot|human)\b/g, '')
       .replace(/\s+/g, ' ')
       .trim()
     if (f === 'all') {
       setQ(stripped)
       return
     }
-    const atom = f === 'humans' ? 'executor:human' : 'executor:llm_agent'
+    const atom = f === 'humans' ? 'actor:human' : 'actor:bot'
     setQ(stripped ? `${stripped} ${atom}` : atom)
   }
   // Filter DSL: free text matches title or tag name (existing

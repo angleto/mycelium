@@ -10,12 +10,16 @@
 //   atom    := '!' atom | tagref | predicate | freeText
 //   tagref  := '@' name | 'tag:' name
 //   predicate := key ':' value
-//     keys: state | due | priority | created | executor
+//     keys: state | due | priority | created | executor | actor
 //     due:  today | tomorrow | overdue | none | +Nd | -Nd | YYYY-MM-DD
 //     priority: integer or comparator (<=N, <N, >=N, >N)
 //     created: same as due (date keywords / relative)
 //     state: name or ! prefix
-//     executor: human | llm_agent | offered
+//     executor: human | llm_agent | offered  (narrow: assignee identity)
+//     actor: human | bot                     (matches the card badge —
+//       broader than executor: a task with NULL assignee that was
+//       created via an MCP token / ai_assistant identity is "bot",
+//       same way the card surfaces an AI badge.)
 //   freeText: anything else, matches against title (case-insensitive)
 //
 // Unknown keys / malformed tokens degrade to free-text — easier than
@@ -83,6 +87,7 @@ function compileAtom(token: string, ctx: FilterCtx): FilterPredicate {
     if (key === 'priority') return comparator((t) => t.priority ?? Infinity, value)
     if (key === 'created') return compileCreated(value, ctx)
     if (key === 'executor') return compileExecutor(value)
+    if (key === 'actor') return compileActor(value)
   }
   // free text → match title, description, checklist item text, or any
   // tag name. Description/checklist coverage is what lets "pane"
@@ -117,6 +122,25 @@ function compileState(value: string, ctx: FilterCtx): FilterPredicate {
 function compileExecutor(value: string): FilterPredicate {
   if (value === 'offered') return (t) => t.offered === true
   return (t) => t.executor_kind === value
+}
+
+// Matches the badge cascade in TaskKanban / RecentTasks / quick-add:
+// first the assignee identity, else the creator if AI, else the legacy
+// executor_kind. ``executor:`` is too narrow for the /tasks toggle —
+// MCP-created tasks with NULL assignee carry executor_kind=human (the
+// column default) so "Bots" never matched them, even though the cards
+// show an AI badge. ``actor:bot`` reproduces the badge predicate so the
+// filter result matches what the user sees.
+function isActorBot(t: Task): boolean {
+  if (t.assignee_kind) return t.assignee_kind === 'ai_assistant'
+  if (t.created_by_kind === 'ai_assistant' || t.created_by_kind === 'mcp_token') return true
+  return t.executor_kind === 'llm_agent'
+}
+
+function compileActor(value: string): FilterPredicate {
+  if (value === 'bot') return isActorBot
+  if (value === 'human') return (t) => !isActorBot(t)
+  return () => false
 }
 
 function compileDue(value: string, ctx: FilterCtx): FilterPredicate {
