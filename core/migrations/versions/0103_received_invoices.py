@@ -24,7 +24,14 @@ returns NULL and the inbound logs the orphan + answers 200 (SdI does not
 retry; the operator can backfill later).
 
 Revision: 0103
-Down revision: 0102
+Down revision: 0101
+
+NB: this migration's down_revision skips 0102 because the 0102 migration
+(eisenhower defaults, a separate WIP on another dev's local tree) was not
+yet pushed to origin/v2.0 when this commit landed. The image build pulls
+from origin and would fail with KeyError: '0102'. When the 0102 dev
+pushes their migration they should rebase their down_revision to "0103"
+to chain after this one (and Alembic will pick the linear order again).
 """
 
 from __future__ import annotations
@@ -34,7 +41,7 @@ from collections.abc import Sequence
 from alembic import op
 
 revision: str = "0103"
-down_revision: str | None = "0102"
+down_revision: str | None = "0101"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
