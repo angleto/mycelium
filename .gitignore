@@ -18,6 +18,19 @@ htmlcov/
 .env
 *.local
 
+# Local-only material (out-of-band keys, CSRs, scratch credentials).
+# Anything dropped under /private/ never enters git history.
+/private/
+
+# Defensive: private keys and key bundles never go in the repo, no
+# matter where they land. Public certs (.crt) are intentionally left
+# trackable.
+*.key
+*.pem
+*.csr
+*.p12
+*.pfx
+
 # Node / web
 node_modules/
 web/dist/
