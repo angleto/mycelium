@@ -2,7 +2,7 @@
 # I membri sono i pacchetti del monorepo. Vedi docs/architecture.md.
 
 [tool.uv.workspace]
-members = ["core", "api", "mcp", "worker", "sdi-inbound"]
+members = ["core", "api", "mcp", "worker", "sdi-inbound", "cli"]
 
 [tool.uv.sources]
 flow-core = { workspace = true }
@@ -10,6 +10,7 @@ flow-api = { workspace = true }
 flow-mcp = { workspace = true }
 flow-worker = { workspace = true }
 flow-sdi-inbound = { workspace = true }
+flow-cli = { workspace = true }
 
 [dependency-groups]
 dev = [
@@ -30,6 +31,7 @@ src = [
     "mcp/src",
     "worker/src",
     "sdi-inbound/src",
+    "cli/src",
 ]
 
 [tool.ruff.lint]
@@ -48,7 +50,7 @@ strict = true
 plugins = ["pydantic.mypy"]
 namespace_packages = true
 explicit_package_bases = true
-mypy_path = "core/src:api/src:mcp/src:worker/src:sdi-inbound/src"
+mypy_path = "core/src:api/src:mcp/src:worker/src:sdi-inbound/src:cli/src"
 
 # Untyped third-party libs: pgvector ships no py.typed;
 # sentence-transformers is an optional extra (lazily imported);
@@ -69,4 +71,4 @@ ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-testpaths = ["core/tests", "api/tests"]
+testpaths = ["core/tests", "api/tests", "cli/tests"]

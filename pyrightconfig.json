@@ -8,6 +8,7 @@
     "api/src",
     "mcp/src",
     "worker/src",
-    "sdi-inbound/src"
+    "sdi-inbound/src",
+    "cli/src"
   ]
 }

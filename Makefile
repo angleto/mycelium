@@ -48,3 +48,11 @@ run-worker:
 
 run-sdi:
 	uv run uvicorn flow_sdi_inbound.main:app --reload --port 8081
+
+# CLI dev convenience: ``make cli ARGS="task list --json"``.
+cli:
+	uv run flow $(ARGS)
+
+# Run the CLI smoke tests only (offline, no backend needed).
+test-cli:
+	uv run pytest cli/tests -x
