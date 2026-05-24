@@ -143,7 +143,7 @@ class FlowCli < Formula
         brew install sox
 
       First run:
-        flow auth login --base-url https://flow.leto.blue
+        flow auth login --base-url https://flow.xeno.garden
 
       Neovim integration:
         https://github.com/angleto/flow/tree/main/nvim/flow.nvim

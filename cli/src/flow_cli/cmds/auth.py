@@ -37,7 +37,7 @@ def login(
         "http://localhost:8000",
         "--base-url",
         "-u",
-        help="Flow API base URL (e.g. https://flow.leto.blue).",
+        help="Flow API base URL (e.g. https://flow.xeno.garden).",
     ),
     email: str | None = typer.Option(None, "--email", "-e", help="Account email."),
     password: str | None = typer.Option(

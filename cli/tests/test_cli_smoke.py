@@ -72,7 +72,7 @@ def test_status_without_credentials_exits_clean(
 def test_config_round_trip(isolated_config_dir: Path) -> None:
     cfg = load_config()
     cfg.profiles["default"] = Profile(
-        base_url="https://flow.leto.blue",
+        base_url="https://flow.xeno.garden",
         workspace_id="00000000-0000-0000-0000-000000000001",
         workspace_name="Personal",
     )
@@ -81,7 +81,7 @@ def test_config_round_trip(isolated_config_dir: Path) -> None:
 
     again = load_config()
     assert again.current_profile == "default"
-    assert again.profiles["default"].base_url == "https://flow.leto.blue"
+    assert again.profiles["default"].base_url == "https://flow.xeno.garden"
     assert again.profiles["default"].workspace_name == "Personal"
 
 

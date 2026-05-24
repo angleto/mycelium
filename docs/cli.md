@@ -34,7 +34,7 @@ the REST API** (no business logic):
 ## Auth flow
 
 ```
-flow auth login -u https://flow.leto.blue
+flow auth login -u https://flow.xeno.garden
    │
    ▼  POST /auth/login   (+ /auth/login-mfa if 401 auth.mfa_required)
    ◇  JWT in memory
