@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { api, errMessage, workspaceHeader } from '../api/client'
 import type { components } from '../api/schema'
@@ -27,11 +27,23 @@ export function ChecklistPanel({
   const [err, setErr] = useState<string | null>(null)
 
   // Report counts to the parent (tab badge) whenever items change.
+  // The callback is read through a ref so the effect never depends on
+  // its identity: TaskDetailRoute passes an inline arrow (new reference
+  // each render) and ``setChecklistCount({ done, total })`` builds a
+  // fresh object every call (Object.is fails -> re-render is never
+  // bailed out), so depending on the callback would loop forever
+  // (open-task freeze with no console error, since this is not a
+  // nested-during-render setState the runtime guards against).
+  const onCountChangeRef = useRef(onCountChange)
   useEffect(() => {
-    if (!onCountChange) return
+    onCountChangeRef.current = onCountChange
+  }, [onCountChange])
+  useEffect(() => {
+    const cb = onCountChangeRef.current
+    if (!cb) return
     const done = items.filter((it) => it.done).length
-    onCountChange(done, items.length)
-  }, [items, onCountChange])
+    cb(done, items.length)
+  }, [items])
 
   // The parent passes ``initial`` (embedded in TaskOut) so the panel
   // doesn't need a round-trip on first render. After that we own the
