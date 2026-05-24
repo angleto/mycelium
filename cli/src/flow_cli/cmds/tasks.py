@@ -9,6 +9,7 @@ from typing import Any
 import typer
 
 from flow_cli.cmds._common import client, get_json, resolve_id, short_id
+from flow_cli.completion import complete_task_id
 from flow_cli.http import CLIError
 from flow_cli.ui import (
     edit_in_editor,
@@ -100,7 +101,11 @@ def list_(
 
 @app.command()
 def show(
-    task_id: str = typer.Argument(..., help="Task UUID (short prefixes accepted if unique)."),
+    task_id: str = typer.Argument(
+        ...,
+        autocompletion=complete_task_id,
+        help="Task UUID (short prefixes accepted if unique).",
+    ),
 ) -> None:
     """Show one task with its description, tags, comments and reminders."""
     with client() as c:
@@ -178,7 +183,7 @@ def add(
 
 @app.command()
 def edit(
-    task_id: str = typer.Argument(...),
+    task_id: str = typer.Argument(..., autocompletion=complete_task_id),
     title: str | None = typer.Option(None, "--title"),
     description: str | None = typer.Option(
         None,
@@ -232,14 +237,20 @@ def edit(
 
 
 @app.command()
-def done(task_id: str = typer.Argument(..., help="Task to mark as done.")) -> None:
+def done(
+    task_id: str = typer.Argument(
+        ..., autocompletion=complete_task_id, help="Task to mark as done."
+    ),
+) -> None:
     """Transition the task to the 'done' state."""
     _transition(task_id, target_name="done")
 
 
 @app.command()
 def verify(
-    task_id: str = typer.Argument(..., help="Task to mark as awaiting verification."),
+    task_id: str = typer.Argument(
+        ..., autocompletion=complete_task_id, help="Task to mark as awaiting verification."
+    ),
 ) -> None:
     """Transition the task to the 'verify' state (pre-done, user gate)."""
     _transition(task_id, target_name="verify")
@@ -247,7 +258,7 @@ def verify(
 
 @app.command()
 def to(
-    task_id: str = typer.Argument(...),
+    task_id: str = typer.Argument(..., autocompletion=complete_task_id),
     state: str = typer.Argument(..., help="Target state name."),
 ) -> None:
     """Generic transition: ``flow task to <id> in_progress``."""
@@ -255,25 +266,25 @@ def to(
 
 
 @app.command()
-def archive(task_id: str = typer.Argument(...)) -> None:
+def archive(task_id: str = typer.Argument(..., autocompletion=complete_task_id)) -> None:
     """Archive (soft-hide) a task."""
     _versioned_action(task_id, "archive")
 
 
 @app.command()
-def unarchive(task_id: str = typer.Argument(...)) -> None:
+def unarchive(task_id: str = typer.Argument(..., autocompletion=complete_task_id)) -> None:
     """Restore an archived task to the active list."""
     _versioned_action(task_id, "unarchive")
 
 
 @app.command("delete")
-def delete_(task_id: str = typer.Argument(...)) -> None:
+def delete_(task_id: str = typer.Argument(..., autocompletion=complete_task_id)) -> None:
     """Soft-delete a task (recoverable from trash)."""
     _versioned_action(task_id, "delete")
 
 
 @app.command()
-def restore(task_id: str = typer.Argument(...)) -> None:
+def restore(task_id: str = typer.Argument(..., autocompletion=complete_task_id)) -> None:
     """Restore a soft-deleted task."""
     _versioned_action(task_id, "restore")
 
@@ -294,7 +305,10 @@ app.add_typer(attach_app, name="attach")
 
 
 @tag_app.command("add")
-def tag_add(task_id: str = typer.Argument(...), tag: str = typer.Argument(...)) -> None:
+def tag_add(
+    task_id: str = typer.Argument(..., autocompletion=complete_task_id),
+    tag: str = typer.Argument(...),
+) -> None:
     """Attach a tag (by name or UUID) to a task."""
     with client() as c:
         full = _resolve_task(c, task_id)
@@ -306,7 +320,10 @@ def tag_add(task_id: str = typer.Argument(...), tag: str = typer.Argument(...)) 
 
 
 @tag_app.command("rm")
-def tag_rm(task_id: str = typer.Argument(...), tag: str = typer.Argument(...)) -> None:
+def tag_rm(
+    task_id: str = typer.Argument(..., autocompletion=complete_task_id),
+    tag: str = typer.Argument(...),
+) -> None:
     """Detach a tag from a task."""
     with client() as c:
         full = _resolve_task(c, task_id)
@@ -319,7 +336,7 @@ def tag_rm(task_id: str = typer.Argument(...), tag: str = typer.Argument(...)) -
 
 @comment_app.command("add")
 def comment_add(
-    task_id: str = typer.Argument(...),
+    task_id: str = typer.Argument(..., autocompletion=complete_task_id),
     body: str | None = typer.Option(
         None, "--body", "-m", help="Comment body. Use '-' for stdin; omit to open $EDITOR."
     ),
@@ -343,7 +360,7 @@ def comment_add(
 
 
 @comment_app.command("list")
-def comment_list(task_id: str = typer.Argument(...)) -> None:
+def comment_list(task_id: str = typer.Argument(..., autocompletion=complete_task_id)) -> None:
     """List comments on a task."""
     with client() as c:
         full = _resolve_task(c, task_id)
@@ -363,7 +380,7 @@ def comment_list(task_id: str = typer.Argument(...)) -> None:
 
 @remind_app.command("add")
 def remind_add(
-    task_id: str = typer.Argument(...),
+    task_id: str = typer.Argument(..., autocompletion=complete_task_id),
     offset_minutes: int = typer.Argument(
         ..., help="Minutes before due_date to fire (e.g. 60 = 1h, 1440 = 1 day)."
     ),
@@ -380,7 +397,7 @@ def remind_add(
 
 @remind_app.command("rm")
 def remind_rm(
-    task_id: str = typer.Argument(...),
+    task_id: str = typer.Argument(..., autocompletion=complete_task_id),
     reminder_id: str = typer.Argument(...),
 ) -> None:
     """Remove a reminder."""
@@ -394,7 +411,7 @@ def remind_rm(
 
 @attach_app.command("add")
 def attach_add(
-    task_id: str = typer.Argument(...),
+    task_id: str = typer.Argument(..., autocompletion=complete_task_id),
     path: Path = typer.Argument(..., exists=True, dir_okay=False, readable=True),
 ) -> None:
     """Upload a file attachment to a task."""
@@ -410,7 +427,7 @@ def attach_add(
 
 
 @attach_app.command("list")
-def attach_list(task_id: str = typer.Argument(...)) -> None:
+def attach_list(task_id: str = typer.Argument(..., autocompletion=complete_task_id)) -> None:
     """List attachments on a task."""
     with client() as c:
         full = _resolve_task(c, task_id)
@@ -431,6 +448,121 @@ def attach_list(task_id: str = typer.Argument(...)) -> None:
             for r in rows
         ],
     )
+
+
+# --- graph -----------------------------------------------------------
+
+
+@app.command()
+def graph(
+    task_id: str | None = typer.Argument(
+        None,
+        autocompletion=complete_task_id,
+        help="Focus on one task (predecessors/successors). Omit for the whole graph.",
+    ),
+    project_tag_id: str | None = typer.Option(
+        None, "--project", help="Restrict the whole-graph view to one project."
+    ),
+) -> None:
+    """Show task dependencies as an ASCII tree.
+
+    With an argument: predecessors above the task, successors below.
+    Without: the full graph as an adjacency listing (cheap rendering;
+    use the SPA for a real diagram).
+    """
+    with client() as c:
+        if task_id:
+            full = _resolve_task(c, task_id)
+            task = get_json(c.get(f"/tasks/{full}"))
+            deps = get_json(c.get("/dependencies", params={"task_id": full}))
+            _render_task_graph(task, deps, full)
+        else:
+            params: dict[str, str] = {}
+            if project_tag_id:
+                params["project_tag_id"] = project_tag_id
+            g = get_json(c.get("/graph", params=params))
+            _render_full_graph(g)
+
+
+def _render_task_graph(task: dict[str, Any], deps: list[dict[str, Any]], focus_id: str) -> None:
+    if json_mode():
+        emit_json({"task": task, "dependencies": deps})
+        return
+    predecessors = [d for d in deps if str(d.get("successor_id")) == focus_id]
+    successors = [d for d in deps if str(d.get("predecessor_id")) == focus_id]
+    title = task.get("title", "?")
+    state = task.get("state", "?")
+
+    out().print("")
+    if predecessors:
+        out().print("[bold]Depends on[/bold]")
+        for d in predecessors:
+            kind = d.get("type", "?")
+            lag = d.get("lag_working_minutes") or 0
+            tag = f" [{kind}{f' +{lag}m' if lag else ''}]"
+            out().print(f"  ├── {short_id(d.get('predecessor_id'))}{tag}")
+        out().print("  │")
+    out().print(f"  [bold]● {short_id(focus_id)}[/bold]  {title}  [dim]({state})[/dim]")
+    if successors:
+        out().print("  │")
+        out().print("[bold]Blocks[/bold]")
+        for d in successors:
+            kind = d.get("type", "?")
+            lag = d.get("lag_working_minutes") or 0
+            tag = f" [{kind}{f' +{lag}m' if lag else ''}]"
+            out().print(f"  └── {short_id(d.get('successor_id'))}{tag}")
+    if not predecessors and not successors:
+        info("[dim]no dependencies.[/dim]")
+
+
+def _render_full_graph(graph_data: dict[str, Any]) -> None:
+    if json_mode():
+        emit_json(graph_data)
+        return
+    nodes = {str(n.get("id")): n for n in graph_data.get("nodes") or []}
+    edges = graph_data.get("edges") or []
+    if not nodes:
+        info("[dim]no tasks in graph.[/dim]")
+        return
+    by_pred: dict[str, list[dict[str, Any]]] = {}
+    has_pred: set[str] = set()
+    for e in edges:
+        by_pred.setdefault(str(e.get("predecessor")), []).append(e)
+        has_pred.add(str(e.get("successor")))
+    # Roots = nodes with no incoming edges; we render each subtree from
+    # there. Anything left over (cycles or orphan) is appended.
+    roots = sorted(n for n in nodes if n not in has_pred)
+    rendered: set[str] = set()
+
+    def _walk(node_id: str, prefix: str, is_last: bool) -> None:
+        rendered.add(node_id)
+        node = nodes.get(node_id) or {}
+        connector = "└── " if is_last else "├── "
+        flag = " [red](blocked)[/red]" if node.get("blocked") else ""
+        out().print(
+            f"{prefix}{connector}{short_id(node_id)}  "
+            f"{_truncate(node.get('title', ''), 60)}  [dim]({node.get('state', '?')})[/dim]{flag}"
+        )
+        children = by_pred.get(node_id) or []
+        next_prefix = prefix + ("    " if is_last else "│   ")
+        for i, e in enumerate(children):
+            child = str(e.get("successor"))
+            if child in rendered:
+                out().print(f"{next_prefix}└── [dim]→ {short_id(child)} (cycle)[/dim]")
+                continue
+            _walk(child, next_prefix, i == len(children) - 1)
+
+    for i, root in enumerate(roots):
+        _walk(root, "", i == len(roots) - 1)
+    leftover = [n for n in nodes if n not in rendered]
+    if leftover:
+        out().print("\n[bold]Cycles / unreachable[/bold]")
+        for nid in sorted(leftover):
+            node = nodes.get(nid) or {}
+            out().print(
+                f"  {short_id(nid)}  {_truncate(node.get('title', ''), 60)}  "
+                f"[dim]({node.get('state', '?')})[/dim]"
+            )
 
 
 # --- internals -------------------------------------------------------

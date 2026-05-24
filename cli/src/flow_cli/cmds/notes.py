@@ -15,6 +15,7 @@ from typing import Any
 import typer
 
 from flow_cli.cmds._common import client, get_json, resolve_id, short_id
+from flow_cli.completion import complete_note_id, complete_task_id
 from flow_cli.http import CLIError, raise_for_response
 from flow_cli.ui import (
     edit_in_editor,
@@ -61,6 +62,7 @@ def add(
     task: str | None = typer.Option(
         None,
         "--task",
+        autocompletion=complete_task_id,
         help="Link the note to this task (Proposal A: note → task pre-bind).",
     ),
     tag: list[str] = typer.Option([], "--tag", help="Tag name or UUID; pass multiple times."),
@@ -138,7 +140,7 @@ def list_(
 
 
 @app.command()
-def show(note_id: str = typer.Argument(...)) -> None:
+def show(note_id: str = typer.Argument(..., autocompletion=complete_note_id)) -> None:
     """Print a note's title and full body."""
     with client() as c:
         full = _resolve_note(c, note_id)
@@ -156,7 +158,7 @@ def show(note_id: str = typer.Argument(...)) -> None:
 
 @app.command()
 def edit(
-    note_id: str = typer.Argument(...),
+    note_id: str = typer.Argument(..., autocompletion=complete_note_id),
     title: str | None = typer.Option(None, "--title"),
     text: str | None = typer.Option(
         None,
@@ -167,6 +169,7 @@ def edit(
     task: str | None = typer.Option(
         None,
         "--task",
+        autocompletion=complete_task_id,
         help="Set the note→task link. Use '-' to unlink.",
     ),
 ) -> None:
@@ -195,23 +198,23 @@ def edit(
 
 
 @app.command()
-def archive(note_id: str = typer.Argument(...)) -> None:
+def archive(note_id: str = typer.Argument(..., autocompletion=complete_note_id)) -> None:
     _action(note_id, "archive")
 
 
 @app.command()
-def unarchive(note_id: str = typer.Argument(...)) -> None:
+def unarchive(note_id: str = typer.Argument(..., autocompletion=complete_note_id)) -> None:
     _action(note_id, "unarchive")
 
 
 @app.command("delete")
-def delete_(note_id: str = typer.Argument(...)) -> None:
+def delete_(note_id: str = typer.Argument(..., autocompletion=complete_note_id)) -> None:
     """Soft-delete a note (recoverable)."""
     _action(note_id, "delete")
 
 
 @app.command()
-def restore(note_id: str = typer.Argument(...)) -> None:
+def restore(note_id: str = typer.Argument(..., autocompletion=complete_note_id)) -> None:
     _action(note_id, "restore")
 
 
@@ -248,7 +251,7 @@ def tag_rm(note_id: str = typer.Argument(...), tag: str = typer.Argument(...)) -
 
 @attach_app.command("add")
 def attach_add(
-    note_id: str = typer.Argument(...),
+    note_id: str = typer.Argument(..., autocompletion=complete_note_id),
     path: Path = typer.Argument(..., exists=True, dir_okay=False, readable=True),
 ) -> None:
     """Upload a file (image, PDF, ...) as an attachment on a note."""
@@ -264,7 +267,7 @@ def attach_add(
 
 
 @attach_app.command("list")
-def attach_list(note_id: str = typer.Argument(...)) -> None:
+def attach_list(note_id: str = typer.Argument(..., autocompletion=complete_note_id)) -> None:
     with client() as c:
         full = _resolve_note(c, note_id)
         rows = get_json(c.get(f"/notes/{full}/attachments"))
@@ -298,7 +301,12 @@ def voice(
         help="Auto-stop after N seconds (default: record until Ctrl-C).",
     ),
     title: str | None = typer.Option(None, "--title", "-t"),
-    task: str | None = typer.Option(None, "--task", help="Link to this task."),
+    task: str | None = typer.Option(
+        None,
+        "--task",
+        autocompletion=complete_task_id,
+        help="Link to this task.",
+    ),
     keep_audio: bool = typer.Option(
         False, "--keep-audio", help="Keep the local recording after upload."
     ),

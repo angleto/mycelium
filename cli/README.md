@@ -22,7 +22,7 @@ Optional runtime: `sox` (or `ffmpeg`) for `flow note voice`.
 ## First login
 
 ```sh
-flow auth login --base-url https://flow.leto.blue
+flow auth login --base-url https://flow.xeno.garden
 ```
 
 This trades email/password (+ TOTP if configured) for a long-lived
@@ -60,6 +60,12 @@ flow task remind add a1b2 60            # 60 min before due
 flow task attach add a1b2 ./scan.pdf
 flow note edit n9z3 --task -            # '-' clears the link
 
+# Reports + graph
+flow timer report                       # last 30d by project (hours + billable)
+flow timer report -g client --since 2026-05-01
+flow task graph                         # full ASCII dep tree
+flow task graph a1b2                    # focused: predecessors / blocks
+
 # Search + advisor
 flow search "release v1.2"
 flow what-now --duration 25 --location office
@@ -92,6 +98,20 @@ Every command supports `--json` for piping into `jq`, scripts, or the
 
 For everything else, run `flow open <ref>` to jump to the SPA when you
 need a richer view.
+
+## Shell completion
+
+```sh
+flow --install-completion          # zsh / bash / fish / pwsh
+```
+
+Static completion comes from Typer. **Dynamic** completion on `task_id`
+/ `note_id` arguments calls the API at each `<TAB>` and caches the
+result for 60 s under `$XDG_CACHE_HOME/flow/` so subsequent presses
+stay snappy. The cache is per-profile, per-workspace.
+
+Empty/failed lookups (no creds, server down, slow network) silently
+return no candidates — completion never blocks or errors.
 
 ## Profiles
 

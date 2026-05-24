@@ -1,15 +1,17 @@
-"""``flow timer`` — start, stop, status, entry add/edit/rm."""
+"""``flow timer`` — start, stop, status, report, entry add/edit/rm."""
 
 from __future__ import annotations
 
 import datetime as dt
+import enum
 from typing import Any
 
 import typer
 
 from flow_cli.cmds._common import client, get_json, resolve_id, short_id
+from flow_cli.completion import complete_task_id
 from flow_cli.http import CLIError
-from flow_cli.ui import emit_json, emit_table, info, json_mode, success
+from flow_cli.ui import emit_json, emit_table, info, json_mode, out, success
 
 app = typer.Typer(no_args_is_help=True, help="Time tracking: start/stop/status + entry CRUD.")
 
@@ -20,7 +22,11 @@ def _resolve_task(c: Any, partial: str) -> str:
 
 @app.command()
 def start(
-    task_id: str = typer.Argument(..., help="Task to bill the running entry to."),
+    task_id: str = typer.Argument(
+        ...,
+        autocompletion=complete_task_id,
+        help="Task to bill the running entry to.",
+    ),
     memo: str | None = typer.Option(None, "--memo", "-m"),
     parallel: bool = typer.Option(False, "--parallel", help="Run alongside other timers."),
     billable: bool | None = typer.Option(None, "--billable/--unbillable"),
@@ -42,7 +48,11 @@ def start(
 
 @app.command()
 def stop(
-    task_id: str | None = typer.Argument(None, help="Task to stop (omit for the serial timer)."),
+    task_id: str | None = typer.Argument(
+        None,
+        autocompletion=complete_task_id,
+        help="Task to stop (omit for the serial timer).",
+    ),
     memo: str | None = typer.Option(None, "--memo", "-m"),
 ) -> None:
     """Stop a running timer."""
@@ -106,7 +116,11 @@ app.add_typer(entry_app, name="entry")
 
 @entry_app.command("add")
 def entry_add(
-    task_id: str = typer.Argument(..., help="Task this entry bills to."),
+    task_id: str = typer.Argument(
+        ...,
+        autocompletion=complete_task_id,
+        help="Task this entry bills to.",
+    ),
     start: str = typer.Option(..., "--start", help="ISO start datetime (e.g. 2026-05-24T09:00)."),
     end: str | None = typer.Option(None, "--end", help="ISO end datetime."),
     duration_minutes: int | None = typer.Option(
@@ -214,6 +228,89 @@ def entry_rm(entry_id: str = typer.Argument(...)) -> None:
         if resp.status_code not in (200, 204):
             get_json(resp)
     success(f"entry {short_id(entry_id)} deleted.")
+
+
+# --- report ----------------------------------------------------------
+
+
+class _ReportGroup(enum.StrEnum):
+    project = "project"
+    client = "client"
+    generic = "generic"
+    user = "user"
+    task = "task"
+
+
+@app.command()
+def report(
+    group_by: _ReportGroup = typer.Option(
+        _ReportGroup.project, "--group-by", "-g", help="Group rows by this dimension."
+    ),
+    since: str | None = typer.Option(
+        None, "--since", help="ISO start datetime (inclusive). Default: 30 days ago."
+    ),
+    until: str | None = typer.Option(None, "--until", help="ISO end datetime (exclusive)."),
+    billable: bool | None = typer.Option(
+        None, "--billable/--unbillable", help="Filter by billable flag."
+    ),
+    client_id: str | None = typer.Option(
+        None, "--client", help="Restrict to a client (UUID or short prefix)."
+    ),
+    project: str | None = typer.Option(
+        None, "--project", help="Restrict to a project (UUID or short prefix)."
+    ),
+) -> None:
+    """Aggregate time entries by project / client / user / task / day.
+
+    Default window is the last 30 days when --since is omitted. Use
+    --json for raw numbers; otherwise the table converts seconds to
+    hours with two decimal places.
+    """
+    params: dict[str, str] = {"group_by": group_by.value}
+    if since:
+        params["start_from"] = _parse_iso(since).isoformat()
+    else:
+        params["start_from"] = (dt.datetime.now(dt.UTC) - dt.timedelta(days=30)).isoformat()
+    if until:
+        params["start_to"] = _parse_iso(until).isoformat()
+    if billable is not None:
+        params["billable"] = str(billable).lower()
+    with client() as c:
+        if client_id:
+            params["client_tag_id"] = resolve_id(c, client_id, endpoint="/clients", kind="client")
+        if project:
+            params["project_tag_id"] = resolve_id(c, project, endpoint="/projects", kind="project")
+        rows = get_json(c.get("/time/report", params=params))
+    if json_mode():
+        emit_json(rows)
+        return
+    if not rows:
+        info("[dim]no time in window.[/dim]")
+        return
+    rows = sorted(rows, key=lambda r: -int(r.get("seconds") or 0))
+    total_secs = sum(int(r.get("seconds") or 0) for r in rows)
+    total_bill = sum(int(r.get("billable_seconds") or 0) for r in rows)
+    emit_table(
+        f"Time by {group_by.value}",
+        ["label", "hours", "billable", "amount", "ccy"],
+        [
+            (
+                r.get("label") or r.get("key") or "(none)",
+                _fmt_hours(int(r.get("seconds") or 0)),
+                _fmt_hours(int(r.get("billable_seconds") or 0)),
+                str(r.get("amount") or ""),
+                r.get("currency") or "",
+            )
+            for r in rows
+        ],
+    )
+    out().print(
+        f"\n[bold]total[/bold]: {_fmt_hours(total_secs)} ({_fmt_hours(total_bill)} billable)"
+    )
+
+
+def _fmt_hours(secs: int) -> str:
+    return f"{secs / 3600:.2f}h"
 
 
 # --- internals ------------------------------------------------------

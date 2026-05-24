@@ -40,6 +40,8 @@ _CASES = [
     (["workspace", "list", "--help"], ""),
     (["notif", "list", "--help"], ""),
     (["schedule", "list", "--help"], ""),
+    (["timer", "report", "--help"], "--group-by"),
+    (["task", "graph", "--help"], "predecessors"),
 ]
 
 
