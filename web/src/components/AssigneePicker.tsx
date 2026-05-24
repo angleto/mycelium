@@ -37,6 +37,12 @@ export function AssigneePicker({
   const [busy, setBusy] = useState(false)
   const blurTimer = useRef<number | null>(null)
 
+  // Holds the actor for ``value`` when we had to fetch it outside the
+  // picker's search flow (e.g. on initial mount). Kept separate from
+  // ``matches`` so the chip-resolution effect doesn't fight the
+  // search effect for the same slot.
+  const [fetchedActor, setFetchedActor] = useState<Actor | null>(null)
+
   const search = useCallback(async (needle: string) => {
     setBusy(true)
     const params = new URLSearchParams()
@@ -62,11 +68,42 @@ export function AssigneePicker({
     return () => window.clearTimeout(h)
   }, [q, open, search])
 
+  // Resolve the chip's display_name on mount and whenever ``value``
+  // changes to a handle we don't have in ``matches``. The bare-handle
+  // query against /actors?q= is the most specific lookup we can issue
+  // without a per-actor GET endpoint. Stays cheap because it only
+  // fires when matches don't cover the current value.
+  const matchedActor = useMemo(
+    () => (value ? matches.find((a) => a.handle === value) : null) ?? null,
+    [value, matches],
+  )
+  const needsFetch = !!value && !matchedActor && fetchedActor?.handle !== value
+  useEffect(() => {
+    if (!needsFetch || !value) return
+    let cancelled = false
+    void (async () => {
+      const res = await authFetch(
+        `/actors?q=${encodeURIComponent(value)}&limit=5`,
+        { headers: workspaceHeader() as Record<string, string> },
+      )
+      if (!res.ok || cancelled) return
+      const data = (await res.json()) as Actor[]
+      const exact = data.find((a) => a.handle === value)
+      if (exact) setFetchedActor(exact)
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [needsFetch, value])
+
+  const currentActor: Actor | null =
+    matchedActor ?? (fetchedActor?.handle === value ? fetchedActor : null)
   const currentLabel = useMemo(() => {
     if (!value) return ''
-    const hit = matches.find((a) => a.handle === value)
-    return hit ? `${hit.display_name} (@${value})` : `@${value}`
-  }, [value, matches])
+    return currentActor
+      ? `${currentActor.display_name} (@${value})`
+      : `@${value}`
+  }, [value, currentActor])
 
   function pick(actor: Actor) {
     onChange(actor.handle)
@@ -89,7 +126,10 @@ export function AssigneePicker({
             <span className="chip__glyph" aria-hidden="true">
               {value.startsWith('_a_') ? '◆' : '▲'}
             </span>
-            @{value}
+            {currentActor && (
+              <span className="assignpick__name">{currentActor.display_name}</span>
+            )}
+            <span className="muted">@{value}</span>
             {!disabled && (
               <button
                 type="button"

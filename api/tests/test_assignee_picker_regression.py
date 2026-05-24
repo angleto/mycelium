@@ -19,12 +19,13 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 
 from flow_core.db import admin_session, tenant_session
 from flow_core.models.identity import Identity
 from flow_core.services import actors as actors_svc
 from flow_core.services import ai_assistants as ai_svc
+from flow_core.services import identities as identities_svc
 from flow_core.services import tasks as tasks_svc
 from flow_core.services.auth import signup
 
@@ -122,3 +123,49 @@ async def test_create_assistant_appears_in_picker_and_is_assignable() -> None:
         ).scalar_one_or_none()
         assert ident is not None
         assert reloaded.assignee_id == ident.id
+
+
+async def test_lookup_by_handle_self_heals_when_identity_is_missing() -> None:
+    """Pre-Stage-A users (and any post-migration drift) can land in a
+    state where users.handle is set but the matching identity row was
+    never materialised. lookup_by_handle now falls back to the source
+    tables and ensures the identity on the spot. Simulates the bug by
+    deleting the auto-created identity, then triggers an assign that
+    must succeed (re-creating the identity transparently)."""
+    async with admin_session() as s:
+        res = await signup(s, email=_email(), password="pw-strong-123", org_name="W")
+    org, user = res.org_id, res.user_id
+    async with tenant_session(str(org), str(user)) as s:
+        actors = await actors_svc.list_actors(s, org_id=org)
+        self_handle = next(a.handle for a in actors if a.kind == "user" and a.ref_id == user)
+        await s.execute(
+            delete(Identity).where(
+                Identity.org_id == org,
+                Identity.user_id == user,
+            )
+        )
+        await s.flush()
+        ident = await identities_svc.lookup_by_handle(s, org_id=org, handle=self_handle)
+        assert ident is not None
+        assert ident.user_id == user
+        assert ident.handle == self_handle
+
+
+async def test_lookup_by_handle_self_heals_when_assistant_identity_is_missing() -> None:
+    """Same self-heal path, for ai_assistant identities."""
+    async with admin_session() as s:
+        res = await signup(s, email=_email(), password="pw-strong-123", org_name="W")
+    org, user = res.org_id, res.user_id
+    async with tenant_session(str(org), str(user)) as s:
+        made = await ai_svc.create_assistant(s, org_id=org, actor_id=user, label="Claude")
+        await s.execute(
+            delete(Identity).where(
+                Identity.org_id == org,
+                Identity.ai_assistant_id == made.assistant.id,
+            )
+        )
+        await s.flush()
+        ident = await identities_svc.lookup_by_handle(s, org_id=org, handle=made.assistant.handle)
+        assert ident is not None
+        assert ident.ai_assistant_id == made.assistant.id
+        assert ident.handle == made.assistant.handle

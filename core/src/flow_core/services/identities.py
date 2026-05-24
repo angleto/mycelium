@@ -25,6 +25,7 @@ from flow_core.errors import DomainError, NotFoundError
 from flow_core.i18n import MessageCode
 from flow_core.models.ai_assistant import AiAssistant
 from flow_core.models.identity import Identity, IdentityKind
+from flow_core.models.membership import Membership
 from flow_core.models.user import User
 
 
@@ -145,10 +146,21 @@ async def lookup_by_handle(
 ) -> Identity | None:
     """Resolve ``@handle`` to an Identity row in the current org, or
     None when not found. Empty handle returns None defensively (the
-    caller should not pass an empty string)."""
+    caller should not pass an empty string).
+
+    Self-heals legacy/drifted state: ``list_actors`` sources from the
+    user/ai_assistant tables directly, but ``identities`` is the
+    resolver. Pre-Stage-A signups (and assistants created before the
+    handle-mint fix) can land in a state where the source table has a
+    handle but the matching identity row is missing or carries a
+    different handle (e.g. backfilled by a migration to a UUID
+    sentinel and then renamed). When the lookup misses, we fall back
+    to the source tables and ``ensure_*`` the identity so the next
+    call hits the fast path.
+    """
     if not handle:
         return None
-    return (
+    row = (
         await session.execute(
             select(Identity).where(
                 Identity.org_id == org_id,
@@ -156,6 +168,30 @@ async def lookup_by_handle(
             )
         )
     ).scalar_one_or_none()
+    if row is not None:
+        return row
+    # Fallback: the picker's source-of-truth (users / ai_assistants)
+    # diverged from identities. Re-materialise.
+    user_id = (
+        await session.execute(
+            select(User.id)
+            .join(Membership, Membership.user_id == User.id)
+            .where(Membership.org_id == org_id, User.handle == handle)
+        )
+    ).scalar_one_or_none()
+    if user_id is not None:
+        return await ensure_for_user(session, org_id=org_id, user_id=user_id)
+    assistant_id = (
+        await session.execute(
+            select(AiAssistant.id).where(
+                AiAssistant.org_id == org_id,
+                AiAssistant.handle == handle,
+            )
+        )
+    ).scalar_one_or_none()
+    if assistant_id is not None:
+        return await ensure_for_ai_assistant(session, org_id=org_id, assistant_id=assistant_id)
+    return None
 
 
 async def get_identity(
