@@ -35,7 +35,7 @@ def config_path() -> Path:
 
 @dataclass(slots=True)
 class Profile:
-    base_url: str = "https://flow.xeno.garden"
+    base_url: str = "https://flow.xeno.garden/api"
     workspace_id: str | None = None
     workspace_name: str | None = None
 
@@ -68,7 +68,7 @@ def load_config() -> Config:
         if not isinstance(body, dict):
             continue
         profiles[str(name)] = Profile(
-            base_url=str(body.get("base_url", "https://flow.xeno.garden")),
+            base_url=str(body.get("base_url", "https://flow.xeno.garden/api")),
             workspace_id=(str(body["workspace_id"]) if body.get("workspace_id") else None),
             workspace_name=(str(body["workspace_name"]) if body.get("workspace_name") else None),
         )

@@ -34,7 +34,7 @@ app.add_typer(mfa_app, name="mfa")
 @app.command()
 def login(
     base_url: str = typer.Option(
-        "https://flow.xeno.garden",
+        "https://flow.xeno.garden/api",
         "--base-url",
         "-u",
         help="Flow API base URL (override for local dev / staging).",
