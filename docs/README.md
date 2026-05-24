@@ -24,6 +24,7 @@ planning draft.
 - [Phased roadmap and verification criteria](roadmap.md)
 - [References](references.md)
 - [Architecture Decision Records](adr/README.md)
+- [CLI and Neovim integration](cli.md)
 
 ## How to read
 
