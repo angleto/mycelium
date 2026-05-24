@@ -488,7 +488,24 @@ class Scheduler:
         res_succ: dict[uuid.UUID, set[uuid.UUID]] = {i: set() for i in ids}
         by_person: dict[uuid.UUID, list[_Node]] = {}
         llm_nodes: list[_Node] = []
+        # Migration 0094 / ADR-0008 addendum: appointment-tasks
+        # (``duration_minutes`` NOT NULL on the row) are pre-placed
+        # hard constraints. They never enter the placement loop:
+        # ``start_at`` is the fixed pin, ``start_at + duration`` the
+        # end. They also feed the per-person busy list so plain work
+        # is scheduled around them, just like legacy Event rows did
+        # before the unification.
+        appt_busy_by_user: dict[uuid.UUID, list[tuple[dt.datetime, dt.datetime]]] = {}
         for n in nodes.values():
+            t = n.task
+            if t.start_at is not None and t.duration_minutes is not None:
+                # Pre-placed: fixed window, never moves.
+                appt_end = t.start_at + dt.timedelta(minutes=t.duration_minutes)
+                sched[t.id] = (t.start_at, appt_end)
+                n.ss, n.se = t.start_at, appt_end
+                if n.assignee is not None:
+                    appt_busy_by_user.setdefault(n.assignee, []).append((t.start_at, appt_end))
+                continue
             if (
                 n.kind is ExecKind.human
                 and n.assignee is not None
@@ -512,7 +529,11 @@ class Scheduler:
             switch_min = (
                 human_exec[user_id].context_switch_cost_minutes if user_id in human_exec else 0
             )
-            busy = [
+            # Hard constraints on the person's timeline: legacy Event
+            # rows AND appointment-tasks of the same user (migration
+            # 0094 / ADR-0008 addendum). Both feed the same overlap
+            # avoidance: ``base = cal.snap_forward(clash[1])`` below.
+            busy: list[tuple[dt.datetime, dt.datetime]] = [
                 (e.start_at, e.end_at)
                 for e in (
                     await self._s.execute(
@@ -527,6 +548,7 @@ class Scheduler:
                 .scalars()
                 .all()
             ]
+            busy.extend(appt_busy_by_user.get(user_id, []))
             busy.sort()
             plist.sort(key=key)
             cursor = now
