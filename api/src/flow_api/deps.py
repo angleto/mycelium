@@ -22,7 +22,7 @@ from flow_core.errors import AuthError, ForbiddenError, NotFoundError
 from flow_core.i18n import MessageCode
 from flow_core.models.membership import Role
 from flow_core.models.user import User
-from flow_core.security import decode_token
+from flow_core.security import decode_token_async
 from flow_core.services.auth import assert_token_not_revoked
 from flow_core.services.rbac import _RANK, get_role
 
@@ -41,11 +41,19 @@ def _bearer_token(
     return credentials.credentials
 
 
-def current_claims(
+async def current_claims(
     token: Annotated[str, Depends(_bearer_token)],
 ) -> dict[str, Any]:
-    """Decoded JWT claims (sub, jti, exp). Used by logout/revoke."""
-    return decode_token(token)
+    """Decoded bearer claims. Accepts both session JWTs (SPA / login
+    flow) and agent tokens (``flow_at_...``) used by the CLI / MCP.
+
+    For JWTs the dict carries ``sub``, ``jti``, ``iat``, ``exp``.
+    For agent tokens ``sub``, ``org_id``, ``scope``, ``typ='agent'``.
+    Either flavour is enough for ``current_user_id`` (reads ``sub``)
+    plus the JWT revocation check (skipped gracefully when no ``jti``
+    is present, since agent tokens carry their own revocation state
+    enforced inside ``decode_token_async``)."""
+    return await decode_token_async(token)
 
 
 async def current_user_id(

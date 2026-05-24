@@ -122,6 +122,42 @@ async def test_delete_revokes_and_post_revoke_auth_fails() -> None:
         assert rows[0]["revoked_at"] is not None
 
 
+async def test_api_accepts_agent_token_as_bearer() -> None:
+    """Regression: the REST API ``current_claims`` dependency must
+    accept ``flow_at_...`` agent tokens (used by the CLI), not just
+    session JWTs. Previously ``decode_token`` (JWT-only) was wired in,
+    so every CLI command after ``flow auth login`` returned 401
+    ``auth.token_invalid`` despite a freshly-minted, valid PAT."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as c:
+        login_headers = await _signup_and_headers(c)
+        workspace_id = login_headers["X-Workspace-Id"]
+
+        # Mint a PAT via the JWT-authed mint endpoint.
+        mint = (
+            await c.post(
+                "/agent-tokens",
+                headers=login_headers,
+                json={"name": "cli-regression", "scope": "cli"},
+            )
+        ).json()
+        pat = mint["raw"]
+        assert pat.startswith(svc.RAW_PREFIX)
+
+        # Hit a protected, tenant-scoped route with ONLY the PAT as
+        # Bearer (no JWT). Pre-fix this returned 401
+        # auth.token_invalid because the API tried jwt.decode() on the
+        # opaque agent token. Post-fix decode_token_async branches on
+        # the prefix and the request goes through normally.
+        pat_headers = {
+            "Authorization": f"Bearer {pat}",
+            "X-Workspace-Id": workspace_id,
+        }
+        r = await c.get("/tasks", headers=pat_headers)
+        assert r.status_code == 200, r.text
+        assert isinstance(r.json(), list)
+
+
 async def test_ttl_zero_disables_expiry() -> None:
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://t") as c:
