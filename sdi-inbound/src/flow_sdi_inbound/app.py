@@ -13,6 +13,7 @@ gets a 400 (never a 500, so SdI's retry/log path stays clean).
 
 from __future__ import annotations
 
+import lxml.etree as ET
 from fastapi import FastAPI, Request, Response
 
 from flow_core.services.sdi_inbound import ingest_notification
@@ -30,8 +31,12 @@ def create_app() -> FastAPI:
         raw = await request.body()
         try:
             await ingest_notification(raw)
-        except ValueError:
-            # Unrecognized payload: 400 so SdI / logs surface it, not a 500.
+        except (ValueError, ET.XMLSyntaxError):
+            # Unrecognized / not-well-formed payload: 400 so SdI / logs
+            # surface it, not a 500 (ADR-0011: never 500 on the SdI push
+            # path or its retry/log behaviour gets noisy). lxml raises
+            # XMLSyntaxError on malformed XML; the service-layer parser
+            # raises ValueError on a structurally unknown notification.
             return Response(status_code=400)
         return Response(status_code=200)
 

@@ -39,6 +39,19 @@ def test_parse_unknown_notification_raises() -> None:
         parse_notification(b"<Foo><IdentificativoSdI>X</IdentificativoSdI></Foo>")
 
 
+def test_inbound_app_rejects_malformed_xml_with_400() -> None:
+    # ADR-0011: SdI push must never see a 500 (its retry/log path gets
+    # noisy). Both an empty body and arbitrary non-XML must surface as 400,
+    # not bubble lxml.XMLSyntaxError into a 500.
+    from fastapi.testclient import TestClient
+
+    from flow_sdi_inbound.app import create_app
+
+    client = TestClient(create_app())
+    assert client.post("/sdi/notification", content=b"").status_code == 400
+    assert client.post("/sdi/notification", content=b"HELLO").status_code == 400
+
+
 async def _org() -> tuple[uuid.UUID, uuid.UUID]:
     async with admin_session() as s:
         r = await signup(
