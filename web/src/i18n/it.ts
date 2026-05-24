@@ -538,6 +538,17 @@ export const it: Catalog = {
     remAtDue: 'Alla scadenza',
     remBefore: '{{v}} prima',
     remAdd: 'Aggiungi promemoria',
+    scope: {
+      label: 'Quando',
+      all: 'Tutti',
+      today: 'Oggi',
+      week: 'Settimana',
+      month: 'Mese',
+    },
+    dateFocus: 'Focus date',
+    dateFocusHint: 'Mostra solo i task con una data (scadenza o appuntamento)',
+    event: 'Appuntamento',
+    eventTitle: 'Appuntamento {{when}} · {{minutes}} min',
   },
   ownerPicker: {
     none: 'Nessun responsabile',

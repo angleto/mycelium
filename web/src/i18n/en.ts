@@ -537,6 +537,19 @@ export const en = {
     remAtDue: 'At due',
     remBefore: '{{v}} before',
     remAdd: 'Add reminder',
+    // Scope filter + date focus (TasksRoute toolbar). The scope narrows
+    // by date window; date focus shows only tasks that carry a date.
+    scope: {
+      label: 'When',
+      all: 'All',
+      today: 'Today',
+      week: 'Week',
+      month: 'Month',
+    },
+    dateFocus: 'Date focus',
+    dateFocusHint: 'Show only tasks with a date (deadline or appointment)',
+    event: 'Appointment',
+    eventTitle: 'Appointment {{when}} · {{minutes}} min',
   },
   ownerPicker: {
     none: 'No owner',

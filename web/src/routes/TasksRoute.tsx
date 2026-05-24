@@ -17,6 +17,68 @@ import type { components } from '../api/schema'
 
 type View = 'kanban' | 'list'
 const VIEW_KEY = 'flow.tasks.view'
+const SCOPE_KEY = 'flow.tasks.scope'
+const DATEFOCUS_KEY = 'flow.tasks.dateFocus'
+
+type Scope = 'all' | 'today' | 'week' | 'month'
+const SCOPES: ReadonlyArray<Scope> = ['all', 'today', 'week', 'month'] as const
+
+function defaultScope(): Scope {
+  try {
+    const v = localStorage.getItem(SCOPE_KEY)
+    if (v === 'all' || v === 'today' || v === 'week' || v === 'month') return v
+  } catch {
+    /* private mode / quota: fall through */
+  }
+  return 'all'
+}
+
+function defaultDateFocus(): boolean {
+  try {
+    return localStorage.getItem(DATEFOCUS_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+
+// Pick the "date" of a task for scope/date-focus filtering. Appointment
+// tasks (start_at + duration_minutes) use start_at; reminders / deadline
+// tasks use due_date; plain tasks have no date and never match.
+function taskDate(tk: {
+  start_at?: string | null
+  due_date?: string | null
+}): Date | null {
+  if (tk.start_at) return new Date(tk.start_at)
+  if (tk.due_date) {
+    // due_date is a YYYY-MM-DD string; anchor at local midnight so the
+    // window math below stays in the user's timezone.
+    const [y, m, d] = tk.due_date.split('-').map(Number)
+    return new Date(y, (m ?? 1) - 1, d ?? 1)
+  }
+  return null
+}
+
+// Inclusive-start, exclusive-end window for the given scope. Week is
+// Monday-anchored (Europe convention); month is calendar month.
+function scopeWindow(scope: Scope, now: Date): [Date, Date] | null {
+  if (scope === 'all') return null
+  const start = new Date(now)
+  start.setHours(0, 0, 0, 0)
+  const end = new Date(start)
+  if (scope === 'today') {
+    end.setDate(end.getDate() + 1)
+  } else if (scope === 'week') {
+    const dow = start.getDay() || 7 // Sun=0 -> 7
+    start.setDate(start.getDate() - (dow - 1))
+    end.setTime(start.getTime())
+    end.setDate(end.getDate() + 7)
+  } else {
+    start.setDate(1)
+    end.setTime(start.getTime())
+    end.setMonth(end.getMonth() + 1)
+  }
+  return [start, end]
+}
 
 // Default view per viewport. Mobile (≤768px) ALWAYS starts on the
 // dense list: a single kanban column on a phone is just a vertical
@@ -111,6 +173,26 @@ export function TasksRoute() {
       /* ignore */
     }
   }, [view])
+  // Scope (All/Today/Week/Month) narrows the visible set by date
+  // window; date focus is the orthogonal toggle "only tasks with a
+  // date". Both persisted per user via localStorage so the next visit
+  // restores the same lens.
+  const [scope, setScope] = useState<Scope>(defaultScope)
+  const [dateFocus, setDateFocus] = useState<boolean>(defaultDateFocus)
+  useEffect(() => {
+    try {
+      localStorage.setItem(SCOPE_KEY, scope)
+    } catch {
+      /* ignore */
+    }
+  }, [scope])
+  useEffect(() => {
+    try {
+      localStorage.setItem(DATEFOCUS_KEY, dateFocus ? '1' : '0')
+    } catch {
+      /* ignore */
+    }
+  }, [dateFocus])
 
   const stateById = new Map(wfStates.map((s) => [s.id, s]))
   const allowed = new Map<string, Set<string>>()
@@ -421,11 +503,25 @@ export function TasksRoute() {
         (tk.tags ?? []).some((g) => focusIds.includes(g.id)),
       )
     : matched
+  // Date lens (scope + date focus). Applied on top of focus, before the
+  // view-specific gating below. ``scope=all`` + ``dateFocus=false`` is
+  // a no-op (avoids the predicate per row).
+  const dateWindow = scopeWindow(scope, new Date())
+  const dateLensed =
+    !dateWindow && !dateFocus
+      ? focused
+      : focused.filter((tk) => {
+          const d = taskDate(tk)
+          if (dateFocus && d === null) return false
+          if (!dateWindow) return true
+          if (d === null) return false
+          return d >= dateWindow[0] && d < dateWindow[1]
+        })
   // ``shown`` feeds the kanban (full set; its columns are gated by
   // is_hidden/showHidden). ``listShown`` is the list view's set: in list
   // mode it also drops terminal-state tasks unless ``hideTerminal`` is
   // off. In kanban mode listShown === shown (the gate is view-scoped).
-  const shown = focused
+  const shown = dateLensed
   const terminalStateIds = new Set(
     wfStates.filter((s) => s.is_terminal).map((s) => s.id),
   )
@@ -606,6 +702,37 @@ export function TasksRoute() {
             {hideTerminal ? t('common.on') : t('common.off')}
           </button>
         )}
+        <div
+          className="viewtabs"
+          role="radiogroup"
+          aria-label={t('tasks.scope.label')}
+        >
+          {SCOPES.map((s) => (
+            <button
+              key={s}
+              type="button"
+              role="radio"
+              aria-checked={scope === s}
+              className={
+                'viewtabs__tab' + (scope === s ? ' viewtabs__tab--active' : '')
+              }
+              onClick={() => setScope(s)}
+            >
+              {t(`tasks.scope.${s}`)}
+            </button>
+          ))}
+        </div>
+        <button
+          type="button"
+          role="switch"
+          aria-checked={dateFocus}
+          className={'toggle-pill' + (dateFocus ? ' toggle-pill--on' : '')}
+          onClick={() => setDateFocus((v) => !v)}
+          title={t('tasks.dateFocusHint')}
+        >
+          {t('tasks.dateFocus')}:{' '}
+          {dateFocus ? t('common.on') : t('common.off')}
+        </button>
         <div className="viewtabs" role="tablist" aria-label={t('tasks.viewSwitch')}>
           <button
             type="button"
@@ -787,11 +914,28 @@ export function TasksRoute() {
                 </span>
                 <span className="taskrow__meta">
                   <span className="taskrow__sep" aria-hidden="true" />
-                  {tk.due_date && (
+                  {tk.start_at && tk.duration_minutes ? (
+                    <span
+                      className="muted"
+                      title={t('tasks.eventTitle', {
+                        when: new Date(tk.start_at).toLocaleString(),
+                        minutes: tk.duration_minutes,
+                      })}
+                    >
+                      🕒 {new Date(tk.start_at).toLocaleString([], {
+                        month: 'short',
+                        day: '2-digit',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      })}
+                      {' · '}
+                      {tk.duration_minutes}m
+                    </span>
+                  ) : tk.due_date ? (
                     <span className="muted" title={t('tasks.due')}>
                       📅 {tk.due_date}
                     </span>
-                  )}
+                  ) : null}
                   <PriorityChip priority={tk.priority} score={score} />
                   {stateById.has(tk.state_id) ? (
                     <select

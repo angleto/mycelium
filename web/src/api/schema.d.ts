@@ -6535,6 +6535,12 @@ export interface components {
             tag_ids?: string[];
             /** Assignee Ids */
             assignee_ids?: string[];
+            /** Start At */
+            start_at?: string | null;
+            /** Duration Minutes */
+            duration_minutes?: number | null;
+            /** Recurrence */
+            recurrence?: Record<string, unknown> | null;
         };
         /** TaskIdOut */
         TaskIdOut: {
@@ -6637,6 +6643,12 @@ export interface components {
             version: number;
             /** Tags */
             tags?: components["schemas"]["TagBrief"][];
+            /** Start At */
+            start_at?: string | null;
+            /** Duration Minutes */
+            duration_minutes?: number | null;
+            /** Recurrence */
+            recurrence?: Record<string, unknown> | null;
         };
         /** TaskPatchIn */
         TaskPatchIn: {
@@ -6677,6 +6689,12 @@ export interface components {
             necessity?: components["schemas"]["Necessity"] | null;
             /** Budget Id */
             budget_id?: string | null;
+            /** Start At */
+            start_at?: string | null;
+            /** Duration Minutes */
+            duration_minutes?: number | null;
+            /** Recurrence */
+            recurrence?: Record<string, unknown> | null;
         };
         /** TaskRelationCreateIn */
         TaskRelationCreateIn: {
