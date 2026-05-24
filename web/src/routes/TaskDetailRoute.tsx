@@ -45,6 +45,13 @@ export function TaskDetailRoute() {
   const [urgency, setUrgency] = useState(4)
   const [estimate, setEstimate] = useState('')
   const [due, setDue] = useState('')
+  // Appointment editor (migration 0094, ADR-0008 addendum). The task
+  // is a calendar appointment when both ``start_at`` and
+  // ``duration_minutes`` are set. The block is opt-in (a toggle
+  // expands it) so the majority "task with a due date" workflow stays
+  // untouched.
+  const [apptStartAt, setApptStartAt] = useState('')
+  const [apptDuration, setApptDuration] = useState<number | ''>('')
   // '' = inherit project default, 'yes' = billable, 'no' = not.
   const [bill, setBill] = useState<'' | 'yes' | 'no'>('')
   const [estCustom, setEstCustom] = useState(false)
@@ -78,6 +85,19 @@ export function TaskDetailRoute() {
     setUrgency(tk.urgency ?? 4)
     setEstimate(tk.estimate_effort_h ?? '')
     setDue(tk.due_date ?? '')
+    // Hydrate the appointment block. The datetime-local input wants
+    // a naive local-tz string "YYYY-MM-DDTHH:MM"; the server returns
+    // ISO UTC, convert.
+    if (tk.start_at) {
+      const d = new Date(tk.start_at)
+      const pad = (n: number) => String(n).padStart(2, '0')
+      setApptStartAt(
+        `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`,
+      )
+    } else {
+      setApptStartAt('')
+    }
+    setApptDuration(tk.duration_minutes ?? '')
     setBill(tk.billable == null ? '' : tk.billable ? 'yes' : 'no')
     setStateId(tk.state_id)
   }, [])
@@ -342,6 +362,33 @@ export function TaskDetailRoute() {
   function onDue(v: string) {
     setDue(v)
     void autosave({ due_date: v || null })
+  }
+  // Appointment promotion / edit (migration 0094). Save the pair
+  // atomically: the backend CHECK constraint rejects half-set inputs.
+  // ``start_at`` is read from the datetime-local input as a naive
+  // local-tz string; we send the ISO form so the server reads it as
+  // a UTC timestamp anchored at the user's wall-clock moment.
+  async function saveAppointment(startLocal: string, minutes: number | '') {
+    if (!startLocal || !minutes) {
+      await autosave({ start_at: null, duration_minutes: null })
+      return
+    }
+    const iso = new Date(startLocal).toISOString()
+    await autosave({ start_at: iso, duration_minutes: Number(minutes) })
+  }
+  function onApptStart(v: string) {
+    setApptStartAt(v)
+    void saveAppointment(v, apptDuration)
+  }
+  function onApptDuration(v: string) {
+    const n = v ? Number(v) : ''
+    setApptDuration(n)
+    void saveAppointment(apptStartAt, n)
+  }
+  function clearAppointment() {
+    setApptStartAt('')
+    setApptDuration('')
+    void autosave({ start_at: null, duration_minutes: null })
   }
   function commitEstimate(v: string) {
     void autosave({ estimate_effort_h: v.trim() ? v.trim() : null })
@@ -699,6 +746,41 @@ export function TaskDetailRoute() {
             onChange={(e) => onDue(e.target.value)}
           />
         </label>
+        <fieldset className="taskdetail__appointment">
+          <legend>{t('tasks.appointment')}</legend>
+          <p className="hint">{t('tasks.appointmentHint')}</p>
+          <div className="row">
+            <label>
+              {t('tasks.appointmentStart')}
+              <input
+                type="datetime-local"
+                value={apptStartAt}
+                onChange={(e) => onApptStart(e.target.value)}
+              />
+            </label>
+            <label>
+              {t('tasks.appointmentDuration')}
+              <input
+                type="number"
+                min={1}
+                step={5}
+                value={apptDuration}
+                onChange={(e) => onApptDuration(e.target.value)}
+                placeholder="min"
+              />
+            </label>
+            {(apptStartAt || apptDuration) && (
+              <button
+                type="button"
+                className="ghost"
+                onClick={() => clearAppointment()}
+                title={t('tasks.appointmentClear')}
+              >
+                {t('tasks.appointmentClear')}
+              </button>
+            )}
+          </div>
+        </fieldset>
         <fieldset className="taskdetail__assignee">
           <legend>{t('assigneePicker.label')}</legend>
           <AssigneePicker

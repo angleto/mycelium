@@ -550,6 +550,12 @@ export const en = {
     dateFocusHint: 'Show only tasks with a date (deadline or appointment)',
     event: 'Appointment',
     eventTitle: 'Appointment {{when}} · {{minutes}} min',
+    appointment: 'Appointment',
+    appointmentHint:
+      'Pin this task to a specific moment with a duration. The slot blocks the calendar for the assignee and every participant (no-ubiquity).',
+    appointmentStart: 'Start',
+    appointmentDuration: 'Duration (min)',
+    appointmentClear: 'Clear appointment',
   },
   participants: {
     title: 'Participants',

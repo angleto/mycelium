@@ -549,6 +549,12 @@ export const it: Catalog = {
     dateFocusHint: 'Mostra solo i task con una data (scadenza o appuntamento)',
     event: 'Appuntamento',
     eventTitle: 'Appuntamento {{when}} · {{minutes}} min',
+    appointment: 'Appuntamento',
+    appointmentHint:
+      'Aggancia il task a un momento preciso con una durata. Lo slot blocca il calendario per l\'assegnatario e tutti i partecipanti (no-ubiquita).',
+    appointmentStart: 'Inizio',
+    appointmentDuration: 'Durata (min)',
+    appointmentClear: 'Rimuovi appuntamento',
   },
   participants: {
     title: 'Partecipanti',
