@@ -160,7 +160,7 @@ def create_app() -> FastAPI:
         app.add_exception_handler(exc_type, _make_handler(status))
 
     # Cross-origin SPA (production serves the SPA and the API on
-    # different hosts: xenoflow.dev vs api.xenoflow.dev). Enabled
+    # different hosts: flow.xeno.garden vs api.flow.xeno.garden). Enabled
     # only when origins are configured (FLOW_CORS_ORIGINS).
     origins = get_settings().cors_origin_list
     if origins:
@@ -218,7 +218,7 @@ def create_app() -> FastAPI:
     # the SECURITY DEFINER authenticate_agent_token (migration 0059)
     # and publishes it into a ContextVar that ``_tenant`` inside every
     # @mcp.tool short-circuits on. URL becomes /mcp at the public
-    # ingress (xenoflow.dev/mcp); behind nginx the SPA's same-origin
+    # ingress (flow.xeno.garden/mcp); behind nginx the SPA's same-origin
     # routing already covers /api/, the deploy adds a /mcp/ proxy.
     # Mount the SAME mcp_app instance whose lifespan _make_lifespan
     # drives — mounting a fresh one would leave the session manager

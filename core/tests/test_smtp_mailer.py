@@ -36,7 +36,7 @@ def _smtp_settings(**over: object) -> Settings:
         "smtp_port": 587,
         "smtp_username": "tem-user",
         "smtp_password": "tem-pass",
-        "smtp_from": "Xenoflow <no-reply@xenoflow.dev>",
+        "smtp_from": "Flow <no-reply@xeno.garden>",
         "smtp_starttls": True,
     }
     base.update(over)
@@ -112,7 +112,7 @@ async def test_smtp_send_uses_starttls_login_and_sendmessage(
         port=587,
         username="tem-user",
         password="tem-pass",
-        sender="Xenoflow <no-reply@xenoflow.dev>",
+        sender="Flow <no-reply@xeno.garden>",
         starttls=True,
     )
 
@@ -127,7 +127,7 @@ async def test_smtp_send_uses_starttls_login_and_sendmessage(
     assert fake.starttls_called is True
     assert fake.login_args == ("tem-user", "tem-pass")
     assert fake.sent is not None
-    assert fake.sent["From"] == "Xenoflow <no-reply@xenoflow.dev>"
+    assert fake.sent["From"] == "Flow <no-reply@xeno.garden>"
     assert fake.sent["To"] == "user@example.test"
     assert fake.sent["Subject"] == "Reset"
     assert "https://x/r?token=t" in fake.sent.get_content()
@@ -142,7 +142,7 @@ async def test_smtp_send_skips_login_without_username_and_starttls_off(
         port=25,
         username="",  # unauthenticated relay
         password="",
-        sender="ops@xenoflow.dev",
+        sender="ops@xeno.garden",
         starttls=False,  # plain relay, no STARTTLS
     )
 
@@ -153,4 +153,4 @@ async def test_smtp_send_skips_login_without_username_and_starttls_off(
     assert fake.starttls_called is False
     assert fake.login_args is None  # login() never issued
     assert fake.sent is not None
-    assert fake.sent["From"] == "ops@xenoflow.dev"
+    assert fake.sent["From"] == "ops@xeno.garden"

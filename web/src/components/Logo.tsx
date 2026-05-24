@@ -1,4 +1,4 @@
-// Xenoflow mark: a crescent moon in the TOP-RIGHT over two wave lines.
+// Flow mark: a crescent moon in the TOP-RIGHT over two wave lines.
 // The crescent is a white disc with a tile-coloured disc cut out of
 // it (always renders as a clean crescent). Accent app-tile.
 export function Logo({ size = 22 }: { size?: number }) {
@@ -8,7 +8,7 @@ export function Logo({ size = 22 }: { size?: number }) {
       height={size}
       viewBox="0 0 32 32"
       role="img"
-      aria-label="Xenoflow"
+      aria-label="Flow"
     >
       <rect width="32" height="32" rx="7" fill="var(--accent)" />
       {/* Crescent moon, top-right: white disc minus an offset

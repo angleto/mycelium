@@ -1,6 +1,6 @@
 {
-  "name": "Xenoflow",
-  "short_name": "Xenoflow",
+  "name": "Flow",
+  "short_name": "Flow",
   "description": "Personal productivity, time tracking, billing and notes",
   "start_url": "/",
   "scope": "/",

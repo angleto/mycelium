@@ -3,17 +3,17 @@
 Three channels, each landing in the SAME Flow `/notes`:
 
 1. **PWA install** (browser → home-screen icon)
-2. **Apple Shortcut** (Siri "Hey Siri, nuova nota Xenoflow…")
+2. **Apple Shortcut** (Siri "Hey Siri, nuova nota Flow…")
 3. **Telegram bot** (voice messages → notes; revived in v1.2.29)
 
 All three reuse the same backend; the difference is the front door.
 
 ## 1. PWA install
 
-Mobile Safari (iOS) / Chrome (Android) → open `https://xenoflow.dev` →
+Mobile Safari (iOS) / Chrome (Android) → open `https://flow.xeno.garden` →
 share menu → **Add to Home Screen**. From v1.2.28 Flow registers a
 real manifest + service worker, so the icon opens fullscreen (no
-browser chrome), shows the right title (`Xenoflow`), and has two PWA
+browser chrome), shows the right title (`Flow`), and has two PWA
 shortcuts the OS surfaces on long-press of the icon: **New note**
 and **Tasks**. The service worker caches the SPA shell so the icon
 opens to a usable screen even with flaky network; the API still goes
@@ -28,7 +28,7 @@ Apple Shortcut paths below.
 
 ## 2. Apple Shortcut
 
-Single endpoint: `POST https://xenoflow.dev/api/notes/quick-create`
+Single endpoint: `POST https://flow.xeno.garden/api/notes/quick-create`
 with `Authorization: Bearer flow_at_…`. Body:
 
 ```json
@@ -63,7 +63,7 @@ project.
    - key `text` → from `Dictated Text`
    - key `kind` → `text`
 6. Add **Get Contents of URL**:
-   - URL: `https://xenoflow.dev/api/notes/quick-create`
+   - URL: `https://flow.xeno.garden/api/notes/quick-create`
    - Method: `POST`
    - Headers:
      - `Authorization` = `Bearer flow_at_xxxxxxxxxxxxxxxxxxxxxxxxxxx`
@@ -119,7 +119,7 @@ To enable the bot in prod:
 
    ```bash
    curl -s "https://api.telegram.org/bot$TOKEN/setWebhook" \
-     -d "url=https://xenoflow.dev/api/telegram/webhook/$SECRET" \
+     -d "url=https://flow.xeno.garden/api/telegram/webhook/$SECRET" \
      -d "secret_token=$SECRET"
    ```
 

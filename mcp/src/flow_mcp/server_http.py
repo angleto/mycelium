@@ -97,7 +97,7 @@ def make_mcp_app() -> Starlette:
     # Disable the SDK's DNS-rebinding Host/Origin guard. FastMCP
     # auto-enables it (with allowed_hosts = localhost-only) because the
     # instance's default host is 127.0.0.1; behind nginx the public
-    # Host is xenoflow.dev and the Origin is the MCP client
+    # Host is flow.xeno.garden and the Origin is the MCP client
     # (claude.ai, Cursor, ...), so the localhost allowlist returns
     # 421 Misdirected Request on every call. DNS rebinding is a
     # localhost-server threat (a malicious page reaching a loopback
