@@ -604,22 +604,14 @@ async def _copy_task_tags_to_note(
     the client tag is auto-attached by ``create_note``). Audit logs one
     ``attach_tag`` per newly-added row."""
     task_tag_ids = list(
-        (
-            await session.execute(
-                select(TaskTag.tag_id).where(TaskTag.task_id == task_id)
-            )
-        )
+        (await session.execute(select(TaskTag.tag_id).where(TaskTag.task_id == task_id)))
         .scalars()
         .all()
     )
     if not task_tag_ids:
         return
     existing = set(
-        (
-            await session.execute(
-                select(NoteTag.tag_id).where(NoteTag.note_id == note_id)
-            )
-        )
+        (await session.execute(select(NoteTag.tag_id).where(NoteTag.note_id == note_id)))
         .scalars()
         .all()
     )
