@@ -20,7 +20,8 @@ they do not have the gift of ubiquity (see ADR-0008).
 No generic RCPSP. Engine = **deterministic logical CPM** over working
 calendars (ES/EF/LS/LF, slack, logical critical path, honest because
 contention-free) + **deterministic per-person serial placement** of
-non-delegated `executor=human` tasks, around fixed appointments, with a
+non-delegated `executor=human` tasks, around fixed appointment-tasks
+(tasks with `start_at` + `duration_minutes`, ADR-0008 addendum), with a
 stable, deterministic priority rule (a four-level P1..P4 priority,
 P1 = highest and scheduled first; then earliest due date, earliest
 created, id as the final tie-break). `executor=llm_agent` tasks are off

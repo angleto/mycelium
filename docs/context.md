@@ -39,7 +39,8 @@ reality, not by convenience.
 ### Complete from the start (feasible and correct)
 
 Tasks, taxonomy, configurable workflows, dependencies and graph,
-deterministic scheduler, time tracking, events/no-ubiquity, human/LLM
+deterministic scheduler, time tracking, appointment-tasks +
+no-ubiquity per identity (mig 0094 / ADR-0008 addendum), human/LLM
 executor, Gmail + generic IMAP email, memory with per-project
 isolation, personal domain + budget, advisory planning assistant, MCP,
 multi-tenant with RLS and optimistic concurrency.

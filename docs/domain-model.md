@@ -33,9 +33,15 @@ Conceptual entities. The physical schema is in
 - **TaskDependency**: a typed directed edge (FS/SS/FF/SF) with `lag`
   (signed working minutes; reference calendar = the predecessor). The
   set is a DAG; cycle detection is mandatory.
-- **Event (appointment)**: org-scoped, client/project tag,
-  participants, time-pinned interval, location. Constraint: no overlap
-  per participant (no-ubiquity).
+- **Appointment**: a Task with `start_at` (timestamptz) +
+  `duration_minutes` (int) IS the calendar block (migration 0094 /
+  ADR-0008 addendum). Extra participants live on
+  `task_participants(task_id, identity_id, start_at,
+  duration_minutes)`. Constraint: no overlap per identity
+  (no-ubiquity), enforced by a single GiST EXCLUDE on
+  `task_participants`; the 0096 trigger mirrors the task's
+  `assignee_id` into a participant row so the EXCLUDE covers both
+  the primary owner and every additional invitee.
 - **WorkflowDefinition**: ordered states and transitions; default per
   Org; an override attachable to a `project_profile`.
 - **WorkingCalendar**: weekly hours, holidays, timezone; Org default +

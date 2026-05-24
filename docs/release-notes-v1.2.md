@@ -140,6 +140,49 @@ assistant can reach (140 tools across 18 domains).
 - CI now enforces mypy strict on all five packages (flow_core,
   flow_api, flow_mcp, flow_worker, flow_sdi_inbound).
 
+## Appointment unification (mig 0094 → 0097, ADR-0008 addendum)
+
+Appointments are no longer a separate entity. A task with `start_at`
+(timestamptz) + `duration_minutes` (int) IS the calendar block, and
+the legacy `events` / `event_participants` tables are gone.
+
+User-facing:
+- **TasksRoute toolbar**: scope segmented control [All | Today |
+  Week | Month] + Date focus toggle (only tasks with a date), both
+  persisted per user.
+- **Row badge**: 🕒 appointment with start+duration, 📅 deadline
+  only, nothing for plain tasks.
+- **EventsRoute** (the calendar view) is now a thin presentation
+  over `/tasks` filtered by `duration_minutes != null`.
+- **TaskDetail → Participants** section appears ONLY for
+  appointment-tasks: inline `/actors` search to add invitees, ✕ to
+  remove. The plain-task / due-date-only workflow is untouched
+  (no new fields surface for the majority case).
+- **Recurrence**: a task with a `recurrence` jsonb (daily / weekly
+  with `by_weekday` / monthly with last-day clamping / yearly with
+  Feb 29 clamp, optional `until`) auto-spawns the next occurrence
+  when it transitions into a terminal state, carrying tags,
+  collaborators and extra participants.
+
+Backend / DB:
+- Migrations 0094 (columns + CHECK + GiST EXCLUDE on assignee),
+  0095 (`task_participants` + sync trigger + per-participant
+  EXCLUDE), 0096 (assignee-mirror trigger; consolidates no-ubiquity
+  on `task_participants`), 0097 (drops `events` /
+  `event_participants`; moves `external_*` GCal sync state onto
+  `tasks`).
+- Scheduler (ADR-0025) treats appointment-tasks as hard pins and
+  reads every participant's busy windows from `task_participants`.
+- Google Calendar sync writes / pushes appointment-tasks instead
+  of events; the idempotency natural key
+  `(external_subscription_id, external_id)` is preserved via a
+  partial UNIQUE index on `tasks`.
+- MCP: the four `*_event` tools are gone; AI agents create
+  appointments through `create_task(start_at, duration_minutes,
+  assignee_id, recurrence?)` and manage extras via
+  `add_task_participant`.
+- 471/471 tests green.
+
 ## Still pending (not in this sprint)
 
 - **Voice notes**: recording + transcription pipeline (currently a

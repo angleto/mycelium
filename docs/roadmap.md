@@ -17,8 +17,11 @@ end-to-end per phase.
 - **F2 Workflow + dependencies + graph**: WorkflowDefinition + project
   override, 4 dependency types + lag, cycle detection, DAG graph.
 - **F3 Deterministic scheduler**: logical CPM + per-person
-  serialization + actuals + pins; Events + no-ubiquity; Gantt with the
-  logical critical path and drag.
+  serialization + actuals + pins; appointment-tasks (`start_at` +
+  `duration_minutes`, mig 0094, ADR-0008 addendum) +
+  no-ubiquity enforced via the GiST EXCLUDE on `task_participants`
+  (assignee + every explicit participant); Gantt with the logical
+  critical path and drag.
 - **F4 Time tracking**: realtime timer (a single active timer per
   user, guaranteed by a partial unique index), manual entries, reports
   per project/client/generic/user/task with billable totals and a rate

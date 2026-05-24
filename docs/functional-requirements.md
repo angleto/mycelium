@@ -35,9 +35,13 @@ non-persistent derived overlay, not a workflow state.
 Resource model:
 
 - each person is a unary resource on their own calendar;
-- events/appointments are exclusive fixed reservations;
-- the same person's `executor=human` tasks are **serialized** (no time
-  overlap) around appointments;
+- appointment-tasks (tasks with `start_at` + `duration_minutes`,
+  migration 0094 / ADR-0008 addendum) are exclusive fixed
+  reservations: their position is pinned and they never enter the
+  placement loop. Every participant (assignee mirror + explicit
+  invitees) has the slot in their per-person busy list;
+- the same person's `executor=human` work tasks are **serialized**
+  (no time overlap) around these appointment-tasks;
 - `executor=llm_agent` tasks are off the human timeline (parallel,
   scheduled by precedence only).
 

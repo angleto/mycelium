@@ -68,6 +68,7 @@ from flow_core.services import memory as memory_svc
 from flow_core.services import note_links as note_links_svc
 from flow_core.services import notes as notes_svc
 from flow_core.services import notifications as notif_svc
+from flow_core.services import participants as part_svc
 from flow_core.services import time_tracking as time_svc
 from flow_core.services import workflow as workflow_svc
 from flow_core.services.rbac import get_role
@@ -1063,9 +1064,89 @@ async def set_user_calendar(
 
 # Migration 0097 dropped the standalone events table. Appointments are
 # tasks with ``start_at`` + ``duration_minutes`` -- AI agents create
-# them through ``create_task`` and the participants endpoint /
-# add_participant tool. The four legacy ``*_event`` MCP tools were
-# removed in this commit.
+# them through ``create_task`` and pin extra invitees through the
+# participants tools below. The four legacy ``*_event`` MCP tools
+# (create_event / list_events / reschedule_event / delete_event) were
+# removed in the unification commit.
+
+
+@mcp.tool()
+async def list_task_participants(
+    token: str,
+    org_id: str,
+    task_id: str,
+) -> list[dict[str, Any]]:
+    """List the additional identities pinned to an appointment-task
+    (migration 0095/0096, ADR-0008 addendum). The assignee always
+    appears here too via the 0096 trigger mirror, so a single read
+    returns every identity that owns the slot. Plain tasks /
+    reminders return an empty list (no slot to occupy)."""
+    async with _tenant(token, org_id) as (s, org, _user):
+        rows = await part_svc.list_participants(s, org_id=org, task_id=uuid.UUID(task_id))
+        return [
+            {
+                "identity_id": str(p.identity_id),
+                "handle": i.handle,
+                "kind": i.kind.value,
+                "start_at": p.start_at.isoformat(),
+                "duration_minutes": p.duration_minutes,
+            }
+            for p, i in rows
+        ]
+
+
+@mcp.tool()
+async def add_task_participant(
+    token: str,
+    org_id: str,
+    task_id: str,
+    identity_id: str | None = None,
+    handle: str | None = None,
+) -> dict[str, Any]:
+    """Pin an identity to an appointment-task (the task must carry
+    ``start_at`` + ``duration_minutes``). Pass either ``identity_id``
+    or ``handle`` (the service resolves the handle through the
+    org's identities). Idempotent on the same (task, identity).
+    Raises ``event.overlap`` (409) when the identity already holds
+    another appointment overlapping the window."""
+    async with _tenant(token, org_id) as (s, org, user):
+        row = await part_svc.add_participant(
+            s,
+            org_id=org,
+            actor_id=user,
+            task_id=uuid.UUID(task_id),
+            identity_id=uuid.UUID(identity_id) if identity_id else None,
+            handle=handle,
+        )
+        return {
+            "task_id": str(row.task_id),
+            "identity_id": str(row.identity_id),
+            "start_at": row.start_at.isoformat(),
+            "duration_minutes": row.duration_minutes,
+        }
+
+
+@mcp.tool()
+async def remove_task_participant(
+    token: str,
+    org_id: str,
+    task_id: str,
+    identity_id: str,
+) -> dict[str, Any]:
+    """Unpin an identity from an appointment-task. No-op if the
+    identity is not a participant. Removing the assignee's mirror
+    row is allowed but the 0096 trigger will re-insert it on the
+    next task update -- to permanently remove the primary owner,
+    change ``tasks.assignee_id`` instead."""
+    async with _tenant(token, org_id) as (s, org, user):
+        await part_svc.remove_participant(
+            s,
+            org_id=org,
+            actor_id=user,
+            task_id=uuid.UUID(task_id),
+            identity_id=uuid.UUID(identity_id),
+        )
+        return {"task_id": task_id, "identity_id": identity_id, "removed": True}
 
 
 @mcp.tool()

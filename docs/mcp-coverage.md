@@ -34,12 +34,13 @@ genuine gap, not an asymmetry by design.
 | Domain | Tools | Read | Write/Mutating | Owner-gated | Scope buckets |
 |---|---|---|---|---|---|
 | Tasks | 16 | 4 | 12 | a few via RBAC sudo | `tasks:read`, `tasks:write` |
+| Task participants (appointment-tasks) | 3 | 1 | 2 | none | `tasks:read`, `tasks:write` |
 | Tags / Projects / Clients | 11 | 4 | 7 | tag scope is admin | `tags:read`, `tags:write`, `delete:taxonomy` |
 | Notes | 16 | 4 | 12 | none | `notes:read`, `notes:write` |
 | Memory | 9 | 3 | 6 | channel admin gated | `memory:read`, `memory:write` |
 | Time tracking | 9 | 4 | 5 | none | `time:read`, `time:write` |
 | Calendar (working calendars + holidays) | 6 | 2 | 4 | service-level | `calendar:read`, `calendar:write` |
-| Events (appointments) | 4 | 1 | 3 | none | `calendar:read`, `calendar:write` |
+| Events (appointments) | — | — | — | unified into Tasks (migration 0094 / 0097) | use `tasks:*` |
 | Dependencies | 4 | 2 | 2 | none | `dependencies:read`, `dependencies:write` |
 | Workflows | 7 | 3 | 4 | service-level | (none yet) → `workflows:write` |
 | Comments | 2 | 1 | 1 | none | `comments:read`, `comments:write` |
@@ -283,26 +284,41 @@ GAPs (calendar):
   disconnect; `calendar:read` for list / sync (with the caveat that
   sync also writes events).
 
-## Events (appointments)
+## Events (appointments) — unified into Tasks
 
-The four core operations; no-ubiquity enforced in the service.
+Migration 0094 (ADR-0008 addendum) collapsed appointments onto
+`tasks` via `start_at` + `duration_minutes`; migration 0097 dropped
+the standalone `events` / `event_participants` tables. The four
+former tools (`create_event` / `list_events` / `reschedule_event` /
+`delete_event`) are gone. AI agents now use:
 
-| Tool | Server line | Service entry | Scope key |
-|---|---|---|---|
-| `create_event` | server.py:947 | `events_svc.create_event` (events.py:57) | `calendar:write` |
-| `list_events` | server.py:975 | `events_svc.list_events` (events.py:100) | `calendar:read` |
-| `reschedule_event` | server.py:987 | `events_svc.reschedule_event` (events.py:121) | `calendar:write` |
-| `delete_event` | server.py:1010 | `events_svc.delete_event` (events.py:164) | `calendar:write` |
+| Old MCP tool | Replacement |
+|---|---|
+| `create_event(title, start_at, end_at, participant_ids, ...)` | `create_task(title, start_at, duration_minutes, assignee_id, ...)` + `add_task_participant` per extra invitee |
+| `list_events` | `list_tasks` filtered client-side by `duration_minutes != null` |
+| `reschedule_event(start_at, end_at)` | `update_task(start_at, duration_minutes)` (the 0095 trigger keeps participants' windows in sync) |
+| `delete_event` | `delete_task` |
 
-GAPs (events):
+No-ubiquity is enforced by the GiST EXCLUDE on `task_participants`
+(consolidated in 0096): every identity in the appointment — the
+assignee mirror + every explicit participant — gets the slot in its
+calendar, and an overlapping appointment for any of them is
+rejected with `event.overlap`.
 
-- **No `update_event` for title / location / participants without
-  rescheduling**. `events_svc.reschedule_event` takes only times;
-  there is no service entry that edits non-time fields. Joint GAP
-  (add service + tool). Scope: `calendar:write`.
-- **No `get_event`**: `events_svc.get_event` (events.py:50) exists
-  but no tool; an agent needs to filter `list_events` client-side.
-  Scope: `calendar:read`.
+### Participants on appointment-tasks
+
+| Tool | Service entry | Scope key |
+|---|---|---|
+| `list_task_participants` | `part_svc.list_participants` (participants.py) | `tasks:read` |
+| `add_task_participant` | `part_svc.add_participant` (participants.py) | `tasks:write` |
+| `remove_task_participant` | `part_svc.remove_participant` (participants.py) | `tasks:write` |
+
+`add_task_participant` accepts either `identity_id` (uuid) or
+`handle` (resolved through the workspace's identities). Idempotent
+on `(task_id, identity_id)`; rejects with `event.overlap` (409)
+when the identity already holds an overlapping appointment. The
+list always includes the assignee mirror row inserted by the 0096
+trigger.
 
 ## Dependencies
 
@@ -717,8 +733,8 @@ just an oversight:
 | `notes:write` | write | `create_note`, `get_or_create_task_note`, `create_task_note`, `update_note`, `archive_note`, `delete_note`, `restore_note`, `add_note_tag`, `remove_note_tag`, `start_conversation_session`, `append_message`, `transcribe_note`, `run_command`, `synthesize_speech` |
 | `memory:read` | read | `memory_search`, `memory_status`, `memory_channels_list` |
 | `memory:write` | write | `memory_write`, `memory_consolidate`, `memory_delete_blob`, `memory_erase`, `memory_channel_create`, `memory_channel_update`, `memory_channel_delete` |
-| `calendar:read` | read | `list_calendars`, `list_holidays`, `list_events` |
-| `calendar:write` | write | `create_calendar`, `add_holiday`, `remove_holiday`, `set_user_calendar`, `create_event`, `reschedule_event`, `delete_event` |
+| `calendar:read` | read | `list_calendars`, `list_holidays` (appointments live on `tasks` since mig 0094; use `tasks:read`) |
+| `calendar:write` | write | `create_calendar`, `add_holiday`, `remove_holiday`, `set_user_calendar` (appointments on `tasks`; use `tasks:write`) |
 | `schedule:read` | read | `get_schedule`, `list_schedule` |
 | `comments:read` | read | `list_comments` |
 | `comments:write` | write | `add_comment` |

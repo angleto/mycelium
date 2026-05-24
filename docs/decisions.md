@@ -24,7 +24,7 @@ and the rejected alternatives are in the [ADRs](adr/README.md).
 | D | Retrieval | Hybrid lexical + semantic baseline, RRF fusion (k ~ 60), (org, project) scope |
 | E | LLM/Embedding abstraction | Reuse the bitvision_phoenix pattern; Flow adds `EmbedderProvider` |
 | F | Memory isolation | Hard boundary per (org, project): mandatory RLS + partition + predicate; never relevance only |
-| G | No-ubiquity | `events` entity; the same person's appointments do not overlap (rejection) |
+| G | No-ubiquity | Appointments unified onto `tasks` via `start_at` + `duration_minutes` (ADR-0008 addendum, migration 0094); per-identity overlap is rejected via the GiST EXCLUDE on `task_participants` (enforced for the assignee + every explicit participant, mig 0095/0096) |
 | H | Executor | `task.executor` = human user (serial) or LLM agent (parallel, off the human timeline) |
 | I | Planning assistant | Advisory layer in the v1 core on top of the scheduler: deterministic core (feasibility + ranking + constrained selection), LLM/MCP as the natural-language frontend |
 | J | Personal domain + budget | Modeled in v1: tasks with cost/location/context/necessity; budget envelope per period/category; deterministic selection within budget (priority knapsack) |

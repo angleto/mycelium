@@ -42,17 +42,33 @@ org-scoped entity. Memory is partitioned by `org_id`.
   optimistic concurrency; the most recent recompute supersedes the
   previous)
 
-## Calendars and events
+## Calendars and appointments
 
 - `working_calendars(id, org_id, name, is_default, weekly_hours,
   timezone)`
 - `calendar_holidays(calendar_id, date)`
 - `user_calendar(user_id, calendar_id, daily_capacity_h)`
-- `events(id, org_id, project_tag_id?, client_tag_id?, title, start,
-  end, location, version)`
-- `event_participants(event_id, user_id)`
-  - constraint: no interval overlap for the same `user_id`
-    (no-ubiquity), also valid against scheduled human tasks
+- **Appointments are tasks** (migration 0094, ADR-0008 addendum): a
+  task with `start_at` (timestamptz) + `duration_minutes` (int) IS
+  the calendar block. The pair is enforced by a CHECK constraint
+  (both set or both NULL).
+- `task_participants(task_id, identity_id, org_id, start_at,
+  duration_minutes)` — additional identities pinned to an
+  appointment-task. The window is denormalised so the GiST EXCLUDE
+  constraint
+  `no_overlap_task_participants(identity_id, tstzrange(...))` enforces
+  no-ubiquity per identity. The 0096 trigger
+  `sync_task_assignee_participant` mirrors the assignee into a
+  participant row, so the single EXCLUDE covers both the assignee
+  and every extra invitee. The 0095 trigger
+  `sync_task_participants_window` keeps the denormalised columns
+  aligned with the parent task and removes all participants if the
+  appointment status is dropped (duration_minutes → NULL).
+- Google Calendar ingest writes appointment-tasks; the sync state
+  (`external_provider`, `external_id`, `external_subscription_id`)
+  lives on `tasks` (migration 0097, partial UNIQUE on
+  `(external_subscription_id, external_id)`). The legacy `events` /
+  `event_participants` tables are gone.
 
 ## Workflow
 
@@ -75,8 +91,9 @@ org-scoped entity. Memory is partitioned by `org_id`.
 - Advisory capabilities (what-can-i-do-now, errand bundling,
   prioritization within budget) live in the service layer, not in
   tables: deterministic queries over
-  `tasks`/`schedule`/`events`/`budgets` accessible to the user within
-  an org.
+  `tasks` (incl. appointment-tasks) / `schedule` /
+  `task_participants` / `budgets` accessible to the user within an
+  org.
 
 ## Metering and credits
 

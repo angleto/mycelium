@@ -16,7 +16,7 @@ Format: Status, Context, Decision, Consequences, Alternatives rejected.
 - [0005 Hierarchical memory on pgvector, hybrid RRF retrieval](0005-hierarchical-memory-pgvector-hybrid-rrf.md)
 - [0006 At-rest encryption at the volume level](0006-at-rest-volume-encryption.md)
 - [0007 Hard memory isolation per (org, project)](0007-memory-hard-isolation-org-project.md)
-- [0008 No-ubiquity: events entity](0008-no-ubiquity-events.md)
+- [0008 No-ubiquity: events entity](0008-no-ubiquity-events.md) — superseded by addendum: appointments unified onto `tasks` (mig 0094 / 0095 / 0096 / 0097); the legacy events table is gone
 - [0009 Invoice immutability, soft-delete carve-out](0009-invoice-immutability.md)
 - [0010 Conservation: free AdE service](0010-conservation-ade-free-service.md)
 - [0011 SDI: intermediary/mandate model, v1 B2B/B2C](0011-sdi-intermediary-mandate-v1-b2b.md)
