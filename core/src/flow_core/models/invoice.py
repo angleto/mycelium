@@ -136,6 +136,14 @@ class IssuerProfile(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, B
     default_modalita_pagamento: Mapped[str | None] = mapped_column(String(4), nullable=True)
     default_payment_terms_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
     is_default: Mapped[bool] = mapped_column(nullable=False, server_default="false")
+    # Recipient CodiceDestinatario AdE assigns at accreditamento Ricezione
+    # (7 alphanumeric). When set, this issuer is reachable as cessionario:
+    # SdI delivers any incoming FatturaElettronica with this codice to our
+    # /sdi/notification endpoint (services/sdi_passive.ingest_passive_invoice).
+    # NULL = the issuer is accredited only as transmitter (active cycle).
+    codice_destinatario_ricezione: Mapped[str | None] = mapped_column(
+        String(7), nullable=True, unique=True
+    )
     conservation_adhesion: Mapped[ConservationAdhesion] = mapped_column(
         SAEnum(
             ConservationAdhesion,
