@@ -68,7 +68,7 @@ class ConstraintKind(enum.StrEnum):
 class Necessity(enum.StrEnum):
     must = "must"
     should = "should"
-    nice = "nice"
+    could = "could"
 
 
 class Task(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, Base):

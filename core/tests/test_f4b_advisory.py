@@ -217,7 +217,7 @@ async def test_prioritize_within_budget_knapsack_and_determinism() -> None:
             title="n1",
             priority=3,
             monetary_cost=Decimal(10),
-            necessity=Necessity.nice,
+            necessity=Necessity.could,
             **mk,
         )
         plan = await advisory.prioritize_within_budget(s, org_id=org, actor_id=user, budget_id=b.id)

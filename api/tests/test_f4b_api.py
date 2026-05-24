@@ -68,11 +68,11 @@ async def test_f4b_api_flow() -> None:
             "/tasks",
             headers=h,
             json={
-                "title": "nice lamp",
+                "title": "could lamp",
                 "priority": 3,
                 "estimate_effort_h": "0.5",
                 "monetary_cost": "70",
-                "necessity": "nice",
+                "necessity": "could",
                 "budget_id": bud["id"],
                 "assignee_ids": [me],
             },
@@ -82,7 +82,7 @@ async def test_f4b_api_flow() -> None:
         assert cons["consumed"] == "130.00" and cons["residual"] == "-30.00"
 
         plan = (await c.get(f"/advisory/budget/{bud['id']}/plan", headers=h)).json()
-        # The must-have (60) fits; the nice (70) does not within 100.
+        # The must (60) fits; the could (70) does not within 100.
         assert [p["task_id"] for p in plan["selected"]] == [must["id"]]
         assert plan["allocated"] == "60.00"
         assert plan["excluded"][0]["reason"] == "budget_exhausted"

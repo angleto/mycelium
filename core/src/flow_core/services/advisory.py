@@ -39,12 +39,12 @@ from flow_core.services.rbac import require_role
 _NEC_RANK: dict[Necessity, int] = {
     Necessity.must: 0,
     Necessity.should: 1,
-    Necessity.nice: 2,
+    Necessity.could: 2,
 }
 _NEC_WEIGHT: dict[Necessity, int] = {
     Necessity.must: 100,
     Necessity.should: 10,
-    Necessity.nice: 3,
+    Necessity.could: 3,
 }
 _CTX_PREFIX = "ctx:"
 _PLACE_PREFIX = "place:"

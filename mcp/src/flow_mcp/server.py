@@ -510,12 +510,14 @@ async def create_task(
 ) -> dict[str, Any]:
     """Create a task, optionally tagged. Supports personal-domain
     attributes (cost/location/necessity/budget) for the advisory layer.
-    ``required_capabilities`` (docs/adr/0025 P2) are the capabilities the
-    task needs from its executor (empty = any enabled agent). Pass
-    ``start_at`` + ``duration_minutes`` to create an appointment-task
-    (migration 0094 + ADR-0008 addendum): the task becomes a calendar
-    block subject to no-overlap on ``assignee_id`` (and any explicit
-    participants added via ``add_task_participant``)."""
+    ``necessity`` is MoSCoW: ``must`` | ``should`` | ``could`` (default
+    ``should`` when omitted). ``required_capabilities`` (docs/adr/0025
+    P2) are the capabilities the task needs from its executor (empty =
+    any enabled agent). Pass ``start_at`` + ``duration_minutes`` to
+    create an appointment-task (migration 0094 + ADR-0008 addendum):
+    the task becomes a calendar block subject to no-overlap on
+    ``assignee_id`` (and any explicit participants added via
+    ``add_task_participant``)."""
     async with _tenant(token, org_id) as (s, org, user):
         # When the MCP call is authenticated with an agent token
         # (HTTP transport), record the ai_assistant identity (if the
@@ -713,6 +715,7 @@ async def update_task(
 ) -> dict[str, Any]:
     """Edit task fields (only the given ones). Priority is re-derived
     when both importance and urgency are present (Eisenhower).
+    ``necessity`` is MoSCoW: ``must`` | ``should`` | ``could``.
     ``required_capabilities`` is the P2 executor capability requirement
     (docs/adr/0025); pass [] to clear it."""
     values: dict[str, Any] = {}

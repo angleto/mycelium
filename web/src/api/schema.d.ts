@@ -5620,7 +5620,7 @@ export interface components {
          * Necessity
          * @enum {string}
          */
-        Necessity: "must" | "should" | "nice";
+        Necessity: "must" | "should" | "could";
         /** NoteCreateIn */
         NoteCreateIn: {
             kind: components["schemas"]["NoteKind"];
