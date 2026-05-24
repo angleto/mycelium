@@ -36,7 +36,7 @@ from __future__ import annotations
 import calendar
 import datetime as dt
 import uuid
-from typing import Any, cast
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -159,7 +159,7 @@ async def maybe_spawn_next(
     ``until``)."""
     if not task.recurrence:
         return None
-    spec = cast(dict[str, Any], task.recurrence)
+    spec: dict[str, Any] = task.recurrence
     new_start_at: dt.datetime | None = None
     new_due_date: dt.date | None = None
     if task.start_at is not None:
