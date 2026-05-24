@@ -875,6 +875,7 @@ export const it: Catalog = {
     addEvent: 'Aggiungi evento',
     del: 'Elimina',
     none: 'Nessun evento.',
+    endAfterStart: 'La fine deve essere successiva all\'inizio.',
     overlapHint: 'Appuntamenti sovrapposti per la stessa persona sono rifiutati.',
     agenda: 'Agenda',
     agendaHint: 'Eventi del calendario e task con scadenza, dai piu vicini.',

@@ -876,6 +876,7 @@ export const en = {
     addEvent: 'Add event',
     del: 'Delete',
     none: 'No events.',
+    endAfterStart: 'End must be after start.',
     overlapHint: 'Overlapping appointments for the same person are rejected.',
     agenda: 'Agenda',
     agendaHint: 'Calendar events and tasks with a due date, soonest first.',

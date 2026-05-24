@@ -6,18 +6,22 @@ import { useSession } from '../auth/useSession'
 import type { components } from '../api/schema'
 
 type Calendar = components['schemas']['CalendarOut']
-type Ev = components['schemas']['EventOut']
 type Task = components['schemas']['TaskOut']
 
 const WEEK = ['mon', 'tue', 'wed', 'thu', 'fri']
 
+// Calendar / appointments view. Appointments live on `tasks` since
+// migration 0094 (ADR-0008 addendum): a task with `start_at` +
+// `duration_minutes` IS the calendar block, and the GiST EXCLUDE
+// constraint enforces no-overlap per `assignee_id`. This route reads
+// appointment-tasks (`duration_minutes != null`) and creates them via
+// POST /tasks; the working_calendars + holidays UX is unchanged.
 export function EventsRoute() {
   const { t } = useTranslation()
   const session = useSession()
   const activeId = session?.workspaceId
   const [cals, setCals] = useState<Calendar[]>([])
-  const [events, setEvents] = useState<Ev[]>([])
-  const [dueTasks, setDueTasks] = useState<Task[]>([])
+  const [tasks, setTasks] = useState<Task[]>([])
   const [calName, setCalName] = useState('')
   const [holCal, setHolCal] = useState('')
   const [holDay, setHolDay] = useState('')
@@ -26,31 +30,35 @@ export function EventsRoute() {
   const [evEnd, setEvEnd] = useState('')
   const [err, setErr] = useState<string | null>(null)
 
+  // Appointment-tasks (start_at + duration_minutes) and reminder /
+  // deadline tasks (due_date only) are both fetched from /tasks; the
+  // split is done client-side because both share the same row shape.
+  const appointmentTasks = tasks.filter((x) => x.duration_minutes != null)
+  const dueOnlyTasks = tasks.filter(
+    (x) => x.duration_minutes == null && x.due_date != null,
+  )
+
   const reload = useCallback(async () => {
     const h = workspaceHeader()
-    const [c, e, tk] = await Promise.all([
+    const [c, tk] = await Promise.all([
       api.GET('/calendars', { params: { header: h } }),
-      api.GET('/events', { params: { header: h } }),
       api.GET('/tasks', { params: { header: h } }),
     ])
     if (c.data) setCals(c.data)
-    if (e.data) setEvents(e.data)
-    if (tk.data) setDueTasks(tk.data.filter((x) => x.due_date != null))
+    if (tk.data) setTasks(tk.data)
   }, [])
 
   useEffect(() => {
     let active = true
     void (async () => {
       const h = workspaceHeader()
-      const [c, e, tk] = await Promise.all([
+      const [c, tk] = await Promise.all([
         api.GET('/calendars', { params: { header: h } }),
-        api.GET('/events', { params: { header: h } }),
         api.GET('/tasks', { params: { header: h } }),
       ])
       if (!active) return
       if (c.data) setCals(c.data)
-      if (e.data) setEvents(e.data)
-      if (tk.data) setDueTasks(tk.data.filter((x) => x.due_date != null))
+      if (tk.data) setTasks(tk.data)
     })()
     return () => {
       active = false
@@ -89,26 +97,53 @@ export function EventsRoute() {
     setHolDay('')
   }
 
+  // Appointments are created as tasks with start_at + duration_minutes.
+  // The duration is derived from the end input so the user still works
+  // with the calendar-natural (start, end) pair; the service stores the
+  // pair (start_at, duration_minutes) per the migration 0094 contract.
   async function onAddEvent(e: FormEvent) {
     e.preventDefault()
     setErr(null)
-    const { error } = await api.POST('/events', {
+    const start = new Date(evStart)
+    const end = new Date(evEnd)
+    const minutes = Math.round((end.getTime() - start.getTime()) / 60000)
+    if (!(minutes > 0)) {
+      // The DB CHECK + service validation would catch it, but failing
+      // fast keeps the round-trip noise out of the toolbar.
+      setErr(t('events.endAfterStart'))
+      return
+    }
+    const { error } = await api.POST('/tasks', {
       params: { header: workspaceHeader() },
-      body: { title: evTitle, start_at: evStart, end_at: evEnd },
+      body: {
+        title: evTitle,
+        // Required pydantic discriminants (also defaulted server-side).
+        executor_kind: 'human',
+        necessity: 'should',
+        priority: 3,
+        start_at: start.toISOString(),
+        duration_minutes: minutes,
+      },
     })
     if (error) {
-      // Overlap for the same person -> event.overlap (no ubiquity).
+      // Overlap for the same assignee -> event.overlap (no ubiquity).
       setErr(errMessage(error))
       return
     }
     setEvTitle('')
+    setEvStart('')
+    setEvEnd('')
     await reload()
   }
 
   async function onDelete(id: string) {
     setErr(null)
-    const { error } = await api.DELETE('/events/{event_id}', {
-      params: { header: workspaceHeader(), path: { event_id: id } },
+    // Find current version for the optimistic-concurrency soft delete.
+    const tk = appointmentTasks.find((x) => x.id === id)
+    if (!tk) return
+    const { error } = await api.POST('/tasks/{task_id}/delete', {
+      params: { header: workspaceHeader(), path: { task_id: id } },
+      body: { expected_version: tk.version },
     })
     if (error) {
       setErr(errMessage(error))
@@ -179,21 +214,24 @@ export function EventsRoute() {
         />
         <button type="submit">{t('events.addEvent')}</button>
       </form>
-      {events.length === 0 ? (
+      {appointmentTasks.length === 0 ? (
         <p className="hint">{t('events.none')}</p>
       ) : (
         <ul className="list">
-          {events.map((ev) => (
-            <li key={ev.id}>
-              {ev.title}{' '}
-              <span className="muted">
-                {ev.start_at} {'->'} {ev.end_at}
-              </span>
-              <button type="button" onClick={() => void onDelete(ev.id)}>
-                {t('events.del')}
-              </button>
-            </li>
-          ))}
+          {appointmentTasks
+            .slice()
+            .sort((a, b) => (a.start_at ?? '').localeCompare(b.start_at ?? ''))
+            .map((ev) => (
+              <li key={ev.id}>
+                <Link to={`/tasks/${ev.id}`}>{ev.title}</Link>{' '}
+                <span className="muted">
+                  {ev.start_at?.slice(0, 16)} · {ev.duration_minutes}m
+                </span>
+                <button type="button" onClick={() => void onDelete(ev.id)}>
+                  {t('events.del')}
+                </button>
+              </li>
+            ))}
         </ul>
       )}
 
@@ -201,17 +239,19 @@ export function EventsRoute() {
       <p className="hint">{t('events.agendaHint')}</p>
       {(() => {
         const items = [
-          ...events.map((ev) => ({
+          ...appointmentTasks.map((ev) => ({
             key: `e${ev.id}`,
-            when: ev.start_at,
+            when: ev.start_at ?? '',
             label: ev.title,
-            to: null as string | null,
+            to: `/tasks/${ev.id}`,
+            kind: 'event' as const,
           })),
-          ...dueTasks.map((tk) => ({
+          ...dueOnlyTasks.map((tk) => ({
             key: `t${tk.id}`,
             when: `${tk.due_date}T00:00`,
             label: tk.title,
             to: `/tasks/${tk.id}`,
+            kind: 'reminder' as const,
           })),
         ].sort((a, b) => a.when.localeCompare(b.when))
         return items.length === 0 ? (
@@ -221,11 +261,9 @@ export function EventsRoute() {
             {items.map((it) => (
               <li key={it.key}>
                 <span className="muted">{it.when.slice(0, 16)}</span>{' '}
-                {it.to ? (
-                  <Link to={it.to}>📋 {it.label}</Link>
-                ) : (
-                  <>📅 {it.label}</>
-                )}
+                <Link to={it.to}>
+                  {it.kind === 'event' ? '🕒' : '📅'} {it.label}
+                </Link>
               </li>
             ))}
           </ul>
