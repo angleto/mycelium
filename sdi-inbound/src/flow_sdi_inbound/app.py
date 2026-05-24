@@ -25,8 +25,8 @@ def create_app() -> FastAPI:
     async def healthz() -> dict[str, str]:
         return {"status": "ok"}
 
-    @app.post("/sdi/notifica", tags=["sdi"])
-    async def notifica(request: Request) -> Response:
+    @app.post("/sdi/notification", tags=["sdi"])
+    async def notification(request: Request) -> Response:
         raw = await request.body()
         try:
             await ingest_notification(raw)

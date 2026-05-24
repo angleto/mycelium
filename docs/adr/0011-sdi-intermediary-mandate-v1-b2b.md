@@ -55,7 +55,7 @@ independently (consistent with the per-P.IVA `conservation_adhesion`). The
 intermediary payload (`IdTrasmittente` = channel holder,
 `TerzoIntermediarioOSoggettoEmittente`, `SoggettoEmittente=TZ`), the SdICoop
 `RiceviFile` SOAP client (mutual TLS, per-intermediary file name /
-ProgressivoInvio), the inbound `/sdi/notifica` receiver (cross-org
+ProgressivoInvio), the inbound `/sdi/notification` receiver (cross-org
 correlation by `IdentificativoSdI` via a SECURITY DEFINER resolver; FORCE
 RLS dropped on `invoices` per the 0068 pattern) and official-XSD validation
 are all present. The live SOAP transport is never exercised in CI; the exact

@@ -221,7 +221,7 @@ single GUI/REST/MCP choke point).
   FatturaPA XSD validation at transmit (`Schema_VFPA12_V1.2.3`); the per-issuer
   `SdiMandate` + `TerzoIntermediarioOSoggettoEmittente` /
   `SoggettoEmittente=TZ`; the SdICoop `RiceviFile` SOAP transport (mutual TLS) +
-  `/sdi/notifica` inbound receiver (cross-org correlation by `IdentificativoSdI`
+  `/sdi/notification` inbound receiver (cross-org correlation by `IdentificativoSdI`
   via a SECURITY DEFINER resolver). Fiscal conformance vs the v2.6 specs: the
   VAT id is stored split (`IdPaese`/`IdCodice`) with country-prefix
   normalization and a mandatory cedente P.IVA; `RiferimentoNormativo` per issuer

@@ -71,7 +71,7 @@ end-to-end per phase.
   `SdiMandate` + `TerzoIntermediarioOSoggettoEmittente` /
   `SoggettoEmittente=TZ` intermediary payload; a real SdICoop `RiceviFile`
   SOAP client over mutual TLS with a per-intermediary file name /
-  ProgressivoInvio sequence; and the inbound `/sdi/notifica` receiver that
+  ProgressivoInvio sequence; and the inbound `/sdi/notification` receiver that
   correlates RC/MC/NS/AT to the tenant by `IdentificativoSdI` (a SECURITY
   DEFINER cross-org resolver, the 0068 owner-bypass pattern). The SOAP
   envelope build + notification parse are unit-tested; the network calls are
