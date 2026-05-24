@@ -288,6 +288,93 @@ async def test_dropping_appointment_status_removes_participants() -> None:
         assert remaining == []
 
 
+async def test_participants_http_round_trip() -> None:
+    """End-to-end on the /tasks/{id}/participants surface: create
+    appointment, add participant, list, delete, list empty."""
+    from httpx import ASGITransport, AsyncClient
+
+    from flow_api.main import app
+
+    a_email = _email()
+    b_email = _email()
+    async with admin_session() as s:
+        a = await signup(s, email=a_email, password="pw-strong-123", org_name="HTTP")
+        b = await signup(s, email=b_email, password="pw-strong-123", org_name="OTHER")
+    org, owner = a.org_id, a.user_id
+    async with tenant_session(str(org), str(owner)) as s:
+        await mem_svc.add_member(s, org_id=org, actor_id=owner, email=b_email, role="member")
+        await actors_svc.mint_user_handle(s, user_id=owner, seed=a_email)
+        await actors_svc.mint_user_handle(s, user_id=b.user_id, seed=b_email)
+        owner_ident = await identities_svc.ensure_for_user(s, org_id=org, user_id=owner)
+        collab_ident = await identities_svc.ensure_for_user(s, org_id=org, user_id=b.user_id)
+
+    # Use the API to do everything else.
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as c:
+        # Sign in as the owner to get a token.
+        tok_resp = await c.post("/auth/login", json={"email": a_email, "password": "pw-strong-123"})
+        h = {
+            "Authorization": f"Bearer {tok_resp.json()['token']}",
+            "X-Workspace-Id": str(org),
+            "X-Workspace-Role": "owner",
+        }
+        # Create an appointment-task via /tasks.
+        appt_resp = await c.post(
+            "/tasks",
+            headers=h,
+            json={
+                "title": "HTTP appt",
+                "assignee_id": str(owner_ident.id),
+                "start_at": _T0.isoformat(),
+                "duration_minutes": 30,
+                "executor_kind": "human",
+                "necessity": "should",
+                "priority": 3,
+            },
+        )
+        assert appt_resp.status_code == 200, appt_resp.text
+        task_id = appt_resp.json()["id"]
+        # Add the collab as a participant.
+        add_resp = await c.post(
+            f"/tasks/{task_id}/participants",
+            headers=h,
+            json={"identity_id": str(collab_ident.id)},
+        )
+        assert add_resp.status_code == 200, add_resp.text
+        body = add_resp.json()
+        assert body["identity_id"] == str(collab_ident.id)
+        assert body["kind"] == "user"
+        assert body["duration_minutes"] == 30
+        # List shows both the assignee (mirror) and the explicit participant.
+        list_resp = await c.get(f"/tasks/{task_id}/participants", headers=h)
+        assert list_resp.status_code == 200
+        ids = {row["identity_id"] for row in list_resp.json()}
+        assert ids == {str(owner_ident.id), str(collab_ident.id)}
+        # Remove the collab.
+        del_resp = await c.delete(f"/tasks/{task_id}/participants/{collab_ident.id}", headers=h)
+        assert del_resp.status_code == 204
+        list2 = await c.get(f"/tasks/{task_id}/participants", headers=h)
+        assert {r["identity_id"] for r in list2.json()} == {str(owner_ident.id)}
+        # Adding to a plain task -> 422 DomainError.
+        plain_resp = await c.post(
+            "/tasks",
+            headers=h,
+            json={
+                "title": "Plain",
+                "executor_kind": "human",
+                "necessity": "should",
+                "priority": 3,
+            },
+        )
+        plain_id = plain_resp.json()["id"]
+        bad = await c.post(
+            f"/tasks/{plain_id}/participants",
+            headers=h,
+            json={"identity_id": str(collab_ident.id)},
+        )
+        assert bad.status_code in (400, 422), bad.text
+
+
 async def test_two_overlapping_appointments_with_same_participant_rejected() -> None:
     """The user's own scenario: two different events both list the
     collaborator as a participant and overlap in time. The second must

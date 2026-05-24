@@ -498,6 +498,26 @@ class ExpectedVersionIn(BaseModel):
     expected_version: int = Field(ge=1)
 
 
+class ParticipantIn(BaseModel):
+    """Body of POST /tasks/{id}/participants. The identity must belong
+    to the workspace; pinning to a plain task / reminder is rejected
+    with 422 (no time slot to occupy)."""
+
+    identity_id: uuid.UUID
+
+
+class ParticipantOut(BaseModel):
+    """One row of GET /tasks/{id}/participants. The identity ``handle``
+    and ``kind`` are denormalised for the SPA so it can render the
+    badge without a second /identities lookup. Migration 0095."""
+
+    identity_id: uuid.UUID
+    handle: str
+    kind: str  # 'user' | 'ai_assistant' (identity_kind)
+    start_at: datetime.datetime
+    duration_minutes: int
+
+
 class TaskOut(BaseModel):
     id: uuid.UUID
     title: str

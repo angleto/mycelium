@@ -18,6 +18,8 @@ from flow_api.schemas import (
     ExpectedVersionIn,
     HandoffOut,
     NoteOut,
+    ParticipantIn,
+    ParticipantOut,
     ReminderIn,
     ReminderOut,
     StateOut,
@@ -42,6 +44,7 @@ from flow_core.services import coordination as coord_svc
 from flow_core.services import note_links as note_links_svc
 from flow_core.services import notes as notes_svc
 from flow_core.services import notifications as notif_svc
+from flow_core.services import participants as part_svc
 from flow_core.services import tasks as svc
 from flow_core.services import workflow as wf
 
@@ -625,6 +628,75 @@ async def list_comments(
 ) -> list[CommentOut]:
     rows = await svc.list_comments(ctx.session, org_id=ctx.org_id, task_id=task_id)
     return [_comment_out(c) for c in rows]
+
+
+# Participants on appointment-tasks (migration 0095/0096, ADR-0008
+# addendum). Only available when the task carries start_at +
+# duration_minutes; pinning to a plain task / reminder returns 422
+# (DomainError -> 422). Overlap rejection surfaces as 409 with
+# MessageCode.EVENT_OVERLAP, same code as the assignee-axis check.
+@router.get("/{task_id}/participants", response_model=list[ParticipantOut])
+async def list_participants_endpoint(
+    task_id: uuid.UUID, ctx: Annotated[TenantCtx, Depends(tenant_ctx)]
+) -> list[ParticipantOut]:
+    rows = await part_svc.list_participants(ctx.session, org_id=ctx.org_id, task_id=task_id)
+    return [
+        ParticipantOut(
+            identity_id=p.identity_id,
+            handle=i.handle,
+            kind=i.kind.value,
+            start_at=p.start_at,
+            duration_minutes=p.duration_minutes,
+        )
+        for p, i in rows
+    ]
+
+
+@router.post("/{task_id}/participants", response_model=ParticipantOut)
+async def add_participant_endpoint(
+    task_id: uuid.UUID,
+    body: ParticipantIn,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+) -> ParticipantOut:
+    row = await part_svc.add_participant(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        task_id=task_id,
+        identity_id=body.identity_id,
+    )
+    # Re-read the identity so the response carries the handle/kind
+    # the SPA needs to render without a second round-trip.
+    from flow_core.services import identities as identities_svc
+
+    identity = await identities_svc.get_identity(
+        ctx.session, org_id=ctx.org_id, identity_id=row.identity_id
+    )
+    return ParticipantOut(
+        identity_id=row.identity_id,
+        handle=identity.handle,
+        kind=identity.kind.value,
+        start_at=row.start_at,
+        duration_minutes=row.duration_minutes,
+    )
+
+
+@router.delete(
+    "/{task_id}/participants/{identity_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def remove_participant_endpoint(
+    task_id: uuid.UUID,
+    identity_id: uuid.UUID,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+) -> None:
+    await part_svc.remove_participant(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        task_id=task_id,
+        identity_id=identity_id,
+    )
 
 
 @router.post("/{task_id}/attachments", response_model=AttachmentOut)
