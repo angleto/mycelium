@@ -102,7 +102,7 @@ jobs:
           BUILT_AT: ${{ steps.src.outputs.built_at }}
         run: |
           set -euo pipefail
-          for c in backend worker frontend; do
+          for c in backend worker frontend sdi-inbound; do
             echo "::group::build $c:$TAG"
             docker buildx build --platform linux/arm64 \
               -f docker/$c.Dockerfile \
@@ -113,4 +113,4 @@ jobs:
               --push .
             echo "::endgroup::"
           done
-          echo "Pushed: ghcr.io/angleto/flow/{backend,worker,frontend}:$TAG"
+          echo "Pushed: ghcr.io/angleto/flow/{backend,worker,frontend,sdi-inbound}:$TAG"
