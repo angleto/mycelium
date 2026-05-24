@@ -28,7 +28,9 @@ function M.check()
     warn("could not read `--version` output")
   end
 
-  local res = vim.system({ bin, "auth", "status", "--json" }, { text = true }):wait()
+  -- ``--json`` is a top-level flag on the CLI (set in the root callback),
+  -- not a sub-command flag, so it must come BEFORE ``auth``.
+  local res = vim.system({ bin, "--json", "auth", "status" }, { text = true }):wait()
   if res.code == 0 then
     ok("credential present and reachable")
   else
