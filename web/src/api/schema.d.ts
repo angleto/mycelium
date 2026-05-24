@@ -6593,6 +6593,8 @@ export interface components {
             created_by_handle?: string | null;
             /** Created By Kind */
             created_by_kind?: string | null;
+            /** Created By Label */
+            created_by_label?: string | null;
             /**
              * Owner Id
              * Format: uuid

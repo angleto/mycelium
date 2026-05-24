@@ -634,13 +634,16 @@ export function TaskDetailRoute() {
             handle={task.assignee_handle ?? null}
           />
         </p>
-      ) : task.created_by_kind === 'ai_assistant' ? (
+      ) : task.created_by_kind === 'ai_assistant' ||
+        task.created_by_kind === 'mcp_token' ? (
         <p>
           <IdentityBadge
             kind={task.created_by_kind}
             handle={task.created_by_handle ?? null}
+            label={task.created_by_label ?? null}
             title={t('tasks.aiCreatedTitle', {
-              handle: task.created_by_handle ?? '',
+              handle:
+                task.created_by_label ?? task.created_by_handle ?? '',
             })}
           />
         </p>

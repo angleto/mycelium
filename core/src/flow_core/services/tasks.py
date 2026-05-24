@@ -125,6 +125,12 @@ async def create_task(
     # with the ai_assistant identity when the principal is an agent
     # token, so AI-created tasks are identifiable.
     created_by_identity_id: uuid.UUID | None = None,
+    # migration 0093: the agent_token behind the call when the
+    # principal is an mcp_token. Set unconditionally by the MCP layer
+    # for the HTTP transport (regardless of whether the token has an
+    # ``assistant_id`` bound), so a bare token still surfaces AI
+    # authorship through ``agent_tokens.name`` in the serializer.
+    created_by_token_id: uuid.UUID | None = None,
 ) -> Task:
     await require_role(session, org_id, actor_id, Role.member)
     if parent_task_id is not None:
@@ -220,6 +226,7 @@ async def create_task(
         necessity=necessity,
         budget_id=budget_id,
         created_by_identity_id=created_by_identity_id,
+        created_by_token_id=created_by_token_id,
     )
     session.add(task)
     await session.flush()

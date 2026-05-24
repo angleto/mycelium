@@ -56,6 +56,7 @@ def _out(
     assignee_kind: str | None = None,
     created_by_handle: str | None = None,
     created_by_kind: str | None = None,
+    created_by_label: str | None = None,
 ) -> TaskOut:
     from flow_core.models.task import ExecKind
 
@@ -87,6 +88,7 @@ def _out(
         created_by_identity_id=t.created_by_identity_id,
         created_by_handle=created_by_handle,
         created_by_kind=created_by_kind,
+        created_by_label=created_by_label,
         owner_id=t.owner_id,
         executor_kind=eff_kind,
         estimate_effort_h=t.estimate_effort_h,
@@ -164,22 +166,68 @@ async def _assignee_idents(
 
 async def _creator_idents(
     ctx: TenantCtx, task_ids: set[uuid.UUID]
-) -> dict[uuid.UUID, tuple[str, str]]:
-    """Per-task (handle, kind) of the ``created_by_identity_id``
-    identity (migration 0091). Lets the SPA tag AI-created tasks even
-    when the assignee is empty."""
+) -> dict[uuid.UUID, tuple[str, str, str | None]]:
+    """Per-task ``(handle, kind, label)`` of the AI assistant identity
+    behind ``created_by_identity_id``. ``label`` is
+    ``ai_assistants.label`` (the user-facing display name) when the
+    identity is an ai_assistant; ``None`` otherwise — the user-side
+    handle is in the ``handle`` slot. Migrations 0091/0093."""
     if not task_ids:
         return {}
+    from flow_core.models.ai_assistant import AiAssistant
     from flow_core.models.identity import Identity
 
     rows = (
         await ctx.session.execute(
-            select(Task.id, Identity.handle, Identity.kind)
+            select(Task.id, Identity.handle, Identity.kind, AiAssistant.label)
             .join(Identity, Identity.id == Task.created_by_identity_id)
+            .outerjoin(AiAssistant, AiAssistant.id == Identity.ai_assistant_id)
             .where(Task.id.in_(task_ids))
         )
     ).all()
-    return {tid: (handle, kind.value) for tid, handle, kind in rows}
+    return {tid: (handle, kind.value, label) for tid, handle, kind, label in rows}
+
+
+async def _creator_tokens(ctx: TenantCtx, task_ids: set[uuid.UUID]) -> dict[uuid.UUID, str]:
+    """Per-task ``agent_tokens.name`` for tasks that recorded a token
+    id but no identity (bare MCP tokens — migration 0093). Lets the
+    SPA badge AI authorship even before the legacy token is upgraded
+    to the ai_assistants flow."""
+    if not task_ids:
+        return {}
+    from flow_core.models.agent_token import AgentToken
+
+    rows = (
+        await ctx.session.execute(
+            select(Task.id, AgentToken.name)
+            .join(AgentToken, AgentToken.id == Task.created_by_token_id)
+            .where(Task.id.in_(task_ids))
+        )
+    ).all()
+    return {tid: name for tid, name in rows}
+
+
+def _resolve_creator(
+    task: Task,
+    idents: dict[uuid.UUID, tuple[str, str, str | None]],
+    tokens: dict[uuid.UUID, str],
+) -> tuple[str | None, str | None, str | None]:
+    """Collapse the identity + token lookups into the three serializer
+    slots ``(handle, kind, label)``. Precedence: an ai_assistant
+    identity wins (kind=ai_assistant, label=ai_assistants.label,
+    handle=identities.handle); else a bare token marks the task as
+    AI authored too (kind=mcp_token, label=agent_tokens.name); else
+    the user identity (kind=user, handle=identities.handle)."""
+    ident = idents.get(task.id)
+    if ident is not None:
+        handle, kind, ai_label = ident
+        if kind == "ai_assistant":
+            return handle, kind, ai_label or handle
+        return handle, kind, None
+    token_name = tokens.get(task.id)
+    if token_name is not None:
+        return None, "mcp_token", token_name
+    return None, None, None
 
 
 async def _state_names(ctx: TenantCtx, state_ids: set[uuid.UUID]) -> dict[uuid.UUID, str]:
@@ -227,8 +275,9 @@ async def create_task(
     tagmap = await svc.tags_by_task(ctx.session, task_ids=[task.id])
     idents = await _assignee_idents(ctx, {task.id})
     creators = await _creator_idents(ctx, {task.id})
+    ctokens = await _creator_tokens(ctx, {task.id})
     h, k = idents.get(task.id, (None, None))
-    ch, ck = creators.get(task.id, (None, None))
+    ch, ck, cl = _resolve_creator(task, creators, ctokens)
     return _out(
         task,
         names.get(task.state_id, ""),
@@ -237,6 +286,7 @@ async def create_task(
         assignee_kind=k,
         created_by_handle=ch,
         created_by_kind=ck,
+        created_by_label=cl,
     )
 
 
@@ -275,10 +325,11 @@ async def list_tasks(
     ids = {t.id for t in rows}
     idents = await _assignee_idents(ctx, ids)
     creators = await _creator_idents(ctx, ids)
+    ctokens = await _creator_tokens(ctx, ids)
     out: list[TaskOut] = []
     for t in rows:
         h, k = idents.get(t.id, (None, None))
-        ch, ck = creators.get(t.id, (None, None))
+        ch, ck, cl = _resolve_creator(t, creators, ctokens)
         out.append(
             _out(
                 t,
@@ -288,6 +339,7 @@ async def list_tasks(
                 assignee_kind=k,
                 created_by_handle=ch,
                 created_by_kind=ck,
+                created_by_label=cl,
             )
         )
     return out
@@ -303,8 +355,9 @@ async def get_task(task_id: uuid.UUID, ctx: Annotated[TenantCtx, Depends(tenant_
     tagmap = await svc.tags_by_task(ctx.session, task_ids=[task.id])
     idents = await _assignee_idents(ctx, {task.id})
     creators = await _creator_idents(ctx, {task.id})
+    ctokens = await _creator_tokens(ctx, {task.id})
     h, k = idents.get(task.id, (None, None))
-    ch, ck = creators.get(task.id, (None, None))
+    ch, ck, cl = _resolve_creator(task, creators, ctokens)
     return _out(
         task,
         names.get(task.state_id, ""),
@@ -313,6 +366,7 @@ async def get_task(task_id: uuid.UUID, ctx: Annotated[TenantCtx, Depends(tenant_
         assignee_kind=k,
         created_by_handle=ch,
         created_by_kind=ck,
+        created_by_label=cl,
     )
 
 
@@ -667,8 +721,9 @@ async def _task_out(ctx: TenantCtx, task: Task) -> TaskOut:
     tagmap = await svc.tags_by_task(ctx.session, task_ids=[task.id])
     idents = await _assignee_idents(ctx, {task.id})
     creators = await _creator_idents(ctx, {task.id})
+    ctokens = await _creator_tokens(ctx, {task.id})
     h, k = idents.get(task.id, (None, None))
-    ch, ck = creators.get(task.id, (None, None))
+    ch, ck, cl = _resolve_creator(task, creators, ctokens)
     return _out(
         task,
         names.get(task.state_id, ""),
@@ -677,6 +732,7 @@ async def _task_out(ctx: TenantCtx, task: Task) -> TaskOut:
         assignee_kind=k,
         created_by_handle=ch,
         created_by_kind=ck,
+        created_by_label=cl,
     )
 
 

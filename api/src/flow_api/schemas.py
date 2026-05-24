@@ -429,6 +429,15 @@ class TaskCreateIn(BaseModel):
     budget_id: uuid.UUID | None = None
     tag_ids: list[uuid.UUID] = Field(default_factory=list)
     assignee_ids: list[uuid.UUID] = Field(default_factory=list)
+    # Appointment unification (migration 0094). When ``start_at`` and
+    # ``duration_minutes`` are both set the task is a calendar
+    # appointment subject to the no-overlap constraint per assignee.
+    # Pairing is enforced by the CHECK constraint (both set or both
+    # NULL); a partial input raises 422 at the service layer.
+    start_at: datetime.datetime | None = None
+    duration_minutes: int | None = Field(default=None, ge=1)
+    # Recurrence spec consumed by the recurrence engine. Free-form jsonb.
+    recurrence: dict[str, Any] | None = None
 
 
 class TaskPatchIn(BaseModel):
@@ -456,6 +465,12 @@ class TaskPatchIn(BaseModel):
     location: str | None = Field(default=None, max_length=200)
     necessity: Necessity | None = None
     budget_id: uuid.UUID | None = None
+    # Appointment unification (migration 0094). Patch can set/clear
+    # the pair atomically: both fields together. Recurrence is
+    # independent and can be patched on its own.
+    start_at: datetime.datetime | None = None
+    duration_minutes: int | None = Field(default=None, ge=1)
+    recurrence: dict[str, Any] | None = None
 
 
 class TaskStateIn(BaseModel):
@@ -517,6 +532,12 @@ class TaskOut(BaseModel):
     created_by_identity_id: uuid.UUID | None = None
     created_by_handle: str | None = None
     created_by_kind: str | None = None
+    # migration 0093: display label for the creator. For an
+    # ai_assistant-bound identity it is ``ai_assistants.label``; for a
+    # bare MCP token it is ``agent_tokens.name`` and ``created_by_kind``
+    # is set to ``mcp_token`` (vs ``ai_assistant`` when the assistant
+    # row exists). The SPA renders the bot icon for both kinds.
+    created_by_label: str | None = None
     owner_id: uuid.UUID
     # ``executor_kind`` is re-exposed for SPA backward compat
     # (cards/filters/graph still consume it). The serializer fills it

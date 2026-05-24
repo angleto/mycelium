@@ -1,10 +1,11 @@
-// Punto 4 ADR-0028: distinguish at a glance who an assignee is — a
-// human user or an AI agent — in task/note list rows. Visually
-// distinct from TagChip (no tag color, no kind glyph) because identity
-// is a separate axis from tags. The icon doubles as the screen-reader
-// label; the handle is rendered next to it when present.
+// Punto 4 ADR-0028 (+ migration 0093): distinguish at a glance who an
+// assignee or a creator is — a human user, an AI assistant bound to an
+// identity, or a bare MCP agent_token (legacy). Visually distinct from
+// TagChip (no tag color, no kind glyph) because identity is a separate
+// axis from tags. The icon doubles as the screen-reader label; the
+// label (or handle) is rendered next to it when present.
 
-type Kind = 'user' | 'ai_assistant' | string | null | undefined
+type Kind = 'user' | 'ai_assistant' | 'mcp_token' | string | null | undefined
 
 function HumanIcon() {
   return (
@@ -48,33 +49,39 @@ function BotIcon() {
 export function IdentityBadge({
   kind,
   handle,
+  label,
   title,
   className,
 }: {
   kind: Kind
+  // Workspace-unique handle (user identity or ai_assistant handle).
+  // Used when no ``label`` is available.
   handle?: string | null
+  // Human-readable display name (ai_assistants.label, or
+  // agent_tokens.name for a bare MCP token). Wins over ``handle`` for
+  // rendering when present, so the SPA shows the friendly name the
+  // operator picked in Settings rather than the slug.
+  label?: string | null
   title?: string
   className?: string
 }) {
-  const isBot = kind === 'ai_assistant'
+  // "mcp_token" is a bare agent_token (no ai_assistants row bound); it
+  // is still an AI for badging purposes — same icon, label from the
+  // token name.
+  const isBot = kind === 'ai_assistant' || kind === 'mcp_token'
   const isHuman = kind === 'user'
   if (!isBot && !isHuman) return null
   const cls = ['idbadge', `idbadge--${isBot ? 'bot' : 'human'}`, className]
     .filter(Boolean)
     .join(' ')
+  const display = label || handle || (isBot ? 'AI' : 'User')
   const t =
     title ??
-    (isBot
-      ? handle
-        ? `Bot: ${handle}`
-        : 'Bot'
-      : handle
-        ? `User: ${handle}`
-        : 'User')
+    (isBot ? `Bot: ${display}` : `User: ${display}`)
   return (
     <span className={cls} title={t}>
       {isBot ? <BotIcon /> : <HumanIcon />}
-      {handle ? <span className="idbadge__handle">{handle}</span> : null}
+      <span className="idbadge__handle">{display}</span>
     </span>
   )
 }

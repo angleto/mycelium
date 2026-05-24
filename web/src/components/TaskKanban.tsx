@@ -168,12 +168,17 @@ export function TaskKanban({
                             kind={tk.assignee_kind}
                             handle={tk.assignee_handle ?? null}
                           />
-                        ) : tk.created_by_kind === 'ai_assistant' ? (
+                        ) : tk.created_by_kind === 'ai_assistant' ||
+                          tk.created_by_kind === 'mcp_token' ? (
                           <IdentityBadge
                             kind={tk.created_by_kind}
                             handle={tk.created_by_handle ?? null}
+                            label={tk.created_by_label ?? null}
                             title={t('tasks.aiCreatedTitle', {
-                              handle: tk.created_by_handle ?? '',
+                              handle:
+                                tk.created_by_label ??
+                                tk.created_by_handle ??
+                                '',
                             })}
                           />
                         ) : tk.executor_kind === 'llm_agent' ? (

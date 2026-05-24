@@ -138,18 +138,23 @@ async def _tenant(
         yield session, org, user_id
 
 
-async def _resolve_agent_identity(session: AsyncSession, org: uuid.UUID) -> uuid.UUID | None:
-    """Return the ai_assistant identity bound to the agent token used
-    by the current MCP call, or ``None`` for stdio / human-bearer
-    requests. The lookup walks ``agent_tokens.assistant_id ->
-    ai_assistants -> identities`` so the principal that just signed
-    in is the row that owns the action being audited."""
+async def _resolve_agent_context(
+    session: AsyncSession, org: uuid.UUID
+) -> tuple[uuid.UUID | None, uuid.UUID | None]:
+    """Return ``(ai_assistant_identity_id, agent_token_id)`` for the
+    current MCP call, or ``(None, None)`` for stdio / human-bearer
+    requests. The identity is resolved through
+    ``agent_tokens.assistant_id -> ai_assistants -> identities`` and
+    is therefore ``None`` for bare tokens (assistant_id IS NULL,
+    pre-migration 0059). The token id is returned in both cases so
+    AI authorship survives a bare token too — ``agent_tokens.name``
+    becomes the display label in the serializer (migration 0093)."""
     principal = _PRINCIPAL.get()
     if principal is None:
-        return None
+        return None, None
     _user_id, _org, token_id = principal
     if token_id is None:
-        return None
+        return None, None
     from sqlalchemy import select as _sel
 
     from flow_core.models.agent_token import AgentToken
@@ -165,7 +170,8 @@ async def _resolve_agent_identity(session: AsyncSession, org: uuid.UUID) -> uuid
             Identity.org_id == org,
         )
     )
-    return row.scalar_one_or_none()
+    identity_id = row.scalar_one_or_none()
+    return identity_id, token_id
 
 
 @mcp.tool()
@@ -491,11 +497,13 @@ async def create_task(
     ``required_capabilities`` (docs/adr/0025 P2) are the capabilities the
     task needs from its executor (empty = any enabled agent)."""
     async with _tenant(token, org_id) as (s, org, user):
-        # When the MCP call is authenticated with an agent token bound
-        # to an ai_assistant (HTTP transport), record the ai_assistant
-        # as the task's creator identity so /tasks can tell apart
-        # AI-created tasks from human-created ones (ADR-0028 Punto 4).
-        creator_identity_id = await _resolve_agent_identity(s, org)
+        # When the MCP call is authenticated with an agent token
+        # (HTTP transport), record the ai_assistant identity (if the
+        # token is bound to one) AND the token id itself, so /tasks
+        # can render an AI badge whether or not the token has been
+        # upgraded to the ai_assistants flow (migrations 0059 / 0091
+        # / 0093 in concert).
+        creator_identity_id, creator_token_id = await _resolve_agent_context(s, org)
         task = await tasks.create_task(
             s,
             org_id=org,
@@ -516,6 +524,7 @@ async def create_task(
             tag_ids=[uuid.UUID(t) for t in (tag_ids or [])],
             assignee_ids=[uuid.UUID(u) for u in (assignee_ids or [])],
             created_by_identity_id=creator_identity_id,
+            created_by_token_id=creator_token_id,
         )
         return _task(task)
 

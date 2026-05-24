@@ -8,11 +8,13 @@ import datetime
 import enum
 import uuid
 from decimal import Decimal
+from typing import Any
 
 from sqlalchemy import (
     Date,
     DateTime,
     ForeignKey,
+    Integer,
     Numeric,
     SmallInteger,
     String,
@@ -20,7 +22,7 @@ from sqlalchemy import (
     text,
 )
 from sqlalchemy import Enum as SAEnum
-from sqlalchemy.dialects.postgresql import ARRAY
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -162,6 +164,16 @@ class Task(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, Base):
         ForeignKey("identities.id", ondelete="SET NULL"),
         nullable=True,
     )
+    # migration 0093: when the principal is an mcp_token, we also
+    # record the token id directly so AI authorship survives a "bare"
+    # token (assistant_id IS NULL — pre-migration 0059 credentials).
+    # ai_assistants.label / agent_tokens.name then provides the display
+    # label and the SPA renders the bot icon regardless.
+    created_by_token_id: Mapped[uuid.UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("agent_tokens.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     # Scheduler fields (F3). Defaults keep earlier phases unaffected.
     remaining_effort_h: Mapped[Decimal | None] = mapped_column(Numeric(8, 2), nullable=True)
     actual_start: Mapped[datetime.datetime | None] = mapped_column(
@@ -205,3 +217,18 @@ class Task(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, Base):
         nullable=True,
         index=True,
     )
+    # Appointment unification (migration 0094, ADR-0008 addendum).
+    # ``start_at`` + ``duration_minutes`` together turn a task into a
+    # calendar appointment: fixed-time interval, no-ubiquity per
+    # ``assignee_id`` enforced by a GiST EXCLUDE constraint. The two
+    # are paired (CHECK constraint): both NULL = plain task / reminder,
+    # both NOT NULL = appointment. ``due_date`` (date) remains the
+    # legacy deadline column; appointments use ``start_at`` instead.
+    start_at: Mapped[datetime.datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    duration_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Recurrence spec consumed by the recurrence engine. Shape is
+    # intentionally not constrained at the column level (jsonb): the
+    # engine validates it. Empty / NULL = one-shot.
+    recurrence: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)

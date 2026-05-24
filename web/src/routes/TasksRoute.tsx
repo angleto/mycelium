@@ -757,15 +757,18 @@ export function TasksRoute() {
                       kind={tk.assignee_kind}
                       handle={tk.assignee_handle ?? null}
                     />
-                  ) : tk.created_by_kind === 'ai_assistant' ? (
-                    // Created by an AI assistant through MCP; show the
-                    // creator badge so the row stays identifiable even
-                    // when no assignee is set.
+                  ) : tk.created_by_kind === 'ai_assistant' ||
+                    tk.created_by_kind === 'mcp_token' ? (
+                    // Created by an AI agent (identity-bound or bare
+                    // MCP token); badge is always bot, label comes from
+                    // ai_assistants.label OR agent_tokens.name.
                     <IdentityBadge
                       kind={tk.created_by_kind}
                       handle={tk.created_by_handle ?? null}
+                      label={tk.created_by_label ?? null}
                       title={t('tasks.aiCreatedTitle', {
-                        handle: tk.created_by_handle ?? '',
+                        handle:
+                          tk.created_by_label ?? tk.created_by_handle ?? '',
                       })}
                     />
                   ) : tk.executor_kind === 'llm_agent' ? (
