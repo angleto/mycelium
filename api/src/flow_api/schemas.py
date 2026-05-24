@@ -5,6 +5,7 @@ from __future__ import annotations
 import datetime
 import uuid
 from decimal import Decimal
+from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 
