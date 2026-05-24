@@ -5,6 +5,7 @@ import { api, errMessage, workspaceHeader } from '../api/client'
 import { RichEditor } from '../components/RichEditor'
 import { AssigneePicker } from '../components/AssigneePicker'
 import { OwnerPicker } from '../components/OwnerPicker'
+import { ParticipantsSection } from '../components/ParticipantsSection'
 import { TagPicker } from '../components/TagPicker'
 import { PriorityChip } from '../components/PriorityChip'
 import { IdentityBadge } from '../components/IdentityBadge'
@@ -1061,6 +1062,13 @@ export function TaskDetailRoute() {
             </li>
           ))}
         </ul>
+      )}
+
+      {task.duration_minutes != null && task.start_at != null && (
+        <ParticipantsSection
+          taskId={id}
+          assigneeIdentityId={task.assignee_id ?? null}
+        />
       )}
 
       <h2>{t('attach.title')}</h2>

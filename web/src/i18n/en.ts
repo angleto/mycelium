@@ -551,6 +551,16 @@ export const en = {
     event: 'Appointment',
     eventTitle: 'Appointment {{when}} · {{minutes}} min',
   },
+  participants: {
+    title: 'Participants',
+    hint: 'Other people / agents pinned to this appointment. Each cannot hold another overlapping event.',
+    none: 'No participants yet.',
+    assignee: '(assignee)',
+    add: 'Add a participant…',
+    remove: 'Remove participant',
+    noMatch: 'No match',
+    overlap: 'Already busy in another overlapping appointment.',
+  },
   ownerPicker: {
     none: 'No owner',
     search: 'Search a user…',

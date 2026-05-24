@@ -57,14 +57,24 @@ async def add_participant(
     org_id: uuid.UUID,
     actor_id: uuid.UUID,
     task_id: uuid.UUID,
-    identity_id: uuid.UUID,
+    identity_id: uuid.UUID | None = None,
+    handle: str | None = None,
 ) -> TaskParticipant:
-    """Pin ``identity_id`` to the appointment-task's window. Idempotent
-    on the same ``(task_id, identity_id)`` pair (returns the existing
-    row). Raises ConflictError(EVENT_OVERLAP) when the identity already
-    holds another appointment overlapping the task's window."""
+    """Pin an identity to the appointment-task's window. Accepts either
+    ``identity_id`` (uuid) or ``handle`` (looked up in the workspace's
+    org). Idempotent on the same ``(task_id, identity_id)`` pair
+    (returns the existing row). Raises ConflictError(EVENT_OVERLAP)
+    when the identity already holds another appointment overlapping
+    the task's window."""
     await require_role(session, org_id, actor_id, Role.member)
     task = await _require_appointment_task(session, org_id=org_id, task_id=task_id)
+    if identity_id is None and handle:
+        identity = await identities_svc.lookup_by_handle(session, org_id=org_id, handle=handle)
+        if identity is None:
+            raise DomainError(MessageCode.DOMAIN_ERROR)
+        identity_id = identity.id
+    if identity_id is None:
+        raise DomainError(MessageCode.DOMAIN_ERROR)
     # Identity must belong to this org (FK alone is org-agnostic).
     await identities_svc.get_identity(session, org_id=org_id, identity_id=identity_id)
 

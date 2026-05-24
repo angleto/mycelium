@@ -499,11 +499,14 @@ class ExpectedVersionIn(BaseModel):
 
 
 class ParticipantIn(BaseModel):
-    """Body of POST /tasks/{id}/participants. The identity must belong
-    to the workspace; pinning to a plain task / reminder is rejected
-    with 422 (no time slot to occupy)."""
+    """Body of POST /tasks/{id}/participants. Pass either
+    ``identity_id`` (UUID into ``identities``) or ``handle`` (the
+    user/assistant handle the picker carries); the service resolves
+    the handle through ``identities`` in the workspace's org. At
+    least one must be set; ``identity_id`` wins if both are passed."""
 
-    identity_id: uuid.UUID
+    identity_id: uuid.UUID | None = None
+    handle: str | None = Field(default=None, max_length=40)
 
 
 class ParticipantOut(BaseModel):

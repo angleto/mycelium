@@ -550,6 +550,16 @@ export const it: Catalog = {
     event: 'Appuntamento',
     eventTitle: 'Appuntamento {{when}} · {{minutes}} min',
   },
+  participants: {
+    title: 'Partecipanti',
+    hint: 'Altre persone / agenti vincolati a questo appuntamento. Ognuno non puo avere un altro evento sovrapposto.',
+    none: 'Nessun partecipante.',
+    assignee: '(responsabile)',
+    add: 'Aggiungi un partecipante…',
+    remove: 'Rimuovi partecipante',
+    noMatch: 'Nessun risultato',
+    overlap: 'Gia occupato in un altro appuntamento sovrapposto.',
+  },
   ownerPicker: {
     none: 'Nessun responsabile',
     search: 'Cerca un utente…',

@@ -664,6 +664,7 @@ async def add_participant_endpoint(
         actor_id=ctx.user_id,
         task_id=task_id,
         identity_id=body.identity_id,
+        handle=body.handle,
     )
     # Re-read the identity so the response carries the handle/kind
     # the SPA needs to render without a second round-trip.
