@@ -18,25 +18,79 @@ from flow_core.services import invoice as inv
 from flow_core.services import sdi_mandate as mandate
 from flow_core.services.auth import signup
 from flow_core.services.sdi_inbound import ingest_notification, parse_notification
+from flow_core.services.sdi_notification_xsd import NS_MESSAGGI
 from flow_core.services.taxonomy import ClientInput, create_client
+
+# v1 notification fixtures are XSD-valid against MessaggiTypes_v1.1: SdI
+# rejects anything else, and so do we. The root carries the official messaggi
+# namespace; children are unqualified (the schema is elementFormDefault
+# unqualified). ``ds:Signature`` is omitted on purpose -- the validator is
+# signature-relaxed (XAdES verification is a separate, post-v1 concern).
+
+
+def _rc(ident: str) -> bytes:
+    return (
+        f'<m:RicevutaConsegna xmlns:m="{NS_MESSAGGI}" versione="1.0">'
+        f"<IdentificativoSdI>{ident}</IdentificativoSdI>"
+        f"<NomeFile>IT01234567890_00001.xml</NomeFile>"
+        f"<DataOraRicezione>2026-05-25T10:00:00</DataOraRicezione>"
+        f"<DataOraConsegna>2026-05-25T10:01:00</DataOraConsegna>"
+        f"<Destinatario><Codice>ABCDEFG</Codice><Descrizione>Acme</Descrizione></Destinatario>"
+        f"<MessageId>MID00001</MessageId>"
+        f"</m:RicevutaConsegna>"
+    ).encode()
+
+
+def _ns(ident: str) -> bytes:
+    return (
+        f'<m:NotificaScarto xmlns:m="{NS_MESSAGGI}" versione="1.0">'
+        f"<IdentificativoSdI>{ident}</IdentificativoSdI>"
+        f"<NomeFile>IT01234567890_00001.xml</NomeFile>"
+        f"<DataOraRicezione>2026-05-25T10:00:00</DataOraRicezione>"
+        f"<ListaErrori><Errore><Codice>00001</Codice>"
+        f"<Descrizione>boom</Descrizione></Errore></ListaErrori>"
+        f"<MessageId>MID00002</MessageId>"
+        f"</m:NotificaScarto>"
+    ).encode()
 
 
 def test_parse_ricevuta_consegna() -> None:
-    raw = b"<RicevutaConsegna><IdentificativoSdI>SDIX1</IdentificativoSdI></RicevutaConsegna>"
-    assert parse_notification(raw) == ("SDIX1", "RC")
+    assert parse_notification(_rc("100000000001")) == ("100000000001", "RC")
 
 
-def test_parse_scarto_with_namespace() -> None:
-    raw = (
-        b'<ns:NotificaScarto xmlns:ns="urn:x">'
-        b"<IdentificativoSdI>SDIX2</IdentificativoSdI></ns:NotificaScarto>"
-    )
-    assert parse_notification(raw) == ("SDIX2", "NS")
+def test_parse_notifica_scarto() -> None:
+    assert parse_notification(_ns("100000000002")) == ("100000000002", "NS")
 
 
-def test_parse_unknown_notification_raises() -> None:
-    with pytest.raises(ValueError):
-        parse_notification(b"<Foo><IdentificativoSdI>X</IdentificativoSdI></Foo>")
+def test_parse_rejects_lax_namespace() -> None:
+    # Bare XML without the official messaggi namespace is rejected: SdI never
+    # emits a notification without the canonical namespace; tolerating that
+    # would mask a real protocol bug.
+    bare = b"<RicevutaConsegna><IdentificativoSdI>1</IdentificativoSdI></RicevutaConsegna>"
+    with pytest.raises(ValueError, match="MessaggiTypes"):
+        parse_notification(bare)
+
+
+def test_parse_rejects_unknown_root() -> None:
+    foo = f'<m:Foo xmlns:m="{NS_MESSAGGI}"/>'.encode()
+    with pytest.raises(ValueError, match="MessaggiTypes"):
+        parse_notification(foo)
+
+
+def test_parse_rejects_missing_required_field() -> None:
+    # A RicevutaConsegna missing DataOraConsegna is structurally invalid; the
+    # XSD gate must reject it before XPath extraction.
+    incomplete = (
+        f'<m:RicevutaConsegna xmlns:m="{NS_MESSAGGI}" versione="1.0">'
+        f"<IdentificativoSdI>1</IdentificativoSdI>"
+        f"<NomeFile>x.xml</NomeFile>"
+        f"<DataOraRicezione>2026-05-25T10:00:00</DataOraRicezione>"
+        f"<Destinatario><Codice>ABCDEFG</Codice><Descrizione>A</Descrizione></Destinatario>"
+        f"<MessageId>M</MessageId>"
+        f"</m:RicevutaConsegna>"
+    ).encode()
+    with pytest.raises(ValueError, match="MessaggiTypes"):
+        parse_notification(incomplete)
 
 
 def test_inbound_app_rejects_malformed_xml_with_400() -> None:
@@ -75,9 +129,12 @@ def _coop() -> Iterator[None]:
             )
 
         async def transmit(self, *, xml: str, invoice_id: str, filename: str) -> TransmitResult:
-            # Unique per invoice so concurrent/repeated test runs never collide.
+            # IdentificativoSdI is xsd:integer with up to 12 digits per the
+            # official schema; derive a unique numeric id from the invoice
+            # UUID so concurrent/repeated test runs never collide.
+            numeric = int(invoice_id.replace("-", "")[:11], 16) % 10**12
             return TransmitResult(
-                identificativo_sdi=f"SDIINB{invoice_id[:8].upper()}",
+                identificativo_sdi=str(numeric),
                 conservation=ConservationStatus.ade_pending,
                 channel=self.name,
             )
@@ -135,16 +192,11 @@ async def test_inbound_ingest_correlates_cross_org_and_marks_delivered(_coop: No
 
     # Ingest a delivery receipt with NO tenant context: the service must
     # resolve the org cross-org by IdentificativoSdI, then apply the outcome.
-    raw = (
-        f"<RicevutaConsegna><IdentificativoSdI>{identificativo}</IdentificativoSdI>"
-        f"</RicevutaConsegna>"
-    ).encode()
-    updated = await ingest_notification(raw)
+    updated = await ingest_notification(_rc(identificativo))
     assert updated is not None
     assert updated.sdi_status is SdiStatus.RC
     assert updated.state is InvoiceState.delivered
     assert updated.conservation_status is ConservationStatus.ade_covered
 
     # An unknown IdentificativoSdI yields None (SdI may retry; never a 500).
-    unknown = b"<RicevutaConsegna><IdentificativoSdI>NOPE000</IdentificativoSdI></RicevutaConsegna>"
-    assert await ingest_notification(unknown) is None
+    assert await ingest_notification(_rc("999999999999")) is None
