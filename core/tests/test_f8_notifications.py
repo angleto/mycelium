@@ -227,7 +227,10 @@ async def test_reminder_scan_promotes_subday_on_date_only() -> None:
             enabled=True,
             target="me@example.test",
         )
-        due = (dt.datetime.now(tz=dt.UTC) + dt.timedelta(hours=6)).date()
+        # Migration 0005: due_date is timestamptz; "no time specified"
+        # is end-of-day UTC (the SPA's convention).
+        due_day = (dt.datetime.now(tz=dt.UTC) + dt.timedelta(hours=6)).date()
+        due = dt.datetime.combine(due_day, dt.time(23, 59, 59), tzinfo=dt.UTC)
         task = await tasks_svc.create_task(
             s,
             org_id=org,
@@ -258,7 +261,8 @@ async def test_reminder_scan_is_idempotent() -> None:
             enabled=True,
             target="me@example.test",
         )
-        due = (dt.datetime.now(tz=dt.UTC) + dt.timedelta(hours=12)).date()
+        due_day = (dt.datetime.now(tz=dt.UTC) + dt.timedelta(hours=12)).date()
+        due = dt.datetime.combine(due_day, dt.time(23, 59, 59), tzinfo=dt.UTC)
         await tasks_svc.create_task(
             s,
             org_id=org,

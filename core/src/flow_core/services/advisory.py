@@ -56,7 +56,8 @@ class FeasibleTask:
     title: str
     necessity: Necessity
     priority: int
-    due_date: dt.date | None
+    # Migration 0005: deadline is a timestamptz (carries time-of-day).
+    due_date: dt.datetime | None
     remaining_minutes: int
 
 
@@ -235,11 +236,14 @@ async def what_can_i_do_now(
                 remaining_minutes=minutes,
             )
         )
+    # Sentinel must match the field's type to keep sort total: a
+    # datetime always sorts as datetime, never compared to a date.
+    _DT_MAX = dt.datetime.max.replace(tzinfo=dt.UTC)
     out.sort(
         key=lambda f: (
             _NEC_RANK[f.necessity],
             f.priority,
-            f.due_date or dt.date.max,
+            f.due_date or _DT_MAX,
             f.remaining_minutes,
             str(f.task_id),
         )

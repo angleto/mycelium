@@ -6,6 +6,7 @@ import { useSession } from '../auth/useSession'
 import { kindGlyph } from '../lib/tagGlyph'
 import { useFocus } from '../lib/focus'
 import { useWorkflowStates } from '../lib/useWorkflowStates'
+import { formatDueDate } from '../lib/time'
 import type { components } from '../api/schema'
 
 type Task = components['schemas']['TaskOut']
@@ -464,7 +465,7 @@ export function GraphRoute() {
               n.title,
               tk?.state ? `state: ${tk.state}` : '',
               tk?.priority != null ? `priority: ${tk.priority}` : '',
-              tk?.due_date ? `due: ${tk.due_date}` : '',
+              tk?.due_date ? `due: ${formatDueDate(tk.due_date)}` : '',
               tagsLine ? `tags: ${tagsLine}` : '',
               tk?.executor_kind === 'llm_agent' ? 'AI agent' : '',
             ].filter(Boolean)

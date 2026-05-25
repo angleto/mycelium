@@ -537,13 +537,17 @@ export const it: Catalog = {
     },
     search: 'Cerca titolo, @tag, state:in_progress, due:today, priority:<=4...',
     searchHint:
-      "Testo libero su titolo o nome tag. Filtri: @tagname (o !@tagname per escludere), state:NAME, state:!NAME, due:today | tomorrow | overdue | none | +Nd | -Nd | YYYY-MM-DD, priority:<=N (o <,>,>=,=), executor:human | llm_agent | offered, actor:human | bot (badge della card). Spazi = AND, | = OR.",
+      "Testo libero: ricerca server-side ibrida (FTS + semantica) su titolo, descrizione, checklist e tag. Filtri: @tagname (o !@tagname per escludere), state:NAME, state:!NAME, due:today | tomorrow | overdue | none | +Nd | -Nd | YYYY-MM-DD, priority:<=N (o <,>,>=,=), executor:human | llm_agent | offered, actor:human | bot (badge della card). Spazi = AND, | = OR.",
+    searching: 'ricerca…',
+    searchingHint:
+      'Ricerca server in corso (titolo + descrizione + checklist + semantica).',
     estimate: 'Stima (h)',
     estNone: '— nessuna —',
     estCustom: 'Personalizzato...',
     estPick: 'Preset…',
     estPlaceholder: 'Stima',
     due: 'Scadenza',
+    dueTime: 'Ora (opzionale)',
     billable: 'Fatturabile',
     billInherit: 'Eredita dal progetto',
     billYes: 'Fatturabile',

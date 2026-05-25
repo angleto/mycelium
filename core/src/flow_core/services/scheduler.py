@@ -136,12 +136,17 @@ def _policy_key(
     - ``throughput`` (maximize concurrent fill): shortest effort first
       so more tasks fit per unit time, then the balanced rule.
     """
+    # Sort sentinel: due_date is timestamptz (migration 0005), so a
+    # missing deadline still needs a value comparable to a real
+    # datetime. ``dt.datetime.max`` lacks tzinfo and would raise on
+    # comparison with the aware values returned by SQLAlchemy.
+    _DUE_MAX = dt.datetime.max.replace(tzinfo=dt.UTC)
     if policy is SchedulePolicy.fastest:
         return lambda x: (
             _logical_slack_min(x),
             0 if (x.ls - x.es).total_seconds() <= 0 else 1,
             x.task.priority,
-            x.task.due_date or dt.date.max,
+            x.task.due_date or _DUE_MAX,
             x.task.created_at,
             str(x.task.id),
         )
@@ -149,7 +154,7 @@ def _policy_key(
         return lambda x: (
             1 if rate_of(x) > 0 else 0,
             x.task.priority,
-            x.task.due_date or dt.date.max,
+            x.task.due_date or _DUE_MAX,
             x.task.created_at,
             str(x.task.id),
         )
@@ -157,14 +162,14 @@ def _policy_key(
         return lambda x: (
             x.duration_min,
             x.task.priority,
-            x.task.due_date or dt.date.max,
+            x.task.due_date or _DUE_MAX,
             x.task.created_at,
             str(x.task.id),
         )
     # balanced: the canonical ADR-0004 priority rule.
     return lambda x: (
         x.task.priority,
-        x.task.due_date or dt.date.max,
+        x.task.due_date or _DUE_MAX,
         x.task.created_at,
         str(x.task.id),
     )

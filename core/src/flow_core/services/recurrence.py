@@ -161,13 +161,16 @@ async def maybe_spawn_next(
         return None
     spec: dict[str, Any] = task.recurrence
     new_start_at: dt.datetime | None = None
-    new_due_date: dt.date | None = None
+    new_due_date: dt.datetime | None = None
     if task.start_at is not None:
         new_start_at = next_occurrence_datetime(task.start_at, spec)
         if new_start_at is None:
             return None
     elif task.due_date is not None:
-        new_due_date = next_occurrence_date(task.due_date, spec)
+        # Migration 0005: due_date carries a time-of-day. Use the
+        # datetime variant so we preserve hour/minute on the spawned
+        # row (a 18:00 deadline stays 18:00 next occurrence).
+        new_due_date = next_occurrence_datetime(task.due_date, spec)
         if new_due_date is None:
             return None
     else:

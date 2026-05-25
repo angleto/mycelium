@@ -1,4 +1,21 @@
 // Shared elapsed/time formatting (timer chips, running indicator).
+
+// Render a task's due_date (timestamptz since migration 0005) for the
+// SPA's compact surfaces (kanban card, list rows, graph nodes). When
+// the stored value is "end-of-day local" (the convention applied when
+// the user didn't set a time), strip the time so the card stays
+// "due tomorrow", not "due tomorrow at 23:59". Otherwise show the
+// local "YYYY-MM-DD HH:MM" so a 14:30 deadline is legible.
+export function formatDueDate(iso: string): string {
+  const d = new Date(iso)
+  if (!Number.isFinite(d.getTime())) return iso
+  const pad = (n: number) => String(n).padStart(2, '0')
+  const ymd = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+  const isEndOfDay =
+    d.getHours() === 23 && d.getMinutes() === 59 && d.getSeconds() === 59
+  return isEndOfDay ? ymd : `${ymd} ${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+
 export function hms(sec: number): string {
   const s = Math.max(0, Math.floor(sec))
   return `${Math.floor(s / 3600)}:${String(

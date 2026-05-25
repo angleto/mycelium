@@ -2636,6 +2636,23 @@ export interface paths {
         patch: operations["patch_channel_memory_channels__channel_id__patch"];
         trace?: never;
     };
+    "/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Search */
+        post: operations["search_search_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/notes": {
         parameters: {
             query?: never;
@@ -6479,6 +6496,70 @@ export interface components {
          * @enum {string}
          */
         SdiStatus: "none" | "RC" | "MC" | "NS" | "AT" | "NE" | "DT";
+        /**
+         * SearchHit
+         * @description One row in the unified search response. ``task_id`` is set for
+         *     ``kind='task'`` hits (resolved through ``task_index_pointer``); the
+         *     ``blob_id`` is always the underlying memory row. ``snippet`` is the
+         *     server-side ``ts_headline`` extract; ``title`` is the task title
+         *     when applicable, otherwise None.
+         */
+        SearchHit: {
+            /** Kind */
+            kind: string;
+            /** Task Id */
+            task_id?: string | null;
+            /**
+             * Blob Id
+             * Format: uuid
+             */
+            blob_id: string;
+            /** Title */
+            title?: string | null;
+            /** Snippet */
+            snippet?: string | null;
+            /** Score */
+            score: number;
+            /** Tags */
+            tags?: components["schemas"]["TagBrief"][];
+        };
+        /**
+         * SearchIn
+         * @description Unified free-text search across the org. ``kinds`` defaults to
+         *     ['task', 'blob']; ``kinds=['task']`` is the SPA's task-search path,
+         *     ``kinds=['blob']`` mirrors /memory/search. ``include_archived`` and
+         *     ``include_deleted`` only apply to ``task`` hits.
+         */
+        SearchIn: {
+            /** Q */
+            q: string;
+            /** Kinds */
+            kinds?: string[];
+            /** Tag Ids */
+            tag_ids?: string[];
+            /** Channel Keys */
+            channel_keys?: string[];
+            /**
+             * Limit
+             * @default 20
+             */
+            limit: number;
+            /**
+             * Include Archived
+             * @default false
+             */
+            include_archived: boolean;
+            /**
+             * Include Deleted
+             * @default false
+             */
+            include_deleted: boolean;
+            /**
+             * Operation Id
+             * @default search
+             */
+            operation_id: string;
+        };
         /** SentOut */
         SentOut: {
             /** Sent Id */
@@ -14092,6 +14173,44 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MemoryChannelOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    search_search_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SearchIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SearchHit"][];
                 };
             };
             /** @description Validation Error */

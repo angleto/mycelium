@@ -249,7 +249,10 @@ export function EventsRoute() {
           })),
           ...dueOnlyTasks.map((tk) => ({
             key: `t${tk.id}`,
-            when: `${tk.due_date}T00:00`,
+            // Migration 0005: tk.due_date is already an ISO datetime,
+            // so the agenda sort can use it directly (no fake T00:00
+            // suffix that used to be needed when this was a date).
+            when: tk.due_date ?? '',
             label: tk.title,
             to: `/tasks/${tk.id}`,
             kind: 'reminder' as const,

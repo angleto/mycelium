@@ -6,6 +6,7 @@ import { TagChip } from './TagChip'
 import { TaskTimer } from './TaskTimer'
 import { IdentityBadge } from './IdentityBadge'
 import type { components } from '../api/schema'
+import { formatDueDate } from '../lib/time'
 
 type Task = components['schemas']['TaskOut']
 type State = components['schemas']['StateOut']
@@ -203,7 +204,7 @@ export function TaskKanban({
                       <PriorityChip priority={tk.priority} score={score} />
                       {tk.due_date && (
                         <span className="muted" title={t('tasks.due')}>
-                          📅 {tk.due_date}
+                          📅 {formatDueDate(tk.due_date)}
                         </span>
                       )}
                     </div>

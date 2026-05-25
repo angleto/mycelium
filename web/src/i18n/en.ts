@@ -536,13 +536,17 @@ export const en = {
     },
     search: 'Search title, @tag, state:in_progress, due:today, priority:<=4...',
     searchHint:
-      'Free text matches title or tag name. Filter shorthand: @tagname (or !@tagname for exclusion), state:NAME, state:!NAME, due:today | tomorrow | overdue | none | +Nd | -Nd | YYYY-MM-DD, priority:<=N (or <,>,>=,=), executor:human | llm_agent | offered, actor:human | bot (matches card badge). Separate with spaces (AND), use | for OR.',
+      'Free text runs as a server-side hybrid search (FTS + semantic) over title, description, checklist text and tags. Filter shorthand: @tagname (or !@tagname for exclusion), state:NAME, state:!NAME, due:today | tomorrow | overdue | none | +Nd | -Nd | YYYY-MM-DD, priority:<=N (or <,>,>=,=), executor:human | llm_agent | offered, actor:human | bot (matches card badge). Separate with spaces (AND), use | for OR.',
+    searching: 'searching…',
+    searchingHint:
+      'Server-side search in flight (title + description + checklist + semantic).',
     estimate: 'Estimate (h)',
     estNone: '— none —',
     estCustom: 'Custom...',
     estPick: 'Preset…',
     estPlaceholder: 'Estimation',
     due: 'Due date',
+    dueTime: 'Time (optional)',
     billable: 'Billable',
     billInherit: 'Inherit from project',
     billYes: 'Billable',

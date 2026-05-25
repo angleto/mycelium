@@ -84,7 +84,14 @@ class Task(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, Base):
     importance: Mapped[int] = mapped_column(SmallInteger, nullable=False, server_default="4")
     urgency: Mapped[int] = mapped_column(SmallInteger, nullable=False, server_default="4")
     start_date: Mapped[datetime.date | None] = mapped_column(Date, nullable=True)
-    due_date: Mapped[datetime.date | None] = mapped_column(Date, nullable=True)
+    # Promoted from DATE to TIMESTAMPTZ in migration 0005 so the
+    # deadline can carry an optional time-of-day. Date-only entries
+    # land at 23:59:59 UTC (end-of-day) — that's also the backfill
+    # rule, so legacy "due tomorrow" tasks still expire at the end
+    # of the day, not at midnight UTC.
+    due_date: Mapped[datetime.datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     state_id: Mapped[uuid.UUID] = mapped_column(
         PG_UUID(as_uuid=True),
         ForeignKey("workflow_states.id", ondelete="RESTRICT"),

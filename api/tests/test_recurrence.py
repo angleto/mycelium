@@ -198,7 +198,7 @@ async def test_spawn_on_done_reminder_shifts_due_date() -> None:
             org_id=org,
             actor_id=user,
             title="Pay invoice",
-            due_date=dt.date(2026, 1, 31),
+            due_date=dt.datetime(2026, 1, 31, 23, 59, 59, tzinfo=dt.UTC),
             recurrence={"kind": "monthly"},
         )
         from flow_core.services import workflow as wf_svc
@@ -243,7 +243,8 @@ async def test_spawn_on_done_reminder_shifts_due_date() -> None:
         spawned = [r for r in rows if r.id != t.id]
         assert len(spawned) == 1
         # Jan 31 + 1 month clamps to Feb 28 (2026 is not a leap year).
-        assert spawned[0].due_date == dt.date(2026, 2, 28)
+        # Migration 0005: due_date is timestamptz, time-of-day preserved.
+        assert spawned[0].due_date == dt.datetime(2026, 2, 28, 23, 59, 59, tzinfo=dt.UTC)
         assert spawned[0].start_at is None
         assert spawned[0].duration_minutes is None
 
@@ -256,7 +257,7 @@ async def test_until_stops_the_chain() -> None:
             org_id=org,
             actor_id=user,
             title="Last reminder",
-            due_date=dt.date(2026, 12, 31),
+            due_date=dt.datetime(2026, 12, 31, 23, 59, 59, tzinfo=dt.UTC),
             recurrence={"kind": "daily", "until": "2026-12-31"},
         )
         from flow_core.services import workflow as wf_svc

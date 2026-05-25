@@ -747,7 +747,19 @@ async def update_task(
     if start_date is not None:
         values["start_date"] = dt.date.fromisoformat(start_date)
     if due_date is not None:
-        values["due_date"] = dt.date.fromisoformat(due_date)
+        # Migration 0005: due_date is a timestamptz. Accept either a
+        # full ISO datetime (preserves the caller's time-of-day) or a
+        # bare date (promoted to end-of-day UTC, matching the SPA's
+        # "no time set" convention so a "due tomorrow" agent action
+        # still expires at the end of the calendar day, not at
+        # midnight UTC).
+        s = due_date.strip()
+        if "t" in s.lower() or "+" in s or " " in s:
+            values["due_date"] = dt.datetime.fromisoformat(s)
+        else:
+            values["due_date"] = dt.datetime.combine(
+                dt.date.fromisoformat(s), dt.time(23, 59, 59), tzinfo=dt.UTC
+            )
     if billable is not None:
         values["billable"] = billable
     if estimate_effort_h is not None:

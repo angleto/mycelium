@@ -59,6 +59,31 @@ export function parseFilter(input: string, ctx: FilterCtx): FilterPredicate {
   return (t) => ands.every((f) => f(t))
 }
 
+// Free-text tokens are everything that isn't a structured atom
+// (``@tag``, ``state:``, ``due:``, ``priority:``, ``created:``,
+// ``executor:``, ``actor:``, ``tag:``) or an OR pipe. They're the
+// payload the server-side /search call uses; the structured atoms stay
+// client-side so a refinement like ``state:in_progress`` doesn't need a
+// roundtrip. Negated atoms (``!@done``) are preserved structurally;
+// ``!freeText`` is dropped here (server can't express negative free
+// text in this contract).
+export function getFreeTextTokens(input: string): string[] {
+  const out: string[] = []
+  for (const tok of tokenize(input)) {
+    if (tok === '|') continue
+    let inner = tok
+    if (inner.startsWith('!')) {
+      // Negated structured atoms (``!@done``, ``!state:done``) are
+      // handled in the predicate; ``!plain`` is too rare to round-trip.
+      continue
+    }
+    if (inner.startsWith('@')) continue
+    if (RE_PREDICATE.test(inner)) continue
+    out.push(inner)
+  }
+  return out
+}
+
 function tokenize(input: string): string[] {
   // Whitespace-separated, but ``|`` keeps as its own token even when
   // adjacent to atoms (``a|b`` → ``a | b``).
@@ -143,23 +168,37 @@ function compileActor(value: string): FilterPredicate {
   return () => false
 }
 
+// Migration 0005: due_date is an ISO timestamp (with time-of-day).
+// All ``due:`` filters are calendar-day predicates, so we compare the
+// LOCAL date part — the user's "due today" means today in their tz,
+// not "today UTC".
+function dueLocalYmd(iso: string | null | undefined): string | null {
+  if (!iso) return null
+  const d = new Date(iso)
+  if (!Number.isFinite(d.getTime())) return null
+  return ymd(d)
+}
+
 function compileDue(value: string, ctx: FilterCtx): FilterPredicate {
   const lower = value.toLowerCase()
   if (lower === 'none' || lower === 'no')
     return (t) => t.due_date == null
   if (lower === 'today') {
     const today = ymd(ctx.now)
-    return (t) => t.due_date === today
+    return (t) => dueLocalYmd(t.due_date) === today
   }
   if (lower === 'tomorrow') {
     const d = new Date(ctx.now)
     d.setDate(d.getDate() + 1)
     const tom = ymd(d)
-    return (t) => t.due_date === tom
+    return (t) => dueLocalYmd(t.due_date) === tom
   }
   if (lower === 'overdue') {
     const today = ymd(ctx.now)
-    return (t) => !!t.due_date && t.due_date < today
+    return (t) => {
+      const dueYmd = dueLocalYmd(t.due_date)
+      return dueYmd !== null && dueYmd < today
+    }
   }
   const rel = /^([+-])(\d+)d$/.exec(lower)
   if (rel) {
@@ -168,11 +207,11 @@ function compileDue(value: string, ctx: FilterCtx): FilterPredicate {
     const d = new Date(ctx.now)
     d.setDate(d.getDate() + sign * days)
     const target = ymd(d)
-    return (t) => t.due_date === target
+    return (t) => dueLocalYmd(t.due_date) === target
   }
   // absolute YYYY-MM-DD
   if (/^\d{4}-\d{2}-\d{2}$/.test(value))
-    return (t) => t.due_date === value
+    return (t) => dueLocalYmd(t.due_date) === value
   return () => false
 }
 

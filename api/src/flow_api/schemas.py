@@ -435,7 +435,7 @@ class TaskCreateIn(BaseModel):
     importance: int = Field(default=4, ge=1, le=5)
     urgency: int = Field(default=4, ge=1, le=5)
     start_date: datetime.date | None = None
-    due_date: datetime.date | None = None
+    due_date: datetime.datetime | None = None
     billable: bool | None = None
     parent_task_id: uuid.UUID | None = None
     # docs/adr/0028: ``executor_kind`` kept as an optional input for
@@ -480,7 +480,7 @@ class TaskPatchIn(BaseModel):
     importance: int | None = Field(default=None, ge=1, le=5)
     urgency: int | None = Field(default=None, ge=1, le=5)
     start_date: datetime.date | None = None
-    due_date: datetime.date | None = None
+    due_date: datetime.datetime | None = None
     billable: bool | None = None
     estimate_effort_h: Decimal | None = None
     # docs/adr/0028: ``executor_kind`` is no longer persisted (read
@@ -609,7 +609,8 @@ class TaskOut(BaseModel):
     importance: int
     urgency: int
     start_date: datetime.date | None
-    due_date: datetime.date | None
+    # Migration 0005: due_date is a timestamptz (optional time-of-day).
+    due_date: datetime.datetime | None
     parent_task_id: uuid.UUID | None
     # docs/adr/0028 Stage C: identity-based addressing.
     # ``assignee_id`` is the FK into ``identities``; ``assignee_handle``
@@ -1199,7 +1200,8 @@ class FeasibleTaskOut(BaseModel):
     title: str
     necessity: Necessity
     priority: int
-    due_date: datetime.date | None
+    # Migration 0005: due_date is a timestamptz.
+    due_date: datetime.datetime | None
     remaining_minutes: int
 
 

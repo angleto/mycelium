@@ -29,6 +29,7 @@ from flow_core.models.user import User
 from flow_core.models.workflow import WorkflowState
 from flow_core.services import audit, lifecycle, taxonomy
 from flow_core.services import identities as identities_svc
+from flow_core.services import task_search as _task_search
 from flow_core.services import workflow as wf
 from flow_core.services.rbac import require_role
 
@@ -117,7 +118,10 @@ async def create_task(
     importance: int = 4,
     urgency: int = 4,
     start_date: dt.date | None = None,
-    due_date: dt.date | None = None,
+    # Migration 0005: due_date is now a TIMESTAMPTZ. Date-only inputs
+    # should be normalised to end-of-day UTC by the caller (the API
+    # adapter does this), so the service simply forwards the value.
+    due_date: dt.datetime | None = None,
     billable: bool | None = None,
     parent_task_id: uuid.UUID | None = None,
     # docs/adr/0028: pass either ``assignee_id`` (uuid into identities)
@@ -451,6 +455,10 @@ async def update_task(
         ) or "no_overlap_task_participants" in str(exc.orig):
             raise ConflictError(MessageCode.EVENT_OVERLAP) from exc
         raise
+    # Core UPDATE bypasses the mapper-level event listeners that the
+    # task-search resync would otherwise pick up; mark the task dirty
+    # so the pre-commit flush re-indexes the blob.
+    _task_search.mark_task_dirty(session, task_id)
     await audit.log(
         session,
         org_id=org_id,
@@ -500,6 +508,11 @@ async def set_schedule_fields(
         expected_version=expected_version,
         values=values,
     )
+    # Scheduler write-back doesn't touch ``title``/``description``/
+    # checklist, so the resync's content_hash will short-circuit and no
+    # embed will be paid; the mark is still required so the listener
+    # path doesn't go stale on a future combined update.
+    _task_search.mark_task_dirty(session, task_id)
     await audit.log(
         session,
         org_id=org_id,
@@ -550,6 +563,7 @@ async def set_state(
         expected_version=expected_version,
         values={"state_id": state_id},
     )
+    _task_search.mark_task_dirty(session, task_id)
     await audit.log(
         session,
         org_id=org_id,
@@ -594,7 +608,7 @@ async def _set(
     # soft-deleted row). The actual flag flip + audit is shared with
     # notes via lifecycle.transition.
     await get_task(session, org_id=org_id, task_id=task_id, include_deleted=True)
-    return await lifecycle.transition(
+    new_version = await lifecycle.transition(
         session,
         model_cls=Task,
         org_id=org_id,
@@ -605,6 +619,12 @@ async def _set(
         audit_entity="task",
         audit_action=action,
     )
+    # archive / soft_delete / restore -- lifecycle.transition issues a
+    # Core UPDATE so the mapper listener won't fire. Mark dirty: the
+    # resync re-reads the task and, for soft_delete (deleted_at set),
+    # the loader returns None which triggers cleanup of pointer + blob.
+    _task_search.mark_task_dirty(session, task_id)
+    return new_version
 
 
 async def archive_task(

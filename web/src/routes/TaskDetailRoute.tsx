@@ -43,7 +43,12 @@ export function TaskDetailRoute() {
   const [importance, setImportance] = useState<number>(4)
   const [urgency, setUrgency] = useState<number>(4)
   const [estimate, setEstimate] = useState('')
-  const [due, setDue] = useState('')
+  // Migration 0005: due_date is timestamptz, optional time-of-day.
+  // The SPA splits the picker so the common "due by a calendar day"
+  // workflow stays one input; setting a time is opt-in.
+  // ``dueDate`` is "YYYY-MM-DD" (local), ``dueTime`` is "HH:MM" or ''.
+  const [dueDate, setDueDate] = useState('')
+  const [dueTime, setDueTime] = useState('')
   // Appointment editor (migration 0094, ADR-0008 addendum). The task
   // is a calendar appointment when both ``start_at`` and
   // ``duration_minutes`` are set. The block is opt-in (a toggle
@@ -115,7 +120,26 @@ export function TaskDetailRoute() {
     setImportance(tk.importance)
     setUrgency(tk.urgency)
     setEstimate(tk.estimate_effort_h ?? '')
-    setDue(tk.due_date ?? '')
+    // Migration 0005: due_date is timestamptz. Split into a local
+    // date + optional time; treat "end-of-day local" (= what the
+    // backend stores when the user didn't pick a time) as "no time
+    // specified", so the time input stays empty unless the user
+    // explicitly set a different hour.
+    if (tk.due_date) {
+      const d = new Date(tk.due_date)
+      const pad = (n: number) => String(n).padStart(2, '0')
+      setDueDate(
+        `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`,
+      )
+      const isEndOfDay =
+        d.getHours() === 23 && d.getMinutes() === 59 && d.getSeconds() === 59
+      setDueTime(
+        isEndOfDay ? '' : `${pad(d.getHours())}:${pad(d.getMinutes())}`,
+      )
+    } else {
+      setDueDate('')
+      setDueTime('')
+    }
     // Hydrate the appointment block. The datetime-local input wants
     // a naive local-tz string "YYYY-MM-DDTHH:MM"; the server returns
     // ISO UTC, convert.
@@ -423,9 +447,27 @@ export function TaskDetailRoute() {
     setUrgency(n)
     void autosave({ urgency: n })
   }
-  function onDue(v: string) {
-    setDue(v)
-    void autosave({ due_date: v || null })
+  // Build the ISO datetime we send to /tasks/{id}: empty date clears
+  // the deadline; empty time defaults to 23:59:59 local (the
+  // "no time specified" convention the user asked for on task
+  // a3d1f5f4 item 3). Whatever we send is in the user's local tz
+  // and ``toISOString`` normalises to UTC for the backend.
+  function buildDueIso(date: string, time: string): string | null {
+    if (!date) return null
+    const t = time || '23:59:59'
+    // datetime-local interprets "YYYY-MM-DDTHH:MM(:SS)?" as local;
+    // toISOString then yields the matching UTC instant.
+    return new Date(`${date}T${t}`).toISOString()
+  }
+  function onDueDate(v: string) {
+    setDueDate(v)
+    void autosave({ due_date: buildDueIso(v, dueTime) })
+  }
+  function onDueTime(v: string) {
+    setDueTime(v)
+    // Setting only a time without a date is meaningless; we autosave
+    // only when the date is present (the date input is the anchor).
+    if (dueDate) void autosave({ due_date: buildDueIso(dueDate, v) })
   }
   // Appointment promotion / edit (migration 0094). Save the pair
   // atomically: the backend CHECK constraint rejects half-set inputs,
@@ -861,14 +903,25 @@ export function TaskDetailRoute() {
             score={task.importance * task.urgency}
           />
         </div>
-        <label>
-          {t('tasks.due')}
-          <input
-            type="date"
-            value={due}
-            onChange={(e) => onDue(e.target.value)}
-          />
-        </label>
+        <div className="row">
+          <label>
+            {t('tasks.due')}
+            <input
+              type="date"
+              value={dueDate}
+              onChange={(e) => onDueDate(e.target.value)}
+            />
+          </label>
+          <label>
+            {t('tasks.dueTime')}
+            <input
+              type="time"
+              value={dueTime}
+              onChange={(e) => onDueTime(e.target.value)}
+              disabled={!dueDate}
+            />
+          </label>
+        </div>
         <fieldset className="taskdetail__appointment">
           <legend>{t('tasks.appointment')}</legend>
           <p className="hint">{t('tasks.appointmentHint')}</p>

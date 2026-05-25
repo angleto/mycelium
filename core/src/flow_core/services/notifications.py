@@ -389,7 +389,16 @@ async def scan_reminders(
     fire at a defined moment rather than silently bucketing to one
     day before the due date (the pre-v2.0.27 behaviour)."""
     ref = now or dt.datetime.now(tz=dt.UTC)
-    horizon = ref + dt.timedelta(days=within_days)
+    # Horizon is "end of the (ref + within_days) calendar day in UTC":
+    # since migration 0005 a date-only ``due_date`` lands at 23:59:59
+    # UTC, so a simple ``ref + N days`` cutoff would silently exclude
+    # tonight's end-of-day deadlines when scan_reminders runs in the
+    # early evening. Padding to end-of-day matches the user-facing
+    # "within N days" intent ("today + tomorrow, all of them").
+    horizon_day = (ref + dt.timedelta(days=within_days)).date()
+    horizon = dt.datetime.combine(
+        horizon_day, dt.time(23, 59, 59), tzinfo=dt.UTC
+    )
     candidates = list(
         (
             await session.execute(
@@ -419,9 +428,27 @@ async def scan_reminders(
             when_label = reference.strftime("%Y-%m-%d %H:%M UTC")
             date_only = False
         elif t.due_date is not None:
-            reference = dt.datetime.combine(t.due_date, dt.time.min, tzinfo=dt.UTC)
-            when_label = str(t.due_date)
-            date_only = True
+            # Migration 0005: due_date is a timestamptz. End-of-day
+            # entries (the historical "no time set" backfill) sit at
+            # 23:59:59 UTC; explicit times round-trip as the user
+            # picked them. ``date_only`` is the SPA presentation hint:
+            # treat anything at second 59 of minute 59 of hour 23 as
+            # "no time was specified" so reminder offsets degrade
+            # gracefully (sub-day offsets get promoted to fire at
+            # reference, same pre-0005 contract).
+            reference = t.due_date
+            if reference.tzinfo is None:
+                reference = reference.replace(tzinfo=dt.UTC)
+            date_only = (
+                reference.hour == 23
+                and reference.minute == 59
+                and reference.second == 59
+            )
+            when_label = (
+                reference.date().isoformat()
+                if date_only
+                else reference.strftime("%Y-%m-%d %H:%M UTC")
+            )
         else:
             continue
         # Cap how far ahead we look (a 1-week reminder on a task due
