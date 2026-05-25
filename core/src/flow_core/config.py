@@ -141,6 +141,15 @@ class Settings(BaseSettings):
     # FLOW_DISPATCH_LOOP_INTERVAL_SECONDS like the other worker knobs.
     dispatch_loop_interval_seconds: int = 60
 
+    # Reminders + notification-dispatch worker. One periodic tick scans
+    # due reminders into pending Notifications (idempotent by
+    # dedupe_key) and then dispatches all pending notifications through
+    # the configured sender per channel pref. Per-workspace and
+    # exception-isolated like the dispatch loop. Configurable via
+    # FLOW_REMINDERS_LOOP_INTERVAL_SECONDS. 60s is the floor for
+    # minute-precision reminders on appointment tasks.
+    reminders_loop_interval_seconds: int = 60
+
     # Telegram bot integration (epic #125 P2). Empty defaults so OSS
     # self-host + tests are unaffected: the link router refuses to mint
     # codes when the bot is not configured, the webhook 404s on an empty

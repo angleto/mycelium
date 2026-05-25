@@ -939,12 +939,18 @@ export function TaskDetailRoute() {
             </select>
             {remCustom && (
               <input
-                type="number"
-                min={1}
-                step={1}
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
                 placeholder={t('tasks.remCustomPh')}
                 value={remOff}
-                onChange={(e) => setRemOff(e.target.value)}
+                onChange={(e) => {
+                  // Reminder offsets are integer minutes; strip
+                  // anything that is not a digit so users can't end
+                  // up with "0,50" (Italian decimal) or similar.
+                  const digits = e.target.value.replace(/\D+/g, '')
+                  setRemOff(digits)
+                }}
               />
             )}
             <button

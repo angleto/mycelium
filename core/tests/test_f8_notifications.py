@@ -175,6 +175,77 @@ async def test_recurrence_excludes_dependencies_and_spawns() -> None:
     assert len(spawned) == 1  # an independent new task row
 
 
+async def test_reminder_scan_minute_precise_on_appointment() -> None:
+    """Sub-day offsets on appointment tasks (``start_at`` set) must
+    fire at minute precision off ``start_at``, not collapse to one day
+    before (the pre-v2.0.27 day-bucketed math)."""
+    org, user = await _org()
+    async with tenant_session(str(org), str(user)) as s:
+        await nf.set_pref(
+            s,
+            org_id=org,
+            actor_id=user,
+            user_id=user,
+            channel=NotificationChannelKind.email,
+            enabled=True,
+            target="me@example.test",
+        )
+        start = dt.datetime.now(tz=dt.UTC) + dt.timedelta(hours=2)
+        task = await tasks_svc.create_task(
+            s,
+            org_id=org,
+            actor_id=user,
+            title="meeting",
+            start_at=start,
+            duration_minutes=30,
+            assignee_ids=[user],
+        )
+        await nf.add_reminder(s, org_id=org, actor_id=user, task_id=task.id, offset_minutes=30)
+        # Reference is "now"; the 30-min offset fires at start-30min,
+        # i.e. 90min from now -- still within the 1-day look-ahead.
+        n = await nf.scan_reminders(s, org_id=org, actor_id=user, within_days=1)
+        notes = await nf.list_notifications(s, org_id=org, user_id=user)
+    assert n == 1
+    reminder_notes = [x for x in notes if x.kind == "reminder"]
+    assert len(reminder_notes) == 1
+    assert "30 min before" in reminder_notes[0].body
+
+
+async def test_reminder_scan_promotes_subday_on_date_only() -> None:
+    """A 60-minute offset on a date-only task (``due_date`` set,
+    ``start_at`` unset) has no defined firing minute. It must be
+    promoted to 0 (alla scadenza) so it fires at midnight UTC of the
+    due date rather than silently bucketing one day earlier."""
+    org, user = await _org()
+    async with tenant_session(str(org), str(user)) as s:
+        await nf.set_pref(
+            s,
+            org_id=org,
+            actor_id=user,
+            user_id=user,
+            channel=NotificationChannelKind.email,
+            enabled=True,
+            target="me@example.test",
+        )
+        due = (dt.datetime.now(tz=dt.UTC) + dt.timedelta(hours=6)).date()
+        task = await tasks_svc.create_task(
+            s,
+            org_id=org,
+            actor_id=user,
+            title="due today",
+            due_date=due,
+            assignee_ids=[user],
+        )
+        await nf.add_reminder(s, org_id=org, actor_id=user, task_id=task.id, offset_minutes=60)
+        n = await nf.scan_reminders(s, org_id=org, actor_id=user, within_days=1)
+        notes = await nf.list_notifications(s, org_id=org, user_id=user)
+    assert n == 1
+    reminder_notes = [x for x in notes if x.kind == "reminder"]
+    assert len(reminder_notes) == 1
+    # Promoted to 0 -> "at due" wording, not "60 min before".
+    assert "at due" in reminder_notes[0].body
+
+
 async def test_reminder_scan_is_idempotent() -> None:
     org, user = await _org()
     async with tenant_session(str(org), str(user)) as s:

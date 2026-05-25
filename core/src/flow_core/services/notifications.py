@@ -15,7 +15,7 @@ import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -375,13 +375,21 @@ async def scan_reminders(
     now: dt.datetime | None = None,
 ) -> int:
     """Enqueue (idempotent) reminders for assignees with an enabled
-    channel. Each task fires its configured ``task_reminders`` (N
-    offsets before due_date, Google-Calendar style); a task with a
-    due_date but no reminders gets one implicit reminder at due."""
+    channel. Each task fires its configured ``task_reminders`` N
+    minutes before a firing reference:
+
+      * appointment tasks (``start_at`` set) use ``start_at`` with
+        minute precision;
+      * date-only tasks fall back to ``due_date`` at 00:00 UTC.
+
+    A deadline without explicit reminders gets one implicit reminder
+    at the reference. Sub-day offsets (``0 < off < 1440``) only have a
+    defined firing minute when the task has a ``start_at``; on
+    date-only tasks they are promoted to ``0`` (at reference) so they
+    fire at a defined moment rather than silently bucketing to one
+    day before the due date (the pre-v2.0.27 behaviour)."""
     ref = now or dt.datetime.now(tz=dt.UTC)
-    horizon = (ref + dt.timedelta(days=within_days)).date()
-    # Consider tasks due far enough out that an early reminder could
-    # already be in-window (cap the lead we look back at ~120 days).
+    horizon = ref + dt.timedelta(days=within_days)
     candidates = list(
         (
             await session.execute(
@@ -391,8 +399,10 @@ async def scan_reminders(
                     Task.deleted_at.is_(None),
                     Task.is_archived.is_(False),
                     WorkflowState.is_terminal.is_(False),
-                    Task.due_date.is_not(None),
-                    Task.due_date <= horizon + dt.timedelta(days=120),
+                    or_(
+                        Task.start_at.is_not(None),
+                        Task.due_date.is_not(None),
+                    ),
                 )
             )
         )
@@ -402,6 +412,22 @@ async def scan_reminders(
     )
     enqueued = 0
     for t in candidates:
+        if t.start_at is not None:
+            reference: dt.datetime = t.start_at
+            if reference.tzinfo is None:
+                reference = reference.replace(tzinfo=dt.UTC)
+            when_label = reference.strftime("%Y-%m-%d %H:%M UTC")
+            date_only = False
+        elif t.due_date is not None:
+            reference = dt.datetime.combine(t.due_date, dt.time.min, tzinfo=dt.UTC)
+            when_label = str(t.due_date)
+            date_only = True
+        else:
+            continue
+        # Cap how far ahead we look (a 1-week reminder on a task due
+        # in 4 months is still in-window once it gets close enough).
+        if reference > horizon + dt.timedelta(days=120):
+            continue
         offsets = list(
             (
                 await session.execute(
@@ -411,9 +437,6 @@ async def scan_reminders(
             .scalars()
             .all()
         ) or [0]
-        due = t.due_date
-        if due is None:
-            continue
         assignees = (
             (
                 await session.execute(
@@ -423,9 +446,10 @@ async def scan_reminders(
             .scalars()
             .all()
         )
-        for off in offsets:
-            fire_date = due - dt.timedelta(days=-(-off // 1440))
-            if fire_date > horizon:
+        for raw_off in offsets:
+            off = 0 if date_only and 0 < raw_off < 1440 else raw_off
+            fire_at = reference - dt.timedelta(minutes=off)
+            if fire_at > horizon:
                 continue
             when = "at due" if off == 0 else f"{off} min before"
             for uid in assignees:
@@ -441,8 +465,10 @@ async def scan_reminders(
                         channel=p.channel,
                         kind="reminder",
                         title=f"Task due: {t.title}",
-                        body=f"'{t.title}' is due on {due} ({when}).",
-                        dedupe_key=(f"reminder:{t.id}:{uid}:{p.channel.value}:{due}:{off}"),
+                        body=f"'{t.title}' is due on {when_label} ({when}).",
+                        dedupe_key=(
+                            f"reminder:{t.id}:{uid}:{p.channel.value}:{fire_at.isoformat()}"
+                        ),
                     )
                     enqueued += 1
     return enqueued
