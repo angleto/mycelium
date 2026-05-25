@@ -1,4 +1,4 @@
-# flow.nvim
+# flow-nvim
 
 Neovim front-end for the Flow CLI. Browse tasks, notes, today's
 agenda, and capture new notes/tasks without leaving your editor.
@@ -26,7 +26,7 @@ Drop the following into `~/.config/nvim/lua/plugins/flow.lua`:
 
 ```lua
 return {
-  "angleto/flow.nvim",
+  "angleto/flow-nvim",
   version = "*",           -- resolves to the latest v* tag (matches Flow's release)
   event = "VeryLazy",      -- load after the UI is ready. We avoid `cmd = "Flow"`
                            -- and key-only lazy triggers because both keep the

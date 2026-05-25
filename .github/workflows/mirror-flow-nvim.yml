@@ -1,11 +1,11 @@
-# Mirror nvim/flow.nvim/ into github.com/angleto/flow.nvim on every v*
+# Mirror nvim/flow-nvim/ into github.com/angleto/flow-nvim on every v*
 # tag. The standalone plugin repo is what lazy.nvim / packer expect to
-# resolve `"angleto/flow.nvim"`; the monorepo is the source of truth.
+# resolve `"angleto/flow-nvim"`; the monorepo is the source of truth.
 #
 # Setup (one-time):
-#   1. Create `github.com/angleto/flow.nvim` (public, empty).
+#   1. Create `github.com/angleto/flow-nvim` (public, empty).
 #   2. Create a fine-grained Personal Access Token with `Contents:
-#      read+write` on `angleto/flow.nvim` only.
+#      read+write` on `angleto/flow-nvim` only.
 #   3. Save it as a repository secret named `NVIM_PUSH_TOKEN` in this
 #      repo.
 #
@@ -70,7 +70,7 @@ jobs:
             exit 1
           fi
           git clone --depth=1 \
-            "https://x-access-token:${NVIM_PUSH_TOKEN}@github.com/angleto/flow.nvim.git" \
+            "https://x-access-token:${NVIM_PUSH_TOKEN}@github.com/angleto/flow-nvim.git" \
             nvim-repo
 
       - name: Sync content into plugin repo
@@ -79,9 +79,9 @@ jobs:
           # Wipe everything we own (lua/, plugin/, README) and re-copy
           # from the monorepo subdirectory, so removals propagate too.
           rm -rf nvim-repo/lua nvim-repo/plugin nvim-repo/README.md
-          cp -r nvim/flow.nvim/lua nvim-repo/
-          cp -r nvim/flow.nvim/plugin nvim-repo/
-          cp nvim/flow.nvim/README.md nvim-repo/
+          cp -r nvim/flow-nvim/lua nvim-repo/
+          cp -r nvim/flow-nvim/plugin nvim-repo/
+          cp nvim/flow-nvim/README.md nvim-repo/
 
       - name: Commit + tag + push if changed
         env:

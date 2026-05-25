@@ -51,7 +51,7 @@ system exactly like the web UI.
 - **Keyboard-first CLI + Neovim plugin.** `brew install
   angleto/flow/flow-cli` for the terminal client (`flow today`, `flow
   task add`, `flow timer start`, `flow note voice`, …) and
-  [`nvim/flow.nvim`](nvim/flow.nvim/README.md) for the in-editor
+  [`nvim/flow-nvim`](nvim/flow-nvim/README.md) for the in-editor
   surface. Both shell out to the same REST API; see
   [`docs/cli.md`](docs/cli.md). CLI and nvim plugin track Flow tags
   one-for-one (currently `v2.0.x`).

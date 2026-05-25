@@ -83,7 +83,7 @@ flow auth mfa status
 ```
 
 Every command supports `--json` for piping into `jq`, scripts, or the
-`flow.nvim` plugin which shells out to the same binary.
+`flow-nvim` plugin which shells out to the same binary.
 
 ## What's left in the browser (deliberately)
 

@@ -12,7 +12,7 @@ local function ensure_bin(bin)
     vim.notify(
       ("flow-cli (`%s`) not found on PATH.\nInstall with: brew install angleto/flow/flow-cli"):format(bin),
       vim.log.levels.ERROR,
-      { title = "flow.nvim" }
+      { title = "flow-nvim" }
     )
     return false
   end
@@ -80,7 +80,7 @@ function M.run(args, on_done)
     vim.schedule(function()
       local ok = res.code == 0
       if not ok then
-        vim.notify(res.stderr or "flow failed", vim.log.levels.ERROR, { title = "flow.nvim" })
+        vim.notify(res.stderr or "flow failed", vim.log.levels.ERROR, { title = "flow-nvim" })
       end
       if on_done then on_done(ok, res.stdout) end
     end)
@@ -98,7 +98,7 @@ function M.run_stdin(args, stdin, on_done)
     vim.schedule(function()
       local ok = res.code == 0
       if not ok then
-        vim.notify(res.stderr or "flow failed", vim.log.levels.ERROR, { title = "flow.nvim" })
+        vim.notify(res.stderr or "flow failed", vim.log.levels.ERROR, { title = "flow-nvim" })
       end
       if on_done then on_done(ok, res.stdout) end
     end)

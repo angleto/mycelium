@@ -44,7 +44,7 @@ function M.open_editor_buffer(title, initial_lines, on_save)
       local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
       local text = vim.trim(table.concat(lines, "\n"))
       if text == "" then
-        vim.notify("flow.nvim: empty buffer; not saving.", vim.log.levels.WARN)
+        vim.notify("flow-nvim: empty buffer; not saving.", vim.log.levels.WARN)
         return
       end
       vim.api.nvim_set_option_value("modified", false, { buf = buf })

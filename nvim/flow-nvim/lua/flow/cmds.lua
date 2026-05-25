@@ -25,11 +25,11 @@ function M.complete(arglead)
 end
 
 local function notify_err(msg)
-  vim.notify(msg, vim.log.levels.ERROR, { title = "flow.nvim" })
+  vim.notify(msg, vim.log.levels.ERROR, { title = "flow-nvim" })
 end
 
 local function notify_ok(msg)
-  vim.notify(msg, vim.log.levels.INFO, { title = "flow.nvim" })
+  vim.notify(msg, vim.log.levels.INFO, { title = "flow-nvim" })
 end
 
 local function today()

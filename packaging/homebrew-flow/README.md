@@ -53,7 +53,7 @@ That tag push triggers, in parallel:
   (renders the formula for `v2.0.6` and pushes it into
   `angleto/homebrew-flow`),
 - [`mirror-flow-nvim`](../../.github/workflows/mirror-flow-nvim.yml)
-  (mirrors `nvim/flow.nvim/` into `angleto/flow.nvim` and tags it
+  (mirrors `nvim/flow-nvim/` into `angleto/flow-nvim` and tags it
   `v2.0.6` too).
 
 Users `brew install angleto/flow/flow-cli` and get the new version.

@@ -6,7 +6,7 @@ the REST API** (no business logic):
 | Surface | Source | Install |
 | --- | --- | --- |
 | `flow` CLI | [`cli/`](../cli/README.md) | `brew install angleto/flow/flow-cli` |
-| `flow.nvim` plugin | [`nvim/flow.nvim/`](../nvim/flow.nvim/README.md) | `lazy.nvim` block, see plugin README |
+| `flow-nvim` plugin | [`nvim/flow-nvim/`](../nvim/flow-nvim/README.md) | `lazy.nvim` block, see plugin README |
 
 ## Why a CLI
 
@@ -60,8 +60,8 @@ Flow `v2.0.6`, two mirror workflows fire on the tag push:
   `github.com/angleto/homebrew-flow`. Users `brew install
   angleto/flow/flow-cli` and pick up the new version.
 - [`mirror-flow-nvim`](../.github/workflows/mirror-flow-nvim.yml)
-  copies [`nvim/flow.nvim/`](../nvim/flow.nvim/) into
-  `github.com/angleto/flow.nvim` and re-tags it `v2.0.6` too, so
+  copies [`nvim/flow-nvim/`](../nvim/flow-nvim/) into
+  `github.com/angleto/flow-nvim` and re-tags it `v2.0.6` too, so
   lazy.nvim can pin a version.
 
 The CLI version is single-sourced in `cli/pyproject.toml` (read at

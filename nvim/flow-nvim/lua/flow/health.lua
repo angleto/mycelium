@@ -11,7 +11,7 @@ function M.check()
   local err = health.error or health.report_error
 
   local bin = require("flow").config.bin
-  start("flow.nvim")
+  start("flow-nvim")
   if vim.fn.executable(bin) ~= 1 then
     err(("`%s` not found on PATH"):format(bin), {
       "Install: brew install angleto/flow/flow-cli",
