@@ -182,7 +182,7 @@ async def ingest_passive_invoice(raw: bytes) -> ReceivedInvoice | None:
     async with tenant_session(str(org_id), _SYSTEM_USER) as s:
         # ON CONFLICT (identificativo_sdi) DO NOTHING -> SdI retry safe.
         stmt = (
-            pg_insert(ReceivedInvoice.__table__)
+            pg_insert(ReceivedInvoice)
             .values(
                 org_id=org_id,
                 issuer_profile_id=issuer_id,
@@ -196,7 +196,7 @@ async def ingest_passive_invoice(raw: bytes) -> ReceivedInvoice | None:
                 raw_xml=delivery.fattura_xml,
             )
             .on_conflict_do_nothing(index_elements=["identificativo_sdi"])
-            .returning(ReceivedInvoice.__table__.c.id)
+            .returning(ReceivedInvoice.id)
         )
         result = await s.execute(stmt)
         inserted_id = result.scalar()
