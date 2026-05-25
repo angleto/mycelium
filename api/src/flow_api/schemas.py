@@ -1891,6 +1891,23 @@ class ReceiptIn(BaseModel):
     outcome: str = Field(pattern="^(RC|MC|NS|AT)$")
 
 
+class EsitoCommittenteIn(BaseModel):
+    """Buyer-side EsitoCommittente (ADR-0011 v1.1): EC01 accepts the
+    invoice, EC02 rejects it (max 255-char descrizione, only meaningful on
+    rejection). The signed XML is built + persisted server-side; clients
+    never craft the signature."""
+
+    esito: str = Field(pattern="^(EC01|EC02)$")
+    descrizione: str | None = Field(default=None, max_length=255)
+
+
+class EsitoCommittenteOut(BaseModel):
+    received_invoice_id: uuid.UUID
+    esito: str
+    message_id: str
+    sent_at: datetime.datetime
+
+
 class InvoiceXmlOut(BaseModel):
     xml: str
 

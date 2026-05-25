@@ -37,6 +37,7 @@ from flow_api.routers import (
     notifications,
     oauth,
     oauth_google,
+    received_invoices,
     schedule,
     tags,
     task_relations,
@@ -207,6 +208,7 @@ def create_app() -> FastAPI:
     app.include_router(notes.router)
     app.include_router(attachments.router)
     app.include_router(invoices.router)
+    app.include_router(received_invoices.router)
     app.include_router(notifications.router)
     app.include_router(oauth_google.router)
     app.include_router(telegram.router)
