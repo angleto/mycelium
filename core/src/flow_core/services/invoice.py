@@ -1433,12 +1433,21 @@ from typing import Protocol  # noqa: E402
 
 
 class ParsedNotificationLike(Protocol):
-    outcome: str
-    identificativo_sdi: str
-    message_id: str | None
-    nome_file: str | None
-    esito: str | None
-    raw_xml: bytes
+    # Read-only attributes (declared as properties so the frozen
+    # ``ParsedNotification`` dataclass in ``sdi_inbound`` satisfies the
+    # protocol; plain ``x: T`` on a Protocol means *settable* in mypy).
+    @property
+    def outcome(self) -> str: ...
+    @property
+    def identificativo_sdi(self) -> str: ...
+    @property
+    def message_id(self) -> str | None: ...
+    @property
+    def nome_file(self) -> str | None: ...
+    @property
+    def esito(self) -> str | None: ...
+    @property
+    def raw_xml(self) -> bytes: ...
 
 
 async def list_invoices(

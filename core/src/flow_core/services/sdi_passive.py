@@ -248,7 +248,7 @@ def is_passive_delivery(raw: bytes) -> bool:
         inner_root = ET.fromstring(inner)
     except (ValueError, TypeError, ET.XMLSyntaxError):
         return False
-    return ET.QName(inner_root).localname == "FatturaElettronica"
+    return bool(ET.QName(inner_root).localname == "FatturaElettronica")
 
 
 def is_receiver_notification(raw: bytes) -> bool:
