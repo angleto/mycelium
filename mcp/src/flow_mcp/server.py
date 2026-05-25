@@ -201,6 +201,21 @@ def _tag_brief(t: Tag) -> dict[str, Any]:
     }
 
 
+def _project_fields(d: dict[str, Any], fields: list[str] | None) -> dict[str, Any]:
+    """Project a record dict to a subset of fields. None = no projection.
+
+    ``id`` is always kept (callers need the stable handle for follow-up
+    calls); unknown field names are silently ignored. Used by list_*
+    tools so an LLM picker can ask only for ``[id, title]`` instead of
+    the full record.
+    """
+    if fields is None:
+        return d
+    keep = set(fields)
+    keep.add("id")
+    return {k: v for k, v in d.items() if k in keep}
+
+
 def _task(t: Task, tags: list[Tag] | None = None) -> dict[str, Any]:
     return {
         "id": str(t.id),
@@ -507,17 +522,13 @@ async def create_task(
     duration_minutes: int | None = None,
     recurrence: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Create a task, optionally tagged. ``importance`` / ``urgency``
-    are the Eisenhower axes (1..5, 1 = most pressing); default Low/Low
-    (4/4). ``priority`` is a calculated field (importance x urgency,
-    1..25) and is never settable by the caller. ``necessity`` is
-    MoSCoW: ``must`` | ``should`` | ``could`` (default ``should`` when
-    omitted). ``required_capabilities`` (docs/adr/0025 P2) are the
-    capabilities the task needs from its executor (empty = any enabled
-    agent). Pass ``start_at`` + ``duration_minutes`` to create an
-    appointment-task (migration 0094 + ADR-0008 addendum): the task
-    becomes a calendar block subject to no-overlap on ``assignee_id``
-    (and any explicit participants added via ``add_task_participant``)."""
+    """Create a task. ``importance``/``urgency`` 1..5 Eisenhower
+    (1=most pressing, default 4/4); ``priority`` is derived
+    (importance*urgency, never settable). ``necessity`` is MoSCoW
+    (must|should|could, default should). ``required_capabilities``
+    declare what an executor needs (empty=any). Pass ``start_at``
+    + ``duration_minutes`` to make it an appointment-task subject to
+    no-overlap on assignee and explicit participants."""
     async with _tenant(token, org_id) as (s, org, user):
         # When the MCP call is authenticated with an agent token
         # (HTTP transport), record the ai_assistant identity (if the
@@ -562,8 +573,12 @@ async def list_tasks(
     assignee_kind: str | None = None,
     assignee_handles: list[str] | None = None,
     owner_handles: list[str] | None = None,
+    fields: list[str] | None = None,
+    limit: int = 100,
 ) -> list[dict[str, Any]]:
-    """List tasks, optionally filtered by workflow state id."""
+    """List tasks, optionally filtered by workflow state id. ``fields``
+    opt-in keeps only the named columns (``id`` always kept);
+    ``limit`` caps rows (default 100)."""
     # docs/adr/0028 Punto 4: identity-axis filters. ``assignee_kind``
     # accepts ``user`` or ``ai_assistant``; ``assignee_handles`` /
     # ``owner_handles`` are multi-select on the respective handles.
@@ -579,8 +594,10 @@ async def list_tasks(
             assignee_handles=assignee_handles,
             owner_handles=owner_handles,
         )
+        if limit > 0:
+            rows = rows[:limit]
         tagmap = await tasks.tags_by_task(s, task_ids=[t.id for t in rows])
-        return [_task(t, tagmap.get(t.id, [])) for t in rows]
+        return [_project_fields(_task(t, tagmap.get(t.id, [])), fields) for t in rows]
 
 
 @mcp.tool()
@@ -1421,12 +1438,10 @@ def _agent_run(r: AgentRun) -> dict[str, Any]:
 @mcp.tool()
 async def agent_run_start(token: str, org_id: str, task_id: str) -> dict[str, Any]:
     """Owner: run the agent on an already-dispatched ``llm_agent`` task
-    end-to-end (spawn -> work -> artifact -> complete) and return the
-    TERMINAL run (succeeded|failed|cancelled|blocked). On-demand, not an
-    autonomous loop. Bounded (step/budget caps), killable, every tool
-    call confined to the actor's effective RBAC. Owner-gated in the
-    service (running an agent spends credits; effective-role sudo
-    enforced)."""
+    end-to-end (spawn → work → artifact → complete). Returns the
+    TERMINAL run (succeeded|failed|cancelled|blocked). On-demand, not
+    autonomous loop. Bounded (step/budget caps), killable; every tool
+    call confined to actor's effective RBAC."""
     async with _tenant(token, org_id) as (s, org, user):
         run = await agent_runtime_svc.start_run(
             s,
@@ -1714,13 +1729,12 @@ async def start_timer(
     note_id: str | None = None,
     parallel: bool = False,
 ) -> dict[str, Any]:
-    """Start the live timer for a task. Serial (default) replaces the
-    single running timer; ``parallel=True`` runs alongside others
-    (e.g. concurrent LLM tasks). The same task is never
-    double-tracked. Proposal A: pass ``note_id`` to log time in a work
-    note (it must be linked to a task); the billing task is derived
-    from it, so ``task_id`` may be omitted (or must agree). ``memo`` is
-    the free-text note on the entry (not the Note entity)."""
+    """Start the live timer. Serial (default) replaces the running
+    serial timer; ``parallel=True`` runs alongside (e.g. concurrent
+    LLM tasks). Same task never double-tracked. Proposal A: ``note_id``
+    logs time in a work-note (must be linked to a task); billing task
+    is derived (``task_id`` optional or must agree). ``memo`` =
+    free-text on the entry (not the Note entity)."""
     async with _tenant(token, org_id) as (s, org, user):
         e = await time_svc.start_timer(
             s,
@@ -1794,16 +1808,24 @@ async def list_time_entries(
     org_id: str,
     task_id: str | None = None,
     user_id: str | None = None,
+    fields: list[str] | None = None,
+    limit: int = 100,
+    offset: int = 0,
 ) -> list[dict[str, Any]]:
-    """List time entries, optionally filtered by task or user."""
+    """List time entries, optionally filtered by task or user.
+    ``fields`` opt-in keeps only the named columns (``id`` always kept).
+    ``limit``/``offset`` paginate at the DB level (default limit 100)."""
     async with _tenant(token, org_id) as (s, org, _user):
         rows = await time_svc.list_entries(
             s,
             org_id=org,
             task_id=uuid.UUID(task_id) if task_id else None,
             user_id=uuid.UUID(user_id) if user_id else None,
+            limit=limit,
+            offset=offset,
         )
-        return await _time_entries_many(s, rows)
+        entries = await _time_entries_many(s, rows)
+        return [_project_fields(e, fields) for e in entries]
 
 
 @mcp.tool()
@@ -1836,15 +1858,12 @@ async def update_time_entry(
     started_at: str | None = None,
     ended_at: str | None = None,
 ) -> dict[str, Any]:
-    """Correct a time entry. Beyond memo/billable you can reassign it
-    to another task (``task_id``, transitively changing project/client)
-    and fix the recorded interval (``started_at``/``ended_at``,
-    ISO-8601); ``duration_seconds`` is recomputed server-side. Omit
-    ``ended_at`` to leave it unchanged; pass it explicitly to set or
-    clear the stop time. Proposal A work-note link: pass ``note_id`` to
-    set it (the note must be linked to the entry's task, else a domain
-    error), or ``clear_note_id=True`` to unlink; omitting both
-    preserves the stored value."""
+    """Correct a time entry. Reassign with ``task_id`` (transitively
+    changes project/client). Fix interval with ``started_at``/
+    ``ended_at`` (ISO-8601; duration recomputed). Omit ``ended_at`` to
+    keep; pass to set/clear. Proposal-A work-note: ``note_id`` to set
+    (note must share the entry's task) or ``clear_note_id=True`` to
+    unlink; omit both to preserve."""
     values: dict[str, Any] = {}
     if memo is not None:
         values["memo"] = memo
@@ -2474,16 +2493,12 @@ async def memory_write(
     channel_tag_id: str | None = None,
     channel_key: str | None = None,
 ) -> dict[str, Any]:
-    """Write a memory blob. The embedding is metered *when produced*;
-    if the embedding model is unavailable the blob is stored
-    keyword-only (still FTS-searchable, never an error). Optional
-    provenance for GDPR erasure. Tags = explicit ``tag_ids`` plus an
-    optional memory channel plus those inherited from tagged sources.
-    The channel may be addressed by ``channel_tag_id`` (a
-    ``memory_channel`` tag id) or, deterministically, by ``channel_key``
-    (its stable slug, what integrations use); if both are given they
-    must resolve to the same channel. The (org, project) boundary is
-    hard."""
+    """Write a memory blob (embedding metered when produced; degrades
+    to keyword-only/FTS if the model is unavailable, never errors).
+    Optional provenance for GDPR erasure. Tags = ``tag_ids`` + memory
+    channel + tags inherited from tagged sources. Channel by id
+    (``channel_tag_id``) or stable slug (``channel_key``); if both
+    given they must agree. (org, project) boundary is hard."""
     async with _tenant(token, org_id) as (s, org, user):
         sources = (
             [(source_kind, source_id)] if source_kind is not None and source_id is not None else []
@@ -2517,14 +2532,11 @@ async def memory_search(
     channel_tag_id: str | None = None,
     channel_key: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Hybrid RRF retrieval within the (org, project) boundary
-    (retrieval-as-tool, ADR-0016). Degrades to keyword-only when the
-    embedding model is unavailable. Optional ``tag_ids`` /
-    ``channel_tag_id`` / ``channel_key`` narrow to blobs carrying every
-    given tag (and the channel), a facet that never crosses the
-    boundary. The channel may be given by id or, deterministically, by
-    its stable ``channel_key`` slug; if both are given they must
-    resolve to the same channel. Deterministic order."""
+    """Hybrid RRF retrieval within the (org, project) boundary.
+    Degrades to keyword-only without embedder. ``tag_ids``,
+    ``channel_tag_id`` and ``channel_key`` narrow within the boundary
+    (facets, never cross). Channel by id or stable slug; if both given
+    they must agree. Deterministic order."""
     async with _tenant(token, org_id) as (s, org, user):
         hits = await memory_svc.retrieve(
             s,
@@ -2714,19 +2726,24 @@ def _note(
     n: Note,
     tags: list[Tag] | None = None,
     primary_task_id: uuid.UUID | None = None,
+    include_transcript: bool = True,
 ) -> dict[str, Any]:
     # docs/adr/0029 P3: ``task_id`` comes from the typed link table.
-    return {
+    # ``include_transcript`` lets list_notes opt out of the 0.5-3 KB
+    # body so picker payloads stay small (get_note keeps the default).
+    out: dict[str, Any] = {
         "id": str(n.id),
         "project_id": str(n.project_id) if n.project_id else None,
         "task_id": str(primary_task_id) if primary_task_id else None,
         "kind": n.kind.value,
         "status": n.status.value,
         "title": n.title,
-        "transcript": n.transcript,
         "version": n.version,
         "tags": [_tag_brief(g) for g in (tags or [])],
     }
+    if include_transcript:
+        out["transcript"] = n.transcript
+    return out
 
 
 def _turn(t: NoteTurn) -> dict[str, Any]:
@@ -2771,9 +2788,15 @@ async def list_notes(
     tag_id: str | None = None,
     include_archived: bool = False,
     include_deleted: bool = False,
+    include_transcript: bool = False,
+    fields: list[str] | None = None,
+    limit: int = 100,
 ) -> list[dict[str, Any]]:
     """List notes (newest first); for the @note picker. Optional
-    project/tag focus and archive/trash views."""
+    project/tag focus and archive/trash views. ``include_transcript``
+    opt-in (default False) keeps picker payloads small; ``fields``
+    keeps only the named columns (``id`` always kept); ``limit`` caps
+    rows at the DB level (default 100)."""
     async with _tenant(token, org_id) as (s, org, _user):
         rows = await notes_svc.list_notes(
             s,
@@ -2782,12 +2805,24 @@ async def list_notes(
             tag_id=uuid.UUID(tag_id) if tag_id else None,
             include_archived=include_archived,
             include_deleted=include_deleted,
+            limit=limit,
         )
         tagmap = await notes_svc.tags_by_note(s, note_ids=[n.id for n in rows])
         pid_map = await note_links_svc.primary_task_ids_for_notes(
             s, org_id=org, note_ids=[n.id for n in rows]
         )
-        return [_note(n, tagmap.get(n.id, []), primary_task_id=pid_map.get(n.id)) for n in rows]
+        return [
+            _project_fields(
+                _note(
+                    n,
+                    tagmap.get(n.id, []),
+                    primary_task_id=pid_map.get(n.id),
+                    include_transcript=include_transcript,
+                ),
+                fields,
+            )
+            for n in rows
+        ]
 
 
 @mcp.tool()
@@ -3065,9 +3100,11 @@ async def list_attachments(
     org_id: str,
     note_id: str | None = None,
     task_id: str | None = None,
+    fields: list[str] | None = None,
 ) -> list[dict[str, Any]]:
     """List a note's OR a task's attachments (metadata only; the binary
-    is never returned). Pass exactly one of note_id / task_id."""
+    is never returned). Pass exactly one of note_id / task_id.
+    ``fields`` opt-in keeps only the named columns (``id`` always kept)."""
     async with _tenant(token, org_id) as (s, org, _user):
         rows = await attachments_svc.list_attachments(
             s,
@@ -3076,15 +3113,18 @@ async def list_attachments(
             task_id=uuid.UUID(task_id) if task_id else None,
         )
         return [
-            {
-                "id": str(r.id),
-                "note_id": str(r.note_id) if r.note_id else None,
-                "task_id": str(r.task_id) if r.task_id else None,
-                "filename": r.filename,
-                "mime_type": r.mime_type,
-                "size_bytes": r.size_bytes,
-                "created_at": r.created_at.isoformat(),
-            }
+            _project_fields(
+                {
+                    "id": str(r.id),
+                    "note_id": str(r.note_id) if r.note_id else None,
+                    "task_id": str(r.task_id) if r.task_id else None,
+                    "filename": r.filename,
+                    "mime_type": r.mime_type,
+                    "size_bytes": r.size_bytes,
+                    "created_at": r.created_at.isoformat(),
+                },
+                fields,
+            )
             for r in rows
         ]
 

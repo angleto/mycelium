@@ -3,15 +3,23 @@
 A stable hashed bag-of-words projected into the production dimension
 and L2-normalized, so cosine similarity tracks token overlap without a
 real model. Process-stable (hashlib, not the salted builtin hash).
+
+Tokenization uses ``\\w+`` so punctuation does not stick to words
+(``"tasks,"`` becomes the token ``tasks``). A whitespace split made
+docstring tweaks shift ranks under bag-of-words, which made the tests
+fragile to perfectly valid doc edits.
 """
 
 from __future__ import annotations
 
 import hashlib
 import math
+import re
 
 from flow_core.config import get_settings
 from flow_core.embedder import EmbedResult
+
+_TOKEN = re.compile(r"\w+")
 
 
 def _hash_idx(token: str, dim: int) -> int:
@@ -25,7 +33,7 @@ class FakeEmbedder:
     async def embed(self, text: str) -> EmbedResult:
         dim = get_settings().embed_dim
         vec = [0.0] * dim
-        tokens = text.lower().split()
+        tokens = _TOKEN.findall(text.lower())
         for tok in tokens:
             vec[_hash_idx(tok, dim)] += 1.0
         norm = math.sqrt(sum(x * x for x in vec))
