@@ -39,6 +39,14 @@ _VERDICT_VALUES = ("none", "accepted", "rejected", "deemed_accepted")
 
 
 def upgrade() -> None:
+    # --- extend the sdi_status native enum with v2 kinds ----------------------
+    # ALTER TYPE ... ADD VALUE cannot run inside a transaction block in older
+    # PG releases; PG 12+ allows it in transactional DDL when the value is
+    # already implicitly created (or wrapped in END/BEGIN). We are on 16+, so
+    # the straight ADD VALUE works inside Alembic's transaction.
+    op.execute("ALTER TYPE sdi_status ADD VALUE IF NOT EXISTS 'NE'")
+    op.execute("ALTER TYPE sdi_status ADD VALUE IF NOT EXISTS 'DT'")
+
     # --- invoice_notifications -------------------------------------------------
     op.create_table(
         "invoice_notifications",
@@ -108,6 +116,7 @@ def upgrade() -> None:
         "USING (org_id = (NULLIF(current_setting('app.current_org', true), ''))::uuid) "
         "WITH CHECK (org_id = (NULLIF(current_setting('app.current_org', true), ''))::uuid)"
     )
+    op.execute("GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE invoice_notifications TO flow_app")
 
     # --- received_invoice_notifications ---------------------------------------
     op.create_table(
@@ -183,6 +192,9 @@ def upgrade() -> None:
         "CREATE POLICY p_received_invoice_notifications ON received_invoice_notifications "
         "USING (org_id = (NULLIF(current_setting('app.current_org', true), ''))::uuid) "
         "WITH CHECK (org_id = (NULLIF(current_setting('app.current_org', true), ''))::uuid)"
+    )
+    op.execute(
+        "GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE received_invoice_notifications TO flow_app"
     )
 
     # --- denormalized verdict columns ------------------------------------------

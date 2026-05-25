@@ -33,6 +33,7 @@ from flow_core.i18n import MessageCode
 from flow_core.it_provinces import is_valid_provincia
 from flow_core.models.client_profile import ClientProfile
 from flow_core.models.invoice import (
+    BuyerVerdict,
     ConservationAdhesion,
     ConservationStatus,
     DocumentType,
@@ -47,6 +48,7 @@ from flow_core.models.invoice import (
     SdiTransmissionCounter,
 )
 from flow_core.models.membership import Role
+from flow_core.models.sdi_notification import InvoiceNotification
 from flow_core.sdi_channel import SdiChannel, get_channel
 from flow_core.services import audit
 
@@ -1280,6 +1282,8 @@ async def mark_paid(
     return inv
 
 
+# Active-cycle outcomes RC/MC/AT/NS: legacy delivery + conservation effect.
+# NE/DT do not alter sdi_status this way (they layer on top, see verdict).
 _RECEIPT_MAP: dict[str, tuple[SdiStatus, InvoiceState, ConservationStatus]] = {
     "RC": (SdiStatus.RC, InvoiceState.delivered, ConservationStatus.ade_covered),
     "MC": (SdiStatus.MC, InvoiceState.delivered, ConservationStatus.ade_covered),
@@ -1287,7 +1291,106 @@ _RECEIPT_MAP: dict[str, tuple[SdiStatus, InvoiceState, ConservationStatus]] = {
     "NS": (SdiStatus.NS, InvoiceState.rejected, ConservationStatus.out_of_coverage),
 }
 
+# EC code -> buyer verdict. The XSD restricts EsitoCommittente_Type to these
+# two values (annotations: EC01=ACCETTAZIONE, EC02=RIFIUTO).
+_EC_VERDICT: dict[str, tuple[BuyerVerdict, InvoiceState]] = {
+    "EC01": (BuyerVerdict.accepted, InvoiceState.accepted),
+    "EC02": (BuyerVerdict.rejected, InvoiceState.rejected),
+}
 
+
+async def ingest_active_notification(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID | None,
+    parsed: ParsedNotificationLike,
+) -> Invoice:
+    """Correlate an SdI active-cycle notification to the tenant by
+    ``IdentificativoSdI`` (ADR-0011) and dispatch it: RC/MC/AT mark delivery
+    + AdE coverage; NS rejects; NE applies the buyer verdict; DT marks
+    deemed acceptance (15-day window expired). Every notification, including
+    the raw signed XML, is appended to ``invoice_notifications`` for audit;
+    the unique ``(invoice_id, kind, message_id)`` index makes SdI retries
+    idempotent."""
+    inv = (
+        await session.execute(
+            select(Invoice).where(Invoice.identificativo_sdi == parsed.identificativo_sdi)
+        )
+    ).scalar_one_or_none()
+    if inv is None:
+        raise NotFoundError(MessageCode.INVOICE_NOT_FOUND)
+    now = dt.datetime.now(tz=dt.UTC)
+    payload: dict[str, object] = {}
+    if parsed.outcome in _RECEIPT_MAP:
+        sdi, state, cons = _RECEIPT_MAP[parsed.outcome]
+        inv.sdi_status = sdi
+        inv.state = state
+        inv.conservation_status = cons
+        payload = {"outcome": parsed.outcome}
+    elif parsed.outcome == "NE":
+        # NE relays the buyer's EsitoCommittente. We layer the verdict on top
+        # of the existing delivery state without clobbering RC/MC/AT.
+        if parsed.esito not in _EC_VERDICT:
+            raise DomainError(
+                MessageCode.DOMAIN_ERROR, detail=f"NE missing/unknown Esito: {parsed.esito!r}"
+            )
+        verdict, state = _EC_VERDICT[parsed.esito]
+        inv.sdi_status = SdiStatus.NE
+        inv.buyer_verdict = verdict
+        inv.buyer_verdict_at = now
+        inv.state = state
+        payload = {"outcome": "NE", "esito": parsed.esito}
+    elif parsed.outcome == "DT":
+        # Deemed acceptance (15-day window expired). Only flip the verdict
+        # if no explicit NE arrived earlier; preserve a buyer's explicit
+        # accept/reject (NE wins over DT).
+        inv.sdi_status = SdiStatus.DT
+        inv.dt_received_at = now
+        if inv.buyer_verdict is BuyerVerdict.none:
+            inv.buyer_verdict = BuyerVerdict.deemed_accepted
+            inv.buyer_verdict_at = now
+            inv.state = InvoiceState.accepted
+        payload = {"outcome": "DT"}
+    else:
+        raise DomainError(MessageCode.DOMAIN_ERROR)
+    inv.version += 1
+
+    notif = InvoiceNotification(
+        org_id=org_id,
+        invoice_id=inv.id,
+        kind=parsed.outcome,
+        nome_file=parsed.nome_file,
+        message_id=parsed.message_id,
+        raw_xml=parsed.raw_xml,
+        payload=payload,
+    )
+    session.add(notif)
+    try:
+        await session.flush()
+    except IntegrityError:
+        # SdI re-delivered a notification with the same (invoice, kind,
+        # message_id); the prior ingest already applied it. Roll back the
+        # whole transaction so the verdict columns stay coherent with the
+        # audit row that wins (the first insertion).
+        await session.rollback()
+        return inv
+
+    await audit.log(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        entity="invoice",
+        entity_id=inv.id,
+        action="sdi_notification",
+        diff=payload,
+    )
+    return inv
+
+
+# Kept for compatibility with older callers / tests that still pass an
+# outcome string instead of a ParsedNotification dataclass. New code should
+# use ``ingest_active_notification`` so the audit row gets written.
 async def ingest_receipt(
     session: AsyncSession,
     *,
@@ -1296,10 +1399,6 @@ async def ingest_receipt(
     identificativo_sdi: str,
     outcome: str,
 ) -> Invoice:
-    """Correlate an SdI push notification to the tenant by
-    ``IdentificativoSdI`` (ADR-0011) and apply the active-cycle outcome
-    (RC/MC/NS/AT). SdI-transited invoices become AdE-covered
-    (ADR-0010)."""
     if outcome not in _RECEIPT_MAP:
         raise DomainError(MessageCode.DOMAIN_ERROR)
     inv = (
@@ -1325,6 +1424,21 @@ async def ingest_receipt(
         diff={"outcome": outcome},
     )
     return inv
+
+
+# Forward-declared protocol-ish typing helper to avoid an import cycle with
+# ``sdi_inbound``. The dispatcher only reads attributes from the parsed
+# notification; any object exposing this shape is accepted.
+from typing import Protocol  # noqa: E402
+
+
+class ParsedNotificationLike(Protocol):
+    outcome: str
+    identificativo_sdi: str
+    message_id: str | None
+    nome_file: str | None
+    esito: str | None
+    raw_xml: bytes
 
 
 async def list_invoices(

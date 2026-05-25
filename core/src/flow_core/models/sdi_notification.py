@@ -18,13 +18,14 @@ import uuid
 from typing import Any
 
 from sqlalchemy import DateTime, ForeignKey, Index, LargeBinary, String, text
-from sqlalchemy.dialects.postgresql import JSONB, UUID as PG_UUID
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
-from flow_core.models.base import Base, OrgScopedMixin, TimestampMixin, UUIDPKMixin
+from flow_core.models.base import Base, OrgScopedMixin, UUIDPKMixin
 
 
-class InvoiceNotification(UUIDPKMixin, OrgScopedMixin, TimestampMixin, Base):
+class InvoiceNotification(UUIDPKMixin, OrgScopedMixin, Base):
     """A notification received on the active cycle for a transmitted
     ``Invoice`` (RC, MC, NS, AT, NE, DT). Insert is idempotent on the
     ``(invoice_id, kind, message_id)`` unique index, so an SdI retry with
@@ -59,9 +60,12 @@ class InvoiceNotification(UUIDPKMixin, OrgScopedMixin, TimestampMixin, Base):
     payload: Mapped[dict[str, Any]] = mapped_column(
         JSONB, nullable=False, server_default=text("'{}'::jsonb")
     )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
 
 
-class ReceivedInvoiceNotification(UUIDPKMixin, OrgScopedMixin, TimestampMixin, Base):
+class ReceivedInvoiceNotification(UUIDPKMixin, OrgScopedMixin, Base):
     """A notification on the receiver cycle for a ``ReceivedInvoice``. Kinds:
     MT (delivery metadata), SE (our EC was scartato), DT (15-day timeout),
     EC (our outbound esito-committente, ``direction='out'``). The unique
@@ -97,4 +101,7 @@ class ReceivedInvoiceNotification(UUIDPKMixin, OrgScopedMixin, TimestampMixin, B
     raw_xml: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
     payload: Mapped[dict[str, Any]] = mapped_column(
         JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
     )

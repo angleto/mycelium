@@ -20,7 +20,8 @@ import datetime
 import enum
 import uuid
 
-from sqlalchemy import DateTime, Enum as SAEnum, ForeignKey, Index, LargeBinary, String, text
+from sqlalchemy import DateTime, ForeignKey, Index, LargeBinary, String, text
+from sqlalchemy import Enum as SAEnum
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 

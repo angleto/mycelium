@@ -10,9 +10,11 @@ from collections.abc import Iterator
 from decimal import Decimal
 
 import pytest
+from sqlalchemy import select
 
 from flow_core.db import admin_session, tenant_session
-from flow_core.models.invoice import ConservationStatus, InvoiceState, SdiStatus
+from flow_core.models.invoice import BuyerVerdict, ConservationStatus, InvoiceState, SdiStatus
+from flow_core.models.sdi_notification import InvoiceNotification
 from flow_core.sdi_channel import IntermediaryIdentity, TransmitResult, set_channel_override
 from flow_core.services import invoice as inv
 from flow_core.services import sdi_mandate as mandate
@@ -54,12 +56,42 @@ def _ns(ident: str) -> bytes:
     ).encode()
 
 
+def _ne(ident: str, esito: str, *, message_id: str = "MID00NE1") -> bytes:
+    return (
+        f'<m:NotificaEsito xmlns:m="{NS_MESSAGGI}" versione="1.0">'
+        f"<IdentificativoSdI>{ident}</IdentificativoSdI>"
+        f"<NomeFile>IT01234567890_00001.xml</NomeFile>"
+        f'<EsitoCommittente versione="1.0">'
+        f"<IdentificativoSdI>{ident}</IdentificativoSdI>"
+        f"<Esito>{esito}</Esito>"
+        f"</EsitoCommittente>"
+        f"<MessageId>{message_id}</MessageId>"
+        f"</m:NotificaEsito>"
+    ).encode()
+
+
+def _dt(ident: str, *, message_id: str = "MID00DT1") -> bytes:
+    return (
+        f'<m:NotificaDecorrenzaTermini xmlns:m="{NS_MESSAGGI}" versione="1.0">'
+        f"<IdentificativoSdI>{ident}</IdentificativoSdI>"
+        f"<NomeFile>IT01234567890_00001.xml</NomeFile>"
+        f"<MessageId>{message_id}</MessageId>"
+        f"</m:NotificaDecorrenzaTermini>"
+    ).encode()
+
+
 def test_parse_ricevuta_consegna() -> None:
-    assert parse_notification(_rc("100000000001")) == ("100000000001", "RC")
+    parsed = parse_notification(_rc("100000000001"))
+    assert parsed.outcome == "RC"
+    assert parsed.identificativo_sdi == "100000000001"
+    assert parsed.message_id == "MID00001"
+    assert parsed.esito is None
 
 
 def test_parse_notifica_scarto() -> None:
-    assert parse_notification(_ns("100000000002")) == ("100000000002", "NS")
+    parsed = parse_notification(_ns("100000000002"))
+    assert parsed.outcome == "NS"
+    assert parsed.identificativo_sdi == "100000000002"
 
 
 def test_parse_rejects_lax_namespace() -> None:
@@ -200,3 +232,128 @@ async def test_inbound_ingest_correlates_cross_org_and_marks_delivered(_coop: No
 
     # An unknown IdentificativoSdI yields None (SdI may retry; never a 500).
     assert await ingest_notification(_rc("999999999999")) is None
+
+
+async def _setup_transmitted_invoice(coop: None) -> str:
+    """Spin up an org + transmitted invoice and return its IdentificativoSdI.
+    Used by the NE/DT integration tests below."""
+    org, user = await _org()
+    async with tenant_session(str(org), str(user)) as s:
+        issuer = await inv.create_issuer_profile(
+            s,
+            org_id=org,
+            actor_id=user,
+            label="P",
+            denominazione="Acme Srl",
+            piva="01234567890",
+            indirizzo="Via Roma 1",
+            cap="00100",
+            comune="Roma",
+            is_default=True,
+        )
+        client = await create_client(
+            s,
+            org_id=org,
+            actor_id=user,
+            name="C",
+            profile=ClientInput(
+                ragione_sociale="Client SpA",
+                id_paese="IT",
+                id_codice="09876543210",
+                codice_destinatario="ABCDEFG",
+                indirizzo="Via Milano 2",
+                cap="20100",
+                comune="Milano",
+            ),
+        )
+        await mandate.grant_mandate(s, org_id=org, actor_id=user, issuer_profile_id=issuer.id)
+        d = await inv.create_draft(s, org_id=org, actor_id=user, client_tag_id=client.id, year=2026)
+        await inv.add_line(
+            s,
+            org_id=org,
+            actor_id=user,
+            invoice_id=d.id,
+            description="svc",
+            unit_price=Decimal(100),
+        )
+        tx = await inv.transmit(s, org_id=org, actor_id=user, invoice_id=d.id)
+    assert tx.identificativo_sdi is not None
+    return tx.identificativo_sdi
+
+
+async def test_ne_ec01_marks_accepted(_coop: None) -> None:
+    # Buyer accepts via EsitoCommittente EC01 -> verdict=accepted, state=accepted.
+    ident = await _setup_transmitted_invoice(_coop)
+    await ingest_notification(_rc(ident))  # delivery first
+    updated = await ingest_notification(_ne(ident, "EC01"))
+    assert updated is not None
+    assert updated.sdi_status is SdiStatus.NE
+    assert updated.buyer_verdict is BuyerVerdict.accepted
+    assert updated.state is InvoiceState.accepted
+    assert updated.buyer_verdict_at is not None
+
+
+async def test_ne_ec02_marks_rejected(_coop: None) -> None:
+    ident = await _setup_transmitted_invoice(_coop)
+    await ingest_notification(_rc(ident))
+    updated = await ingest_notification(_ne(ident, "EC02"))
+    assert updated is not None
+    assert updated.buyer_verdict is BuyerVerdict.rejected
+    assert updated.state is InvoiceState.rejected
+
+
+async def test_dt_marks_deemed_accepted_when_no_prior_ne(_coop: None) -> None:
+    # 15-day window expired without a buyer NE -> deemed acceptance.
+    ident = await _setup_transmitted_invoice(_coop)
+    await ingest_notification(_rc(ident))
+    updated = await ingest_notification(_dt(ident))
+    assert updated is not None
+    assert updated.sdi_status is SdiStatus.DT
+    assert updated.buyer_verdict is BuyerVerdict.deemed_accepted
+    assert updated.state is InvoiceState.accepted
+    assert updated.dt_received_at is not None
+
+
+async def test_dt_does_not_clobber_prior_ne_rejection(_coop: None) -> None:
+    # NE (explicit verdict) must win over a later DT (timeout). Only sdi_status
+    # and dt_received_at change; the verdict stays as 'rejected'.
+    ident = await _setup_transmitted_invoice(_coop)
+    await ingest_notification(_rc(ident))
+    await ingest_notification(_ne(ident, "EC02"))
+    updated = await ingest_notification(_dt(ident))
+    assert updated is not None
+    assert updated.sdi_status is SdiStatus.DT
+    assert updated.dt_received_at is not None
+    assert updated.buyer_verdict is BuyerVerdict.rejected
+    assert updated.state is InvoiceState.rejected
+
+
+async def test_audit_log_appends_one_row_per_notification(_coop: None) -> None:
+    # Every ingest writes an invoice_notifications row; a SdI retry with the
+    # same message_id is swallowed by the dedupe unique index.
+    ident = await _setup_transmitted_invoice(_coop)
+    await ingest_notification(_rc(ident))
+    await ingest_notification(_ne(ident, "EC01"))
+    # Retry of the NE with the same MessageId: idempotent (no second row).
+    await ingest_notification(_ne(ident, "EC01"))
+
+    org_id = await _resolve_org_for(ident)
+    async with tenant_session(str(org_id), "00000000-0000-0000-0000-000000000000") as s:
+        stmt = select(InvoiceNotification.kind).order_by(InvoiceNotification.received_at)
+        rows = (await s.execute(stmt)).scalars().all()
+    assert rows == ["RC", "NE"]
+
+
+async def _resolve_org_for(identificativo: str) -> uuid.UUID:
+    # Helper that mirrors sdi_inbound._resolve_org; exposed here so the audit
+    # assertion can open a tenant_session without leaking a private symbol.
+    from sqlalchemy import text as _text
+
+    async with admin_session() as s:
+        val = (
+            await s.execute(
+                _text("SELECT sdi_resolve_invoice_org(:ident)"), {"ident": identificativo}
+            )
+        ).scalar()
+    assert val is not None
+    return uuid.UUID(str(val))
