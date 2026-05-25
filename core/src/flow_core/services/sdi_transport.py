@@ -42,9 +42,7 @@ def _mtls_ssl_context(
     (httpx 0.28+); the context is a Python stdlib type so unit tests stay
     portable and respx is unaffected (it intercepts before TLS)."""
     ctx = (
-        ssl.create_default_context(cafile=ca_bundle)
-        if ca_bundle
-        else ssl.create_default_context()
+        ssl.create_default_context(cafile=ca_bundle) if ca_bundle else ssl.create_default_context()
     )
     ctx.load_cert_chain(certfile=client_cert, keyfile=client_key)
     return ctx
@@ -113,9 +111,7 @@ async def send_via_sdicoop(
     surface as ``httpx.HTTPError``; a malformed/fault response as
     ``ValueError``. Config-gated; never exercised in CI."""
     envelope = build_ricevifile_envelope(filename=filename, xml=xml)
-    ctx = _mtls_ssl_context(
-        client_cert=client_cert, client_key=client_key, ca_bundle=ca_bundle
-    )
+    ctx = _mtls_ssl_context(client_cert=client_cert, client_key=client_key, ca_bundle=ca_bundle)
     async with httpx.AsyncClient(verify=ctx, timeout=_SEND_TIMEOUT_S) as client:
         resp = await client.post(
             endpoint_url,
@@ -195,9 +191,7 @@ async def send_esito_via_sdicoop(
     as ``send_via_sdicoop`` (network/TLS = ``httpx.HTTPError``, malformed
     response = ``ValueError``). Config-gated; never exercised in CI."""
     envelope = build_notificaesito_envelope(filename=filename, signed_xml=signed_xml)
-    ctx = _mtls_ssl_context(
-        client_cert=client_cert, client_key=client_key, ca_bundle=ca_bundle
-    )
+    ctx = _mtls_ssl_context(client_cert=client_cert, client_key=client_key, ca_bundle=ca_bundle)
     async with httpx.AsyncClient(verify=ctx, timeout=_SEND_TIMEOUT_S) as client:
         resp = await client.post(
             endpoint_url,

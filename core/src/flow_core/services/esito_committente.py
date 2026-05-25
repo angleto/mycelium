@@ -33,8 +33,12 @@ import uuid
 
 import httpx
 import lxml.etree as ET
-from cryptography.hazmat.primitives import serialization
-from signxml import DigestAlgorithm, SignatureConstructionMethod, SignatureMethod, XMLSigner
+from signxml.algorithms import (
+    DigestAlgorithm,
+    SignatureConstructionMethod,
+    SignatureMethod,
+)
+from signxml.signer import XMLSigner
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -108,15 +112,17 @@ def build_esito_committente_xml(
         ET.SubElement(root, "MessageIdCommittente").text = message_id_committente
 
     key_pem, cert_pem = _load_signing_material()
-    key = serialization.load_pem_private_key(key_pem, password=None)
     signer = XMLSigner(
         method=SignatureConstructionMethod.enveloped,
         signature_algorithm=SignatureMethod.RSA_SHA256,
         digest_algorithm=DigestAlgorithm.SHA256,
     )
-    signed = signer.sign(root, key=key, cert=cert_pem)
+    # signxml accepts the key as PEM bytes directly (no need to materialise
+    # a cryptography key object, which would yield a union type wider than
+    # signxml's signature). The cert is passed as the PEM text.
+    signed = signer.sign(root, key=key_pem, cert=cert_pem.decode("ascii"))
 
-    payload = ET.tostring(signed, xml_declaration=True, encoding="UTF-8")
+    payload: bytes = ET.tostring(signed, xml_declaration=True, encoding="UTF-8")
     # Self-check: a misconfigured signer is a deploy bug; surface it here
     # rather than at the SdI esito.
     errors = validate_sdi_notification(payload)

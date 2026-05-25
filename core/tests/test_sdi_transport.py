@@ -49,17 +49,12 @@ def test_parse_response_missing_identificativo_raises() -> None:
 
 
 def test_esito_filename_appends_progressivo_esito() -> None:
-    assert (
-        esito_filename("IT", "01234567890", "00001", "001")
-        == "IT01234567890_00001_EC_001.xml"
-    )
+    assert esito_filename("IT", "01234567890", "00001", "001") == "IT01234567890_00001_EC_001.xml"
 
 
 def test_notificaesito_envelope_carries_filename_and_signed_payload() -> None:
     signed = b"<m:NotificaEsitoCommittente>...</m:NotificaEsitoCommittente>"
-    env = build_notificaesito_envelope(
-        filename="IT01234567890_00001_EC_001.xml", signed_xml=signed
-    )
+    env = build_notificaesito_envelope(filename="IT01234567890_00001_EC_001.xml", signed_xml=signed)
     texts = {e.text for e in ET.fromstring(env).iter() if e.text}
     assert "IT01234567890_00001_EC_001.xml" in texts
     assert base64.b64encode(signed).decode() in texts
