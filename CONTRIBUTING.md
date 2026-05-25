@@ -36,9 +36,7 @@ Conventional, English, imperative mood (e.g.
 
 ## Developer Certificate of Origin (DCO)
 
-To preserve the project's ability to evolve its licensing later (for
-example to offer a dual license, or to relicense under another
-OSI-compatible license), every commit must be signed off under the
+Every commit must be signed off under the
 [Developer Certificate of Origin 1.1](https://developercertificate.org/).
 
 The sign-off is a single trailer line at the end of the commit message:
@@ -61,3 +59,27 @@ anonymous or pseudonymous sign-offs) and should match your
 
 Pull requests with unsigned commits will be asked to rebase with
 sign-offs before merge.
+
+## Contributor License Agreement (CLA)
+
+In addition to the DCO sign-off above, contributions are accepted
+under the [Flow Contributor License Agreement](CLA.md). The CLA
+grants the maintainer the rights needed to release the project
+under both AGPL-3.0-or-later and a separate commercial license
+(see [NOTICE](NOTICE) and [LICENSE](LICENSE)). The DCO alone is
+not sufficient for that, because under DCO each contributor retains
+copyright in their contribution and only licenses it under the
+project's then-current license; without the CLA the maintainer
+cannot relicense third-party contributions to commercial customers.
+
+Acceptance is one-time per contributor. The first pull request from
+a contributor must include the exact line
+
+    I accept the Flow CLA (CLA.md)
+
+in its description or in the body of its top commit. Subsequent
+contributions from the same contributor are covered automatically
+until acceptance is revoked in writing (see CLA.md section 8).
+
+Pull requests without CLA acceptance will be asked to add it before
+merge.

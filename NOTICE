@@ -1,0 +1,89 @@
+Flow
+Copyright (c) 2026 Angelo Leto
+
+This product includes software developed by Angelo Leto.
+
+-------------------------------------------------------------------------------
+Licensing
+-------------------------------------------------------------------------------
+
+The source code in this repository is distributed under the GNU
+Affero General Public License v3.0 or later (AGPL-3.0-or-later)
+together with the additional term set out in the LICENSE file
+pursuant to AGPLv3 section 7(b) (see "Attribution" below).
+
+A separate commercial license is available for parties who cannot
+or do not wish to accept the obligations of AGPL-3.0-or-later (in
+particular the AGPL section 13 network-use source disclosure and
+the section 7(b) attribution requirement below). The commercial
+license is offered at the discretion of the copyright holder;
+contact angelo@leto.blue for terms.
+
+-------------------------------------------------------------------------------
+Attribution required under AGPLv3 section 7(b)
+-------------------------------------------------------------------------------
+
+If you redistribute, host, modify, or build upon this software, you
+MUST preserve the following attribution in every reasonable
+user-visible location, including (where applicable):
+
+  - the "About" page or equivalent informational screen of any
+    graphical or web user interface;
+  - any startup banner and the `--version` / `--help` output of any
+    command-line interface;
+  - the interactive network interface served to remote users of a
+    network-deployed instance (AGPLv3 section 13);
+  - the accompanying documentation and the source distribution.
+
+The required attribution text is, verbatim:
+
+    Based on Flow (https://github.com/angleto/flow),
+    Copyright (c) Angelo Leto. Licensed under AGPL-3.0-or-later.
+
+You may not remove, obscure, alter, translate-away, or relocate this
+attribution in a way that diminishes its visibility, and you may
+not modify the URL or copyright statement above. Translations of
+the surrounding interface chrome are permitted provided the
+attribution itself remains in English (or is reproduced in English
+alongside the translation).
+
+This requirement is imposed under AGPLv3 section 7(b) and is a
+non-removable additional term of the license; see the LICENSE
+file. Any covered work that fails to preserve this attribution is
+distributed in violation of this License and of the copyright in
+the underlying work.
+
+-------------------------------------------------------------------------------
+Trademark
+-------------------------------------------------------------------------------
+
+"Flow" and the Flow logo are trademarks of Angelo Leto. Neither the
+GNU Affero General Public License, nor the attribution requirement
+above, grants any right to use the "Flow" name or the Flow logo
+beyond the descriptive "Based on Flow" attribution set out above.
+
+Forks and derivative distributions must be released under a different
+name and a different mark. You may describe your project as "based
+on Flow" or "compatible with Flow", but you may not redistribute it
+under the "Flow" name, nor use the Flow logo, in a way that would
+suggest endorsement by or affiliation with the upstream project.
+
+For permission inquiries related to the "Flow" mark, contact
+angelo@leto.blue.
+
+-------------------------------------------------------------------------------
+Contributions
+-------------------------------------------------------------------------------
+
+Contributions to the upstream project are accepted under BOTH:
+
+  (1) the Developer Certificate of Origin 1.1 (sign-off via
+      `git commit -s`); and
+  (2) the Flow Contributor License Agreement (see CLA.md).
+
+The CLA grants the project maintainer the rights necessary to
+release the project under both AGPL-3.0-or-later and the separate
+commercial license referenced above, without re-requesting
+permission from each contributor. Pull requests are checked for
+both DCO sign-off and CLA acceptance before merge. See
+CONTRIBUTING.md for the workflow.

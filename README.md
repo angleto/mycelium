@@ -85,24 +85,39 @@ Architecture, domain model, decisions and ADRs live in
 
 ## License
 
-Flow is free software licensed under the **GNU Affero General Public
-License v3.0 or later** (`AGPL-3.0-or-later`). You may use, study,
-share and modify it; if you run a modified version to provide a network
-service, you must make the complete corresponding source of your
-version available to its users. See [`LICENSE`](LICENSE).
+Flow is dual-licensed:
+
+- as **free software** under the **GNU Affero General Public License
+  v3.0 or later** (`AGPL-3.0-or-later`), with the attribution
+  requirement set out in the [`NOTICE`](NOTICE) file under AGPLv3
+  section 7(b). Any redistribution, fork, hosted instance, or
+  derivative work must preserve the "Based on Flow" attribution in
+  user-visible locations (About / Version / startup banner /
+  interactive network interface / documentation). If you run a
+  modified version to provide a network service, AGPL section 13
+  also requires you to offer the corresponding source to its users.
+- under a separate **commercial license** for parties who cannot or
+  do not wish to comply with AGPL section 13 (network-use source
+  disclosure) or the section 7(b) attribution requirement. Contact
+  angelo@leto.blue for terms.
+
+See [`LICENSE`](LICENSE) and [`NOTICE`](NOTICE) for the full text.
 
 SPDX-License-Identifier: AGPL-3.0-or-later
 
 ## Trademark
 
-"Flow" and the Flow logo are trademarks of Angelo Leto. The AGPL grant
-above covers the source code; it does not grant permission to use the
-project name or logo. Forks and derivative distributions must be
-released under a different name and a different mark. You may describe
-your project as "based on Flow" or "compatible with Flow", but you may
-not redistribute it under the "Flow" name, nor use the logo, in a way
-that would suggest endorsement by or affiliation with the upstream
-project.
+"Flow" and the Flow logo are trademarks of Angelo Leto. Neither the
+AGPL grant nor the section 7(b) attribution requirement grants
+permission to use the project name or logo beyond the descriptive
+"Based on Flow" attribution. Forks and derivative distributions must
+be released under a different name and a different mark. You may
+describe your project as "based on Flow" or "compatible with Flow",
+but you may not redistribute it under the "Flow" name, nor use the
+logo, in a way that would suggest endorsement by or affiliation with
+the upstream project. See [`NOTICE`](NOTICE) for full terms and
+contact details for trademark permission requests.
 
 Contributions to the upstream project must be signed off under the
-[Developer Certificate of Origin](CONTRIBUTING.md#developer-certificate-of-origin-dco).
+[Developer Certificate of Origin](CONTRIBUTING.md#developer-certificate-of-origin-dco)
+**and** submitted under the [Flow Contributor License Agreement](CLA.md).
