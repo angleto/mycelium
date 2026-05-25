@@ -8,7 +8,7 @@ browser.
 
 ```sh
 # macOS / Linuxbrew
-brew install angleto/tap/flow-cli
+brew install angleto/flow/flow-cli
 
 # From this monorepo
 uv sync --all-packages && uv run flow --help

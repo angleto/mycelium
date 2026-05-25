@@ -5,7 +5,7 @@ the REST API** (no business logic):
 
 | Surface | Source | Install |
 | --- | --- | --- |
-| `flow` CLI | [`cli/`](../cli/README.md) | `brew install angleto/tap/flow-cli` |
+| `flow` CLI | [`cli/`](../cli/README.md) | `brew install angleto/flow/flow-cli` |
 | `flow.nvim` plugin | [`nvim/flow.nvim/`](../nvim/flow.nvim/README.md) | `lazy.nvim` block, see plugin README |
 
 ## Why a CLI
@@ -53,12 +53,12 @@ server-side (`DELETE /agent-tokens/{id}`) and deletes the local file.
 CLI and plugin share **the monorepo's release tag**. When you cut
 Flow `v2.0.6`, two mirror workflows fire on the tag push:
 
-- [`mirror-homebrew-tap`](../.github/workflows/mirror-homebrew-tap.yml)
-  renders [`packaging/homebrew-tap/Formula/flow-cli.rb`](../packaging/homebrew-tap/Formula/flow-cli.rb)
+- [`mirror-homebrew-flow`](../.github/workflows/mirror-homebrew-flow.yml)
+  renders [`packaging/homebrew-flow/Formula/flow-cli.rb`](../packaging/homebrew-flow/Formula/flow-cli.rb)
   for `v2.0.6` (downloads the tarball, computes the sha256, substitutes
   the `__TAG__` / `__SHA256__` placeholders) and pushes the result into
-  `github.com/angleto/homebrew-tap`. Users `brew install
-  angleto/tap/flow-cli` and pick up the new version.
+  `github.com/angleto/homebrew-flow`. Users `brew install
+  angleto/flow/flow-cli` and pick up the new version.
 - [`mirror-flow-nvim`](../.github/workflows/mirror-flow-nvim.yml)
   copies [`nvim/flow.nvim/`](../nvim/flow.nvim/) into
   `github.com/angleto/flow.nvim` and re-tags it `v2.0.6` too, so

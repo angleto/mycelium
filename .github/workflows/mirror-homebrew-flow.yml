@@ -1,6 +1,6 @@
-# Mirror packaging/homebrew-tap/ into github.com/angleto/homebrew-tap
+# Mirror packaging/homebrew-flow/ into github.com/angleto/homebrew-flow
 # on every v* tag (the unified Flow release tag). The tap repo is a
-# public mirror used by `brew tap angleto/tap`; the monorepo is the
+# public mirror used by `brew tap angleto/flow`; the monorepo is the
 # source of truth for the formula template.
 #
 # The committed `Formula/flow-cli.rb` is a TEMPLATE with `__TAG__` and
@@ -10,13 +10,13 @@
 #
 # Setup (one-time):
 #   1. Create a fine-grained Personal Access Token with `Contents:
-#      read+write` on the `angleto/homebrew-tap` repository only.
+#      read+write` on the `angleto/homebrew-flow` repository only.
 #   2. Save it as a repository secret named `TAP_PUSH_TOKEN` in this
 #      repo.
 #
 # Without that secret the first step fails fast with a clear error.
 
-name: mirror-homebrew-tap
+name: mirror-homebrew-flow
 
 on:
   push:
@@ -72,11 +72,11 @@ jobs:
           TAG: ${{ steps.tag.outputs.tag }}
         run: |
           set -euo pipefail
-          packaging/homebrew-tap/bin/render-formula "${TAG}" --in-place
+          packaging/homebrew-flow/bin/render-formula "${TAG}" --in-place
           # Sanity: placeholders must be gone now.
-          if grep -qE '__TAG__|__SHA256__' packaging/homebrew-tap/Formula/flow-cli.rb; then
+          if grep -qE '__TAG__|__SHA256__' packaging/homebrew-flow/Formula/flow-cli.rb; then
             echo "::error::render-formula left placeholders unresolved"
-            grep -nE '__TAG__|__SHA256__' packaging/homebrew-tap/Formula/flow-cli.rb
+            grep -nE '__TAG__|__SHA256__' packaging/homebrew-flow/Formula/flow-cli.rb
             exit 1
           fi
 
@@ -90,7 +90,7 @@ jobs:
             exit 1
           fi
           git clone --depth=1 \
-            "https://x-access-token:${TAP_PUSH_TOKEN}@github.com/angleto/homebrew-tap.git" \
+            "https://x-access-token:${TAP_PUSH_TOKEN}@github.com/angleto/homebrew-flow.git" \
             tap-repo
 
       - name: Sync content into tap
@@ -98,9 +98,9 @@ jobs:
           set -euo pipefail
           # Wipe what we own and re-copy, so removals propagate too.
           rm -rf tap-repo/Formula tap-repo/bin tap-repo/README.md
-          cp -r packaging/homebrew-tap/Formula tap-repo/
-          cp -r packaging/homebrew-tap/bin tap-repo/
-          cp packaging/homebrew-tap/README.md tap-repo/
+          cp -r packaging/homebrew-flow/Formula tap-repo/
+          cp -r packaging/homebrew-flow/bin tap-repo/
+          cp packaging/homebrew-flow/README.md tap-repo/
 
       - name: Commit + push if changed
         env:

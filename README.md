@@ -49,7 +49,7 @@ system exactly like the web UI.
   and an inbound (passive) router that ingests received invoices.
 - **MCP server** (100+ tools) mirroring the API for agent control.
 - **Keyboard-first CLI + Neovim plugin.** `brew install
-  angleto/tap/flow-cli` for the terminal client (`flow today`, `flow
+  angleto/flow/flow-cli` for the terminal client (`flow today`, `flow
   task add`, `flow timer start`, `flow note voice`, …) and
   [`nvim/flow.nvim`](nvim/flow.nvim/README.md) for the in-editor
   surface. Both shell out to the same REST API; see

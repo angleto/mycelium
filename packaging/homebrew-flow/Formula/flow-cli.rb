@@ -6,7 +6,7 @@ class FlowCli < Formula
   # NOTE: this file is a template. The url + sha256 below carry tag
   # and digest placeholders, resolved at release time by either:
   #   - ``bin/render-formula <version>`` (local smoke test), or
-  #   - the ``mirror-homebrew-tap`` GitHub Actions workflow on every
+  #   - the ``mirror-homebrew-flow`` GitHub Actions workflow on every
   #     ``v*`` tag push (canonical publication path).
   # Do not commit a real url/sha256 here; the workflow rewrites them
   # against the tag being released.

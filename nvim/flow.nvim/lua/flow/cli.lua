@@ -10,7 +10,7 @@ end
 local function ensure_bin(bin)
   if vim.fn.executable(bin) ~= 1 then
     vim.notify(
-      ("flow-cli (`%s`) not found on PATH.\nInstall with: brew install angleto/tap/flow-cli"):format(bin),
+      ("flow-cli (`%s`) not found on PATH.\nInstall with: brew install angleto/flow/flow-cli"):format(bin),
       vim.log.levels.ERROR,
       { title = "flow.nvim" }
     )

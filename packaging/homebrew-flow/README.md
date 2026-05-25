@@ -1,22 +1,22 @@
-# homebrew-tap (angleto/tap)
+# homebrew-flow (angleto/flow)
 
 Homebrew tap for the Flow personal-productivity tools. The canonical
 contents live in this directory; the actual tap repository at
-`github.com/angleto/homebrew-tap` is a public mirror, refreshed by the
-[`mirror-homebrew-tap`](../../.github/workflows/mirror-homebrew-tap.yml)
+`github.com/angleto/homebrew-flow` is a public mirror, refreshed by the
+[`mirror-homebrew-flow`](../../.github/workflows/mirror-homebrew-flow.yml)
 GitHub Actions workflow on every `v*` tag of the monorepo.
 
 ## Usage
 
 ```sh
-brew tap angleto/tap
+brew tap angleto/flow
 brew install flow-cli
 ```
 
 Or in one line:
 
 ```sh
-brew install angleto/tap/flow-cli
+brew install angleto/flow/flow-cli
 ```
 
 ## What's here
@@ -49,20 +49,20 @@ That tag push triggers, in parallel:
 
 - `ci.yml` (ruff + mypy + tests),
 - `build-images.yml` (Docker images → GHCR),
-- [`mirror-homebrew-tap`](../../.github/workflows/mirror-homebrew-tap.yml)
+- [`mirror-homebrew-flow`](../../.github/workflows/mirror-homebrew-flow.yml)
   (renders the formula for `v2.0.6` and pushes it into
-  `angleto/homebrew-tap`),
+  `angleto/homebrew-flow`),
 - [`mirror-flow-nvim`](../../.github/workflows/mirror-flow-nvim.yml)
   (mirrors `nvim/flow.nvim/` into `angleto/flow.nvim` and tags it
   `v2.0.6` too).
 
-Users `brew install angleto/tap/flow-cli` and get the new version.
+Users `brew install angleto/flow/flow-cli` and get the new version.
 No manual mirror step.
 
 ## Local smoke (before tagging)
 
 ```sh
-cd packaging/homebrew-tap
+cd packaging/homebrew-flow
 
 # Resolve the template against an existing tag (any v* works).
 bin/render-formula v2.0.5 > /tmp/flow-cli.rb
@@ -74,12 +74,12 @@ mkdir Formula && cp /tmp/flow-cli.rb Formula/
 git add -A && git -c user.email=. -c user.name=. commit -q -m smoke
 
 HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALL_CLEANUP=1 \
-  brew tap --force angleto/tap "file://$PWD"
+  brew tap --force angleto/flow "file://$PWD"
 HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALL_CLEANUP=1 \
-  brew install --build-from-source angleto/tap/flow-cli
+  brew install --build-from-source angleto/flow/flow-cli
 flow --version && flow auth status
-brew test angleto/tap/flow-cli
-brew uninstall flow-cli && brew untap angleto/tap
+brew test angleto/flow/flow-cli
+brew uninstall flow-cli && brew untap angleto/flow
 ```
 
 ## Refreshing Python resources

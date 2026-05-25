@@ -10,7 +10,7 @@
 #   bin/render-formula v2.0.6 > /tmp/flow-cli.rb        # local smoke
 #   bin/render-formula v2.0.6 --in-place                # rewrite Formula/flow-cli.rb
 #
-# Source of truth: the ``mirror-homebrew-tap`` GitHub Actions workflow
+# Source of truth: the ``mirror-homebrew-flow`` GitHub Actions workflow
 # runs the same logic at every ``v*`` tag push.
 set -euo pipefail
 

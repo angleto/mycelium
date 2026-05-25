@@ -14,7 +14,7 @@ function M.check()
   start("flow.nvim")
   if vim.fn.executable(bin) ~= 1 then
     err(("`%s` not found on PATH"):format(bin), {
-      "Install: brew install angleto/tap/flow-cli",
+      "Install: brew install angleto/flow/flow-cli",
       "Or:      pipx install flow-cli",
     })
     return
