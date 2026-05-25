@@ -17,7 +17,9 @@ from flow_api.schemas import (
     EmailIn,
     LoginIn,
     LoginMfaIn,
+    LogoutIn,
     MeOut,
+    RefreshIn,
     ResetPasswordIn,
     SignupIn,
     SignupOut,
@@ -32,9 +34,11 @@ from flow_core.models.user import User
 from flow_core.services.auth import (
     login,
     login_mfa,
+    refresh_session,
     request_password_reset,
     resend_verification,
     reset_password,
+    revoke_refresh_family,
     revoke_token,
     signup,
     verify_email,
@@ -65,6 +69,7 @@ async def signup_endpoint(body: SignupIn) -> SignupOut:
         user_id=result.user_id,
         workspace_id=result.org_id,
         token=result.token,
+        refresh_token=result.refresh_token,
         email_verification_required=result.email_verification_required,
     )
 
@@ -72,8 +77,8 @@ async def signup_endpoint(body: SignupIn) -> SignupOut:
 @router.post("/login", response_model=TokenOut)
 async def login_endpoint(body: LoginIn) -> TokenOut:
     async with admin_session() as session:
-        token = await login(session, email=body.email, password=body.password)
-    return TokenOut(token=token)
+        pair = await login(session, email=body.email, password=body.password)
+    return TokenOut(token=pair.access_token, refresh_token=pair.refresh_token)
 
 
 @router.post("/login-mfa", response_model=TokenOut)
@@ -81,13 +86,23 @@ async def login_mfa_endpoint(body: LoginMfaIn) -> TokenOut:
     """Combined password + TOTP/backup-code login. Use once /auth/login
     has answered 401 auth.mfa_required."""
     async with admin_session() as session:
-        token = await login_mfa(
+        pair = await login_mfa(
             session,
             email=body.email,
             password=body.password,
             totp_code=body.totp_code,
         )
-    return TokenOut(token=token)
+    return TokenOut(token=pair.access_token, refresh_token=pair.refresh_token)
+
+
+@router.post("/refresh", response_model=TokenOut)
+async def refresh_endpoint(body: RefreshIn) -> TokenOut:
+    """Rotate the refresh token, mint a fresh access JWT. The presented
+    refresh row is single-use: a replay revokes the whole family (theft
+    signal). All failure modes collapse to 401 invalid-token."""
+    async with admin_session() as session:
+        pair = await refresh_session(session, raw_refresh=body.refresh_token)
+    return TokenOut(token=pair.access_token, refresh_token=pair.refresh_token)
 
 
 @router.get("/me", response_model=MeOut)
@@ -107,8 +122,8 @@ async def me_endpoint(
 @router.post("/verify-email", response_model=TokenOut)
 async def verify_email_endpoint(body: VerifyEmailIn) -> TokenOut:
     async with admin_session() as session:
-        token = await verify_email(session, raw_token=body.token)
-    return TokenOut(token=token)
+        pair = await verify_email(session, raw_token=body.token)
+    return TokenOut(token=pair.access_token, refresh_token=pair.refresh_token)
 
 
 @router.post("/resend-verification", status_code=status.HTTP_202_ACCEPTED)
@@ -135,15 +150,18 @@ async def reset_password_endpoint(body: ResetPasswordIn) -> Response:
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
 async def logout_endpoint(
     claims: Annotated[dict[str, Any], Depends(current_claims)],
+    body: LogoutIn | None = None,
 ) -> Response:
-    """Real server-side logout: revoke the current token's jti so it
-    cannot be reused even though JWTs are stateless."""
+    """Real server-side logout: revoke the current access token's jti
+    AND (when the SPA sends it) the entire refresh family, so neither
+    credential can be reused."""
     jti = claims.get("jti")
     sub = claims.get("sub")
     exp = claims.get("exp")
-    if isinstance(jti, str) and isinstance(exp, int):
-        subject = uuid.UUID(sub) if isinstance(sub, str) else None
-        async with admin_session() as session:
+    subject = uuid.UUID(sub) if isinstance(sub, str) else None
+    raw_refresh = body.refresh_token if body is not None else None
+    async with admin_session() as session:
+        if isinstance(jti, str) and isinstance(exp, int):
             await revoke_token(
                 session,
                 jti=uuid.UUID(jti),
@@ -152,4 +170,6 @@ async def logout_endpoint(
                 revoked_by=subject,
                 reason="logout",
             )
+        if raw_refresh:
+            await revoke_refresh_family(session, raw_refresh=raw_refresh)
     return Response(status_code=status.HTTP_204_NO_CONTENT)

@@ -40,6 +40,10 @@ class Settings(BaseSettings):
     jwt_secret: str = Field(min_length=32, description="JWT signing secret.")
     jwt_alg: str = "HS256"
     jwt_ttl_seconds: int = 3600
+    # Refresh-token TTL (default 90d). Rotated on every /auth/refresh,
+    # so a session that's actively used renews indefinitely; only an
+    # idle gap beyond this kicks the user back to /login.
+    refresh_token_ttl_seconds: int = 90 * 24 * 3600
 
     # App-level envelope for opaque secrets (OAuth tokens, IMAP
     # passwords; ADR-0006). Fernet key = urlsafe-b64 of 32 bytes (44

@@ -76,6 +76,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/auth/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Refresh Endpoint
+         * @description Rotate the refresh token, mint a fresh access JWT. The presented
+         *     refresh row is single-use: a replay revokes the whole family (theft
+         *     signal). All failure modes collapse to 401 invalid-token.
+         */
+        post: operations["refresh_endpoint_auth_refresh_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/auth/me": {
         parameters: {
             query?: never;
@@ -176,8 +198,9 @@ export interface paths {
         put?: never;
         /**
          * Logout Endpoint
-         * @description Real server-side logout: revoke the current token's jti so it
-         *     cannot be reused even though JWTs are stateless.
+         * @description Real server-side logout: revoke the current access token's jti
+         *     AND (when the SPA sends it) the entire refresh family, so neither
+         *     credential can be reused.
          */
         post: operations["logout_endpoint_auth_logout_post"];
         delete?: never;
@@ -409,6 +432,27 @@ export interface paths {
          *     is not clobbered by an estimate-presets save.
          */
         patch: operations["patch_my_workspace_settings_workspaces_me_settings_patch"];
+        trace?: never;
+    };
+    "/workspaces/me/trash/empty": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Empty Workspace Trash
+         * @description Permanently delete every soft-deleted task and note in the
+         *     current workspace (owner/admin only; the service re-checks).
+         */
+        post: operations["empty_workspace_trash_workspaces_me_trash_empty_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/workspaces/{workspace_id}": {
@@ -2610,6 +2654,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/notes/links": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Workspace Note Links */
+        get: operations["list_workspace_note_links_notes_links_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/notes/{note_id}": {
         parameters: {
             query?: never;
@@ -3331,6 +3392,23 @@ export interface paths {
         put?: never;
         /** Ingest Receipt */
         post: operations["ingest_receipt_invoices_receipt_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/received-invoices/{received_invoice_id}/esito-committente": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Send Ec */
+        post: operations["send_ec_received_invoices__received_invoice_id__esito_committente_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4640,6 +4718,36 @@ export interface components {
             context?: string | null;
         };
         /**
+         * EsitoCommittenteIn
+         * @description Buyer-side EsitoCommittente (ADR-0011 v1.1): EC01 accepts the
+         *     invoice, EC02 rejects it (max 255-char descrizione, only meaningful on
+         *     rejection). The signed XML is built + persisted server-side; clients
+         *     never craft the signature.
+         */
+        EsitoCommittenteIn: {
+            /** Esito */
+            esito: string;
+            /** Descrizione */
+            descrizione?: string | null;
+        };
+        /** EsitoCommittenteOut */
+        EsitoCommittenteOut: {
+            /**
+             * Received Invoice Id
+             * Format: uuid
+             */
+            received_invoice_id: string;
+            /** Esito */
+            esito: string;
+            /** Message Id */
+            message_id: string;
+            /**
+             * Sent At
+             * Format: date-time
+             */
+            sent_at: string;
+        };
+        /**
          * ExecKind
          * @enum {string}
          */
@@ -5353,6 +5461,17 @@ export interface components {
             password: string;
             /** Totp Code */
             totp_code: string;
+        };
+        /**
+         * LogoutIn
+         * @description Optional refresh token: posting it lets the server revoke the
+         *     entire refresh family on logout (not just the current access
+         *     JWT). The SPA always sends it; legacy clients that don't are
+         *     still logged out from the access JWT.
+         */
+        LogoutIn: {
+            /** Refresh Token */
+            refresh_token?: string | null;
         };
         /**
          * MeOut
@@ -6196,6 +6315,11 @@ export interface components {
             /** Active */
             active: boolean;
         };
+        /** RefreshIn */
+        RefreshIn: {
+            /** Refresh Token */
+            refresh_token: string;
+        };
         /** ReminderIn */
         ReminderIn: {
             /** Offset Minutes */
@@ -6354,7 +6478,7 @@ export interface components {
          * SdiStatus
          * @enum {string}
          */
-        SdiStatus: "none" | "RC" | "MC" | "NS" | "AT";
+        SdiStatus: "none" | "RC" | "MC" | "NS" | "AT" | "NE" | "DT";
         /** SentOut */
         SentOut: {
             /** Sent Id */
@@ -6385,6 +6509,8 @@ export interface components {
             workspace_id: string;
             /** Token */
             token?: string | null;
+            /** Refresh Token */
+            refresh_token?: string | null;
             /**
              * Email Verification Required
              * @default false
@@ -6616,12 +6742,12 @@ export interface components {
              * Importance
              * @default 4
              */
-            importance?: number;
+            importance: number;
             /**
              * Urgency
              * @default 4
              */
-            urgency?: number;
+            urgency: number;
             /** Start Date */
             start_date?: string | null;
             /** Due Date */
@@ -7068,10 +7194,18 @@ export interface components {
             /** Memo */
             memo?: string | null;
         };
-        /** TokenOut */
+        /**
+         * TokenOut
+         * @description Access JWT plus a long-lived rotating refresh token. The SPA
+         *     persists both; ``/auth/refresh`` mints a new pair before the
+         *     access token expires, so an actively-used session never logs the
+         *     user out.
+         */
         TokenOut: {
             /** Token */
             token: string;
+            /** Refresh Token */
+            refresh_token: string;
         };
         /** TransitionIn */
         TransitionIn: {
@@ -7097,6 +7231,16 @@ export interface components {
         TransmitIn: {
             /** Progressivo */
             progressivo?: string | null;
+        };
+        /**
+         * TrashEmptyOut
+         * @description Counts of rows purged by ``POST /workspaces/me/trash/empty``.
+         */
+        TrashEmptyOut: {
+            /** Tasks */
+            tasks: number;
+            /** Notes */
+            notes: number;
         };
         /**
          * TurnRole
@@ -7470,6 +7614,39 @@ export interface operations {
             };
         };
     };
+    refresh_endpoint_auth_refresh_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RefreshIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TokenOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     me_endpoint_auth_me_get: {
         parameters: {
             query?: never;
@@ -7625,7 +7802,11 @@ export interface operations {
             path?: never;
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["LogoutIn"] | null;
+            };
+        };
         responses: {
             /** @description Successful Response */
             204: {
@@ -7633,6 +7814,15 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
             };
         };
     };
@@ -8104,6 +8294,40 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["VersionOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    empty_workspace_trash_workspaces_me_trash_empty_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TrashEmptyOut"];
                 };
             };
             /** @description Validation Error */
@@ -13958,6 +14182,40 @@ export interface operations {
             };
         };
     };
+    list_workspace_note_links_notes_links_get: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NoteLinkOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_note_notes__note_id__get: {
         parameters: {
             query?: never;
@@ -16012,6 +16270,46 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["InvoiceOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    send_ec_received_invoices__received_invoice_id__esito_committente_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                received_invoice_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EsitoCommittenteIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EsitoCommittenteOut"];
                 };
             };
             /** @description Validation Error */

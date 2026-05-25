@@ -20,6 +20,7 @@ from flow_api.schemas import (
     MemberAddIn,
     MemberOut,
     MemberRoleIn,
+    TrashEmptyOut,
     WorkspaceCreateIn,
     WorkspaceOut,
     WorkspacePatchIn,
@@ -34,7 +35,7 @@ from flow_core.errors import NotFoundError
 from flow_core.i18n import MessageCode
 from flow_core.models.membership import Role
 from flow_core.models.organization import Organization
-from flow_core.services import dispatch_loop, memberships
+from flow_core.services import dispatch_loop, memberships, trash
 from flow_core.services.auth import (
     create_org_for_user,
     delete_org_for_user,
@@ -222,6 +223,20 @@ async def patch_my_workspace(
         values={"name": body.name},
     )
     return WorkspaceVersionOut(id=ctx.org_id, version=new_version)
+
+
+@router.post("/me/trash/empty", response_model=TrashEmptyOut)
+async def empty_workspace_trash(
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+) -> TrashEmptyOut:
+    """Permanently delete every soft-deleted task and note in the
+    current workspace (owner/admin only; the service re-checks)."""
+    counts = await trash.empty_trash(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+    )
+    return TrashEmptyOut(tasks=counts["tasks"], notes=counts["notes"])
 
 
 @router.delete(

@@ -42,8 +42,8 @@ async def _signup() -> tuple[uuid.UUID, uuid.UUID, str]:
 
 async def _login_jwt(email: str, password: str) -> str:
     async with admin_session() as s:
-        r = await login(s, email=email, password=password)
-    return r.token
+        pair = await login(s, email=email, password=password)
+    return pair.access_token
 
 
 # ---------------------------------------------------------------------------

@@ -191,9 +191,9 @@ async def test_non_owner_cannot_mint() -> None:
             await s.flush()
 
         async with admin_session() as s:
-            member_jwt = await login(s, email=member_email, password="pw-strong-123")
+            member_pair = await login(s, email=member_email, password="pw-strong-123")
         headers = {
-            "Authorization": f"Bearer {member_jwt}",
+            "Authorization": f"Bearer {member_pair.access_token}",
             "X-Workspace-Id": str(owner.org_id),
             # Even asking for owner explicitly: the ceiling is the
             # caller's stored membership (member), so it clamps down.

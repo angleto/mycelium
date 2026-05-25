@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { api, errMessage, workspaceHeader } from '../api/client'
 import { useSession } from '../auth/useSession'
+import { useMyWorkspace } from '../auth/useMyWorkspace'
 import { TagChip } from '../components/TagChip'
 import type { components } from '../api/schema'
 
@@ -17,10 +18,13 @@ export function TrashRoute() {
   const { t } = useTranslation()
   const session = useSession()
   const activeId = session?.workspaceId
+  const { ws } = useMyWorkspace()
+  const canEmpty = ws?.my_role === 'owner' || ws?.my_role === 'admin'
   const [tasks, setTasks] = useState<Task[]>([])
   const [notes, setNotes] = useState<NoteT[]>([])
   const [mode, setMode] = useState<Mode>('deleted')
   const [err, setErr] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
 
   const load = useCallback(async () => {
     setErr(null)
@@ -90,6 +94,28 @@ export function TrashRoute() {
     await load()
   }
 
+  async function emptyTrash() {
+    if (!canEmpty) return
+    if (!window.confirm(t('trash.emptyConfirm'))) return
+    setErr(null)
+    setBusy(true)
+    try {
+      const { data, error } = await api.POST('/workspaces/me/trash/empty', {
+        params: { header: workspaceHeader() },
+      })
+      if (error) {
+        setErr(errMessage(error))
+      } else if (data) {
+        window.alert(
+          t('trash.emptyResult', { tasks: data.tasks, notes: data.notes }),
+        )
+      }
+      await load()
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const deleted = tasks.filter((t) => t.deleted_at != null)
   const archived = tasks.filter((t) => t.is_archived && t.deleted_at == null)
   const shown = mode === 'deleted' ? deleted : archived
@@ -117,6 +143,19 @@ export function TrashRoute() {
         >
           {t('trash.archived')} ({archived.length + nArchived.length})
         </button>
+        {canEmpty &&
+          mode === 'deleted' &&
+          deleted.length + nDeleted.length > 0 && (
+            <button
+              type="button"
+              className="btn--sm btn--danger"
+              onClick={() => void emptyTrash()}
+              disabled={busy}
+              style={{ marginLeft: 'auto' }}
+            >
+              {t('trash.empty')}
+            </button>
+          )}
       </div>
       {err && <p className="err">{err}</p>}
       {shown.length === 0 && shownNotes.length === 0 ? (

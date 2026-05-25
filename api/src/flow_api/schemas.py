@@ -58,6 +58,7 @@ class SignupOut(BaseModel):
     # None when email verification is required: the SPA shows a
     # "check your email" state instead of logging the user in.
     token: str | None = None
+    refresh_token: str | None = None
     email_verification_required: bool = False
 
 
@@ -67,7 +68,26 @@ class LoginIn(BaseModel):
 
 
 class TokenOut(BaseModel):
+    """Access JWT plus a long-lived rotating refresh token. The SPA
+    persists both; ``/auth/refresh`` mints a new pair before the
+    access token expires, so an actively-used session never logs the
+    user out."""
+
     token: str
+    refresh_token: str
+
+
+class RefreshIn(BaseModel):
+    refresh_token: str = Field(min_length=16, max_length=512)
+
+
+class LogoutIn(BaseModel):
+    """Optional refresh token: posting it lets the server revoke the
+    entire refresh family on logout (not just the current access
+    JWT). The SPA always sends it; legacy clients that don't are
+    still logged out from the access JWT."""
+
+    refresh_token: str | None = Field(default=None, max_length=512)
 
 
 class MeOut(BaseModel):
@@ -236,6 +256,13 @@ class VersionOut(BaseModel):
 
 # Alias used by the workspace router PATCH response.
 WorkspaceVersionOut = VersionOut
+
+
+class TrashEmptyOut(BaseModel):
+    """Counts of rows purged by ``POST /workspaces/me/trash/empty``."""
+
+    tasks: int
+    notes: int
 
 
 class TagCreateIn(BaseModel):

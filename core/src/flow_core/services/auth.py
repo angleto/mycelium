@@ -38,12 +38,24 @@ from flow_core.i18n import MessageCode
 from flow_core.models.auth_tokens import (
     EmailVerificationToken,
     PasswordResetToken,
+    RefreshToken,
     RevokedToken,
 )
 from flow_core.models.user import User
 from flow_core.security import create_access_token, hash_password, verify_password
 from flow_core.services import actors as actors_svc
 from flow_core.services.mailer import OutboundEmail, get_mailer
+
+
+_REFRESH_PREFIX = "flow_rt_"
+
+
+@dataclass(frozen=True, slots=True)
+class TokenPair:
+    """Access JWT + raw refresh token returned by login / refresh."""
+
+    access_token: str
+    refresh_token: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,6 +65,7 @@ class SignupResult:
     # None when email verification is required: the user has no usable
     # session until they verify (mirrors bitvision_phoenix).
     token: str | None
+    refresh_token: str | None
     email_verification_required: bool
 
 
@@ -77,6 +90,40 @@ def _token_for(user: User) -> str:
         user_id=str(user.id),
         extra={"email": user.email, "is_admin": user.is_admin},
     )
+
+
+async def _mint_refresh_token(
+    session: AsyncSession,
+    *,
+    user_id: uuid.UUID,
+    family_id: uuid.UUID,
+) -> str:
+    """Persist a fresh refresh row in ``family_id`` and return the
+    plaintext (only the SHA-256 hash hits the DB)."""
+    raw = _REFRESH_PREFIX + secrets.token_urlsafe(32)
+    expires = dt.datetime.now(dt.UTC) + dt.timedelta(
+        seconds=get_settings().refresh_token_ttl_seconds
+    )
+    session.add(
+        RefreshToken(
+            family_id=family_id,
+            user_id=user_id,
+            token_hash=_hash_token(raw),
+            expires_at=expires,
+        )
+    )
+    await session.flush()
+    return raw
+
+
+async def _issue_login_pair(session: AsyncSession, *, user: User) -> TokenPair:
+    """Mint a fresh access JWT plus a brand-new refresh family. Used
+    by login / login_mfa / verify_email — anywhere a brand-new session
+    begins (NOT by /auth/refresh, which rotates inside an existing
+    family)."""
+    access = _token_for(user)
+    refresh = await _mint_refresh_token(session, user_id=user.id, family_id=uuid.uuid4())
+    return TokenPair(access_token=access, refresh_token=refresh)
 
 
 async def _provision_org(session: AsyncSession, *, name: str, user_id: uuid.UUID) -> uuid.UUID:
@@ -122,14 +169,18 @@ async def signup(
     org_id = await _provision_org(session, name=org_name, user_id=user.id)
     require_verify = get_settings().require_email_verification
     token: str | None = None
+    refresh_token: str | None = None
     if require_verify:
         await _issue_verification(session, user=user)
     else:
-        token = _token_for(user)
+        pair = await _issue_login_pair(session, user=user)
+        token = pair.access_token
+        refresh_token = pair.refresh_token
     return SignupResult(
         user_id=user.id,
         org_id=org_id,
         token=token,
+        refresh_token=refresh_token,
         email_verification_required=require_verify,
     )
 
@@ -263,15 +314,17 @@ async def _authenticate(session: AsyncSession, *, email: str, password: str) -> 
     return user
 
 
-async def login(session: AsyncSession, *, email: str, password: str) -> str:
+async def login(session: AsyncSession, *, email: str, password: str) -> TokenPair:
     user = await _authenticate(session, email=email, password=password)
     if user.mfa_enabled_at is not None:
         # 401 mfa_required: the SPA pivots to /auth/login-mfa.
         raise AuthError(MessageCode.AUTH_MFA_REQUIRED)
-    return _token_for(user)
+    return await _issue_login_pair(session, user=user)
 
 
-async def login_mfa(session: AsyncSession, *, email: str, password: str, totp_code: str) -> str:
+async def login_mfa(
+    session: AsyncSession, *, email: str, password: str, totp_code: str
+) -> TokenPair:
     """Combined password + TOTP/backup-code login (used once MFA is
     active). Consuming a backup code is persisted."""
     from flow_core.services.mfa import verify_mfa_code
@@ -282,15 +335,15 @@ async def login_mfa(session: AsyncSession, *, email: str, password: str, totp_co
     if not verify_mfa_code(user, totp_code):
         raise AuthError(MessageCode.AUTH_INVALID_TOTP)
     await session.flush()  # persist backup-code consumption, if any
-    return _token_for(user)
+    return await _issue_login_pair(session, user=user)
 
 
 # ---- email verification -------------------------------------------------
 
 
-async def verify_email(session: AsyncSession, *, raw_token: str) -> str:
+async def verify_email(session: AsyncSession, *, raw_token: str) -> TokenPair:
     """Consume a verification token, mark the email verified, return a
-    fresh access token. Invalid/expired/used all collapse to one error
+    fresh token pair. Invalid/expired/used all collapse to one error
     (no oracle on token existence)."""
     now = dt.datetime.now(dt.UTC)
     row = (
@@ -309,7 +362,7 @@ async def verify_email(session: AsyncSession, *, raw_token: str) -> str:
     if user.email_verified_at is None:
         user.email_verified_at = now
     await session.flush()
-    return _token_for(user)
+    return await _issue_login_pair(session, user=user)
 
 
 async def resend_verification(session: AsyncSession, *, email: str) -> None:
@@ -431,3 +484,98 @@ async def assert_token_not_revoked(session: AsyncSession, *, jti: uuid.UUID) -> 
     ).scalar_one_or_none()
     if found is not None:
         raise AuthError(MessageCode.AUTH_TOKEN_REVOKED)
+
+
+# ---- Refresh-token rotation ---------------------------------------------
+
+
+async def _revoke_family(session: AsyncSession, *, family_id: uuid.UUID) -> None:
+    """Mark every still-active row in ``family_id`` revoked. Used on
+    logout AND on reuse detection (token-theft signal)."""
+    now = dt.datetime.now(dt.UTC)
+    rows = (
+        (
+            await session.execute(
+                select(RefreshToken).where(
+                    RefreshToken.family_id == family_id,
+                    RefreshToken.revoked_at.is_(None),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    for r in rows:
+        r.revoked_at = now
+    await session.flush()
+
+
+async def refresh_session(session: AsyncSession, *, raw_refresh: str) -> TokenPair:
+    """Rotate a refresh token: validate, mark the presented row used,
+    mint a successor inside the same family, return the new pair.
+
+    Failure modes (all collapse to ``AUTH_TOKEN_INVALID`` so the SPA
+    pivots to /login uniformly):
+
+    - unknown / malformed token
+    - expired
+    - revoked (family was revoked by logout or by an earlier reuse)
+    - **reuse**: the row already has ``used_at`` set. This is the
+      theft signal: revoke every active sibling in the family so the
+      attacker's stolen branch loses access alongside the legitimate
+      one.
+    """
+    now = dt.datetime.now(dt.UTC)
+    row = (
+        await session.execute(
+            select(RefreshToken).where(RefreshToken.token_hash == _hash_token(raw_refresh))
+        )
+    ).scalar_one_or_none()
+    if row is None or row.revoked_at is not None or row.expires_at <= now:
+        raise AuthError(MessageCode.AUTH_TOKEN_INVALID)
+    if row.used_at is not None:
+        # Theft signal: the rotation already happened, yet this row
+        # is being presented again. Persist the family revocation in
+        # its OWN transaction so the side-effect survives the
+        # AuthError below (the caller's transaction rolls back on
+        # raise, which would otherwise lose the security-critical
+        # revoke).
+        family_id = row.family_id
+        async with admin_session() as oob:
+            await _revoke_family(oob, family_id=family_id)
+        raise AuthError(MessageCode.AUTH_TOKEN_INVALID)
+    user = (
+        await session.execute(select(User).where(User.id == row.user_id))
+    ).scalar_one_or_none()
+    if user is None:
+        raise AuthError(MessageCode.AUTH_TOKEN_INVALID)
+    # Refuse to keep a session alive for a locked / unverified account
+    # (mirrors the login path's preconditions).
+    _check_verified(user)
+    if _is_locked(user):
+        raise LockedError(MessageCode.AUTH_ACCOUNT_LOCKED)
+
+    row.used_at = now
+    new_raw = await _mint_refresh_token(session, user_id=user.id, family_id=row.family_id)
+    successor = (
+        await session.execute(
+            select(RefreshToken).where(RefreshToken.token_hash == _hash_token(new_raw))
+        )
+    ).scalar_one()
+    row.replaced_by_id = successor.id
+    await session.flush()
+    return TokenPair(access_token=_token_for(user), refresh_token=new_raw)
+
+
+async def revoke_refresh_family(session: AsyncSession, *, raw_refresh: str) -> None:
+    """Revoke the whole family that owns ``raw_refresh`` (logout).
+    Silent on unknown tokens — a logout request should never leak
+    whether a credential was valid."""
+    row = (
+        await session.execute(
+            select(RefreshToken).where(RefreshToken.token_hash == _hash_token(raw_refresh))
+        )
+    ).scalar_one_or_none()
+    if row is None:
+        return
+    await _revoke_family(session, family_id=row.family_id)
