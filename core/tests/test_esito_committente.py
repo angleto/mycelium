@@ -28,7 +28,7 @@ from cryptography.x509.oid import NameOID
 from flow_core.config import get_settings
 from flow_core.db import tenant_session
 from flow_core.errors import DomainError
-from flow_core.models.sdi_received import CommittenteVerdict
+from flow_core.models.sdi_received import CommittenteVerdict, ReceivedInvoice
 from flow_core.services import invoice as inv
 from flow_core.services.auth import signup
 from flow_core.services.esito_committente import (
@@ -77,6 +77,42 @@ def _ec_signing() -> Iterator[None]:
     finally:
         del os.environ["FLOW_SDI_EC_SIGNING_KEY_PEM"]
         del os.environ["FLOW_SDI_EC_SIGNING_CERT_PEM"]
+        get_settings.cache_clear()
+
+
+@pytest.fixture
+def _sdicoop_active(tmp_path: object, _ec_signing: None) -> Iterator[str]:
+    """Stand up a fully provisioned sdicoop channel pointing at a fake
+    endpoint: real PEM files on disk (httpx opens them when creating the
+    SSL context, so the path must exist) + the intermediary identity +
+    endpoint URL. Yields the endpoint URL so the test can register the
+    matching respx route. Tears env down on exit."""
+    import pathlib
+
+    tp = pathlib.Path(str(tmp_path))
+    key_pem, cert_pem = _generate_test_signing_material()
+    cert_path = tp / "client.crt.pem"
+    key_path = tp / "client.key.pem"
+    cert_path.write_text(cert_pem)
+    key_path.write_text(key_pem)
+    endpoint = "https://sdi-test.example/ricevinotifica"
+    env = {
+        "FLOW_SDI_CHANNEL": "sdicoop",
+        "FLOW_SDI_INTERMEDIARY_ID_PAESE": "IT",
+        "FLOW_SDI_INTERMEDIARY_ID_CODICE": "11122233344",
+        "FLOW_SDI_INTERMEDIARY_DENOMINAZIONE": "Flow Intermediary Srl",
+        "FLOW_SDI_ENDPOINT_URL": endpoint,
+        "FLOW_SDI_CLIENT_CERT": str(cert_path),
+        "FLOW_SDI_CLIENT_KEY": str(key_path),
+    }
+    for k, v in env.items():
+        os.environ[k] = v
+    get_settings.cache_clear()
+    try:
+        yield endpoint
+    finally:
+        for k in env:
+            os.environ.pop(k, None)
         get_settings.cache_clear()
 
 
@@ -276,3 +312,114 @@ async def test_send_ec_rejection_marks_rejected_verdict(_ec_signing: None) -> No
             await s.execute(select(ReceivedInvoice).where(ReceivedInvoice.id == ri_id))
         ).scalar_one()
     assert ri.committente_verdict is CommittenteVerdict.rejected
+
+
+# --- Live transport wiring (sdicoop channel) ----------------------------------
+
+
+async def test_send_ec_with_sdicoop_posts_and_stores_ack(_sdicoop_active: str) -> None:
+    """When the channel is fully provisioned the service POSTs the signed EC
+    over (mocked) mutual TLS and stores the SdI ack on the audit row."""
+    import respx
+    from httpx import Response
+
+    from flow_core.models.sdi_notification import ReceivedInvoiceNotification
+
+    org, user, ri_id = await _make_org_with_received_invoice()
+    endpoint = _sdicoop_active
+
+    ack_envelope = (
+        b'<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/">'
+        b"<soapenv:Body><EsitoRicezione>ER01</EsitoRicezione></soapenv:Body>"
+        b"</soapenv:Envelope>"
+    )
+
+    with respx.mock(assert_all_called=True) as mock:
+        route = mock.post(endpoint).mock(
+            return_value=Response(200, content=ack_envelope, headers={"Content-Type": "text/xml"})
+        )
+        async with tenant_session(str(org), str(user)) as s:
+            notif = await send_esito_committente(
+                s, org_id=org, actor_id=user, received_invoice_id=ri_id, esito="EC01"
+            )
+
+    assert route.called
+    sent_req = route.calls.last.request
+    # The body must be the SOAP envelope around the signed EC. We do not
+    # decode the base64 file here -- shape checks (SOAPAction + the
+    # filename derived from the message_id) are enough to confirm wiring.
+    assert sent_req.headers["soapaction"] == '"NotificaEsito"'
+    assert notif.payload["ack"] == "ER01"
+    assert notif.payload["filename"].endswith("_EC_001.xml")
+
+    # The audit row reads back with the ack persisted.
+    async with tenant_session(str(org), str(user)) as s:
+        from sqlalchemy import select as _sel
+
+        rows = (
+            (
+                await s.execute(
+                    _sel(ReceivedInvoiceNotification).where(
+                        ReceivedInvoiceNotification.received_invoice_id == ri_id
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert len(rows) == 1 and rows[0].payload["ack"] == "ER01"
+
+
+async def test_send_ec_with_sdicoop_transport_error_persists_anyway(
+    _sdicoop_active: str,
+) -> None:
+    """Network/HTTP failure must not roll back the persisted EC: the buyer's
+    intent is durable, the transport_error is recorded so an operator can
+    replay. Verdict denormalization still moves to accepted/rejected."""
+    import respx
+    from httpx import Response
+
+    org, user, ri_id = await _make_org_with_received_invoice()
+    endpoint = _sdicoop_active
+
+    with respx.mock(assert_all_called=True) as mock:
+        mock.post(endpoint).mock(return_value=Response(500, content=b"boom"))
+        async with tenant_session(str(org), str(user)) as s:
+            notif = await send_esito_committente(
+                s, org_id=org, actor_id=user, received_invoice_id=ri_id, esito="EC02"
+            )
+
+    assert "transport_error" in notif.payload
+    assert "ack" not in notif.payload
+    # The signed XML is still stored verbatim + the verdict moved.
+    assert validate_sdi_notification(notif.raw_xml) == []
+    from sqlalchemy import select as _sel
+
+    async with tenant_session(str(org), str(user)) as s:
+        ri = (
+            await s.execute(_sel(ReceivedInvoice).where(ReceivedInvoice.id == ri_id))
+        ).scalar_one()
+    assert ri.committente_verdict is CommittenteVerdict.rejected
+
+
+async def test_send_ec_without_channel_does_not_call_transport(_ec_signing: None) -> None:
+    """Default (manual_export) channel: the persistence path runs alone, no
+    HTTP is attempted. respx ``assert_all_called=False`` so an unused mock
+    does not fail the test; ``called`` stays False."""
+    import respx
+    from httpx import Response
+
+    org, user, ri_id = await _make_org_with_received_invoice()
+
+    with respx.mock(assert_all_called=False) as mock:
+        route = mock.post("https://sdi-test.example/ricevinotifica").mock(
+            return_value=Response(200, content=b"<r><EsitoRicezione>ER01</EsitoRicezione></r>")
+        )
+        async with tenant_session(str(org), str(user)) as s:
+            notif = await send_esito_committente(
+                s, org_id=org, actor_id=user, received_invoice_id=ri_id, esito="EC01"
+            )
+
+    assert not route.called
+    assert "ack" not in notif.payload
+    assert "transport_error" not in notif.payload
