@@ -80,6 +80,13 @@ async def tenant_session(
     backward-compatible (the test suite and the SPA's REST paths still
     work without changes).
     """
+    # Imported lazily so the services layer (which depends on the models
+    # registered at import time) doesn't pull db.py into a circular cycle.
+    # The side-effect of the import is what matters: it registers the
+    # SQLAlchemy mapper-level event listeners that track task/checklist
+    # mutations into ``session.info``.
+    from flow_core.services.task_search import flush_task_search_dirty
+
     sm = get_sessionmaker()
     async with sm() as session:
         async with session.begin():
@@ -100,6 +107,13 @@ async def tenant_session(
                 },
             )
             yield session
+            # Resync task-search index for any task/checklist row that
+            # mutated inside this transaction. Sits inside the outer
+            # ``begin()`` so the blob upsert is atomic with the source
+            # mutation (FTS is visible the instant the commit lands;
+            # the embedding vector is best-effort within a 2 s timeout
+            # and the backfill worker fills the rest).
+            await flush_task_search_dirty(session)
 
 
 @asynccontextmanager

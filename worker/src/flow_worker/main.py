@@ -16,7 +16,13 @@ import logging
 
 from flow_core.config import get_settings
 from flow_core.services.mailer import build_system_mailer, set_mailer
-from flow_worker import dispatch, google_calendar, reminders, telegram_assistant
+from flow_worker import (
+    dispatch,
+    google_calendar,
+    reminders,
+    task_search_backfill,
+    telegram_assistant,
+)
 
 
 async def _run() -> None:
@@ -27,12 +33,16 @@ async def _run() -> None:
     #  - ADR-0026 P3 Telegram assistant queue drain (no-op when
     #    FLOW_ASSISTANT_ENABLED is false);
     #  - reminders + notification-dispatch tick (per-workspace
-    #    scan_reminders + dispatch_pending; closes the FR-12 loop).
+    #    scan_reminders + dispatch_pending; closes the FR-12 loop);
+    #  - task-search embedding backfill (re-embeds task blobs whose
+    #    initial write timed out; the listener-driven resync is the
+    #    authoritative path, this is a safety net).
     await asyncio.gather(
         dispatch.run_forever(),
         google_calendar.run_forever(),
         telegram_assistant.run_forever(),
         reminders.run_forever(),
+        task_search_backfill.run_forever(),
     )
 
 

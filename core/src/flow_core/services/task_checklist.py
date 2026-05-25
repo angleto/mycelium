@@ -32,6 +32,7 @@ from flow_core.i18n import MessageCode
 from flow_core.models.membership import Role
 from flow_core.models.task_checklist_item import TaskChecklistItem
 from flow_core.services import audit
+from flow_core.services import task_search as _task_search
 from flow_core.services.rbac import require_role
 from flow_core.services.tasks import get_task
 
@@ -198,6 +199,9 @@ async def update_item(
         expected_version=expected_version,
         values=values,
     )
+    # Core UPDATE bypasses the mapper listener; mark the parent task so
+    # the resync re-renders the blob with the new item text/done state.
+    _task_search.mark_task_dirty(session, task_id)
     # Refresh so the caller sees the post-update state. ``refresh`` is
     # async-aware in SQLAlchemy 2.x and re-issues a SELECT for the
     # given attributes, bypassing the identity-map cache.
@@ -259,6 +263,7 @@ async def clear_done(
     removed_ids = [r[0] for r in result.all()]
     await session.flush()
     if removed_ids:
+        _task_search.mark_task_dirty(session, task_id)
         await audit.log(
             session,
             org_id=org_id,
@@ -314,6 +319,11 @@ async def reorder_items(
             expected_version=item.version,
             values={"position": new_pos},
         )
+    # Position-only reorder doesn't change rendered text (positions
+    # drive ordering, not the bullet text), so the resync's
+    # content_hash will short-circuit; the mark is still needed because
+    # the listener path didn't fire.
+    _task_search.mark_task_dirty(session, task_id)
     await audit.log(
         session,
         org_id=org_id,

@@ -115,8 +115,8 @@ from flow_core.models.task import (
 )
 from flow_core.models.task_checklist_item import TaskChecklistItem
 from flow_core.models.task_collaborator import TaskCollaborator
-from flow_core.models.task_index_pointer import TaskIndexPointer
 from flow_core.models.task_handoff import HandoffStatus, TaskHandoff
+from flow_core.models.task_index_pointer import TaskIndexPointer
 from flow_core.models.task_participant import TaskParticipant
 from flow_core.models.task_relation import TaskRelation
 from flow_core.models.task_tag import TaskTag

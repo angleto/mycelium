@@ -772,16 +772,19 @@ CANONICAL_MEMORY_CHANNELS: tuple[tuple[str, str], ...] = (
     ("manual", "Manual"),
     ("agent", "Agent"),
     ("note", "Note"),
+    ("task", "Tasks"),
 )
 _CANONICAL_KEYS: frozenset[str] = frozenset(k for k, _ in CANONICAL_MEMORY_CHANNELS)
 
-# Channels actually usable today. ``manual``/``agent``/``note`` are
-# intrinsically usable; ``email``/``telegram`` are seeded but excluded
+# Channels actually usable today. ``manual``/``agent``/``note``/``task``
+# are intrinsically usable; ``email``/``telegram`` are seeded but excluded
 # from the listing until their integration ships. A custom channel
 # added by a platform admin is not in this set but IS configured (it
 # was deliberately created), so the membership test is
 # "system_key in _CONFIGURED_KEYS OR not a canonical (seeded) key".
-_CONFIGURED_KEYS: frozenset[str] = frozenset({"manual", "agent", "note"})
+# ``task`` is written by the task-search resync listener (one blob per
+# task, rendered from title + description + checklist).
+_CONFIGURED_KEYS: frozenset[str] = frozenset({"manual", "agent", "note", "task"})
 
 # Short English description per seeded channel (rendered read-only in
 # the channel picker). Custom channels have no description (None).
@@ -789,6 +792,7 @@ _CHANNEL_DESCRIPTIONS: dict[str, str] = {
     "manual": "Written by you in the app",
     "agent": "Written by the assistant",
     "note": "Captured from your notes",
+    "task": "Indexed from your tasks",
 }
 
 

@@ -154,6 +154,13 @@ class Settings(BaseSettings):
     # minute-precision reminders on appointment tasks.
     reminders_loop_interval_seconds: int = 60
 
+    # Task-search embedding backfill worker. Re-embeds task blobs whose
+    # initial write timed out (model_id='none'); race-protected via the
+    # pointer ``content_hash``. Per-workspace + exception-isolated like
+    # the other loops. 60s is a low-cost default: the population is
+    # bounded (only timed-out writes) and the worker quickly drains.
+    task_search_backfill_interval_seconds: int = 60
+
     # Telegram bot integration (epic #125 P2). Empty defaults so OSS
     # self-host + tests are unaffected: the link router refuses to mint
     # codes when the bot is not configured, the webhook 404s on an empty

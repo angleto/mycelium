@@ -39,6 +39,7 @@ from flow_api.routers import (
     oauth_google,
     received_invoices,
     schedule,
+    search,
     tags,
     task_relations,
     tasks,
@@ -205,6 +206,7 @@ def create_app() -> FastAPI:
     app.include_router(billing.router)
     app.include_router(memory.router)
     app.include_router(memory_channels.router)
+    app.include_router(search.router)
     app.include_router(notes.router)
     app.include_router(attachments.router)
     app.include_router(invoices.router)

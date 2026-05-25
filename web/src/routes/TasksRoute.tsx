@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { api, errMessage, workspaceHeader } from '../api/client'
+import { api, errMessage, searchTasksByText, workspaceHeader } from '../api/client'
 import { useSession } from '../auth/useSession'
 import { TagChip } from '../components/TagChip'
 import { PriorityChip } from '../components/PriorityChip'
@@ -12,7 +12,7 @@ import { TaskTimer } from '../components/TaskTimer'
 import { TagPickerGrid } from '../components/TagPickerGrid'
 import { useFocus } from '../lib/focus'
 import { useLinkedClientProject } from '../lib/linkedClientProject'
-import { parseFilter } from '../lib/taskFilter'
+import { getFreeTextTokens, parseFilter } from '../lib/taskFilter'
 import type { components } from '../api/schema'
 
 type View = 'kanban' | 'list'
@@ -195,6 +195,58 @@ export function TasksRoute() {
       /* ignore */
     }
   }, [dateFocus])
+
+  // Server-side task search. The structured DSL stays client-side
+  // (instant, no network); the free-text portion of the query goes to
+  // /search?kinds=task, which uses the FTS + pgvector RRF pipeline so a
+  // matched task whose title doesn't contain the query word (matched
+  // via description, checklist text or semantic similarity) shows up.
+  // The result is an id-set ANDed into the client-side predicate, so
+  // ``state:in_progress checklist-only-word`` filters correctly: the
+  // server returns tasks matching the word, the client narrows to
+  // state=in_progress without a roundtrip.
+  //
+  // ``serverIds === null`` means "no free-text in the query" -> no
+  // intersection applied (back-compat: structured-only filters work
+  // exactly as before). An empty Set means "free-text present, no
+  // server hits" -> the list is empty until the user refines.
+  const [serverIds, setServerIds] = useState<Set<string> | null>(null)
+  const [searching, setSearching] = useState(false)
+  useEffect(() => {
+    const freeText = getFreeTextTokens(q.trim()).join(' ').trim()
+    if (!freeText) {
+      setServerIds(null)
+      setSearching(false)
+      return
+    }
+    const ac = new AbortController()
+    setSearching(true)
+    // 250ms debounce: fast enough to feel live, slow enough to not
+    // flood the embedder on each keystroke.
+    const handle = window.setTimeout(() => {
+      void (async () => {
+        try {
+          const hits = await searchTasksByText(freeText, ac.signal)
+          if (ac.signal.aborted) return
+          setServerIds(
+            new Set(
+              hits
+                .filter((h) => h.kind === 'task' && h.task_id)
+                .map((h) => h.task_id as string),
+            ),
+          )
+        } catch {
+          if (!ac.signal.aborted) setServerIds(new Set())
+        } finally {
+          if (!ac.signal.aborted) setSearching(false)
+        }
+      })()
+    }, 250)
+    return () => {
+      window.clearTimeout(handle)
+      ac.abort()
+    }
+  }, [q])
 
   const stateById = new Map(wfStates.map((s) => [s.id, s]))
   const allowed = new Map<string, Set<string>>()
@@ -512,7 +564,13 @@ export function TasksRoute() {
           now: new Date(),
         }
         const pred = parseFilter(ql, filterCtx)
-        return tasks.filter(pred)
+        // Intersect with the server-side free-text hits. ``serverIds``
+        // is null when the query carries no free-text component (only
+        // structured atoms), in which case the predicate alone decides
+        // -- same behaviour as before this hook landed.
+        return tasks.filter(
+          (t) => pred(t) && (serverIds === null || serverIds.has(t.id)),
+        )
       })()
     : tasks
   // Focus (sidebar): client (all its projects) or one project. Only
@@ -649,6 +707,15 @@ export function TasksRoute() {
           onChange={(e) => setQ(e.target.value)}
           style={{ flex: 1, minWidth: '12rem' }}
         />
+        {searching && (
+          <span
+            className="hint"
+            aria-live="polite"
+            title={t('tasks.searchingHint')}
+          >
+            {t('tasks.searching')}
+          </span>
+        )}
         <div
           className="viewtabs"
           role="radiogroup"

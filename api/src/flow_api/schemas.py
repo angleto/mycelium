@@ -2204,3 +2204,38 @@ class AiAssistantCreatedOut(BaseModel):
 
     assistant: AiAssistantOut
     raw_secret: str
+
+
+# --- Unified search (task_search) ---------------------------------------
+
+
+class SearchIn(BaseModel):
+    """Unified free-text search across the org. ``kinds`` defaults to
+    ['task', 'blob']; ``kinds=['task']`` is the SPA's task-search path,
+    ``kinds=['blob']`` mirrors /memory/search. ``include_archived`` and
+    ``include_deleted`` only apply to ``task`` hits."""
+
+    q: str = Field(min_length=1, max_length=2000)
+    kinds: list[str] = Field(default_factory=lambda: ["task", "blob"])
+    tag_ids: list[uuid.UUID] = Field(default_factory=list)
+    channel_keys: list[str] = Field(default_factory=list)
+    limit: int = Field(default=20, gt=0, le=100)
+    include_archived: bool = False
+    include_deleted: bool = False
+    operation_id: str = Field(min_length=1, max_length=128, default="search")
+
+
+class SearchHit(BaseModel):
+    """One row in the unified search response. ``task_id`` is set for
+    ``kind='task'`` hits (resolved through ``task_index_pointer``); the
+    ``blob_id`` is always the underlying memory row. ``snippet`` is the
+    server-side ``ts_headline`` extract; ``title`` is the task title
+    when applicable, otherwise None."""
+
+    kind: str  # 'task' | 'blob'
+    task_id: uuid.UUID | None = None
+    blob_id: uuid.UUID
+    title: str | None = None
+    snippet: str | None = None
+    score: float
+    tags: list[TagBrief] = Field(default_factory=list)

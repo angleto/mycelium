@@ -46,11 +46,12 @@ from flow_api.main import app
 from flow_core.bootstrap_admin import ensure_admin
 from flow_core.embedder import set_embedder_override
 
-# Seeded in the DB (determinism for a future ingest): all five.
-_SEEDED = {"email", "telegram", "manual", "agent", "note"}
+# Seeded in the DB (determinism for a future ingest): the original
+# five integrations plus ``task`` (channel for task-search blobs).
+_SEEDED = {"email", "telegram", "manual", "agent", "note", "task"}
 # Exposed in the list/select surface: email/telegram are filtered out
 # until their ingestion exists.
-_CONFIGURED = {"manual", "agent", "note"}
+_CONFIGURED = {"manual", "agent", "note", "task"}
 _ADMIN_PW = "Str0ng-Passw0rd!"
 _ELEVATE = {"X-Admin-Mode": "1"}
 
