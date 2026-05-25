@@ -109,7 +109,11 @@ def collect_registry() -> dict[str, Any]:
         "per_tool_avg_full_bytes": total_full // max(1, len(per_tool)),
         "per_tool_avg_stripped_bytes": total_stripped // max(1, len(per_tool)),
         "top10_heaviest_full": [
-            {k: v for k, v in p.items() if k in ("name", "full_bytes", "stripped_bytes", "schema_props")}
+            {
+                k: v
+                for k, v in p.items()
+                if k in ("name", "full_bytes", "stripped_bytes", "schema_props")
+            }
             for p in per_tool[:10]
         ],
         "top10_verbose_descriptions": sorted(
@@ -193,15 +197,15 @@ def collect_serializer_samples() -> dict[str, Any]:
         )
 
     def make_note(transcript_chars: int) -> Any:
+        seed = "La nota tipica vive in tutto il flusso di cattura. "
+        transcript = (seed * (transcript_chars // len(seed) + 1))[:transcript_chars]
         return SimpleNamespace(
             id="66666666-6666-6666-6666-666666666666",
             project_id="77777777-7777-7777-7777-777777777777",
             kind=SimpleNamespace(value="text"),
             status=SimpleNamespace(value="active"),
             title="Brainstorm: dynamic toolset cache",
-            transcript=("La nota tipica vive in tutto il flusso di cattura. " * (transcript_chars // 50 + 1))[
-                :transcript_chars
-            ],
+            transcript=transcript,
             version=1,
         )
 
@@ -257,7 +261,13 @@ def measure_dir(path: Path, glob: str = "**/*.md") -> dict[str, Any]:
         files += 1
         total_b += len(data)
         total_l += text.count("\n") + 1
-        biggest.append({"path": str(p.relative_to(path)), "bytes": len(data), "lines": text.count("\n") + 1})
+        biggest.append(
+            {
+                "path": str(p.relative_to(path)),
+                "bytes": len(data),
+                "lines": text.count("\n") + 1,
+            }
+        )
     biggest.sort(key=lambda x: x["bytes"], reverse=True)
     return {
         "exists": True,
@@ -324,12 +334,19 @@ async def main() -> int:
     summary = out["summary"]
     reg = out["registry"]
     corp = out["corpus"]
+    http_b = reg["tools_list_http_bytes"]
+    http_t = summary["tools_list_http_tokens_est"]
+    stdio_b = reg["tools_list_stdio_full_bytes"]
+    stdio_t = summary["tools_list_stdio_full_tokens_est"]
+    strip_b = reg["tools_list_stdio_stripped_bytes"]
+    strip_t = summary["tools_list_stdio_stripped_tokens_est"]
+    save_b = summary["stripping_savings_bytes"]
     print(f"baseline written: {out_path.relative_to(REPO)}")
     print()
-    print(f"tools/list HTTP (3 meta-tools):     {reg['tools_list_http_bytes']:>9,} B  (~{summary['tools_list_http_tokens_est']:,} tok)")
-    print(f"tools/list stdio full (154 tools):  {reg['tools_list_stdio_full_bytes']:>9,} B  (~{summary['tools_list_stdio_full_tokens_est']:,} tok)")
-    print(f"tools/list stdio stripped:          {reg['tools_list_stdio_stripped_bytes']:>9,} B  (~{summary['tools_list_stdio_stripped_tokens_est']:,} tok)")
-    print(f"  auth-stripping savings:           {summary['stripping_savings_bytes']:>9,} B")
+    print(f"tools/list HTTP (3 meta-tools):     {http_b:>9,} B  (~{http_t:,} tok)")
+    print(f"tools/list stdio full (154 tools):  {stdio_b:>9,} B  (~{stdio_t:,} tok)")
+    print(f"tools/list stdio stripped:          {strip_b:>9,} B  (~{strip_t:,} tok)")
+    print(f"  auth-stripping savings:           {save_b:>9,} B")
     print()
     print(f"per-tool avg full schema bytes:     {reg['per_tool_avg_full_bytes']:>9,} B")
     print(f"per-tool avg stripped schema:       {reg['per_tool_avg_stripped_bytes']:>9,} B")
@@ -352,7 +369,7 @@ async def main() -> int:
     print(f"corpus total on disk: {summary['corpus_total_bytes']:,} B")
     for k, v in corp.items():
         if isinstance(v, dict) and v.get("bytes"):
-            print(f"  {k:<30} {v.get('files','-'):>4}f  {v['bytes']:>9,} B")
+            print(f"  {k:<30} {v.get('files', '-'):>4}f  {v['bytes']:>9,} B")
     return 0
 
 
