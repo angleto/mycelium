@@ -31,10 +31,11 @@ from flow_core.models.invoice import Invoice
 from flow_core.services import invoice as invoice_svc
 from flow_core.services.sdi_notification_xsd import validate_sdi_notification
 
-# Active-cycle notification root element -> outcome code (ADR-0011 v1). Keys
-# must mirror ``V1_NOTIFICATION_ROOTS`` in ``sdi_notification_xsd``: the XSD
-# validator gates entry, this map then translates a known-good root into the
-# Invoice ``sdi_status`` code. NE/DT/EC/SE (PA / passive cycle) are post-v1.
+# Active-cycle notification root element -> outcome code. Subset of
+# ``ACTIVE_CYCLE_ROOTS`` in ``sdi_notification_xsd``: the XSD validator gates
+# entry, this map then translates a known-good root into the Invoice
+# ``sdi_status`` code. NE/DT routing lives in a follow-up; receiver-cycle
+# notifications (EC/SE/MT) are dispatched by the app router, not here.
 _ROOT_OUTCOME: dict[str, str] = {
     "RicevutaConsegna": "RC",
     "NotificaMancataConsegna": "MC",
@@ -79,7 +80,13 @@ def parse_notification(raw: bytes) -> tuple[str, str]:
         raise ValueError(
             "SdI notification fails XSD MessaggiTypes_v1.1: " + "; ".join(xsd_errors[:3])
         )
-    outcome = _ROOT_OUTCOME[ET.QName(root).localname]
+    localname = ET.QName(root).localname
+    if localname not in _ROOT_OUTCOME:
+        # XSD-valid notification, but the active-cycle router does not handle
+        # this kind yet (NE/DT routing lives in a follow-up; EC/SE/MT belong
+        # to the passive cycle and are dispatched upstream by the app router).
+        raise ValueError(f"SdI notification '{localname}' is not routed by the active-cycle parser")
+    outcome = _ROOT_OUTCOME[localname]
     ident_el = _find_local(root, "IdentificativoSdI")
     ident = (ident_el.text or "").strip() if ident_el is not None and ident_el.text else ""
     if not ident:

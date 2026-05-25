@@ -72,6 +72,15 @@ class SdiStatus(enum.StrEnum):
     MC = "MC"  # mancata consegna
     NS = "NS"  # notifica di scarto
     AT = "AT"  # attestazione trasmissione (impossibilita recapito)
+    NE = "NE"  # notifica esito (committente accept/reject relayed)
+    DT = "DT"  # decorrenza termini (15-day buyer window expired)
+
+
+class BuyerVerdict(enum.StrEnum):
+    none = "none"
+    accepted = "accepted"
+    rejected = "rejected"
+    deemed_accepted = "deemed_accepted"  # DT timeout
 
 
 class PaymentStatus(enum.StrEnum):
@@ -266,6 +275,28 @@ class Invoice(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, Base):
     )
     xml: Mapped[str | None] = mapped_column(Text, nullable=True)
     issued_at: Mapped[datetime.datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # Denormalized buyer outcome (NE/DT). The full audit trail of every
+    # notification lives in ``invoice_notifications``; these columns carry
+    # the latest derived state for fast filtering. ``deemed_accepted`` is
+    # set when DT arrives without a prior NE. Stored as VARCHAR with a CHECK
+    # constraint (not a native PG enum) to keep additions cheap.
+    buyer_verdict: Mapped[BuyerVerdict] = mapped_column(
+        SAEnum(
+            BuyerVerdict,
+            name="buyer_verdict",
+            native_enum=False,
+            create_constraint=False,
+            length=20,
+        ),
+        nullable=False,
+        server_default="none",
+    )
+    buyer_verdict_at: Mapped[datetime.datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    dt_received_at: Mapped[datetime.datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
 

@@ -58,6 +58,7 @@ from flow_core.models.google_calendar import (
     GoogleCalendarStatus,
 )
 from flow_core.models.invoice import (
+    BuyerVerdict,
     ConservationAdhesion,
     ConservationStatus,
     DocumentType,
@@ -100,7 +101,8 @@ from flow_core.models.organization import Organization
 from flow_core.models.project_profile import ProjectProfile
 from flow_core.models.schedule import Schedule
 from flow_core.models.sdi_mandate import SdiMandate, SdiMandateStatus
-from flow_core.models.sdi_received import ReceivedInvoice
+from flow_core.models.sdi_notification import InvoiceNotification, ReceivedInvoiceNotification
+from flow_core.models.sdi_received import CommittenteVerdict, ReceivedInvoice
 from flow_core.models.tag import Tag, TagKind
 from flow_core.models.tag_scope import TagScope
 from flow_core.models.task import (
@@ -145,10 +147,12 @@ __all__ = [
     "BlobSource",
     "Budget",
     "BudgetPeriod",
+    "BuyerVerdict",
     "CalendarHoliday",
     "CalendarSubscription",
     "ClientProfile",
     "Comment",
+    "CommittenteVerdict",
     "ConservationAdhesion",
     "ConservationStatus",
     "ConstraintKind",
@@ -174,6 +178,7 @@ __all__ = [
     "InvoiceCounter",
     "InvoiceKind",
     "InvoiceLine",
+    "InvoiceNotification",
     "InvoiceState",
     "IssuerProfile",
     "LedgerEntryKind",
@@ -199,6 +204,7 @@ __all__ = [
     "RateCard",
     "RateUnit",
     "ReceivedInvoice",
+    "ReceivedInvoiceNotification",
     "RecurrenceFreq",
     "RevokedToken",
     "Role",

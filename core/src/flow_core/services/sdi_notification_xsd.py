@@ -1,11 +1,15 @@
 """Official SdI notification XSD validation (FR-9 hardening, ADR-0011).
 
-SdI pushes outcome notifications (RC/MC/NS/AT in the v1 active cycle) to the
-trasmittente's endpoint as XML. This validator checks the payload against the
-official ``MessaggiTypes_v1.1`` schema (vendored under ``fatturapa_xsd/``)
-*before* the namespace-agnostic XPath parser in ``sdi_inbound`` extracts
-fields: a structurally invalid payload is a protocol bug (ours or theirs) and
-must be surfaced, not silently tolerated by lax XPath.
+SdI exchanges several notification types between trasmittente and ricevente
+(see ``MessaggiTypes_v1.1`` schema, vendored under ``fatturapa_xsd/``); this
+module is the schema gate that runs before any parser extracts fields, so a
+structurally invalid payload is a protocol bug (ours or theirs) and gets
+surfaced, not silently tolerated by lax XPath.
+
+Routing of which type is allowed on which endpoint and how it is applied to
+domain state is a separate concern (see ``sdi_inbound`` for the active cycle
+and ``sdi_passive`` for the receiver cycle). This validator answers a single
+question: *is this XML a well-formed SdI notification of any known kind?*
 
 The schema declares ``ds:Signature`` as required on every notification root.
 Real SdI notifications are XAdES-signed; signature *verification* is a
@@ -27,14 +31,34 @@ _XSD_FILE = pathlib.Path(__file__).parent / "fatturapa_xsd" / "MessaggiTypes_v1.
 
 NS_MESSAGGI = "http://www.fatturapa.gov.it/sdi/messaggi/v1.0"
 
-# v1 active-cycle notifications (ADR-0011). NE/DT/EC/SE/MT are post-v1.
-V1_NOTIFICATION_ROOTS: frozenset[str] = frozenset(
+# All notification root elements declared by MessaggiTypes_v1.1. Semantic
+# subsets (active vs receiver cycle) are routing concerns, see ``sdi_inbound``
+# and ``sdi_passive``; here we just enumerate what the schema knows.
+ACTIVE_CYCLE_ROOTS: frozenset[str] = frozenset(
     {
+        # Trasmittente receives these after pushing a FatturaElettronica to SdI.
         "RicevutaConsegna",
         "NotificaScarto",
         "NotificaMancataConsegna",
         "AttestazioneTrasmissioneFattura",
+        "NotificaEsito",
     }
+)
+RECEIVER_CYCLE_ROOTS: frozenset[str] = frozenset(
+    {
+        # Ricevente receives these as the addressee of a passive FatturaElettronica.
+        "MetadatiInvioFile",
+        "NotificaEsitoCommittente",
+        "ScartoEsitoCommittente",
+    }
+)
+# DT (NotificaDecorrenzaTermini) is dual-direction: SdI sends it both to the
+# trasmittente (deemed acceptance after the 15-day window) and to the
+# ricevente (same event, opposite point of view). Listed in both subsets.
+DUAL_CYCLE_ROOTS: frozenset[str] = frozenset({"NotificaDecorrenzaTermini"})
+
+ALL_NOTIFICATION_ROOTS: frozenset[str] = (
+    ACTIVE_CYCLE_ROOTS | RECEIVER_CYCLE_ROOTS | DUAL_CYCLE_ROOTS
 )
 
 
@@ -57,9 +81,10 @@ def validate_sdi_notification(xml: bytes | str) -> list[str]:
     """Validate an SdI notification XML against the official schema.
 
     Returns a list of human-readable ``line: message`` errors, empty when
-    valid. Pre-strips ``ds:Signature`` so a fixture / unsigned-test payload
-    is judged on its business structure alone. Never raises for an invalid
-    payload; only a malformed string returns a single not-well-formed error.
+    valid. The check is signature-agnostic (the schema's ``ds:Signature`` is
+    relaxed in memory); root must be one of ``ALL_NOTIFICATION_ROOTS`` and
+    in the official messaggi namespace. Never raises for an invalid payload;
+    only a malformed string returns a single not-well-formed error.
     """
     if isinstance(xml, str):
         xml = xml.encode("utf-8")
@@ -68,10 +93,10 @@ def validate_sdi_notification(xml: bytes | str) -> list[str]:
     except ET.XMLSyntaxError as exc:
         return [f"XML not well-formed: {exc}"]
     qname = ET.QName(doc)
-    if qname.localname not in V1_NOTIFICATION_ROOTS:
+    if qname.localname not in ALL_NOTIFICATION_ROOTS:
         return [
-            f"line {doc.sourceline}: root '{qname.localname}' is not a supported "
-            f"v1 notification (expected one of {sorted(V1_NOTIFICATION_ROOTS)})"
+            f"line {doc.sourceline}: root '{qname.localname}' is not a known "
+            f"SdI notification (expected one of {sorted(ALL_NOTIFICATION_ROOTS)})"
         ]
     if qname.namespace != NS_MESSAGGI:
         return [

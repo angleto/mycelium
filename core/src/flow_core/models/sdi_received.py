@@ -16,9 +16,11 @@ EsitoCommittente if PA, ...).
 
 from __future__ import annotations
 
+import datetime
+import enum
 import uuid
 
-from sqlalchemy import ForeignKey, Index, LargeBinary, String, text
+from sqlalchemy import DateTime, Enum as SAEnum, ForeignKey, Index, LargeBinary, String, text
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -29,6 +31,13 @@ from flow_core.models.base import (
     UUIDPKMixin,
     VersionMixin,
 )
+
+
+class CommittenteVerdict(enum.StrEnum):
+    none = "none"
+    accepted = "accepted"
+    rejected = "rejected"
+    deemed_accepted = "deemed_accepted"  # DT timeout on receiver side
 
 
 class ReceivedInvoice(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, Base):
@@ -64,4 +73,23 @@ class ReceivedInvoice(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin,
     raw_xml: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
     processing_status: Mapped[str] = mapped_column(
         String(20), nullable=False, server_default=text("'new'")
+    )
+    # Denormalized committente outcome (EC sent / SE / DT receiver-side).
+    # Full audit log lives in ``received_invoice_notifications``.
+    committente_verdict: Mapped[CommittenteVerdict] = mapped_column(
+        SAEnum(
+            CommittenteVerdict,
+            name="committente_verdict",
+            native_enum=False,
+            create_constraint=False,
+            length=20,
+        ),
+        nullable=False,
+        server_default="none",
+    )
+    committente_verdict_at: Mapped[datetime.datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    dt_received_at: Mapped[datetime.datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
     )
