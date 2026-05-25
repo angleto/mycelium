@@ -163,15 +163,26 @@ async def _resolve_org(identificativo: str) -> uuid.UUID | None:
 
 async def ingest_notification(raw: bytes) -> Invoice | None:
     """Parse + apply an SdI notification. Returns the updated invoice, or None
-    if no invoice matches the IdentificativoSdI (SdI may retry; do not 500)."""
+    if no invoice matches the IdentificativoSdI (SdI may retry; do not 500).
+
+    DT is dual-cycle: SdI sends the same NotificaDecorrenzaTermini both to
+    the transmitter (15 days without buyer EC) and to the receiver (15 days
+    without our outbound EC). We resolve transmitter first; if that misses,
+    a DT also probes the receiver side via the passive resolver."""
     parsed = parse_notification(raw)
     org_id = await _resolve_org(parsed.identificativo_sdi)
-    if org_id is None:
-        return None
-    async with tenant_session(str(org_id), _SYSTEM_USER) as s:
-        return await invoice_svc.ingest_active_notification(
-            s,
-            org_id=org_id,
-            actor_id=None,
-            parsed=parsed,
-        )
+    if org_id is not None:
+        async with tenant_session(str(org_id), _SYSTEM_USER) as s:
+            return await invoice_svc.ingest_active_notification(
+                s,
+                org_id=org_id,
+                actor_id=None,
+                parsed=parsed,
+            )
+    if parsed.outcome == "DT":
+        # Receiver-side fallback: a DT that does not match any transmitted
+        # invoice may belong to one we *received*.
+        from flow_core.services.sdi_passive import ingest_receiver_dt
+
+        await ingest_receiver_dt(parsed)
+    return None

@@ -288,6 +288,58 @@ async def _resolve_received_invoice_org(identificativo: str) -> uuid.UUID | None
     return uuid.UUID(str(val))
 
 
+async def ingest_receiver_dt(parsed) -> ReceivedInvoice | None:  # type: ignore[no-untyped-def]
+    """Apply a receiver-side ``NotificaDecorrenzaTermini``: the 15-day
+    window for us to send EsitoCommittente expired, so the invoice is
+    deemed accepted. The XSD validation + parse already ran upstream
+    (sdi_inbound.parse_notification); here we only carry the structured
+    fields and update committente_verdict + dt_received_at on the
+    received invoice + append the audit row."""
+    # Local imports to avoid an import cycle with sdi_inbound.
+    import datetime as _dt
+
+    from sqlalchemy.exc import IntegrityError
+    from sqlalchemy.future import select
+
+    from flow_core.models.sdi_received import CommittenteVerdict
+
+    ident = parsed.identificativo_sdi
+    org_id = await _resolve_received_invoice_org(ident)
+    if org_id is None:
+        return None
+    async with tenant_session(str(org_id), _SYSTEM_USER) as s:
+        ri = (
+            await s.execute(
+                select(ReceivedInvoice).where(ReceivedInvoice.identificativo_sdi == ident)
+            )
+        ).scalar_one_or_none()
+        if ri is None:
+            return None
+        now = _dt.datetime.now(tz=_dt.UTC)
+        ri.dt_received_at = now
+        if ri.committente_verdict is CommittenteVerdict.none:
+            ri.committente_verdict = CommittenteVerdict.deemed_accepted
+            ri.committente_verdict_at = now
+        ri.version += 1
+
+        notif = ReceivedInvoiceNotification(
+            org_id=org_id,
+            received_invoice_id=ri.id,
+            kind="DT",
+            direction="in",
+            nome_file=parsed.nome_file,
+            message_id=parsed.message_id,
+            raw_xml=parsed.raw_xml,
+            payload={"outcome": "DT"},
+        )
+        s.add(notif)
+        try:
+            await s.flush()
+        except IntegrityError:
+            await s.rollback()
+        return ri
+
+
 async def ingest_receiver_notification(raw: bytes) -> ReceivedInvoice | None:
     """Apply an MT or SE notification: write the audit row on
     ``received_invoice_notifications`` and (for SE) record that the

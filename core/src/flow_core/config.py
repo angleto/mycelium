@@ -195,6 +195,13 @@ class Settings(BaseSettings):
     sdi_client_cert: str = ""
     sdi_client_key: str = ""
     sdi_ca_bundle: str = ""
+    # EsitoCommittente outbound (ADR-0011 v1.1): the NotificaEsitoCommittente
+    # we generate as buyer carries an XMLDSig enveloped signature. The
+    # signing key / cert are PEM bytes loaded from the deploy secret store;
+    # tests inject ephemeral self-signed material at runtime. Empty (the
+    # default) means "no EC outbound is wired"; the service raises on call.
+    sdi_ec_signing_key_pem: str = ""
+    sdi_ec_signing_cert_pem: str = ""
 
     # App
     env: str = "dev"
