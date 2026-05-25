@@ -77,9 +77,27 @@ export function TaskDetailRoute() {
   >([])
   // Two tabs in the task body: markdown description and checklist
   // (no modality, both always available; the user picks what to use).
+  // The last picked tab is remembered per task in localStorage so that
+  // reopening a checklist-driven task lands directly on its checklist.
+  const tabKey = `flow.task.${id}.activeTab`
   const [activeTab, setActiveTab] = useState<'description' | 'checklist'>(
-    'description',
+    () => {
+      try {
+        const v = localStorage.getItem(tabKey)
+        if (v === 'checklist' || v === 'description') return v
+      } catch {
+        /* private mode / quota: fall through to default */
+      }
+      return 'description'
+    },
   )
+  useEffect(() => {
+    try {
+      localStorage.setItem(tabKey, activeTab)
+    } catch {
+      /* ignore */
+    }
+  }, [tabKey, activeTab])
   const [checklistCount, setChecklistCount] = useState<{
     done: number
     total: number
