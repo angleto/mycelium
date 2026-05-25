@@ -5,7 +5,15 @@
 // left off. Cached so the snapshot ref is stable for
 // useSyncExternalStore.
 
-export type Session = { token: string; workspaceId: string }
+export type Session = {
+  token: string
+  workspaceId: string
+  // Long-lived rotating refresh token (90d server-side default).
+  // Optional for backwards compat: a session minted before refresh
+  // support shipped has none, and falls back to the legacy "log out
+  // on 401" behaviour until the user next logs in.
+  refreshToken?: string
+}
 
 const KEY = 'flow.session'
 const LAST_WS = 'flow.lastWorkspace'
@@ -28,7 +36,12 @@ function read(): Session | null {
   if (!raw) return null
   try {
     const v = JSON.parse(raw) as Partial<Session>
-    return v.token && v.workspaceId ? { token: v.token, workspaceId: v.workspaceId } : null
+    if (!v.token || !v.workspaceId) return null
+    return {
+      token: v.token,
+      workspaceId: v.workspaceId,
+      refreshToken: typeof v.refreshToken === 'string' ? v.refreshToken : undefined,
+    }
   } catch {
     return null
   }
@@ -83,9 +96,23 @@ export function setSession(s: Session): void {
 
 export function setActiveWorkspace(workspaceId: string): void {
   if (!cache) return
-  cache = { token: cache.token, workspaceId }
+  cache = { ...cache, workspaceId }
   localStorage.setItem(KEY, JSON.stringify(cache))
   localStorage.setItem(LAST_WS, workspaceId)
+  emit()
+}
+
+/** Rotate the access (+ refresh) token of the current session in
+ * place. Used by the /auth/refresh interceptor: keeps workspaceId
+ * intact and emits so listeners (header bearer cache, etc.) pick
+ * up the new credentials immediately. No-op if no session. */
+export function updateSessionTokens(
+  token: string,
+  refreshToken: string | undefined,
+): void {
+  if (!cache) return
+  cache = { ...cache, token, refreshToken }
+  localStorage.setItem(KEY, JSON.stringify(cache))
   emit()
 }
 

@@ -7,32 +7,103 @@ import {
   isAdminMode,
   lastWorkspaceId,
   setSession,
+  updateSessionTokens,
 } from '../auth/session'
 import i18n from '../i18n'
+
+// Single-flight refresh promise: many in-flight requests may all
+// 401 at once when the access JWT expires; without coalescing, each
+// would race to /auth/refresh and the second arrival would replay a
+// now-used refresh row (theft signal → family revoked → all logged
+// out). Holding one promise per refresh attempt collapses the storm
+// into one rotation and shares the result.
+let inflightRefresh: Promise<string | null> | null = null
+
+/** Rotate the access (+ refresh) token via /auth/refresh. Returns
+ * the new access token (or null if refresh failed / no refresh token
+ * is held, in which case the caller drops the session). The promise
+ * is cached for the lifetime of the rotation so concurrent 401s
+ * collapse to one server roundtrip. */
+async function refreshAccessToken(): Promise<string | null> {
+  if (inflightRefresh) return inflightRefresh
+  const s = getSession()
+  if (!s || !s.refreshToken) return null
+  inflightRefresh = (async () => {
+    try {
+      const res = await fetch('/api/auth/refresh', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ refresh_token: s.refreshToken }),
+      })
+      if (!res.ok) return null
+      const data = (await res.json()) as {
+        token: string
+        refresh_token: string
+      }
+      updateSessionTokens(data.token, data.refresh_token)
+      return data.token
+    } catch {
+      return null
+    } finally {
+      inflightRefresh = null
+    }
+  })()
+  return inflightRefresh
+}
+
+function applyAuthHeaders(headers: Headers, token: string): void {
+  headers.set('Authorization', `Bearer ${token}`)
+  if (isAdminMode()) headers.set('X-Admin-Mode', '1')
+  const wr = getWorkspaceRole()
+  if (wr) headers.set('X-Workspace-Role', wr)
+  headers.set('Accept-Language', i18n.language)
+}
 
 // Authorization is the HTTPBearer scheme (injected here, not a typed
 // param). Accept-Language drives the backend i18n catalog so error
 // `detail` comes back localized. X-Workspace-Id is a typed per-call
 // parameter (see workspaceHeader).
+//
+// On 401 the middleware tries one refresh and replays the original
+// request transparently; only if refresh fails do we drop the
+// session and let RequireAuth route to /login. The refresh path
+// itself is /auth/refresh (NoAuthMiddleware) so it can't loop.
 const authMiddleware: Middleware = {
   onRequest({ request }) {
     const s = getSession()
     if (s) request.headers.set('Authorization', `Bearer ${s.token}`)
-    // Sent only while elevated; the server still re-checks the
-    // capability, so this never escalates a non-admin.
     if (s && isAdminMode()) request.headers.set('X-Admin-Mode', '1')
-    // Effective workspace role ('' = default member). Server clamps it
-    // to the real membership role, so a forged value cannot escalate.
     const wr = s ? getWorkspaceRole() : ''
     if (wr) request.headers.set('X-Workspace-Role', wr)
     request.headers.set('Accept-Language', i18n.language)
     return request
   },
-  onResponse({ response }) {
-    // A revoked/expired token (auth.token_revoked / 401) drops the
-    // session; RequireAuth then routes to /login.
-    if (response.status === 401 && getSession()) clearSession()
-    return response
+  async onResponse({ request, response }) {
+    if (response.status !== 401 || !getSession()) return response
+    // Avoid recursion: a 401 on /auth/refresh itself means the
+    // refresh token is dead — drop session immediately.
+    if (new URL(request.url).pathname.endsWith('/auth/refresh')) {
+      clearSession()
+      return response
+    }
+    const fresh = await refreshAccessToken()
+    if (!fresh) {
+      clearSession()
+      return response
+    }
+    const retryHeaders = new Headers(request.headers)
+    applyAuthHeaders(retryHeaders, fresh)
+    const retry = await fetch(request.url, {
+      method: request.method,
+      headers: retryHeaders,
+      body: request.body,
+      // openapi-fetch reads the body once; clone the request just in
+      // case the original was already consumed.
+      // (Request bodies that are JSON have already been serialized
+      // into request.body, which is a stream the platform supports
+      // replaying via fetch for non-streamed bodies.)
+    })
+    return retry
   },
 }
 
@@ -60,15 +131,20 @@ export async function authFetch(
   const s = getSession()
   if (!s) throw new Error('no session')
   const h = new Headers(init.headers)
-  h.set('Authorization', `Bearer ${s.token}`)
+  applyAuthHeaders(h, s.token)
   h.set('x-workspace-id', s.workspaceId)
-  if (isAdminMode()) h.set('X-Admin-Mode', '1')
-  const wr = getWorkspaceRole()
-  if (wr) h.set('X-Workspace-Role', wr)
-  h.set('Accept-Language', i18n.language)
   const res = await fetch(`/api${path}`, { ...init, headers: h })
-  if (res.status === 401 && getSession()) clearSession()
-  return res
+  if (res.status !== 401 || !getSession()) return res
+  // Same refresh-and-retry contract as the typed client.
+  const fresh = await refreshAccessToken()
+  if (!fresh) {
+    clearSession()
+    return res
+  }
+  const retryHeaders = new Headers(init.headers)
+  applyAuthHeaders(retryHeaders, fresh)
+  retryHeaders.set('x-workspace-id', s.workspaceId)
+  return fetch(`/api${path}`, { ...init, headers: retryHeaders })
 }
 
 /** Backend domain error envelope ({code, detail}); see api/app.py.
@@ -108,10 +184,60 @@ export function errMessage(e: unknown): string {
   return (e as ApiError | undefined)?.code ?? i18n.t('error.generic')
 }
 
+/** Unified server-side search (tasks + memory blobs). Returns the
+ * subset of TASK ids that match the query, hits for ``kind='task'``
+ * only (the SPA composes them with its structured client-side filters
+ * via id-set intersection). The endpoint itself is wider and returns
+ * both kinds + snippets; this helper is the narrow consumer that
+ * TasksRoute needs. Lives here (not in api/search.ts) until the schema
+ * is regenerated -- the typed client doesn't expose /search yet.
+ *
+ * Aborts on the next call automatically via the caller's
+ * AbortController (passed in init.signal); a debounce + abort pattern in
+ * the route keeps fast typing from racing the network. */
+export type ServerSearchHit = {
+  kind: string
+  task_id: string | null
+  blob_id: string
+  title: string | null
+  snippet: string | null
+  score: number
+}
+
+export async function searchTasksByText(
+  query: string,
+  signal?: AbortSignal,
+): Promise<ServerSearchHit[]> {
+  const res = await authFetch('/search', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      q: query,
+      kinds: ['task'],
+      limit: 100,
+      operation_id: 'tasks-route-search',
+    }),
+    signal,
+  })
+  if (!res.ok) {
+    // 422 (empty q) and 401 propagate; the caller treats anything
+    // non-2xx as "fall back to client-side filter only".
+    return []
+  }
+  const data = (await res.json()) as ServerSearchHit[]
+  return data
+}
+
 // After auth we hold a token but no workspace context yet: fetch the
 // user's workspaces and activate the remembered one (else the first).
-// Switching later is in-app, no re-auth (ADR-0024).
-export async function establishSession(token: string): Promise<void> {
+// Switching later is in-app, no re-auth (ADR-0024). ``refreshToken``
+// is the long-lived rotating credential returned by
+// login/signup/verify-email/refresh; if absent the SPA falls back to
+// the legacy "401 → /login" behaviour.
+export async function establishSession(
+  token: string,
+  refreshToken?: string,
+): Promise<void> {
   const { data, error } = await api.GET('/workspaces', {
     headers: { Authorization: `Bearer ${token}` },
   })
@@ -120,5 +246,5 @@ export async function establishSession(token: string): Promise<void> {
   }
   const remembered = lastWorkspaceId()
   const pick = data.find((w) => w.id === remembered) ?? data[0]
-  setSession({ token, workspaceId: pick.id })
+  setSession({ token, workspaceId: pick.id, refreshToken })
 }

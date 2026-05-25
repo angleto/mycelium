@@ -70,6 +70,7 @@ from flow_core.services import notes as notes_svc
 from flow_core.services import notifications as notif_svc
 from flow_core.services import participants as part_svc
 from flow_core.services import task_checklist as checklist_svc
+from flow_core.services import task_search as task_search_svc
 from flow_core.services import time_tracking as time_svc
 from flow_core.services import workflow as workflow_svc
 from flow_core.services.rbac import get_role
@@ -2555,6 +2556,56 @@ async def memory_search(
 
 
 @mcp.tool()
+async def search(
+    token: str,
+    org_id: str,
+    q: str,
+    operation_id: str = "search",
+    kinds: list[str] | None = None,
+    project_id: str | None = None,
+    limit: int = 20,
+    tag_ids: list[str] | None = None,
+    channel_keys: list[str] | None = None,
+    include_archived: bool = False,
+    include_deleted: bool = False,
+) -> list[dict[str, Any]]:
+    """Unified free-text search across tasks and memory blobs.
+
+    ``kinds`` defaults to ``['task', 'blob']``. Task hits are org-wide
+    (project filtering goes via ``tag_ids``); blob hits respect the
+    caller's ``project_id``. Results carry an ``ts_headline`` snippet.
+    Use this instead of ``memory_search`` when the caller wants
+    "everything that mentions X" rather than memory-only retrieval.
+    """
+    async with _tenant(token, org_id) as (s, org, user):
+        hits = await task_search_svc.search_unified(
+            s,
+            org_id=org,
+            actor_id=user,
+            project_id=uuid.UUID(project_id) if project_id else None,
+            query=q,
+            kinds=kinds or ["task", "blob"],
+            tag_ids=[uuid.UUID(t) for t in (tag_ids or [])],
+            channel_keys=channel_keys or [],
+            limit=limit,
+            include_archived=include_archived,
+            include_deleted=include_deleted,
+            operation_id=operation_id,
+        )
+        return [
+            {
+                "kind": h.kind,
+                "task_id": str(h.task_id) if h.task_id else None,
+                "blob_id": str(h.blob_id),
+                "title": h.title,
+                "snippet": h.snippet,
+                "score": h.score,
+            }
+            for h in hits
+        ]
+
+
+@mcp.tool()
 async def memory_erase(token: str, org_id: str, source_kind: str, source_id: str) -> dict[str, Any]:
     """GDPR erasure by provenance; cascades to embedding/sources."""
     async with _tenant(token, org_id) as (s, org, user):
@@ -3087,11 +3138,63 @@ async def synthesize_speech(
 
 # --- Attachments on notes / tasks (DB-BYTEA) ---
 #
-# Binary UPLOAD is intentionally NOT exposed over MCP: tools exchange
-# JSON, and base64-blob round-trips do not fit the protocol (and would
-# bypass the multipart size guard). Upload stays REST-only
-# (POST /notes|tasks/{id}/attachments). MCP gets read/curation parity
-# (list + delete), mirroring the other list_*/delete_* tools.
+# Binary UPLOAD over MCP: the file bytes are base64-encoded inside the
+# JSON tool call (the protocol exchanges JSON, not multipart). The
+# ``attachment_max_bytes`` guard from settings still applies — it is
+# checked on the *decoded* payload by the service layer, exactly like
+# the REST path. Practical for an LLM agent that wants to attach a
+# rendered report or a small PDF without bouncing through REST.
+
+
+@mcp.tool()
+async def upload_attachment(
+    token: str,
+    org_id: str,
+    filename: str,
+    data_b64: str,
+    note_id: str | None = None,
+    task_id: str | None = None,
+    mime_type: str | None = None,
+) -> dict[str, Any]:
+    """Attach a file (base64-encoded bytes) to a note OR a task.
+
+    Exactly one of ``note_id`` / ``task_id`` must be set. ``data_b64``
+    is base64 of the raw file contents; the server decodes and
+    enforces ``attachment_max_bytes`` (default 10 MiB) on the
+    decoded size. The detected mime overrides ``mime_type`` if the
+    sniffer disagrees with a misleading client hint.
+
+    Returns the attachment metadata (id, filename, mime_type,
+    size_bytes); the binary is never echoed back."""
+    import base64
+    import binascii
+
+    if (note_id is None) == (task_id is None):
+        raise ValueError("provide exactly one of note_id / task_id")
+    try:
+        raw = base64.b64decode(data_b64, validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise ValueError(f"data_b64 is not valid base64: {exc}") from exc
+    async with _tenant(token, org_id) as (s, org, user):
+        att = await attachments_svc.add_attachment(
+            s,
+            org_id=org,
+            actor_id=user,
+            note_id=uuid.UUID(note_id) if note_id else None,
+            task_id=uuid.UUID(task_id) if task_id else None,
+            filename=filename,
+            mime_type=mime_type,
+            data=raw,
+        )
+        return {
+            "id": str(att.id),
+            "note_id": str(att.note_id) if att.note_id else None,
+            "task_id": str(att.task_id) if att.task_id else None,
+            "filename": att.filename,
+            "mime_type": att.mime_type,
+            "size_bytes": att.size_bytes,
+            "created_at": att.created_at.isoformat(),
+        }
 
 
 @mcp.tool()

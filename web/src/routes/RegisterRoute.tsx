@@ -33,7 +33,7 @@ export function RegisterRoute() {
       return
     }
     if (data.token) {
-      await establishSession(data.token)
+      await establishSession(data.token, data.refresh_token ?? undefined)
       navigate('/', { replace: true })
       return
     }

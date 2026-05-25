@@ -106,6 +106,10 @@ export function TaskDetailRoute() {
 
   const apply = useCallback((tk: Task) => {
     setTask(tk)
+    // Reset the autosave concurrency state to the freshly-loaded
+    // canonical version: a reload after 409 must start the next
+    // patch from this version, not from a stale ref.
+    latestVersion.current = tk.version
     setTitle(tk.title)
     setDescription(tk.description ?? '')
     setImportance(tk.importance)
@@ -319,30 +323,51 @@ export function TaskDetailRoute() {
   // response so server-derived fields (priority above all) stay in
   // sync without a reload() — which would clobber an unsaved
   // title/description edit by overwriting the corresponding inputs.
+  //
+  // Concurrency: the SPA can fire several autosaves in quick succession
+  // (importance + urgency + due date in <1s, or the debounced text save
+  // racing a chip click). ``task.version`` is captured by React's
+  // closure at render time, so two parallel autosaves would both send
+  // the same ``expected_version`` and the second would 409 (kicking
+  // off a reload storm; reproduces the bug logged on task fc321e26).
+  //
+  // Two ingredients fix this:
+  // 1. ``latestVersion`` ref tracks the freshest server-confirmed
+  //    version, independent of React render timing.
+  // 2. ``autosaveChain`` ref serializes autosaves through a single
+  //    Promise chain — each call waits for its predecessor to resolve
+  //    so they always see the freshest version when they read it.
   async function autosave(patch: Record<string, unknown>) {
     if (!task) return
-    setErr(null)
-    const { data, error, response } = await api.PATCH('/tasks/{task_id}', {
-      params: { header: workspaceHeader(), path: { task_id: id } },
-      body: { expected_version: task.version, ...patch },
-    })
-    if (response.status === 409) {
-      setErr(t('tasks.conflict'))
-      await reload()
-      return
-    }
-    if (error || !data) {
-      setErr(errMessage(error))
-      return
-    }
-    // PATCH /tasks/{id} now returns the full canonical TaskOut so we
-    // can drop the local re-derivation: in particular ``task.priority``
-    // is whatever the service computed (importance x urgency when both
-    // are set, otherwise the persisted value). The text-autosave's
-    // ``dirty`` check (title/description compared against ``task.*``)
-    // still clears correctly: the response reflects what the server
-    // just persisted, which is what the user just typed.
-    setTask(data)
+    const run = (autosaveChain.current ?? Promise.resolve()).then(
+      async () => {
+        setErr(null)
+        const v = latestVersion.current ?? task.version
+        const { data, error, response } = await api.PATCH(
+          '/tasks/{task_id}',
+          {
+            params: { header: workspaceHeader(), path: { task_id: id } },
+            body: { expected_version: v, ...patch },
+          },
+        )
+        if (response.status === 409) {
+          setErr(t('tasks.conflict'))
+          await reload()
+          return
+        }
+        if (error || !data) {
+          setErr(errMessage(error))
+          return
+        }
+        // Update both the ref (so the next queued autosave sees the
+        // fresh version immediately) and the React state (so the rest
+        // of the page renders the canonical TaskOut).
+        latestVersion.current = data.version
+        setTask(data)
+      },
+    )
+    autosaveChain.current = run.catch(() => undefined)
+    return run
   }
 
   // Title + description autosave: debounce 1s after the last change.
@@ -353,6 +378,15 @@ export function TaskDetailRoute() {
   const lastSentText = useRef<{ title: string; description: string } | null>(
     null,
   )
+  // Freshest server-confirmed version, decoupled from React render
+  // closures. Seeded by ``apply()`` (initial load + reload paths) and
+  // bumped by every successful autosave so the next queued autosave
+  // never replays a stale ``expected_version``.
+  const latestVersion = useRef<number | null>(null)
+  // Single Promise chain that serializes autosaves: a click on
+  // importance + a click on urgency 100ms apart resolve in order,
+  // each seeing the version bump from the previous.
+  const autosaveChain = useRef<Promise<void> | null>(null)
   useEffect(() => {
     if (!task) return
     if (lastSentText.current === null) {
@@ -394,15 +428,17 @@ export function TaskDetailRoute() {
     void autosave({ due_date: v || null })
   }
   // Appointment promotion / edit (migration 0094). Save the pair
-  // atomically: the backend CHECK constraint rejects half-set inputs.
-  // ``start_at`` is read from the datetime-local input as a naive
-  // local-tz string; we send the ISO form so the server reads it as
-  // a UTC timestamp anchored at the user's wall-clock moment.
+  // atomically: the backend CHECK constraint rejects half-set inputs,
+  // so we ONLY autosave once both fields have a value. A partial
+  // input (user just typed the start, hasn't filled duration yet) is
+  // a no-op — earlier we cleared both here, which reset the input the
+  // user had just typed (reproduced on task a3d1f5f4 item 2).
+  //
+  // Demoting back to a plain task is a deliberate action: the user
+  // clicks "clear appointment" → ``clearAppointment()`` below sends
+  // the explicit ``{start_at: null, duration_minutes: null}`` pair.
   async function saveAppointment(startLocal: string, minutes: number | '') {
-    if (!startLocal || !minutes) {
-      await autosave({ start_at: null, duration_minutes: null })
-      return
-    }
+    if (!startLocal || !minutes) return
     const iso = new Date(startLocal).toISOString()
     await autosave({ start_at: iso, duration_minutes: Number(minutes) })
   }

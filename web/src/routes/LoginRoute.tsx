@@ -19,8 +19,8 @@ export function LoginRoute() {
   const [info, setInfo] = useState<string | null>(null)
   const [err, setErr] = useState<string | null>(null)
 
-  async function finish(token: string) {
-    await establishSession(token)
+  async function finish(token: string, refreshToken?: string) {
+    await establishSession(token, refreshToken)
     navigate('/', { replace: true })
   }
 
@@ -33,7 +33,7 @@ export function LoginRoute() {
       body: { email, password },
     })
     if (response.ok && data) {
-      await finish(data.token)
+      await finish(data.token, data.refresh_token ?? undefined)
       return
     }
     setBusy(false)
@@ -58,7 +58,7 @@ export function LoginRoute() {
       body: { email, password, totp_code: totp },
     })
     if (response.ok && data) {
-      await finish(data.token)
+      await finish(data.token, data.refresh_token ?? undefined)
       return
     }
     setBusy(false)

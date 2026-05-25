@@ -3,7 +3,8 @@
 // Stays out of the way for /api/* and /mcp* — those always go to the
 // network so an offline backend yields a real error, not a stale UI.
 
-const CACHE = 'flow-shell-v1'
+// Bump on every behaviour change so old SWs are replaced atomically.
+const CACHE = 'flow-shell-v2'
 
 self.addEventListener('install', () => {
   // The first activation is fine without any preload — the SPA bundle
@@ -22,6 +23,17 @@ self.addEventListener('activate', (e) => {
   self.clients.claim()
 })
 
+// Build a real Response for the offline fallback path so respondWith
+// never receives undefined (which crashes the SW with
+// "Failed to convert value to 'Response'" and kills navigation).
+function offlineFallback() {
+  return new Response(
+    '<!doctype html><meta charset="utf-8"><title>Offline</title>' +
+      '<p>You are offline and this page is not cached yet.</p>',
+    { status: 503, headers: { 'Content-Type': 'text/html; charset=utf-8' } },
+  )
+}
+
 self.addEventListener('fetch', (event) => {
   const req = event.request
   if (req.method !== 'GET') return
@@ -38,19 +50,27 @@ self.addEventListener('fetch', (event) => {
   }
   // Stale-while-revalidate for the SPA shell: serve cached if present,
   // refresh in the background. New tab on a fresh install bootstraps
-  // the cache.
+  // the cache. Critical invariant: respondWith MUST resolve to a
+  // Response, never undefined — otherwise the browser logs
+  // "Failed to convert value to 'Response'" and the entire SW context
+  // throws (every subsequent navigation in this tab fails).
   event.respondWith(
-    caches.open(CACHE).then(async (cache) => {
+    (async () => {
+      const cache = await caches.open(CACHE)
       const hit = await cache.match(req)
-      const fetched = fetch(req)
+      const networkPromise = fetch(req)
         .then((res) => {
+          // Only cache real, same-origin, success responses (200 +
+          // basic). Opaque / 30x / 404 / 5xx must not poison the cache.
           if (res && res.status === 200 && res.type === 'basic') {
             cache.put(req, res.clone())
           }
           return res
         })
-        .catch(() => hit) // offline: best-effort serve cached
-      return hit || fetched
-    }),
+        .catch(() => null)
+      if (hit) return hit
+      const fresh = await networkPromise
+      return fresh ?? offlineFallback()
+    })(),
   )
 })

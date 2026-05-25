@@ -21,7 +21,7 @@ export function VerifyEmailRoute() {
       })
       if (!active) return
       if (response.ok && data) {
-        await establishSession(data.token)
+        await establishSession(data.token, data.refresh_token ?? undefined)
         if (active) navigate('/', { replace: true })
         return
       }

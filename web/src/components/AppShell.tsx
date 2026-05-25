@@ -2,7 +2,12 @@ import { useEffect, useState } from 'react'
 import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { api, workspaceHeader } from '../api/client'
-import { clearSession, setAdminMode, setWorkspaceRole } from '../auth/session'
+import {
+  clearSession,
+  getSession,
+  setAdminMode,
+  setWorkspaceRole,
+} from '../auth/session'
 import {
   useSession,
   useAdminMode,
@@ -333,8 +338,12 @@ export function AppShell() {
   }, [isMobile, sidebarOpen])
 
   async function onLogout() {
-    // Real server-side logout: revoke the JWT, then drop the session.
-    await api.POST('/auth/logout')
+    // Real server-side logout: revoke the JWT *and* the refresh
+    // family (if we have a refresh token), then drop the session.
+    const rt = getSession()?.refreshToken
+    await api.POST('/auth/logout', {
+      body: rt ? { refresh_token: rt } : { refresh_token: null },
+    })
     clearSession()
   }
 

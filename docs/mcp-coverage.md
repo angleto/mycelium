@@ -389,26 +389,22 @@ GAPs (comments):
 
 ## Attachments
 
-Read + delete only. **Binary upload is intentionally REST-only**, see
-the comment block at server.py:2878. Tools exchange JSON and base64
-round-trips don't fit the protocol or the multipart size guard.
+Upload (base64) + read (metadata) + delete. The size guard
+(`attachment_max_bytes`, default 10 MiB) is enforced server-side on
+the *decoded* payload, same code path as the REST multipart upload.
 
 | Tool | Server line | Service entry | Scope key |
 |---|---|---|---|
-| `list_attachments` | server.py:2888 | `attachments_svc.list_attachments` (attachments.py:307) | `notes:read` / `tasks:read` (depending on parent) |
-| `delete_attachment` | server.py:2918 | `attachments_svc.delete_attachment` (attachments.py:379) | `attachments:write` (danger) |
+| `upload_attachment` | server.py:3155 | `attachments_svc.add_attachment` (attachments.py:236) | `attachments:write` (danger) |
+| `list_attachments` | server.py:3206 | `attachments_svc.list_attachments` (attachments.py:307) | `notes:read` / `tasks:read` (depending on parent) |
+| `delete_attachment` | server.py:3239 | `attachments_svc.delete_attachment` (attachments.py:379) | `attachments:write` (danger) |
 
 GAPs (attachments):
 
-- **Upload over MCP**: by-design, but worth flagging: there is no
-  mechanism for an agent to push bytes. If we ever lift it, the
-  scope is already `attachments:write` (danger because bytes leave
-  the workspace boundary at read time). Service entry exists:
-  `attachments_svc.add_attachment` (attachments.py:236).
-- **Download**: `attachments_svc.read_attachment_bytes`
-  (attachments.py:366) exists; same protocol concern. If we add a
-  base64 read tool, gate it strictly: `attachments:read` (new key
-  needed, it isn't in the catalog yet).
+- **Download bytes over MCP**: `attachments_svc.read_attachment_bytes`
+  (attachments.py:366) exists; if we add a base64 read tool, gate
+  it strictly: `attachments:read` (new key needed, it isn't in the
+  catalog yet).
 
 ## Budgets
 
