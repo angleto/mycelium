@@ -65,12 +65,11 @@ def _purge_s3_only_attachments() -> Iterator[None]:
     """DB-row safety net (the row analog of the override net above).
 
     The suite commits to a shared DB. An attachment row left in S3
-    form (``data`` NULL, bytes off-DB) makes ``alembic downgrade``
-    fail when it re-imposes ``data NOT NULL`` (migration 0049, by
-    design) -- which would break the standing post-pytest migration
-    round-trip that holds for every prior migration. S3-path tests
-    clean inline, but that is skipped on an early assertion failure or
-    for partially-created rows.
+    form (``data`` NULL, bytes off-DB) is illegal under the baseline
+    schema's ``data NOT NULL`` invariant (pre-squash this was migration
+    0049, now folded into 0001_baseline). S3-path tests clean inline,
+    but that is skipped on an early assertion failure or for
+    partially-created rows.
 
     Unconditionally purge S3-only rows after every test. RLS hides
     org-scoped rows from a no-tenant session (``admin_session`` is
