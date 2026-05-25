@@ -1,7 +1,7 @@
 """Actors: human-readable addressable identities (users + AI assistants)
-that a task can be assigned to. Stage A of #21 (kill Executor) — see
-migration 0060 for the schema and ``docs/release-notes-v1.2.md`` for
-the user-facing rollout.
+that a task can be assigned to. Stage A of #21 (kill Executor); the
+schema for actors / agent tokens / AI assistants lives in the squashed
+``0001_baseline.sql``.
 
 This module is the **single resolver** the UI / MCP picker walks to
 turn an ``@handle`` into a concrete principal. Today the only sources

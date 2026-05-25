@@ -95,11 +95,10 @@ The active development line is **`v2.0`** (also the default branch).
 Compared to the v1.x line, v2.0 collapses 104 incremental Alembic
 revisions into a single baseline (see
 [`docs/migrations.md`](docs/migrations.md)): new installs run one
-migration instead of the full historical chain. The v1.2 user-facing
-changelog is preserved at
-[`docs/release-notes-v1.2.md`](docs/release-notes-v1.2.md) for
-historical reference; v1.x branches and tags have been retired from
-the remote.
+migration instead of the full historical chain. v1.x branches and
+tags have been retired from the remote; the user-facing summary of
+what shipped in v2.0 is at
+[`docs/release-notes-v2.0.md`](docs/release-notes-v2.0.md).
 
 ## License
 
