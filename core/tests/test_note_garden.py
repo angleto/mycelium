@@ -152,6 +152,42 @@ async def test_link_and_unlink_notes_typed() -> None:
         assert removed2 is False
 
 
+async def test_list_workspace_note_links_returns_full_edge_set() -> None:
+    # Garden mindmap path: one round-trip for every note-to-note link
+    # in the workspace, regardless of which note is the anchor.
+    org, user = await _make_workspace()
+    async with tenant_session(str(org), str(user)) as s:
+        a = await _make_note(s, org, user, "a")
+        b = await _make_note(s, org, user, "b")
+        c = await _make_note(s, org, user, "c")
+        await note_links.link_notes(
+            s, org_id=org, actor_id=user,
+            parent_note_id=a.id, child_note_id=b.id, kind="references",
+        )
+        await note_links.link_notes(
+            s, org_id=org, actor_id=user,
+            parent_note_id=b.id, child_note_id=c.id, kind="atom_of",
+        )
+        rows = await note_links.list_workspace_note_links(s, org_id=org)
+        assert len(rows) == 2
+        edges = {(r.parent_note_id, r.child_note_id, r.kind) for r in rows}
+        assert (a.id, b.id, "references") in edges
+        assert (b.id, c.id, "atom_of") in edges
+
+    # Links from a different workspace must not leak.
+    other_org, other_user = await _make_workspace()
+    async with tenant_session(str(other_org), str(other_user)) as s:
+        x = await _make_note(s, other_org, other_user, "x")
+        y = await _make_note(s, other_org, other_user, "y")
+        await note_links.link_notes(
+            s, org_id=other_org, actor_id=other_user,
+            parent_note_id=x.id, child_note_id=y.id, kind="references",
+        )
+    async with tenant_session(str(org), str(user)) as s:
+        rows = await note_links.list_workspace_note_links(s, org_id=org)
+        assert len(rows) == 2  # still only the two from our workspace
+
+
 async def test_link_notes_rejects_self_link_and_unknown_kind() -> None:
     org, user = await _make_workspace()
     async with tenant_session(str(org), str(user)) as s:

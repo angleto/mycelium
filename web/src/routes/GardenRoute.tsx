@@ -17,14 +17,16 @@ import { useTranslation } from 'react-i18next'
 
 import { api, errMessage, workspaceHeader } from '../api/client'
 import { MarkdownView } from '../components/Markdown'
+import { GardenMindmap } from '../components/GardenMindmap'
 import { useFocus } from '../lib/focus'
+import { getSession } from '../auth/session'
 import type { components } from '../api/schema'
 
 type Note = components['schemas']['NoteOut']
 type NoteWithLinks = components['schemas']['NoteWithLinksOut']
 type TaskBrief = { id: string; title: string }
 
-type Tab = 'inbox' | 'garden' | 'cemetery'
+type Tab = 'inbox' | 'garden' | 'cemetery' | 'mindmap'
 
 const MATURITY_OPTIONS = ['seed', 'growing', 'mature', 'dormant'] as const
 
@@ -56,17 +58,48 @@ const TAB_GLYPH: Record<Tab, string> = {
   inbox: '🌱',
   garden: '🌿',
   cemetery: '🍂',
+  mindmap: '🕸',
+}
+
+// Tab persistence (per-workspace): the mindmap tab is heavier to
+// switch into (graph layout), so keeping the user's choice across
+// reloads avoids the "wait, I was in mindmap" surprise. Scoped per
+// workspace because the same browser may host multiple tenants.
+function activeTabKey(workspaceId: string | null): string {
+  return `flow.garden.activeTab.${workspaceId ?? '_'}`
+}
+
+function loadActiveTab(workspaceId: string | null): Tab {
+  try {
+    const raw = localStorage.getItem(activeTabKey(workspaceId))
+    if (raw === 'inbox' || raw === 'garden' || raw === 'cemetery' || raw === 'mindmap') {
+      return raw
+    }
+  } catch {
+    // ignore
+  }
+  return 'inbox'
 }
 
 export function GardenRoute() {
   const { t } = useTranslation()
   const [notes, setNotes] = useState<Note[]>([])
   const [allTasks, setAllTasks] = useState<TaskBrief[]>([])
-  const [tab, setTab] = useState<Tab>('inbox')
+  const session = getSession()
+  const workspaceId = session?.workspaceId ?? null
+  const [tab, setTab] = useState<Tab>(() => loadActiveTab(workspaceId))
   const [openId, setOpenId] = useState<string | null>(null)
   const [openData, setOpenData] = useState<NoteWithLinks | null>(null)
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(activeTabKey(workspaceId), tab)
+    } catch {
+      // quota full: tab simply won't persist this session
+    }
+  }, [tab, workspaceId])
 
   // Focus (sidebar): a client (all its projects) or one project.
   // Same predicate as NotesRoute so /garden and /notes always agree
@@ -130,12 +163,21 @@ export function GardenRoute() {
   )
 
   const buckets = useMemo(() => {
-    const out: Record<Tab, Note[]> = { inbox: [], garden: [], cemetery: [] }
+    const out: Record<Tab, Note[]> = {
+      inbox: [],
+      garden: [],
+      cemetery: [],
+      mindmap: [],
+    }
     for (const n of notes) {
       if (n.deleted_at || n.is_archived) continue
       if (!inFocus(n)) continue
       out[bucketOf(n)].push(n)
     }
+    // The mindmap view spans every alive note in scope (all three
+    // lifecycle buckets) — its count chip reflects the total set
+    // it renders, not a separate bucket.
+    out.mindmap = [...out.inbox, ...out.garden, ...out.cemetery]
     return out
   }, [notes, inFocus])
 
@@ -224,6 +266,7 @@ export function GardenRoute() {
     { id: 'inbox', label: t('garden.tab.inbox') },
     { id: 'garden', label: t('garden.tab.garden') },
     { id: 'cemetery', label: t('garden.tab.cemetery') },
+    { id: 'mindmap', label: t('garden.tab.mindmap') },
   ]
   const visible = buckets[tab]
 
@@ -253,7 +296,13 @@ export function GardenRoute() {
 
       {err && <p className="err">{err}</p>}
 
-      {visible.length === 0 ? (
+      {tab === 'mindmap' ? (
+        <GardenMindmap
+          notes={visible}
+          workspaceId={workspaceId ?? '_'}
+          onOpenNote={(id) => void openPlant(id)}
+        />
+      ) : visible.length === 0 ? (
         <p className="hint garden__empty">{t(`garden.empty.${tab}`)}</p>
       ) : (
         <ul className="garden__list">

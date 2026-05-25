@@ -252,6 +252,27 @@ async def unlink_notes(
     return True
 
 
+async def list_workspace_note_links(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+) -> list[NoteNoteLink]:
+    """Return every note-to-note link in the workspace. Used by the
+    garden mindmap to render the full edge set in one round-trip
+    instead of N per-note queries (docs/adr/0029 D6: workspace-scoped
+    notes are few-per-tenant, so a single query is preferable to
+    server-side aggregation)."""
+    return list(
+        (
+            await session.execute(
+                select(NoteNoteLink).where(NoteNoteLink.org_id == org_id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+
 async def list_note_links(
     session: AsyncSession,
     *,
@@ -836,6 +857,7 @@ __all__ = [
     "link_notes",
     "list_note_links",
     "list_note_task_links",
+    "list_workspace_note_links",
     "promote_note_to_task",
     "record_task_artifact",
     "set_maturity",

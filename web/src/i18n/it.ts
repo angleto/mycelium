@@ -596,11 +596,25 @@ export const it: Catalog = {
       inbox: 'Inbox',
       garden: 'Giardino',
       cemetery: 'Cimitero',
+      mindmap: 'Mappa',
     },
     empty: {
       inbox: 'Nessuna nota fresca.',
       garden: 'Nessuna nota in crescita.',
       cemetery: 'Nessuna nota dormiente o trapiantata.',
+    },
+    mindmap: {
+      empty: 'Nessuna nota in questa vista.',
+      search: 'Cerca una nota…',
+      tagEdges: 'Mostra collegamenti per tag in comune',
+      createLink: 'Crea collegamento',
+      confirmDelete: 'Rimuovere questo collegamento?',
+      linkKind: {
+        atom_of: 'atomo di',
+        references: 'riferimento',
+        replies_to: 'risposta a',
+        supersedes: 'sostituisce',
+      },
     },
     maturity: {
       seed: 'seme',
@@ -693,6 +707,10 @@ export const it: Catalog = {
     undelete: 'Ripristina',
     unarchive: 'Dearchivia',
     none: 'Niente qui.',
+    empty: 'Svuota cestino',
+    emptyConfirm:
+      'Elimina definitivamente ogni task e nota nel cestino? Non è reversibile.',
+    emptyResult: 'Eliminati {{tasks}} task e {{notes}} note.',
   },
   cp: {
     nav: 'Clienti e progetti',

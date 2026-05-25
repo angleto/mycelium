@@ -597,11 +597,25 @@ export const en = {
       inbox: 'Inbox',
       garden: 'Garden',
       cemetery: 'Cemetery',
+      mindmap: 'Mind map',
     },
     empty: {
       inbox: 'No fresh notes.',
       garden: 'No notes currently growing.',
       cemetery: 'No dormant or transplanted notes.',
+    },
+    mindmap: {
+      empty: 'No notes in this view yet.',
+      search: 'Find a note…',
+      tagEdges: 'Show shared-tag links',
+      createLink: 'Create link',
+      confirmDelete: 'Remove this link?',
+      linkKind: {
+        atom_of: 'atom of',
+        references: 'references',
+        replies_to: 'replies to',
+        supersedes: 'supersedes',
+      },
     },
     maturity: {
       seed: 'seed',
@@ -694,6 +708,10 @@ export const en = {
     undelete: 'Restore',
     unarchive: 'Unarchive',
     none: 'Nothing here.',
+    empty: 'Empty trash',
+    emptyConfirm:
+      'Permanently delete every trashed task and note? This cannot be undone.',
+    emptyResult: 'Purged {{tasks}} task(s) and {{notes}} note(s).',
   },
   cp: {
     nav: 'Clients & projects',

@@ -3120,6 +3120,156 @@ button.btn--danger:hover {
   flex-wrap: wrap;
 }
 
+/* Garden mindmap (ADR-0029 P2): graph view of notes + their typed
+   links + tag-derived edges. The container is sized so the canvas
+   has a stable footprint regardless of how many notes are present. */
+.garden__mindmap {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.garden__mindmap-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  padding: 0.35rem 0;
+}
+.garden__mindmap-search {
+  background: var(--surface-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.3rem 0.6rem;
+  font-size: 0.85rem;
+  min-width: 200px;
+}
+.garden__mindmap-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+  cursor: pointer;
+}
+.garden__mindmap-toggle input { accent-color: var(--accent); }
+.garden__mindmap-legend {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  font-size: 0.75rem;
+  color: var(--muted);
+  margin-left: auto;
+  flex-wrap: wrap;
+}
+.garden__mindmap-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+.garden__mindmap-legend-swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+}
+.garden__mindmap-canvas {
+  height: 70vh;
+  min-height: 480px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  overflow: hidden;
+}
+.garden__mindmap-canvas .react-flow__renderer {
+  background: var(--surface);
+}
+.garden__mindmap-canvas .react-flow__minimap,
+.garden__mindmap-canvas .react-flow__controls {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.garden__mindmap-canvas .react-flow__controls-button {
+  background: var(--surface-2);
+  color: var(--text);
+  border-bottom: 1px solid var(--border);
+}
+.garden__mindmap-canvas .react-flow__controls-button:hover {
+  background: var(--surface);
+  color: var(--accent);
+}
+
+.mm-node {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.4rem 0.65rem;
+  background: var(--surface-2);
+  border: 1.5px solid var(--border);
+  border-radius: 10px;
+  color: var(--text);
+  font-size: 0.85rem;
+  max-width: 220px;
+  cursor: grab;
+  transition: border-color 120ms ease, transform 120ms ease, opacity 120ms ease;
+}
+.mm-node:active { cursor: grabbing; }
+.mm-node:hover { border-color: var(--accent); }
+.mm-node--dimmed { opacity: 0.55; }
+.mm-node--promoted { border-style: dashed; }
+.mm-node--highlighted {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 30%, transparent);
+}
+.mm-node__glyph {
+  font-size: 1.05rem;
+  line-height: 1;
+}
+.mm-node__title {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-h);
+}
+.mm-node__tag {
+  font-size: 0.65rem;
+  padding: 0.05rem 0.4rem;
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  white-space: nowrap;
+}
+.mm-node__handle {
+  width: 9px;
+  height: 9px;
+  background: var(--accent);
+  border: 1.5px solid var(--surface);
+  border-radius: 999px;
+}
+.mm-node__handle--in { background: var(--muted); }
+
+.modal__panel--narrow { max-width: 420px; }
+.garden__mindmap-kindlist {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin: 0.5rem 0;
+}
+.garden__mindmap-kindopt {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.3rem 0.4rem;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.garden__mindmap-kindopt:hover { background: var(--surface-2); }
+
 /* Task body tabs: description vs checklist. Both fields are always
    available on every task (no modality); the tab strip just decides
    which one the user is looking at right now. */
