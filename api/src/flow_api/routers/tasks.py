@@ -1022,7 +1022,7 @@ async def delete_checklist_item(
 
 
 @router.post(
-    "/{task_id}/checklist/clear-done",
+    "/{task_id}/checklist:clear_done",
     response_model=TaskChecklistClearDoneOut,
 )
 async def clear_checklist_done(
@@ -1039,7 +1039,7 @@ async def clear_checklist_done(
 
 
 @router.post(
-    "/{task_id}/checklist/reorder",
+    "/{task_id}/checklist:reorder",
     response_model=list[TaskChecklistItemOut],
 )
 async def reorder_checklist(

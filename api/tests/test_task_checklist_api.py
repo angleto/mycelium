@@ -132,7 +132,7 @@ async def test_checklist_crud_and_concurrency() -> None:
         bread_id = items[0]["id"]
         milk_id = items[1]["id"]
         reorder = await c.post(
-            f"/tasks/{tid}/checklist/reorder",
+            f"/tasks/{tid}/checklist:reorder",
             headers=h,
             json={"ids": [eggs_id, bread_id, milk_id]},
         )
@@ -142,7 +142,7 @@ async def test_checklist_crud_and_concurrency() -> None:
 
         # Mismatched reorder payload (one id missing) is a domain error.
         bad = await c.post(
-            f"/tasks/{tid}/checklist/reorder",
+            f"/tasks/{tid}/checklist:reorder",
             headers=h,
             json={"ids": [eggs_id, bread_id]},
         )
@@ -155,7 +155,7 @@ async def test_checklist_crud_and_concurrency() -> None:
             headers=h,
             json={"expected_version": bread["version"], "done": True},
         )
-        cd = await c.post(f"/tasks/{tid}/checklist/clear-done", headers=h)
+        cd = await c.post(f"/tasks/{tid}/checklist:clear_done", headers=h)
         assert cd.status_code == 200
         assert cd.json()["removed"] == 1
         remaining = (await c.get(f"/tasks/{tid}/checklist", headers=h)).json()

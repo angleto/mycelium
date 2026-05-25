@@ -1077,7 +1077,7 @@ export interface paths {
         patch: operations["update_checklist_item_tasks__task_id__checklist__item_id__patch"];
         trace?: never;
     };
-    "/tasks/{task_id}/checklist/clear-done": {
+    "/tasks/{task_id}/checklist:clear_done": {
         parameters: {
             query?: never;
             header?: never;
@@ -1094,7 +1094,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/tasks/{task_id}/checklist/reorder": {
+    "/tasks/{task_id}/checklist:reorder": {
         parameters: {
             query?: never;
             header?: never;

@@ -179,7 +179,7 @@ export function ChecklistPanel({
       setBusy(true)
       setErr(null)
       const { data, error } = await api.POST(
-        '/tasks/{task_id}/checklist/reorder',
+        '/tasks/{task_id}/checklist:reorder',
         {
           params: { header: workspaceHeader(), path: { task_id: taskId } },
           body: { ids: reordered.map((it) => it.id) },
@@ -202,7 +202,7 @@ export function ChecklistPanel({
     setBusy(true)
     setErr(null)
     const { data, error } = await api.POST(
-      '/tasks/{task_id}/checklist/clear-done',
+      '/tasks/{task_id}/checklist:clear_done',
       {
         params: { header: workspaceHeader(), path: { task_id: taskId } },
       },

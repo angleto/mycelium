@@ -3887,7 +3887,7 @@ async def remove_item(
 
 
 @mcp.tool()
-async def clear_done_items(
+async def clear_done(
     token: str,
     org_id: str,
     task_id: str,
