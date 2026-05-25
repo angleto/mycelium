@@ -118,10 +118,14 @@ export function EventsRoute() {
       body: {
         title: evTitle,
         // executor_kind/necessity have backend defaults but are written
-        // here for the discriminator. importance/urgency/priority are
-        // backend-only (Low/Low default, priority derived).
+        // here for the discriminator. importance/urgency mirror the
+        // backend's Low/Low default (4/4 -> priority 16); openapi-ts
+        // emits them as required because they have a default-without-
+        // null, so we have to spell them out client-side.
         executor_kind: 'human',
         necessity: 'should',
+        importance: 4,
+        urgency: 4,
         start_at: start.toISOString(),
         duration_minutes: minutes,
       },

@@ -375,12 +375,15 @@ export function TasksRoute() {
       params: { header: workspaceHeader() },
       body: {
         title,
-        // Quick-add intentionally omits importance/urgency: the backend
-        // defaults to Low/Low (4/4 -> derived priority 16) and that is
-        // the single source of truth for the default. ``priority`` is
-        // a calculated field and is never an input.
+        // Backend defaults importance/urgency to Low/Low (4/4 ->
+        // derived priority 16); openapi-typescript emits them as
+        // required (default-without-null), so we spell out the
+        // defaults explicitly. ``priority`` is a calculated field
+        // and is never an input.
         executor_kind: 'human',
         necessity: 'should',
+        importance: 4,
+        urgency: 4,
         // Always emit the client tag (a task is never client-less; the
         // default Personal is pre-selected when nothing is chosen) and
         // the project tag when one is picked. The backend resolves the
