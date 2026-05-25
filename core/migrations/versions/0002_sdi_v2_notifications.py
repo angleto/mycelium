@@ -260,8 +260,27 @@ def upgrade() -> None:
         "committente_verdict IN ('" + "','".join(_VERDICT_VALUES) + "')",
     )
 
+    # --- SECURITY DEFINER resolver for receiver-cycle notifications -----------
+    # The transmitter cycle has ``sdi_resolve_invoice_org``; receiver-cycle
+    # notifications (MT/SE/DT-receiver-side) arrive on the same endpoint and
+    # need a cross-org lookup keyed on the IdentificativoSdI of an invoice
+    # *we received*, not one we transmitted.
+    op.execute("""
+        CREATE FUNCTION public.sdi_resolve_received_invoice_org(p_identificativo text)
+        RETURNS uuid
+        LANGUAGE sql STABLE SECURITY DEFINER
+        SET search_path TO 'public', 'pg_temp'
+        AS $$
+            SELECT org_id FROM received_invoices
+            WHERE identificativo_sdi = p_identificativo
+            LIMIT 1
+        $$
+    """)
+    op.execute("GRANT EXECUTE ON FUNCTION sdi_resolve_received_invoice_org(text) TO flow_app")
+
 
 def downgrade() -> None:
+    op.execute("DROP FUNCTION IF EXISTS sdi_resolve_received_invoice_org(text)")
     # Constraint names below are the *suffix* the naming convention
     # ``ck_%(table_name)s_%(constraint_name)s`` interpolates into; alembic
     # rebuilds the full name on drop_constraint.

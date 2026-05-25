@@ -28,7 +28,12 @@ import lxml.etree as ET
 from fastapi import FastAPI, Request, Response
 
 from flow_core.services.sdi_inbound import ingest_notification
-from flow_core.services.sdi_passive import ingest_passive_invoice, is_passive_delivery
+from flow_core.services.sdi_passive import (
+    ingest_passive_invoice,
+    ingest_receiver_notification,
+    is_passive_delivery,
+    is_receiver_notification,
+)
 
 
 def create_app() -> FastAPI:
@@ -44,7 +49,11 @@ def create_app() -> FastAPI:
         try:
             if is_passive_delivery(raw):
                 await ingest_passive_invoice(raw)
+            elif is_receiver_notification(raw):
+                # MT / SE: notifications on an invoice WE received.
+                await ingest_receiver_notification(raw)
             else:
+                # Active-cycle: RC/MC/NS/AT/NE/DT (DT transmitter-side).
                 await ingest_notification(raw)
         except (ValueError, ET.XMLSyntaxError):
             # Unrecognized / not-well-formed payload: 400 so SdI / logs

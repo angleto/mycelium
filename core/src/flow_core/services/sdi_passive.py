@@ -33,6 +33,7 @@ from sqlalchemy import text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from flow_core.db import admin_session, tenant_session
+from flow_core.models.sdi_notification import ReceivedInvoiceNotification
 from flow_core.models.sdi_received import ReceivedInvoice
 
 # Nil UUID used as the actor_id for tenant_session: the passive inbound is a
@@ -224,23 +225,128 @@ async def ingest_passive_invoice(raw: bytes) -> ReceivedInvoice | None:
 
 
 def is_passive_delivery(raw: bytes) -> bool:
-    """Quick router predicate: True iff the payload looks like a SdI
-    RiceviFatture wrapper (SOAP envelope or fileSdI carrying a NomeFile
-    that points to a FatturaElettronica). Cheap; the deep parse happens
-    in ingest_passive_invoice. False for active-cycle notification roots
-    (RicevutaConsegna / NotificaScarto / ...). Returns False also on a
-    malformed payload (the caller dispatches it through the active
-    parser, which will raise ValueError -> 400 from the app)."""
+    """Quick router predicate: True iff the payload is a passive
+    FatturaElettronica delivery -- either a bare ``FatturaElettronica`` root
+    or a SdI ``RiceviFatture`` SOAP wrapper whose base64 ``File`` decodes to
+    one. False for *every* notification root (RC/MC/NS/AT/NE/DT/MT/SE/EC);
+    they all carry a ``NomeFile`` too, so a structural test on its presence
+    alone is not enough. Returns False on a malformed payload (the caller
+    dispatches it through the active parser, which surfaces it as 400)."""
     try:
         root = ET.fromstring(raw)
     except ET.XMLSyntaxError:
         return False
-    rootname = ET.QName(root).localname
-    # A FatturaElettronica posted unwrapped: also passive.
-    if rootname == "FatturaElettronica":
+    if ET.QName(root).localname == "FatturaElettronica":
         return True
-    # SOAP wrapper carrying base64 File + NomeFile = passive RiceviFatture.
-    # Active notifications also use File-base64 wrappers, but they do NOT
-    # carry NomeFile -- that field is unique to the passive delivery shape.
-    nome = _find_local(root, "NomeFile")
-    return nome is not None
+    # SOAP wrapper case: the inner File must base64-decode to a
+    # FatturaElettronica. Notifications never embed a fattura.
+    file_el = _find_local(root, "File")
+    if file_el is None or not file_el.text:
+        return False
+    try:
+        inner = base64.b64decode(file_el.text)
+        inner_root = ET.fromstring(inner)
+    except (ValueError, TypeError, ET.XMLSyntaxError):
+        return False
+    return ET.QName(inner_root).localname == "FatturaElettronica"
+
+
+def is_receiver_notification(raw: bytes) -> bool:
+    """True iff the payload is a receiver-cycle notification root our
+    receiver pipeline handles directly (MT / SE). DT lives on this cycle too
+    but is dual-direction: the active dispatcher tries Invoice first, then
+    falls back to ReceivedInvoice, so DT routes through the active path."""
+    try:
+        root = ET.fromstring(raw)
+    except ET.XMLSyntaxError:
+        return False
+    return ET.QName(root).localname in {"MetadatiInvioFile", "ScartoEsitoCommittente"}
+
+
+# Receiver-cycle notification root -> kind code stored on
+# received_invoice_notifications. Mirrors _ROOT_OUTCOME in sdi_inbound for
+# the active cycle.
+_RECEIVER_ROOT_KIND: dict[str, str] = {
+    "MetadatiInvioFile": "MT",
+    "ScartoEsitoCommittente": "SE",
+}
+
+
+async def _resolve_received_invoice_org(identificativo: str) -> uuid.UUID | None:
+    """Resolve org_id for a received_invoice by IdentificativoSdI. Uses the
+    SECURITY DEFINER ``sdi_resolve_received_invoice_org`` (migration 0002),
+    same owner-bypass pattern as the transmitter resolver."""
+    async with admin_session() as s:
+        val = (
+            await s.execute(
+                text("SELECT sdi_resolve_received_invoice_org(:ident)"),
+                {"ident": identificativo},
+            )
+        ).scalar()
+    if val is None:
+        return None
+    return uuid.UUID(str(val))
+
+
+async def ingest_receiver_notification(raw: bytes) -> ReceivedInvoice | None:
+    """Apply an MT or SE notification: write the audit row on
+    ``received_invoice_notifications`` and (for SE) record that the
+    committente outcome we sent was rejected by SdI. Returns the received
+    invoice, or None if no match (SdI may retry; never 500).
+
+    Validation gates entry, namespace-agnostic parse extracts the fields, the
+    SECURITY DEFINER resolver finds the right org, and the audit insert is
+    idempotent on the dedupe unique index for SdI retries."""
+    # Local imports to keep the validator dependency lazy and avoid cycles.
+    from sqlalchemy.exc import IntegrityError
+    from sqlalchemy.future import select
+
+    from flow_core.services.sdi_notification_xsd import validate_sdi_notification
+
+    errors = validate_sdi_notification(raw)
+    if errors:
+        raise ValueError(
+            "SdI receiver notification fails XSD MessaggiTypes_v1.1: " + "; ".join(errors[:3])
+        )
+    root = ET.fromstring(raw)
+    localname = ET.QName(root).localname
+    if localname not in _RECEIVER_ROOT_KIND:
+        raise ValueError(f"not a receiver-cycle notification: {localname!r}")
+    ident = _find_local_text(root, "IdentificativoSdI")
+    if not ident:
+        raise ValueError("receiver notification has empty IdentificativoSdI")
+    kind = _RECEIVER_ROOT_KIND[localname]
+    nome_file = _find_local_text(root, "NomeFile")
+    message_id = _find_local_text(root, "MessageId")
+
+    org_id = await _resolve_received_invoice_org(ident)
+    if org_id is None:
+        return None
+
+    async with tenant_session(str(org_id), _SYSTEM_USER) as s:
+        ri = (
+            await s.execute(
+                select(ReceivedInvoice).where(ReceivedInvoice.identificativo_sdi == ident)
+            )
+        ).scalar_one_or_none()
+        if ri is None:
+            # Resolver said this org has it, but RLS hid it -- shouldn't
+            # happen, but treat as a no-op so SdI doesn't retry indefinitely.
+            return None
+        notif = ReceivedInvoiceNotification(
+            org_id=org_id,
+            received_invoice_id=ri.id,
+            kind=kind,
+            direction="in",
+            nome_file=nome_file,
+            message_id=message_id,
+            raw_xml=raw,
+            payload={"outcome": kind},
+        )
+        s.add(notif)
+        try:
+            await s.flush()
+        except IntegrityError:
+            # Duplicate (same kind + message_id): SdI retry, swallow.
+            await s.rollback()
+        return ri

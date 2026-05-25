@@ -19,10 +19,13 @@ from flow_core.db import admin_session, tenant_session
 from flow_core.models.sdi_received import ReceivedInvoice
 from flow_core.services import invoice as inv
 from flow_core.services.auth import signup
+from flow_core.services.sdi_notification_xsd import NS_MESSAGGI
 from flow_core.services.sdi_passive import (
     PassiveDelivery,
     ingest_passive_invoice,
+    ingest_receiver_notification,
     is_passive_delivery,
+    is_receiver_notification,
     parse_fattura_header,
     unwrap_passive_delivery,
 )
@@ -207,3 +210,119 @@ async def test_ingest_passive_invoice_orphan_returns_none() -> None:
         nome="IT09876543210_ZZZ.xml",
     )
     assert await ingest_passive_invoice(raw) is None
+
+
+# --- receiver-cycle notifications (MT / SE) -----------------------------------
+
+
+def _mt(ident: str, *, message_id: str = "MID00MT1") -> bytes:
+    return (
+        f'<m:MetadatiInvioFile xmlns:m="{NS_MESSAGGI}" versione="1.0">'
+        f"<IdentificativoSdI>{ident}</IdentificativoSdI>"
+        f"<NomeFile>IT09876543210_00001.xml</NomeFile>"
+        f"<CodiceDestinatario>ABCDEFG</CodiceDestinatario>"
+        f"<Formato>FPR12</Formato>"
+        f"<TentativiInvio>1</TentativiInvio>"
+        f"<MessageId>{message_id}</MessageId>"
+        f"</m:MetadatiInvioFile>"
+    ).encode()
+
+
+def _se(ident: str, *, message_id: str = "MID00SE1") -> bytes:
+    return (
+        f'<m:ScartoEsitoCommittente xmlns:m="{NS_MESSAGGI}" versione="1.0">'
+        f"<IdentificativoSdI>{ident}</IdentificativoSdI>"
+        f"<Scarto>EN00</Scarto>"
+        f"<MessageId>{message_id}</MessageId>"
+        f"</m:ScartoEsitoCommittente>"
+    ).encode()
+
+
+def test_router_classifies_receiver_notifications() -> None:
+    # MT / SE must take the receiver path, not the passive (FatturaElettronica)
+    # one. is_passive_delivery has historically false-positived on anything
+    # carrying a NomeFile; that bug is fixed and explicitly guarded here.
+    assert is_passive_delivery(_mt("100000000001")) is False
+    assert is_passive_delivery(_se("100000000002")) is False
+    assert is_receiver_notification(_mt("100000000001")) is True
+    assert is_receiver_notification(_se("100000000002")) is True
+
+
+def test_router_does_not_misclassify_active_notification_with_nomefile() -> None:
+    # Regression: a real RC has NomeFile; it must not route to the passive
+    # path just because that element is present.
+    rc = (
+        f'<m:RicevutaConsegna xmlns:m="{NS_MESSAGGI}" versione="1.0">'
+        f"<IdentificativoSdI>100000000001</IdentificativoSdI>"
+        f"<NomeFile>x.xml</NomeFile>"
+        f"<DataOraRicezione>2026-05-25T10:00:00</DataOraRicezione>"
+        f"<DataOraConsegna>2026-05-25T10:01:00</DataOraConsegna>"
+        f"<Destinatario><Codice>ABCDEFG</Codice><Descrizione>A</Descrizione></Destinatario>"
+        f"<MessageId>M</MessageId>"
+        f"</m:RicevutaConsegna>"
+    ).encode()
+    assert is_passive_delivery(rc) is False
+    assert is_receiver_notification(rc) is False
+
+
+async def test_ingest_receiver_notification_appends_audit_row(
+    _seeded_recipient: None,
+) -> None:
+    # Spin up an issuer + received_invoices row, then feed a MT/SE notification
+    # carrying the same IdentificativoSdI; both write a row on
+    # received_invoice_notifications, dedup-unique on (kind, message_id).
+    org, user = await _org()
+    codice = uuid.uuid4().hex[:7].upper()
+    async with tenant_session(str(org), str(user)) as s:
+        issuer = await inv.create_issuer_profile(
+            s,
+            org_id=org,
+            actor_id=user,
+            label="R",
+            denominazione="Recipient SRL",
+            piva="13438810015",
+            indirizzo="Via Test 1",
+            cap="10100",
+            comune="Torino",
+            is_default=True,
+        )
+        issuer.codice_destinatario_ricezione = codice
+        await s.flush()
+
+    # The receiver-cycle XSD restricts IdentificativoSdI to xsd:integer
+    # (<=12 digits); pick a numeric id for the delivery so the MT/SE that
+    # follow can refer to the same row through schema-valid notifications.
+    ident = str(int(uuid.uuid4().hex[:9], 16) % 10**12)
+    delivery = _wrap_riceve_fatture(
+        _fattura_xml(codice),
+        ident=ident,
+        nome=f"IT09876543210_{uuid.uuid4().hex[:5].upper()}.xml",
+    )
+    ri = await ingest_passive_invoice(delivery)
+    assert ri is not None
+
+    # MT and SE on the same received invoice.
+    mt_result = await ingest_receiver_notification(_mt(ident))
+    assert mt_result is not None and mt_result.id == ri.id
+    se_result = await ingest_receiver_notification(_se(ident))
+    assert se_result is not None and se_result.id == ri.id
+
+    # SdI retry of MT with the same MessageId is a no-op (dedupe index).
+    await ingest_receiver_notification(_mt(ident))
+
+    async with tenant_session(str(org), str(user)) as s:
+        from sqlalchemy import select
+
+        from flow_core.models.sdi_notification import ReceivedInvoiceNotification
+
+        stmt = select(ReceivedInvoiceNotification.kind).order_by(
+            ReceivedInvoiceNotification.received_at
+        )
+        kinds = (await s.execute(stmt)).scalars().all()
+    assert kinds == ["MT", "SE"]
+
+
+async def test_ingest_receiver_notification_orphan_returns_none() -> None:
+    # No received_invoices row matches this IdentificativoSdI -> 200 + None,
+    # so SdI does not flood the retry queue.
+    assert await ingest_receiver_notification(_mt("999999999999")) is None
