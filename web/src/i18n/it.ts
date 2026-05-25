@@ -553,6 +553,8 @@ export const it: Catalog = {
     remAtDue: 'Alla scadenza',
     remBefore: '{{v}} prima',
     remAdd: 'Aggiungi promemoria',
+    remCustom: 'Personalizzato…',
+    remCustomPh: 'min',
     scope: {
       label: 'Quando',
       all: 'Tutti',

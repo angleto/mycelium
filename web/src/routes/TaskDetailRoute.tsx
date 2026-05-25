@@ -61,6 +61,7 @@ export function TaskDetailRoute() {
     components['schemas']['ReminderOut'][]
   >([])
   const [remOff, setRemOff] = useState('1440')
+  const [remCustom, setRemCustom] = useState(false)
   const [deps, setDeps] = useState<Dep[]>([])
   const [depOther, setDepOther] = useState('')
   const [depQuery, setDepQuery] = useState('')
@@ -914,16 +915,38 @@ export function TaskDetailRoute() {
           </div>
           <div className="row">
             <select
-              value={remOff}
-              onChange={(e) => setRemOff(e.target.value)}
+              value={remCustom ? 'custom' : remOff}
+              onChange={(e) => {
+                const v = e.target.value
+                if (v === 'custom') {
+                  setRemCustom(true)
+                } else {
+                  setRemCustom(false)
+                  setRemOff(v)
+                }
+              }}
             >
               <option value="0">{t('tasks.remAtDue')}</option>
+              <option value="5">{t('tasks.remBefore', { v: '5m' })}</option>
+              <option value="10">{t('tasks.remBefore', { v: '10m' })}</option>
+              <option value="30">{t('tasks.remBefore', { v: '30m' })}</option>
               <option value="60">{t('tasks.remBefore', { v: '1h' })}</option>
               <option value="240">{t('tasks.remBefore', { v: '4h' })}</option>
               <option value="1440">{t('tasks.remBefore', { v: '1d' })}</option>
               <option value="2880">{t('tasks.remBefore', { v: '2d' })}</option>
               <option value="10080">{t('tasks.remBefore', { v: '1w' })}</option>
+              <option value="custom">{t('tasks.remCustom')}</option>
             </select>
+            {remCustom && (
+              <input
+                type="number"
+                min={1}
+                step={1}
+                placeholder={t('tasks.remCustomPh')}
+                value={remOff}
+                onChange={(e) => setRemOff(e.target.value)}
+              />
+            )}
             <button
               type="button"
               className="btn--sm"

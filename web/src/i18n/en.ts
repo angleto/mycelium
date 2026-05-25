@@ -552,6 +552,8 @@ export const en = {
     remAtDue: 'At due',
     remBefore: '{{v}} before',
     remAdd: 'Add reminder',
+    remCustom: 'Custom…',
+    remCustomPh: 'min',
     // Scope filter + date focus (TasksRoute toolbar). The scope narrows
     // by date window; date focus shows only tasks that carry a date.
     scope: {
