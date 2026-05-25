@@ -38,17 +38,23 @@ system exactly like the web UI.
 - **Notes → tasks.** Every note belongs to a client (default
   "Personal"); convert a note to a task or spin a task off a text
   selection, inheriting tags.
+- **Tasks with structure.** Per-task checklist (indexed in search),
+  Eisenhower importance/urgency as mandatory axes with priority
+  derived from them, MoSCoW necessity (must / should / could / wont).
 - **Time &amp; billing on the client.** Hourly rate and billable default
   live on the client; every task resolves to a project and a client.
 - **Clients &amp; projects, workflows, invoicing**, tag scoping, a
   dependency graph, scheduler, email-to-task, notifications.
+- **Italian e-invoicing, both ways.** Outbound (active) cycle to SDI
+  and an inbound (passive) router that ingests received invoices.
 - **MCP server** (100+ tools) mirroring the API for agent control.
 - **Keyboard-first CLI + Neovim plugin.** `brew install
   angleto/tap/flow-cli` for the terminal client (`flow today`, `flow
   task add`, `flow timer start`, `flow note voice`, …) and
   [`nvim/flow.nvim`](nvim/flow.nvim/README.md) for the in-editor
   surface. Both shell out to the same REST API; see
-  [`docs/cli.md`](docs/cli.md).
+  [`docs/cli.md`](docs/cli.md). CLI and nvim plugin track Flow tags
+  one-for-one (currently `v2.0.x`).
 - **Tested.** Backend pytest + a Playwright end-to-end suite.
 
 ## Stack
@@ -82,6 +88,18 @@ account): `cd web && pnpm e2e`.
 
 Architecture, domain model, decisions and ADRs live in
 [`docs/`](docs/README.md).
+
+## Versioning
+
+The active development line is **`v2.0`** (also the default branch).
+Compared to the v1.x line, v2.0 collapses 104 incremental Alembic
+revisions into a single baseline (see
+[`docs/migrations.md`](docs/migrations.md)): new installs run one
+migration instead of the full historical chain. The v1.2 user-facing
+changelog is preserved at
+[`docs/release-notes-v1.2.md`](docs/release-notes-v1.2.md) for
+historical reference; v1.x branches and tags have been retired from
+the remote.
 
 ## License
 
