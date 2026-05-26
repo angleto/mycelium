@@ -12,6 +12,7 @@ from sqlalchemy import select
 from flow_api.deps import TenantCtx, tenant_ctx
 from flow_api.routers.attachments import att_out, read_capped, upload_file_field
 from flow_api.schemas import (
+    AppendOut,
     AssigneeIn,
     AttachmentOut,
     CommentCreateIn,
@@ -38,6 +39,7 @@ from flow_api.schemas import (
     TaskChecklistItemPatchIn,
     TaskChecklistReorderIn,
     TaskCreateIn,
+    TaskDescriptionAppendIn,
     TaskNoteCreateIn,
     TaskNoteLinkIn,
     TaskNoteLinksOut,
@@ -498,6 +500,31 @@ async def patch_task(
         created_by_label=cl,
         checklist=items_map.get(task.id, []),
     )
+
+
+@router.post("/{task_id}/description/append", response_model=AppendOut)
+async def append_description(
+    task_id: uuid.UUID,
+    body: TaskDescriptionAppendIn,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+) -> AppendOut:
+    """Task 4ac39ecf: context-blind append for ``task.description``
+    (mirror of /notes/{id}/append). Lets an MCP / LLM caller add a
+    paragraph -- a status note, a follow-up checklist, a finding --
+    without re-sending the existing body. ``expected_version`` is
+    optional; when omitted the helper appends onto whatever state the
+    row currently has."""
+    new_version, appended = await svc.append_to_description(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        task_id=task_id,
+        text=body.text,
+        separator=body.separator,
+        expected_version=body.expected_version,
+        dedupe_if_tail_matches=body.dedupe_if_tail_matches,
+    )
+    return AppendOut(id=task_id, version=new_version, appended_chars=appended)
 
 
 @router.post("/{task_id}/state", response_model=VersionOut)

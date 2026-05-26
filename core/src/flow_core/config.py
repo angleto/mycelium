@@ -63,6 +63,13 @@ class Settings(BaseSettings):
     # before the bytes are persisted. Override via FLOW_ATTACHMENT_MAX_BYTES.
     attachment_max_bytes: int = 10 * 1024 * 1024
 
+    # Cap on the post-append byte size of note.transcript / note.summary /
+    # task.description (task 4ac39ecf). The append helpers refuse a
+    # write whose resulting body would exceed this. Override via
+    # FLOW_NOTE_BODY_MAX_BYTES (legacy update_note / SPA editors are
+    # NOT gated by this -- they replace, not extend).
+    note_body_max_bytes: int = 1 * 1024 * 1024
+
     # Pluggable attachment storage backend (mirrors the LLM/embedder
     # seam). "pg" (default) keeps today's behaviour exactly: bytes live
     # in the attachments.data BYTEA column, atomic with the row, no

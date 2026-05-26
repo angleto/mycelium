@@ -554,6 +554,75 @@ async def update_task(
     return new_version
 
 
+async def append_to_description(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    task_id: uuid.UUID,
+    text: str,
+    separator: str = "\n\n",
+    expected_version: int | None = None,
+    dedupe_if_tail_matches: bool = False,
+    channel: str = "api",
+) -> tuple[int, int]:
+    """Append ``text`` to ``task.description`` without reading the body
+    first (task 4ac39ecf). Mirror of ``notes.append_to_note_field``;
+    returns ``(new_version, appended_chars)``.
+
+    ``expected_version=None`` -> use the just-loaded version (append on
+    current state; concurrent writers surface as stale_version).
+    ``dedupe_if_tail_matches=True`` -> no-op when the body already ends
+    with ``text``. ``BODY_LIMIT_EXCEEDED`` when the resulting body
+    would exceed ``settings.note_body_max_bytes`` (the same cap as
+    notes; description is the symmetric long-form field).
+    """
+    from flow_core.config import get_settings as _get_settings
+
+    from flow_core.services.notes import _collapsed_concat as _concat
+
+    task = await get_task(session, org_id=org_id, task_id=task_id)
+    current = task.description or ""
+    if dedupe_if_tail_matches and current and current.rstrip().endswith(text.rstrip()):
+        return task.version, 0
+    new_value = _concat(current, separator, text)
+    max_bytes = _get_settings().note_body_max_bytes
+    if len(new_value.encode("utf-8")) > max_bytes:
+        raise DomainError(MessageCode.BODY_LIMIT_EXCEEDED, max_bytes=str(max_bytes))
+    eff_version = expected_version if expected_version is not None else task.version
+    values: dict[str, Any] = {"description": new_value}
+    new_version = await optimistic_update(
+        session,
+        Task,
+        pk=task_id,
+        expected_version=eff_version,
+        values=values,
+    )
+    _task_search.mark_task_dirty(session, task_id)
+    await audit.log(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        entity="task",
+        entity_id=task_id,
+        action="description.append",
+        diff={"description_appended_chars": str(len(text))},
+    )
+    await _log_task_revision(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        task_id=task_id,
+        version_from=eff_version,
+        version_to=new_version,
+        changed_fields=["description"],
+        channel=channel,
+        edit_session_id=None,
+        restored_from=None,
+    )
+    return new_version, len(text)
+
+
 def _coerce_task_restore_values(payload: dict[str, Any]) -> dict[str, Any]:
     """JSON snapshot values come back as strings (Decimal, date,
     datetime, UUID) per ``_json_safe`` in entity_revisions; coerce

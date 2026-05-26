@@ -31,6 +31,7 @@ from flow_core.ai_providers import (
     get_stt,
     get_tts,
 )
+from flow_core.config import get_settings
 from flow_core.errors import DomainError, NotFoundError
 from flow_core.i18n import MessageCode
 from flow_core.models.billing import CostBasis
@@ -451,6 +452,97 @@ async def update_note(
                 task_id=new_task_id,
             )
     return new_version
+
+
+# --- Context-blind append (task 4ac39ecf) -----------------------------------
+# Domain-semantic edit primitive for MCP / LLM callers that want to add a
+# paragraph without first reading the whole body. Distinct from
+# ``update_note`` (full-field replace, used by the Tiptap autosave).
+
+
+_APPEND_TARGETS_NOTE: frozenset[str] = frozenset({"summary", "transcript"})
+
+
+def _collapsed_concat(current: str | None, separator: str, text: str) -> str:
+    """Join ``current + separator + text`` with two collapses: an empty
+    current swallows the separator; a current that already ends with the
+    separator (modulo trailing whitespace) doesn't get a second copy.
+    This keeps appended paragraphs aligned with the existing block
+    structure without introducing accidental gaps."""
+    base = current or ""
+    if not base:
+        return text
+    if base.endswith(separator):
+        return base + text
+    if separator and base.rstrip(" \t\n\r").endswith(separator.rstrip(" \t\n\r")):
+        # The current body ends with the structural part of the separator
+        # but has trailing whitespace; fall through to a single newline
+        # join so we don't double-up the blank line.
+        return base.rstrip() + "\n\n" + text if separator == "\n\n" else base + text
+    return base + separator + text
+
+
+async def append_to_note_field(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    note_id: uuid.UUID,
+    target: str,
+    text: str,
+    separator: str = "\n\n",
+    expected_version: int | None = None,
+    dedupe_if_tail_matches: bool = False,
+    channel: str = "api",
+) -> tuple[int, int]:
+    """Append ``text`` to ``note.transcript`` or ``note.summary`` without
+    reading the body first.
+
+    Returns ``(new_version, appended_chars)``. Idempotency contract:
+    when ``dedupe_if_tail_matches=True`` and the body already ends with
+    ``text`` (ignoring trailing whitespace), the write is skipped and
+    the function returns ``(current_version, 0)`` -- safe for MCP
+    retries.
+
+    Concurrency: ``expected_version=None`` means "append onto whatever
+    state the row currently has"; the helper loads the version and
+    submits the optimistic update with it (a concurrent writer wins by
+    bumping version first, here we surface ``stale_version`` rather
+    than silently overwriting -- caller can retry on the new state).
+    Pass an explicit ``expected_version`` to assert the caller has a
+    coherent view of the row.
+    """
+    if target not in _APPEND_TARGETS_NOTE:
+        raise DomainError(MessageCode.DOMAIN_ERROR)
+    note = await get_note(session, org_id=org_id, note_id=note_id)
+    current: str | None = getattr(note, target)
+    if dedupe_if_tail_matches and current and current.rstrip().endswith(text.rstrip()):
+        return note.version, 0
+    new_value = _collapsed_concat(current, separator, text)
+    max_bytes = get_settings().note_body_max_bytes
+    if len(new_value.encode("utf-8")) > max_bytes:
+        raise DomainError(MessageCode.BODY_LIMIT_EXCEEDED, max_bytes=str(max_bytes))
+    eff_version = expected_version if expected_version is not None else note.version
+    values: dict[str, Any] = {target: new_value}
+    # Re-derive the title from the head of the body when the note has
+    # no explicit one yet (same behaviour as update_note's blank-title
+    # path), so the first paragraph appended to an empty transcript
+    # gives the note a visible name.
+    if target == "transcript" and not (note.title and note.title.strip()):
+        derived = _derive_title(new_value)
+        if derived:
+            values["title"] = derived
+    new_version = await _note_set(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        note_id=note_id,
+        expected_version=eff_version,
+        values=values,
+        action="append",
+        channel=channel,
+    )
+    return new_version, len(text)
 
 
 async def archive_note(

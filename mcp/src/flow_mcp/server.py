@@ -711,6 +711,47 @@ async def get_task(token: str, org_id: str, task_id: str) -> dict[str, Any]:
 
 
 @mcp.tool()
+async def append_to_task_description(
+    token: str,
+    org_id: str,
+    task_id: str,
+    text: str,
+    separator: str = "\n\n",
+    expected_version: int | None = None,
+    dedupe_if_tail_matches: bool = False,
+) -> dict[str, Any]:
+    """Append ``text`` to ``task.description`` without first reading the
+    body (task 4ac39ecf). Mirror of ``append_to_note`` scoped to the
+    task description: an LLM can add a status note / a finding without
+    round-tripping the existing description through its context.
+
+    ``expected_version=None`` (default) appends onto whatever state the
+    row currently has. ``dedupe_if_tail_matches=True`` makes the call
+    a no-op when the body already ends with ``text``.
+
+    Returns ``{task_id, version, appended_chars}``; appended_chars=0
+    on dedupe. Refuses with ``body.limit_exceeded`` past
+    ``FLOW_NOTE_BODY_MAX_BYTES`` (default 1 MiB)."""
+    async with _tenant(token, org_id) as (s, org, user):
+        new_version, appended = await tasks.append_to_description(
+            s,
+            org_id=org,
+            actor_id=user,
+            task_id=uuid.UUID(task_id),
+            text=text,
+            separator=separator,
+            expected_version=expected_version,
+            dedupe_if_tail_matches=dedupe_if_tail_matches,
+            channel="mcp",
+        )
+        return {
+            "task_id": task_id,
+            "version": new_version,
+            "appended_chars": appended,
+        }
+
+
+@mcp.tool()
 async def update_task(
     token: str,
     org_id: str,
@@ -2947,6 +2988,52 @@ async def create_task_note(
         tagmap = await notes_svc.tags_by_note(s, note_ids=[n.id])
         pid = await note_links_svc.primary_task_id_for_note(s, org_id=org, note_id=n.id)
         return _note(n, tagmap.get(n.id, []), primary_task_id=pid)
+
+
+@mcp.tool()
+async def append_to_note(
+    token: str,
+    org_id: str,
+    note_id: str,
+    text: str,
+    target: str = "summary",
+    separator: str = "\n\n",
+    expected_version: int | None = None,
+    dedupe_if_tail_matches: bool = False,
+) -> dict[str, Any]:
+    """Append ``text`` to ``note.summary`` (default) or ``note.transcript``
+    without first reading the note body. Context-blind primitive: a
+    long note can grow by a paragraph without round-tripping the
+    existing content through the LLM context (task 4ac39ecf).
+
+    ``expected_version`` defaults to None (append onto whatever state
+    the row currently has -- natural for log-style writers); pass a
+    specific version to assert a coherent view (returns stale_version
+    on mismatch). ``dedupe_if_tail_matches=True`` makes the call a
+    no-op when the body already ends with ``text`` (safe to retry).
+
+    Returns ``{note_id, version, appended_chars}`` (appended_chars=0
+    on dedupe). Refuses with ``body.limit_exceeded`` when the resulting
+    body would exceed ``FLOW_NOTE_BODY_MAX_BYTES`` (default 1 MiB).
+    """
+    async with _tenant(token, org_id) as (s, org, user):
+        new_version, appended = await notes_svc.append_to_note_field(
+            s,
+            org_id=org,
+            actor_id=user,
+            note_id=uuid.UUID(note_id),
+            target=target,
+            text=text,
+            separator=separator,
+            expected_version=expected_version,
+            dedupe_if_tail_matches=dedupe_if_tail_matches,
+            channel="mcp",
+        )
+        return {
+            "note_id": note_id,
+            "version": new_version,
+            "appended_chars": appended,
+        }
 
 
 @mcp.tool()

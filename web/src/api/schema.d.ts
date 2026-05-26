@@ -705,6 +705,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/tasks/{task_id}/description/append": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Append Description
+         * @description Task 4ac39ecf: context-blind append for ``task.description``
+         *     (mirror of /notes/{id}/append). Lets an MCP / LLM caller add a
+         *     paragraph -- a status note, a follow-up checklist, a finding --
+         *     without re-sending the existing body. ``expected_version`` is
+         *     optional; when omitted the helper appends onto whatever state the
+         *     row currently has.
+         */
+        post: operations["append_description_tasks__task_id__description_append_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/tasks/{task_id}/state": {
         parameters: {
             query?: never;
@@ -2989,6 +3014,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/notes/{note_id}/append": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Append Note
+         * @description Task 4ac39ecf: context-blind append for ``note.summary`` /
+         *     ``note.transcript``. The caller never has to read the body first
+         *     (saves context for MCP / LLM tools). When ``expected_version`` is
+         *     omitted, the helper appends onto whatever state the row currently
+         *     has -- safe for log-style writers.
+         */
+        post: operations["append_note_notes__note_id__append_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/notes/{note_id}/delete": {
         parameters: {
             query?: never;
@@ -4248,6 +4297,22 @@ export interface components {
             content: string;
             /** Operation Id */
             operation_id: string;
+        };
+        /**
+         * AppendOut
+         * @description Response for the append endpoints. ``appended_chars`` is 0 when
+         *     ``dedupe_if_tail_matches=True`` triggered a no-op.
+         */
+        AppendOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Version */
+            version: number;
+            /** Appended Chars */
+            appended_chars: number;
         };
         /** AssigneeIn */
         AssigneeIn: {
@@ -6124,6 +6189,32 @@ export interface components {
          * @enum {string}
          */
         Necessity: "must" | "should" | "could";
+        /**
+         * NoteAppendIn
+         * @description Body for POST /notes/{id}/append (task 4ac39ecf). Context-blind
+         *     edit: the caller does NOT need to have read the note body.
+         *     ``target`` picks the field to extend; ``expected_version`` is
+         *     optional (omit to append onto whatever state the row currently has
+         *     -- natural for log-style appenders).
+         */
+        NoteAppendIn: {
+            /** Target */
+            target: string;
+            /** Text */
+            text: string;
+            /**
+             * Separator
+             * @default
+             */
+            separator?: string;
+            /** Expected Version */
+            expected_version?: number | null;
+            /**
+             * Dedupe If Tail Matches
+             * @default false
+             */
+            dedupe_if_tail_matches?: boolean;
+        };
         /** NoteCreateIn */
         NoteCreateIn: {
             kind: components["schemas"]["NoteKind"];
@@ -7372,6 +7463,27 @@ export interface components {
             recurrence?: {
                 [key: string]: unknown;
             } | null;
+        };
+        /**
+         * TaskDescriptionAppendIn
+         * @description Body for POST /tasks/{id}/description/append (task 4ac39ecf).
+         *     Same semantics as NoteAppendIn, scoped to ``task.description``.
+         */
+        TaskDescriptionAppendIn: {
+            /** Text */
+            text: string;
+            /**
+             * Separator
+             * @default
+             */
+            separator?: string;
+            /** Expected Version */
+            expected_version?: number | null;
+            /**
+             * Dedupe If Tail Matches
+             * @default false
+             */
+            dedupe_if_tail_matches?: boolean;
         };
         /** TaskIdOut */
         TaskIdOut: {
@@ -9671,6 +9783,46 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["StateOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    append_description_tasks__task_id__description_append_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TaskDescriptionAppendIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AppendOut"];
                 };
             };
             /** @description Validation Error */
@@ -15547,6 +15699,46 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AttachmentOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    append_note_notes__note_id__append_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                note_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NoteAppendIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AppendOut"];
                 };
             };
             /** @description Validation Error */

@@ -1617,6 +1617,39 @@ class NoteTagIn(BaseModel):
     tag_id: uuid.UUID
 
 
+class NoteAppendIn(BaseModel):
+    """Body for POST /notes/{id}/append (task 4ac39ecf). Context-blind
+    edit: the caller does NOT need to have read the note body.
+    ``target`` picks the field to extend; ``expected_version`` is
+    optional (omit to append onto whatever state the row currently has
+    -- natural for log-style appenders)."""
+
+    target: str = Field(pattern="^(summary|transcript)$")
+    text: str = Field(min_length=1)
+    separator: str = Field(default="\n\n", max_length=16)
+    expected_version: int | None = None
+    dedupe_if_tail_matches: bool = False
+
+
+class TaskDescriptionAppendIn(BaseModel):
+    """Body for POST /tasks/{id}/description/append (task 4ac39ecf).
+    Same semantics as NoteAppendIn, scoped to ``task.description``."""
+
+    text: str = Field(min_length=1)
+    separator: str = Field(default="\n\n", max_length=16)
+    expected_version: int | None = None
+    dedupe_if_tail_matches: bool = False
+
+
+class AppendOut(BaseModel):
+    """Response for the append endpoints. ``appended_chars`` is 0 when
+    ``dedupe_if_tail_matches=True`` triggered a no-op."""
+
+    id: uuid.UUID
+    version: int
+    appended_chars: int
+
+
 class NoteOut(BaseModel):
     id: uuid.UUID
     project_id: uuid.UUID | None

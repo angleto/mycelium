@@ -86,6 +86,7 @@ class MessageCode(enum.StrEnum):
     REVISION_NOT_FOUND = "revision.not_found"
     ATTACHMENT_NOT_FOUND = "attachment.not_found"
     ATTACHMENT_TOO_LARGE = "attachment.too_large"
+    BODY_LIMIT_EXCEEDED = "body.limit_exceeded"
     INTENT_UNRECOGNIZED = "intent.unrecognized"
     INVOICE_NOT_FOUND = "invoice.not_found"
     INVOICE_NOT_DRAFT = "invoice.not_draft"
@@ -246,6 +247,9 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
         MessageCode.REVISION_NOT_FOUND: "Revision not found",
         MessageCode.ATTACHMENT_NOT_FOUND: "Attachment not found",
         MessageCode.ATTACHMENT_TOO_LARGE: "Attachment exceeds the maximum size",
+        MessageCode.BODY_LIMIT_EXCEEDED: (
+            "Append would exceed the maximum body size ({max_bytes} bytes)"
+        ),
         MessageCode.INTENT_UNRECOGNIZED: ("Command not recognized: {raw}"),
         MessageCode.INVOICE_NOT_FOUND: "Invoice not found",
         MessageCode.INVOICE_NOT_DRAFT: (

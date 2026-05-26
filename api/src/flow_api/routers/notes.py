@@ -17,6 +17,7 @@ from flow_api.deps import TenantCtx, tenant_ctx
 from flow_api.routers.attachments import att_out, read_capped, upload_file_field
 from flow_api.schemas import (
     AppendMessageIn,
+    AppendOut,
     AttachmentOut,
     CommandIn,
     ConversationStartIn,
@@ -29,6 +30,7 @@ from flow_api.schemas import (
     NoteEraseOut,
     NoteLinkIn,
     NoteLinkOut,
+    NoteAppendIn,
     NoteOut,
     NotePatchIn,
     NotePromoteIn,
@@ -334,6 +336,31 @@ async def update_note(
         **kwargs,
     )
     return VersionOut(id=note_id, version=v)
+
+
+@router.post("/{note_id}/append", response_model=AppendOut)
+async def append_note(
+    note_id: uuid.UUID,
+    body: NoteAppendIn,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+) -> AppendOut:
+    """Task 4ac39ecf: context-blind append for ``note.summary`` /
+    ``note.transcript``. The caller never has to read the body first
+    (saves context for MCP / LLM tools). When ``expected_version`` is
+    omitted, the helper appends onto whatever state the row currently
+    has -- safe for log-style writers."""
+    new_version, appended = await svc.append_to_note_field(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        note_id=note_id,
+        target=body.target,
+        text=body.text,
+        separator=body.separator,
+        expected_version=body.expected_version,
+        dedupe_if_tail_matches=body.dedupe_if_tail_matches,
+    )
+    return AppendOut(id=note_id, version=new_version, appended_chars=appended)
 
 
 @router.post("/{note_id}/delete", response_model=VersionOut)
