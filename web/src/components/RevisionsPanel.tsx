@@ -85,6 +85,55 @@ export function RevisionsPanel({
   // the task/note detail doesn't end with a long list pushing the
   // primary actions out of view.
   const [expanded, setExpanded] = useState(false)
+  // Inline editing of the summary label: only one row at a time. The
+  // draft holds keystrokes; blur (or Enter) saves via PATCH, Esc
+  // cancels. ``null`` means "no row in edit mode".
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [draft, setDraft] = useState('')
+
+  const saveSummary = useCallback(
+    async (rev: Revision, raw: string) => {
+      const trimmed = raw.trim()
+      const value: string | null = trimmed === '' ? null : trimmed
+      if (value === (rev.summary ?? null)) {
+        // No change: just exit the editor.
+        setEditingId(null)
+        return
+      }
+      setErr(null)
+      const path =
+        kind === 'task'
+          ? '/tasks/{task_id}/revisions/{rev_id}'
+          : '/notes/{note_id}/revisions/{rev_id}'
+      const params =
+        kind === 'task'
+          ? { header: workspaceHeader(), path: { task_id: id, rev_id: rev.id } }
+          : { header: workspaceHeader(), path: { note_id: id, rev_id: rev.id } }
+      const { data, error } =
+        kind === 'task'
+          ? await api.PATCH(path as '/tasks/{task_id}/revisions/{rev_id}', {
+              // openapi-fetch type narrowing trips on the union; the
+              // runtime values are valid against either branch.
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              params: params as any,
+              body: { summary: value },
+            })
+          : await api.PATCH(path as '/notes/{note_id}/revisions/{rev_id}', {
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              params: params as any,
+              body: { summary: value },
+            })
+      if (error || !data) {
+        setErr(errMessage(error))
+        return
+      }
+      setRows((cur) =>
+        cur.map((r) => (r.id === rev.id ? { ...r, summary: data.summary } : r)),
+      )
+      setEditingId(null)
+    },
+    [kind, id],
+  )
 
   const reload = useCallback(async () => {
     setErr(null)
@@ -238,6 +287,8 @@ export function RevisionsPanel({
             })
             const fields = rev.changed_fields.join(', ')
             const isSelected = rev.id === selectedId
+            const isEditingLabel = editingId === rev.id
+            const labelDisplay = rev.summary ?? fields
             return (
               <li
                 key={rev.id}
@@ -272,8 +323,51 @@ export function RevisionsPanel({
                       </span>
                     )}
                   </div>
-                  <div className="revision-fields">{fields}</div>
                 </button>
+                {/* Editable summary label, sibling of the expand-button
+                 *   so the input isn't a nested-interactive inside it.
+                 *   When the row is open (active editing session) the
+                 *   label is suppressed: no sealed snapshot to label. */}
+                {!open && (
+                  <div className="revision-label">
+                    {isEditingLabel ? (
+                      <input
+                        autoFocus
+                        className="revision-label__input"
+                        type="text"
+                        maxLength={200}
+                        value={draft}
+                        placeholder={fields || t('revisions.labelPh')}
+                        onChange={(e) => setDraft(e.target.value)}
+                        onBlur={() => void saveSummary(rev, draft)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault()
+                            void saveSummary(rev, draft)
+                          } else if (e.key === 'Escape') {
+                            e.preventDefault()
+                            setEditingId(null)
+                          }
+                        }}
+                      />
+                    ) : (
+                      <button
+                        type="button"
+                        className={
+                          'revision-label__text' +
+                          (rev.summary ? '' : ' revision-label__text--fallback')
+                        }
+                        title={t('revisions.labelEdit')}
+                        onClick={() => {
+                          setEditingId(rev.id)
+                          setDraft(rev.summary ?? '')
+                        }}
+                      >
+                        {labelDisplay || t('revisions.labelPh')}
+                      </button>
+                    )}
+                  </div>
+                )}
                 {isSelected && !open && (
                   <RevisionDiffView
                     rev={rev}

@@ -282,6 +282,22 @@ class RevisionOut(BaseModel):
     last_edit_at: datetime.datetime
     sealed_at: datetime.datetime | None
     restored_from: uuid.UUID | None
+    # Free-text "speaking name" the user (or the LLM sweep, when wired)
+    # can attach to a revision. NULL = no label; SPA falls back to the
+    # ``changed_fields`` list. See migration 0010.
+    summary: str | None = None
+
+
+class RevisionSummaryIn(BaseModel):
+    """Body of ``PATCH /{tasks|notes}/{id}/revisions/{rev_id}``.
+
+    ``summary=None`` clears the label back to the changed_fields
+    fallback. No ``expected_version``: the summary is metadata
+    decoupled from the snapshot, and a stale write merely overwrites
+    the previous label.
+    """
+
+    summary: str | None = Field(default=None, max_length=200)
 
 
 class RevisionRestoreIn(BaseModel):

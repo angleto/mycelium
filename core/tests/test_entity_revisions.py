@@ -449,9 +449,10 @@ async def test_restore_stale_version_conflict() -> None:
 
 
 async def test_sealed_row_immutable_trigger() -> None:
-    """The BEFORE UPDATE trigger forbids touching a sealed row,
-    regardless of which column. Bypassing the service can't corrupt
-    history."""
+    """The BEFORE UPDATE trigger forbids touching any column on a
+    sealed row EXCEPT ``summary`` (column allow-list since migration
+    0010). Bypassing the service can't corrupt history.
+    """
     org, user = await _org("OrgSealedImmutable")
     tid, _v1 = await _make_task(org, user)
     async with tenant_session(str(org), str(user)) as s:
@@ -466,6 +467,54 @@ async def test_sealed_row_immutable_trigger() -> None:
             )
     # Trigger raises with a custom message; check it's the right one.
     assert "sealed" in str(ei.value).lower()
+
+
+async def test_summary_settable_on_sealed_row() -> None:
+    """The summary column escapes the sealed-immutability gate so the
+    LLM sweep (and the user, via PATCH) can label sealed revisions
+    after the fact. Empty / whitespace inputs collapse to NULL; long
+    strings get trimmed to ``SUMMARY_MAX_LEN``."""
+    org, user = await _org("OrgRevisionSummary")
+    tid, _v1 = await _make_task(org, user)
+    async with tenant_session(str(org), str(user)) as s:
+        rows = await revs.list_revisions(
+            s, entity_kind=revs.ENTITY_KIND_TASK, entity_id=tid, limit=10
+        )
+        sealed = next(r for r in rows if r.sealed_at is not None)
+        assert sealed.summary is None
+
+        # Plain set.
+        out = await revs.set_summary(
+            s,
+            revision_id=sealed.id,
+            summary="renamed task, dropped cost",
+            entity_kind=revs.ENTITY_KIND_TASK,
+            entity_id=tid,
+        )
+        assert out.summary == "renamed task, dropped cost"
+
+        # Whitespace / empty -> NULL.
+        out = await revs.set_summary(
+            s, revision_id=sealed.id, summary="   "
+        )
+        assert out.summary is None
+
+        # None explicit clear.
+        await revs.set_summary(
+            s, revision_id=sealed.id, summary="x"
+        )
+        out = await revs.set_summary(
+            s, revision_id=sealed.id, summary=None
+        )
+        assert out.summary is None
+
+        # Trim to SUMMARY_MAX_LEN.
+        long = "a" * (revs.SUMMARY_MAX_LEN + 50)
+        out = await revs.set_summary(
+            s, revision_id=sealed.id, summary=long
+        )
+        assert out.summary is not None
+        assert len(out.summary) == revs.SUMMARY_MAX_LEN
 
 
 # ────────────────────────────────────────────────────────────────────

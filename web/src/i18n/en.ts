@@ -636,6 +636,8 @@ export const en = {
     restoreField: 'Restore this field',
     restoring: 'Restoring…',
     restoredFrom: 'restore',
+    labelPh: 'Label this revision…',
+    labelEdit: 'Click to edit the label',
     noDiff: 'No differences against the current state.',
     confirmRestore:
       'Revert this entity to the snapshot of this revision? A new restore entry will be added to the history.',

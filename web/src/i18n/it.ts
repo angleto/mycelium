@@ -635,6 +635,8 @@ export const it: Catalog = {
     restoreField: 'Ripristina questo campo',
     restoring: 'Ripristino…',
     restoredFrom: 'ripristino',
+    labelPh: 'Etichetta questa revisione…',
+    labelEdit: 'Clic per modificare l\'etichetta',
     noDiff: 'Nessuna differenza rispetto allo stato attuale.',
     confirmRestore:
       "Ripristinare questa entita allo snapshot di questa revisione? Sara aggiunta una nuova voce 'restore' in cronologia.",

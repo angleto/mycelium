@@ -72,3 +72,12 @@ class EntityRevision(UUIDPKMixin, OrgScopedMixin, Base):
         ForeignKey("entity_revision.id", ondelete="SET NULL"),
         nullable=True,
     )
+    # Free-text label users can attach to a revision for a "speaking
+    # name" in the history timeline. Populated asynchronously by the
+    # worker via the open-model LLM; the user can edit it manually or
+    # trigger a regenerate. NULL means "no label yet"; the SPA falls
+    # back to the changed_fields list. Decoupled from the snapshot:
+    # the immutability trigger has a column allow-list (migration
+    # 0010) so summary is the one column that can change on a sealed
+    # row.
+    summary: Mapped[str | None] = mapped_column(Text, nullable=True)

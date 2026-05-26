@@ -3539,6 +3539,35 @@ button.btn--danger:hover {
   padding: 0.4rem 0.6rem;
   background: var(--surface-1);
 }
+/* Per-row editable summary label. Replaces the changed_fields list
+ * (still surfaced as the placeholder/fallback when no summary is
+ * set) so the timeline reads as "what happened" instead of "which
+ * columns changed". */
+.revision-label {
+  margin-top: 0.15rem;
+}
+.revision-label__text {
+  background: transparent;
+  border: 0;
+  padding: 0;
+  cursor: text;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  width: 100%;
+}
+.revision-label__text--fallback {
+  color: var(--text-d);
+  font-style: italic;
+}
+.revision-label__input {
+  width: 100%;
+  padding: 0.1rem 0.3rem;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 0.2rem;
+  font: inherit;
+}
 .revision-row.revision-open {
   background: var(--surface-2);
   border-style: dashed;

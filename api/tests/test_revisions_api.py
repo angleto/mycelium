@@ -190,3 +190,49 @@ async def test_revisions_rls_isolation_api() -> None:
         # Workspace B can't fetch the revision.
         r = await c.get(f"/tasks/{tid}/revisions/{rev_id}", headers=hb)
         assert r.status_code == 404
+
+
+async def test_task_revision_summary_patch() -> None:
+    """PATCH /tasks/{id}/revisions/{rev_id} sets/clears the summary
+    label. Goes through on sealed rows (column allow-list trigger)."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as c:
+        a = await _signup(c, "RevSummary")
+        h = _auth(a)
+
+        task = (await c.post("/tasks", headers=h, json={"title": "T0"})).json()
+        tid = task["id"]
+        listing = (await c.get(f"/tasks/{tid}/revisions", headers=h)).json()
+        rev_id = listing[0]["id"]
+        assert listing[0]["summary"] is None
+        assert listing[0]["sealed_at"] is not None
+
+        # Set the label.
+        r = await c.patch(
+            f"/tasks/{tid}/revisions/{rev_id}",
+            headers=h,
+            json={"summary": "task created"},
+        )
+        assert r.status_code == 200, r.text
+        assert r.json()["summary"] == "task created"
+
+        # GET reflects the new value.
+        again = (await c.get(f"/tasks/{tid}/revisions/{rev_id}", headers=h)).json()
+        assert again["summary"] == "task created"
+
+        # Clear with explicit null.
+        r = await c.patch(
+            f"/tasks/{tid}/revisions/{rev_id}",
+            headers=h,
+            json={"summary": None},
+        )
+        assert r.status_code == 200
+        assert r.json()["summary"] is None
+
+        # Pydantic enforces the 200-char max at the wire boundary.
+        r = await c.patch(
+            f"/tasks/{tid}/revisions/{rev_id}",
+            headers=h,
+            json={"summary": "x" * 201},
+        )
+        assert r.status_code == 422

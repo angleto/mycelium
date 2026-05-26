@@ -41,6 +41,7 @@ from flow_api.schemas import (
     NoteWithLinksOut,
     RevisionOut,
     RevisionRestoreIn,
+    RevisionSummaryIn,
     SynthesizeIn,
     SynthOut,
     TagBrief,
@@ -866,6 +867,7 @@ def _revision_out(rev: Any) -> RevisionOut:
         last_edit_at=rev.last_edit_at,
         sealed_at=rev.sealed_at,
         restored_from=rev.restored_from,
+        summary=rev.summary,
     )
 
 
@@ -897,6 +899,25 @@ async def get_note_revision(
     rev = await rev_svc.get_revision(
         ctx.session,
         revision_id=rev_id,
+        entity_kind=rev_svc.ENTITY_KIND_NOTE,
+        entity_id=note_id,
+    )
+    return _revision_out(rev)
+
+
+@router.patch("/{note_id}/revisions/{rev_id}", response_model=RevisionOut)
+async def update_note_revision_summary(
+    note_id: uuid.UUID,
+    rev_id: uuid.UUID,
+    body: RevisionSummaryIn,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+) -> RevisionOut:
+    """Set / clear the ``summary`` label on a revision. Mirror of the
+    /tasks endpoint; see that one for the contract."""
+    rev = await rev_svc.set_summary(
+        ctx.session,
+        revision_id=rev_id,
+        summary=body.summary,
         entity_kind=rev_svc.ENTITY_KIND_NOTE,
         entity_id=note_id,
     )

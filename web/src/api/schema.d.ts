@@ -1230,7 +1230,15 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
-        patch?: never;
+        /**
+         * Update Task Revision Summary
+         * @description Set / clear the ``summary`` label on a revision. The summary is
+         *     metadata decoupled from the snapshot: it can change on sealed
+         *     rows (the immutability trigger has a column allow-list since
+         *     migration 0010). No optimistic-lock guard: a stale write merely
+         *     overwrites the previous label.
+         */
+        patch: operations["update_task_revision_summary_tasks__task_id__revisions__rev_id__patch"];
         trace?: never;
     };
     "/tasks/{task_id}/revisions/{rev_id}/restore": {
@@ -2598,6 +2606,54 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/memory/migration-status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Migration Status
+         * @description Embedding migration coverage for this workspace (task 1d081395):
+         *     {total, migrated, pending}. ``total`` is blobs with non-NULL text;
+         *     ``migrated`` is blobs already populated with the v2 embedding;
+         *     ``pending`` is the worker's TODO. Used to decide when to run the
+         *     cutover migration that drops v1 columns.
+         */
+        get: operations["migration_status__memory_migration_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/memory/migrate-embeddings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Migrate Embeddings
+         * @description Admin-gated one-shot trigger: run the v2 embedding backfill on
+         *     this workspace now (don't wait for the worker tick). Returns
+         *     ``{migrated, batch_size}``; if migrated == batch_size, more rows
+         *     are pending -- re-call to drain. No-op when v2 model isn't
+         *     configured.
+         */
+        post: operations["migrate_embeddings__memory_migrate_embeddings_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/memory/blobs/{blob_id}": {
         parameters: {
             query?: never;
@@ -3253,7 +3309,12 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
-        patch?: never;
+        /**
+         * Update Note Revision Summary
+         * @description Set / clear the ``summary`` label on a revision. Mirror of the
+         *     /tasks endpoint; see that one for the contract.
+         */
+        patch: operations["update_note_revision_summary_notes__note_id__revisions__rev_id__patch"];
         trace?: never;
     };
     "/notes/{note_id}/revisions/{rev_id}/restore": {
@@ -6751,6 +6812,8 @@ export interface components {
             sealed_at: string | null;
             /** Restored From */
             restored_from: string | null;
+            /** Summary */
+            summary?: string | null;
         };
         /**
          * RevisionRestoreIn
@@ -6766,6 +6829,19 @@ export interface components {
             expected_version: number;
             /** Fields */
             fields?: string[] | null;
+        };
+        /**
+         * RevisionSummaryIn
+         * @description Body of ``PATCH /{tasks|notes}/{id}/revisions/{rev_id}``.
+         *
+         *     ``summary=None`` clears the label back to the changed_fields
+         *     fallback. No ``expected_version``: the summary is metadata
+         *     decoupled from the snapshot, and a stale write merely overwrites
+         *     the previous label.
+         */
+        RevisionSummaryIn: {
+            /** Summary */
+            summary?: string | null;
         };
         /**
          * ScheduleMode
@@ -6911,7 +6987,9 @@ export interface components {
          * @description Unified free-text search across the org. ``kinds`` defaults to
          *     ['task', 'blob']; ``kinds=['task']`` is the SPA's task-search path,
          *     ``kinds=['blob']`` mirrors /memory/search. ``include_archived`` and
-         *     ``include_deleted`` only apply to ``task`` hits.
+         *     ``include_deleted`` only apply to ``task`` hits. ``rerank`` opts
+         *     into the cross-encoder reranker for this call regardless of the
+         *     env default (task 27579d6a).
          */
         SearchIn: {
             /** Q */
@@ -6937,6 +7015,11 @@ export interface components {
              * @default false
              */
             include_deleted?: boolean;
+            /**
+             * Rerank
+             * @default false
+             */
+            rerank?: boolean;
             /**
              * Operation Id
              * @default search
@@ -10921,6 +11004,47 @@ export interface operations {
             };
         };
     };
+    update_task_revision_summary_tasks__task_id__revisions__rev_id__patch: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                task_id: string;
+                rev_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RevisionSummaryIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RevisionOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     restore_task_revision_tasks__task_id__revisions__rev_id__restore_post: {
         parameters: {
             query?: never;
@@ -14473,6 +14597,80 @@ export interface operations {
             };
         };
     };
+    migration_status__memory_migration_status_get: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: number;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    migrate_embeddings__memory_migrate_embeddings_post: {
+        parameters: {
+            query?: {
+                batch_size?: number;
+            };
+            header: {
+                "x-admin-mode"?: string | null;
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: number;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_blob_memory_blobs__blob_id__get: {
         parameters: {
             query?: never;
@@ -16111,6 +16309,47 @@ export interface operations {
             cookie?: never;
         };
         requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RevisionOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_note_revision_summary_notes__note_id__revisions__rev_id__patch: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                note_id: string;
+                rev_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RevisionSummaryIn"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {

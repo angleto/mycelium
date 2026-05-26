@@ -543,6 +543,66 @@ async def get_revision(
     return row
 
 
+# Human-friendly summary label per revision. Truncated to this many
+# characters before persisting so a chatty LLM can't blow up a row.
+# 200 is generous enough for "renamed task, dropped cost, switched
+# project to General" yet still fits on a single SPA line.
+SUMMARY_MAX_LEN = 200
+
+
+async def set_summary(
+    session: AsyncSession,
+    *,
+    revision_id: uuid.UUID,
+    summary: str | None,
+    entity_kind: str | None = None,
+    entity_id: uuid.UUID | None = None,
+) -> EntityRevision:
+    """Set / clear the ``summary`` label on a revision. The sealed
+    immutability trigger has a column allow-list (migration 0010) so
+    this UPDATE goes through on sealed rows too. ``None`` clears the
+    summary back to its NULL "fallback to changed_fields" default.
+    """
+    row = await get_revision(
+        session,
+        revision_id=revision_id,
+        entity_kind=entity_kind,
+        entity_id=entity_id,
+    )
+    trimmed: str | None
+    if summary is None:
+        trimmed = None
+    else:
+        cleaned = summary.strip()
+        if not cleaned:
+            trimmed = None
+        else:
+            trimmed = cleaned[:SUMMARY_MAX_LEN]
+    row.summary = trimmed
+    await session.flush()
+    return row
+
+
+async def list_pending_summaries(
+    session: AsyncSession,
+    *,
+    limit: int = 50,
+) -> list[EntityRevision]:
+    """Return sealed revisions whose ``summary`` is still NULL, oldest
+    first. Used by the worker sweep to back-fill labels via the LLM in
+    chronological order so the timeline becomes "speaking" from the
+    earliest gap onwards.
+    """
+    stmt = (
+        select(EntityRevision)
+        .where(EntityRevision.sealed_at.is_not(None))
+        .where(EntityRevision.summary.is_(None))
+        .order_by(EntityRevision.sealed_at.asc())
+        .limit(limit)
+    )
+    return list((await session.execute(stmt)).scalars().all())
+
+
 def restorable_payload(
     revision: EntityRevision, *, fields: Sequence[str] | None = None
 ) -> dict[str, Any]:

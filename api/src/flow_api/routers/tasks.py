@@ -28,6 +28,7 @@ from flow_api.schemas import (
     ReminderOut,
     RevisionOut,
     RevisionRestoreIn,
+    RevisionSummaryIn,
     StateOut,
     TagBrief,
     TagRefIn,
@@ -1189,6 +1190,7 @@ def _revision_out(rev: Any) -> RevisionOut:
         last_edit_at=rev.last_edit_at,
         sealed_at=rev.sealed_at,
         restored_from=rev.restored_from,
+        summary=rev.summary,
     )
 
 
@@ -1227,6 +1229,28 @@ async def get_task_revision(
     rev = await rev_svc.get_revision(
         ctx.session,
         revision_id=rev_id,
+        entity_kind=rev_svc.ENTITY_KIND_TASK,
+        entity_id=task_id,
+    )
+    return _revision_out(rev)
+
+
+@router.patch("/{task_id}/revisions/{rev_id}", response_model=RevisionOut)
+async def update_task_revision_summary(
+    task_id: uuid.UUID,
+    rev_id: uuid.UUID,
+    body: RevisionSummaryIn,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+) -> RevisionOut:
+    """Set / clear the ``summary`` label on a revision. The summary is
+    metadata decoupled from the snapshot: it can change on sealed
+    rows (the immutability trigger has a column allow-list since
+    migration 0010). No optimistic-lock guard: a stale write merely
+    overwrites the previous label."""
+    rev = await rev_svc.set_summary(
+        ctx.session,
+        revision_id=rev_id,
+        summary=body.summary,
         entity_kind=rev_svc.ENTITY_KIND_TASK,
         entity_id=task_id,
     )
