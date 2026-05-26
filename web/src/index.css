@@ -6,8 +6,8 @@
   --text-h: #15201a;
   --muted: #6b7665;
   --border: #d8d3c4;
-  --accent: #5b3fb8;
-  --accent-weak: #e6e0f3;
+  --accent: #4a6b3e;
+  --accent-weak: #e2ecde;
   --accent-fg: #ffffff;
   --brand: #4a6b3e;
   --brand-weak: #e2ecde;
@@ -21,6 +21,7 @@
   --shadow: 0 1px 2px rgba(21, 32, 26, 0.06), 0 1px 8px rgba(21, 32, 26, 0.04);
   --sans: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
   --mono: ui-monospace, SFMono-Regular, Consolas, monospace;
+  --font-display: ui-serif, Georgia, 'Times New Roman', serif;
   --topbar-h: 52px;
 
   font: 15px/1.5 var(--sans);
@@ -44,8 +45,8 @@
   --text-h: #f0eee5;
   --muted: #8a937e;
   --border: #2a342c;
-  --accent: #a99cf2;
-  --accent-weak: #2a2342;
+  --accent: #7fa56e;
+  --accent-weak: #1d2c1f;
   --accent-fg: #0f1612;
   --brand: #7fa56e;
   --brand-weak: #1d2c1f;
@@ -66,8 +67,8 @@
     --text-h: #f0eee5;
     --muted: #8a937e;
     --border: #2a342c;
-    --accent: #a99cf2;
-    --accent-weak: #2a2342;
+    --accent: #7fa56e;
+    --accent-weak: #1d2c1f;
     --accent-fg: #0f1612;
     --brand: #7fa56e;
     --brand-weak: #1d2c1f;
@@ -91,8 +92,10 @@ h1,
 h2,
 h3 {
   color: var(--text-h);
-  font-weight: 650;
-  line-height: 1.25;
+  font-family: var(--font-display);
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: -0.01em;
   margin: 0 0 0.6rem;
 }
 h1 {
@@ -2742,7 +2745,7 @@ button.btn--danger:hover {
   border-radius: 2px;
   vertical-align: -1px;
   margin-right: 0.3rem;
-  background: var(--accent, #5b3fb8);
+  background: var(--accent, #4a6b3e);
   opacity: 0.55;
 }
 .sched__sw--crit {

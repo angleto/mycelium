@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="128" height="128" role="img" aria-label="Flow (monochrome, dark on light)">
+  <g fill="#15201a" stroke="#15201a">
+    <path d="M7 6.5 C5 11.5 4 16 4 19 L10 19 C10 16 9 11.5 7 6.5 Z" stroke="none"/>
+    <rect x="6.4" y="19" width="1.2" height="2" stroke="none"/>
+    <path d="M12.5 13 C12.5 10 17.5 10 17.5 13 Z" stroke="none"/>
+    <ellipse cx="15" cy="13" rx="2.6" ry="0.55" stroke="none"/>
+    <rect x="14.2" y="13" width="1.6" height="6.5" stroke="none"/>
+    <path d="M21.5 15 C21.5 12.5 26 12.5 26 15 Z" stroke="none"/>
+    <ellipse cx="23.75" cy="15" rx="2.35" ry="0.45" stroke="none"/>
+    <rect x="23" y="15" width="1.5" height="4.5" stroke="none"/>
+    <path d="M2 21 L30 21" fill="none" stroke-width="0.5" stroke-linecap="round" stroke-dasharray="0.8 1.2" opacity="0.45"/>
+    <path d="M7 21 Q6 24 4.5 26" fill="none" stroke-width="0.55" stroke-linecap="round" opacity="0.55"/>
+    <path d="M7 21 Q9 25 12 27" fill="none" stroke-width="0.55" stroke-linecap="round" opacity="0.6"/>
+    <path d="M15 21 Q13 24 11 26.5" fill="none" stroke-width="0.55" stroke-linecap="round" opacity="0.6"/>
+    <path d="M15 21 Q17 24 19 26.5" fill="none" stroke-width="0.55" stroke-linecap="round" opacity="0.6"/>
+    <path d="M23.75 21 Q22 24.5 19.5 27" fill="none" stroke-width="0.55" stroke-linecap="round" opacity="0.6"/>
+    <path d="M23.75 21 Q26 24 28 25.5" fill="none" stroke-width="0.55" stroke-linecap="round" opacity="0.55"/>
+    <circle cx="4.5" cy="26" r="0.9" stroke="none" opacity="0.75"/>
+    <circle cx="11.5" cy="26.7" r="1.05" stroke="none"/>
+    <circle cx="19.5" cy="26.7" r="1.05" stroke="none"/>
+    <circle cx="28" cy="25.5" r="0.9" stroke="none" opacity="0.75"/>
+  </g>
+</svg>
