@@ -32,6 +32,7 @@ from flow_core.models.memory_blob import BlobSource, MemoryBlob, MemoryBlobTag
 from flow_core.models.tag import Tag, TagKind
 from flow_core.models.task_tag import TaskTag
 from flow_core.services import audit, billing, taxonomy
+from flow_core.services.chunker import Chunker
 from flow_core.services.rbac import require_role
 
 _RRF_K = 60
@@ -194,78 +195,103 @@ async def write_blob(
     channel_tag_id: uuid.UUID | None = None,
     channel_key: str | None = None,
     embedder: Embedder | None = None,
+    chunker: Chunker | None = None,
 ) -> MemoryBlob:
+    """Write a memory blob (or N blobs if the text is chunked).
+
+    Long ``namespace='note'`` text is split into paragraph-sized
+    chunks (task `bbc21aa1`); each chunk gets its own blob + own
+    BlobSource(chunk_index=i). The function returns the FIRST chunk's
+    blob -- callers that need every chunk can read them back via
+    ``blob_sources.source_id``. Short text and other namespaces stay
+    single-vector (WholeChunker), so the legacy contract is preserved.
+
+    ``chunker`` is the explicit override: pass a Chunker instance to
+    force a strategy regardless of the namespace/length heuristic.
+    """
+    from flow_core.services.chunker import pick_chunker
+
     await require_role(session, org_id, actor_id, Role.member)
     channel_id = await _resolve_channel_tag_id(
         session, org_id=org_id, channel_tag_id=channel_tag_id, channel_key=channel_key
     )
     emb = embedder or get_embedder()
-    result = await _safe_embed(emb, text_body)
     expected = get_settings().embed_dim
-    if result is not None and len(result.vector) != expected:
-        # A dimension mismatch is a real misconfiguration of an embedder
-        # that *did* produce a vector, not the "extra missing" case:
-        # surface it. (When the embedder is unavailable, result is None
-        # and the blob is stored keyword-only instead.)
-        raise DomainError(MessageCode.MEMORY_DIM_MISMATCH, expected=str(expected))
-    if result is not None:
-        # Embedding is a cost-incurring op: gate + debit (ADR-0019).
-        # Metered only when an embedding was produced AND the org has a
-        # rate card for that model: the bundled self-hosted embedder is
-        # free out of the box (no rate card => no charge), so memory
-        # works without billing setup; still metered if configured.
-        await billing.meter_if_billable(
-            session,
-            org_id=org_id,
-            actor_id=actor_id,
-            operation_id=operation_id,
-            op="embed",
-            model_id=result.model_id,
-            units_in=Decimal(result.tokens),
-            basis=CostBasis.local,
-        )
-    now = dt.datetime.now(tz=dt.UTC)
-    blob = MemoryBlob(
-        org_id=org_id,
-        project_id=project_id,
-        namespace=namespace,
-        tier="hot",
-        text=text_body,
-        # Keyword-only fallback: a valid row with no vector. The FTS
-        # generated column still indexes ``text`` so it is retrievable
-        # via the lexical branch; ``dim`` stays the configured width so
-        # a later re-embedding is a value fill, not a schema change.
-        embedding=result.vector if result is not None else None,
-        model_id=result.model_id if result is not None else _NO_EMBED_MODEL,
-        dim=len(result.vector) if result is not None else expected,
-        access_count=1,
-        last_accessed_at=now,
-        importance=importance,
-        access_score=importance,
-    )
-    session.add(blob)
-    await session.flush()
-    for kind, sid in sources:
-        session.add(BlobSource(blob_id=blob.id, org_id=org_id, source_kind=kind, source_id=sid))
-    await session.flush()
-    # Tags = explicit (validated to the tenant) plus the validated
-    # memory channel plus those inherited from the provenance, so a
-    # blob derived from tagged sources keeps the facet.
+    selected = chunker or pick_chunker(namespace=namespace, text=text_body)
+    pieces = selected.chunks(text_body)
+    # Cache tag computation outside the loop: explicit/channel/inherited
+    # don't change per chunk so we compute them once.
     explicit = await _visible_tag_ids(session, tag_ids)
     inherited = await _inherited_tag_ids(session, sources)
     channel = {channel_id} if channel_id is not None else set()
-    await _attach_blob_tags(
-        session, org_id=org_id, blob_id=blob.id, tag_ids=explicit | inherited | channel
-    )
-    await audit.log(
-        session,
-        org_id=org_id,
-        actor_id=actor_id,
-        entity="memory_blob",
-        entity_id=blob.id,
-        action="write",
-    )
-    return blob
+    all_tags = explicit | inherited | channel
+
+    first_blob: MemoryBlob | None = None
+    for piece in pieces:
+        result = await _safe_embed(emb, piece.text)
+        if result is not None and len(result.vector) != expected:
+            raise DomainError(MessageCode.MEMORY_DIM_MISMATCH, expected=str(expected))
+        if result is not None:
+            await billing.meter_if_billable(
+                session,
+                org_id=org_id,
+                actor_id=actor_id,
+                operation_id=operation_id,
+                op="embed",
+                model_id=result.model_id,
+                units_in=Decimal(result.tokens),
+                basis=CostBasis.local,
+            )
+        now = dt.datetime.now(tz=dt.UTC)
+        blob = MemoryBlob(
+            org_id=org_id,
+            project_id=project_id,
+            namespace=namespace,
+            tier="hot",
+            text=piece.text,
+            embedding=result.vector if result is not None else None,
+            model_id=result.model_id if result is not None else _NO_EMBED_MODEL,
+            dim=len(result.vector) if result is not None else expected,
+            access_count=1,
+            last_accessed_at=now,
+            importance=importance,
+            access_score=importance,
+        )
+        session.add(blob)
+        await session.flush()
+        for kind, sid in sources:
+            session.add(
+                BlobSource(
+                    blob_id=blob.id,
+                    org_id=org_id,
+                    source_kind=kind,
+                    source_id=sid,
+                    chunk_index=piece.index,
+                )
+            )
+        await session.flush()
+        await _attach_blob_tags(
+            session, org_id=org_id, blob_id=blob.id, tag_ids=all_tags
+        )
+        await audit.log(
+            session,
+            org_id=org_id,
+            actor_id=actor_id,
+            entity="memory_blob",
+            entity_id=blob.id,
+            action="write",
+            diff={"chunk_index": str(piece.index)} if len(pieces) > 1 else None,
+        )
+        if first_blob is None:
+            first_blob = blob
+    if first_blob is None:
+        # pick_chunker guarantees a non-empty list (WholeChunker
+        # returns [Chunk(text=input, 0)] even for empty input), so
+        # this branch is unreachable; raise rather than return a
+        # spurious value so a future refactor can't silently corrupt
+        # the contract.
+        raise RuntimeError("chunker produced no chunks")
+    return first_blob
 
 
 async def retrieve(
@@ -314,6 +340,7 @@ async def retrieve(
     from flow_core.services.retrieval.stages import (
         AccessCounterStage,
         CrossEncoderRerankerStage,
+        DedupeBySourceStage,
         GraderMinStage,
         LexicalFTSStage,
         LimitStage,
@@ -382,6 +409,13 @@ async def retrieve(
     stages.extend(
         [
             OrderingStage(),
+            # DedupeBySourceStage runs after ordering so the candidate
+            # kept per source is the highest-scored chunk (the order is
+            # already RRF/rerank-DESC by this point). It also runs
+            # BEFORE Limit so the truncation is on unique sources, not
+            # on chunks (otherwise top-10 could collapse to 3 sources
+            # with 7 chunks of the same parent).
+            DedupeBySourceStage(),
             GraderMinStage(min_score=grader_min_rrf),
             LimitStage(k=limit),
             AccessCounterStage(),

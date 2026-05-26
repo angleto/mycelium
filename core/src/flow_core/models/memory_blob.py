@@ -75,11 +75,16 @@ class MemoryBlob(OrgScopedMixin, TimestampMixin, Base):
 
 class BlobSource(Base):
     """Explicit N:1 provenance (docs/adr/0005): many sources can map to
-    one blob; erasing the blob cascades here (FK ON DELETE CASCADE)."""
+    one blob; erasing the blob cascades here (FK ON DELETE CASCADE).
+    ``chunk_index`` (migration 0008) extends the natural key so one
+    source can own multiple chunks (paragraph-split for long notes).
+    chunk_index=0 = whole document (legacy single-vector semantics)."""
 
     __tablename__ = "blob_sources"
     __table_args__ = (
-        PrimaryKeyConstraint("blob_id", "source_kind", "source_id", name="pk_blob_sources"),
+        PrimaryKeyConstraint(
+            "blob_id", "source_kind", "source_id", "chunk_index", name="pk_blob_sources"
+        ),
         ForeignKeyConstraint(
             ["blob_id", "org_id"],
             ["memory_blobs.id", "memory_blobs.org_id"],
@@ -92,6 +97,7 @@ class BlobSource(Base):
     org_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False, index=True)
     source_kind: Mapped[str] = mapped_column(String(40), nullable=False)
     source_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    chunk_index: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

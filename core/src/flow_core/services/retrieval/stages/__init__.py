@@ -5,6 +5,7 @@ their owning task drops them in."""
 from __future__ import annotations
 
 from flow_core.services.retrieval.stages.access import AccessCounterStage
+from flow_core.services.retrieval.stages.dedupe import DedupeBySourceStage
 from flow_core.services.retrieval.stages.fusion import RRFFusionStage
 from flow_core.services.retrieval.stages.lexical import LexicalFTSStage
 from flow_core.services.retrieval.stages.order_limit import (
@@ -21,6 +22,7 @@ from flow_core.services.retrieval.stages.semantic import SemanticDenseStage
 __all__ = [
     "AccessCounterStage",
     "CrossEncoderRerankerStage",
+    "DedupeBySourceStage",
     "GraderMinStage",
     "LexicalFTSStage",
     "LimitStage",
