@@ -38,9 +38,7 @@ class RerankResult:
 
 @runtime_checkable
 class Reranker(Protocol):
-    async def rerank(
-        self, query: str, pairs: Sequence[str]
-    ) -> RerankResult:
+    async def rerank(self, query: str, pairs: Sequence[str]) -> RerankResult:
         """``pairs`` is the document texts; the query is broadcast.
         Returns a score per document, higher = better, in the same
         order as ``pairs``."""
@@ -106,7 +104,8 @@ class LocalReranker:
 
         def _run() -> list[float]:
             return [
-                float(s) for s in model.predict(  # type: ignore[attr-defined]
+                float(s)
+                for s in model.predict(  # type: ignore[attr-defined]
                     [(query, p) for p in pairs]
                 )
             ]

@@ -4105,9 +4105,7 @@ def _revision_payload(rev: Any) -> dict[str, Any]:
         "channel": rev.channel,
         "actor_id": str(rev.actor_id) if rev.actor_id else None,
         "actor_kind": rev.actor_kind,
-        "actor_subject_id": (
-            str(rev.actor_subject_id) if rev.actor_subject_id else None
-        ),
+        "actor_subject_id": (str(rev.actor_subject_id) if rev.actor_subject_id else None),
         "edit_session_id": rev.edit_session_id,
         "version_from": rev.version_from,
         "version_to": rev.version_to,
@@ -4134,9 +4132,7 @@ async def list_task_revisions(
     at the head of the first page when present."""
     cutoff = dt.datetime.fromisoformat(before) if before else None
     async with _tenant(token, org_id) as (s, org, _user):
-        await tasks.get_task(
-            s, org_id=org, task_id=uuid.UUID(task_id), include_deleted=True
-        )
+        await tasks.get_task(s, org_id=org, task_id=uuid.UUID(task_id), include_deleted=True)
         rows = await revisions_svc.list_revisions(
             s,
             entity_kind=revisions_svc.ENTITY_KIND_TASK,
@@ -4205,9 +4201,7 @@ async def list_note_revisions(
     Symmetric to ``list_task_revisions``."""
     cutoff = dt.datetime.fromisoformat(before) if before else None
     async with _tenant(token, org_id) as (s, org, _user):
-        await notes_svc.get_note(
-            s, org_id=org, note_id=uuid.UUID(note_id), include_deleted=True
-        )
+        await notes_svc.get_note(s, org_id=org, note_id=uuid.UUID(note_id), include_deleted=True)
         rows = await revisions_svc.list_revisions(
             s,
             entity_kind=revisions_svc.ENTITY_KIND_NOTE,

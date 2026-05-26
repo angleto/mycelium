@@ -51,9 +51,7 @@ class SemanticDenseStage(Stage):
         # kNN so a selective tag still surfaces matches. SET LOCAL
         # keeps the GUC bound to the current transaction only. Set
         # once even if we run both branches.
-        await ctx.session.execute(
-            text("SET LOCAL hnsw.iterative_scan = strict_order")
-        )
+        await ctx.session.execute(text("SET LOCAL hnsw.iterative_scan = strict_order"))
         new: list[Candidate] = []
         # v2 branch: rows that have been migrated. Run first so its
         # rank position is lower (= more important to RRF) on the

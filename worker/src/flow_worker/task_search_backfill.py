@@ -78,12 +78,8 @@ async def run_once(batch_size: int = 20, pointer_batch_size: int = 50) -> tuple[
             if owner is None:
                 continue
             async with tenant_session(str(org_id), str(owner), actor_kind="system") as s:
-                re_embedded = await task_search.run_embedding_backfill(
-                    s, batch_size=batch_size
-                )
-                indexed = await task_search.run_pointer_backfill(
-                    s, batch_size=pointer_batch_size
-                )
+                re_embedded = await task_search.run_embedding_backfill(s, batch_size=batch_size)
+                indexed = await task_search.run_pointer_backfill(s, batch_size=pointer_batch_size)
             if re_embedded or indexed:
                 _log.info(
                     "task-search backfill org=%s re-embedded=%d indexed=%d",

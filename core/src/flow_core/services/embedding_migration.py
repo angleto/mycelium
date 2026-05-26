@@ -27,9 +27,7 @@ from flow_core.models.memory_blob import MemoryBlob
 logger = logging.getLogger(__name__)
 
 
-async def run_embedding_migration(
-    session: AsyncSession, *, batch_size: int = 50
-) -> int:
+async def run_embedding_migration(session: AsyncSession, *, batch_size: int = 50) -> int:
     """Backfill ``embedding_v2`` for blobs that don't have it yet.
     Returns the count of blobs migrated in this batch.
 
@@ -71,8 +69,7 @@ async def run_embedding_migration(
             continue
         if not result.vector or len(result.vector) != expected_dim:
             logger.warning(
-                "embedding migration dim mismatch for blob_id=%s "
-                "(got %d, expected %d)",
+                "embedding migration dim mismatch for blob_id=%s (got %d, expected %d)",
                 blob_id,
                 len(result.vector) if result.vector else 0,
                 expected_dim,
@@ -101,13 +98,9 @@ async def migration_status(session: AsyncSession) -> dict[str, int]:
     Returns ``{total, migrated, pending}`` over visible blobs."""
     from sqlalchemy import func
 
-    total_q = select(func.count()).select_from(MemoryBlob).where(
-        MemoryBlob.text.is_not(None)
-    )
+    total_q = select(func.count()).select_from(MemoryBlob).where(MemoryBlob.text.is_not(None))
     migrated_q = (
-        select(func.count())
-        .select_from(MemoryBlob)
-        .where(MemoryBlob.embedding_v2.is_not(None))
+        select(func.count()).select_from(MemoryBlob).where(MemoryBlob.embedding_v2.is_not(None))
     )
     total = (await session.execute(total_q)).scalar_one()
     migrated = (await session.execute(migrated_q)).scalar_one()

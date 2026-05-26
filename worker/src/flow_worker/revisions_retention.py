@@ -36,11 +36,7 @@ _log = logging.getLogger("flow.worker.revisions_retention")
 
 async def _all_workspaces() -> list[uuid.UUID]:
     async with admin_session() as s:
-        rows = (
-            (await s.execute(select(Organization).order_by(Organization.id)))
-            .scalars()
-            .all()
-        )
+        rows = (await s.execute(select(Organization).order_by(Organization.id))).scalars().all()
         return [o.id for o in sorted(rows, key=lambda o: str(o.id))]
 
 
@@ -85,9 +81,7 @@ async def run_once() -> tuple[int, int, int, int]:
             owner = await _owner_of(org_id)
             if owner is None:
                 continue
-            async with tenant_session(
-                str(org_id), str(owner), actor_kind="system"
-            ) as s:
+            async with tenant_session(str(org_id), str(owner), actor_kind="system") as s:
                 daily, weekly = await revisions_svc.coarsen(
                     s,
                     retain_full_days=full_days,
@@ -102,8 +96,7 @@ async def run_once() -> tuple[int, int, int, int]:
             total_notes += notes_d
             if daily or weekly or tasks_d or notes_d:
                 _log.info(
-                    "revisions retention org=%s daily=%d weekly=%d "
-                    "tasks_hard=%d notes_hard=%d",
+                    "revisions retention org=%s daily=%d weekly=%d tasks_hard=%d notes_hard=%d",
                     org_id,
                     daily,
                     weekly,

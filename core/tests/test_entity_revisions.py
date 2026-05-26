@@ -124,12 +124,8 @@ def test_restorable_whitelist_is_subset_of_snapshot() -> None:
 
     task_orphan = _TASK_RESTORABLE_FIELDS - set(_TASK_SNAPSHOT_FIELDS)
     note_orphan = _NOTE_RESTORABLE_FIELDS - set(_NOTE_SNAPSHOT_FIELDS)
-    assert not task_orphan, (
-        f"Task restorable fields missing from snapshot: {task_orphan}"
-    )
-    assert not note_orphan, (
-        f"Note restorable fields missing from snapshot: {note_orphan}"
-    )
+    assert not task_orphan, f"Task restorable fields missing from snapshot: {task_orphan}"
+    assert not note_orphan, f"Note restorable fields missing from snapshot: {note_orphan}"
 
 
 async def test_web_coalesces_under_window() -> None:
@@ -590,8 +586,7 @@ async def test_hard_delete_cascades_revisions() -> None:
     with psycopg.connect(dsn, autocommit=True) as conn:
         conn.execute("DELETE FROM tasks WHERE id = %s", (str(tid),))
         cur = conn.execute(
-            "SELECT count(*) FROM entity_revision "
-            "WHERE entity_kind='task' AND entity_id = %s",
+            "SELECT count(*) FROM entity_revision WHERE entity_kind='task' AND entity_id = %s",
             (str(tid),),
         )
         row = cur.fetchone()
@@ -613,10 +608,10 @@ async def test_revisions_rls_isolates_orgs() -> None:
     tid_a, _ = await _make_task(org_a, user_a, title="A-task")
     async with tenant_session(str(org_b), str(user_b)) as s:
         rows = (
-            await s.execute(
-                select(EntityRevision).where(EntityRevision.entity_id == tid_a)
-            )
-        ).scalars().all()
+            (await s.execute(select(EntityRevision).where(EntityRevision.entity_id == tid_a)))
+            .scalars()
+            .all()
+        )
     assert rows == []
 
 
@@ -689,32 +684,28 @@ async def test_coarsen_keeps_one_per_day_then_one_per_week() -> None:
             )
 
         before = (
-            (
-                await s.execute(
-                    text(
-                        "SELECT count(*) FROM entity_revision "
-                        "WHERE entity_kind='task' AND entity_id = :tid"
-                    ),
-                    {"tid": str(tid)},
-                )
-            ).scalar_one()
-        )
+            await s.execute(
+                text(
+                    "SELECT count(*) FROM entity_revision "
+                    "WHERE entity_kind='task' AND entity_id = :tid"
+                ),
+                {"tid": str(tid)},
+            )
+        ).scalar_one()
         daily, weekly = await revs.coarsen(
             s,
             retain_full_days=30,
             coarse_to_weekly_days=365,
         )
         after = (
-            (
-                await s.execute(
-                    text(
-                        "SELECT count(*) FROM entity_revision "
-                        "WHERE entity_kind='task' AND entity_id = :tid"
-                    ),
-                    {"tid": str(tid)},
-                )
-            ).scalar_one()
-        )
+            await s.execute(
+                text(
+                    "SELECT count(*) FROM entity_revision "
+                    "WHERE entity_kind='task' AND entity_id = :tid"
+                ),
+                {"tid": str(tid)},
+            )
+        ).scalar_one()
 
     # Daily zone (30..365 days): 3 rows on day-50 → 2 deleted;
     # 2 rows on day-60 → 1 deleted. Total daily: 3.
@@ -732,9 +723,7 @@ async def test_coarsen_keeps_create_baseline_inside_retain_window() -> None:
     org, user = await _org("OrgCoarsenRecent")
     tid, _v = await _make_task(org, user)
     async with tenant_session(str(org), str(user)) as s:
-        daily, weekly = await revs.coarsen(
-            s, retain_full_days=30, coarse_to_weekly_days=365
-        )
+        daily, weekly = await revs.coarsen(s, retain_full_days=30, coarse_to_weekly_days=365)
         rows = await revs.list_revisions(
             s, entity_kind=revs.ENTITY_KIND_TASK, entity_id=tid, limit=10
         )
@@ -759,10 +748,7 @@ async def test_hard_delete_soft_deleted_cascades_revisions() -> None:
         )
         # Backdate the soft-delete so it qualifies as "expired".
         await s.execute(
-            text(
-                "UPDATE tasks SET deleted_at = now() - interval '120 days' "
-                "WHERE id = :tid"
-            ),
+            text("UPDATE tasks SET deleted_at = now() - interval '120 days' WHERE id = :tid"),
             {"tid": str(tid)},
         )
         tasks_d, notes_d = await revs.hard_delete_soft_deleted(s, after_days=90)

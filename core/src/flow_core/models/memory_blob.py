@@ -76,9 +76,7 @@ class MemoryBlob(OrgScopedMixin, TimestampMixin, Base):
     # migration worker backfills them for legacy rows. retrieve reads
     # v2 if non-NULL else v1, so the cutover is transparent. The dim
     # is parameterised at migration time (default 1024 for bge-m3).
-    embedding_v2: Mapped[list[float] | None] = mapped_column(
-        Vector(1024), nullable=True
-    )
+    embedding_v2: Mapped[list[float] | None] = mapped_column(Vector(1024), nullable=True)
     model_id_v2: Mapped[str | None] = mapped_column(String(160), nullable=True)
     dim_v2: Mapped[int | None] = mapped_column(Integer, nullable=True)
 

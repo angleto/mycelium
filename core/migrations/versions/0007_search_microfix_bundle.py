@@ -51,9 +51,7 @@ def upgrade() -> None:
         "ADD COLUMN fts_lang tsvector "
         "GENERATED ALWAYS AS (to_tsvector('italian', COALESCE(text, ''))) STORED"
     )
-    op.execute(
-        "CREATE INDEX ix_memory_blobs_fts_lang ON memory_blobs USING gin (fts_lang)"
-    )
+    op.execute("CREATE INDEX ix_memory_blobs_fts_lang ON memory_blobs USING gin (fts_lang)")
 
     # 2) HNSW embedding index: cosine_ops -> ip_ops. Vectors are
     #    L2-normalized by the embedder (asserted at write time in

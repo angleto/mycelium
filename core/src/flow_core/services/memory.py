@@ -300,9 +300,7 @@ async def write_blob(
                 )
             )
         await session.flush()
-        await _attach_blob_tags(
-            session, org_id=org_id, blob_id=blob.id, tag_ids=all_tags
-        )
+        await _attach_blob_tags(session, org_id=org_id, blob_id=blob.id, tag_ids=all_tags)
         await audit.log(
             session,
             org_id=org_id,

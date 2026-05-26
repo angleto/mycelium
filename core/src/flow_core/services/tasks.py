@@ -570,9 +570,7 @@ def _coerce_task_restore_values(payload: dict[str, Any]) -> dict[str, Any]:
         elif key == "start_date":
             out[key] = dt.date.fromisoformat(value) if isinstance(value, str) else value
         elif key in {"due_date", "start_at"}:
-            out[key] = (
-                dt.datetime.fromisoformat(value) if isinstance(value, str) else value
-            )
+            out[key] = dt.datetime.fromisoformat(value) if isinstance(value, str) else value
         elif key in {"estimate_effort_h", "monetary_cost"}:
             out[key] = Decimal(value) if not isinstance(value, Decimal) else value
         elif key in {"parent_task_id", "budget_id"}:

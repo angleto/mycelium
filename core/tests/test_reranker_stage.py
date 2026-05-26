@@ -69,10 +69,7 @@ def test_gate_skips_few_candidates() -> None:
 
 def test_gate_accepts_when_thresholds_met() -> None:
     gate = RerankGate(min_query_tokens=2, min_candidates=2)
-    assert (
-        gate.should_rerank("one two three", [_cand("a"), _cand("b"), _cand("c")])
-        is True
-    )
+    assert gate.should_rerank("one two three", [_cand("a"), _cand("b"), _cand("c")]) is True
 
 
 async def test_rerank_overrides_score_and_preserves_rrf_in_diagnostics() -> None:

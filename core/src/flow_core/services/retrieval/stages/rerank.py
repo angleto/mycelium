@@ -71,9 +71,7 @@ class CrossEncoderRerankerStage(Stage):
         return candidates
 
     @staticmethod
-    async def _load_texts(
-        ctx: RetrievalContext, candidates: list[Candidate]
-    ) -> list[str]:
+    async def _load_texts(ctx: RetrievalContext, candidates: list[Candidate]) -> list[str]:
         """Hydrate text for candidates that don't carry it yet (the
         lexical/semantic stages only carry ids). Single SELECT, then
         backfill in place so a subsequent stage finds the text."""
@@ -81,9 +79,7 @@ class CrossEncoderRerankerStage(Stage):
         if missing:
             rows = (
                 await ctx.session.execute(
-                    select(MemoryBlob.id, MemoryBlob.text).where(
-                        MemoryBlob.id.in_(missing)
-                    )
+                    select(MemoryBlob.id, MemoryBlob.text).where(MemoryBlob.id.in_(missing))
                 )
             ).all()
             by_id = {bid: txt for bid, txt in rows}

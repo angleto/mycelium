@@ -42,11 +42,7 @@ _SEAL_TICK_SECONDS = 30
 
 async def _all_workspaces() -> list[uuid.UUID]:
     async with admin_session() as s:
-        rows = (
-            (await s.execute(select(Organization).order_by(Organization.id)))
-            .scalars()
-            .all()
-        )
+        rows = (await s.execute(select(Organization).order_by(Organization.id))).scalars().all()
         return [o.id for o in sorted(rows, key=lambda o: str(o.id))]
 
 
@@ -83,9 +79,7 @@ async def run_once() -> int:
             owner = await _owner_of(org_id)
             if owner is None:
                 continue
-            async with tenant_session(
-                str(org_id), str(owner), actor_kind="system"
-            ) as s:
+            async with tenant_session(str(org_id), str(owner), actor_kind="system") as s:
                 sealed = await revisions_svc.seal_idle(s)
             if sealed:
                 _log.info(

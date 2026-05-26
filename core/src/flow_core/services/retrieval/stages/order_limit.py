@@ -40,9 +40,7 @@ class OrderingStage(Stage):
         if missing:
             rows = (
                 await ctx.session.execute(
-                    select(MemoryBlob.id, MemoryBlob.created_at).where(
-                        MemoryBlob.id.in_(missing)
-                    )
+                    select(MemoryBlob.id, MemoryBlob.created_at).where(MemoryBlob.id.in_(missing))
                 )
             ).all()
             by_id = {bid: ts for bid, ts in rows}
