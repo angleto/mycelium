@@ -16,7 +16,11 @@ htmlcov/
 
 # Env / secrets
 .env
+.env.*
+envtest
+envtest.*
 *.local
+web/e2e-prod/.auth/
 
 # Local-only material (out-of-band keys, CSRs, scratch credentials).
 # Anything dropped under /private/ never enters git history.
