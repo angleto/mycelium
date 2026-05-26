@@ -709,6 +709,10 @@ button.btn--danger:hover {
   background: var(--surface-2);
   color: var(--text-h);
   border: 1px solid var(--border);
+  /* Chips are atomic labels: the label itself must never break across
+   * two lines (it turns a chip into a "pellet"). The chip can still
+   * wrap as a whole inside a flex parent. */
+  white-space: nowrap;
 }
 .chip__dot {
   width: 8px;
