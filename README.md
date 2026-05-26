@@ -1,13 +1,16 @@
 <p align="center">
-  <img src="assets/flow-logo.svg" width="96" height="96" alt="Flow logo" />
+  <img src="assets/flow-logo-horizontal.svg" height="64" alt="Flow logo" />
 </p>
 
 <h1 align="center">Flow</h1>
 
 <p align="center">
-  A multi-tenant personal work hub: tasks, time &amp; billing, notes,
-  clients/projects, workflows, invoicing — with an MCP control surface
-  co-equal to the GUI.
+  <strong>The forest of memory.</strong><br/>
+  A personal work hub where tasks, notes, time, clients/projects and
+  invoicing share one tenant — and where archived knowledge decomposes
+  into atoms that fertilise the next thought. Every surface is also a
+  first-class MCP control surface, so an AI agent can drive the whole
+  system exactly like the web UI.
 </p>
 
 <p align="center">
@@ -27,6 +30,32 @@ hierarchical memory and semantic retrieval, clients/projects,
 configurable workflows, and Italian electronic invoicing (SDI). Every
 surface is also exposed over **MCP**, so an AI agent can drive the whole
 system exactly like the web UI.
+
+## What makes Flow different
+
+Most knowledge tools keep your notes intact and let them sediment until
+you can't find anything. Flow treats memory like a forest floor: the
+things you finish thinking about don't disappear, they **decompose**
+into smaller, embedded atoms (claims, definitions, examples, decisions)
+that retrieval and the link graph can recompose into new ideas. Tags
+and citations are the mycelium that joins atoms across notes; the LLM
+side of Flow is wired to *traverse* that mycelium, not to summarise
+your notes into yet another opaque blob.
+
+Three commitments fall out of this:
+
+- **One tenant, one substrate.** Tasks, notes, time, clients, invoices
+  and memory share the same RLS-scoped workspace, so an atom from a
+  three-year-old transcript can ground today's task without a copy.
+- **Decomposition over summary.** Long notes are paragraph-chunked at
+  index time and a per-turn chunker covers conversations; retrieval
+  hits the exact paragraph (with `chunk_index` + `ts_headline`), not
+  the whole document. The user can promote any chunk into a typed
+  link or a derived task without losing provenance.
+- **Agents on the same footing as the user.** The web UI, the CLI,
+  the Neovim plugin, an MCP client and the internal Telegram assistant
+  all dispatch through the same RBAC + RLS surface. Unified search
+  (`task_search.search_unified`) is a tool both humans and LLMs hold.
 
 ## Highlights
 
