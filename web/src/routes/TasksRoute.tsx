@@ -626,7 +626,7 @@ export function TasksRoute() {
     <section className="card card--wide">
       <h1>{t('tasks.title')}</h1>
 
-      <RecentTasks tasks={tasks} />
+      <RecentTasks tasks={focused} />
 
       <form onSubmit={(e) => void onCreate(e)} className="quickadd">
         <input

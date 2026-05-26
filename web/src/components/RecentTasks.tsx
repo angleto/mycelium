@@ -48,9 +48,9 @@ function recencyMs(tk: Task): number {
 // Recent-tasks widget pinned at the top of /tasks: the last N tasks by
 // modification/creation, newest first, so the user can jump straight to
 // what they just touched instead of hunting through the list/board.
-// Operates on the already-loaded task set, so it respects the workspace
-// and tag filter that drive the fetch but ignores the transient search
-// box and focus sidebar (the shortcut stays populated while you type).
+// Operates on the focus-filtered task set, so it respects the workspace,
+// tag filter and Focus sidebar (client/project) but ignores the transient
+// search box and date lens.
 export function RecentTasks({ tasks }: { tasks: Task[] }) {
   const { t, i18n } = useTranslation()
   const [open, setOpen] = useState(readOpen)
