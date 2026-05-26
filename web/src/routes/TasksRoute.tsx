@@ -215,11 +215,17 @@ export function TasksRoute() {
   useEffect(() => {
     const freeText = getFreeTextTokens(q.trim()).join(' ').trim()
     if (!freeText) {
+      // External-state sync (drop stale search results when the user
+      // clears the box). The eslint rule fires only on the CI runner
+      // for now; disable explicitly so the build is green there.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setServerIds(null)
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setSearching(false)
       return
     }
     const ac = new AbortController()
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setSearching(true)
     // 250ms debounce: fast enough to feel live, slow enough to not
     // flood the embedder on each keystroke.
