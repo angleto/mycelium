@@ -54,33 +54,61 @@ async def _owner_of(org_id: uuid.UUID) -> uuid.UUID | None:
     return ordered[0].user_id
 
 
-async def run_once(batch_size: int = 20) -> int:
-    """One sweep across all workspaces. Returns the total number of
-    blobs re-embedded. Per-workspace exceptions isolated/logged."""
+async def run_once(batch_size: int = 20, pointer_batch_size: int = 50) -> tuple[int, int]:
+    """One sweep across all workspaces.
+
+    Returns ``(re_embedded, indexed)``:
+    - ``re_embedded``: blobs whose initial write timed out and that we
+      just re-embedded.
+    - ``indexed``: tasks that pre-date the task-search deploy (no
+      pointer yet) and that we just indexed via ``run_pointer_backfill``.
+
+    Per-workspace exceptions isolated/logged.
+    """
     try:
         org_ids = await _all_workspaces()
     except Exception:
         _log.exception("task-search backfill: failed to list workspaces")
-        return 0
-    total = 0
+        return (0, 0)
+    total_re_embedded = 0
+    total_indexed = 0
     for org_id in org_ids:
         try:
             owner = await _owner_of(org_id)
             if owner is None:
                 continue
             async with tenant_session(str(org_id), str(owner), actor_kind="system") as s:
-                count = await task_search.run_embedding_backfill(s, batch_size=batch_size)
-            if count:
-                _log.info("task-search backfill org=%s re-embedded=%d", org_id, count)
-            total += count
+                re_embedded = await task_search.run_embedding_backfill(
+                    s, batch_size=batch_size
+                )
+                indexed = await task_search.run_pointer_backfill(
+                    s, batch_size=pointer_batch_size
+                )
+            if re_embedded or indexed:
+                _log.info(
+                    "task-search backfill org=%s re-embedded=%d indexed=%d",
+                    org_id,
+                    re_embedded,
+                    indexed,
+                )
+            total_re_embedded += re_embedded
+            total_indexed += indexed
         except Exception:
             _log.exception("task-search backfill failed for org=%s", org_id)
-    return total
+    return (total_re_embedded, total_indexed)
 
 
 async def run_forever() -> None:
     interval = max(5, get_settings().task_search_backfill_interval_seconds)
     _log.info("task-search backfill worker started (interval=%ds)", interval)
+    # Boost the first sweep: workspaces that pre-date the task-search
+    # deploy can carry hundreds of unindexed tasks; the default
+    # ``pointer_batch_size`` of 50 would take ~30 ticks (~30 min) to
+    # drain. The boost ticks finish the migration in a couple of
+    # minutes, then the loop settles back to the small steady-state
+    # batch which is enough for normal mutation drift.
+    boost_pointer_batch = 500
+    await run_once(pointer_batch_size=boost_pointer_batch)
     while True:
-        await run_once()
         await asyncio.sleep(interval)
+        await run_once()

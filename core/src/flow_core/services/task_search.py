@@ -794,3 +794,41 @@ async def run_embedding_backfill(session: AsyncSession, *, batch_size: int = 20)
         if result.rowcount > 0:
             updated += 1
     return updated
+
+
+async def run_pointer_backfill(session: AsyncSession, *, batch_size: int = 50) -> int:
+    """Index tasks that don't have a ``task_index_pointer`` yet.
+
+    The listener path catches every NEW mutation, but tasks that
+    pre-date the deploy of task-search never went through it -- they
+    live in the DB without a pointer/blob, so /search misses them.
+    This sweep picks the first ``batch_size`` unindexed tasks (skipping
+    soft-deleted: they would just be resync'd and immediately cleaned
+    up by the pointer ``_load_task_with_items`` invariant) and runs the
+    same ``_resync_task_blob`` the listener would have.
+
+    Returns the count of tasks indexed in this batch. The worker calls
+    this every tick so a large backlog drains gradually
+    (1538 tasks at batch=50/tick * 60s = ~30 min to full coverage);
+    callers that want immediate coverage can hit the
+    ``POST /search/reindex`` admin endpoint, which runs the same
+    helper synchronously with a larger batch.
+    """
+    rows = (
+        await session.execute(
+            select(Task.id)
+            .outerjoin(TaskIndexPointer, TaskIndexPointer.task_id == Task.id)
+            .where(TaskIndexPointer.task_id.is_(None), Task.deleted_at.is_(None))
+            .limit(batch_size)
+        )
+    ).all()
+    if not rows:
+        return 0
+    indexed = 0
+    for (task_id,) in rows:
+        try:
+            await _resync_task_blob(session, task_id)
+            indexed += 1
+        except Exception:
+            logger.exception("task-search pointer backfill failed for task_id=%s", task_id)
+    return indexed

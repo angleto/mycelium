@@ -12,8 +12,9 @@ from __future__ import annotations
 from typing import Annotated
 
 from fastapi import APIRouter, Depends
+from pydantic import BaseModel, Field
 
-from flow_api.deps import TenantCtx, tenant_ctx
+from flow_api.deps import TenantCtx, tenant_admin_ctx, tenant_ctx
 from flow_api.schemas import SearchHit, SearchIn
 from flow_core.services import task_search as svc
 
@@ -50,3 +51,35 @@ async def search(
         )
         for h in hits
     ]
+
+
+class ReindexOut(BaseModel):
+    """Result of a one-shot pointer backfill. ``indexed`` is the count
+    of tasks that got a pointer + blob in this call; if it equals
+    ``batch_size`` there are more tasks to process and the caller
+    should re-invoke (or wait for the periodic worker tick)."""
+
+    indexed: int
+    batch_size: int
+
+
+class ReindexIn(BaseModel):
+    batch_size: int = Field(default=200, ge=1, le=2000)
+
+
+@router.post("/reindex", response_model=ReindexOut)
+async def reindex(
+    body: ReindexIn,
+    ctx: Annotated[TenantCtx, Depends(tenant_admin_ctx)],
+) -> ReindexOut:
+    """Index every task that pre-dates the task-search deploy in this
+    workspace. Admin-gated (the same sudo lever used by other tenant
+    maintenance endpoints) because it touches every row.
+
+    Runs the same ``_resync_task_blob`` the listener path runs on a
+    fresh mutation, in one transaction, capped at ``batch_size``
+    (default 200). Idempotent: tasks that already have a pointer are
+    skipped by the SELECT itself.
+    """
+    indexed = await svc.run_pointer_backfill(ctx.session, batch_size=body.batch_size)
+    return ReindexOut(indexed=indexed, batch_size=body.batch_size)
