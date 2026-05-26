@@ -175,3 +175,62 @@ async def test_promoted_from_unlink_is_refused() -> None:
             params={"task_id": task_id, "kind": "promoted_from"},
         )
         assert d.status_code >= 400 and d.status_code != 404, d.text
+
+
+async def test_linked_task_count_includes_all_four_kinds() -> None:
+    """Task 1e07437e: ``NoteOut.linked_task_count`` aggregates every
+    kind of task link (subject, artifact, derived_from, promoted_from)
+    so the SPA chip on NoteListItem matches the drawer panel.
+
+    Earlier the chip showed only the count of ``derived_task_ids``,
+    which omits subject/artifact links -- a note whose only link was
+    ``subject`` showed no chip even though the drawer listed it.
+    """
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as c:
+        h = await _signup(c)
+
+        # Fresh note: no links yet -> chip-driver count is 0.
+        note_id = await _make_note(c, h, "anchor")
+        n0 = (await c.get(f"/notes/{note_id}", headers=h)).json()
+        assert n0["linked_task_count"] == 0
+
+        # Three different kinds of links, then re-read the note.
+        # subject + artifact go through the typed endpoint;
+        # derived_from is created as a side-effect of /derive-task.
+        t_subj = await _make_task(c, h, "subject-task")
+        t_art = await _make_task(c, h, "artifact-task")
+        await c.post(
+            f"/notes/{note_id}/task-links",
+            headers=h,
+            json={"task_id": t_subj, "kind": "subject"},
+        )
+        await c.post(
+            f"/notes/{note_id}/task-links",
+            headers=h,
+            json={"task_id": t_art, "kind": "artifact"},
+        )
+        # /derive-task adds the derived_from edge (a new task is
+        # created with the link in one shot).
+        derived = await c.post(
+            f"/notes/{note_id}/derive-task",
+            headers=h,
+            json={"title": "derived-task"},
+        )
+        assert derived.status_code == 200, derived.text
+
+        # Single-note GET surfaces the count.
+        n1 = (await c.get(f"/notes/{note_id}", headers=h)).json()
+        assert n1["linked_task_count"] == 3, n1
+
+        # The list endpoint surfaces the count too (the chip lives in
+        # the list view, so the field must be populated there as well
+        # -- and via a batched query, not N+1).
+        listed = (await c.get("/notes", headers=h)).json()
+        match = next(n for n in listed if n["id"] == note_id)
+        assert match["linked_task_count"] == 3
+        # And derived_task_ids stays exclusively the two "fruit" kinds
+        # (here only the one ``derived_from`` task), so the SPA can
+        # still show concrete task titles for that subset.
+        assert len(match["derived_task_ids"]) == 1
+

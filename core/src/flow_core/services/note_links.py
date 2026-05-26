@@ -39,7 +39,7 @@ import uuid
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -491,6 +491,39 @@ async def derived_task_ids_for_notes(
     return out
 
 
+async def linked_task_counts_for_notes(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    note_ids: list[uuid.UUID],
+) -> dict[uuid.UUID, int]:
+    """Batched ``{note_id: count}`` of ALL task links to each note
+    (every kind: derived_from, promoted_from, subject, artifact).
+
+    Task 1e07437e: the SPA's "N tasks" chip on NoteListItem used to
+    count only the two "fruit" kinds (derived_from + promoted_from).
+    A note that was only linked as ``subject`` or ``artifact`` showed
+    no chip even though the drawer panel listed real links. This
+    helper returns the full count so the chip matches the drawer.
+
+    One batched ``GROUP BY`` per call (O(notes), not O(notes*tasks)).
+    Notes with zero links are omitted from the mapping.
+    """
+    if not note_ids:
+        return {}
+    rows = (
+        await session.execute(
+            select(NoteTaskLink.note_id, func.count(NoteTaskLink.id))
+            .where(
+                NoteTaskLink.org_id == org_id,
+                NoteTaskLink.note_id.in_(note_ids),
+            )
+            .group_by(NoteTaskLink.note_id)
+        )
+    ).all()
+    return {nid: int(c) for nid, c in rows}
+
+
 async def notes_for_task(
     session: AsyncSession,
     *,
@@ -902,6 +935,7 @@ async def tick_maturity_transitions(
 __all__ = [
     "derive_task_from_note",
     "derived_task_ids_for_notes",
+    "linked_task_counts_for_notes",
     "link_notes",
     "list_note_links",
     "list_note_task_links",

@@ -33,7 +33,23 @@ export function NoteListItem({
 }) {
   const { t } = useTranslation()
   const preview = (note.transcript ?? '').split('\n')[0].trim()
-  const tasks = derivedTaskTitles ?? []
+  const derivedTitles = derivedTaskTitles ?? []
+  // Task 1e07437e: the chip reflects EVERY linked task (subject,
+  // artifact, derived_from, promoted_from), not just the two "fruit"
+  // kinds the parent route can resolve to titles. Fall back to the
+  // derived-titles length when the backend hasn't populated the new
+  // field yet (older list payloads, optimistic SPA state).
+  const linkedCount =
+    typeof note.linked_task_count === 'number'
+      ? note.linked_task_count
+      : derivedTitles.length
+  // Tooltip prefers concrete task titles when available; otherwise
+  // shows a generic count so the chip is still self-explanatory for
+  // subject-/artifact-only links the parent doesn't know how to title.
+  const tooltip =
+    derivedTitles.length > 0
+      ? derivedTitles.join('\n')
+      : t('notes.derivedTasksAria', { count: linkedCount })
   const isPromoted = !!note.promoted_at
   return (
     <li className="noteitem">
@@ -44,13 +60,13 @@ export function NoteListItem({
         <span className="muted">
           {note.kind} · {note.status}
         </span>
-        {tasks.length > 0 && (
+        {linkedCount > 0 && (
           <span
             className="chip chip--derived"
-            title={tasks.join('\n')}
-            aria-label={t('notes.derivedTasksAria', { count: tasks.length })}
+            title={tooltip}
+            aria-label={t('notes.derivedTasksAria', { count: linkedCount })}
           >
-            {t('notes.derivedTasksCount', { count: tasks.length })}
+            {t('notes.derivedTasksCount', { count: linkedCount })}
           </span>
         )}
         {isPromoted && (

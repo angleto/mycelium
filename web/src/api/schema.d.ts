@@ -6247,6 +6247,11 @@ export interface components {
             promoted_at?: string | null;
             /** Derived Task Ids */
             derived_task_ids?: string[];
+            /**
+             * Linked Task Count
+             * @default 0
+             */
+            linked_task_count?: number;
         };
         /** NotePatchIn */
         NotePatchIn: {

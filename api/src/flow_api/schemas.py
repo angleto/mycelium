@@ -1644,6 +1644,11 @@ class NoteOut(BaseModel):
     # SPA renders an "N tasks" chip on the note row from this list;
     # ``task_id`` above stays the SPA-canonical "primary".
     derived_task_ids: list[uuid.UUID] = Field(default_factory=list)
+    # Task 1e07437e: total count of typed links into this note across
+    # every kind (subject, artifact, derived_from, promoted_from), so
+    # the SPA chip reflects all linked tasks -- not just the two
+    # "fruit" kinds that ``derived_task_ids`` covers.
+    linked_task_count: int = 0
 
 
 class NoteSetMaturityIn(BaseModel):
