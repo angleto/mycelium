@@ -5,10 +5,11 @@ seam (fakes in tests)."""
 
 from __future__ import annotations
 
+import datetime
 import uuid
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Header, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
@@ -20,6 +21,8 @@ from flow_api.schemas import (
     CommandIn,
     ConversationStartIn,
     DerivedTaskOut,
+    EditSessionSealIn,
+    EditSessionSealOut,
     ExpectedVersionIn,
     NoteCreateIn,
     NoteDeriveTaskIn,
@@ -36,6 +39,8 @@ from flow_api.schemas import (
     NoteTranscribeIn,
     NoteTurnOut,
     NoteWithLinksOut,
+    RevisionOut,
+    RevisionRestoreIn,
     SynthesizeIn,
     SynthOut,
     TagBrief,
@@ -47,6 +52,7 @@ from flow_core.models.project_profile import ProjectProfile
 from flow_core.models.tag import Tag, TagKind
 from flow_core.services import agent_tokens as agent_tokens_svc
 from flow_core.services import attachments as att_svc
+from flow_core.services import entity_revisions as rev_svc
 from flow_core.services import note_links as note_links_svc
 from flow_core.services import notes as svc
 
@@ -285,6 +291,7 @@ async def update_note(
     note_id: uuid.UUID,
     body: NotePatchIn,
     ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    edit_session_id: Annotated[str | None, Header(alias="X-Edit-Session-Id")] = None,
 ) -> VersionOut:
     # task_id is bidirectional Proposal A: pass it through only when the
     # client actually sent the key (an explicit null unlinks; omitting
@@ -298,6 +305,7 @@ async def update_note(
         kwargs["task_id"] = body.task_id
     if "audio_ref" in body.model_fields_set:
         kwargs["audio_ref"] = body.audio_ref
+    channel = "web" if edit_session_id else "api"
     v = await svc.update_note(
         ctx.session,
         org_id=ctx.org_id,
@@ -306,6 +314,8 @@ async def update_note(
         expected_version=body.expected_version,
         title=body.title,
         text=body.text,
+        channel=channel,
+        edit_session_id=edit_session_id,
         **kwargs,
     )
     return VersionOut(id=note_id, version=v)
@@ -833,3 +843,99 @@ async def remove_note_task_link(
     )
     if not removed:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+
+
+def _revision_out(rev: Any) -> RevisionOut:
+    """Serialize an EntityRevision ORM row. ``org_id`` is dropped: the
+    revision lives in the caller's tenant already (RLS)."""
+    return RevisionOut(
+        id=rev.id,
+        entity_kind=rev.entity_kind,
+        entity_id=rev.entity_id,
+        snapshot=rev.snapshot or {},
+        changed_fields=list(rev.changed_fields or []),
+        channel=rev.channel,
+        actor_id=rev.actor_id,
+        actor_kind=rev.actor_kind,
+        actor_subject_id=rev.actor_subject_id,
+        edit_session_id=rev.edit_session_id,
+        version_from=rev.version_from,
+        version_to=rev.version_to,
+        edit_count=rev.edit_count,
+        started_at=rev.started_at,
+        last_edit_at=rev.last_edit_at,
+        sealed_at=rev.sealed_at,
+        restored_from=rev.restored_from,
+    )
+
+
+@router.get("/{note_id}/revisions", response_model=list[RevisionOut])
+async def list_note_revisions(
+    note_id: uuid.UUID,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    before: Annotated[datetime.datetime | None, Query()] = None,
+) -> list[RevisionOut]:
+    """Timeline of revisions for this note, most recent first."""
+    await svc.get_note(ctx.session, org_id=ctx.org_id, note_id=note_id, include_deleted=True)
+    rows = await rev_svc.list_revisions(
+        ctx.session,
+        entity_kind=rev_svc.ENTITY_KIND_NOTE,
+        entity_id=note_id,
+        limit=limit,
+        before=before,
+    )
+    return [_revision_out(r) for r in rows]
+
+
+@router.get("/{note_id}/revisions/{rev_id}", response_model=RevisionOut)
+async def get_note_revision(
+    note_id: uuid.UUID,
+    rev_id: uuid.UUID,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+) -> RevisionOut:
+    rev = await rev_svc.get_revision(
+        ctx.session,
+        revision_id=rev_id,
+        entity_kind=rev_svc.ENTITY_KIND_NOTE,
+        entity_id=note_id,
+    )
+    return _revision_out(rev)
+
+
+@router.post("/{note_id}/revisions/{rev_id}/restore", response_model=VersionOut)
+async def restore_note_revision(
+    note_id: uuid.UUID,
+    rev_id: uuid.UUID,
+    body: RevisionRestoreIn,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+) -> VersionOut:
+    """Apply the snapshot's restorable fields (``title`` /
+    ``transcript``) back to the note. Logged as a NEW sealed
+    revision on the ``restore`` channel with ``restored_from``."""
+    version = await svc.restore_revision(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        note_id=note_id,
+        revision_id=rev_id,
+        expected_version=body.expected_version,
+        fields=body.fields,
+    )
+    return VersionOut(id=note_id, version=version)
+
+
+@router.post("/{note_id}/edit-session/seal", response_model=EditSessionSealOut)
+async def seal_note_edit_session(
+    note_id: uuid.UUID,
+    body: EditSessionSealIn,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+) -> EditSessionSealOut:
+    count = await rev_svc.seal_open(
+        ctx.session,
+        entity_kind=rev_svc.ENTITY_KIND_NOTE,
+        entity_id=note_id,
+        actor_id=ctx.user_id,
+        edit_session_id=body.edit_session_id,
+    )
+    return EditSessionSealOut(sealed=count)

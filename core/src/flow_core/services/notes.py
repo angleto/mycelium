@@ -42,6 +42,7 @@ from flow_core.models.tag import Tag, TagKind
 from flow_core.models.task import Task
 from flow_core.models.task_tag import TaskTag
 from flow_core.services import audit, billing, lifecycle, taxonomy
+from flow_core.services import entity_revisions as _revisions
 from flow_core.services import memory as memory_svc
 from flow_core.services import note_links as note_links_svc
 from flow_core.services.rbac import require_role
@@ -249,6 +250,40 @@ async def detach_tag(
     )
 
 
+async def _log_note_revision(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    note_id: uuid.UUID,
+    version_from: int,
+    version_to: int,
+    changed_fields: list[str],
+    channel: str,
+    edit_session_id: str | None,
+    restored_from: uuid.UUID | None = None,
+) -> None:
+    """Recovery-history entry for a note mutation. Reads the note back
+    so the snapshot reflects the post-update state (the Core UPDATE
+    inside ``optimistic_update`` bypasses the ORM mapper)."""
+    fresh = await get_note(session, org_id=org_id, note_id=note_id, include_deleted=True)
+    snapshot = await _revisions.snapshot_note(session, fresh)
+    await _revisions.append(
+        session,
+        org_id=org_id,
+        entity_kind=_revisions.ENTITY_KIND_NOTE,
+        entity_id=note_id,
+        actor_id=actor_id,
+        snapshot=snapshot,
+        changed_fields=changed_fields,
+        channel=channel,
+        version_from=version_from,
+        version_to=version_to,
+        edit_session_id=edit_session_id,
+        restored_from=restored_from,
+    )
+
+
 async def _note_set(
     session: AsyncSession,
     *,
@@ -258,12 +293,15 @@ async def _note_set(
     expected_version: int,
     values: dict[str, Any],
     action: str,
+    channel: str = "system",
+    edit_session_id: str | None = None,
+    restored_from: uuid.UUID | None = None,
 ) -> int:
     # Validate existence (include deleted: restore needs to see the
     # soft-deleted row). Flag flip + audit shared with tasks via
     # lifecycle.transition.
     await get_note(session, org_id=org_id, note_id=note_id, include_deleted=True)
-    return await lifecycle.transition(
+    new_version = await lifecycle.transition(
         session,
         model_cls=Note,
         org_id=org_id,
@@ -273,6 +311,68 @@ async def _note_set(
         values=values,
         audit_entity="note",
         audit_action=action,
+    )
+    # ``_note_set`` is the shared entry point for both content edits
+    # (update_note) and lifecycle transitions (archive/delete/restore).
+    # The caller picks the right ``changed_fields`` tag through
+    # ``action``; content edits add the actual column names so the
+    # timeline still shows what was touched.
+    if action == "update":
+        fields = list(values.keys())
+    else:
+        fields = [f"_{action}", *values.keys()]
+    await _log_note_revision(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        note_id=note_id,
+        version_from=expected_version,
+        version_to=new_version,
+        changed_fields=fields,
+        channel=channel,
+        edit_session_id=edit_session_id,
+        restored_from=restored_from,
+    )
+    return new_version
+
+
+async def restore_revision(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    note_id: uuid.UUID,
+    revision_id: uuid.UUID,
+    expected_version: int,
+    fields: Sequence[str] | None = None,
+) -> int:
+    """Revert a note's restorable fields (``title`` / ``transcript``)
+    to the snapshot stored in ``revision_id``. Produces a NEW sealed
+    revision on the ``restore`` channel with ``restored_from``
+    pointing at the source revision."""
+    revision = await _revisions.get_revision(
+        session,
+        revision_id=revision_id,
+        entity_kind=_revisions.ENTITY_KIND_NOTE,
+        entity_id=note_id,
+    )
+    payload = _revisions.restorable_payload(revision, fields=fields)
+    if not payload:
+        raise DomainError(MessageCode.DOMAIN_ERROR)
+    # The snapshot stores the column name ``transcript``; that matches
+    # the DB column so it lands straight in ``values``. No type
+    # coercion needed: both restorable fields are plain strings.
+    return await _note_set(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        note_id=note_id,
+        expected_version=expected_version,
+        values=dict(payload),
+        action="restore_revision",
+        channel="restore",
+        edit_session_id=None,
+        restored_from=revision_id,
     )
 
 
@@ -287,6 +387,12 @@ async def update_note(
     text: str | None = None,
     task_id: uuid.UUID | None | _Unset = _UNSET,
     audio_ref: str | None | _Unset = _UNSET,
+    # Recovery history. ``channel='web'`` plus an ``edit_session_id``
+    # coalesces consecutive PATCHes from the same SPA session into a
+    # single open revision (autosave-friendly). Other channels write
+    # sealed-on-arrival rows.
+    channel: str = "api",
+    edit_session_id: str | None = None,
 ) -> int:
     """Edit title/body. When the title is blank it is re-derived from
     the first line of the body (Apple Notes style).
@@ -327,6 +433,8 @@ async def update_note(
         expected_version=expected_version,
         values=values,
         action="update",
+        channel=channel,
+        edit_session_id=edit_session_id,
     )
     if pending_task_link[0]:
         new_task_id = pending_task_link[1]
@@ -414,6 +522,11 @@ async def create_note(
     text: str | None = None,
     audio_ref: str | None = None,
     audio_seconds: int | None = None,
+    # Recovery history: the channel this create came in through. The
+    # baseline revision is written sealed so the timeline shows the
+    # note's starting point.
+    channel: str = "api",
+    edit_session_id: str | None = None,
 ) -> Note:
     """Capture only. NOT metered, works at zero credits (ADR-0020:
     never lose the idea)."""
@@ -464,6 +577,17 @@ async def create_note(
         entity="note",
         entity_id=note.id,
         action="create",
+    )
+    await _log_note_revision(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        note_id=note.id,
+        version_from=note.version,
+        version_to=note.version,
+        changed_fields=["_create"],
+        channel=channel,
+        edit_session_id=edit_session_id,
     )
     return note
 

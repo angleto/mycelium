@@ -18,7 +18,9 @@ import { VoiceRecorder } from '../components/VoiceRecorder'
 import { TaskTimer } from '../components/TaskTimer'
 import { Attachments } from '../components/Attachments'
 import { LinkedTasksPanel } from '../components/LinkedTasksPanel'
+import { RevisionsPanel } from '../components/RevisionsPanel'
 import { useFocus } from '../lib/focus'
+import { useEditSession } from '../lib/useEditSession'
 import type { components } from '../api/schema'
 
 type Note = components['schemas']['NoteOut']
@@ -337,13 +339,32 @@ export function NotesRoute() {
     await openEdit(data)
   }
 
+  // Recovery-history coalescing on the SPA: a per-note editing
+  // session id rides every autosave PATCH as ``X-Edit-Session-Id``;
+  // the server merges consecutive PATCHes that share it into one
+  // open revision. On unmount / 30s idle the session is sealed and
+  // the next edit mints a fresh id; ``editSession.seal`` also fires
+  // POST /edit-session/seal so the timeline closes the window
+  // immediately rather than waiting 60s for the worker safety net.
+  const editSession = useEditSession((sealedId) => {
+    if (!sel) return
+    void api.POST('/notes/{note_id}/edit-session/seal', {
+      params: { header: workspaceHeader(), path: { note_id: sel.id } },
+      body: { edit_session_id: sealedId },
+    })
+  })
+
   const autoSaveNote = useCallback(async () => {
     if (!sel || sel.kind === 'conversation') return
     if (eTitle === savedSnap.current.title && eText === savedSnap.current.text)
       return
     setNoteSaving(true)
+    const sessionId = editSession.touch()
     const { data, error, response } = await api.PATCH('/notes/{note_id}', {
-      params: { header: workspaceHeader(), path: { note_id: sel.id } },
+      params: {
+        header: { ...workspaceHeader(), 'X-Edit-Session-Id': sessionId },
+        path: { note_id: sel.id },
+      },
       body: { expected_version: sel.version, title: eTitle, text: eText },
     })
     setNoteSaving(false)
@@ -358,7 +379,7 @@ export function NotesRoute() {
     }
     savedSnap.current = { title: eTitle, text: eText }
     setSel((p) => (p ? { ...p, version: data.version, title: eTitle } : p))
-  }, [sel, eTitle, eText, t, loadNotes])
+  }, [sel, eTitle, eText, t, loadNotes, editSession])
 
   // Debounced autosave (1.2s after the last keystroke).
   useEffect(() => {
@@ -897,6 +918,12 @@ export function NotesRoute() {
                 </div>
                 <Attachments noteId={sel.id} />
                 <LinkedTasksPanel noteId={sel.id} />
+                <RevisionsPanel
+                  kind="note"
+                  id={sel.id}
+                  version={sel.version}
+                  onRestored={() => void refreshSel()}
+                />
               </div>
             )}
             {!creating && sel && sel.kind !== 'conversation' && (

@@ -28,6 +28,7 @@ from flow_core.models.task_tag import TaskTag
 from flow_core.models.user import User
 from flow_core.models.workflow import WorkflowState
 from flow_core.services import audit, lifecycle, taxonomy
+from flow_core.services import entity_revisions as _revisions
 from flow_core.services import identities as identities_svc
 from flow_core.services import task_search as _task_search
 from flow_core.services import workflow as wf
@@ -105,6 +106,49 @@ async def get_task(
     return task
 
 
+async def _log_task_revision(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    task_id: uuid.UUID,
+    version_from: int,
+    version_to: int,
+    changed_fields: list[str],
+    channel: str,
+    edit_session_id: str | None,
+    restored_from: uuid.UUID | None = None,
+) -> None:
+    """Persist a recovery-history entry for a task mutation.
+
+    Reads the task back so the snapshot reflects the post-update
+    state (the Core UPDATE in ``optimistic_update`` bypasses the ORM
+    mapper, so any in-memory copy is stale). ``include_deleted=True``
+    is required for the soft-delete path: the row exists, just with
+    ``deleted_at`` set.
+
+    ``restored_from`` chains a restore revision back to the source
+    revision so the timeline shows ``restored from #abcd1234`` next
+    to the new sealed row.
+    """
+    fresh = await get_task(session, org_id=org_id, task_id=task_id, include_deleted=True)
+    snapshot = await _revisions.snapshot_task(session, fresh)
+    await _revisions.append(
+        session,
+        org_id=org_id,
+        entity_kind=_revisions.ENTITY_KIND_TASK,
+        entity_id=task_id,
+        actor_id=actor_id,
+        snapshot=snapshot,
+        changed_fields=changed_fields,
+        channel=channel,
+        version_from=version_from,
+        version_to=version_to,
+        edit_session_id=edit_session_id,
+        restored_from=restored_from,
+    )
+
+
 async def create_task(
     session: AsyncSession,
     *,
@@ -161,6 +205,12 @@ async def create_task(
     start_at: dt.datetime | None = None,
     duration_minutes: int | None = None,
     recurrence: dict[str, Any] | None = None,
+    # Recovery history: the channel this create came in through, plus
+    # an optional editing-session id when the SPA wants the first
+    # snapshot to be attributable to the same session as the upcoming
+    # edits. Default ``"api"`` for callers that don't know.
+    channel: str = "api",
+    edit_session_id: str | None = None,
 ) -> Task:
     _validate_event_pairing(start_at, duration_minutes)
     await require_role(session, org_id, actor_id, Role.member)
@@ -318,6 +368,20 @@ async def create_task(
         entity_id=task.id,
         action="create",
     )
+    # Recovery-history baseline: a sealed revision at the moment of
+    # creation. Lets the timeline show the task's starting point and
+    # gives a non-empty restore target for the very first edit.
+    await _log_task_revision(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        task_id=task.id,
+        version_from=task.version,
+        version_to=task.version,
+        changed_fields=["_create"],
+        channel=channel,
+        edit_session_id=edit_session_id,
+    )
     return task
 
 
@@ -397,6 +461,13 @@ async def update_task(
     task_id: uuid.UUID,
     expected_version: int,
     values: dict[str, Any],
+    # Recovery history (channel-aware coalescing). When ``channel='web'``
+    # and ``edit_session_id`` is set, consecutive PATCH calls that share
+    # the session id coalesce into a single open revision; otherwise a
+    # sealed revision is appended per call.
+    channel: str = "api",
+    edit_session_id: str | None = None,
+    restored_from: uuid.UUID | None = None,
 ) -> int:
     # ``assignee_handle`` is a convenience input that we resolve to
     # ``assignee_id`` below; it is not a column itself but we tolerate
@@ -468,7 +539,94 @@ async def update_task(
         action="update",
         diff={k: str(v) for k, v in values.items()},
     )
+    await _log_task_revision(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        task_id=task_id,
+        version_from=expected_version,
+        version_to=new_version,
+        changed_fields=list(values.keys()),
+        channel=channel,
+        edit_session_id=edit_session_id,
+        restored_from=restored_from,
+    )
     return new_version
+
+
+def _coerce_task_restore_values(payload: dict[str, Any]) -> dict[str, Any]:
+    """JSON snapshot values come back as strings (Decimal, date,
+    datetime, UUID) per ``_json_safe`` in entity_revisions; coerce
+    them back to Python types the service layer / SQLAlchemy expect.
+    Unknown keys are filtered upstream by ``restorable_payload``.
+    """
+    out: dict[str, Any] = {}
+    for key, value in payload.items():
+        if value is None:
+            out[key] = None
+            continue
+        if key in {"importance", "urgency", "duration_minutes"}:
+            out[key] = int(value)
+        elif key == "start_date":
+            out[key] = dt.date.fromisoformat(value) if isinstance(value, str) else value
+        elif key in {"due_date", "start_at"}:
+            out[key] = (
+                dt.datetime.fromisoformat(value) if isinstance(value, str) else value
+            )
+        elif key in {"estimate_effort_h", "monetary_cost"}:
+            out[key] = Decimal(value) if not isinstance(value, Decimal) else value
+        elif key in {"parent_task_id", "budget_id"}:
+            out[key] = uuid.UUID(value) if isinstance(value, str) else value
+        elif key == "necessity":
+            out[key] = Necessity(value) if not isinstance(value, Necessity) else value
+        elif key == "required_capabilities":
+            out[key] = list(value)
+        else:
+            out[key] = value
+    return out
+
+
+async def restore_revision(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    task_id: uuid.UUID,
+    revision_id: uuid.UUID,
+    expected_version: int,
+    fields: Sequence[str] | None = None,
+) -> int:
+    """Revert a task's restorable fields to the snapshot stored in
+    ``revision_id``. Produces a NEW sealed revision on the
+    ``restore`` channel with ``restored_from = revision_id``; the
+    source revision is never mutated.
+
+    ``fields=None`` restores every field allowed by
+    ``restorable_payload``; a non-empty ``fields`` narrows the
+    subset and rejects non-restorable names (DomainError) so a
+    caller can't sneak owner/state through.
+    """
+    revision = await _revisions.get_revision(
+        session,
+        revision_id=revision_id,
+        entity_kind=_revisions.ENTITY_KIND_TASK,
+        entity_id=task_id,
+    )
+    payload = _revisions.restorable_payload(revision, fields=fields)
+    values = _coerce_task_restore_values(payload)
+    if not values:
+        raise DomainError(MessageCode.DOMAIN_ERROR)
+    return await update_task(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        task_id=task_id,
+        expected_version=expected_version,
+        values=values,
+        channel="restore",
+        edit_session_id=None,
+        restored_from=revision_id,
+    )
 
 
 _SCHEDULE_FIELDS = frozenset(
@@ -572,6 +730,17 @@ async def set_state(
         entity_id=task_id,
         action="set_state",
     )
+    await _log_task_revision(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        task_id=task_id,
+        version_from=expected_version,
+        version_to=new_version,
+        changed_fields=["state_id"],
+        channel="system",
+        edit_session_id=None,
+    )
     # Coordination handoff fan-out (docs/adr/0025, P4): fire ONLY when
     # the transition crosses INTO a terminal state from a non-terminal
     # one (re-entering the same terminal state is a no-op -- idempotent
@@ -624,6 +793,20 @@ async def _set(
     # resync re-reads the task and, for soft_delete (deleted_at set),
     # the loader returns None which triggers cleanup of pointer + blob.
     _task_search.mark_task_dirty(session, task_id)
+    # Discrete lifecycle revisions land on the ``system`` channel:
+    # they're not free-text edits and don't coalesce with the SPA's
+    # editing session, but the timeline should still show them.
+    await _log_task_revision(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        task_id=task_id,
+        version_from=expected_version,
+        version_to=new_version,
+        changed_fields=[f"_{action}", *values.keys()],
+        channel="system",
+        edit_session_id=None,
+    )
     return new_version
 
 

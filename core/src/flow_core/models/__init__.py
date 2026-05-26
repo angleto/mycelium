@@ -53,6 +53,7 @@ from flow_core.models.email import (
     EmailMessage,
     EmailProvider,
 )
+from flow_core.models.entity_revision import EntityRevision
 from flow_core.models.executor import Executor, ExecutorKind
 from flow_core.models.google_calendar import (
     CalendarSubscription,
@@ -169,6 +170,7 @@ __all__ = [
     "EmailMessage",
     "EmailProvider",
     "EmailVerificationToken",
+    "EntityRevision",
     "ExecKind",
     "Executor",
     "ExecutorKind",

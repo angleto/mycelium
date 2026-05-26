@@ -332,15 +332,32 @@ async def retrieve(
             .having(func.count(func.distinct(MemoryBlobTag.tag_id)) == len(wanted))
         )
         tag_clauses = (MemoryBlob.id.in_(tagged),)
+    # Lexical branch matches on BOTH dictionaries (``simple`` for
+    # cross-language tokens like names/identifiers, ``italian`` for
+    # stemmed Italian text). Migration 0007 added ``fts_lang``; the OR
+    # is a no-op for the ``simple`` branch (recall stays >= old) and a
+    # net win for italian queries against stemmed content. ts_rank
+    # picks the better of the two so an italian match doesn't lose to
+    # a tied simple match.
     lexical = (
         select(MemoryBlob.id)
         .where(
             MemoryBlob.org_id == org_id,
             pred,
-            text("fts @@ plainto_tsquery('simple', :q)"),
+            text(
+                "(fts @@ plainto_tsquery('simple', :q)"
+                " OR fts_lang @@ plainto_tsquery('italian', :q))"
+            ),
             *tag_clauses,
         )
-        .order_by(text("ts_rank(fts, plainto_tsquery('simple', :q)) DESC"))
+        .order_by(
+            text(
+                "GREATEST("
+                "ts_rank(fts, plainto_tsquery('simple', :q)),"
+                "ts_rank(fts_lang, plainto_tsquery('italian', :q))"
+                ") DESC"
+            )
+        )
         .limit(_OVERSAMPLE)
     ).params(q=query)
 
@@ -349,6 +366,18 @@ async def retrieve(
     # lexical branch; the (org, project) + tag predicates and the RRF
     # fusion below are unchanged (RRF over one branch is well-defined).
     if qres is not None:
+        # Filtered HNSW: pgvector >= 0.7 supports iterative_scan so the
+        # (org, project, tag) predicates run BEFORE the kNN step rather
+        # than throwing the filter at the top-K from the index. Without
+        # this, a selective tag (e.g. project_id that matches 1% of
+        # blobs) would lose most candidates in the post-filter and the
+        # ranking degrades. Session-local (set_config(local=true)) so
+        # other queries in the same connection are unaffected.
+        await session.execute(text("SET LOCAL hnsw.iterative_scan = strict_order"))
+        # ``max_inner_product`` exploits the L2-normalized contract from
+        # the embedder: rank is identical to cosine_distance (since for
+        # unit-norm vectors cosine = 1 - IP) but skips the per-pair norm
+        # division. Index op class switched to ``vector_ip_ops`` in 0007.
         semantic = (
             select(MemoryBlob.id)
             .where(
@@ -357,7 +386,7 @@ async def retrieve(
                 MemoryBlob.embedding.is_not(None),
                 *tag_clauses,
             )
-            .order_by(MemoryBlob.embedding.cosine_distance(qres.vector))
+            .order_by(MemoryBlob.embedding.max_inner_product(qres.vector))
             .limit(_OVERSAMPLE)
         )
         sem = await _branch_ranks(session, semantic)

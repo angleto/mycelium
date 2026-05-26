@@ -83,6 +83,7 @@ class MessageCode(enum.StrEnum):
     MEMORY_CROSS_SUBJECT = "memory.cross_subject"
     NOTE_NOT_FOUND = "note.not_found"
     NOTE_NOT_LINKED_TO_TASK = "note.not_linked_to_task"
+    REVISION_NOT_FOUND = "revision.not_found"
     ATTACHMENT_NOT_FOUND = "attachment.not_found"
     ATTACHMENT_TOO_LARGE = "attachment.too_large"
     INTENT_UNRECOGNIZED = "intent.unrecognized"
@@ -242,6 +243,7 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
         ),
         MessageCode.NOTE_NOT_FOUND: "Note not found",
         MessageCode.NOTE_NOT_LINKED_TO_TASK: ("Link a task to the note before billing time"),
+        MessageCode.REVISION_NOT_FOUND: "Revision not found",
         MessageCode.ATTACHMENT_NOT_FOUND: "Attachment not found",
         MessageCode.ATTACHMENT_TOO_LARGE: "Attachment exceeds the maximum size",
         MessageCode.INTENT_UNRECOGNIZED: ("Command not recognized: {raw}"),

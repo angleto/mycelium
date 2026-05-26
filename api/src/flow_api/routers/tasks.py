@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import datetime
 import uuid
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from sqlalchemy import select
 
 from flow_api.deps import TenantCtx, tenant_ctx
@@ -15,6 +16,8 @@ from flow_api.schemas import (
     AttachmentOut,
     CommentCreateIn,
     CommentOut,
+    EditSessionSealIn,
+    EditSessionSealOut,
     ExpectedVersionIn,
     HandoffOut,
     NoteOut,
@@ -23,6 +26,8 @@ from flow_api.schemas import (
     ParticipantOut,
     ReminderIn,
     ReminderOut,
+    RevisionOut,
+    RevisionRestoreIn,
     StateOut,
     TagBrief,
     TagRefIn,
@@ -50,6 +55,7 @@ from flow_core.models.task_handoff import TaskHandoff
 from flow_core.models.workflow import WorkflowState
 from flow_core.services import attachments as att_svc
 from flow_core.services import coordination as coord_svc
+from flow_core.services import entity_revisions as rev_svc
 from flow_core.services import note_links as note_links_svc
 from flow_core.services import notes as notes_svc
 from flow_core.services import notifications as notif_svc
@@ -445,6 +451,7 @@ async def patch_task(
     task_id: uuid.UUID,
     body: TaskPatchIn,
     ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    edit_session_id: Annotated[str | None, Header(alias="X-Edit-Session-Id")] = None,
 ) -> TaskOut:
     # Returns the full canonical TaskOut (not just {id, version}) so any
     # caller (SPA, CLI, MCP, nvim) sees server-derived fields without an
@@ -455,6 +462,11 @@ async def patch_task(
     # that had NULL importance/urgency and showed a different priority
     # than the list/kanban — bug fixed by deleting the JS derive).
     values: dict[str, Any] = body.model_dump(exclude_unset=True, exclude={"expected_version"})
+    # ``X-Edit-Session-Id`` flips the recovery-history channel to ``web``
+    # so consecutive autosaves under the same session coalesce into one
+    # open revision. Without the header, every PATCH is a sealed
+    # revision (matches MCP / external-API semantics).
+    channel = "web" if edit_session_id else "api"
     await svc.update_task(
         ctx.session,
         org_id=ctx.org_id,
@@ -462,6 +474,8 @@ async def patch_task(
         task_id=task_id,
         expected_version=body.expected_version,
         values=values,
+        channel=channel,
+        edit_session_id=edit_session_id,
     )
     task = await svc.get_task(ctx.session, org_id=ctx.org_id, task_id=task_id, include_deleted=True)
     names = await _state_names(ctx, {task.state_id})
@@ -1151,3 +1165,111 @@ async def reorder_checklist(
         ordered_ids=body.ids,
     )
     return [_checklist_item_out(r) for r in rows]
+
+
+def _revision_out(rev: Any) -> RevisionOut:
+    """Serialize an EntityRevision ORM row. ``org_id`` is dropped: the
+    revision lives in the caller's tenant already (RLS) and the SPA
+    doesn't need it on every row."""
+    return RevisionOut(
+        id=rev.id,
+        entity_kind=rev.entity_kind,
+        entity_id=rev.entity_id,
+        snapshot=rev.snapshot or {},
+        changed_fields=list(rev.changed_fields or []),
+        channel=rev.channel,
+        actor_id=rev.actor_id,
+        actor_kind=rev.actor_kind,
+        actor_subject_id=rev.actor_subject_id,
+        edit_session_id=rev.edit_session_id,
+        version_from=rev.version_from,
+        version_to=rev.version_to,
+        edit_count=rev.edit_count,
+        started_at=rev.started_at,
+        last_edit_at=rev.last_edit_at,
+        sealed_at=rev.sealed_at,
+        restored_from=rev.restored_from,
+    )
+
+
+@router.get("/{task_id}/revisions", response_model=list[RevisionOut])
+async def list_task_revisions(
+    task_id: uuid.UUID,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    before: Annotated[datetime.datetime | None, Query()] = None,
+) -> list[RevisionOut]:
+    """Timeline of revisions, most recent first. ``before`` filters on
+    ``COALESCE(sealed_at, last_edit_at)`` so the open-window revision
+    keeps showing up at the head of the first page."""
+    # Validate existence + tenant scope before listing (RLS would also
+    # filter, but a 404 on a missing task is a friendlier surface
+    # error than an empty list).
+    await svc.get_task(ctx.session, org_id=ctx.org_id, task_id=task_id, include_deleted=True)
+    rows = await rev_svc.list_revisions(
+        ctx.session,
+        entity_kind=rev_svc.ENTITY_KIND_TASK,
+        entity_id=task_id,
+        limit=limit,
+        before=before,
+    )
+    return [_revision_out(r) for r in rows]
+
+
+@router.get("/{task_id}/revisions/{rev_id}", response_model=RevisionOut)
+async def get_task_revision(
+    task_id: uuid.UUID,
+    rev_id: uuid.UUID,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+) -> RevisionOut:
+    """Single revision lookup; 404 if the id doesn't belong to this
+    task (defense in depth on top of RLS)."""
+    rev = await rev_svc.get_revision(
+        ctx.session,
+        revision_id=rev_id,
+        entity_kind=rev_svc.ENTITY_KIND_TASK,
+        entity_id=task_id,
+    )
+    return _revision_out(rev)
+
+
+@router.post("/{task_id}/revisions/{rev_id}/restore", response_model=VersionOut)
+async def restore_task_revision(
+    task_id: uuid.UUID,
+    rev_id: uuid.UUID,
+    body: RevisionRestoreIn,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+) -> VersionOut:
+    """Apply the snapshot's restorable fields back to the task. The
+    operation is logged as a NEW sealed revision on the ``restore``
+    channel with ``restored_from = rev_id``; the source revision is
+    not mutated."""
+    version = await svc.restore_revision(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        task_id=task_id,
+        revision_id=rev_id,
+        expected_version=body.expected_version,
+        fields=body.fields,
+    )
+    return VersionOut(id=task_id, version=version)
+
+
+@router.post("/{task_id}/edit-session/seal", response_model=EditSessionSealOut)
+async def seal_task_edit_session(
+    task_id: uuid.UUID,
+    body: EditSessionSealIn,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+) -> EditSessionSealOut:
+    """Client-initiated seal of the open web revision for the given
+    ``edit_session_id``. Idempotent: closing an already-sealed (or
+    never-opened) session returns ``sealed = 0``."""
+    count = await rev_svc.seal_open(
+        ctx.session,
+        entity_kind=rev_svc.ENTITY_KIND_TASK,
+        entity_id=task_id,
+        actor_id=ctx.user_id,
+        edit_session_id=body.edit_session_id,
+    )
+    return EditSessionSealOut(sealed=count)

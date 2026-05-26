@@ -258,6 +258,59 @@ class VersionOut(BaseModel):
 WorkspaceVersionOut = VersionOut
 
 
+class RevisionOut(BaseModel):
+    """One entry of the recovery-history timeline for a task or note.
+
+    ``sealed_at = None`` flags the open-window revision the SPA can
+    label "editing in progress"; everything else is immutable.
+    """
+
+    id: uuid.UUID
+    entity_kind: str
+    entity_id: uuid.UUID
+    snapshot: dict[str, Any]
+    changed_fields: list[str]
+    channel: str
+    actor_id: uuid.UUID | None
+    actor_kind: str
+    actor_subject_id: uuid.UUID | None
+    edit_session_id: str | None
+    version_from: int
+    version_to: int
+    edit_count: int
+    started_at: datetime.datetime
+    last_edit_at: datetime.datetime
+    sealed_at: datetime.datetime | None
+    restored_from: uuid.UUID | None
+
+
+class RevisionRestoreIn(BaseModel):
+    """Body of ``POST /{tasks|notes}/{id}/revisions/{rev_id}/restore``.
+
+    ``fields`` narrows the restore to a subset of the snapshot's
+    restorable fields; ``None`` restores everything the policy
+    allows. ``expected_version`` is the standard optimistic-lock
+    guard against a stale UI.
+    """
+
+    expected_version: int = Field(ge=1)
+    fields: list[str] | None = None
+
+
+class EditSessionSealIn(BaseModel):
+    """Body of ``POST /{tasks|notes}/{id}/edit-session/seal``.
+
+    Idempotent close of the open web revision matching this
+    ``edit_session_id``. Returns ``{sealed: <int>}`` (the count of
+    rows actually transitioned to sealed)."""
+
+    edit_session_id: str = Field(min_length=1, max_length=128)
+
+
+class EditSessionSealOut(BaseModel):
+    sealed: int
+
+
 class TrashEmptyOut(BaseModel):
     """Counts of rows purged by ``POST /workspaces/me/trash/empty``."""
 

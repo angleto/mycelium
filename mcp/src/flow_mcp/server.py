@@ -62,6 +62,7 @@ from flow_core.services import coordination as coordination_svc
 from flow_core.services import dependencies, scheduler, tasks, taxonomy
 from flow_core.services import dispatch_loop as dispatch_loop_svc
 from flow_core.services import email as email_svc
+from flow_core.services import entity_revisions as revisions_svc
 from flow_core.services import executors as executors_svc
 from flow_core.services import invoice as invoice_svc
 from flow_core.services import memory as memory_svc
@@ -562,6 +563,7 @@ async def create_task(
             start_at=dt.datetime.fromisoformat(start_at) if start_at else None,
             duration_minutes=duration_minutes,
             recurrence=recurrence,
+            channel="mcp",
         )
         return _task(task)
 
@@ -784,6 +786,7 @@ async def update_task(
             task_id=uuid.UUID(task_id),
             expected_version=expected_version,
             values=values,
+            channel="mcp",
         )
         return {"task_id": task_id, "version": version}
 
@@ -2837,6 +2840,7 @@ async def create_note(
             project_id=uuid.UUID(project_id) if project_id else None,
             title=title,
             text=text,
+            channel="mcp",
         )
         tagmap = await notes_svc.tags_by_note(s, note_ids=[n.id])
         pid = await note_links_svc.primary_task_id_for_note(s, org_id=org, note_id=n.id)
@@ -2971,6 +2975,7 @@ async def update_note(
             expected_version=expected_version,
             title=title,
             text=text,
+            channel="mcp",
             **extra,
         )
         return {"note_id": note_id, "version": version}
@@ -4081,3 +4086,174 @@ async def clear_done(
             task_id=uuid.UUID(task_id),
         )
         return {"task_id": task_id, "removed": removed}
+
+
+def _revision_payload(rev: Any) -> dict[str, Any]:
+    """Serialize an EntityRevision row into the JSON shape returned by
+    every revision-flavored MCP tool. ``snapshot`` is already JSON-
+    safe (the service coerces Decimal/date/UUID at write time)."""
+    return {
+        "id": str(rev.id),
+        "entity_kind": rev.entity_kind,
+        "entity_id": str(rev.entity_id),
+        "snapshot": rev.snapshot or {},
+        "changed_fields": list(rev.changed_fields or []),
+        "channel": rev.channel,
+        "actor_id": str(rev.actor_id) if rev.actor_id else None,
+        "actor_kind": rev.actor_kind,
+        "actor_subject_id": (
+            str(rev.actor_subject_id) if rev.actor_subject_id else None
+        ),
+        "edit_session_id": rev.edit_session_id,
+        "version_from": rev.version_from,
+        "version_to": rev.version_to,
+        "edit_count": rev.edit_count,
+        "started_at": rev.started_at.isoformat() if rev.started_at else None,
+        "last_edit_at": rev.last_edit_at.isoformat() if rev.last_edit_at else None,
+        "sealed_at": rev.sealed_at.isoformat() if rev.sealed_at else None,
+        "restored_from": str(rev.restored_from) if rev.restored_from else None,
+    }
+
+
+@mcp.tool()
+async def list_task_revisions(
+    token: str,
+    org_id: str,
+    task_id: str,
+    limit: int = 50,
+    before: str | None = None,
+) -> list[dict[str, Any]]:
+    """Recovery-history timeline for a task, most recent first.
+    ``before`` is an ISO-8601 timestamp that filters on
+    ``COALESCE(sealed_at, last_edit_at)`` and supports cursor-style
+    paging. The open-window revision (sealed_at IS NULL) is included
+    at the head of the first page when present."""
+    cutoff = dt.datetime.fromisoformat(before) if before else None
+    async with _tenant(token, org_id) as (s, org, _user):
+        await tasks.get_task(
+            s, org_id=org, task_id=uuid.UUID(task_id), include_deleted=True
+        )
+        rows = await revisions_svc.list_revisions(
+            s,
+            entity_kind=revisions_svc.ENTITY_KIND_TASK,
+            entity_id=uuid.UUID(task_id),
+            limit=limit,
+            before=cutoff,
+        )
+        return [_revision_payload(r) for r in rows]
+
+
+@mcp.tool()
+async def get_task_revision(
+    token: str,
+    org_id: str,
+    task_id: str,
+    revision_id: str,
+) -> dict[str, Any]:
+    """Single revision lookup; 404 if the id doesn't belong to this
+    task (defense in depth on top of RLS)."""
+    async with _tenant(token, org_id) as (s, _org, _user):
+        rev = await revisions_svc.get_revision(
+            s,
+            revision_id=uuid.UUID(revision_id),
+            entity_kind=revisions_svc.ENTITY_KIND_TASK,
+            entity_id=uuid.UUID(task_id),
+        )
+        return _revision_payload(rev)
+
+
+@mcp.tool()
+async def restore_task_revision(
+    token: str,
+    org_id: str,
+    task_id: str,
+    revision_id: str,
+    expected_version: int,
+    fields: list[str] | None = None,
+) -> dict[str, Any]:
+    """Revert a task's restorable content fields to a past revision.
+    ``fields`` narrows the restore to a subset (omit for the full
+    restorable payload). Identity/state columns are filtered out by
+    the service. Produces a NEW sealed revision on the ``restore``
+    channel; the source revision is not mutated."""
+    async with _tenant(token, org_id) as (s, org, user):
+        version = await tasks.restore_revision(
+            s,
+            org_id=org,
+            actor_id=user,
+            task_id=uuid.UUID(task_id),
+            revision_id=uuid.UUID(revision_id),
+            expected_version=expected_version,
+            fields=fields,
+        )
+        return {"task_id": task_id, "version": version}
+
+
+@mcp.tool()
+async def list_note_revisions(
+    token: str,
+    org_id: str,
+    note_id: str,
+    limit: int = 50,
+    before: str | None = None,
+) -> list[dict[str, Any]]:
+    """Recovery-history timeline for a note, most recent first.
+    Symmetric to ``list_task_revisions``."""
+    cutoff = dt.datetime.fromisoformat(before) if before else None
+    async with _tenant(token, org_id) as (s, org, _user):
+        await notes_svc.get_note(
+            s, org_id=org, note_id=uuid.UUID(note_id), include_deleted=True
+        )
+        rows = await revisions_svc.list_revisions(
+            s,
+            entity_kind=revisions_svc.ENTITY_KIND_NOTE,
+            entity_id=uuid.UUID(note_id),
+            limit=limit,
+            before=cutoff,
+        )
+        return [_revision_payload(r) for r in rows]
+
+
+@mcp.tool()
+async def get_note_revision(
+    token: str,
+    org_id: str,
+    note_id: str,
+    revision_id: str,
+) -> dict[str, Any]:
+    """Single note-revision lookup; 404 if the id doesn't belong to
+    this note."""
+    async with _tenant(token, org_id) as (s, _org, _user):
+        rev = await revisions_svc.get_revision(
+            s,
+            revision_id=uuid.UUID(revision_id),
+            entity_kind=revisions_svc.ENTITY_KIND_NOTE,
+            entity_id=uuid.UUID(note_id),
+        )
+        return _revision_payload(rev)
+
+
+@mcp.tool()
+async def restore_note_revision(
+    token: str,
+    org_id: str,
+    note_id: str,
+    revision_id: str,
+    expected_version: int,
+    fields: list[str] | None = None,
+) -> dict[str, Any]:
+    """Revert a note's ``title`` / ``transcript`` to a past revision.
+    ``fields`` narrows the restore to one of the two; omitting it
+    restores both. Lifecycle / status / linkage are intentionally
+    not restorable."""
+    async with _tenant(token, org_id) as (s, org, user):
+        version = await notes_svc.restore_revision(
+            s,
+            org_id=org,
+            actor_id=user,
+            note_id=uuid.UUID(note_id),
+            revision_id=uuid.UUID(revision_id),
+            expected_version=expected_version,
+            fields=fields,
+        )
+        return {"note_id": note_id, "version": version}

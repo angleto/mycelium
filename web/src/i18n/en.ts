@@ -618,6 +618,27 @@ export const en = {
     noMatch: 'No match',
     overlap: 'Already busy in another overlapping appointment.',
   },
+  revisions: {
+    title: 'History',
+    loading: 'Loading history…',
+    empty: 'No revisions yet.',
+    editing: 'editing',
+    restore: 'Restore',
+    restoring: 'Restoring…',
+    restoredFrom: 'restore',
+    confirmRestore:
+      'Revert this entity to the snapshot of this revision? A new restore entry will be added to the history.',
+    channel: {
+      web: 'web',
+      api: 'api',
+      mcp: 'mcp',
+      worker: 'worker',
+      cli: 'cli',
+      telegram: 'telegram',
+      restore: 'restore',
+      system: 'system',
+    },
+  },
   ownerPicker: {
     none: 'No owner',
     search: 'Search a user…',

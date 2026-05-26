@@ -617,6 +617,27 @@ export const it: Catalog = {
     noMatch: 'Nessun risultato',
     overlap: 'Gia occupato in un altro appuntamento sovrapposto.',
   },
+  revisions: {
+    title: 'Cronologia',
+    loading: 'Caricamento cronologia…',
+    empty: 'Nessuna revisione.',
+    editing: 'in modifica',
+    restore: 'Ripristina',
+    restoring: 'Ripristino…',
+    restoredFrom: 'ripristino',
+    confirmRestore:
+      "Ripristinare questa entita allo snapshot di questa revisione? Sara aggiunta una nuova voce 'restore' in cronologia.",
+    channel: {
+      web: 'web',
+      api: 'api',
+      mcp: 'mcp',
+      worker: 'worker',
+      cli: 'cli',
+      telegram: 'telegram',
+      restore: 'restore',
+      system: 'sistema',
+    },
+  },
   ownerPicker: {
     none: 'Nessun responsabile',
     search: 'Cerca un utente…',

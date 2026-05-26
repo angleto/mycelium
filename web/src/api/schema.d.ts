@@ -998,6 +998,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/tasks/{task_id}/note-links": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Task Note Links
+         * @description Symmetric to ``GET /notes/{note_id}/links`` but task-side: every
+         *     typed note↔task link touching ``task_id`` (all four kinds). The
+         *     drawer pairs each link with a note title fetched separately so the
+         *     payload stays slim.
+         */
+        get: operations["list_task_note_links_tasks__task_id__note_links_get"];
+        put?: never;
+        /**
+         * Add Task Note Link
+         * @description Task-side mirror of ``POST /notes/{note_id}/task-links``. Only
+         *     ``subject`` / ``artifact`` accepted; ``derived_from`` and
+         *     ``promoted_from`` are emitted only by the dedicated creation
+         *     endpoints on the note side.
+         */
+        post: operations["add_task_note_link_tasks__task_id__note_links_post"];
+        /**
+         * Remove Task Note Link
+         * @description Task-side delete. Same semantics as the note-side endpoint
+         *     (``promoted_from`` refused, idempotent 404 only if nothing matched).
+         */
+        delete: operations["remove_task_note_link_tasks__task_id__note_links_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/tasks/{task_id}/handoffs": {
         parameters: {
             query?: never;
@@ -1149,6 +1184,94 @@ export interface paths {
         put?: never;
         /** Reorder Checklist */
         post: operations["reorder_checklist_tasks__task_id__checklist_reorder_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tasks/{task_id}/revisions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Task Revisions
+         * @description Timeline of revisions, most recent first. ``before`` filters on
+         *     ``COALESCE(sealed_at, last_edit_at)`` so the open-window revision
+         *     keeps showing up at the head of the first page.
+         */
+        get: operations["list_task_revisions_tasks__task_id__revisions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tasks/{task_id}/revisions/{rev_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Task Revision
+         * @description Single revision lookup; 404 if the id doesn't belong to this
+         *     task (defense in depth on top of RLS).
+         */
+        get: operations["get_task_revision_tasks__task_id__revisions__rev_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tasks/{task_id}/revisions/{rev_id}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Restore Task Revision
+         * @description Apply the snapshot's restorable fields back to the task. The
+         *     operation is logged as a NEW sealed revision on the ``restore``
+         *     channel with ``restored_from = rev_id``; the source revision is
+         *     not mutated.
+         */
+        post: operations["restore_task_revision_tasks__task_id__revisions__rev_id__restore_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tasks/{task_id}/edit-session/seal": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Seal Task Edit Session
+         * @description Client-initiated seal of the open web revision for the given
+         *     ``edit_session_id``. Idempotent: closing an already-sealed (or
+         *     never-opened) session returns ``sealed = 0``.
+         */
+        post: operations["seal_task_edit_session_tasks__task_id__edit_session_seal_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2653,6 +2776,33 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/search/reindex": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reindex
+         * @description Index every task that pre-dates the task-search deploy in this
+         *     workspace. Admin-gated (the same sudo lever used by other tenant
+         *     maintenance endpoints) because it touches every row.
+         *
+         *     Runs the same ``_resync_task_blob`` the listener path runs on a
+         *     fresh mutation, in one transaction, capped at ``batch_size``
+         *     (default 200). Idempotent: tasks that already have a pointer are
+         *     skipped by the SELECT itself.
+         */
+        post: operations["reindex_search_reindex_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/notes": {
         parameters: {
             query?: never;
@@ -3033,6 +3183,113 @@ export interface paths {
         post: operations["link_notes_notes__note_id__links_post"];
         /** Unlink Notes */
         delete: operations["unlink_notes_notes__note_id__links_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/notes/{note_id}/task-links": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Add Note Task Link
+         * @description Create a typed note↔task link from the note side. ``kind`` picks
+         *     the named operation: ``subject`` → start_task_on_note,
+         *     ``artifact`` → record_task_artifact. ``derived_from`` and
+         *     ``promoted_from`` are intentionally NOT accepted here: those are
+         *     creation-with-link operations, not free linkage (see
+         *     /notes/{id}/derive-task and /promote).
+         */
+        post: operations["add_note_task_link_notes__note_id__task_links_post"];
+        /**
+         * Remove Note Task Link
+         * @description Idempotent removal: returns 404 only if no row matched. Refuses
+         *     ``promoted_from`` (a transplant cannot be undone via unlink; the
+         *     note has ``promoted_at`` set as a side-effect).
+         */
+        delete: operations["remove_note_task_link_notes__note_id__task_links_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/notes/{note_id}/revisions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Note Revisions
+         * @description Timeline of revisions for this note, most recent first.
+         */
+        get: operations["list_note_revisions_notes__note_id__revisions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/notes/{note_id}/revisions/{rev_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Note Revision */
+        get: operations["get_note_revision_notes__note_id__revisions__rev_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/notes/{note_id}/revisions/{rev_id}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Restore Note Revision
+         * @description Apply the snapshot's restorable fields (``title`` /
+         *     ``transcript``) back to the note. Logged as a NEW sealed
+         *     revision on the ``restore`` channel with ``restored_from``.
+         */
+        post: operations["restore_note_revision_notes__note_id__revisions__rev_id__restore_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/notes/{note_id}/edit-session/seal": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Seal Note Edit Session */
+        post: operations["seal_note_edit_session_notes__note_id__edit_session_seal_post"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -4547,6 +4804,23 @@ export interface components {
          * @enum {string}
          */
         DocumentType: "TD01" | "TD04";
+        /**
+         * EditSessionSealIn
+         * @description Body of ``POST /{tasks|notes}/{id}/edit-session/seal``.
+         *
+         *     Idempotent close of the open web revision matching this
+         *     ``edit_session_id``. Returns ``{sealed: <int>}`` (the count of
+         *     rows actually transitioned to sealed).
+         */
+        EditSessionSealIn: {
+            /** Edit Session Id */
+            edit_session_id: string;
+        };
+        /** EditSessionSealOut */
+        EditSessionSealOut: {
+            /** Sealed */
+            sealed: number;
+        };
         /** EmailAccountCreateIn */
         EmailAccountCreateIn: {
             provider: components["schemas"]["EmailProvider"];
@@ -5917,6 +6191,22 @@ export interface components {
              */
             tag_id: string;
         };
+        /**
+         * NoteTaskLinkIn
+         * @description Body for POST /notes/{id}/task-links and POST /tasks/{id}/note-links.
+         *     Only ``subject`` and ``artifact`` are accepted here; ``derived_from``
+         *     and ``promoted_from`` are creation-with-link operations exposed via
+         *     their dedicated endpoints (derive-task / promote).
+         */
+        NoteTaskLinkIn: {
+            /**
+             * Task Id
+             * Format: uuid
+             */
+            task_id: string;
+            /** Kind */
+            kind: string;
+        };
         /** NoteTaskLinkOut */
         NoteTaskLinkOut: {
             /**
@@ -6337,6 +6627,27 @@ export interface components {
             /** Refresh Token */
             refresh_token: string;
         };
+        /** ReindexIn */
+        ReindexIn: {
+            /**
+             * Batch Size
+             * @default 200
+             */
+            batch_size?: number;
+        };
+        /**
+         * ReindexOut
+         * @description Result of a one-shot pointer backfill. ``indexed`` is the count
+         *     of tasks that got a pointer + blob in this call; if it equals
+         *     ``batch_size`` there are more tasks to process and the caller
+         *     should re-invoke (or wait for the periodic worker tick).
+         */
+        ReindexOut: {
+            /** Indexed */
+            indexed: number;
+            /** Batch Size */
+            batch_size: number;
+        };
         /** ReminderIn */
         ReminderIn: {
             /** Offset Minutes */
@@ -6383,6 +6694,78 @@ export interface components {
             token: string;
             /** New Password */
             new_password: string;
+        };
+        /**
+         * RevisionOut
+         * @description One entry of the recovery-history timeline for a task or note.
+         *
+         *     ``sealed_at = None`` flags the open-window revision the SPA can
+         *     label "editing in progress"; everything else is immutable.
+         */
+        RevisionOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Entity Kind */
+            entity_kind: string;
+            /**
+             * Entity Id
+             * Format: uuid
+             */
+            entity_id: string;
+            /** Snapshot */
+            snapshot: {
+                [key: string]: unknown;
+            };
+            /** Changed Fields */
+            changed_fields: string[];
+            /** Channel */
+            channel: string;
+            /** Actor Id */
+            actor_id: string | null;
+            /** Actor Kind */
+            actor_kind: string;
+            /** Actor Subject Id */
+            actor_subject_id: string | null;
+            /** Edit Session Id */
+            edit_session_id: string | null;
+            /** Version From */
+            version_from: number;
+            /** Version To */
+            version_to: number;
+            /** Edit Count */
+            edit_count: number;
+            /**
+             * Started At
+             * Format: date-time
+             */
+            started_at: string;
+            /**
+             * Last Edit At
+             * Format: date-time
+             */
+            last_edit_at: string;
+            /** Sealed At */
+            sealed_at: string | null;
+            /** Restored From */
+            restored_from: string | null;
+        };
+        /**
+         * RevisionRestoreIn
+         * @description Body of ``POST /{tasks|notes}/{id}/revisions/{rev_id}/restore``.
+         *
+         *     ``fields`` narrows the restore to a subset of the snapshot's
+         *     restorable fields; ``None`` restores everything the policy
+         *     allows. ``expected_version`` is the standard optimistic-lock
+         *     guard against a stale UI.
+         */
+        RevisionRestoreIn: {
+            /** Expected Version */
+            expected_version: number;
+            /** Fields */
+            fields?: string[] | null;
         };
         /**
          * ScheduleMode
@@ -6884,6 +7267,38 @@ export interface components {
             title?: string | null;
             /** Text */
             text?: string | null;
+        };
+        /**
+         * TaskNoteLinkIn
+         * @description Body for POST /tasks/{id}/note-links. Mirror of NoteTaskLinkIn
+         *     from the task-side (the note id lives in the body).
+         */
+        TaskNoteLinkIn: {
+            /**
+             * Note Id
+             * Format: uuid
+             */
+            note_id: string;
+            /** Kind */
+            kind: string;
+        };
+        /**
+         * TaskNoteLinksOut
+         * @description Lookup payload for the task-side LinkedNotesPanel. Returns the
+         *     full set of typed note↔task relations touching ``task_id`` (all four
+         *     kinds), independent of NoteOut so list endpoints stay slim.
+         */
+        TaskNoteLinksOut: {
+            /**
+             * Task Id
+             * Format: uuid
+             */
+            task_id: string;
+            /**
+             * Note Links
+             * @default []
+             */
+            note_links?: components["schemas"]["NoteTaskLinkOut"][];
         };
         /** TaskOut */
         TaskOut: {
@@ -9076,6 +9491,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
+                "X-Edit-Session-Id"?: string | null;
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
                 "x-workspace-role"?: string | null;
@@ -9944,6 +10360,119 @@ export interface operations {
             };
         };
     };
+    list_task_note_links_tasks__task_id__note_links_get: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskNoteLinksOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    add_task_note_link_tasks__task_id__note_links_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TaskNoteLinkIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NoteTaskLinkOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    remove_task_note_link_tasks__task_id__note_links_delete: {
+        parameters: {
+            query: {
+                note_id: string;
+                kind: string;
+            };
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_handoffs_tasks__task_id__handoffs_get: {
         parameters: {
             query?: never;
@@ -10303,6 +10832,163 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TaskChecklistItemOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_task_revisions_tasks__task_id__revisions_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                before?: string | null;
+            };
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RevisionOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_task_revision_tasks__task_id__revisions__rev_id__get: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                task_id: string;
+                rev_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RevisionOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    restore_task_revision_tasks__task_id__revisions__rev_id__restore_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                task_id: string;
+                rev_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RevisionRestoreIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VersionOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    seal_task_edit_session_tasks__task_id__edit_session_seal_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EditSessionSealIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EditSessionSealOut"];
                 };
             };
             /** @description Validation Error */
@@ -14224,6 +14910,44 @@ export interface operations {
             };
         };
     };
+    reindex_search_reindex_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-admin-mode"?: string | null;
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReindexIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReindexOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_notes_notes_get: {
         parameters: {
             query?: {
@@ -14375,6 +15099,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
+                "X-Edit-Session-Id"?: string | null;
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
                 "x-workspace-role"?: string | null;
@@ -15242,6 +15967,240 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    add_note_task_link_notes__note_id__task_links_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                note_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NoteTaskLinkIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NoteTaskLinkOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    remove_note_task_link_notes__note_id__task_links_delete: {
+        parameters: {
+            query: {
+                task_id: string;
+                kind: string;
+            };
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                note_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_note_revisions_notes__note_id__revisions_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                before?: string | null;
+            };
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                note_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RevisionOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_note_revision_notes__note_id__revisions__rev_id__get: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                note_id: string;
+                rev_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RevisionOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    restore_note_revision_notes__note_id__revisions__rev_id__restore_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                note_id: string;
+                rev_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RevisionRestoreIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VersionOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    seal_note_edit_session_notes__note_id__edit_session_seal_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                note_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EditSessionSealIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EditSessionSealOut"];
+                };
             };
             /** @description Validation Error */
             422: {

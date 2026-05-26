@@ -15,8 +15,10 @@ import { AgentRunPanel } from '../components/AgentRunPanel'
 import { ChecklistPanel } from '../components/ChecklistPanel'
 import { CoordinationPanel } from '../components/CoordinationPanel'
 import { LinkedNotesPanel } from '../components/LinkedNotesPanel'
+import { RevisionsPanel } from '../components/RevisionsPanel'
 import { TaskTimer } from '../components/TaskTimer'
 import { formatHours } from '../lib/estimate'
+import { useEditSession } from '../lib/useEditSession'
 
 import type { components } from '../api/schema'
 
@@ -362,16 +364,35 @@ export function TaskDetailRoute() {
   // 2. ``autosaveChain`` ref serializes autosaves through a single
   //    Promise chain — each call waits for its predecessor to resolve
   //    so they always see the freshest version when they read it.
+  // Recovery-history coalescing on the SPA: a per-task editing
+  // session id rides every autosave PATCH as ``X-Edit-Session-Id``.
+  // The server merges consecutive PATCHes that share it into one
+  // open revision. When the user navigates away (unmount) or the
+  // gap exceeds 30s, the session id is sealed and a fresh one will
+  // be minted on the next edit. ``editSession.seal`` also fires the
+  // explicit /edit-session/seal POST so the timeline shows the
+  // window closed immediately, not 60s later via the worker.
+  const editSession = useEditSession((sealedId) => {
+    void api.POST('/tasks/{task_id}/edit-session/seal', {
+      params: { header: workspaceHeader(), path: { task_id: id } },
+      body: { edit_session_id: sealedId },
+    })
+  })
+
   async function autosave(patch: Record<string, unknown>) {
     if (!task) return
     const run = (autosaveChain.current ?? Promise.resolve()).then(
       async () => {
         setErr(null)
         const v = latestVersion.current ?? task.version
+        const sessionId = editSession.touch()
         const { data, error, response } = await api.PATCH(
           '/tasks/{task_id}',
           {
-            params: { header: workspaceHeader(), path: { task_id: id } },
+            params: {
+              header: { ...workspaceHeader(), 'X-Edit-Session-Id': sessionId },
+              path: { task_id: id },
+            },
             body: { expected_version: v, ...patch },
           },
         )
@@ -1370,6 +1391,13 @@ export function TaskDetailRoute() {
           <AgentRunPanel taskId={id} />
         </>
       )}
+
+      <RevisionsPanel
+        kind="task"
+        id={id}
+        version={task.version}
+        onRestored={() => void reload()}
+      />
     </section>
   )
 }

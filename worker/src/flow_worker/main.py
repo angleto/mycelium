@@ -20,6 +20,7 @@ from flow_worker import (
     dispatch,
     google_calendar,
     reminders,
+    revisions,
     task_search_backfill,
     telegram_assistant,
 )
@@ -43,6 +44,7 @@ async def _run() -> None:
         telegram_assistant.run_forever(),
         reminders.run_forever(),
         task_search_backfill.run_forever(),
+        revisions.run_forever(),
     )
 
 
