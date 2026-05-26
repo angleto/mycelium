@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { req, patchTaskWithFreshVersion, E2E_TAG_ID } from './_api'
+import { req, E2E_TAG_ID } from './_api'
 
 // Verify task d37aacd7: markdown editor image upload via file picker.
 // Drag/drop & paste paths are exercised by the same doUpload(); the
