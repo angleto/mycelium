@@ -122,7 +122,12 @@ export function TasksRoute() {
   const navigate = useNavigate()
   const session = useSession()
   const activeId = session?.workspaceId
-  const { focusIds, active: focusActive } = useFocus()
+  const {
+    focusIds,
+    active: focusActive,
+    clientId: focusClientId,
+    projectId: focusProjectId,
+  } = useFocus()
   const [tasks, setTasks] = useState<Task[]>([])
   const [tags, setTags] = useState<Tag[]>([])
   // Projects come from /projects (not /tags) because only ProjectOut
@@ -267,6 +272,7 @@ export function TasksRoute() {
     onPickClient,
     onPickProject,
     setClientId,
+    setProjectId,
     filterProjectsByClient,
   } = useLinkedClientProject(projectsByClient)
 
@@ -285,6 +291,20 @@ export function TasksRoute() {
     const def = clients.find((c) => c.name === 'Personal') ?? clients[0]
     if (def) setClientId(def.id)
   }, [clientId, clients])
+
+  // Focus-mode sync (task 92a6973e): when the user picks a client
+  // and/or project from the Focus sidebar, the Quick add row mirrors
+  // that selection so a new task lands inside the focused scope
+  // without an extra click. Runs only while focus is active; turning
+  // focus off leaves the manual selection alone (no flapping).
+  useEffect(() => {
+    if (!focusActive) return
+    if (focusClientId) setClientId(focusClientId)
+    // Project narrowing is optional: when focus is client-only, clear
+    // the quick-add project so the new task lands at client level;
+    // when focus narrows to a specific project, mirror it.
+    setProjectId(focusProjectId || '')
+  }, [focusActive, focusClientId, focusProjectId, setClientId, setProjectId])
 
   const loadTasks = useCallback(async () => {
     setErr(null)
