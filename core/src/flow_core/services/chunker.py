@@ -22,6 +22,22 @@ from typing import Protocol, runtime_checkable
 # and storage for negligible recall gain on text that already fits one
 # embedding (e5-small / bge-m3 truncate quietly past 512 / 8192 tokens).
 _CHUNK_THRESHOLD_TOKENS = 800
+
+
+def get_chunk_threshold_tokens() -> int:
+    """Public read of the paragraph-split activation threshold (used by
+    ``pick_chunker`` and by the rechunk admin path to identify legacy
+    whole-doc notes long enough to benefit from re-indexing)."""
+    return _CHUNK_THRESHOLD_TOKENS
+
+
+def approx_tokens(text: str) -> int:
+    """Public re-export of the cheap word-count tokenizer used by
+    ``pick_chunker``. Same heuristic as ``_approx_tokens`` so the
+    rechunk path and the write path agree on what counts as 'long'."""
+    return _approx_tokens(text)
+
+
 # Approximate token budget per chunk; the actual token count depends on
 # the tokenizer (which the chunker doesn't load to stay cheap). Word
 # counts approximate tokens within ~10-30% which is good enough for

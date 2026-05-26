@@ -126,6 +126,29 @@ async def migration_status_(
     return await svc.migration_status(ctx.session)
 
 
+@router.post("/rechunk")
+async def rechunk_(
+    ctx: Annotated[TenantCtx, Depends(tenant_admin_ctx)],
+    source_kind: str = "note",
+    batch_size: int = 50,
+    dry_run: bool = False,
+) -> dict[str, int]:
+    """Admin-gated one-shot trigger: re-index legacy whole-doc notes
+    through the paragraph chunker (task 2149e753). Returns
+    ``{scanned, rechunked, skipped_short, batch_size}``; if
+    ``rechunked == batch_size`` more candidates remain -- re-call to
+    drain. ``dry_run=true`` reports the count without touching data.
+    Idempotent: sources already chunked are skipped by the SELECT."""
+    return await svc.rechunk_legacy_sources(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        source_kind=source_kind,
+        batch_size=batch_size,
+        dry_run=dry_run,
+    )
+
+
 @router.post("/migrate-embeddings")
 async def migrate_embeddings_(
     ctx: Annotated[TenantCtx, Depends(tenant_admin_ctx)],

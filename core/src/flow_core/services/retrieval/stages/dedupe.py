@@ -74,6 +74,16 @@ class DedupeBySourceStage(Stage):
                     c.source_id = sid
                     c.chunk_index = idx
 
+        # Progressive-migration guard (task 2149e753): when the same
+        # ``(source_kind, source_id)`` has both a legacy whole-doc
+        # blob (chunk_index=0) and one or more real chunks (chunk_index
+        # > 0) in the candidate set, the legacy blob is stale by
+        # construction -- the rechunk re-indexed the source but didn't
+        # delete the old row, or the worker is mid-flight. Drop the
+        # legacy chunks so they cannot win the collapse below.
+        has_real_chunks: set[tuple[str | None, str | None]] = {
+            (c.source_kind, c.source_id) for c in candidates if c.chunk_index > 0
+        }
         # Collapse: scan in current order, keep the FIRST occurrence
         # of each (source_kind, source_id) since the order so far is
         # already by descending score (RRF / rerank put the best
@@ -89,6 +99,9 @@ class DedupeBySourceStage(Stage):
                 # without BlobSource entries -- shouldn't happen on
                 # current data but defensive).
                 out.append(c)
+                continue
+            if c.chunk_index == 0 and key in has_real_chunks:
+                # Legacy whole-doc sibling of a re-chunked source: drop.
                 continue
             if key in seen:
                 continue

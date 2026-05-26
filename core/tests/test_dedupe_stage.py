@@ -91,3 +91,35 @@ async def test_dedupe_mixed_sources_and_sourceless() -> None:
     )
     # Winner of doc-1 + sourceless candidate. Order preserved.
     assert out == [sourced_winner, sourceless]
+
+
+async def test_dedupe_progressive_drops_legacy_when_real_chunks_present() -> None:
+    """Task 2149e753: when a source has both a legacy whole-doc blob
+    (chunk_index=0) and one or more real paragraph chunks
+    (chunk_index>0) in the candidate set, the legacy row is stale and
+    must be dropped so it cannot win the collapse even if it ranks
+    higher than the real chunks. This is the safety net that lets a
+    partial / in-flight ``rechunk`` keep working without surfacing
+    duplicates."""
+    note_id = "note-mig"
+    legacy = _cand_with_source(note_id, chunk_index=0, score=0.95)
+    real_low = _cand_with_source(note_id, chunk_index=1, score=0.4)
+    real_high = _cand_with_source(note_id, chunk_index=2, score=0.6)
+    # Order them with the legacy first to verify it doesn't sneak in
+    # just because it has the top RRF score.
+    out = await DedupeBySourceStage().run(
+        "q", _ctx_stub(), [legacy, real_high, real_low]
+    )
+    assert len(out) == 1
+    assert out[0] is real_high
+    assert out[0].chunk_index == 2
+
+
+async def test_dedupe_progressive_keeps_chunk_zero_when_no_real_chunks() -> None:
+    """Counter to the progressive rule: a source whose ONLY candidate
+    is chunk_index=0 (legitimate whole-doc blob, e.g. a short note)
+    must still surface -- the rule only filters chunk 0 when its
+    multi-chunk siblings are present in the same candidate set."""
+    legitimate = _cand_with_source("short", chunk_index=0, score=0.7)
+    out = await DedupeBySourceStage().run("q", _ctx_stub(), [legitimate])
+    assert out == [legitimate]

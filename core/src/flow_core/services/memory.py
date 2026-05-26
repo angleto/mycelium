@@ -788,6 +788,155 @@ async def delete_blob(
     )
 
 
+async def rechunk_legacy_sources(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    source_kind: str = "note",
+    batch_size: int = 50,
+    dry_run: bool = False,
+    operation_id: str | None = None,
+) -> dict[str, int]:
+    """Re-index legacy whole-doc sources through the paragraph chunker.
+
+    Task 2149e753 (follow-up to bbc21aa1). At deploy time every note
+    was indexed as a single vector (chunk_index=0). After the chunker
+    landed only NEW writes are paragraph-split; the old long notes
+    stay single-vector and so miss the precision gain. This admin
+    path finds those sources, deletes their old blob, and re-writes
+    the same text via ``write_blob`` -- which now picks
+    ``ParagraphChunker`` for ``namespace='note'`` text above the
+    threshold, fanning out one ``MemoryBlob`` per paragraph.
+
+    A source is a *rechunk candidate* iff every BlobSource row for
+    it has ``chunk_index=0`` (so it was never chunked) AND its blob
+    text exceeds the chunker threshold (otherwise the chunker would
+    still pick ``WholeChunker``, so re-indexing changes nothing).
+
+    Idempotent (sources whose blobs are already chunked are skipped
+    by the SELECT). Each source is rewritten in the same transaction
+    that loaded it: the old row's tags / project / importance are
+    preserved on the new chunk-blobs.
+
+    ``dry_run=True`` returns the candidate count without touching any
+    rows -- useful to scope a rollout. ``batch_size`` caps the work
+    per call (default 50): if ``rechunked == batch_size`` the caller
+    should re-invoke until it drops below.
+    """
+    from flow_core.services.chunker import (
+        get_chunk_threshold_tokens,
+        approx_tokens,
+    )
+
+    # No service-level role gate: the only caller is the admin endpoint
+    # ``/memory/rechunk`` which already enforces ``tenant_admin_ctx``
+    # (platform admin capability + active X-Admin-Mode elevation). The
+    # session is still RLS-scoped to the tenant org, so the SELECT and
+    # mutations below can only see the caller's workspace.
+
+    # Find candidate (source_kind, source_id) groups: every BlobSource
+    # row for the source has chunk_index = 0 (NOT yet chunked). The
+    # HAVING bool_or trick keeps it to a single batched pass.
+    cand_rows = (
+        await session.execute(
+            select(
+                BlobSource.source_kind,
+                BlobSource.source_id,
+            )
+            .where(BlobSource.source_kind == source_kind)
+            .group_by(BlobSource.source_kind, BlobSource.source_id)
+            .having(func.bool_and(BlobSource.chunk_index == 0))
+        )
+    ).all()
+
+    scanned = 0
+    rechunked = 0
+    skipped_short = 0
+    for kind, sid in cand_rows:
+        # Cap the work per call so the endpoint stays bounded.
+        if rechunked >= batch_size:
+            break
+        # Load the legacy blob behind this source (there is exactly
+        # one when every chunk_index is 0; defensively pick the
+        # first if multiple rows pointed at the same blob).
+        bs_row = (
+            await session.execute(
+                select(BlobSource).where(
+                    BlobSource.source_kind == kind,
+                    BlobSource.source_id == sid,
+                )
+            )
+        ).scalars().first()
+        if bs_row is None:
+            continue
+        blob = (
+            await session.execute(
+                select(MemoryBlob).where(MemoryBlob.id == bs_row.blob_id)
+            )
+        ).scalar_one_or_none()
+        if blob is None:
+            continue
+        scanned += 1
+        # Skip blobs with no text (defensive; the model column is
+        # NOT NULL but the type hint admits Optional).
+        original_text = blob.text or ""
+        if not original_text:
+            continue
+        # Skip blobs the chunker would still leave whole (paragraph
+        # split is only useful above the threshold). Counted separately
+        # so callers can see why the candidate list shrank.
+        if approx_tokens(original_text) < get_chunk_threshold_tokens():
+            skipped_short += 1
+            continue
+        if dry_run:
+            rechunked += 1
+            continue
+        # Snapshot the row's per-source metadata before deletion.
+        original_project_id = blob.project_id
+        original_importance = blob.importance
+        original_namespace = blob.namespace
+        original_tag_ids = [
+            row.tag_id
+            for row in (
+                await session.execute(
+                    select(MemoryBlobTag.tag_id).where(MemoryBlobTag.blob_id == blob.id)
+                )
+            ).all()
+        ]
+        # Cascade-delete the legacy blob (FK ON DELETE CASCADE clears
+        # blob_sources + memory_blob_tags + embedding vector + fts).
+        await session.execute(
+            delete(MemoryBlob).where(
+                MemoryBlob.id == blob.id, MemoryBlob.org_id == org_id
+            )
+        )
+        await session.flush()
+        # Re-write the same text. ``write_blob`` re-runs the chunker;
+        # the new BlobSource rows reuse ``(kind, sid)`` so any external
+        # cross-link to the source survives the rechunk.
+        await write_blob(
+            session,
+            org_id=org_id,
+            actor_id=actor_id,
+            project_id=original_project_id,
+            text_body=original_text,
+            operation_id=operation_id or f"rechunk-{sid}",
+            namespace=original_namespace,
+            sources=[(kind, sid)],
+            importance=original_importance,
+            tag_ids=original_tag_ids,
+        )
+        rechunked += 1
+
+    return {
+        "scanned": scanned,
+        "rechunked": rechunked,
+        "skipped_short": skipped_short,
+        "batch_size": batch_size,
+    }
+
+
 async def attach_blob_tag(
     session: AsyncSession,
     *,

@@ -2630,6 +2630,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/memory/rechunk": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Rechunk
+         * @description Admin-gated one-shot trigger: re-index legacy whole-doc notes
+         *     through the paragraph chunker (task 2149e753). Returns
+         *     ``{scanned, rechunked, skipped_short, batch_size}``; if
+         *     ``rechunked == batch_size`` more candidates remain -- re-call to
+         *     drain. ``dry_run=true`` reports the count without touching data.
+         *     Idempotent: sources already chunked are skipped by the SELECT.
+         */
+        post: operations["rechunk__memory_rechunk_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/memory/migrate-embeddings": {
         parameters: {
             query?: never;
@@ -14612,6 +14637,46 @@ export interface operations {
                 "x-project-id"?: string | null;
                 "x-workspace-role"?: string | null;
                 "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: number;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    rechunk__memory_rechunk_post: {
+        parameters: {
+            query?: {
+                source_kind?: string;
+                batch_size?: number;
+                dry_run?: boolean;
+            };
+            header: {
+                "x-admin-mode"?: string | null;
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
             };
             path?: never;
             cookie?: never;

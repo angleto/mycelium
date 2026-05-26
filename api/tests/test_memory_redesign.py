@@ -373,6 +373,142 @@ async def test_chunk_index_and_snippet_for_multi_chunk_note(
         assert hits2[0]["chunk_snippet"] is None
 
 
+async def test_rechunk_endpoint_re_indexes_legacy_long_note(
+    _fake_embedder: None,
+) -> None:
+    """task 2149e753: POST /memory/rechunk takes a workspace where a
+    long note was indexed pre-chunking (one BlobSource with
+    chunk_index=0) and re-writes it through the ParagraphChunker so
+    the source ends up with N>1 BlobSource rows.
+
+    The fixture builds the legacy state by hand-overriding the
+    chunker on write (``WholeChunker``) -- that simulates the deploy
+    state where every note was single-vector. After rechunk we
+    re-read the source's BlobSource rows from the public surface
+    (the search hits) to confirm the new chunked indexing took.
+    """
+    from flow_core.services import memory as mem_svc
+    from flow_core.services.chunker import WholeChunker
+
+    from flow_core.bootstrap_admin import ensure_admin
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as c:
+        # /memory/rechunk is admin-gated (tenant_admin_ctx) like
+        # /memory/migrate-embeddings: needs a platform admin AND the
+        # X-Admin-Mode elevation header. Bootstrap one for the test.
+        admin_email = _email()
+        admin_pw = "Str0ng-Passw0rd!"
+        await ensure_admin(admin_email, admin_pw)
+        login = (
+            await c.post("/auth/login", json={"email": admin_email, "password": admin_pw})
+        ).json()
+        me = (
+            await c.get(
+                "/auth/me", headers={"Authorization": f"Bearer {login['token']}"}
+            )
+        ).json()
+        orgs = (
+            await c.get(
+                "/workspaces",
+                headers={"Authorization": f"Bearer {login['token']}"},
+            )
+        ).json()
+        ws = orgs[0]["id"] if orgs else me["workspace_id"]
+        h = {
+            "Authorization": f"Bearer {login['token']}",
+            "X-Workspace-Id": str(ws),
+        }
+        h_admin = {**h, "X-Admin-Mode": "1"}
+        org_id = uuid.UUID(str(ws))
+        user_id = uuid.UUID(me["user_id"])
+        await _grant_and_rate(c, h)
+        proj_id = uuid.uuid4()
+
+        # Pre-rechunk fixture: pin a long note as a single whole-doc
+        # blob, mimicking the deploy state. The marker lives in
+        # paragraph 1 so a search for it will only match a real chunk
+        # AFTER the rechunk (when paragraph 1 becomes its own blob).
+        para0 = "alpha " * 400
+        para1 = "the quarterly zorbgg-marker review covers projections " * 60
+        para2 = "epsilon " * 400
+        long_text = f"{para0}\n\n{para1}\n\n{para2}"
+        source_id = str(uuid.uuid4())
+
+        from flow_core.db import tenant_session
+
+        async with tenant_session(str(org_id), str(user_id)) as s:
+            await mem_svc.write_blob(
+                s,
+                org_id=org_id,
+                actor_id=user_id,
+                project_id=proj_id,
+                text_body=long_text,
+                operation_id="legacy-write",
+                namespace="note",
+                sources=[("note", source_id)],
+                chunker=WholeChunker(),
+            )
+
+        # Sanity: before rechunk, the marker search returns the legacy
+        # whole-doc blob (chunk_index=0). The semantic FakeEmbedder
+        # also ranks it on top because the marker text dominates the
+        # vector.
+        pre = await c.post(
+            "/memory/search",
+            headers=h,
+            json={
+                "project_id": str(proj_id),
+                "query": "zorbgg-marker",
+                "operation_id": "q-pre",
+            },
+        )
+        assert pre.status_code == 200, pre.text
+        pre_hits = pre.json()
+        assert pre_hits, "pre-rechunk: the legacy blob must still be findable"
+        assert pre_hits[0]["chunk_index"] == 0
+
+        # Dry-run reports the candidate count without touching data.
+        dry = await c.post("/memory/rechunk?dry_run=true", headers=h_admin)
+        assert dry.status_code == 200, dry.text
+        dry_body = dry.json()
+        assert dry_body["rechunked"] >= 1
+        assert dry_body["scanned"] >= 1
+
+        # Real run: rechunked count matches what dry-run promised.
+        real = await c.post("/memory/rechunk", headers=h_admin)
+        assert real.status_code == 200, real.text
+        real_body = real.json()
+        assert real_body["rechunked"] == dry_body["rechunked"]
+
+        # Post-rechunk: the same query now picks up a real chunk
+        # (chunk_index >= 1). The progressive-dedupe guard makes sure
+        # the (deleted) chunk_index=0 sibling doesn't sneak back in.
+        post = await c.post(
+            "/memory/search",
+            headers=h,
+            json={
+                "project_id": str(proj_id),
+                "query": "zorbgg-marker",
+                "operation_id": "q-post",
+            },
+        )
+        assert post.status_code == 200, post.text
+        post_hits = post.json()
+        assert post_hits
+        assert post_hits[0]["chunk_index"] >= 1, post_hits[0]
+
+        # Calling rechunk again is a no-op (idempotent): the candidate
+        # selector skips sources that already have chunk_index > 0.
+        again = await c.post("/memory/rechunk", headers=h_admin)
+        assert again.status_code == 200, again.text
+        assert again.json()["rechunked"] == 0
+
+        # Non-admin (or admin without X-Admin-Mode) is rejected.
+        denied = await c.post("/memory/rechunk", headers=h)
+        assert denied.status_code == 403, denied.text
+
+
 async def test_embedder_present_but_no_rate_card_is_free(
     _fake_embedder: None,
 ) -> None:
