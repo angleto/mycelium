@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 
 from flow_api.deps import TenantCtx, tenant_ctx
@@ -18,6 +18,7 @@ from flow_api.schemas import (
     ExpectedVersionIn,
     HandoffOut,
     NoteOut,
+    NoteTaskLinkOut,
     ParticipantIn,
     ParticipantOut,
     ReminderIn,
@@ -32,6 +33,8 @@ from flow_api.schemas import (
     TaskChecklistReorderIn,
     TaskCreateIn,
     TaskNoteCreateIn,
+    TaskNoteLinkIn,
+    TaskNoteLinksOut,
     TaskOut,
     TaskPatchIn,
     TaskStateIn,
@@ -839,6 +842,99 @@ async def create_task_note(
         ctx.session, org_id=ctx.org_id, note_id=n.id
     )
     return _note_out(n, tagmap.get(n.id, []), primary_task_id=pid)
+
+
+def _note_task_link_out(link: Any) -> NoteTaskLinkOut:
+    return NoteTaskLinkOut(
+        id=link.id,
+        note_id=link.note_id,
+        task_id=link.task_id,
+        kind=link.kind,
+        created_by=link.created_by,
+        created_at=link.created_at,
+    )
+
+
+@router.get(
+    "/{task_id}/note-links",
+    response_model=TaskNoteLinksOut,
+    tags=["garden"],
+)
+async def list_task_note_links(
+    task_id: uuid.UUID,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+) -> TaskNoteLinksOut:
+    """Symmetric to ``GET /notes/{note_id}/links`` but task-side: every
+    typed note↔task link touching ``task_id`` (all four kinds). The
+    drawer pairs each link with a note title fetched separately so the
+    payload stays slim."""
+    links = await note_links_svc.list_note_task_links(
+        ctx.session, org_id=ctx.org_id, task_id=task_id
+    )
+    return TaskNoteLinksOut(
+        task_id=task_id,
+        note_links=[_note_task_link_out(li) for li in links],
+    )
+
+
+@router.post(
+    "/{task_id}/note-links",
+    response_model=NoteTaskLinkOut,
+    tags=["garden"],
+)
+async def add_task_note_link(
+    task_id: uuid.UUID,
+    body: TaskNoteLinkIn,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+) -> NoteTaskLinkOut:
+    """Task-side mirror of ``POST /notes/{note_id}/task-links``. Only
+    ``subject`` / ``artifact`` accepted; ``derived_from`` and
+    ``promoted_from`` are emitted only by the dedicated creation
+    endpoints on the note side."""
+    if body.kind == "subject":
+        link = await note_links_svc.start_task_on_note(
+            ctx.session,
+            org_id=ctx.org_id,
+            actor_id=ctx.user_id,
+            task_id=task_id,
+            note_id=body.note_id,
+        )
+    elif body.kind == "artifact":
+        link = await note_links_svc.record_task_artifact(
+            ctx.session,
+            org_id=ctx.org_id,
+            actor_id=ctx.user_id,
+            task_id=task_id,
+            note_id=body.note_id,
+        )
+    else:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST)
+    return _note_task_link_out(link)
+
+
+@router.delete(
+    "/{task_id}/note-links",
+    status_code=204,
+    tags=["garden"],
+)
+async def remove_task_note_link(
+    task_id: uuid.UUID,
+    note_id: uuid.UUID,
+    kind: str,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+) -> None:
+    """Task-side delete. Same semantics as the note-side endpoint
+    (``promoted_from`` refused, idempotent 404 only if nothing matched)."""
+    removed = await note_links_svc.unlink_note_task(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        note_id=note_id,
+        task_id=task_id,
+        kind=kind,
+    )
+    if not removed:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
 
 
 # --- P4: coordination handoffs + contract-net (docs/adr/0025) ---

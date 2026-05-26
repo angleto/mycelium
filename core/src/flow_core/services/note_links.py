@@ -590,6 +590,58 @@ async def list_note_task_links(
     return list((await session.execute(stmt)).scalars().all())
 
 
+async def unlink_note_task(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    note_id: uuid.UUID,
+    task_id: uuid.UUID,
+    kind: str,
+) -> bool:
+    """Remove a single typed note↔task link. Symmetric to ``unlink_notes``
+    on the note-to-note side. Idempotent: returns False if no row matched.
+    Promoted notes are read-only at the service layer, so removing a
+    ``promoted_from`` link is refused (the original promotion is the only
+    way to mark a note transplanted, and unlinking it would orphan the
+    ``promoted_at`` timestamp)."""
+    if kind not in NOTE_TASK_LINK_KINDS:
+        raise DomainError(MessageCode.DOMAIN_ERROR)
+    await require_role(session, org_id, actor_id, Role.member)
+    row = (
+        await session.execute(
+            select(NoteTaskLink).where(
+                NoteTaskLink.org_id == org_id,
+                NoteTaskLink.note_id == note_id,
+                NoteTaskLink.task_id == task_id,
+                NoteTaskLink.kind == kind,
+            )
+        )
+    ).scalar_one_or_none()
+    if row is None:
+        return False
+    if kind == "promoted_from":
+        # The promotion side-effect (note.promoted_at) is set in
+        # ``promote_note_to_task`` and there is no symmetric unmake.
+        raise DomainError(MessageCode.DOMAIN_ERROR)
+    await session.delete(row)
+    await session.flush()
+    await audit.log(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        entity="note_task_link",
+        entity_id=row.id,
+        action="delete",
+        diff={
+            "note_id": str(note_id),
+            "task_id": str(task_id),
+            "kind": kind,
+        },
+    )
+    return True
+
+
 # ---------------------------------------------------------------------------
 # Named lifecycle operations
 # ---------------------------------------------------------------------------
@@ -859,6 +911,7 @@ __all__ = [
     "set_maturity",
     "start_task_on_note",
     "tick_maturity_transitions",
+    "unlink_note_task",
     "unlink_notes",
 ]
 

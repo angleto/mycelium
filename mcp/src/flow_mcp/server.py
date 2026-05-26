@@ -3837,6 +3837,30 @@ async def record_task_artifact(
         return {"link_id": str(link.id), "kind": link.kind}
 
 
+@mcp.tool()
+async def unlink_note_task(
+    token: str,
+    org_id: str,
+    note_id: str,
+    task_id: str,
+    kind: str,
+) -> dict[str, Any]:
+    """Remove a typed note↔task link (``subject``, ``artifact``,
+    ``derived_from``). ``promoted_from`` is refused: a transplant cannot
+    be undone via unlink. Idempotent: returns ``removed`` false when no
+    matching row exists."""
+    async with _tenant(token, org_id) as (s, org, user):
+        removed = await note_links_svc.unlink_note_task(
+            s,
+            org_id=org,
+            actor_id=user,
+            note_id=uuid.UUID(note_id),
+            task_id=uuid.UUID(task_id),
+            kind=kind,
+        )
+        return {"removed": removed}
+
+
 # ---------------------------------------------------------------------------
 # Identity-first task ownership / assignment (docs/adr/0028 D5 follow-up):
 # explicit primitives that wrap ``update_task``. Useful for Telegram chat

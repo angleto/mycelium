@@ -1611,11 +1611,38 @@ class NoteTaskLinkOut(BaseModel):
     created_at: datetime.datetime
 
 
+class NoteTaskLinkIn(BaseModel):
+    """Body for POST /notes/{id}/task-links and POST /tasks/{id}/note-links.
+    Only ``subject`` and ``artifact`` are accepted here; ``derived_from``
+    and ``promoted_from`` are creation-with-link operations exposed via
+    their dedicated endpoints (derive-task / promote)."""
+
+    task_id: uuid.UUID
+    kind: str = Field(pattern="^(subject|artifact)$")
+
+
+class TaskNoteLinkIn(BaseModel):
+    """Body for POST /tasks/{id}/note-links. Mirror of NoteTaskLinkIn
+    from the task-side (the note id lives in the body)."""
+
+    note_id: uuid.UUID
+    kind: str = Field(pattern="^(subject|artifact)$")
+
+
 class NoteWithLinksOut(BaseModel):
     note: NoteOut
     outgoing: list[NoteLinkOut] = []
     incoming: list[NoteLinkOut] = []
     task_links: list[NoteTaskLinkOut] = []
+
+
+class TaskNoteLinksOut(BaseModel):
+    """Lookup payload for the task-side LinkedNotesPanel. Returns the
+    full set of typed note↔task relations touching ``task_id`` (all four
+    kinds), independent of NoteOut so list endpoints stay slim."""
+
+    task_id: uuid.UUID
+    note_links: list[NoteTaskLinkOut] = []
 
 
 class DerivedTaskOut(BaseModel):

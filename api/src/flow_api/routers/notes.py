@@ -31,6 +31,7 @@ from flow_api.schemas import (
     NotePromoteIn,
     NoteSetMaturityIn,
     NoteTagIn,
+    NoteTaskLinkIn,
     NoteTaskLinkOut,
     NoteTranscribeIn,
     NoteTurnOut,
@@ -769,3 +770,66 @@ async def list_note_links(
         incoming=[_link_out(o) for o in incoming],
         task_links=[_task_link_out(o) for o in task_links],
     )
+
+
+@router.post(
+    "/{note_id}/task-links",
+    response_model=NoteTaskLinkOut,
+    tags=["garden"],
+)
+async def add_note_task_link(
+    note_id: uuid.UUID,
+    body: NoteTaskLinkIn,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+) -> NoteTaskLinkOut:
+    """Create a typed note↔task link from the note side. ``kind`` picks
+    the named operation: ``subject`` → start_task_on_note,
+    ``artifact`` → record_task_artifact. ``derived_from`` and
+    ``promoted_from`` are intentionally NOT accepted here: those are
+    creation-with-link operations, not free linkage (see
+    /notes/{id}/derive-task and /promote)."""
+    if body.kind == "subject":
+        link = await note_links_svc.start_task_on_note(
+            ctx.session,
+            org_id=ctx.org_id,
+            actor_id=ctx.user_id,
+            task_id=body.task_id,
+            note_id=note_id,
+        )
+    elif body.kind == "artifact":
+        link = await note_links_svc.record_task_artifact(
+            ctx.session,
+            org_id=ctx.org_id,
+            actor_id=ctx.user_id,
+            task_id=body.task_id,
+            note_id=note_id,
+        )
+    else:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST)
+    return _task_link_out(link)
+
+
+@router.delete(
+    "/{note_id}/task-links",
+    status_code=204,
+    tags=["garden"],
+)
+async def remove_note_task_link(
+    note_id: uuid.UUID,
+    task_id: uuid.UUID,
+    kind: str,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+) -> None:
+    """Idempotent removal: returns 404 only if no row matched. Refuses
+    ``promoted_from`` (a transplant cannot be undone via unlink; the
+    note has ``promoted_at`` set as a side-effect)."""
+    removed = await note_links_svc.unlink_note_task(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        note_id=note_id,
+        task_id=task_id,
+        kind=kind,
+    )
+    if not removed:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)

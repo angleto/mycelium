@@ -1046,6 +1046,92 @@ button.btn--danger:hover {
   letter-spacing: 0.02em;
 }
 .taskpicklist__empty { padding: 0.5rem 0.6rem; }
+
+/* LinkedTasksPanel / LinkedNotesPanel (task 892f40b1): note↔task
+   typed relations (ADR-0029). One section per kind: subject, artifact,
+   derived_from, promoted_from. The section head is a kind chip + count;
+   the body is a compact list with × to unlink. */
+.linkedpanel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  margin-top: 0.6rem;
+  padding: 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+.linkedpanel__head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+.linkedpanel__section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  border-top: 1px dashed var(--border);
+  padding-top: 0.4rem;
+}
+.linkedpanel__section:first-of-type { border-top: 0; padding-top: 0; }
+.linkedpanel__sectionhead {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+.linkedpanel__empty {
+  margin: 0;
+  padding-left: 0.4rem;
+}
+.linkedpanel__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.linkedpanel__item {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.2rem 0.4rem;
+  border-radius: 4px;
+}
+.linkedpanel__item:hover { background: var(--surface-2); }
+.linkedpanel__title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.linkedpanel__picker { margin-top: 0.35rem; }
+/* Kind chips: a faint background + matching text, distinct per kind so
+   the four sections read at a glance. Subject = active green, artifact
+   = neutral, derived = blue, promoted = purple. */
+.chip--kind {
+  font-size: 0.74rem;
+  text-transform: lowercase;
+  letter-spacing: 0.02em;
+  padding: 0.05rem 0.4rem;
+}
+.chip--kind-subject {
+  background: rgba(38, 217, 92, 0.14);
+  color: #1f8a40;
+}
+.chip--kind-artifact {
+  background: rgba(120, 120, 120, 0.16);
+  color: #555;
+}
+.chip--kind-derived_from {
+  background: rgba(38, 132, 217, 0.14);
+  color: #1f5f8a;
+}
+.chip--kind-promoted_from {
+  background: rgba(154, 99, 238, 0.16);
+  color: #6d28d9;
+}
 .toggle-pill--sm {
   font-size: 0.78rem;
   padding: 0.15rem 0.45rem;
