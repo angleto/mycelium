@@ -18,7 +18,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from decimal import Decimal
 
-from sqlalchemy import ColumnElement, Select, delete, func, select, text, update
+from sqlalchemy import ColumnElement, delete, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -268,13 +268,6 @@ async def write_blob(
     return blob
 
 
-async def _branch_ranks(
-    session: AsyncSession, stmt: Select[tuple[uuid.UUID]]
-) -> dict[uuid.UUID, int]:
-    rows = (await session.execute(stmt)).scalars().all()
-    return {bid: i + 1 for i, bid in enumerate(rows)}
-
-
 async def retrieve(
     session: AsyncSession,
     *,
@@ -311,6 +304,21 @@ async def retrieve(
             basis=CostBasis.local,
         )
 
+    # Build the per-call context (predicates pre-computed once) and run
+    # the canonical retrieval pipeline. The pipeline is the extension
+    # point: rerankers / HyDE / chunking-dedupe land as additional
+    # stages without touching this function.
+    from flow_core.services.retrieval import RetrievalContext, RetrievalPipeline
+    from flow_core.services.retrieval.stages import (
+        AccessCounterStage,
+        GraderMinStage,
+        LexicalFTSStage,
+        LimitStage,
+        OrderingStage,
+        RRFFusionStage,
+        SemanticDenseStage,
+    )
+
     pred = _project_pred(project_id)
     # Tags are a facet *inside* the (org, project) boundary, never a
     # way past it: ANDed into both branches, never replacing the hard
@@ -332,107 +340,45 @@ async def retrieve(
             .having(func.count(func.distinct(MemoryBlobTag.tag_id)) == len(wanted))
         )
         tag_clauses = (MemoryBlob.id.in_(tagged),)
-    # Lexical branch matches on BOTH dictionaries (``simple`` for
-    # cross-language tokens like names/identifiers, ``italian`` for
-    # stemmed Italian text). Migration 0007 added ``fts_lang``; the OR
-    # is a no-op for the ``simple`` branch (recall stays >= old) and a
-    # net win for italian queries against stemmed content. ts_rank
-    # picks the better of the two so an italian match doesn't lose to
-    # a tied simple match.
-    lexical = (
-        select(MemoryBlob.id)
-        .where(
-            MemoryBlob.org_id == org_id,
-            pred,
-            text(
-                "(fts @@ plainto_tsquery('simple', :q)"
-                " OR fts_lang @@ plainto_tsquery('italian', :q))"
-            ),
-            *tag_clauses,
-        )
-        .order_by(
-            text(
-                "GREATEST("
-                "ts_rank(fts, plainto_tsquery('simple', :q)),"
-                "ts_rank(fts_lang, plainto_tsquery('italian', :q))"
-                ") DESC"
-            )
-        )
-        .limit(_OVERSAMPLE)
-    ).params(q=query)
 
-    # Semantic branch only when the query was actually embedded. With no
-    # embedder (optional extra missing) retrieval degrades to the single
-    # lexical branch; the (org, project) + tag predicates and the RRF
-    # fusion below are unchanged (RRF over one branch is well-defined).
-    if qres is not None:
-        # Filtered HNSW: pgvector >= 0.7 supports iterative_scan so the
-        # (org, project, tag) predicates run BEFORE the kNN step rather
-        # than throwing the filter at the top-K from the index. Without
-        # this, a selective tag (e.g. project_id that matches 1% of
-        # blobs) would lose most candidates in the post-filter and the
-        # ranking degrades. Session-local (set_config(local=true)) so
-        # other queries in the same connection are unaffected.
-        await session.execute(text("SET LOCAL hnsw.iterative_scan = strict_order"))
-        # ``max_inner_product`` exploits the L2-normalized contract from
-        # the embedder: rank is identical to cosine_distance (since for
-        # unit-norm vectors cosine = 1 - IP) but skips the per-pair norm
-        # division. Index op class switched to ``vector_ip_ops`` in 0007.
-        semantic = (
-            select(MemoryBlob.id)
-            .where(
-                MemoryBlob.org_id == org_id,
-                pred,
-                MemoryBlob.embedding.is_not(None),
-                *tag_clauses,
-            )
-            .order_by(MemoryBlob.embedding.max_inner_product(qres.vector))
-            .limit(_OVERSAMPLE)
-        )
-        sem = await _branch_ranks(session, semantic)
-    else:
-        sem = {}
-    lex = await _branch_ranks(session, lexical)
-    ids = set(sem) | set(lex)
-    if not ids:
+    ctx = RetrievalContext(
+        session=session,
+        org_id=org_id,
+        actor_id=actor_id,
+        project_id=project_id,
+        operation_id=operation_id,
+        embedder=emb,
+        project_pred=pred,
+        tag_clauses=tag_clauses,
+        query_embedding=qres,
+    )
+    pipeline = RetrievalPipeline(
+        stages=[
+            LexicalFTSStage(oversample=_OVERSAMPLE),
+            SemanticDenseStage(oversample=_OVERSAMPLE),
+            RRFFusionStage(k=_RRF_K),
+            OrderingStage(),
+            GraderMinStage(min_score=grader_min_rrf),
+            LimitStage(k=limit),
+            AccessCounterStage(),
+        ]
+    )
+    top = await pipeline.run(query, ctx)
+    if not top:
         return []
-
-    fused: dict[uuid.UUID, float] = {}
-    for bid in ids:
-        score = 0.0
-        if bid in sem:
-            score += 1.0 / (_RRF_K + sem[bid])
-        if bid in lex:
-            score += 1.0 / (_RRF_K + lex[bid])
-        fused[bid] = score
-
+    # Load full blobs for the result (the pipeline carries only ids +
+    # rank; the caller still expects ``Hit(blob=MemoryBlob, rrf=score)``).
     blobs = {
         b.id: b
-        for b in (await session.execute(select(MemoryBlob).where(MemoryBlob.id.in_(ids))))
+        for b in (
+            await session.execute(
+                select(MemoryBlob).where(MemoryBlob.id.in_([c.blob_id for c in top]))
+            )
+        )
         .scalars()
         .all()
     }
-    # Deterministic order: RRF desc, then created_at asc, then id.
-    ordered = sorted(
-        ids,
-        key=lambda b: (-fused[b], blobs[b].created_at, str(b)),
-    )
-    if grader_min_rrf is not None and (not ordered or fused[ordered[0]] < grader_min_rrf):
-        return []
-    top = ordered[:limit]
-    if top:
-        now = dt.datetime.now(tz=dt.UTC)
-        await session.execute(
-            update(MemoryBlob)
-            .where(MemoryBlob.id.in_(top))
-            .values(
-                access_count=MemoryBlob.access_count + 1,
-                last_accessed_at=now,
-                access_score=MemoryBlob.access_score + 1,
-            )
-        )
-        await session.flush()
-    return [Hit(blob=blobs[b], rrf=fused[b]) for b in top]
+    return [Hit(blob=blobs[c.blob_id], rrf=c.score) for c in top if c.blob_id in blobs]
 
 
 async def gdpr_erase(
