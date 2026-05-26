@@ -52,6 +52,14 @@ _CHUNK_OVERLAP_WORDS = 50
 
 _PARAGRAPH_SPLIT = re.compile(r"\n\s*\n+")
 _WORD_COUNT = re.compile(r"\w+")
+# Stable on-the-wire separator the transcribe / append_message paths
+# embed between conversation turns when handing flat text to
+# write_blob. Distinct from a paragraph break (which is two newlines)
+# so a turn with internal paragraphs survives intact when re-joined,
+# and visible enough to spot in a debug dump. Keep in sync with any
+# caller that builds turn-structured strings.
+NOTE_TURN_SEPARATOR = "\n\n---turn---\n\n"
+_NOTE_TURN_SPLIT = re.compile(r"\n\n-{3}turn-{3}\n\n")
 
 
 @dataclass(frozen=True)
@@ -147,11 +155,54 @@ class ParagraphChunker:
         return out
 
 
+@dataclass
+class NoteTurnChunker:
+    """One chunk per conversation turn (task 4858e818).
+
+    Conversation notes and STT transcripts with diarisation carry an
+    inherent structure -- each turn is a self-contained semantic unit
+    (one user message, one LLM reply, one speaker utterance). Treating
+    each turn as its own chunk keeps the embedding focused on a single
+    intent and lets retrieval surface the exact turn that matched.
+
+    The caller is expected to hand us flat text already joined with
+    ``NOTE_TURN_SEPARATOR`` (the transcribe / append_message paths
+    build this string when they call into ``memory.write_blob``); the
+    chunker is intentionally not coupled to the ORM ``NoteTurn`` model
+    so it can be unit-tested in isolation and reused by future
+    callers that produce turn-structured text from other sources
+    (diarised STT, imported chat logs, agent traces).
+
+    Degenerate inputs (empty text, no separator present) fall back to
+    a single whole-doc chunk -- same contract as ``WholeChunker`` so
+    the strategy is safe to pick by default for the namespace even
+    when the caller forgot to insert separators.
+    """
+
+    name: str = "note_turn"
+    separator_pattern: re.Pattern[str] = _NOTE_TURN_SPLIT
+
+    def chunks(self, text: str) -> list[Chunk]:
+        if not text or not text.strip():
+            return [Chunk(text=text, index=0)]
+        parts = [p.strip() for p in self.separator_pattern.split(text) if p.strip()]
+        if not parts:
+            # Whitespace-only or only separators: keep the raw input
+            # as a single chunk so a downstream embed never sees an
+            # empty string from this branch.
+            return [Chunk(text=text, index=0)]
+        return [Chunk(text=p, index=i) for i, p in enumerate(parts)]
+
+
 def pick_chunker(*, namespace: str, text: str) -> Chunker:
-    """Strategy selector. Conservative by design: only ``namespace='note'``
-    above the threshold gets paragraph-split. Tasks, channels, consolidated
-    memory, agent output etc. stay single-vector. Callers that want a
-    different recipe pass a Chunker instance directly."""
+    """Strategy selector. Conservative by design: ``namespace='note'``
+    above the threshold gets paragraph-split; ``namespace='note_transcribe'``
+    gets per-turn split (one chunk per conversation turn / diarised
+    utterance). Tasks, channels, consolidated memory, agent output etc.
+    stay single-vector. Callers that want a different recipe pass a
+    Chunker instance directly to ``write_blob``."""
+    if namespace == "note_transcribe":
+        return NoteTurnChunker()
     if namespace != "note":
         return WholeChunker()
     tokens = _approx_tokens(text)
