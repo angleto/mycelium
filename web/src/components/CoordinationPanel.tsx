@@ -98,7 +98,7 @@ export function CoordinationPanel({
       )}
       {h.message && <div>{h.message}</div>}
       {h.artifact_note_id && (
-        <Link to={`/notes?open=${h.artifact_note_id}`}>
+        <Link to={`/notes/${h.artifact_note_id}`}>
           {t('coord.artifact')}
         </Link>
       )}

@@ -555,7 +555,7 @@ export function TaskDetailRoute() {
       setErr(errMessage(error))
       return
     }
-    navigate(`/notes?open=${data.id}`)
+    navigate(`/notes/${data.id}`)
   }
 
   function fmtOffset(m: number): string {
@@ -626,7 +626,7 @@ export function TaskDetailRoute() {
       setErr(errMessage(error))
       return
     }
-    navigate(`/notes?open=${data.id}`)
+    navigate(`/notes/${data.id}`)
   }
 
   async function onAddDep() {
@@ -1342,7 +1342,7 @@ export function TaskDetailRoute() {
         <ul className="list">
           {workNotes.map((n) => (
             <li key={n.id}>
-              <Link to={`/notes?open=${n.id}`}>
+              <Link to={`/notes/${n.id}`}>
                 {n.title || t('notes.untitled')}
               </Link>
             </li>

@@ -61,6 +61,7 @@ function App() {
             <Route path="/billing" element={<BillingRoute />} />
             <Route path="/memory" element={<MemoryRoute />} />
             <Route path="/notes" element={<NotesRoute />} />
+            <Route path="/notes/:id" element={<NotesRoute />} />
             <Route path="/garden" element={<GardenRoute />} />
             <Route path="/invoices" element={<InvoicesRoute />} />
             <Route path="/notifications" element={<NotificationsRoute />} />

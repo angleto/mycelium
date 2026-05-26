@@ -378,7 +378,7 @@ export function GardenRoute() {
                   </>
                 )}
                 <Link
-                  to={`/notes?open=${n.id}`}
+                  to={`/notes/${n.id}`}
                   className="plant__btn plant__btn--ghost"
                   title={t('garden.openNote')}
                   aria-label={t('garden.openNote')}
@@ -504,7 +504,7 @@ function PlantDetail({
             {outgoing.map((l) => (
               <li key={l.id}>
                 <span className="chip chip--linkkind">{l.kind}</span>{' '}
-                <Link to={`/notes?open=${l.child_note_id}`}>
+                <Link to={`/notes/${l.child_note_id}`}>
                   {titleById(l.child_note_id)}
                 </Link>{' '}
                 <button
@@ -528,7 +528,7 @@ function PlantDetail({
             {incoming.map((l) => (
               <li key={l.id}>
                 <span className="chip chip--linkkind">{l.kind}</span>{' '}
-                <Link to={`/notes?open=${l.parent_note_id}`}>
+                <Link to={`/notes/${l.parent_note_id}`}>
                   {titleById(l.parent_note_id)}
                 </Link>
               </li>

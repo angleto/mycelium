@@ -1245,6 +1245,8 @@ export const it: Catalog = {
     deleteBtn: 'Sposta nel cestino',
     confirmErase:
       'Cancellare definitivamente "{{title}}" e la sua memoria? Operazione irreversibile.',
+    copyId: 'Copia ID nota',
+    idCopied: 'ID copiato',
   },
   invoices: {
     nav: 'Fatture',

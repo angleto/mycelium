@@ -127,7 +127,7 @@ export function AgentRunPanel({ taskId }: { taskId: string }) {
               {r.artifact_note_id && (
                 <>
                   {' · '}
-                  <Link to={`/notes?open=${r.artifact_note_id}`}>
+                  <Link to={`/notes/${r.artifact_note_id}`}>
                     {t('agentrun.artifact')}
                   </Link>
                 </>

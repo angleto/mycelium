@@ -1245,6 +1245,8 @@ export const en = {
     deleteBtn: 'Move to Trash',
     confirmErase:
       'Permanently erase "{{title}}" and its memory? This cannot be undone.',
+    copyId: 'Copy note ID',
+    idCopied: 'ID copied',
   },
   invoices: {
     nav: 'Invoices',

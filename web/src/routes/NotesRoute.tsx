@@ -5,7 +5,7 @@ import {
   useState,
   type FormEvent,
 } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { api, authFetch, errMessage, workspaceHeader } from '../api/client'
 import { useSession } from '../auth/useSession'
@@ -43,7 +43,14 @@ export function NotesRoute() {
     focusIds,
     active: focusActive,
   } = useFocus()
+  const navigate = useNavigate()
+  // ``/notes/:id`` opens the note modal on that id; ``/notes`` is the
+  // bare list. The path is the canonical reference (UUID visible in the
+  // address bar) — query ``?open=<id>`` is kept as legacy deep-link and
+  // redirected here below.
+  const { id: routeId } = useParams<{ id?: string }>()
   const [searchParams, setSearchParams] = useSearchParams()
+  const [idCopied, setIdCopied] = useState(false)
   const [notes, setNotes] = useState<Note[]>([])
   const [tags, setTags] = useState<Tag[]>([])
   const [fTag, setFTag] = useState('')
@@ -140,10 +147,20 @@ export function NotesRoute() {
       })
     : notes
 
-  function closeModal() {
+  // closeModal now depends on routeId (it pops the URL only when
+  // we're on /notes/:id), so memoise it — otherwise the Esc-listener
+  // effect below would have to declare a fresh dep every render and
+  // would either churn the listener or trip exhaustive-deps.
+  const closeModal = useCallback(() => {
     setSel(null)
     setCreating(false)
-  }
+    setIdCopied(false)
+    // Keep the URL in sync with the modal: closing returns to /notes
+    // so the path no longer points at a hidden note. ``replace`` so the
+    // browser back button doesn't trap the user in a "go back, modal
+    // reopens, close, modal reopens..." loop.
+    if (routeId) navigate('/notes', { replace: true })
+  }, [routeId, navigate])
 
   // Esc closes the modal (the only implicit exit; the backdrop does
   // not, to avoid losing a long note by a stray click).
@@ -154,40 +171,69 @@ export function NotesRoute() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [sel, creating])
+  }, [sel, creating, closeModal])
 
-  // Deep links (mention resolution): /notes?open=<id> opens the note
-  // modal (view + edit, reusing it — no duplicate viewer); ?tag=<id>
-  // pre-filters. Params are consumed then cleared.
+  // Deep links: ``/notes?open=<id>`` is the legacy form (kept for
+  // mentions stored in older note bodies and external bookmarks) —
+  // it redirects to the canonical ``/notes/<id>`` so the URL settles
+  // on a single shape. ``?tag=<id>`` pre-filters the list;
+  // ``?action=new`` opens the create modal (PWA shortcut).
   useEffect(() => {
     const openId = searchParams.get('open')
     const tagId = searchParams.get('tag')
     const action = searchParams.get('action')
     if (!openId && !tagId && action !== 'new') return
-    void (async () => {
-      if (tagId) setFTag(tagId)
-      if (openId) {
-        const { data } = await api.GET('/notes/{note_id}', {
-          params: { header: workspaceHeader(), path: { note_id: openId } },
-        })
-        if (data) await openEdit(data)
-      } else if (action === 'new') {
-        // PWA home-screen shortcut entry point: jump directly to the
-        // new-note modal so the user can capture without an extra tap.
-        openCreate()
-      }
+    // Single-shot URL handoff: params get cleared at the end so this
+    // effect re-fires only on the next deep link. ``setFTag`` is the
+    // URL→state pull that the lint rule flags; the others (navigate /
+    // setSearchParams) are outside-React APIs and don't trip it.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (tagId) setFTag(tagId)
+    if (openId) {
       setSearchParams({}, { replace: true })
-    })()
-    // openEdit/setters are stable enough; params are cleared so this
+      navigate(`/notes/${openId}`, { replace: true })
+      return
+    }
+    if (action === 'new') openCreate()
+    setSearchParams({}, { replace: true })
+    // openCreate/setters are stable; params are cleared so this
     // runs once per incoming deep link.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams])
+
+  // Path-param entry: ``/notes/<id>`` (canonical) or an arrival on
+  // /notes/<id> via redirect from ``?open=<id>``. Load the note and
+  // open the modal. ``openEdit`` is idempotent on the URL (it skips
+  // ``navigate`` when ``routeId`` already matches), so this does not
+  // loop with the URL sync inside ``openEdit`` / ``closeModal``.
+  useEffect(() => {
+    if (!routeId) return
+    if (sel?.id === routeId) return
+    void (async () => {
+      const { data, error } = await api.GET('/notes/{note_id}', {
+        params: { header: workspaceHeader(), path: { note_id: routeId } },
+      })
+      if (error || !data) {
+        // Stale or invalid id (deleted note, wrong workspace,
+        // typo in a pasted link): drop back to the list so the
+        // user sees something useful instead of a stuck route.
+        setErr(errMessage(error))
+        navigate('/notes', { replace: true })
+        return
+      }
+      await openEdit(data)
+    })()
+    // openEdit is stable enough; reacting only to routeId / sel.id
+    // keeps the effect tight.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [routeId, sel?.id])
 
   async function openEdit(n: Note) {
     setErr(null)
     setMsg(null)
     setCreating(false)
     setSel(n)
+    setIdCopied(false)
     savedSnap.current = { title: n.title ?? '', text: n.transcript ?? '' }
     setETitle(n.title ?? '')
     setEText(n.transcript ?? '')
@@ -199,6 +245,10 @@ export function NotesRoute() {
     } else {
       setTurns([])
     }
+    // Canonical URL for the open note: /notes/<id>. ``replace`` so
+    // clicking between notes in the list does not pile up history
+    // entries the user would then have to back-step through.
+    if (routeId !== n.id) navigate(`/notes/${n.id}`, { replace: true })
   }
 
   function openCreate() {
@@ -676,6 +726,34 @@ export function NotesRoute() {
               <strong>
                 {creating ? t('notes.newNote') : t('notes.editing')}
               </strong>
+              {!creating && sel && (
+                // Tiny clickable chip exposing the note id so the user
+                // can paste it elsewhere (e.g. share a reference with an
+                // assistant) without having to dig into the address bar.
+                // The full UUID lives in ``title`` for hover + a11y; the
+                // visible label keeps the head compact.
+                <button
+                  type="button"
+                  className="chip"
+                  title={idCopied ? t('notes.idCopied') : sel.id}
+                  aria-label={t('notes.copyId')}
+                  onClick={async () => {
+                    try {
+                      await navigator.clipboard.writeText(sel.id)
+                      setIdCopied(true)
+                      window.setTimeout(() => setIdCopied(false), 1500)
+                    } catch {
+                      // Clipboard unavailable (insecure context or
+                      // permission denied): the id is still readable
+                      // from the address bar / tooltip, so we just
+                      // surface a transient hint via state.
+                      setIdCopied(false)
+                    }
+                  }}
+                >
+                  {idCopied ? t('notes.idCopied') : `ID ${sel.id.slice(0, 8)}…`}
+                </button>
+              )}
               <span className="modal__sp" />
               {!creating && sel && sel.kind !== 'conversation' && (
                 <span className="muted">

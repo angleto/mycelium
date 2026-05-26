@@ -26,6 +26,6 @@ export function mentionLink(kind: MentionKind, id: string, label: string): strin
 export function routeForMention(kind: MentionKind, id: string): string {
   if (kind === 'task') return `/tasks/${id}`
   if (kind === 'tag') return `/notes?tag=${id}`
-  // Opens the note modal (view + edit) in the Notes view.
-  return `/notes?open=${id}`
+  // Canonical path for a single note (modal renders over /notes).
+  return `/notes/${id}`
 }
