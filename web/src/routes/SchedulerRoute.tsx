@@ -177,7 +177,7 @@ export function SchedulerRoute() {
           {summary.projected_credit_cost} {t('scheduler.credits')}
           {' · '}
           {t(`scheduler.policies.${summary.policy}`)}
-          {summary.unassignable_count > 0 && (
+          {(summary.unassignable_count ?? 0) > 0 && (
             <>
               {' · '}
               <span className="err">

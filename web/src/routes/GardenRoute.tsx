@@ -318,7 +318,7 @@ export function GardenRoute() {
                   className={`plant__glyph plant__glyph--${n.maturity}`}
                   aria-hidden="true"
                 >
-                  {MATURITY_GLYPH[n.maturity] ?? '🌱'}
+                  {MATURITY_GLYPH[n.maturity ?? 'seed'] ?? '🌱'}
                 </span>
                 <span className="plant__body">
                   <span className="plant__title">{titleOf(n)}</span>
@@ -416,7 +416,7 @@ export function GardenRoute() {
                   className={`plant__glyph plant__glyph--${openData.note.maturity}`}
                   aria-hidden="true"
                 >
-                  {MATURITY_GLYPH[openData.note.maturity] ?? '🌱'}
+                  {MATURITY_GLYPH[openData.note.maturity ?? 'seed'] ?? '🌱'}
                 </span>
               )}
               <span className="modal__sp" />
@@ -473,12 +473,18 @@ function PlantDetail({
   const taskTitleById = (id: string) =>
     allTasks.find((x) => x.id === id)?.title?.trim() || id.slice(0, 8)
   const n = data.note
+  // The schema marks default-valued arrays as optional (post fix to
+  // gen:api --default-non-nullable false), so guard them with empty
+  // fallbacks once at the top of the render.
+  const outgoing = data.outgoing ?? []
+  const incoming = data.incoming ?? []
+  const taskLinks = data.task_links ?? []
   return (
     <div className="plant-detail">
       <div className="plant-detail__chips">
-        <span className={`chip chip--maturity chip--${n.maturity}`}>
-          <span aria-hidden="true">{MATURITY_GLYPH[n.maturity] ?? '🌱'}</span>{' '}
-          {t(`garden.maturity.${n.maturity}`)}
+        <span className={`chip chip--maturity chip--${n.maturity ?? 'seed'}`}>
+          <span aria-hidden="true">{MATURITY_GLYPH[n.maturity ?? 'seed'] ?? '🌱'}</span>{' '}
+          {t(`garden.maturity.${n.maturity ?? 'seed'}`)}
         </span>
         {n.promoted_at && (
           <span className="chip chip--promoted">{t('garden.promotedChip')}</span>
@@ -491,11 +497,11 @@ function PlantDetail({
       )}
       <section className="plant-detail__section">
         <h3>{t('garden.outgoing')}</h3>
-        {data.outgoing.length === 0 ? (
+        {outgoing.length === 0 ? (
           <p className="hint">{t('garden.none')}</p>
         ) : (
           <ul className="plant-detail__links">
-            {data.outgoing.map((l) => (
+            {outgoing.map((l) => (
               <li key={l.id}>
                 <span className="chip chip--linkkind">{l.kind}</span>{' '}
                 <Link to={`/notes?open=${l.child_note_id}`}>
@@ -515,11 +521,11 @@ function PlantDetail({
       </section>
       <section className="plant-detail__section">
         <h3>{t('garden.incoming')}</h3>
-        {data.incoming.length === 0 ? (
+        {incoming.length === 0 ? (
           <p className="hint">{t('garden.none')}</p>
         ) : (
           <ul className="plant-detail__links">
-            {data.incoming.map((l) => (
+            {incoming.map((l) => (
               <li key={l.id}>
                 <span className="chip chip--linkkind">{l.kind}</span>{' '}
                 <Link to={`/notes?open=${l.parent_note_id}`}>
@@ -532,11 +538,11 @@ function PlantDetail({
       </section>
       <section className="plant-detail__section">
         <h3>{t('garden.fruits')}</h3>
-        {data.task_links.length === 0 ? (
+        {taskLinks.length === 0 ? (
           <p className="hint">{t('garden.none')}</p>
         ) : (
           <ul className="plant-detail__links">
-            {data.task_links.map((l) => (
+            {taskLinks.map((l) => (
               <li key={l.id}>
                 <span className="chip chip--linkkind">{l.kind}</span>{' '}
                 <Link to={`/tasks/${l.task_id}`}>

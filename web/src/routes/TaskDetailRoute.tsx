@@ -1318,7 +1318,7 @@ export function TaskDetailRoute() {
       <h2>{t('coord.title')}</h2>
       <CoordinationPanel
         taskId={id}
-        offered={task.offered}
+        offered={task.offered ?? false}
         titleOf={titleOf}
         onChanged={() => void reload()}
       />

@@ -76,7 +76,8 @@ interface PlantNodeData extends Record<string, unknown> {
 
 function PlantNode({ data }: NodeProps<Node<PlantNodeData>>) {
   const { note, primaryTag, dimmed, highlighted, onOpen } = data
-  const glyph = MATURITY_GLYPH[note.maturity] ?? '🌱'
+  const maturity = note.maturity ?? 'seed'
+  const glyph = MATURITY_GLYPH[maturity] ?? '🌱'
   const title = (note.title && note.title.trim()) || '·'
   return (
     <div

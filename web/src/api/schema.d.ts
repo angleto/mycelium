@@ -3756,12 +3756,12 @@ export interface components {
              * Scope
              * @default mcp
              */
-            scope: string;
+            scope?: string;
             /**
              * Ttl Days
              * @default 365
              */
-            ttl_days: number | null;
+            ttl_days?: number | null;
         };
         /**
          * AgentTokenCreateOut
@@ -3985,7 +3985,7 @@ export interface components {
              * Currency
              * @default EUR
              */
-            currency: string;
+            currency?: string;
         };
         /** BudgetOut */
         BudgetOut: {
@@ -4102,7 +4102,7 @@ export interface components {
              * Timezone
              * @default Europe/Rome
              */
-            timezone: string;
+            timezone?: string;
             /** Weekly Hours */
             weekly_hours: {
                 [key: string]: string[][];
@@ -4164,14 +4164,14 @@ export interface components {
              * Default Billable
              * @default true
              */
-            default_billable: boolean;
+            default_billable?: boolean;
             /** Tariffa */
             tariffa?: number | string | null;
             /**
              * Valuta
              * @default EUR
              */
-            valuta: string;
+            valuta?: string;
             /** Timezone */
             timezone?: string | null;
             /** Default Condizioni Pagamento */
@@ -4415,7 +4415,7 @@ export interface components {
              * Lag Working Minutes
              * @default 0
              */
-            lag_working_minutes: number;
+            lag_working_minutes?: number;
         };
         /** DependencyOut */
         DependencyOut: {
@@ -4484,7 +4484,7 @@ export interface components {
              * Task Title
              * @default
              */
-            task_title: string;
+            task_title?: string;
             /** Executor Id */
             executor_id?: string | null;
             /** Executor Name */
@@ -4516,7 +4516,7 @@ export interface components {
         /** DispatchTickIn */
         DispatchTickIn: {
             /** @default balanced */
-            policy: components["schemas"]["SchedulePolicy"];
+            policy?: components["schemas"]["SchedulePolicy"];
         };
         /**
          * DispatchTickOut
@@ -4772,7 +4772,7 @@ export interface components {
         /** ExecutorCreateIn */
         ExecutorCreateIn: {
             /** @default llm_agent */
-            kind: components["schemas"]["ExecutorKind"];
+            kind?: components["schemas"]["ExecutorKind"];
             /** Name */
             name: string;
             /** User Id */
@@ -4781,7 +4781,7 @@ export interface components {
              * Context Switch Cost Minutes
              * @default 0
              */
-            context_switch_cost_minutes: number;
+            context_switch_cost_minutes?: number;
             /** Provider */
             provider?: string | null;
             /** Model Id */
@@ -4790,19 +4790,19 @@ export interface components {
              * Max Parallel
              * @default 4
              */
-            max_parallel: number;
+            max_parallel?: number;
             /** Credit Budget */
             credit_budget?: number | string | null;
             /**
              * Credit Rate Per Hour
              * @default 0
              */
-            credit_rate_per_hour: number | string;
+            credit_rate_per_hour?: number | string;
             /**
              * Enabled
              * @default true
              */
-            enabled: boolean;
+            enabled?: boolean;
             /** Capability Tags */
             capability_tags?: string[];
         };
@@ -5045,7 +5045,7 @@ export interface components {
              * Quantity
              * @default 1
              */
-            quantity: number | string;
+            quantity?: number | string;
             /** Vat Rate */
             vat_rate?: number | string | null;
             /** Natura */
@@ -5276,34 +5276,34 @@ export interface components {
              * Regime Fiscale
              * @default RF01
              */
-            regime_fiscale: string;
+            regime_fiscale?: string;
             /**
              * Paese
              * @default IT
              */
-            paese: string;
+            paese?: string;
             /**
              * Indirizzo
              * @default
              */
-            indirizzo: string;
+            indirizzo?: string;
             /**
              * Cap
              * @default
              */
-            cap: string;
+            cap?: string;
             /**
              * Comune
              * @default
              */
-            comune: string;
+            comune?: string;
             /** Provincia */
             provincia?: string | null;
             /**
              * Nazione
              * @default IT
              */
-            nazione: string;
+            nazione?: string;
             /** Rea */
             rea?: string | null;
             /** Default Iban */
@@ -5332,7 +5332,7 @@ export interface components {
              * Is Default
              * @default false
              */
-            is_default: boolean;
+            is_default?: boolean;
         };
         /** IssuerProfileOut */
         IssuerProfileOut: {
@@ -5637,7 +5637,7 @@ export interface components {
              * Limit
              * @default 10
              */
-            limit: number;
+            limit?: number;
             /** Grader Min Rrf */
             grader_min_rrf?: number | null;
             /** Tag Ids */
@@ -5664,7 +5664,7 @@ export interface components {
              * Namespace
              * @default note
              */
-            namespace: string;
+            namespace?: string;
             /** Sources */
             sources?: [
                 string,
@@ -5674,7 +5674,7 @@ export interface components {
              * Importance
              * @default 0
              */
-            importance: number | string;
+            importance?: number | string;
             /** Tag Ids */
             tag_ids?: string[];
             /** Channel Tag Id */
@@ -5694,14 +5694,14 @@ export interface components {
              * Units In
              * @default 0
              */
-            units_in: number | string;
+            units_in?: number | string;
             /**
              * Units Out
              * @default 0
              */
-            units_out: number | string;
+            units_out?: number | string;
             /** @default local */
-            basis: components["schemas"]["CostBasis"];
+            basis?: components["schemas"]["CostBasis"];
         };
         /** MfaActivateIn */
         MfaActivateIn: {
@@ -5861,21 +5861,21 @@ export interface components {
              * Is Archived
              * @default false
              */
-            is_archived: boolean;
+            is_archived?: boolean;
             /** Deleted At */
             deleted_at?: string | null;
             /**
              * Tags
              * @default []
              */
-            tags: components["schemas"]["TagBrief"][];
+            tags?: components["schemas"]["TagBrief"][];
             /** Version */
             version: number;
             /**
              * Maturity
              * @default seed
              */
-            maturity: string;
+            maturity?: string;
             /** Promoted At */
             promoted_at?: string | null;
             /** Derived Task Ids */
@@ -5952,7 +5952,7 @@ export interface components {
              * Embed
              * @default true
              */
-            embed: boolean;
+            embed?: boolean;
         };
         /** NoteTurnOut */
         NoteTurnOut: {
@@ -5974,17 +5974,17 @@ export interface components {
              * Outgoing
              * @default []
              */
-            outgoing: components["schemas"]["NoteLinkOut"][];
+            outgoing?: components["schemas"]["NoteLinkOut"][];
             /**
              * Incoming
              * @default []
              */
-            incoming: components["schemas"]["NoteLinkOut"][];
+            incoming?: components["schemas"]["NoteLinkOut"][];
             /**
              * Task Links
              * @default []
              */
-            task_links: components["schemas"]["NoteTaskLinkOut"][];
+            task_links?: components["schemas"]["NoteTaskLinkOut"][];
         };
         /**
          * NotificationChannelKind
@@ -6031,12 +6031,12 @@ export interface components {
              * Enabled
              * @default true
              */
-            enabled: boolean;
+            enabled?: boolean;
             /**
              * Target
              * @default
              */
-            target: string;
+            target?: string;
         };
         /** NotificationPrefOut */
         NotificationPrefOut: {
@@ -6175,7 +6175,7 @@ export interface components {
             /** Text */
             text: string;
             /** @default text */
-            kind: components["schemas"]["NoteKind"];
+            kind?: components["schemas"]["NoteKind"];
             /** Title */
             title?: string | null;
         };
@@ -6222,17 +6222,17 @@ export interface components {
             /** Provider */
             provider: string;
             /** @default token */
-            unit: components["schemas"]["RateUnit"];
+            unit?: components["schemas"]["RateUnit"];
             /**
              * Credits Per Input
              * @default 0
              */
-            credits_per_input: number | string;
+            credits_per_input?: number | string;
             /**
              * Credits Per Output
              * @default 0
              */
-            credits_per_output: number | string;
+            credits_per_output?: number | string;
             /** Provider Cost Per Input */
             provider_cost_per_input?: number | string | null;
             /** Provider Cost Per Output */
@@ -6241,12 +6241,12 @@ export interface components {
              * Markup
              * @default 1
              */
-            markup: number | string;
+            markup?: number | string;
             /**
              * Is Active
              * @default true
              */
-            is_active: boolean;
+            is_active?: boolean;
             /** Tier */
             tier?: string | null;
         };
@@ -6269,7 +6269,7 @@ export interface components {
             /** As Of */
             as_of?: string | null;
             /** @default balanced */
-            policy: components["schemas"]["SchedulePolicy"];
+            policy?: components["schemas"]["SchedulePolicy"];
         };
         /** RecomputeOut */
         RecomputeOut: {
@@ -6284,7 +6284,7 @@ export interface components {
              * Unassignable Count
              * @default 0
              */
-            unassignable_count: number;
+            unassignable_count?: number;
         };
         /**
          * RecurrenceFreq
@@ -6308,7 +6308,7 @@ export interface components {
              * Interval
              * @default 1
              */
-            interval: number;
+            interval?: number;
             /** Until */
             until?: string | null;
         };
@@ -6422,7 +6422,7 @@ export interface components {
              * Unassignable
              * @default false
              */
-            unassignable: boolean;
+            unassignable?: boolean;
             /** Unassignable Reason */
             unassignable_reason?: string | null;
             /**
@@ -6543,22 +6543,22 @@ export interface components {
              * Limit
              * @default 20
              */
-            limit: number;
+            limit?: number;
             /**
              * Include Archived
              * @default false
              */
-            include_archived: boolean;
+            include_archived?: boolean;
             /**
              * Include Deleted
              * @default false
              */
-            include_deleted: boolean;
+            include_deleted?: boolean;
             /**
              * Operation Id
              * @default search
              */
-            operation_id: string;
+            operation_id?: string;
         };
         /** SentOut */
         SentOut: {
@@ -6596,7 +6596,7 @@ export interface components {
              * Email Verification Required
              * @default false
              */
-            email_verification_required: boolean;
+            email_verification_required?: boolean;
         };
         /** StateOut */
         StateOut: {
@@ -6617,7 +6617,7 @@ export interface components {
              * Is Hidden
              * @default false
              */
-            is_hidden: boolean;
+            is_hidden?: boolean;
             /** Description */
             description?: string | null;
         };
@@ -6706,7 +6706,7 @@ export interface components {
              * Scope Target Ids
              * @default []
              */
-            scope_target_ids: string[];
+            scope_target_ids?: string[];
             /** Version */
             version: number;
         };
@@ -6735,7 +6735,7 @@ export interface components {
              * Target Ids
              * @default []
              */
-            target_ids: string[];
+            target_ids?: string[];
         };
         /** TaskChecklistClearDoneOut */
         TaskChecklistClearDoneOut: {
@@ -6823,12 +6823,12 @@ export interface components {
              * Importance
              * @default 4
              */
-            importance: number;
+            importance?: number;
             /**
              * Urgency
              * @default 4
              */
-            urgency: number;
+            urgency?: number;
             /** Start Date */
             start_date?: string | null;
             /** Due Date */
@@ -6838,7 +6838,7 @@ export interface components {
             /** Parent Task Id */
             parent_task_id?: string | null;
             /** @default human */
-            executor_kind: components["schemas"]["ExecKind"];
+            executor_kind?: components["schemas"]["ExecKind"];
             /** Assignee Id */
             assignee_id?: string | null;
             /** Owner Id */
@@ -6854,7 +6854,7 @@ export interface components {
             /** Location */
             location?: string | null;
             /** @default should */
-            necessity: components["schemas"]["Necessity"];
+            necessity?: components["schemas"]["Necessity"];
             /** Budget Id */
             budget_id?: string | null;
             /** Tag Ids */
@@ -6954,7 +6954,7 @@ export interface components {
              * Offered
              * @default false
              */
-            offered: boolean;
+            offered?: boolean;
             /** Deleted At */
             deleted_at?: string | null;
             /**
@@ -7266,7 +7266,7 @@ export interface components {
              * Parallel
              * @default false
              */
-            parallel: boolean;
+            parallel?: boolean;
         };
         /** TimeStopIn */
         TimeStopIn: {
@@ -7454,22 +7454,22 @@ export interface components {
              * Ord
              * @default 0
              */
-            ord: number;
+            ord?: number;
             /**
              * Is Initial
              * @default false
              */
-            is_initial: boolean;
+            is_initial?: boolean;
             /**
              * Is Terminal
              * @default false
              */
-            is_terminal: boolean;
+            is_terminal?: boolean;
             /**
              * Is Hidden
              * @default false
              */
-            is_hidden: boolean;
+            is_hidden?: boolean;
             /** Description */
             description?: string | null;
         };
@@ -7481,22 +7481,22 @@ export interface components {
              * Ord
              * @default 0
              */
-            ord: number;
+            ord?: number;
             /**
              * Is Initial
              * @default false
              */
-            is_initial: boolean;
+            is_initial?: boolean;
             /**
              * Is Terminal
              * @default false
              */
-            is_terminal: boolean;
+            is_terminal?: boolean;
             /**
              * Is Hidden
              * @default false
              */
-            is_hidden: boolean;
+            is_hidden?: boolean;
             /** Description */
             description?: string | null;
         };
@@ -7521,7 +7521,7 @@ export interface components {
              * My Role
              * @default owner
              */
-            my_role: string;
+            my_role?: string;
         };
         /** WorkspacePatchIn */
         WorkspacePatchIn: {
@@ -7537,7 +7537,7 @@ export interface components {
             /** Default Client Tag Id */
             default_client_tag_id?: string | null;
             /** @default approval_required */
-            autonomous_dispatch: components["schemas"]["AutonomousDispatch"];
+            autonomous_dispatch?: components["schemas"]["AutonomousDispatch"];
         };
         /** WorkspaceSettingsIn */
         WorkspaceSettingsIn: {
