@@ -571,6 +571,126 @@ def restorable_payload(
     return {f: snap[f] for f in chosen}
 
 
+async def coarsen(
+    session: AsyncSession,
+    *,
+    retain_full_days: int,
+    coarse_to_weekly_days: int,
+) -> tuple[int, int]:
+    """Retention/coarsening pass for the current tenant. Returns
+    ``(deleted_daily, deleted_weekly)``: revisions removed by the
+    first and second tier.
+
+    Two tiers, sliding-window over ``COALESCE(sealed_at, last_edit_at)``:
+
+    1. **Daily**: between ``retain_full_days`` and
+       ``coarse_to_weekly_days`` ago, keep only the most recent row
+       per (entity_kind, entity_id, calendar-day). The bucket is
+       ``date_trunc('day', effective_ts)`` so the cut is timezone-
+       independent (PG stores UTC).
+    2. **Weekly**: older than ``coarse_to_weekly_days``, keep only
+       the most recent row per (entity_kind, entity_id,
+       calendar-week).
+
+    Idempotent: a row already alone in its bucket survives every
+    pass. Never touches rows in the "retain-full" window (everything
+    newer than ``retain_full_days``). Never touches the open web
+    revision (``sealed_at IS NULL``) -- the safety-net job seals
+    those first, retention runs on a slower cadence.
+    """
+    daily_res = await session.execute(
+        text(
+            """
+            DELETE FROM entity_revision
+            WHERE id IN (
+              SELECT id FROM (
+                SELECT id,
+                       ROW_NUMBER() OVER (
+                         PARTITION BY entity_kind, entity_id,
+                                      date_trunc('day',
+                                        COALESCE(sealed_at, last_edit_at))
+                         ORDER BY COALESCE(sealed_at, last_edit_at) DESC,
+                                  id DESC
+                       ) AS rn
+                FROM entity_revision
+                WHERE sealed_at IS NOT NULL
+                  AND COALESCE(sealed_at, last_edit_at)
+                        < now() - make_interval(days => :full_days)
+                  AND COALESCE(sealed_at, last_edit_at)
+                        >= now() - make_interval(days => :weekly_days)
+              ) ranked
+              WHERE rn > 1
+            )
+            """
+        ),
+        {"full_days": retain_full_days, "weekly_days": coarse_to_weekly_days},
+    )
+    weekly_res = await session.execute(
+        text(
+            """
+            DELETE FROM entity_revision
+            WHERE id IN (
+              SELECT id FROM (
+                SELECT id,
+                       ROW_NUMBER() OVER (
+                         PARTITION BY entity_kind, entity_id,
+                                      date_trunc('week',
+                                        COALESCE(sealed_at, last_edit_at))
+                         ORDER BY COALESCE(sealed_at, last_edit_at) DESC,
+                                  id DESC
+                       ) AS rn
+                FROM entity_revision
+                WHERE sealed_at IS NOT NULL
+                  AND COALESCE(sealed_at, last_edit_at)
+                        < now() - make_interval(days => :weekly_days)
+              ) ranked
+              WHERE rn > 1
+            )
+            """
+        ),
+        {"weekly_days": coarse_to_weekly_days},
+    )
+    daily = int(getattr(daily_res, "rowcount", 0) or 0)
+    weekly = int(getattr(weekly_res, "rowcount", 0) or 0)
+    return daily, weekly
+
+
+async def hard_delete_soft_deleted(
+    session: AsyncSession,
+    *,
+    after_days: int,
+) -> tuple[int, int]:
+    """Hard-delete task and note rows whose ``deleted_at`` is older
+    than the cutoff. The AFTER DELETE cascade trigger purges their
+    revisions. Returns ``(tasks_deleted, notes_deleted)``.
+
+    Runs in the current tenant via RLS, same pattern as ``coarsen``.
+    """
+    tasks_res = await session.execute(
+        text(
+            """
+            DELETE FROM tasks
+            WHERE deleted_at IS NOT NULL
+              AND deleted_at < now() - make_interval(days => :d)
+            """
+        ),
+        {"d": after_days},
+    )
+    notes_res = await session.execute(
+        text(
+            """
+            DELETE FROM notes
+            WHERE deleted_at IS NOT NULL
+              AND deleted_at < now() - make_interval(days => :d)
+            """
+        ),
+        {"d": after_days},
+    )
+    tasks_deleted = int(getattr(tasks_res, "rowcount", 0) or 0)
+    notes_deleted = int(getattr(notes_res, "rowcount", 0) or 0)
+    return tasks_deleted, notes_deleted
+
+
 async def find_visible_open_for(
     session: AsyncSession,
     *,
@@ -601,8 +721,10 @@ __all__ = (
     "IDLE_SAFETY_SEAL_SECONDS",
     "AppendResult",
     "append",
+    "coarsen",
     "find_visible_open_for",
     "get_revision",
+    "hard_delete_soft_deleted",
     "list_revisions",
     "restorable_payload",
     "seal_idle",
