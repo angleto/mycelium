@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import type { TFunction } from 'i18next'
 import { api, errMessage, workspaceHeader } from '../api/client'
 import type { components } from '../api/schema'
+import { display, equal, fieldType } from '../lib/revisionDiff'
 
 type Revision = components['schemas']['RevisionOut']
 
@@ -12,9 +14,39 @@ interface RevisionsPanelProps {
    * restore. Caller bumps it after a successful restore (the
    * service returns the new version). */
   version: number
+  /** Current entity state, by field name. Drives the diff
+   * side-by-side view: the snapshot of the selected revision is
+   * compared against this map. Optional — without it the panel
+   * still renders the timeline and supports restore-totale. */
+  current?: Record<string, unknown>
   /** Fired after a successful restore. The caller typically
    * refetches the entity to pick up the reverted fields. */
   onRestored?: (newVersion: number) => void
+}
+
+/** Fields that show up in the diff side-by-side view for each kind.
+ * The list is the union of "fields the server allows to restore"
+ * (`restorable_payload` whitelist on the backend) and the practical
+ * core that the SPA already exposes in its editors. Per-field
+ * restore on a non-listed field is still possible at the API level
+ * (`fields: [...]`) but the UI sticks to the curated set. */
+const VIEWABLE_FIELDS: Record<'task' | 'note', readonly string[]> = {
+  task: [
+    'title',
+    'description',
+    'importance',
+    'urgency',
+    'start_date',
+    'due_date',
+    'billable',
+    'estimate_effort_h',
+    'monetary_cost',
+    'location',
+    'necessity',
+    'start_at',
+    'duration_minutes',
+  ],
+  note: ['title', 'transcript'],
 }
 
 function formatTime(iso: string | null): string {
@@ -24,37 +56,38 @@ function formatTime(iso: string | null): string {
   return d.toLocaleString()
 }
 
-/** Recovery-history timeline for a single task or note. Shows the
- * latest 50 revisions, most recent first; the row marked
- * ``editing`` corresponds to the open web revision (sealed_at is
- * null on the server). ``Restore`` reverts the entity to the
- * snapshot stored on that row.
+/** Recovery-history timeline for a single task or note.
  *
- * Diff side-by-side is intentionally NOT here yet — the timeline
- * + restore covers the original "I deleted something by mistake"
- * recovery path. A diff view can land on top of this without
- * changing the data model.
+ * - Lists the latest 50 revisions, most recent first; the row with
+ *   ``sealed_at === null`` is the open web session, badged
+ *   ``editing``.
+ * - Clicking a sealed row opens an inline diff side-by-side with
+ *   the current entity state. Each row that differs offers a
+ *   per-field ``Restore`` button; ``Restore all`` at the bottom
+ *   reverts every restorable field.
+ * - The set of viewable fields is curated per kind (see
+ *   ``VIEWABLE_FIELDS``). The server's restorable-fields whitelist
+ *   is authoritative; this list only governs what the UI surfaces.
  */
 export function RevisionsPanel({
   kind,
   id,
   version,
+  current,
   onRestored,
 }: RevisionsPanelProps) {
   const { t } = useTranslation()
   const [rows, setRows] = useState<Revision[]>([])
-  const [loading, setLoading] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
+  const [selectedId, setSelectedId] = useState<string | null>(null)
 
-  const load = useCallback(async () => {
-    setLoading(true)
+  const reload = useCallback(async () => {
     setErr(null)
     if (kind === 'task') {
       const { data, error } = await api.GET('/tasks/{task_id}/revisions', {
         params: { header: workspaceHeader(), path: { task_id: id } },
       })
-      setLoading(false)
       if (error) {
         setErr(errMessage(error))
         return
@@ -64,7 +97,6 @@ export function RevisionsPanel({
       const { data, error } = await api.GET('/notes/{note_id}/revisions', {
         params: { header: workspaceHeader(), path: { note_id: id } },
       })
-      setLoading(false)
       if (error) {
         setErr(errMessage(error))
         return
@@ -73,10 +105,6 @@ export function RevisionsPanel({
     }
   }, [kind, id])
 
-  // Initial load is part of the panel's lifecycle (subscribe to
-  // external timeline as the entity comes into view). The
-  // ``active`` flag guards against a race when the user switches
-  // entities before the fetch resolves.
   useEffect(() => {
     let active = true
     void (async () => {
@@ -107,15 +135,17 @@ export function RevisionsPanel({
     }
   }, [kind, id])
 
-  const restore = useCallback(
-    async (rev: Revision) => {
-      if (!window.confirm(t('revisions.confirmRestore'))) return
+  const runRestore = useCallback(
+    async (rev: Revision, fields: string[] | null) => {
+      const confirmKey = fields
+        ? 'revisions.confirmRestoreField'
+        : 'revisions.confirmRestore'
+      if (!window.confirm(t(confirmKey))) return
       setBusy(rev.id)
       setErr(null)
-      const opts = {
-        params: { header: workspaceHeader() },
-        body: { expected_version: version },
-      }
+      const body = fields
+        ? { expected_version: version, fields }
+        : { expected_version: version }
       if (kind === 'task') {
         const { data, error, response } = await api.POST(
           '/tasks/{task_id}/revisions/{rev_id}/restore',
@@ -124,7 +154,7 @@ export function RevisionsPanel({
               header: workspaceHeader(),
               path: { task_id: id, rev_id: rev.id },
             },
-            body: opts.body,
+            body,
           },
         )
         setBusy(null)
@@ -145,7 +175,7 @@ export function RevisionsPanel({
               header: workspaceHeader(),
               path: { note_id: id, rev_id: rev.id },
             },
-            body: opts.body,
+            body,
           },
         )
         setBusy(null)
@@ -159,20 +189,26 @@ export function RevisionsPanel({
         }
         onRestored?.(data.version)
       }
-      await load()
+      await reload()
     },
-    [kind, id, version, onRestored, t, load],
+    [kind, id, version, onRestored, t, reload],
   )
 
-  if (loading && rows.length === 0) {
-    return <p className="muted">{t('revisions.loading')}</p>
-  }
+  const restoreAll = useCallback(
+    (rev: Revision) => runRestore(rev, null),
+    [runRestore],
+  )
+
+  const restoreField = useCallback(
+    (rev: Revision, field: string) => runRestore(rev, [field]),
+    [runRestore],
+  )
 
   return (
     <div className="revisions-panel">
       <h3>{t('revisions.title')}</h3>
       {err && <p className="error">{err}</p>}
-      {rows.length === 0 && !loading ? (
+      {rows.length === 0 ? (
         <p className="muted">{t('revisions.empty')}</p>
       ) : (
         <ul className="revisions-list">
@@ -183,43 +219,150 @@ export function RevisionsPanel({
               defaultValue: rev.channel,
             })
             const fields = rev.changed_fields.join(', ')
+            const isSelected = rev.id === selectedId
             return (
               <li
                 key={rev.id}
-                className={`revision-row${open ? ' revision-open' : ''}`}
+                className={[
+                  'revision-row',
+                  open ? 'revision-open' : '',
+                  isSelected ? 'revision-selected' : '',
+                ]
+                  .filter(Boolean)
+                  .join(' ')}
               >
-                <div className="revision-meta">
-                  <span className="revision-time">{formatTime(ts)}</span>
-                  <span className="revision-channel">{channelLabel}</span>
-                  {open && (
-                    <span className="revision-open-badge">
-                      {t('revisions.editing')}
-                    </span>
-                  )}
-                  {rev.restored_from && (
-                    <span className="revision-restored-badge">
-                      {t('revisions.restoredFrom')}
-                    </span>
-                  )}
-                </div>
-                <div className="revision-fields">{fields}</div>
-                {!open && (
-                  <button
-                    type="button"
-                    className="revision-restore"
-                    onClick={() => void restore(rev)}
-                    disabled={busy === rev.id}
-                  >
-                    {busy === rev.id
-                      ? t('revisions.restoring')
-                      : t('revisions.restore')}
-                  </button>
+                <button
+                  type="button"
+                  className="revision-meta-btn"
+                  onClick={() =>
+                    setSelectedId((cur) => (cur === rev.id ? null : rev.id))
+                  }
+                  disabled={open}
+                  aria-expanded={isSelected}
+                >
+                  <div className="revision-meta">
+                    <span className="revision-time">{formatTime(ts)}</span>
+                    <span className="revision-channel">{channelLabel}</span>
+                    {open && (
+                      <span className="revision-open-badge">
+                        {t('revisions.editing')}
+                      </span>
+                    )}
+                    {rev.restored_from && (
+                      <span className="revision-restored-badge">
+                        {t('revisions.restoredFrom')}
+                      </span>
+                    )}
+                  </div>
+                  <div className="revision-fields">{fields}</div>
+                </button>
+                {isSelected && !open && (
+                  <RevisionDiffView
+                    rev={rev}
+                    kind={kind}
+                    current={current ?? {}}
+                    busy={busy === rev.id}
+                    onRestoreField={(field) => void restoreField(rev, field)}
+                    onRestoreAll={() => void restoreAll(rev)}
+                  />
                 )}
               </li>
             )
           })}
         </ul>
       )}
+    </div>
+  )
+}
+
+interface RevisionDiffViewProps {
+  rev: Revision
+  kind: 'task' | 'note'
+  current: Record<string, unknown>
+  busy: boolean
+  onRestoreField: (field: string) => void
+  onRestoreAll: () => void
+}
+
+/** Side-by-side diff of a revision's snapshot vs the entity's
+ * current state. Rendered when a sealed timeline row is expanded.
+ *
+ * Equality and rendering go through ``revisionDiff.normalize`` /
+ * ``display`` so a Decimal serialised as ``"12.50"`` matches the
+ * ``12.5`` number the SPA carries, and an ISO datetime matches a
+ * ``Date`` object pointing at the same instant. Without this, the
+ * diff would surface false-positive "changes" on every Decimal /
+ * date / boolean field. */
+function RevisionDiffView({
+  rev,
+  kind,
+  current,
+  busy,
+  onRestoreField,
+  onRestoreAll,
+}: RevisionDiffViewProps) {
+  const { t } = useTranslation()
+  const snap = rev.snapshot as Record<string, unknown>
+  const viewable = VIEWABLE_FIELDS[kind]
+  const fields = viewable.filter((f) => f in snap || f in current)
+  const diffs = fields.filter(
+    (f) => !equal(snap[f], current[f], fieldType(kind, f)),
+  )
+
+  return (
+    <div className="revision-diff">
+      {diffs.length === 0 ? (
+        <p className="muted">{t('revisions.noDiff')}</p>
+      ) : (
+        <table className="revision-diff-table">
+          <thead>
+            <tr>
+              <th>{t('revisions.diff.field')}</th>
+              <th>{t('revisions.diff.snapshot')}</th>
+              <th>{t('revisions.diff.current')}</th>
+              <th aria-label="actions" />
+            </tr>
+          </thead>
+          <tbody>
+            {diffs.map((f) => {
+              const type = fieldType(kind, f)
+              return (
+                <tr key={f}>
+                  <th scope="row">
+                    {t(`revisions.diff.fields.${f}`, { defaultValue: f })}
+                  </th>
+                  <td className="revision-diff-snap">
+                    {display(snap[f], type, t as TFunction)}
+                  </td>
+                  <td className="revision-diff-curr">
+                    {display(current[f], type, t as TFunction)}
+                  </td>
+                  <td>
+                    <button
+                      type="button"
+                      className="revision-restore-field"
+                      onClick={() => onRestoreField(f)}
+                      disabled={busy}
+                    >
+                      {t('revisions.restoreField')}
+                    </button>
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      )}
+      <div className="revision-diff-footer">
+        <button
+          type="button"
+          className="revision-restore"
+          onClick={onRestoreAll}
+          disabled={busy}
+        >
+          {busy ? t('revisions.restoring') : t('revisions.restoreAll')}
+        </button>
+      </div>
     </div>
   )
 }

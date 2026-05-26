@@ -914,7 +914,12 @@ export function NotesRoute() {
                 />
                 <div className="field grow">
                   {t('notes.text')}
-                  <RichEditor value={eText} onChange={setEText} large />
+                  <RichEditor
+                    value={eText}
+                    onChange={setEText}
+                    large
+                    imageUploadParent={{ kind: 'note', id: sel.id }}
+                  />
                 </div>
                 <Attachments noteId={sel.id} />
                 <LinkedTasksPanel noteId={sel.id} />
@@ -922,6 +927,14 @@ export function NotesRoute() {
                   kind="note"
                   id={sel.id}
                   version={sel.version}
+                  current={{
+                    ...(sel as unknown as Record<string, unknown>),
+                    // The SPA tracks the editable body separately while
+                    // the user types; pass the live editor value so the
+                    // diff vs the snapshot reflects what is on screen.
+                    transcript: eText,
+                    title: eTitle || sel.title,
+                  }}
                   onRestored={() => void refreshSel()}
                 />
               </div>

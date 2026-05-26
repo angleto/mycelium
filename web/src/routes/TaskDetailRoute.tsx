@@ -877,7 +877,11 @@ export function TaskDetailRoute() {
             </button>
           </div>
           <div role="tabpanel" hidden={activeTab !== 'description'}>
-            <RichEditor value={description} onChange={setDescription} />
+            <RichEditor
+              value={description}
+              onChange={setDescription}
+              imageUploadParent={{ kind: 'task', id: task.id }}
+            />
           </div>
           <div role="tabpanel" hidden={activeTab !== 'checklist'}>
             <ChecklistPanel
@@ -1396,6 +1400,7 @@ export function TaskDetailRoute() {
         kind="task"
         id={id}
         version={task.version}
+        current={task as unknown as Record<string, unknown>}
         onRestored={() => void reload()}
       />
     </section>

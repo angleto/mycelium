@@ -4,7 +4,15 @@
 // (string values, not literals) so other locales must mirror it.
 export const en = {
   app: { title: 'Flow' },
-  common: { on: 'on', off: 'off', close: 'Close', cancel: 'Cancel' },
+  common: {
+    on: 'on',
+    off: 'off',
+    close: 'Close',
+    cancel: 'Cancel',
+    yes: 'Yes',
+    no: 'No',
+    dashEmpty: '—',
+  },
   taskLinkKind: {
     subject: 'subject',
     artifact: 'artifact',
@@ -624,10 +632,36 @@ export const en = {
     empty: 'No revisions yet.',
     editing: 'editing',
     restore: 'Restore',
+    restoreAll: 'Restore whole revision',
+    restoreField: 'Restore this field',
     restoring: 'Restoring…',
     restoredFrom: 'restore',
+    noDiff: 'No differences against the current state.',
     confirmRestore:
       'Revert this entity to the snapshot of this revision? A new restore entry will be added to the history.',
+    confirmRestoreField:
+      'Restore only this field from the selected revision? A new restore entry will be added to the history.',
+    diff: {
+      field: 'Field',
+      snapshot: 'Snapshot',
+      current: 'Current',
+      fields: {
+        title: 'Title',
+        description: 'Description',
+        transcript: 'Body',
+        importance: 'Importance',
+        urgency: 'Urgency',
+        start_date: 'Start date',
+        due_date: 'Due date',
+        billable: 'Billable',
+        estimate_effort_h: 'Estimate (h)',
+        monetary_cost: 'Monetary cost',
+        location: 'Location',
+        necessity: 'Necessity',
+        start_at: 'Appointment start',
+        duration_minutes: 'Duration (min)',
+      },
+    },
     channel: {
       web: 'web',
       api: 'api',
@@ -722,6 +756,8 @@ export const en = {
     tableRow: 'Add row',
     tableCol: 'Add column',
     tableDel: 'Delete table',
+    image: 'Insert image',
+    imageNeedsSave: 'Save the note before adding images.',
     toRaw: 'Edit as Markdown',
     toWysiwyg: 'Rich editor',
   },

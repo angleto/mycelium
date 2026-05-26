@@ -3464,3 +3464,98 @@ button.btn--danger:hover {
   padding: 0.15rem 0.4rem;
   line-height: 1;
 }
+
+/* Recovery-history panel (entity_revision): timeline + inline diff
+ * for the selected revision. Visible at the bottom of TaskDetailRoute
+ * and inside the note-edit modal. */
+.revisions-panel {
+  margin-top: 1.2rem;
+}
+.revisions-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+.revision-row {
+  border: 1px solid var(--border);
+  border-radius: 0.4rem;
+  padding: 0.4rem 0.6rem;
+  background: var(--surface-1);
+}
+.revision-row.revision-open {
+  background: var(--surface-2);
+  border-style: dashed;
+}
+.revision-row.revision-selected {
+  border-color: var(--accent, var(--border));
+}
+.revision-meta-btn {
+  appearance: none;
+  background: none;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+}
+.revision-meta-btn[disabled] {
+  cursor: default;
+}
+.revision-meta {
+  display: flex;
+  gap: 0.6rem;
+  align-items: baseline;
+  font-size: 0.85rem;
+}
+.revision-time { font-variant-numeric: tabular-nums; }
+.revision-channel { color: var(--muted); }
+.revision-open-badge,
+.revision-restored-badge {
+  font-size: 0.7rem;
+  padding: 0.05rem 0.35rem;
+  border-radius: 0.3rem;
+  background: var(--surface-3, var(--surface-2));
+  color: var(--muted);
+}
+.revision-fields {
+  font-size: 0.85rem;
+  color: var(--muted);
+  margin-top: 0.15rem;
+  word-break: break-word;
+}
+.revision-diff {
+  margin-top: 0.5rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--border);
+}
+.revision-diff-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+.revision-diff-table th,
+.revision-diff-table td {
+  text-align: left;
+  padding: 0.25rem 0.4rem;
+  vertical-align: top;
+  border-bottom: 1px solid var(--border);
+}
+.revision-diff-snap,
+.revision-diff-curr {
+  font-family: var(--mono, monospace);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-width: 18rem;
+}
+.revision-diff-snap { background: var(--surface-2); }
+.revision-diff-footer {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 0.5rem;
+}

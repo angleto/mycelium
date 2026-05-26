@@ -3,7 +3,15 @@ import type { Catalog } from './en'
 // Italian catalog. Same key shape as en (typed via Catalog).
 export const it: Catalog = {
   app: { title: 'Flow' },
-  common: { on: 'sì', off: 'no', close: 'Chiudi', cancel: 'Annulla' },
+  common: {
+    on: 'sì',
+    off: 'no',
+    close: 'Chiudi',
+    cancel: 'Annulla',
+    yes: 'Sì',
+    no: 'No',
+    dashEmpty: '—',
+  },
   taskLinkKind: {
     subject: 'oggetto',
     artifact: 'artefatto',
@@ -623,10 +631,36 @@ export const it: Catalog = {
     empty: 'Nessuna revisione.',
     editing: 'in modifica',
     restore: 'Ripristina',
+    restoreAll: 'Ripristina tutta la revisione',
+    restoreField: 'Ripristina questo campo',
     restoring: 'Ripristino…',
     restoredFrom: 'ripristino',
+    noDiff: 'Nessuna differenza rispetto allo stato attuale.',
     confirmRestore:
       "Ripristinare questa entita allo snapshot di questa revisione? Sara aggiunta una nuova voce 'restore' in cronologia.",
+    confirmRestoreField:
+      "Ripristinare solo questo campo dalla revisione selezionata? Sara aggiunta una nuova voce 'restore' in cronologia.",
+    diff: {
+      field: 'Campo',
+      snapshot: 'Snapshot',
+      current: 'Attuale',
+      fields: {
+        title: 'Titolo',
+        description: 'Descrizione',
+        transcript: 'Testo',
+        importance: 'Importanza',
+        urgency: 'Urgenza',
+        start_date: 'Data inizio',
+        due_date: 'Scadenza',
+        billable: 'Fatturabile',
+        estimate_effort_h: 'Stima (h)',
+        monetary_cost: 'Costo monetario',
+        location: 'Luogo',
+        necessity: 'Necessita',
+        start_at: 'Inizio appuntamento',
+        duration_minutes: 'Durata (min)',
+      },
+    },
     channel: {
       web: 'web',
       api: 'api',
