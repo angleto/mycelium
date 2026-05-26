@@ -11,7 +11,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, status
 
-from flow_api.deps import TenantCtx, tenant_ctx
+from flow_api.deps import TenantCtx, tenant_admin_ctx, tenant_ctx
 from flow_api.schemas import (
     ErasedOut,
     MemoryBlobOut,
@@ -102,6 +102,36 @@ async def status_(
     model is installed) or memory is running keyword-only. Member-level
     via tenant_ctx; lets the SPA show "semantic vs keyword-only"."""
     return MemoryStatusOut(semantic=embedder_available())
+
+
+@router.get("/migration-status")
+async def migration_status_(
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+) -> dict[str, int]:
+    """Embedding migration coverage for this workspace (task 1d081395):
+    {total, migrated, pending}. ``total`` is blobs with non-NULL text;
+    ``migrated`` is blobs already populated with the v2 embedding;
+    ``pending`` is the worker's TODO. Used to decide when to run the
+    cutover migration that drops v1 columns."""
+    from flow_core.services import embedding_migration as svc
+
+    return await svc.migration_status(ctx.session)
+
+
+@router.post("/migrate-embeddings")
+async def migrate_embeddings_(
+    ctx: Annotated[TenantCtx, Depends(tenant_admin_ctx)],
+    batch_size: int = 200,
+) -> dict[str, int]:
+    """Admin-gated one-shot trigger: run the v2 embedding backfill on
+    this workspace now (don't wait for the worker tick). Returns
+    ``{migrated, batch_size}``; if migrated == batch_size, more rows
+    are pending -- re-call to drain. No-op when v2 model isn't
+    configured."""
+    from flow_core.services import embedding_migration as svc
+
+    migrated = await svc.run_embedding_migration(ctx.session, batch_size=batch_size)
+    return {"migrated": migrated, "batch_size": batch_size}
 
 
 @router.get("/blobs/{blob_id}", response_model=MemoryBlobOut)

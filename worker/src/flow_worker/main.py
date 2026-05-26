@@ -18,9 +18,11 @@ from flow_core.config import get_settings
 from flow_core.services.mailer import build_system_mailer, set_mailer
 from flow_worker import (
     dispatch,
+    embedding_migration,
     google_calendar,
     reminders,
     revisions,
+    revisions_retention,
     task_search_backfill,
     telegram_assistant,
 )
@@ -45,6 +47,8 @@ async def _run() -> None:
         reminders.run_forever(),
         task_search_backfill.run_forever(),
         revisions.run_forever(),
+        revisions_retention.run_forever(),
+        embedding_migration.run_forever(),
     )
 
 

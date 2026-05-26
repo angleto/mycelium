@@ -161,6 +161,23 @@ class Settings(BaseSettings):
     # bounded (only timed-out writes) and the worker quickly drains.
     task_search_backfill_interval_seconds: int = 60
 
+    # Embedding model migration (task 1d081395). The dual-column
+    # pattern in migration 0009 lets us roll a new embedder (bge-m3
+    # 1024d default) without downtime: ``FLOW_EMBED_MODEL`` is the v1
+    # legacy model (left as is for backward-compat with installed
+    # deployments), ``FLOW_EMBED_MODEL_V2`` is the new target. When
+    # set, new writes populate ``embedding_v2`` and the migration
+    # worker backfills v2 for legacy rows. ``embed_dim_v2`` must match
+    # the model's actual dim (pgvector is strict). Leaving v2 unset
+    # keeps the system on v1 only (legacy single-model behaviour).
+    embed_model: str = "intfloat/multilingual-e5-small"
+    embed_model_v2: str = ""
+    embed_dim_v2: int = 1024
+    # Embedding migration worker (sweep-rate per workspace). Like the
+    # task-search backfill: per-workspace + exception-isolated, modest
+    # default so a large workspace drains without saturating the API.
+    embedding_migration_interval_seconds: int = 60
+
     # Cross-encoder reranker (task 27579d6a). Opt-in second-stage
     # scorer that re-orders the top-K from RRF using a cross-encoder
     # model (sees query+doc joined). Off by default because the local

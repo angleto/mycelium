@@ -122,7 +122,9 @@ class LocalEmbedder:
 
 _FactoryFn = Callable[[], Embedder]
 _override: _FactoryFn | None = None
+_override_v2: _FactoryFn | None = None
 _singleton: LocalEmbedder | None = None
+_singleton_v2: LocalEmbedder | None = None
 
 
 def set_embedder_override(fn: _FactoryFn | None) -> None:
@@ -132,13 +134,45 @@ def set_embedder_override(fn: _FactoryFn | None) -> None:
     _override = fn
 
 
+def set_embedder_v2_override(fn: _FactoryFn | None) -> None:
+    """Test seam mirror of ``set_embedder_override`` for the v2 model.
+    Production leaves this None. Independent of the v1 override so
+    tests can simulate a mid-migration state (v1 active + v2
+    available) realistically."""
+    global _override_v2
+    _override_v2 = fn
+
+
 def get_embedder() -> Embedder:
+    """The v1 (legacy) embedder. Settings ``embed_model`` picks the
+    model name; default keeps the OSS multilingual-e5-small. Override
+    via ``set_embedder_override`` for tests."""
     if _override is not None:
         return _override()
     global _singleton
     if _singleton is None:
-        _singleton = LocalEmbedder()
+        from flow_core.config import get_settings as _gs
+
+        _singleton = LocalEmbedder(_gs().embed_model)
     return _singleton
+
+
+def get_embedder_v2() -> Embedder | None:
+    """The v2 embedder, only configured when ``embed_model_v2`` is
+    set (empty string = no v2 model = migration off). Returns None
+    when migration is not active; callers degrade to v1-only writes.
+    """
+    if _override_v2 is not None:
+        return _override_v2()
+    from flow_core.config import get_settings as _gs
+
+    settings = _gs()
+    if not settings.embed_model_v2:
+        return None
+    global _singleton_v2
+    if _singleton_v2 is None:
+        _singleton_v2 = LocalEmbedder(settings.embed_model_v2)
+    return _singleton_v2
 
 
 def embedder_available() -> bool:
