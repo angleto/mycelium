@@ -17,6 +17,7 @@ import { TagPickerGrid } from '../components/TagPickerGrid'
 import { VoiceRecorder } from '../components/VoiceRecorder'
 import { TaskTimer } from '../components/TaskTimer'
 import { Attachments } from '../components/Attachments'
+import { LinkedTasksPanel } from '../components/LinkedTasksPanel'
 import { useFocus } from '../lib/focus'
 import type { components } from '../api/schema'
 
@@ -561,6 +562,11 @@ export function NotesRoute() {
     // chips) reflect the new link.
     await loadNotes()
     setConverting(null)
+    // Open the freshly-derived task in its own view so the user lands
+    // directly on the new fruit instead of staying in the note modal
+    // (task #892f40b1: "devono aprirsi le finestre").
+    closeModal()
+    navigate(`/tasks/${data.task_id}`)
   }
 
   // Transplant the note into a task (ADR-0029 P1, kind=promoted_from):
@@ -592,6 +598,8 @@ export function NotesRoute() {
     setMade({ id: data.task_id, title })
     await loadNotes()
     setConverting(null)
+    closeModal()
+    navigate(`/tasks/${data.task_id}`)
   }
 
   // Case 2 — a long/structured note: spin a task off the current text
@@ -626,6 +634,8 @@ export function NotesRoute() {
     }
     setMade({ id: data.task_id, title })
     await loadNotes()
+    closeModal()
+    navigate(`/tasks/${data.task_id}`)
   }
 
   const modalOpen = sel !== null || creating
@@ -886,6 +896,7 @@ export function NotesRoute() {
                   <RichEditor value={eText} onChange={setEText} large />
                 </div>
                 <Attachments noteId={sel.id} />
+                <LinkedTasksPanel noteId={sel.id} />
               </div>
             )}
             {!creating && sel && sel.kind !== 'conversation' && (

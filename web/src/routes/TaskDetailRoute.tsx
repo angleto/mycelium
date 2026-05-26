@@ -14,6 +14,7 @@ import { Attachments } from '../components/Attachments'
 import { AgentRunPanel } from '../components/AgentRunPanel'
 import { ChecklistPanel } from '../components/ChecklistPanel'
 import { CoordinationPanel } from '../components/CoordinationPanel'
+import { LinkedNotesPanel } from '../components/LinkedNotesPanel'
 import { TaskTimer } from '../components/TaskTimer'
 import { formatHours } from '../lib/estimate'
 
@@ -1322,6 +1323,9 @@ export function TaskDetailRoute() {
         titleOf={titleOf}
         onChanged={() => void reload()}
       />
+
+      <h2>{t('linkedNotes.title')}</h2>
+      <LinkedNotesPanel taskId={id} />
 
       <h2>{t('tasks.workNotes')}</h2>
       {/* The TaskTimer at the top of this view (next to the state

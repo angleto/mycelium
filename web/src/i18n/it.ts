@@ -3,7 +3,37 @@ import type { Catalog } from './en'
 // Italian catalog. Same key shape as en (typed via Catalog).
 export const it: Catalog = {
   app: { title: 'Flow' },
-  common: { on: 'sì', off: 'no', close: 'Chiudi' },
+  common: { on: 'sì', off: 'no', close: 'Chiudi', cancel: 'Annulla' },
+  taskLinkKind: {
+    subject: 'oggetto',
+    artifact: 'artefatto',
+    derived_from: 'derivato',
+    promoted_from: 'trapiantato',
+  },
+  linkedTasks: {
+    title: 'Task collegati',
+    headHint: 'Quattro relazioni tipizzate fra questa nota e i task (ADR-0029).',
+    empty: '—',
+    add: 'Collega un task esistente ({{kind}})',
+    remove: 'Scollega',
+    pickerPh: 'Cerca task…',
+    promotedReadonly:
+      'Una nota trapiantata non si può scollegare: lascerebbe orfana la promozione.',
+    unknownTask: '(task non disponibile)',
+  },
+  linkedNotes: {
+    title: 'Note collegate',
+    headHint: 'Quattro relazioni tipizzate fra note e questo task (ADR-0029).',
+    empty: '—',
+    add: 'Collega una nota esistente ({{kind}})',
+    remove: 'Scollega',
+    pickerPh: 'Cerca note…',
+    unknownNote: '(nota non disponibile)',
+  },
+  notePicker: {
+    search: 'Filtra le note per titolo…',
+    none: 'Nessuna nota corrisponde',
+  },
   assigneePicker: {
     label: 'Assegnatario',
     none: 'Nessun assegnatario',

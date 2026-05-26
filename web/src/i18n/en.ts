@@ -4,7 +4,37 @@
 // (string values, not literals) so other locales must mirror it.
 export const en = {
   app: { title: 'Flow' },
-  common: { on: 'on', off: 'off', close: 'Close' },
+  common: { on: 'on', off: 'off', close: 'Close', cancel: 'Cancel' },
+  taskLinkKind: {
+    subject: 'subject',
+    artifact: 'artifact',
+    derived_from: 'derived from',
+    promoted_from: 'promoted from',
+  },
+  linkedTasks: {
+    title: 'Linked tasks',
+    headHint: 'Four typed relations from this note to tasks (ADR-0029).',
+    empty: '—',
+    add: 'Link an existing task ({{kind}})',
+    remove: 'Unlink',
+    pickerPh: 'Search tasks…',
+    promotedReadonly:
+      'A transplanted note cannot be unlinked: it would orphan the promotion timestamp.',
+    unknownTask: '(task unavailable)',
+  },
+  linkedNotes: {
+    title: 'Linked notes',
+    headHint: 'Four typed relations from notes to this task (ADR-0029).',
+    empty: '—',
+    add: 'Link an existing note ({{kind}})',
+    remove: 'Unlink',
+    pickerPh: 'Search notes…',
+    unknownNote: '(note unavailable)',
+  },
+  notePicker: {
+    search: 'Filter notes by title…',
+    none: 'No matching notes',
+  },
   assigneePicker: {
     label: 'Assignee',
     none: 'Unassigned',
