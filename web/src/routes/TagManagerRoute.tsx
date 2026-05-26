@@ -26,7 +26,7 @@ function TagRow({
 }) {
   const { t } = useTranslation()
   const [name, setName] = useState(tag.name)
-  const [color, setColor] = useState(tag.color || '#6d28d9')
+  const [color, setColor] = useState(tag.color || '#4a6b3e')
   const [scope, setScope] = useState<string[]>(tag.scope_target_ids ?? [])
   const [msg, setMsg] = useState<string | null>(null)
   const [err, setErr] = useState<string | null>(null)
@@ -76,7 +76,7 @@ function TagRow({
       <input value={name} onChange={(e) => setName(e.target.value)} />
       <input
         type="color"
-        value={/^#[0-9a-fA-F]{6}$/.test(color) ? color : '#6d28d9'}
+        value={/^#[0-9a-fA-F]{6}$/.test(color) ? color : '#4a6b3e'}
         onChange={(e) => setColor(e.target.value)}
         aria-label={t('tagmgr.color')}
       />
@@ -264,7 +264,7 @@ export function TagManagerRoute() {
                   <li key={tg.id}>
                     <TagChip
                       name={tg.name}
-                      color={tg.color || '#6d28d9'}
+                      color={tg.color || '#4a6b3e'}
                       kind={tg.kind}
                     />
                     <span className="muted">

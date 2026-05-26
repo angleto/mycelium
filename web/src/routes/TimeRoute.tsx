@@ -42,15 +42,15 @@ function hhmmss(sec: number): string {
 }
 
 const PIE = [
-  '#6d28d9',
+  '#4a6b3e',
+  '#5b3fb8',
+  '#6a4f33',
+  '#c97b9f',
   '#0ea5e9',
-  '#16a34a',
+  '#a13322',
   '#d97706',
-  '#dc2626',
+  '#7fa56e',
   '#0891b2',
-  '#9333ea',
-  '#65a30d',
-  '#e11d48',
 ]
 
 // Dependency-free SVG donut (stroke-dasharray technique) of the

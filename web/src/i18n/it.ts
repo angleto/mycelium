@@ -646,12 +646,12 @@ export const it: Catalog = {
   garden: {
     nav: 'Giardino',
     title: 'Giardino',
-    intro: 'Le tue idee, vive. Inbox raccoglie i semi; Giardino le coltiva; Cimitero conserva quelle dormienti e trapiantate.',
+    intro: 'Le tue idee, vive. Vivaio raccoglie i semi; Giardino le coltiva; Compost conserva quelle dormienti e trapiantate, nutrendo il prossimo ciclo.',
     tab: {
-      inbox: 'Inbox',
+      inbox: 'Vivaio',
       garden: 'Giardino',
-      cemetery: 'Cimitero',
-      mindmap: 'Mappa',
+      cemetery: 'Compost',
+      mindmap: 'Micelio',
     },
     empty: {
       inbox: 'Nessuna nota fresca.',

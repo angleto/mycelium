@@ -1,18 +1,24 @@
 :root {
-  --bg: #f6f7f9;
-  --surface: #ffffff;
-  --surface-2: #f1f2f5;
-  --text: #3b4252;
-  --text-h: #1a1d24;
-  --muted: #707888;
-  --border: #e3e5ea;
-  --accent: #6d28d9;
-  --accent-weak: #ede9fe;
+  --bg: #f7f5ef;
+  --surface: #fdfcf7;
+  --surface-2: #ece8de;
+  --text: #2e362d;
+  --text-h: #15201a;
+  --muted: #6b7665;
+  --border: #d8d3c4;
+  --accent: #5b3fb8;
+  --accent-weak: #e6e0f3;
   --accent-fg: #ffffff;
-  --err: #c0341d;
-  --ok: #15803d;
+  --brand: #4a6b3e;
+  --brand-weak: #e2ecde;
+  --brand-fg: #ffffff;
+  --moss: #4a6b3e;
+  --bark: #6a4f33;
+  --bloom: #c97b9f;
+  --err: #a13322;
+  --ok: #2f7d3f;
   --radius: 9px;
-  --shadow: 0 1px 2px rgba(16, 18, 27, 0.06), 0 1px 8px rgba(16, 18, 27, 0.04);
+  --shadow: 0 1px 2px rgba(21, 32, 26, 0.06), 0 1px 8px rgba(21, 32, 26, 0.04);
   --sans: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
   --mono: ui-monospace, SFMono-Regular, Consolas, monospace;
   --topbar-h: 52px;
@@ -31,34 +37,46 @@
    query is the only way to read the system preference; keep the two
    copies in sync. */
 :root[data-theme='dark'] {
-  --bg: #15161b;
-  --surface: #1d1f26;
-  --surface-2: #24262f;
-  --text: #c3c8d4;
-  --text-h: #f3f4f7;
-  --muted: #8b93a4;
-  --border: #2e313b;
-  --accent: #a78bfa;
+  --bg: #0f1612;
+  --surface: #161e18;
+  --surface-2: #1f2820;
+  --text: #cfd6c8;
+  --text-h: #f0eee5;
+  --muted: #8a937e;
+  --border: #2a342c;
+  --accent: #a99cf2;
   --accent-weak: #2a2342;
-  --accent-fg: #15161b;
-  --err: #f87171;
-  --ok: #4ade80;
+  --accent-fg: #0f1612;
+  --brand: #7fa56e;
+  --brand-weak: #1d2c1f;
+  --brand-fg: #0f1612;
+  --moss: #7fa56e;
+  --bark: #a98963;
+  --bloom: #d99cb8;
+  --err: #f08a76;
+  --ok: #6dc176;
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 1px 10px rgba(0, 0, 0, 0.3);
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme='light']):not([data-theme='dark']) {
-    --bg: #15161b;
-    --surface: #1d1f26;
-    --surface-2: #24262f;
-    --text: #c3c8d4;
-    --text-h: #f3f4f7;
-    --muted: #8b93a4;
-    --border: #2e313b;
-    --accent: #a78bfa;
+    --bg: #0f1612;
+    --surface: #161e18;
+    --surface-2: #1f2820;
+    --text: #cfd6c8;
+    --text-h: #f0eee5;
+    --muted: #8a937e;
+    --border: #2a342c;
+    --accent: #a99cf2;
     --accent-weak: #2a2342;
-    --accent-fg: #15161b;
-    --err: #f87171;
-    --ok: #4ade80;
+    --accent-fg: #0f1612;
+    --brand: #7fa56e;
+    --brand-weak: #1d2c1f;
+    --brand-fg: #0f1612;
+    --moss: #7fa56e;
+    --bark: #a98963;
+    --bloom: #d99cb8;
+    --err: #f08a76;
+    --ok: #6dc176;
     --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 1px 10px rgba(0, 0, 0, 0.3);
   }
 }
@@ -1129,8 +1147,8 @@ button.btn--danger:hover {
   color: #1f5f8a;
 }
 .chip--kind-promoted_from {
-  background: rgba(154, 99, 238, 0.16);
-  color: #6d28d9;
+  background: rgba(91, 63, 184, 0.16);
+  color: #5b3fb8;
 }
 .toggle-pill--sm {
   font-size: 0.78rem;
@@ -2694,7 +2712,7 @@ button.btn--danger:hover {
   border-radius: 2px;
   vertical-align: -1px;
   margin-right: 0.3rem;
-  background: var(--accent, #6d28d9);
+  background: var(--accent, #5b3fb8);
   opacity: 0.55;
 }
 .sched__sw--crit {
@@ -3265,11 +3283,15 @@ button.btn--danger:hover {
   min-height: 480px;
   border: 1px solid var(--border);
   border-radius: 10px;
-  background: var(--surface);
+  background: linear-gradient(
+    180deg,
+    var(--surface) 0%,
+    color-mix(in srgb, var(--brand) 7%, var(--surface)) 100%
+  );
   overflow: hidden;
 }
 .garden__mindmap-canvas .react-flow__renderer {
-  background: var(--surface);
+  background: transparent;
 }
 .garden__mindmap-canvas .react-flow__minimap,
 .garden__mindmap-canvas .react-flow__controls {
@@ -3298,14 +3320,19 @@ button.btn--danger:hover {
   border-radius: 10px;
   color: var(--text);
   font-size: 0.85rem;
-  max-width: 220px;
+  max-width: 240px;
   cursor: grab;
-  transition: border-color 120ms ease, transform 120ms ease, opacity 120ms ease;
+  transition: border-color 120ms ease, transform 120ms ease, opacity 120ms ease,
+    box-shadow 220ms ease;
 }
 .mm-node:active { cursor: grabbing; }
-.mm-node:hover { border-color: var(--accent); }
+.mm-node:hover { border-color: var(--moss); }
 .mm-node--dimmed { opacity: 0.55; }
 .mm-node--promoted { border-style: dashed; }
+/* The highlight is a transient action signal (search hit) and so
+   keeps the CTA accent ring; the organic moss is reserved for the
+   resting/hover state. The inline box-shadow set by the bloom halo
+   composes with this one via comma. */
 .mm-node--highlighted {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 30%, transparent);
@@ -3321,19 +3348,36 @@ button.btn--danger:hover {
   text-overflow: ellipsis;
   color: var(--text-h);
 }
-.mm-node__tag {
-  font-size: 0.65rem;
-  padding: 0.05rem 0.4rem;
+/* Tag dots: each generic/client/project tag of the note becomes a
+   small bloom on the node. Overflow collapses into a +N badge so
+   wide tag lists don't blow the node width. */
+.mm-node__tags {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex: 0 0 auto;
+}
+.mm-node__tag-dot {
+  width: 8px;
+  height: 8px;
   border-radius: 999px;
+  background: var(--moss);
+  border: 1px solid color-mix(in srgb, var(--surface) 50%, transparent);
+  box-shadow: 0 0 2px color-mix(in srgb, var(--bloom) 60%, transparent);
+}
+.mm-node__tag-more {
+  font-size: 0.62rem;
+  color: var(--muted);
+  padding: 0 0.18rem;
+  border-radius: 4px;
   background: var(--surface);
-  color: var(--text);
   border: 1px solid var(--border);
-  white-space: nowrap;
+  line-height: 1.4;
 }
 .mm-node__handle {
   width: 9px;
   height: 9px;
-  background: var(--accent);
+  background: var(--moss);
   border: 1.5px solid var(--surface);
   border-radius: 999px;
 }

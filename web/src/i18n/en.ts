@@ -647,12 +647,12 @@ export const en = {
   garden: {
     nav: 'Garden',
     title: 'Garden',
-    intro: 'Your ideas, alive. Inbox catches seeds; Garden grows them; Cemetery holds the dormant and the transplanted.',
+    intro: 'Your ideas, alive. Nursery catches seeds; Garden grows them; Deadwood holds the dormant and the transplanted, feeding the next cycle.',
     tab: {
-      inbox: 'Inbox',
+      inbox: 'Nursery',
       garden: 'Garden',
-      cemetery: 'Cemetery',
-      mindmap: 'Mind map',
+      cemetery: 'Deadwood',
+      mindmap: 'Mycelium',
     },
     empty: {
       inbox: 'No fresh notes.',

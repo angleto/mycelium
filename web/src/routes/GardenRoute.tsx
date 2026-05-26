@@ -58,7 +58,7 @@ const TAB_GLYPH: Record<Tab, string> = {
   inbox: '🌱',
   garden: '🌿',
   cemetery: '🍂',
-  mindmap: '🕸',
+  mindmap: '🍄',
 }
 
 // Tab persistence (per-workspace): the mindmap tab is heavier to

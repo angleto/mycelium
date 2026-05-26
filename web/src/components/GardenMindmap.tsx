@@ -13,11 +13,12 @@
  * per workspace, so the graph stays put across reloads.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import {
   Background,
   Controls,
   Handle,
+  MarkerType,
   MiniMap,
   Position,
   ReactFlow,
@@ -59,26 +60,52 @@ const MATURITY_GLYPH: Record<string, string> = {
   dormant: '🍂',
 }
 
+// Forest palette: each edge kind takes a natural metaphor.
+// references = a passing scent (muted dashed); atom_of = a solid
+// branch (moss, parent→child); replies_to = water/dialogue (blue);
+// supersedes = bark, the old replaced by the new.
 const LINK_COLOR: Record<LinkKind, string> = {
-  references: 'var(--accent)',
-  atom_of: '#5a8dee',
-  replies_to: '#26a69a',
-  supersedes: '#ef6c00',
+  references: 'var(--muted)',
+  atom_of: 'var(--moss)',
+  replies_to: '#5c89a8',
+  supersedes: 'var(--bark)',
 }
+
+const MAX_TAG_DOTS = 4
 
 interface PlantNodeData extends Record<string, unknown> {
   note: Note
-  primaryTag: TagBrief | null
+  tagDots: TagBrief[]
+  extraTagCount: number
   dimmed: boolean
   highlighted: boolean
+  degree: number
+  entropy: number
   onOpen: (id: string) => void
 }
 
 function PlantNode({ data }: NodeProps<Node<PlantNodeData>>) {
-  const { note, primaryTag, dimmed, highlighted, onOpen } = data
+  const { note, tagDots, extraTagCount, dimmed, highlighted, degree, entropy, onOpen } = data
   const maturity = note.maturity ?? 'seed'
   const glyph = MATURITY_GLYPH[maturity] ?? '🌱'
   const title = (note.title && note.title.trim()) || '·'
+  // Border thickness grows with degree (more connected = more
+  // developed plant). Log-scale so the high-degree hubs don't dwarf
+  // the rest. Cap at 4px so we never blow the layout.
+  const borderWidth = Math.min(4, 1.2 + Math.log(1 + degree) * 0.7)
+  // Bloom halo: variety of the neighbourhood's generic tags
+  // (Shannon entropy 0..1). High variety = the idea sits at a
+  // cross-pollination point, so its halo glows wider. Below a
+  // small threshold we drop the halo entirely so quiet nodes look
+  // quiet.
+  const haloRadius = entropy > 0.05 ? 6 + entropy * 18 : 0
+  const haloMix = Math.round(25 + entropy * 55)
+  const style: CSSProperties = {
+    borderWidth,
+  }
+  if (haloRadius > 0) {
+    style.boxShadow = `0 0 ${haloRadius}px color-mix(in srgb, var(--bloom) ${haloMix}%, transparent)`
+  }
   return (
     <div
       className={
@@ -87,6 +114,7 @@ function PlantNode({ data }: NodeProps<Node<PlantNodeData>>) {
         (highlighted ? ' mm-node--highlighted' : '') +
         (note.promoted_at ? ' mm-node--promoted' : '')
       }
+      style={style}
       onDoubleClick={() => onOpen(note.id)}
       title={title}
     >
@@ -102,12 +130,19 @@ function PlantNode({ data }: NodeProps<Node<PlantNodeData>>) {
         {glyph}
       </span>
       <span className="mm-node__title">{title}</span>
-      {primaryTag && (
-        <span
-          className="mm-node__tag"
-          style={primaryTag.color ? { background: primaryTag.color } : undefined}
-        >
-          {primaryTag.name}
+      {(tagDots.length > 0 || extraTagCount > 0) && (
+        <span className="mm-node__tags" aria-hidden="true">
+          {tagDots.map((tg) => (
+            <span
+              key={tg.id}
+              className="mm-node__tag-dot"
+              style={tg.color ? { background: tg.color } : undefined}
+              title={tg.name}
+            />
+          ))}
+          {extraTagCount > 0 && (
+            <span className="mm-node__tag-more">+{extraTagCount}</span>
+          )}
         </span>
       )}
       <Handle
@@ -290,6 +325,81 @@ function GardenMindmapInner({ notes, workspaceId, onOpenNote }: GardenMindmapPro
     [search],
   )
 
+  // Degree of each visible node: counts typed manual links between
+  // notes in scope. Tag-derived edges are excluded because they're a
+  // visual aid, not an authored relationship — we don't want a node
+  // to appear "developed" just because it shares one generic tag
+  // with many neighbours.
+  const degreeByNode = useMemo(() => {
+    const map = new Map<string, number>()
+    for (const l of workspaceLinks) {
+      if (!noteIds.has(l.parent_note_id) || !noteIds.has(l.child_note_id)) continue
+      map.set(l.parent_note_id, (map.get(l.parent_note_id) ?? 0) + 1)
+      map.set(l.child_note_id, (map.get(l.child_note_id) ?? 0) + 1)
+    }
+    return map
+  }, [workspaceLinks, noteIds])
+
+  // Tag entropy of each node's neighbourhood: 0 = monoculture
+  // (every neighbour shares the same generic tags), 1 = max variety.
+  // Shannon entropy normalised by log2(distinct-tag-count) so the
+  // value stays comparable across nodes with different fan-out.
+  // Drives the bloom halo intensity in PlantNode: high-entropy
+  // nodes are cross-pollination points and bloom wider.
+  const entropyByNode = useMemo(() => {
+    const adj = new Map<string, Set<string>>()
+    for (const l of workspaceLinks) {
+      if (!noteIds.has(l.parent_note_id) || !noteIds.has(l.child_note_id)) continue
+      const a = adj.get(l.parent_note_id) ?? new Set<string>()
+      a.add(l.child_note_id)
+      adj.set(l.parent_note_id, a)
+      const b = adj.get(l.child_note_id) ?? new Set<string>()
+      b.add(l.parent_note_id)
+      adj.set(l.child_note_id, b)
+    }
+    const result = new Map<string, number>()
+    for (const n of notes) {
+      const neighbours = adj.get(n.id)
+      if (!neighbours || neighbours.size === 0) {
+        result.set(n.id, 0)
+        continue
+      }
+      const counts = new Map<string, number>()
+      let total = 0
+      for (const nbId of neighbours) {
+        const nb = noteById.get(nbId)
+        if (!nb) continue
+        for (const tg of nb.tags ?? []) {
+          if (tg.kind !== 'generic') continue
+          counts.set(tg.id, (counts.get(tg.id) ?? 0) + 1)
+          total += 1
+        }
+      }
+      if (total === 0 || counts.size <= 1) {
+        result.set(n.id, 0)
+        continue
+      }
+      let H = 0
+      for (const c of counts.values()) {
+        const p = c / total
+        H -= p * Math.log2(p)
+      }
+      const Hmax = Math.log2(counts.size)
+      result.set(n.id, Hmax > 0 ? Math.min(1, H / Hmax) : 0)
+    }
+    return result
+  }, [workspaceLinks, noteIds, noteById, notes])
+
+  // Tag dots shown inside the node (forest "blooms"). Exclude the
+  // memory_channel kind (system bookkeeping, never user-meaningful)
+  // and cap at MAX_TAG_DOTS — overflow is summarised as a +N pill.
+  const tagDotsFor = useCallback((n: Note): { dots: TagBrief[]; extra: number } => {
+    const visible = (n.tags ?? []).filter((t) => t.kind !== 'memory_channel')
+    const dots = visible.slice(0, MAX_TAG_DOTS)
+    const extra = Math.max(0, visible.length - dots.length)
+    return { dots, extra }
+  }, [])
+
   // Initial nodes — built once per notes-set; user drag positions
   // are merged from localStorage. We compute outside the useNodesState
   // initializer so that subsequent notes changes (load completes,
@@ -300,15 +410,19 @@ function GardenMindmapInner({ notes, workspaceId, onOpenNote }: GardenMindmapPro
     return notes.map((n) => {
       const pos = stored[n.id] ?? seeded[n.id] ?? { x: 0, y: 0 }
       const dimmed = n.maturity === 'dormant' || Boolean(n.promoted_at)
+      const { dots, extra } = tagDotsFor(n)
       return {
         id: n.id,
         type: 'plant',
         position: pos,
         data: {
           note: n,
-          primaryTag: primaryTagFor(n),
+          tagDots: dots,
+          extraTagCount: extra,
           dimmed,
           highlighted: false,
+          degree: degreeByNode.get(n.id) ?? 0,
+          entropy: entropyByNode.get(n.id) ?? 0,
           onOpen: onOpenNote,
         },
         draggable: true,
@@ -335,22 +449,37 @@ function GardenMindmapInner({ notes, workspaceId, onOpenNote }: GardenMindmapPro
         const pos =
           existing?.position ?? stored[n.id] ?? seeded[n.id] ?? { x: 0, y: 0 }
         const dimmed = n.maturity === 'dormant' || Boolean(n.promoted_at)
+        const { dots, extra } = tagDotsFor(n)
         return {
           id: n.id,
           type: 'plant',
           position: pos,
           data: {
             note: n,
-            primaryTag: primaryTagFor(n),
+            tagDots: dots,
+            extraTagCount: extra,
             dimmed,
             highlighted: search ? searchMatch(n) : false,
+            degree: degreeByNode.get(n.id) ?? 0,
+            entropy: entropyByNode.get(n.id) ?? 0,
             onOpen: onOpenNote,
           },
           draggable: true,
         }
       })
     })
-  }, [notes, workspaceId, primaryTagFor, search, searchMatch, onOpenNote, setNodes])
+  }, [
+    notes,
+    workspaceId,
+    primaryTagFor,
+    search,
+    searchMatch,
+    onOpenNote,
+    setNodes,
+    degreeByNode,
+    entropyByNode,
+    tagDotsFor,
+  ])
 
   // Persist position changes (debounced via rAF microtask is overkill
   // for human-paced drag; we save on each NodeChange of kind 'position'
@@ -404,21 +533,39 @@ function GardenMindmapInner({ notes, workspaceId, onOpenNote }: GardenMindmapPro
       .filter(
         (l) => noteIds.has(l.parent_note_id) && noteIds.has(l.child_note_id),
       )
-      .map((l) => ({
-        id: `mm-link-${l.id}`,
-        source: l.parent_note_id,
-        target: l.child_note_id,
-        type: 'default',
-        animated: false,
-        label: t(`garden.mindmap.linkKind.${l.kind}`),
-        labelStyle: { fontSize: 10, fill: 'var(--text)' },
-        labelBgStyle: { fill: 'var(--surface)', fillOpacity: 0.85 },
-        style: {
-          stroke: LINK_COLOR[l.kind as LinkKind] ?? 'var(--accent)',
-          strokeWidth: 1.8,
-        },
-        data: { kind: l.kind, linkId: l.id, isManual: true },
-      }))
+      .map((l) => {
+        const kind = l.kind as LinkKind
+        const color = LINK_COLOR[kind] ?? 'var(--moss)'
+        // Per-kind stroke vocabulary:
+        //  atom_of    → thick solid branch (parent feeds child)
+        //  references → thin dashed scent (a passing mention)
+        //  replies_to → medium dashed-rhythm (call-and-response)
+        //  supersedes → solid + arrowhead (old replaced by new)
+        const style: CSSProperties =
+          kind === 'atom_of'
+            ? { stroke: color, strokeWidth: 2.2 }
+            : kind === 'references'
+              ? { stroke: color, strokeWidth: 1.2, strokeDasharray: '3 3', opacity: 0.75 }
+              : kind === 'replies_to'
+                ? { stroke: color, strokeWidth: 1.8, strokeDasharray: '6 2' }
+                : { stroke: color, strokeWidth: 2.0, opacity: 0.9 }
+        return {
+          id: `mm-link-${l.id}`,
+          source: l.parent_note_id,
+          target: l.child_note_id,
+          type: 'default',
+          animated: false,
+          label: t(`garden.mindmap.linkKind.${l.kind}`),
+          labelStyle: { fontSize: 10, fill: 'var(--text)' },
+          labelBgStyle: { fill: 'var(--surface)', fillOpacity: 0.85 },
+          style,
+          markerEnd:
+            kind === 'supersedes'
+              ? { type: MarkerType.ArrowClosed, color, width: 14, height: 14 }
+              : undefined,
+          data: { kind: l.kind, linkId: l.id, isManual: true },
+        }
+      })
     const tagEdges: Edge[] = []
     if (showTagEdges) {
       const computed = buildTagEdges(notes, noteIds)
@@ -603,7 +750,8 @@ function GardenMindmapInner({ notes, workspaceId, onOpenNote }: GardenMindmapPro
               nodeColor={(n) => {
                 const data = n.data as PlantNodeData | undefined
                 if (data?.dimmed) return 'var(--muted)'
-                return data?.primaryTag?.color || 'var(--accent)'
+                const first = data?.tagDots?.[0]
+                return first?.color || 'var(--moss)'
               }}
               maskColor="rgba(0,0,0,0.18)"
             />
