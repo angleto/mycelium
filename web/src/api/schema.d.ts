@@ -5959,6 +5959,13 @@ export interface components {
             blob: components["schemas"]["MemoryBlobOut"];
             /** Rrf */
             rrf: number;
+            /**
+             * Chunk Index
+             * @default 0
+             */
+            chunk_index?: number;
+            /** Chunk Snippet */
+            chunk_snippet?: string | null;
         };
         /** MemorySearchIn */
         MemorySearchIn: {

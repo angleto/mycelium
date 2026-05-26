@@ -91,7 +91,15 @@ async def search(
         channel_key=body.channel_key,
     )
     tagmap = await svc.tags_by_blob(ctx.session, blob_ids=[h.blob.id for h in hits])
-    return [MemoryHitOut(blob=_blob_out(h.blob, tagmap.get(h.blob.id)), rrf=h.rrf) for h in hits]
+    return [
+        MemoryHitOut(
+            blob=_blob_out(h.blob, tagmap.get(h.blob.id)),
+            rrf=h.rrf,
+            chunk_index=h.chunk_index,
+            chunk_snippet=h.chunk_snippet,
+        )
+        for h in hits
+    ]
 
 
 @router.get("/status", response_model=MemoryStatusOut)

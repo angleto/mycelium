@@ -48,6 +48,15 @@ _NO_EMBED_MODEL = "none"
 class Hit:
     blob: MemoryBlob
     rrf: float
+    # Winning chunk index when the source is multi-chunk (paragraph-split
+    # via ParagraphChunker); 0 for whole-doc / single-vector blobs. The
+    # SPA uses this to scroll to the matching paragraph of a long note.
+    chunk_index: int = 0
+    # ts_headline snippet over the chunk text, populated only when the
+    # source is multi-chunk (whole-doc blobs already have a usable
+    # preview from blob.summary / blob.text head). ``None`` means
+    # "no targeted snippet, fall back to whatever the caller renders".
+    chunk_snippet: str | None = None
 
 
 async def _safe_embed(emb: Embedder, text: str) -> EmbedResult | None:
@@ -483,7 +492,85 @@ async def retrieve(
         .scalars()
         .all()
     }
-    return [Hit(blob=blobs[c.blob_id], rrf=c.score) for c in top if c.blob_id in blobs]
+    # Multi-chunk detection + targeted ts_headline (task d46833bb): a
+    # source is "multi-chunk" when its BlobSource rows count > 1. For
+    # those, run a single batched ts_headline over the WINNING chunk
+    # text (blob.text already holds the chunk after ParagraphChunker)
+    # so the SPA can render a snippet from the right paragraph. Whole-
+    # doc / single-vector blobs skip the SQL entirely.
+    multi_chunk_sources = await _multi_chunk_source_ids(
+        session, sources=[(c.source_kind, c.source_id) for c in top]
+    )
+    snippet_blob_ids = [
+        c.blob_id
+        for c in top
+        if c.blob_id in blobs and (c.source_kind, c.source_id) in multi_chunk_sources
+    ]
+    snippets = await _ts_headlines(session, blob_ids=snippet_blob_ids, query=query)
+    return [
+        Hit(
+            blob=blobs[c.blob_id],
+            rrf=c.score,
+            chunk_index=c.chunk_index,
+            chunk_snippet=snippets.get(c.blob_id),
+        )
+        for c in top
+        if c.blob_id in blobs
+    ]
+
+
+async def _multi_chunk_source_ids(
+    session: AsyncSession,
+    *,
+    sources: list[tuple[str | None, str | None]],
+) -> set[tuple[str, str]]:
+    """Return the set of ``(source_kind, source_id)`` that have more than
+    one BlobSource row (i.e. were paragraph-split). One batched SELECT.
+    ``None`` entries are dropped silently (legacy blobs without
+    provenance)."""
+    valid: list[tuple[str, str]] = [(k, s) for (k, s) in sources if k is not None and s is not None]
+    if not valid:
+        return set()
+    from sqlalchemy import text as sa_text
+
+    # Postgres tuple-IN works via ROW(...) IN (VALUES (...), ...). Using
+    # parametrized binds keeps it injection-safe and lets the planner
+    # treat the value list as a small constant.
+    placeholders = ", ".join(f"(:k{i}, :s{i})" for i in range(len(valid)))
+    params: dict[str, str] = {}
+    for i, (k, s) in enumerate(valid):
+        params[f"k{i}"] = k
+        params[f"s{i}"] = s
+    sql = sa_text(
+        f"SELECT source_kind, source_id"
+        f"  FROM blob_sources"
+        f" WHERE (source_kind, source_id) IN ({placeholders})"
+        f" GROUP BY source_kind, source_id"
+        f" HAVING COUNT(*) > 1"
+    )
+    rows = (await session.execute(sql, params)).all()
+    return {(row.source_kind, row.source_id) for row in rows}
+
+
+async def _ts_headlines(
+    session: AsyncSession, *, blob_ids: list[uuid.UUID], query: str
+) -> dict[uuid.UUID, str]:
+    """Postgres-native snippet over ``memory_blobs.text``. Mirrors the
+    helper in ``task_search`` so each service stays self-contained;
+    same ``simple`` config the FTS column uses, MaxFragments=1 /
+    MaxWords=20 to fit the SPA inline preview."""
+    if not blob_ids:
+        return {}
+    from sqlalchemy import text as sa_text
+
+    sql = sa_text(
+        "SELECT id, ts_headline('simple', text, plainto_tsquery('simple', :q),"
+        " 'MaxFragments=1, MaxWords=20') AS snippet"
+        " FROM memory_blobs"
+        " WHERE id = ANY(:ids)"
+    )
+    rows = (await session.execute(sql, {"q": query, "ids": blob_ids})).all()
+    return {row.id: row.snippet for row in rows}
 
 
 async def gdpr_erase(

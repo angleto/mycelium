@@ -1535,6 +1535,14 @@ class MemoryBlobOut(BaseModel):
 class MemoryHitOut(BaseModel):
     blob: MemoryBlobOut
     rrf: float
+    # Winning chunk index inside a multi-chunk note (paragraph-split via
+    # ParagraphChunker); 0 for whole-doc blobs. Used by the SPA to deep-
+    # link to the right paragraph (e.g. ``/notes/:id?chunk=2``).
+    chunk_index: int = 0
+    # ts_headline over the winning chunk text. Populated only when the
+    # source is multi-chunk; ``None`` means the caller should fall back
+    # to ``blob.summary`` / a head of ``blob.text``.
+    chunk_snippet: str | None = None
 
 
 class MemoryEraseIn(BaseModel):

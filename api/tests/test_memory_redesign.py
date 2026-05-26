@@ -274,6 +274,105 @@ async def test_memory_status_false_when_model_missing(
         assert r.json() == {"semantic": False}
 
 
+async def test_chunk_index_and_snippet_for_multi_chunk_note(
+    _fake_embedder: None,
+) -> None:
+    """task d46833bb: MemoryHitOut surfaces ``chunk_index`` and
+    ``chunk_snippet`` for paragraph-split notes; ``chunk_index=0`` and
+    ``chunk_snippet=None`` for single-vector (whole-doc) blobs.
+
+    Multi-chunk: a long note (>800 words, namespace='note') gets
+    paragraph-split by ``pick_chunker`` so each paragraph becomes its
+    own blob with monotonic ``chunk_index``. A search whose terms hit
+    only one paragraph must return that chunk's index and a
+    ts_headline snippet of THAT chunk text.
+
+    Single-vector: a short blob stays whole-doc (one BlobSource row,
+    chunk_index=0); the API exposes ``chunk_index=0`` and
+    ``chunk_snippet=None`` (no targeted snippet needed)."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as c:
+        h = await _signup(c)
+        await _grant_and_rate(c, h)
+        proj = str(uuid.uuid4())
+
+        # Build a >800-token note so ParagraphChunker kicks in. Three
+        # blank-line-separated paragraphs; the query term lives only
+        # in paragraph 2 (so the winning chunk_index must be 1).
+        para0 = "alpha " * 400
+        para1 = "the quarterly zorblax-marker review covers projections " * 60
+        para2 = "epsilon " * 400
+        long_text = f"{para0}\n\n{para1}\n\n{para2}"
+        # BlobSource rows are what drives the multi-chunk detection +
+        # chunk_index attribution; pass a synthetic ``(kind, id)`` so
+        # each chunk records its index against the same parent.
+        note_src_id = str(uuid.uuid4())
+        w = await c.post(
+            "/memory/blobs",
+            headers=h,
+            json={
+                "project_id": proj,
+                "namespace": "note",
+                "text": long_text,
+                "operation_id": "w-chunk-1",
+                "sources": [["note", note_src_id]],
+            },
+        )
+        assert w.status_code == 200, w.text
+
+        found = await c.post(
+            "/memory/search",
+            headers=h,
+            json={
+                "project_id": proj,
+                "query": "zorblax-marker",
+                "operation_id": "q-chunk-1",
+            },
+        )
+        assert found.status_code == 200, found.text
+        hits = found.json()
+        assert hits, "the multi-chunk note must surface for the query"
+        top = hits[0]
+        # The winning chunk is the middle one (where the marker lives);
+        # chunk_index >= 1 disambiguates "first chunk of multi-chunk"
+        # from "whole-doc".
+        assert top["chunk_index"] >= 1, top
+        assert top["chunk_snippet"] is not None, top
+        # ts_headline wraps matches in <b>...</b> per token (so the
+        # hyphenated marker arrives as ``<b>zorblax</b>-<b>marker</b>``);
+        # the literal token "zorblax" is enough proof the snippet
+        # targets the right paragraph.
+        assert "<b>zorblax</b>" in top["chunk_snippet"].lower(), top["chunk_snippet"]
+
+        # Single-vector blob (short text): chunk_index=0, no snippet.
+        proj2 = str(uuid.uuid4())
+        single_src_id = str(uuid.uuid4())
+        await c.post(
+            "/memory/blobs",
+            headers=h,
+            json={
+                "project_id": proj2,
+                "text": "remember the unique-fact-xtb keyword",
+                "operation_id": "w-chunk-2",
+                "sources": [["note", single_src_id]],
+            },
+        )
+        found2 = await c.post(
+            "/memory/search",
+            headers=h,
+            json={
+                "project_id": proj2,
+                "query": "unique-fact-xtb",
+                "operation_id": "q-chunk-2",
+            },
+        )
+        assert found2.status_code == 200, found2.text
+        hits2 = found2.json()
+        assert hits2
+        assert hits2[0]["chunk_index"] == 0
+        assert hits2[0]["chunk_snippet"] is None
+
+
 async def test_embedder_present_but_no_rate_card_is_free(
     _fake_embedder: None,
 ) -> None:
