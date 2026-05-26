@@ -68,6 +68,7 @@ from flow_core.services import coordination as coordination_svc
 from flow_core.services import memory as memory_svc
 from flow_core.services import note_links as note_links_svc
 from flow_core.services import notes as notes_svc
+from flow_core.services import task_search as task_search_svc
 from flow_core.services import tasks as tasks_svc
 from flow_core.services.rbac import require_role
 
@@ -92,6 +93,7 @@ TOOL_ALLOWLIST: frozenset[str] = frozenset(
         "read_task",  # re-read the task being worked
         "read_task_notes",  # read notes linked to the task
         "recall_memory",  # memory.retrieve on the agent channel
+        "search",  # task_search.search_unified (task 4858e818) -- cross-channel
         "append_work_note",  # notes.create_note_for_task (Proposal-A)
         "write_memory",  # memory.write_blob on the agent channel
         "set_task_state",  # tasks.set_state (workflow-validated)
@@ -249,6 +251,42 @@ async def _run_tool(
             channel_key=_AGENT_CHANNEL,
         )
         return f"recalled:{len(hits)}"
+    if tool == "search":
+        # Unified search across tasks + ALL memory channels (cross-
+        # channel, in contrast to ``recall_memory`` which is scoped to
+        # the agent's own channel). Lets the agent pull context from
+        # the user's notes / other tasks for the work it's doing.
+        # rerank=False (cost cap for internal agents), limit capped at
+        # 10 (large result sets burn context for marginal gain).
+        query = str(args.get("query") or task.title)
+        raw_kinds = args.get("kinds")
+        if isinstance(raw_kinds, list) and raw_kinds:
+            kinds = [str(k) for k in raw_kinds if str(k) in ("task", "blob")]
+        else:
+            kinds = ["task", "blob"]
+        if not kinds:
+            return "search:err:kinds"
+        raw_limit = args.get("limit")
+        try:
+            limit = int(raw_limit) if isinstance(raw_limit, int | str) else 10
+        except (ValueError, TypeError):
+            limit = 10
+        limit = max(1, min(10, limit))
+        hits = await task_search_svc.search_unified(
+            session,
+            org_id=org_id,
+            actor_id=actor_id,
+            project_id=None,
+            query=query,
+            kinds=kinds,
+            tag_ids=[],
+            channel_keys=[],
+            limit=limit,
+            include_archived=False,
+            include_deleted=False,
+            operation_id=f"agentrun:{run.id}:{run.steps}:search",
+        )
+        return f"search:{len(hits)}"
     if tool == "append_work_note":
         note = await notes_svc.create_note_for_task(
             session,

@@ -52,6 +52,7 @@ from flow_core.models.note import NoteKind
 from flow_core.models.telegram import TelegramAssistantJob, TelegramConversation
 from flow_core.services import billing
 from flow_core.services import notes as notes_svc
+from flow_core.services import task_search as task_search_svc
 from flow_core.services import tasks as tasks_svc
 from flow_core.services import workflow as workflow_svc
 from flow_core.telegram_client import get_telegram_api
@@ -75,6 +76,7 @@ _TOOLS: frozenset[str] = frozenset(
         "list_task_transitions",
         "list_notes",
         "get_note",
+        "search",
         # write (P2)
         "create_note",
         "update_note",
@@ -103,6 +105,7 @@ _SYSTEM_PROMPT = (
     '    list_task_transitions  args: {"id": "<task uuid>"}\n'
     '    list_notes      args: {"limit": <int>}\n'
     '    get_note        args: {"id": "<note uuid>"}\n'
+    '    search          args: {"q": "<query>", "kinds"?: ["task","blob"], "limit"?: <int 1-10>}\n'
     "  write:\n"
     '    create_note     args: {"text", "title"?}\n'
     '    update_note     args: {"id", "text"?, "title"?}\n'
@@ -412,6 +415,52 @@ async def _run_tool(
         except Exception:
             return f"error: could not comment on task {args.get('id')}"
         return f"commented on task {task_id}"
+
+    if tool == "search":
+        q = str(args.get("q") or "").strip()
+        if not q:
+            return "error: search needs args.q"
+        raw_kinds = args.get("kinds")
+        if isinstance(raw_kinds, list) and raw_kinds:
+            kinds = [str(k) for k in raw_kinds if str(k) in ("task", "blob")]
+        else:
+            kinds = ["task", "blob"]
+        if not kinds:
+            return "error: search.kinds must include 'task' or 'blob'"
+        raw_limit = args.get("limit")
+        try:
+            limit = int(raw_limit) if isinstance(raw_limit, int | str) else 10
+        except (ValueError, TypeError):
+            limit = 10
+        # Hard cap: the agent should never ask for more than 10; large
+        # result sets burn its context for marginal recall gain.
+        limit = max(1, min(10, limit))
+        hits = await task_search_svc.search_unified(
+            session,
+            org_id=org_id,
+            actor_id=actor_id,
+            project_id=None,
+            query=q,
+            kinds=kinds,
+            tag_ids=[],
+            channel_keys=[],
+            limit=limit,
+            include_archived=False,
+            include_deleted=False,
+            operation_id=f"assistant-search:{uuid.uuid4().hex[:8]}",
+        )
+        if not hits:
+            return "search: (no results)"
+        lines: list[str] = []
+        for h in hits:
+            ident = (
+                f"task:{h.task_id}" if h.kind == "task" and h.task_id else f"blob:{h.blob_id}"
+            )
+            title = _short(h.title or "", 60)
+            snippet = _short(h.snippet or "", 120) if h.snippet else ""
+            tail = f" -- {snippet}" if snippet else ""
+            lines.append(f"- {ident} | {title}{tail}")
+        return "search:\n" + "\n".join(lines)
 
     return f"error: tool {tool} is not available"
 

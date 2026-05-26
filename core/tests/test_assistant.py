@@ -15,8 +15,11 @@ from collections.abc import AsyncIterator, Callable, Sequence
 import pytest
 from sqlalchemy import delete, select
 
+from _fake_embedder import FakeEmbedder
+
 from flow_core.ai_providers import LLMResult, set_llm_override
 from flow_core.db import admin_session, tenant_session
+from flow_core.embedder import set_embedder_override
 from flow_core.models.note import Note, NoteKind
 from flow_core.models.task import Task
 from flow_core.models.telegram import TelegramAssistantJob, TelegramConversation
@@ -31,6 +34,19 @@ from flow_core.telegram_client import (
 )
 
 _Step = str | Callable[[Sequence[tuple[str, str]]], str]
+
+
+@pytest.fixture
+async def _fake_embedder() -> AsyncIterator[None]:
+    """Inject the ADR-0012 seam so the assistant's ``search`` tool
+    exercises the real task-search pipeline against deterministic
+    vectors -- the test asserts on the actual hit list, not on a
+    mocked counter."""
+    set_embedder_override(FakeEmbedder)
+    try:
+        yield
+    finally:
+        set_embedder_override(None)
 
 
 @pytest.fixture(autouse=True)
@@ -257,6 +273,56 @@ async def test_update_task_priority_persists() -> None:
     async with tenant_session(str(org), str(user)) as s:
         t = (await s.execute(select(Task).where(Task.id == tid))).scalar_one()
         assert t.priority == 1
+
+
+async def test_search_tool_returns_matching_task(_fake_embedder: None) -> None:
+    """Task a83a5c0b: the assistant can call ``search`` and gets back a
+    compact ``- task:<uuid> | <title> -- <snippet>`` line per hit. The
+    surrounding ReAct loop then has a navigable id it can pass to
+    ``get_task`` for detail."""
+    org, user = await _signup()
+    async with tenant_session(str(org), str(user)) as s:
+        task = await tasks_svc.create_task(
+            s,
+            org_id=org,
+            actor_id=user,
+            title="Quarterly budget for project alpha-xkz",
+        )
+        tid = task.id
+    steps: list[_Step] = [
+        json.dumps({"tool": "search", "args": {"q": "alpha-xkz", "limit": 5}}),
+        lambda msgs: json.dumps({"tool": "finish", "args": {"output": msgs[-1][1]}}),
+    ]
+    reply = await svc.run_turn(
+        org_id=org,
+        user_id=user,
+        text="find the budget task",
+        turn_key=uuid.uuid4().hex,
+        provider=_ScriptLLM(steps),
+    )
+    assert "search:" in reply
+    assert str(tid) in reply, f"expected task id {tid} in search output, got: {reply}"
+
+
+async def test_search_tool_empty_query_returns_error_observation(
+    _fake_embedder: None,
+) -> None:
+    """A missing/empty ``q`` is reported as an error observation -- the
+    surrounding loop can recover (the next decision sees the error
+    string and picks a different tool / finishes gracefully)."""
+    org, user = await _signup()
+    steps: list[_Step] = [
+        json.dumps({"tool": "search", "args": {"q": ""}}),
+        lambda msgs: json.dumps({"tool": "finish", "args": {"output": msgs[-1][1]}}),
+    ]
+    reply = await svc.run_turn(
+        org_id=org,
+        user_id=user,
+        text="search nothing",
+        turn_key=uuid.uuid4().hex,
+        provider=_ScriptLLM(steps),
+    )
+    assert "error" in reply.lower() and "args.q" in reply
 
 
 # --- P3: durable queue + worker + multi-turn --------------------------------

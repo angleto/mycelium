@@ -408,6 +408,31 @@ async def test_budget_exhaustion_blocks_run(_fake_embedder: None) -> None:
 # --- (d) tool allowlist -> blocked, NO side effect --------------------
 
 
+async def test_search_tool_runs_inside_agent_loop(_fake_embedder: None) -> None:
+    """Task a83a5c0b: ``search`` is in the agent allowlist so the
+    runtime accepts it and dispatches to ``task_search.search_unified``.
+    Smoke: a script that calls search then finishes succeeds (status
+    succeeded, observation surfaced) -- the search-result count is not
+    asserted (deterministic vectors but a single dispatched task only
+    has its own pointer in flight)."""
+    async with admin_session() as s:
+        a = await signup(s, email=_email(), password="pw-strong-123", org_name="SRCH")
+    org, user = a.org_id, a.user_id
+    script = [
+        '{"tool": "search", "args": {"query": "task", "limit": 3}}',
+        '{"tool": "finish", "args": {"output": "found"}}',
+    ]
+    async with tenant_session(str(org), str(user)) as s:
+        task, _ex = await _dispatched_llm_task(s, org=org, user=user)
+        _use_llm(script)
+        run = await runtime.start_run(s, org_id=org, actor_id=user, task_id=task.id)
+        _clear_llm()
+        assert run.status is AgentRunStatus.succeeded
+        assert run.blocked_reason is None
+        # Step 1 = search dispatch, step 2 = finish.
+        assert run.steps == 2
+
+
 async def test_tool_not_allowed_blocks_with_no_side_effect(
     _fake_embedder: None,
 ) -> None:
