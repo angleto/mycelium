@@ -282,6 +282,7 @@ async def retrieve(
     channel_tag_id: uuid.UUID | None = None,
     channel_key: str | None = None,
     embedder: Embedder | None = None,
+    rerank: bool = False,
 ) -> list[Hit]:
     await require_role(session, org_id, actor_id, Role.member)
     channel_id = await _resolve_channel_tag_id(
@@ -308,13 +309,16 @@ async def retrieve(
     # the canonical retrieval pipeline. The pipeline is the extension
     # point: rerankers / HyDE / chunking-dedupe land as additional
     # stages without touching this function.
+    from flow_core.config import get_settings as _get_settings
     from flow_core.services.retrieval import RetrievalContext, RetrievalPipeline
     from flow_core.services.retrieval.stages import (
         AccessCounterStage,
+        CrossEncoderRerankerStage,
         GraderMinStage,
         LexicalFTSStage,
         LimitStage,
         OrderingStage,
+        RerankGate,
         RRFFusionStage,
         SemanticDenseStage,
     )
@@ -352,17 +356,38 @@ async def retrieve(
         tag_clauses=tag_clauses,
         query_embedding=qres,
     )
-    pipeline = RetrievalPipeline(
-        stages=[
-            LexicalFTSStage(oversample=_OVERSAMPLE),
-            SemanticDenseStage(oversample=_OVERSAMPLE),
-            RRFFusionStage(k=_RRF_K),
+    # Reranker stage is added between RRF and the final ordering only
+    # when the caller asked for it (``rerank=True``) OR the workspace
+    # has it enabled globally. The stage itself further gates on
+    # query length and candidate count (see RerankGate); a gated-off
+    # stage is a no-op so the pipeline cost is bounded by RRF.
+    settings = _get_settings()
+    use_rerank = rerank or settings.reranker_enabled
+    from flow_core.services.retrieval.types import Stage as _Stage
+
+    stages: list[_Stage] = [
+        LexicalFTSStage(oversample=_OVERSAMPLE),
+        SemanticDenseStage(oversample=_OVERSAMPLE),
+        RRFFusionStage(k=_RRF_K),
+    ]
+    if use_rerank:
+        stages.append(
+            CrossEncoderRerankerStage(
+                gate=RerankGate(
+                    min_query_tokens=settings.reranker_min_query_tokens,
+                    min_candidates=settings.reranker_min_candidates,
+                ),
+            )
+        )
+    stages.extend(
+        [
             OrderingStage(),
             GraderMinStage(min_score=grader_min_rrf),
             LimitStage(k=limit),
             AccessCounterStage(),
         ]
     )
+    pipeline = RetrievalPipeline(stages=stages)
     top = await pipeline.run(query, ctx)
     if not top:
         return []

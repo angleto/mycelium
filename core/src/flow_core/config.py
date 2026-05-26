@@ -161,6 +161,37 @@ class Settings(BaseSettings):
     # bounded (only timed-out writes) and the worker quickly drains.
     task_search_backfill_interval_seconds: int = 60
 
+    # Cross-encoder reranker (task 27579d6a). Opt-in second-stage
+    # scorer that re-orders the top-K from RRF using a cross-encoder
+    # model (sees query+doc joined). Off by default because the local
+    # model is ~1GB resident and adds latency to interactive search;
+    # production toggles it on selectively. The per-call ``rerank=true``
+    # body flag also enables it for a single search regardless of the
+    # env default. The model id is the sentence-transformers
+    # ``CrossEncoder`` identifier; the default targets
+    # ``bge-reranker-v2-m3`` which is multilingual and pairs naturally
+    # with bge-m3 dense embeddings.
+    reranker_enabled: bool = False
+    reranker_model: str = "BAAI/bge-reranker-v2-m3"
+    # Gate thresholds: skip the reranker on queries too short to
+    # discriminate (one-word queries leave the cross-encoder little to
+    # work with) or on candidate sets too small to be worth the cost.
+    reranker_min_query_tokens: int = 3
+    reranker_min_candidates: int = 5
+
+    # Recovery-history retention worker (entity_revision). The sweep
+    # has two parts: a coarsening pass that keeps 1 revision/day past
+    # ``revisions_retain_full_days`` and 1 revision/week past
+    # ``revisions_coarse_to_weekly_days``, and a hard-delete of
+    # soft-deleted task/note rows older than
+    # ``revisions_hard_delete_after_days`` (the cascade trigger then
+    # purges their revisions). Cadence is daily by default because
+    # the time-bucket thresholds are coarse; can be sped up in tests.
+    revisions_retention_interval_seconds: int = 86_400
+    revisions_retain_full_days: int = 30
+    revisions_coarse_to_weekly_days: int = 365
+    revisions_hard_delete_after_days: int = 90
+
     # Telegram bot integration (epic #125 P2). Empty defaults so OSS
     # self-host + tests are unaffected: the link router refuses to mint
     # codes when the bot is not configured, the webhook 404s on an empty

@@ -2293,7 +2293,9 @@ class SearchIn(BaseModel):
     """Unified free-text search across the org. ``kinds`` defaults to
     ['task', 'blob']; ``kinds=['task']`` is the SPA's task-search path,
     ``kinds=['blob']`` mirrors /memory/search. ``include_archived`` and
-    ``include_deleted`` only apply to ``task`` hits."""
+    ``include_deleted`` only apply to ``task`` hits. ``rerank`` opts
+    into the cross-encoder reranker for this call regardless of the
+    env default (task 27579d6a)."""
 
     q: str = Field(min_length=1, max_length=2000)
     kinds: list[str] = Field(default_factory=lambda: ["task", "blob"])
@@ -2302,6 +2304,7 @@ class SearchIn(BaseModel):
     limit: int = Field(default=20, gt=0, le=100)
     include_archived: bool = False
     include_deleted: bool = False
+    rerank: bool = False
     operation_id: str = Field(min_length=1, max_length=128, default="search")
 
 

@@ -12,14 +12,20 @@ from flow_core.services.retrieval.stages.order_limit import (
     LimitStage,
     OrderingStage,
 )
+from flow_core.services.retrieval.stages.rerank import (
+    CrossEncoderRerankerStage,
+    RerankGate,
+)
 from flow_core.services.retrieval.stages.semantic import SemanticDenseStage
 
 __all__ = [
     "AccessCounterStage",
+    "CrossEncoderRerankerStage",
     "GraderMinStage",
     "LexicalFTSStage",
     "LimitStage",
     "OrderingStage",
     "RRFFusionStage",
+    "RerankGate",
     "SemanticDenseStage",
 ]

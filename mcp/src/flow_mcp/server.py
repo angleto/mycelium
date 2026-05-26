@@ -2583,6 +2583,7 @@ async def search(
     channel_keys: list[str] | None = None,
     include_archived: bool = False,
     include_deleted: bool = False,
+    rerank: bool = False,
 ) -> list[dict[str, Any]]:
     """Unified free-text search across tasks and memory blobs.
 
@@ -2591,6 +2592,8 @@ async def search(
     caller's ``project_id``. Results carry an ``ts_headline`` snippet.
     Use this instead of ``memory_search`` when the caller wants
     "everything that mentions X" rather than memory-only retrieval.
+    ``rerank=True`` opts into a cross-encoder pass on the top-K (task
+    27579d6a) regardless of the env default.
     """
     async with _tenant(token, org_id) as (s, org, user):
         hits = await task_search_svc.search_unified(
@@ -2605,6 +2608,7 @@ async def search(
             limit=limit,
             include_archived=include_archived,
             include_deleted=include_deleted,
+            rerank=rerank,
             operation_id=operation_id,
         )
         return [

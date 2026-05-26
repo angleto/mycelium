@@ -556,6 +556,7 @@ async def search_unified(
     include_archived: bool,
     include_deleted: bool,
     operation_id: str,
+    rerank: bool = False,
 ) -> list[UnifiedHit]:
     """Unified search across tasks and memory blobs.
 
@@ -592,6 +593,7 @@ async def search_unified(
             limit=max(limit * 2, limit),
             tag_ids=tag_ids,
             channel_key="task",
+            rerank=rerank,
         )
         if task_hits:
             blob_ids = [h.blob.id for h in task_hits]
@@ -644,6 +646,7 @@ async def search_unified(
             limit=max(limit * 2, limit),
             tag_ids=tag_ids,
             channel_key=single_channel,
+            rerank=rerank,
         )
         if blob_hits:
             blob_ids = [h.blob.id for h in blob_hits]

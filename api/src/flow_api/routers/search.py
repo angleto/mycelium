@@ -39,6 +39,7 @@ async def search(
         include_archived=body.include_archived,
         include_deleted=body.include_deleted,
         operation_id=body.operation_id,
+        rerank=body.rerank,
     )
     return [
         SearchHit(
