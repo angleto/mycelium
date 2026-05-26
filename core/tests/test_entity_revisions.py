@@ -10,7 +10,6 @@ orgs. API + MCP smoke checks live next to the existing F-suites.
 
 from __future__ import annotations
 
-import asyncio
 import datetime as dt
 import uuid
 
@@ -83,6 +82,54 @@ async def _make_note(
 # ────────────────────────────────────────────────────────────────────
 # Coalescing
 # ────────────────────────────────────────────────────────────────────
+
+
+def test_snapshot_whitelist_is_subset_of_model_columns() -> None:
+    """The snapshot whitelist is hardcoded by design (safe-by-default
+    against new privacy-sensitive columns) but a column rename or
+    removal would silently drop it from snapshots; catch that drift
+    here so the test fails when the schema and the whitelist diverge.
+
+    Symmetric for task and note.
+    """
+    from flow_core.models.note import Note
+    from flow_core.models.task import Task
+    from flow_core.services.entity_revisions import (
+        _NOTE_SNAPSHOT_FIELDS,
+        _TASK_SNAPSHOT_FIELDS,
+    )
+
+    task_cols = {c.name for c in Task.__table__.columns}
+    note_cols = {c.name for c in Note.__table__.columns}
+    task_missing = set(_TASK_SNAPSHOT_FIELDS) - task_cols
+    note_missing = set(_NOTE_SNAPSHOT_FIELDS) - note_cols
+    assert not task_missing, (
+        f"_TASK_SNAPSHOT_FIELDS references non-existent columns: {task_missing}"
+    )
+    assert not note_missing, (
+        f"_NOTE_SNAPSHOT_FIELDS references non-existent columns: {note_missing}"
+    )
+
+
+def test_restorable_whitelist_is_subset_of_snapshot() -> None:
+    """Every restorable field must be in the snapshot (otherwise a
+    restore would pull from a missing key). Snapshot ⊇ Restorable is
+    the load-bearing invariant."""
+    from flow_core.services.entity_revisions import (
+        _NOTE_RESTORABLE_FIELDS,
+        _NOTE_SNAPSHOT_FIELDS,
+        _TASK_RESTORABLE_FIELDS,
+        _TASK_SNAPSHOT_FIELDS,
+    )
+
+    task_orphan = _TASK_RESTORABLE_FIELDS - set(_TASK_SNAPSHOT_FIELDS)
+    note_orphan = _NOTE_RESTORABLE_FIELDS - set(_NOTE_SNAPSHOT_FIELDS)
+    assert not task_orphan, (
+        f"Task restorable fields missing from snapshot: {task_orphan}"
+    )
+    assert not note_orphan, (
+        f"Note restorable fields missing from snapshot: {note_orphan}"
+    )
 
 
 async def test_web_coalesces_under_window() -> None:
@@ -179,7 +226,7 @@ async def test_web_different_sessions_keep_separate_revisions() -> None:
     assert all(r.sealed_at is None for r in web_rows)
 
 
-async def test_web_expired_window_starts_fresh_revision(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_web_expired_window_starts_fresh_revision() -> None:
     """An edit landing >30s after the previous one with the same
     session id seals the stale row and opens a brand-new revision."""
     org, user = await _org("OrgExpire")
@@ -578,6 +625,169 @@ async def test_revisions_rls_isolates_orgs() -> None:
 # ────────────────────────────────────────────────────────────────────
 
 
+async def test_coarsen_keeps_one_per_day_then_one_per_week() -> None:
+    """Coarsening collapses sealed revisions older than the
+    retain-full window down to one per (entity, day) up to the
+    weekly cutoff, then one per (entity, week) past it. Untouched:
+    the retain-full window and the open web revision."""
+    org, user = await _org("OrgCoarsen")
+    tid, _v = await _make_task(org, user)
+
+    async with tenant_session(str(org), str(user)) as s:
+        # Hand-craft a synthetic timeline of sealed revisions covering
+        # three "old" days inside the daily zone and two old weeks
+        # past it. We bypass append() and write straight to the DB so
+        # the timestamps land in the past (append() always uses
+        # now()).
+        # (ts_offset, expected_kept?). asyncpg binds Python timedelta
+        # as a PG interval directly, so we skip the text cast.
+        rows: list[tuple[dt.timedelta, int]] = [
+            # 3 rows on day-50: only the most recent must survive
+            (dt.timedelta(days=50), 1),
+            (dt.timedelta(days=50, hours=1), 1),
+            (dt.timedelta(days=50, hours=2), 1),
+            # 2 rows on day-60: only the most recent must survive
+            (dt.timedelta(days=60), 1),
+            (dt.timedelta(days=60, hours=5), 1),
+            # 1 row on day-400 (past the weekly cutoff, alone in its week)
+            (dt.timedelta(days=400), 1),
+            # 3 rows in the same ISO-week (~day 405..407): only one survives
+            (dt.timedelta(days=405), 1),
+            (dt.timedelta(days=406), 1),
+            (dt.timedelta(days=407), 1),
+        ]
+        # asyncpg infers each bind's PG type from the column it lands
+        # in; subtracting an interval at the SQL level confuses it
+        # because it expects $4 to already be a timestamptz. Pre-compute
+        # the absolute timestamp in Python and bind that directly.
+        now = dt.datetime.now(tz=dt.UTC)
+        for offset, _kept in rows:
+            ts = now - offset
+            await s.execute(
+                text(
+                    """
+                    INSERT INTO entity_revision
+                      (id, org_id, entity_kind, entity_id, snapshot,
+                       changed_fields, channel, actor_id, actor_kind,
+                       version_from, version_to, edit_count,
+                       started_at, last_edit_at, sealed_at)
+                    VALUES (
+                      gen_random_uuid(), :org, 'task', :tid,
+                      '{"title":"T"}'::jsonb,
+                      ARRAY['title']::text[], 'api',
+                      :uid, 'human_direct', 1, 1, 1,
+                      :ts, :ts, :ts
+                    )
+                    """
+                ),
+                {
+                    "org": str(org),
+                    "tid": str(tid),
+                    "uid": str(user),
+                    "ts": ts,
+                },
+            )
+
+        before = (
+            (
+                await s.execute(
+                    text(
+                        "SELECT count(*) FROM entity_revision "
+                        "WHERE entity_kind='task' AND entity_id = :tid"
+                    ),
+                    {"tid": str(tid)},
+                )
+            ).scalar_one()
+        )
+        daily, weekly = await revs.coarsen(
+            s,
+            retain_full_days=30,
+            coarse_to_weekly_days=365,
+        )
+        after = (
+            (
+                await s.execute(
+                    text(
+                        "SELECT count(*) FROM entity_revision "
+                        "WHERE entity_kind='task' AND entity_id = :tid"
+                    ),
+                    {"tid": str(tid)},
+                )
+            ).scalar_one()
+        )
+
+    # Daily zone (30..365 days): 3 rows on day-50 → 2 deleted;
+    # 2 rows on day-60 → 1 deleted. Total daily: 3.
+    assert daily == 3
+    # Weekly zone (>365 days): 3 rows in one ISO-week of day-405..407
+    # → 2 deleted; the lone day-400 row sits in a different week so
+    # it survives. Total weekly: 2.
+    assert weekly == 2
+    assert after == before - (daily + weekly)
+
+
+async def test_coarsen_keeps_create_baseline_inside_retain_window() -> None:
+    """A freshly-created task has a single sealed revision in the
+    retain-full window: coarsening must not touch it."""
+    org, user = await _org("OrgCoarsenRecent")
+    tid, _v = await _make_task(org, user)
+    async with tenant_session(str(org), str(user)) as s:
+        daily, weekly = await revs.coarsen(
+            s, retain_full_days=30, coarse_to_weekly_days=365
+        )
+        rows = await revs.list_revisions(
+            s, entity_kind=revs.ENTITY_KIND_TASK, entity_id=tid, limit=10
+        )
+    assert daily == 0
+    assert weekly == 0
+    assert len(rows) == 1
+
+
+async def test_hard_delete_soft_deleted_cascades_revisions() -> None:
+    """A task soft-deleted past the cutoff is hard-deleted, and the
+    cascade trigger purges its revisions in the same transaction."""
+    org, user = await _org("OrgHardDelete")
+    tid, v1 = await _make_task(org, user)
+    async with tenant_session(str(org), str(user)) as s:
+        # Soft-delete the task first (the normal user flow).
+        await tasks_svc.soft_delete_task(
+            s,
+            org_id=org,
+            actor_id=user,
+            task_id=tid,
+            expected_version=v1,
+        )
+        # Backdate the soft-delete so it qualifies as "expired".
+        await s.execute(
+            text(
+                "UPDATE tasks SET deleted_at = now() - interval '120 days' "
+                "WHERE id = :tid"
+            ),
+            {"tid": str(tid)},
+        )
+        tasks_d, notes_d = await revs.hard_delete_soft_deleted(s, after_days=90)
+        # Both the task row and its revisions are gone.
+        cnt_task = (
+            await s.execute(
+                text("SELECT count(*) FROM tasks WHERE id = :tid"),
+                {"tid": str(tid)},
+            )
+        ).scalar_one()
+        cnt_rev = (
+            await s.execute(
+                text(
+                    "SELECT count(*) FROM entity_revision "
+                    "WHERE entity_kind='task' AND entity_id = :tid"
+                ),
+                {"tid": str(tid)},
+            )
+        ).scalar_one()
+    assert tasks_d == 1
+    assert notes_d == 0
+    assert cnt_task == 0
+    assert cnt_rev == 0
+
+
 async def test_note_update_writes_revision_and_restore_back() -> None:
     """End-to-end note path: create + update + restore round-trips
     through the same hook; restorable_payload yields title and
@@ -614,21 +824,9 @@ async def test_note_update_writes_revision_and_restore_back() -> None:
     assert n.transcript == "body0"
 
 
-# ────────────────────────────────────────────────────────────────────
-# Asyncio sanity: pytest-asyncio runs each test with its own loop.
-# (The conftest fixture disposes the engine per loop; nothing to do
-# here besides letting pytest-asyncio pick the tests up.)
-# ────────────────────────────────────────────────────────────────────
-
-
-# Mark the module as async-tested so pytest-asyncio doesn't skip it
-# even if the project's pyproject only marks specific patterns.
-pytestmark = pytest.mark.asyncio
-
-
-# Silence unused-import warnings: ``asyncio`` is imported because a
-# couple of the test bodies await tasks_svc through tenant_session
-# (which already drives the loop), and the imports stay close to the
-# pattern of every other DB-backed test in the suite.
-_ = asyncio
-_ = dt
+# Pytest-asyncio is configured ``mode=auto`` in pyproject; every
+# coroutine in this module is collected as an async test
+# automatically and the autouse ``_dispose_engine`` fixture in
+# conftest resets the async engine across loops. No explicit
+# ``pytestmark`` (using one would also mark the sync whitelist
+# tests, raising a warning).
