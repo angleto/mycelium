@@ -755,6 +755,8 @@ export const it: Catalog = {
     tableRow: 'Aggiungi riga',
     tableCol: 'Aggiungi colonna',
     tableDel: 'Elimina tabella',
+    image: 'Inserisci immagine',
+    imageNeedsSave: 'Salva la nota prima di aggiungere immagini.',
     toRaw: 'Modifica come Markdown',
     toWysiwyg: 'Editor ricco',
   },

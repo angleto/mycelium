@@ -1691,6 +1691,32 @@ button.btn--danger:hover {
 .rte--lg .ProseMirror {
   min-height: 22rem;
 }
+.rte__err {
+  margin: 0.25rem 0 0;
+  font-size: 0.82rem;
+}
+/* Embedded markdown images: capped at the editor/view width so a
+ * full-resolution screenshot does not blow up the layout. ``--loading``
+ * is the placeholder span shown while the auth-fetch is in flight. */
+.md-img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 6px;
+  vertical-align: middle;
+}
+.md-img-wrap {
+  display: inline-block;
+  line-height: 0;
+}
+.md-img--loading {
+  display: inline-block;
+  width: 1.2em;
+  height: 1.2em;
+  border-radius: 4px;
+  background: var(--surface-sunken, var(--surface));
+  border: 1px dashed var(--border);
+  vertical-align: middle;
+}
 .rte__raw:focus {
   border-color: var(--accent);
 }
