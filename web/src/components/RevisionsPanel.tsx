@@ -81,6 +81,10 @@ export function RevisionsPanel({
   const [err, setErr] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  // The history panel is rarely consulted; default it to collapsed so
+  // the task/note detail doesn't end with a long list pushing the
+  // primary actions out of view.
+  const [expanded, setExpanded] = useState(false)
 
   const reload = useCallback(async () => {
     setErr(null)
@@ -206,11 +210,25 @@ export function RevisionsPanel({
 
   return (
     <div className="revisions-panel">
-      <h3>{t('revisions.title')}</h3>
+      <button
+        type="button"
+        className="revisions-panel__toggle"
+        aria-expanded={expanded}
+        onClick={() => setExpanded((v) => !v)}
+      >
+        <span className="revisions-panel__caret" aria-hidden="true">
+          {expanded ? '▾' : '▸'}
+        </span>
+        <h3>{t('revisions.title')}</h3>
+        {!expanded && rows.length > 0 && (
+          <span className="muted">({rows.length})</span>
+        )}
+      </button>
       {err && <p className="error">{err}</p>}
-      {rows.length === 0 ? (
+      {expanded && rows.length === 0 && (
         <p className="muted">{t('revisions.empty')}</p>
-      ) : (
+      )}
+      {expanded && rows.length > 0 && (
         <ul className="revisions-list">
           {rows.map((rev) => {
             const open = rev.sealed_at === null

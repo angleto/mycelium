@@ -3501,6 +3501,27 @@ button.btn--danger:hover {
 .revisions-panel {
   margin-top: 1.2rem;
 }
+/* Collapsible header: the panel ships collapsed; a single button
+ * (caret + h3) toggles visibility of the timeline below. */
+.revisions-panel__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  color: inherit;
+}
+.revisions-panel__toggle h3 {
+  margin: 0;
+}
+.revisions-panel__caret {
+  font-size: 0.85em;
+  line-height: 1;
+  width: 1ch;
+  display: inline-block;
+}
 .revisions-list {
   list-style: none;
   margin: 0;

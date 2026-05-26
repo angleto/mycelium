@@ -718,6 +718,7 @@ export const en = {
     derive: 'Derive task',
     derivePrompt: 'Title for the derived task:',
     openNote: 'Open note',
+    editNote: 'Open in edit',
     openPlant: 'Open in garden detail',
     promotedChip: 'transplanted',
     loading: 'Loading…',

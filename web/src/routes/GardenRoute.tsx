@@ -92,6 +92,7 @@ export function GardenRoute() {
   const [openData, setOpenData] = useState<NoteWithLinks | null>(null)
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
+  const [idCopied, setIdCopied] = useState(false)
 
   useEffect(() => {
     try {
@@ -419,7 +420,39 @@ export function GardenRoute() {
                   {MATURITY_GLYPH[openData.note.maturity ?? 'seed'] ?? '🌱'}
                 </span>
               )}
+              {openId && (
+                // Tiny clickable chip exposing the note id so the user
+                // can paste it elsewhere (e.g. share a reference with an
+                // assistant) without leaving the modal. Same affordance
+                // used by /notes edit modal.
+                <button
+                  type="button"
+                  className="chip"
+                  title={idCopied ? t('notes.idCopied') : openId}
+                  aria-label={t('notes.copyId')}
+                  onClick={async () => {
+                    try {
+                      await navigator.clipboard.writeText(openId)
+                      setIdCopied(true)
+                      window.setTimeout(() => setIdCopied(false), 1500)
+                    } catch {
+                      setIdCopied(false)
+                    }
+                  }}
+                >
+                  {idCopied ? t('notes.idCopied') : `ID ${openId.slice(0, 8)}…`}
+                </button>
+              )}
               <span className="modal__sp" />
+              {openId && (
+                <Link
+                  to={`/notes/${openId}`}
+                  className="btn--ghost btn--sm"
+                  title={t('garden.editNote')}
+                >
+                  {t('garden.editNote')}
+                </Link>
+              )}
               <button
                 type="button"
                 className="btn--ghost btn--sm"

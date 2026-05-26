@@ -718,6 +718,7 @@ export const it: Catalog = {
     openPlant: 'Apri nel dettaglio del giardino',
     derivePrompt: 'Titolo del task derivato:',
     openNote: 'Apri',
+    editNote: 'Apri in modifica',
     promotedChip: 'trapiantata',
     loading: 'Caricamento…',
     outgoing: 'Collegamenti uscenti',
