@@ -396,9 +396,7 @@ async def scan_reminders(
     # early evening. Padding to end-of-day matches the user-facing
     # "within N days" intent ("today + tomorrow, all of them").
     horizon_day = (ref + dt.timedelta(days=within_days)).date()
-    horizon = dt.datetime.combine(
-        horizon_day, dt.time(23, 59, 59), tzinfo=dt.UTC
-    )
+    horizon = dt.datetime.combine(horizon_day, dt.time(23, 59, 59), tzinfo=dt.UTC)
     candidates = list(
         (
             await session.execute(
@@ -439,11 +437,7 @@ async def scan_reminders(
             reference = t.due_date
             if reference.tzinfo is None:
                 reference = reference.replace(tzinfo=dt.UTC)
-            date_only = (
-                reference.hour == 23
-                and reference.minute == 59
-                and reference.second == 59
-            )
+            date_only = reference.hour == 23 and reference.minute == 59 and reference.second == 59
             when_label = (
                 reference.date().isoformat()
                 if date_only

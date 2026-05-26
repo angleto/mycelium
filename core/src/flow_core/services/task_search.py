@@ -249,8 +249,7 @@ async def flush_task_search_dirty(session: AsyncSession) -> None:
             await _resync_task_blob(session, task_id)
     except InvalidRequestError as exc:
         logger.warning(
-            "task-search resync skipped (session unusable, "
-            "likely partial savepoint rollback): %s",
+            "task-search resync skipped (session unusable, likely partial savepoint rollback): %s",
             exc,
         )
 
@@ -298,9 +297,7 @@ async def _load_task_with_items(
     row-removal (which the mapper ``after_delete`` listener catches)
     drops the blob.
     """
-    task = (
-        await session.execute(select(Task).where(Task.id == task_id))
-    ).scalar_one_or_none()
+    task = (await session.execute(select(Task).where(Task.id == task_id))).scalar_one_or_none()
     if task is None:
         return None
     items = list(
@@ -335,9 +332,7 @@ async def _resync_task_blob(session: AsyncSession, task_id: uuid.UUID) -> None:
     new_hash = content_hash(text_body)
 
     pointer = (
-        await session.execute(
-            select(TaskIndexPointer).where(TaskIndexPointer.task_id == task_id)
-        )
+        await session.execute(select(TaskIndexPointer).where(TaskIndexPointer.task_id == task_id))
     ).scalar_one_or_none()
 
     if pointer is not None and pointer.content_hash == new_hash:
@@ -489,8 +484,10 @@ async def _attach_inherited_tags(
     from flow_core.models.task_tag import TaskTag
 
     rows = (
-        await session.execute(select(TaskTag.tag_id).where(TaskTag.task_id == task_id))
-    ).scalars().all()
+        (await session.execute(select(TaskTag.tag_id).where(TaskTag.task_id == task_id)))
+        .scalars()
+        .all()
+    )
     for tid in set(rows):
         session.add(MemoryBlobTag(blob_id=blob_id, org_id=org_id, tag_id=tid))
     if rows:
@@ -605,9 +602,7 @@ async def search_unified(
                 include_archived=include_archived,
                 include_deleted=include_deleted,
             )
-            snippets = await _ts_headlines(
-                session, blob_ids=blob_ids, query=query
-            )
+            snippets = await _ts_headlines(session, blob_ids=blob_ids, query=query)
             for h in task_hits:
                 tid = id_to_task.get(h.blob.id)
                 if tid is None:

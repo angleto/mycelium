@@ -753,12 +753,12 @@ async def update_task(
         # "no time set" convention so a "due tomorrow" agent action
         # still expires at the end of the calendar day, not at
         # midnight UTC).
-        s = due_date.strip()
-        if "t" in s.lower() or "+" in s or " " in s:
-            values["due_date"] = dt.datetime.fromisoformat(s)
+        raw = due_date.strip()
+        if "t" in raw.lower() or "+" in raw or " " in raw:
+            values["due_date"] = dt.datetime.fromisoformat(raw)
         else:
             values["due_date"] = dt.datetime.combine(
-                dt.date.fromisoformat(s), dt.time(23, 59, 59), tzinfo=dt.UTC
+                dt.date.fromisoformat(raw), dt.time(23, 59, 59), tzinfo=dt.UTC
             )
     if billable is not None:
         values["billable"] = billable

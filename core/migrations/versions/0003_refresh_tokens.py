@@ -79,9 +79,7 @@ def upgrade() -> None:
         sa.Index("ix_refresh_tokens_family_id", "family_id"),
         sa.Index("ix_refresh_tokens_expires_at", "expires_at"),
     )
-    op.execute(
-        "GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE refresh_tokens TO flow_app"
-    )
+    op.execute("GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE refresh_tokens TO flow_app")
 
 
 def downgrade() -> None:

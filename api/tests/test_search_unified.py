@@ -90,9 +90,9 @@ async def test_create_task_makes_it_searchable(_fake_embedder: None) -> None:
         )
         assert r.status_code == 200, r.text
         hits = r.json()
-        assert any(
-            hit["kind"] == "task" and hit["task_id"] == tid for hit in hits
-        ), f"expected the new task in hits, got {hits}"
+        assert any(hit["kind"] == "task" and hit["task_id"] == tid for hit in hits), (
+            f"expected the new task in hits, got {hits}"
+        )
 
 
 async def test_checklist_text_is_indexed(_fake_embedder: None) -> None:

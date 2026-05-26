@@ -263,11 +263,7 @@ async def list_workspace_note_links(
     notes are few-per-tenant, so a single query is preferable to
     server-side aggregation)."""
     return list(
-        (
-            await session.execute(
-                select(NoteNoteLink).where(NoteNoteLink.org_id == org_id)
-            )
-        )
+        (await session.execute(select(NoteNoteLink).where(NoteNoteLink.org_id == org_id)))
         .scalars()
         .all()
     )

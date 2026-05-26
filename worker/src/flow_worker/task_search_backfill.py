@@ -31,9 +31,7 @@ _log = logging.getLogger("flow.worker.task_search")
 
 async def _all_workspaces() -> list[uuid.UUID]:
     async with admin_session() as s:
-        orgs = (
-            (await s.execute(select(Organization).order_by(Organization.id))).scalars().all()
-        )
+        orgs = (await s.execute(select(Organization).order_by(Organization.id))).scalars().all()
         return [o.id for o in sorted(orgs, key=lambda o: str(o.id))]
 
 
@@ -70,9 +68,7 @@ async def run_once(batch_size: int = 20) -> int:
             owner = await _owner_of(org_id)
             if owner is None:
                 continue
-            async with tenant_session(
-                str(org_id), str(owner), actor_kind="system"
-            ) as s:
+            async with tenant_session(str(org_id), str(owner), actor_kind="system") as s:
                 count = await task_search.run_embedding_backfill(s, batch_size=batch_size)
             if count:
                 _log.info("task-search backfill org=%s re-embedded=%d", org_id, count)

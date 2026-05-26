@@ -72,7 +72,7 @@ async def test_upload_attachment_to_note() -> None:
 
 
 async def test_upload_attachment_rejects_both_parents() -> None:
-    org, user, token = await _signup()
+    org, _user, token = await _signup()
     with pytest.raises(ValueError, match="exactly one of"):
         await mcp_server.upload_attachment(
             token=token,
@@ -85,7 +85,7 @@ async def test_upload_attachment_rejects_both_parents() -> None:
 
 
 async def test_upload_attachment_rejects_neither_parent() -> None:
-    org, user, token = await _signup()
+    org, _user, token = await _signup()
     with pytest.raises(ValueError, match="exactly one of"):
         await mcp_server.upload_attachment(
             token=token,

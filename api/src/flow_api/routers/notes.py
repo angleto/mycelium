@@ -159,9 +159,7 @@ async def list_workspace_note_links(
     # edge set in the workspace. Declared before ``GET /{note_id}``
     # because that catch-all would otherwise capture "links" as a
     # ``note_id`` path parameter and fail UUID validation with 422.
-    rows = await note_links_svc.list_workspace_note_links(
-        ctx.session, org_id=ctx.org_id
-    )
+    rows = await note_links_svc.list_workspace_note_links(ctx.session, org_id=ctx.org_id)
     return [_link_out(r) for r in rows]
 
 

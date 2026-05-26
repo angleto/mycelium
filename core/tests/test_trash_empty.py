@@ -46,9 +46,7 @@ async def _member(org_id: uuid.UUID, owner_id: uuid.UUID, role: str) -> uuid.UUI
     async with admin_session() as s:
         from flow_core.models.user import User as UserModel
 
-        u = (
-            await s.execute(select(UserModel).where(UserModel.id == r.user_id))
-        ).scalar_one()
+        u = (await s.execute(select(UserModel).where(UserModel.id == r.user_id))).scalar_one()
         email = u.email
     async with tenant_session(str(org_id), str(owner_id)) as s:
         await add_member(s, org_id=org_id, actor_id=owner_id, email=email, role=role)
@@ -98,7 +96,9 @@ async def test_empty_trash_purges_only_soft_deleted() -> None:
 
     async with tenant_session(str(org), str(owner)) as s:
         assert (await s.execute(select(Task).where(Task.id == live.id))).scalar_one_or_none()
-        assert (await s.execute(select(Task).where(Task.id == doomed.id))).scalar_one_or_none() is None
+        assert (
+            await s.execute(select(Task).where(Task.id == doomed.id))
+        ).scalar_one_or_none() is None
         assert (await s.execute(select(Note).where(Note.id == live_note.id))).scalar_one_or_none()
         assert (
             await s.execute(select(Note).where(Note.id == doomed_note.id))

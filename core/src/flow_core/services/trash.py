@@ -73,9 +73,7 @@ async def empty_trash(
         if note_ids:
             conds.append(Attachment.note_id.in_(note_ids))
         rows = await session.execute(
-            select(Attachment.storage_key).where(
-                or_(*conds), Attachment.storage_key.is_not(None)
-            )
+            select(Attachment.storage_key).where(or_(*conds), Attachment.storage_key.is_not(None))
         )
         keys = [k for k in rows.scalars().all() if k is not None]
         if keys:

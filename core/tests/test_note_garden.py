@@ -161,12 +161,20 @@ async def test_list_workspace_note_links_returns_full_edge_set() -> None:
         b = await _make_note(s, org, user, "b")
         c = await _make_note(s, org, user, "c")
         await note_links.link_notes(
-            s, org_id=org, actor_id=user,
-            parent_note_id=a.id, child_note_id=b.id, kind="references",
+            s,
+            org_id=org,
+            actor_id=user,
+            parent_note_id=a.id,
+            child_note_id=b.id,
+            kind="references",
         )
         await note_links.link_notes(
-            s, org_id=org, actor_id=user,
-            parent_note_id=b.id, child_note_id=c.id, kind="atom_of",
+            s,
+            org_id=org,
+            actor_id=user,
+            parent_note_id=b.id,
+            child_note_id=c.id,
+            kind="atom_of",
         )
         rows = await note_links.list_workspace_note_links(s, org_id=org)
         assert len(rows) == 2
@@ -180,8 +188,12 @@ async def test_list_workspace_note_links_returns_full_edge_set() -> None:
         x = await _make_note(s, other_org, other_user, "x")
         y = await _make_note(s, other_org, other_user, "y")
         await note_links.link_notes(
-            s, org_id=other_org, actor_id=other_user,
-            parent_note_id=x.id, child_note_id=y.id, kind="references",
+            s,
+            org_id=other_org,
+            actor_id=other_user,
+            parent_note_id=x.id,
+            child_note_id=y.id,
+            kind="references",
         )
     async with tenant_session(str(org), str(user)) as s:
         rows = await note_links.list_workspace_note_links(s, org_id=org)

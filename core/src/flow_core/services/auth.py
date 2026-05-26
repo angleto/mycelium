@@ -46,7 +46,6 @@ from flow_core.security import create_access_token, hash_password, verify_passwo
 from flow_core.services import actors as actors_svc
 from flow_core.services.mailer import OutboundEmail, get_mailer
 
-
 _REFRESH_PREFIX = "flow_rt_"
 
 
@@ -544,9 +543,7 @@ async def refresh_session(session: AsyncSession, *, raw_refresh: str) -> TokenPa
         async with admin_session() as oob:
             await _revoke_family(oob, family_id=family_id)
         raise AuthError(MessageCode.AUTH_TOKEN_INVALID)
-    user = (
-        await session.execute(select(User).where(User.id == row.user_id))
-    ).scalar_one_or_none()
+    user = (await session.execute(select(User).where(User.id == row.user_id))).scalar_one_or_none()
     if user is None:
         raise AuthError(MessageCode.AUTH_TOKEN_INVALID)
     # Refuse to keep a session alive for a locked / unverified account

@@ -71,7 +71,7 @@ export function getFreeTextTokens(input: string): string[] {
   const out: string[] = []
   for (const tok of tokenize(input)) {
     if (tok === '|') continue
-    let inner = tok
+    const inner = tok
     if (inner.startsWith('!')) {
       // Negated structured atoms (``!@done``, ``!state:done``) are
       // handled in the predicate; ``!plain`` is too rare to round-trip.

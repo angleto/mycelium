@@ -93,16 +93,12 @@ def upgrade() -> None:
         ["blob_id"],
     )
     op.execute("ALTER TABLE task_index_pointer ENABLE ROW LEVEL SECURITY")
-    _org_pred = (
-        "org_id = (NULLIF(current_setting('app.current_org'::text, true), ''::text))::uuid"
-    )
+    _org_pred = "org_id = (NULLIF(current_setting('app.current_org'::text, true), ''::text))::uuid"
     op.execute(
         f"CREATE POLICY p_task_index_pointer ON task_index_pointer "
         f"USING ({_org_pred}) WITH CHECK ({_org_pred})"
     )
-    op.execute(
-        "GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE task_index_pointer TO flow_app"
-    )
+    op.execute("GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE task_index_pointer TO flow_app")
 
 
 def downgrade() -> None:

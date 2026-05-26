@@ -115,7 +115,7 @@ async def test_replay_revokes_whole_family() -> None:
 
 
 async def test_revoke_family_kills_successor() -> None:
-    user_id, raw = await _signup_login()
+    _user_id, raw = await _signup_login()
     async with admin_session() as s:
         new_pair = await refresh_session(s, raw_refresh=raw)
     async with admin_session() as s:
