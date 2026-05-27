@@ -1615,6 +1615,21 @@ button.btn--danger:hover {
 .md a.chip {
   text-decoration: none;
 }
+/* Task mention chips (task 25fa3ab3): closed tasks render in gray
+   strikethrough; open tasks keep the regular chip color but expose
+   the workflow state in muted parentheses after the title. */
+.chip--task-closed .chip__label {
+  text-decoration: line-through;
+  color: var(--muted);
+}
+.chip--task-closed {
+  color: var(--muted);
+}
+.chip__state {
+  color: var(--muted);
+  font-size: 0.85em;
+  margin-left: 0.1rem;
+}
 /* GFM tables: render them as readable tables with subtle borders.
    ``.md`` is the wrapper produced by MarkdownView (the single
    markdown renderer in the codebase). */

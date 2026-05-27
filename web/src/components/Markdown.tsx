@@ -4,9 +4,15 @@ import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
 import rehypeKatex from 'rehype-katex'
 import { Link } from 'react-router-dom'
+import { useEffect, useState, type ReactNode } from 'react'
 import 'katex/dist/katex.min.css'
-import { parseMentionHref, routeForMention } from '../lib/mentions'
+import { parseMentionHref, routeForMention, type MentionKind } from '../lib/mentions'
 import { useAuthBlobUrl } from '../lib/useAuthBlobUrl'
+import {
+  fetchTaskMention,
+  getCachedTaskMention,
+  type TaskMentionInfo,
+} from '../lib/taskMentionCache'
 
 // Read-side markdown — the only renderer in the codebase, used by
 // /notes turns, /garden plant detail, etc. Links whose href is the
@@ -40,10 +46,61 @@ function strOrUndef(v: unknown): string | undefined {
   return typeof v === 'string' ? v : undefined
 }
 
+// Task mention chip: looks the task up so the label can carry the
+// task's current workflow state (in parens) and, when the state is
+// terminal, render strikethrough-gray. The lookup is cached
+// module-side so many references on one page collapse to one fetch.
+function TaskMentionChip({
+  id,
+  kind,
+  children,
+}: {
+  id: string
+  kind: MentionKind
+  children: ReactNode
+}) {
+  const [info, setInfo] = useState<TaskMentionInfo | null | undefined>(() =>
+    getCachedTaskMention(id),
+  )
+  useEffect(() => {
+    if (info !== undefined) return
+    let alive = true
+    void fetchTaskMention(id).then((res) => {
+      if (alive) setInfo(res)
+    })
+    return () => {
+      alive = false
+    }
+  }, [id, info])
+  const closed = info?.isTerminal === true
+  const cls =
+    'chip' +
+    (closed ? ' chip--task-closed' : '') +
+    (info && !closed && info.stateName ? ' chip--task-open' : '')
+  return (
+    <Link className={cls} to={routeForMention(kind, id)} title={info?.title ?? undefined}>
+      <span className="chip__label">{children}</span>
+      {info?.stateName && (
+        <span className="chip__state" aria-label={`state ${info.stateName}`}>
+          {' '}
+          ({info.stateName})
+        </span>
+      )}
+    </Link>
+  )
+}
+
 const components: Components = {
   a({ href, children }) {
     const m = href ? parseMentionHref(href) : null
     if (m) {
+      if (m.kind === 'task') {
+        return (
+          <TaskMentionChip id={m.id} kind={m.kind}>
+            {children}
+          </TaskMentionChip>
+        )
+      }
       return (
         <Link className="chip" to={routeForMention(m.kind, m.id)}>
           {children}
