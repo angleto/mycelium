@@ -289,6 +289,208 @@ def attach_list(note_id: str = typer.Argument(..., autocompletion=complete_note_
     )
 
 
+# --- parts sub-group (Phase 5, task ce8aaed2) -----------------------
+# Multi-part markdown notes. Mirrors the REST surface from Phase 2a/2b
+# (POST /notes/{id}/parts, PATCH /notes/{id}/parts/{pid}, DELETE,
+# PUT /parts/order, POST /notes/merge).
+
+parts_app = typer.Typer(
+    no_args_is_help=True,
+    help="Ordered markdown parts inside a note (add/list/edit/rm/reorder).",
+)
+app.add_typer(parts_app, name="parts")
+
+
+def _resolve_part(c: Any, note_id: str, partial: str) -> str:
+    """Resolve a short-id (or full uuid) to a part id within a note."""
+    if len(partial) >= 32:
+        return partial
+    rows = get_json(c.get(f"/notes/{note_id}/parts"))
+    short = partial.lower()
+    matches = [p for p in rows if str(p["id"]).lower().startswith(short)]
+    if not matches:
+        raise CLIError(f"no part matching '{partial}' on note {short_id(note_id)}.")
+    if len(matches) > 1:
+        raise CLIError(
+            f"part prefix '{partial}' is ambiguous on note {short_id(note_id)}."
+        )
+    return str(matches[0]["id"])
+
+
+@parts_app.command("add")
+def parts_add(
+    note_id: str = typer.Argument(..., autocompletion=complete_note_id),
+    file: Path | None = typer.Option(
+        None,
+        "--file",
+        "-f",
+        help="Read body from a file. Use '-' for stdin. Omit to open $EDITOR.",
+    ),
+    lang: str | None = typer.Option(
+        None, "--lang", "-l", help="ISO 639-1 hint (en, it, ...). Optional."
+    ),
+    ord: int | None = typer.Option(
+        None,
+        "--ord",
+        help="Insert at this ord (shifts following parts forward). Omit = append.",
+    ),
+) -> None:
+    """Add a markdown part to a note. Body comes from --file, stdin
+    (-), or an interactive $EDITOR session."""
+    if file is not None:
+        if str(file) == "-":
+            body = sys.stdin.read()
+        else:
+            body = file.read_text()
+    else:
+        body = edit_in_editor("")
+    with client() as c:
+        full = _resolve_note(c, note_id)
+        payload: dict[str, Any] = {"body": body}
+        if lang:
+            payload["lang"] = lang
+        if ord is not None:
+            payload["ord"] = ord
+        part = get_json(c.post(f"/notes/{full}/parts", json=payload))
+    if json_mode():
+        emit_json(part)
+        return
+    success(
+        f"added part {short_id(part['id'])} to note {short_id(full)} "
+        f"(ord={part['ord']}, {len(body)} chars)"
+    )
+
+
+@parts_app.command("list")
+def parts_list(
+    note_id: str = typer.Argument(..., autocompletion=complete_note_id),
+) -> None:
+    """List the ordered parts of a note (short id, ord, lang, preview)."""
+    with client() as c:
+        full = _resolve_note(c, note_id)
+        rows = get_json(c.get(f"/notes/{full}/parts"))
+    if json_mode():
+        emit_json(rows)
+        return
+    emit_table(
+        None,
+        ["id", "ord", "lang", "chars", "preview"],
+        [
+            (
+                short_id(r["id"]),
+                r["ord"],
+                r.get("lang") or "",
+                len(r.get("body") or ""),
+                _truncate(
+                    (r.get("body") or "").strip().splitlines()[0]
+                    if (r.get("body") or "").strip()
+                    else "",
+                    60,
+                ),
+            )
+            for r in rows
+        ],
+    )
+
+
+@parts_app.command("edit")
+def parts_edit(
+    note_id: str = typer.Argument(..., autocompletion=complete_note_id),
+    part_id: str = typer.Argument(...),
+) -> None:
+    """Open the part body in $EDITOR; save to PATCH back."""
+    with client() as c:
+        full = _resolve_note(c, note_id)
+        pid = _resolve_part(c, full, part_id)
+        current = get_json(c.get(f"/notes/{full}/parts"))
+        part = next(p for p in current if p["id"] == pid)
+        new_body = edit_in_editor(part.get("body") or "")
+        if new_body == (part.get("body") or ""):
+            info("no changes; skip")
+            return
+        resp = get_json(
+            c.patch(
+                f"/notes/{full}/parts/{pid}",
+                json={"expected_version": part["version"], "body": new_body},
+            )
+        )
+    success(f"updated part {short_id(pid)} (v{resp.get('version')})")
+
+
+@parts_app.command("rm")
+def parts_rm(
+    note_id: str = typer.Argument(..., autocompletion=complete_note_id),
+    part_id: str = typer.Argument(...),
+) -> None:
+    """Hard-delete a part. Remaining ords stay as-is (no compaction)."""
+    with client() as c:
+        full = _resolve_note(c, note_id)
+        pid = _resolve_part(c, full, part_id)
+        resp = c.delete(f"/notes/{full}/parts/{pid}")
+        if resp.status_code not in (200, 204):
+            get_json(resp)
+    success(f"deleted part {short_id(pid)} from note {short_id(full)}")
+
+
+@parts_app.command("reorder")
+def parts_reorder(
+    note_id: str = typer.Argument(..., autocompletion=complete_note_id),
+    part_ids: list[str] = typer.Argument(
+        ..., help="Full set of part ids in the desired order (short ids accepted)."
+    ),
+) -> None:
+    """Rewrite the entire part ordering. Must list EVERY part (the
+    server refuses a partial set so a typo can't silently drop a row)."""
+    with client() as c:
+        full = _resolve_note(c, note_id)
+        resolved = [_resolve_part(c, full, p) for p in part_ids]
+        rows = get_json(
+            c.put(f"/notes/{full}/parts/order", json={"part_ids": resolved})
+        )
+    if json_mode():
+        emit_json(rows)
+        return
+    success(
+        f"reordered {len(rows)} parts on note {short_id(full)}: "
+        + " → ".join(short_id(r["id"]) for r in rows)
+    )
+
+
+@app.command("merge")
+def merge(
+    source: str = typer.Argument(..., autocompletion=complete_note_id),
+    target: str = typer.Argument(..., autocompletion=complete_note_id),
+    strategy: str = typer.Option(
+        "append",
+        "--strategy",
+        "-s",
+        help="Merge strategy. v1 ships 'append' only.",
+    ),
+) -> None:
+    """Fold source's parts into target. Source is soft-deleted; target
+    supersedes it (visible as a 'supersedes' link). Idempotent."""
+    with client() as c:
+        src_id = _resolve_note(c, source)
+        tgt_id = _resolve_note(c, target)
+        out_note = get_json(
+            c.post(
+                "/notes/merge",
+                json={
+                    "source_note_id": src_id,
+                    "target_note_id": tgt_id,
+                    "strategy": strategy,
+                },
+            )
+        )
+    if json_mode():
+        emit_json(out_note)
+        return
+    success(
+        f"merged note {short_id(src_id)} → {short_id(tgt_id)} "
+        f"({len(out_note.get('parts', []))} parts now on target)"
+    )
+
+
 # --- voice ----------------------------------------------------------
 
 
