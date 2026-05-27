@@ -227,10 +227,16 @@ export function NotesRoute() {
       }
       await openEdit(data)
     })()
-    // openEdit is stable enough; reacting only to routeId / sel.id
-    // keeps the effect tight.
+    // Depend ONLY on routeId. With ``sel?.id`` in the deps the effect
+    // re-fires during the close sequence: setSel(null) and navigate()
+    // are not atomic, so a render in between sees sel?.id=undefined
+    // and routeId still=oldId; the effect would then re-fetch and
+    // reopen the modal, requiring a second Close click. The
+    // ``sel?.id === routeId`` guard inside still short-circuits the
+    // redundant GET when a list-click set sel before routeId caught
+    // up.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [routeId, sel?.id])
+  }, [routeId])
 
   async function openEdit(n: Note) {
     setErr(null)
