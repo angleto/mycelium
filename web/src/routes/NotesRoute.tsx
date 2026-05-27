@@ -9,6 +9,7 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { api, authFetch, errMessage, workspaceHeader } from '../api/client'
 import { useSession } from '../auth/useSession'
+import { NotePartsEditor } from '../components/NotePartsEditor'
 import { RichEditor } from '../components/RichEditor'
 import { MarkdownView } from '../components/Markdown'
 import { NoteListItem } from '../components/NoteListItem'
@@ -921,6 +922,7 @@ export function NotesRoute() {
                     imageUploadParent={{ kind: 'note', id: sel.id }}
                   />
                 </div>
+                <NotePartsEditor noteId={sel.id} />
                 <Attachments noteId={sel.id} />
                 <LinkedTasksPanel noteId={sel.id} />
                 <RevisionsPanel

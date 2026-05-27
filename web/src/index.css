@@ -3046,6 +3046,85 @@ button.btn--danger:hover {
    actions. Responsive: on mobile the actions wrap below the
    card body and the textual button labels collapse to glyphs.
 */
+/* Multi-part note editor (task 29761355 Phase 4). Each part is a
+   self-contained block with a collapse toggle, an ord label, a
+   lang chip, reorder buttons and a danger remove. The body opens
+   into the existing RichEditor when expanded; collapsed shows the
+   first non-empty line as preview. Tight vertical rhythm so a
+   note with N parts stays readable in the modal viewport. */
+.parts-editor {
+  margin-top: 1rem;
+  border-top: 1px solid var(--border);
+  padding-top: 0.8rem;
+}
+.parts-editor__head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.6rem;
+}
+.parts-editor__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.parts-editor__item {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+.parts-editor__item-head {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.35rem 0.5rem;
+  border-bottom: 1px solid transparent;
+}
+.parts-editor__item:not(:has(.parts-editor__body)) .parts-editor__item-head {
+  border-bottom-color: transparent;
+}
+.parts-editor__toggle {
+  background: transparent;
+  border: 0;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 0.9rem;
+  padding: 0 0.2rem;
+}
+.parts-editor__ord {
+  font-family: var(--mono);
+  font-size: 0.78rem;
+}
+.parts-editor__preview {
+  font-size: 0.85rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.parts-editor__spacer {
+  flex: 1 1 auto;
+}
+.parts-editor__body {
+  padding: 0.5rem;
+  border-top: 1px solid var(--border);
+}
+.parts-editor__actions {
+  display: flex;
+  gap: 0.4rem;
+  margin-top: 0.5rem;
+}
+.chip--lang {
+  background: var(--accent-weak);
+  color: var(--accent);
+  border-color: var(--accent-weak);
+  font-family: var(--mono);
+}
+
 /* Subtle 'humus' background on /garden (task 0f71f60a / 56d80038):
    the page sits on top of the standard card surface, here tinted by
    two very-low-alpha radial pools (bark + moss) so the section reads
