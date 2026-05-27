@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { authFetch, errMessage } from '../api/client'
 import type { components } from '../api/schema'
@@ -38,6 +38,9 @@ export function NotePartsEditor({ noteId }: { noteId: string }) {
   const [loading, setLoading] = useState(false)
   const [busyPid, setBusyPid] = useState<string | null>(null)
   const [editingBody, setEditingBody] = useState<Record<string, string>>({})
+  // Per-part debounce timers for autosave. Keyed by part.id so each
+  // part's keystrokes reset only its own timer.
+  const autosaveTimers = useRef<Record<string, number>>({})
 
   const reload = useCallback(async () => {
     setLoading(true)
@@ -129,32 +132,62 @@ export function NotePartsEditor({ noteId }: { noteId: string }) {
     }
   }
 
-  const saveBody = async (part: NotePart) => {
-    const draft = editingBody[part.id]
-    if (draft === undefined || draft === (part.body ?? '')) return
-    setBusyPid(part.id)
-    try {
-      const res = await authFetch(`/notes/${noteId}/parts/${part.id}`, {
-        method: 'PATCH',
-        body: JSON.stringify({ expected_version: part.version, body: draft }),
-      })
-      if (!res.ok) {
-        setErr(errMessage(await res.json().catch(() => ({}))))
-        return
+  const saveBody = useCallback(
+    async (part: NotePart, draftOverride?: string) => {
+      const draft = draftOverride ?? editingBody[part.id]
+      if (draft === undefined || draft === (part.body ?? '')) return
+      setBusyPid(part.id)
+      try {
+        const res = await authFetch(`/notes/${noteId}/parts/${part.id}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ expected_version: part.version, body: draft }),
+        })
+        if (!res.ok) {
+          setErr(errMessage(await res.json().catch(() => ({}))))
+          return
+        }
+        // Drop the local draft and refresh from the server so version
+        // bumps reflect (a stale PATCH would otherwise lose the user's
+        // next edit to a concurrent writer).
+        setEditingBody((cur) => {
+          const out = { ...cur }
+          delete out[part.id]
+          return out
+        })
+        await reload()
+      } finally {
+        setBusyPid(null)
       }
-      // Drop the local draft and refresh from the server so version
-      // bumps reflect (a stale PATCH would otherwise lose the user's
-      // next edit to a concurrent writer).
-      setEditingBody((cur) => {
-        const out = { ...cur }
-        delete out[part.id]
-        return out
-      })
-      await reload()
-    } finally {
-      setBusyPid(null)
+    },
+    [editingBody, noteId, reload],
+  )
+
+  // Debounced autosave: 1.2s after the last keystroke on a part, push
+  // the draft to the server. Mirrors NotesRoute's title autosave so
+  // the part editor feels like a normal text field. Manual Save stays
+  // available for users who prefer immediate persistence.
+  useEffect(() => {
+    const timers = autosaveTimers.current
+    for (const part of parts) {
+      const draft = editingBody[part.id]
+      if (draft === undefined || draft === (part.body ?? '')) continue
+      if (timers[part.id]) window.clearTimeout(timers[part.id])
+      timers[part.id] = window.setTimeout(() => {
+        delete timers[part.id]
+        void saveBody(part, draft)
+      }, 1200)
     }
-  }
+    return () => {
+      // Clear pending timers for parts that have been removed or
+      // whose draft was cleared (e.g. after a server-confirmed save).
+      for (const pid of Object.keys(timers)) {
+        if (editingBody[pid] === undefined) {
+          window.clearTimeout(timers[pid])
+          delete timers[pid]
+        }
+      }
+    }
+  }, [editingBody, parts, saveBody])
 
   return (
     <section className="parts-editor">
