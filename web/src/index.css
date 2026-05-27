@@ -3046,6 +3046,26 @@ button.btn--danger:hover {
    actions. Responsive: on mobile the actions wrap below the
    card body and the textual button labels collapse to glyphs.
 */
+/* Subtle 'humus' background on /garden (task 0f71f60a / 56d80038):
+   the page sits on top of the standard card surface, here tinted by
+   two very-low-alpha radial pools (bark + moss) so the section reads
+   as a forest floor without distracting from the content. The
+   gradient is opaque-less so the underlying ``--surface`` colour
+   (whichever the theme picks) still drives contrast for inner rows. */
+.card.garden {
+  background:
+    radial-gradient(
+      ellipse at 15% 0%,
+      color-mix(in oklab, var(--bark) 7%, transparent) 0%,
+      transparent 60%
+    ),
+    radial-gradient(
+      ellipse at 85% 100%,
+      color-mix(in oklab, var(--moss) 6%, transparent) 0%,
+      transparent 55%
+    ),
+    var(--surface);
+}
 .garden__tabs {
   display: flex;
   gap: 0.4rem;
