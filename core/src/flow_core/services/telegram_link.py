@@ -338,6 +338,25 @@ async def handle_webhook_update(payload: dict[str, object]) -> UpdateOutcome:
         duration = voice.get("duration")
         audio_seconds = int(duration) if isinstance(duration, int) else 0
         mime = voice.get("mime_type") or "audio/ogg"
+        # Caption-driven routing (task 44ba3f14): Telegram lets the
+        # user attach a caption to a voice clip. A caption that
+        # starts with ``task`` or ``t:`` (case-insensitive) flags
+        # the clip for promotion to a task after transcription; the
+        # rest of the caption becomes the task title hint.
+        caption_raw = message.get("caption")
+        caption = caption_raw.strip() if isinstance(caption_raw, str) else ""
+        caption_lower = caption.lower()
+        as_task = (
+            caption_lower.startswith("task")
+            or caption_lower.startswith("t:")
+            or caption_lower.startswith("/task")
+        )
+        if as_task:
+            # Strip the routing prefix from the title hint.
+            for prefix in ("/task", "task:", "task", "t:"):
+                if caption_lower.startswith(prefix):
+                    caption = caption[len(prefix) :].strip(" :")
+                    break
         try:
             api_client = get_telegram_api()
             tg_path = await api_client.get_file_path(file_id=file_id)
@@ -375,8 +394,9 @@ async def handle_webhook_update(payload: dict[str, object]) -> UpdateOutcome:
                 expected_version=note.version,
                 audio_ref=f"attachment:{att.id}",
             )
+            transcript_text: str = ""
             try:
-                await notes_svc.transcribe(
+                tr_note = await notes_svc.transcribe(
                     ts,
                     org_id=org_id,
                     actor_id=user_id,
@@ -384,10 +404,52 @@ async def handle_webhook_update(payload: dict[str, object]) -> UpdateOutcome:
                     operation_id=f"telegram-{file_id}",
                     embed=True,
                 )
+                # The transcript lives on note_part(ord=0). Reload it
+                # so a caption-flagged task carries the transcribed
+                # body (no transcript -> empty task description).
+                from flow_core.services import note_parts as parts_svc
+
+                parts = await parts_svc.list_parts(
+                    ts, org_id=org_id, note_id=tr_note.id
+                )
+                transcript_text = (parts[0].body if parts else "") or ""
             except Exception:
                 # Best-effort: an unconfigured STT raises here; the
                 # audio is still saved on the note for later replay.
                 logger.exception("telegram voice transcribe failed for note=%s", note.id)
+            # Caption-driven promotion (task 44ba3f14).
+            if as_task:
+                from flow_core.services import note_links as note_links_svc
+
+                # Title fallback chain: caption text -> first line of
+                # the transcript -> generic placeholder.
+                title = caption
+                if not title and transcript_text:
+                    title = transcript_text.splitlines()[0].strip()[:200]
+                if not title:
+                    title = "Voice task from Telegram"
+                try:
+                    task, _ = await note_links_svc.promote_note_to_task(
+                        ts,
+                        org_id=org_id,
+                        actor_id=user_id,
+                        note_id=note.id,
+                        title=title[:300],
+                    )
+                    return UpdateOutcome(
+                        reply_text=render(
+                            MessageCode.TELEGRAM_TASK_CREATED, title=title[:80]
+                        ),
+                        task_id=task.id,
+                        user_id=user_id,
+                    )
+                except Exception:
+                    # Promotion failure: keep the note as-is so the
+                    # voice is not lost. The user can convert via SPA.
+                    logger.exception(
+                        "telegram voice -> task promotion failed for note=%s",
+                        note.id,
+                    )
         return UpdateOutcome(
             reply_text=render(MessageCode.TELEGRAM_VOICE_SAVED),
             note_id=note.id,

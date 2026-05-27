@@ -137,6 +137,7 @@ def _out(
         transcript=_derived_transcript(parts, transcript),
         summary=n.summary,
         audio_ref=n.audio_ref,
+        audio_seconds=n.audio_seconds,
         is_archived=n.is_archived,
         deleted_at=n.deleted_at,
         tags=[_brief(t) for t in (tags or [])],

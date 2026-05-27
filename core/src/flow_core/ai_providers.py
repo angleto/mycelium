@@ -45,7 +45,14 @@ class LLMProvider(Protocol):
 
 @runtime_checkable
 class TranscriptionProvider(Protocol):
-    async def transcribe(self, *, audio_ref: str, audio_seconds: int) -> TranscriptResult: ...
+    async def transcribe(
+        self,
+        *,
+        audio_ref: str,
+        audio_seconds: int,
+        audio_bytes: bytes | None = None,
+        mime_type: str | None = None,
+    ) -> TranscriptResult: ...
 
 
 @runtime_checkable
@@ -68,12 +75,96 @@ class LocalLLM:
 
 
 class LocalSTT:
+    """Reference STT backed by ``faster-whisper`` when available.
+
+    The extra is optional: if the package is not importable, the
+    provider raises a clear error so the caller (notes.transcribe)
+    can degrade gracefully (the audio remains playable; the note's
+    ``last_error`` records the missing extra). Model/quantisation
+    come from the ``FLOW_STT_MODEL`` / ``FLOW_STT_DEVICE`` env vars
+    so a self-host can pick `small` (CPU, ~250 MB) or `large-v3`
+    (GPU, ~3 GB) without code changes.
+    """
+
     model_id = "local-whisper"
+    _model: object | None = None  # cached across calls
+
+    @classmethod
+    def _load_model(cls) -> object:
+        if cls._model is not None:
+            return cls._model
+        try:
+            from faster_whisper import WhisperModel  # type: ignore[import-not-found]
+        except ImportError as exc:  # pragma: no cover - optional extra
+            raise RuntimeError(
+                "LocalSTT requires the 'faster-whisper' extra "
+                "(pip install faster-whisper)"
+            ) from exc
+        import os
+
+        size = os.environ.get("FLOW_STT_MODEL", "small")
+        device = os.environ.get("FLOW_STT_DEVICE", "cpu")
+        compute_type = os.environ.get("FLOW_STT_COMPUTE_TYPE", "int8")
+        cls._model = WhisperModel(size, device=device, compute_type=compute_type)
+        return cls._model
 
     async def transcribe(  # pragma: no cover - model/network
-        self, *, audio_ref: str, audio_seconds: int
+        self,
+        *,
+        audio_ref: str,
+        audio_seconds: int,
+        audio_bytes: bytes | None = None,
+        mime_type: str | None = None,
     ) -> TranscriptResult:
-        raise RuntimeError("LocalSTT requires the 'faster-whisper' extra")
+        if audio_bytes is None:
+            raise RuntimeError(
+                "LocalSTT needs the raw audio bytes; "
+                "the caller must resolve audio_ref before invoking."
+            )
+        import asyncio
+        import tempfile
+        from pathlib import Path
+
+        def _ext(mt: str | None) -> str:
+            if not mt:
+                return ".ogg"
+            if "mp4" in mt or "m4a" in mt:
+                return ".m4a"
+            if "webm" in mt:
+                return ".webm"
+            if "wav" in mt:
+                return ".wav"
+            return ".ogg"
+
+        suffix = _ext(mime_type)
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+            tmp.write(audio_bytes)
+            tmp_path = tmp.name
+        try:
+            def _run() -> str:
+                model = self._load_model()
+                # faster-whisper returns a (segments, info) tuple; we
+                # join the segment texts (whitespace-separated) for the
+                # full transcript. Italian + auto-detect default; an
+                # FLOW_STT_LANG env var can pin the language.
+                import os
+
+                lang = os.environ.get("FLOW_STT_LANG") or None
+                segments, _ = model.transcribe(  # type: ignore[attr-defined]
+                    tmp_path,
+                    language=lang,
+                    vad_filter=True,
+                )
+                return " ".join(seg.text.strip() for seg in segments).strip()
+
+            text = await asyncio.to_thread(_run)
+        finally:
+            Path(tmp_path).unlink(missing_ok=True)
+        return TranscriptResult(
+            text=text,
+            model_id=self.model_id,
+            audio_seconds=audio_seconds,
+        )
 
 
 class LocalTTS:

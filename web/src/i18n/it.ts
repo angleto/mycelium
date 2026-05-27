@@ -1275,6 +1275,7 @@ export const it: Catalog = {
     create: 'Crea nota',
     voiceRecord: 'Registra',
     voiceStop: 'Stop',
+    voicePlayer: 'Registrazione vocale',
     voiceReRecord: 'Ri-registra',
     command: 'Comando canonico (offline, non a consumo)',
     commandPh: 'es. crea una nuova nota',

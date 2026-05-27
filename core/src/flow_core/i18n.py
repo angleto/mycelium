@@ -314,7 +314,8 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
             "Flow bot:\n"
             "• /note <text> → save a note\n"
             "• /task <title> → create a task\n"
-            "• voice message → save a voice note\n"
+            "• voice message → save a voice note (auto-transcribed)\n"
+            "• voice + caption 'task: <title>' → save AND promote to task\n"
             "• /help → this message\n"
             "Send free text to chat with the Flow assistant."
         ),

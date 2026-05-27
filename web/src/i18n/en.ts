@@ -1275,6 +1275,7 @@ export const en = {
     create: 'Create note',
     voiceRecord: 'Record',
     voiceStop: 'Stop',
+    voicePlayer: 'Voice recording',
     voiceReRecord: 'Re-record',
     command: 'Canonical command (offline, not metered)',
     commandPh: 'e.g. create a new note',

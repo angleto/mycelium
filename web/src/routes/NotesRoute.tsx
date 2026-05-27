@@ -21,6 +21,7 @@ import { TagPickerGrid } from '../components/TagPickerGrid'
 import { VoiceRecorder } from '../components/VoiceRecorder'
 import { TaskTimer } from '../components/TaskTimer'
 import { Attachments } from '../components/Attachments'
+import { VoicePlayer } from '../components/VoicePlayer'
 import { LinkedTasksPanel } from '../components/LinkedTasksPanel'
 import { RevisionsPanel } from '../components/RevisionsPanel'
 import { useFocus } from '../lib/focus'
@@ -947,6 +948,12 @@ export function NotesRoute() {
                     still derived from ``note.transcript`` (concatenated
                     parts) so the autosave/revision diff path keeps
                     working until those flows are fully migrated. */}
+                {sel.kind === 'voice' && sel.audio_ref && (
+                  <VoicePlayer
+                    audioRef={sel.audio_ref}
+                    audioSeconds={sel.audio_seconds}
+                  />
+                )}
                 <NotePartsEditor
                   ref={partsEditorRef}
                   noteId={sel.id}

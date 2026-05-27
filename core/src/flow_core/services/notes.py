@@ -1012,7 +1012,14 @@ async def transcribe(
     stt: TranscriptionProvider | None = None,
 ) -> Note:
     """STT processing: metered per audio-minute; the transcript feeds
-    hierarchical memory with note provenance (ADR-0016/0020)."""
+    hierarchical memory with note provenance (ADR-0016/0020).
+
+    ``note.audio_ref`` carries an opaque pointer of the form
+    ``attachment:<uuid>``. We resolve it to the raw bytes here (rather
+    than inside each STT provider) so providers stay storage-agnostic;
+    fakes ignore ``audio_bytes``, the real local-whisper backend needs
+    them to feed faster-whisper.
+    """
     await require_role(session, org_id, actor_id, Role.member)
     note = await get_note(session, org_id=org_id, note_id=note_id)
     if note.audio_ref is None:
@@ -1021,7 +1028,29 @@ async def transcribe(
     await session.flush()
     provider = stt or get_stt()
     seconds = note.audio_seconds or 0
-    res = await provider.transcribe(audio_ref=note.audio_ref, audio_seconds=seconds)
+    audio_bytes: bytes | None = None
+    mime_type: str | None = None
+    if note.audio_ref.startswith("attachment:"):
+        try:
+            att_id = uuid.UUID(note.audio_ref.split(":", 1)[1])
+            from flow_core.services import attachments as att_svc
+
+            att = await att_svc.get_attachment(
+                session, org_id=org_id, attachment_id=att_id
+            )
+            audio_bytes = await att_svc.read_attachment_bytes(att)
+            mime_type = att.mime_type
+        except Exception:
+            # Resolution failure leaves audio_bytes None; providers
+            # that don't need raw bytes (e.g. cloud STT keyed on a
+            # public URL) keep working.
+            audio_bytes = None
+    res = await provider.transcribe(
+        audio_ref=note.audio_ref,
+        audio_seconds=seconds,
+        audio_bytes=audio_bytes,
+        mime_type=mime_type,
+    )
     await billing.meter(
         session,
         org_id=org_id,

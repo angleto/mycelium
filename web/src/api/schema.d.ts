@@ -6533,6 +6533,8 @@ export interface components {
             summary: string | null;
             /** Audio Ref */
             audio_ref: string | null;
+            /** Audio Seconds */
+            audio_seconds?: number | null;
             /**
              * Is Archived
              * @default false

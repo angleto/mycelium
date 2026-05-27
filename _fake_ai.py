@@ -27,7 +27,15 @@ class FakeLLM:
 class FakeSTT:
     model_id = "fake-stt"
 
-    async def transcribe(self, *, audio_ref: str, audio_seconds: int) -> TranscriptResult:
+    async def transcribe(
+        self,
+        *,
+        audio_ref: str,
+        audio_seconds: int,
+        audio_bytes: bytes | None = None,
+        mime_type: str | None = None,
+    ) -> TranscriptResult:
+        del audio_bytes, mime_type  # fake ignores raw bytes
         return TranscriptResult(
             text=f"transcript of {audio_ref}",
             model_id=self.model_id,

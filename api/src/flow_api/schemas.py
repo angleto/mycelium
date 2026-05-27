@@ -1758,6 +1758,7 @@ class NoteOut(BaseModel):
     transcript: str | None
     summary: str | None
     audio_ref: str | None
+    audio_seconds: int | None = None
     is_archived: bool = False
     deleted_at: datetime.datetime | None = None
     tags: list[TagBrief] = []
