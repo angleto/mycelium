@@ -3430,6 +3430,39 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/garden/graph": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Garden Graph
+         * @description Materialise the workspace note-graph in one round-trip:
+         *
+         *     - ``edges``: undirected ``(src, dst, weight)`` rows with the v1
+         *       ``note_edge_strength`` aggregation (soft-OR of per-kind base
+         *       contributions + Adamic-Adar tag overlap). Co-activity from
+         *       Proposal A is Phase 2.
+         *     - ``centrality``: ``{note_id: pagerank}`` over the manual
+         *       directed link graph (damping=0.85, power iteration). The map
+         *       sums to 1.0 across the workspace.
+         *
+         *     Both computed on demand (no cache). Bounded cost: O(L) for the
+         *     edges, O(iter · L) for PageRank; the typical garden's link count
+         *     stays well under 10k so each call resolves comfortably under a
+         *     second.
+         */
+        get: operations["garden_graph_garden_graph_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/attachments/{attachment_id}/download": {
         parameters: {
             query?: never;
@@ -5311,6 +5344,45 @@ export interface components {
             due_date: string | null;
             /** Remaining Minutes */
             remaining_minutes: number;
+        };
+        /**
+         * GardenGraphEdge
+         * @description One undirected weighted edge between two notes. ``src`` and
+         *     ``dst`` are canonically ordered (sorted by string repr) so two
+         *     rows with the same endpoints never appear in different positions
+         *     across requests. ``weight`` ∈ [0, 1] is the soft-OR of the
+         *     per-kind contributions and the Adamic-Adar tag overlap; the
+         *     third source (co-activity) is documented in ADR-0031 and
+         *     deferred to Phase 2.
+         */
+        GardenGraphEdge: {
+            /**
+             * Src
+             * Format: uuid
+             */
+            src: string;
+            /**
+             * Dst
+             * Format: uuid
+             */
+            dst: string;
+            /** Weight */
+            weight: number;
+        };
+        /**
+         * GardenGraphOut
+         * @description Response of GET /garden/graph: edges + centrality in one
+         *     payload. ``centrality`` is a ``{note_id: pagerank}`` map summing
+         *     to 1 across the workspace; an empty workspace returns ``[]`` and
+         *     ``{}`` respectively.
+         */
+        GardenGraphOut: {
+            /** Edges */
+            edges: components["schemas"]["GardenGraphEdge"][];
+            /** Centrality */
+            centrality: {
+                [key: string]: number;
+            };
         };
         /** GrantIn */
         GrantIn: {
@@ -16708,6 +16780,40 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["EditSessionSealOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    garden_graph_garden_graph_get: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GardenGraphOut"];
                 };
             };
             /** @description Validation Error */

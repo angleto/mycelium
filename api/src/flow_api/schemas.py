@@ -873,6 +873,36 @@ class GraphOut(BaseModel):
     edges: list[GraphEdge]
 
 
+# --- Garden graph (note↔note weighted + PageRank centrality) -------
+# Tasks 4467acb4 (note_edge_strength v1) + 8c0a8f08 (PageRank Phase 1).
+# Both surfaces share one round-trip so the SPA mindmap doesn't have
+# to coordinate two parallel fetches just to render one frame.
+
+
+class GardenGraphEdge(BaseModel):
+    """One undirected weighted edge between two notes. ``src`` and
+    ``dst`` are canonically ordered (sorted by string repr) so two
+    rows with the same endpoints never appear in different positions
+    across requests. ``weight`` ∈ [0, 1] is the soft-OR of the
+    per-kind contributions and the Adamic-Adar tag overlap; the
+    third source (co-activity) is documented in ADR-0031 and
+    deferred to Phase 2."""
+
+    src: uuid.UUID
+    dst: uuid.UUID
+    weight: float
+
+
+class GardenGraphOut(BaseModel):
+    """Response of GET /garden/graph: edges + centrality in one
+    payload. ``centrality`` is a ``{note_id: pagerank}`` map summing
+    to 1 across the workspace; an empty workspace returns ``[]`` and
+    ``{}`` respectively."""
+
+    edges: list[GardenGraphEdge]
+    centrality: dict[uuid.UUID, float]
+
+
 # --- F3: calendars, events, schedule (FR-4, docs/adr/0004, 0008) ---
 
 
