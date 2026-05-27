@@ -185,6 +185,162 @@ function savePositions(
   }
 }
 
+// Soft-OR saturating combine of two [0,1] weights (task 7e99c724).
+// Two evidence sources for the same fact don't add linearly (they'd
+// blow past 1); they accumulate with diminishing returns.
+function softOr(a: number, b: number): number {
+  return 1 - (1 - a) * (1 - b)
+}
+
+// Per-kind base weight contribution: how much each link type pulls
+// two nodes together. Tuned so that an atom_of edge alone gives a
+// noticeably thicker line than references, in line with the existing
+// visual vocabulary (atom_of = trunk, references = scent).
+const KIND_WEIGHT: Record<string, number> = {
+  atom_of: 0.85,
+  supersedes: 0.7,
+  replies_to: 0.6,
+  references: 0.4,
+}
+
+// Edge weight v1 = soft-OR of the kind base and a tag-overlap term
+// (more shared generic tags = stronger context). Tag overlap is
+// derived from the visible note set so it stays consistent with the
+// tag-edges layer. v2 (task 4467acb4) will read this from the
+// note_edge_strength materialised view.
+function edgeWeightV1(
+  kind: string,
+  sharedGenericTags: number,
+): number {
+  const wKind = KIND_WEIGHT[kind] ?? 0.4
+  const wTag = 1 - 1 / (1 + 0.4 * sharedGenericTags)
+  return softOr(wKind, wTag)
+}
+
+// Count shared generic tags between two notes. Cheap O(|tags_a|).
+function sharedGenericTagCount(a: Note | undefined, b: Note | undefined): number {
+  if (!a || !b) return 0
+  const aIds = new Set(
+    (a.tags ?? []).filter((t) => t.kind === 'generic').map((t) => t.id),
+  )
+  if (aIds.size === 0) return 0
+  let n = 0
+  for (const t of b.tags ?? []) {
+    if (t.kind === 'generic' && aIds.has(t.id)) n++
+  }
+  return n
+}
+
+// Mini force simulator (task 7e99c724 v1): repulsion + spring along
+// edges + centripetal gravity proportional to centrality.
+// Deterministic seed (sorted notes by id, no randomness), bounded
+// budget (250 ticks), zero deps. The result is a final positions
+// map the caller merges with stored user-drag positions (which still
+// win). Sub-100ms on a few hundred nodes.
+function forceLayout(
+  notes: Note[],
+  links: { source: string; target: string; weight: number }[],
+  degreeByNode: Map<string, number>,
+): Record<string, { x: number; y: number }> {
+  const N = notes.length
+  if (N === 0) return {}
+  const maxDegree = Math.max(1, ...Array.from(degreeByNode.values()))
+  // Deterministic initial spread: golden-angle spiral so neighbours
+  // don't pile up before the first iteration runs.
+  const phi = Math.PI * (3 - Math.sqrt(5))
+  const sorted = [...notes].sort((a, b) => a.id.localeCompare(b.id))
+  const idx = new Map<string, number>(sorted.map((n, i) => [n.id, i]))
+  const x = new Float64Array(N)
+  const y = new Float64Array(N)
+  for (let i = 0; i < N; i++) {
+    const r = 60 + 22 * Math.sqrt(i)
+    const a = i * phi
+    x[i] = Math.cos(a) * r
+    y[i] = Math.sin(a) * r
+  }
+  // Edge list with weighted spring rest length: heavy edge = short
+  // rest length (nodes pulled closer). Skip edges with an endpoint
+  // outside the visible set.
+  const edges: { a: number; b: number; rest: number; k: number }[] = []
+  for (const l of links) {
+    const ia = idx.get(l.source)
+    const ib = idx.get(l.target)
+    if (ia === undefined || ib === undefined) continue
+    const w = Math.max(0, Math.min(1, l.weight))
+    // L0 = 80 / (0.3 + 0.7w): w=1 -> ~80, w=0 -> ~267
+    edges.push({ a: ia, b: ib, rest: 80 / (0.3 + 0.7 * w), k: 0.06 + 0.12 * w })
+  }
+  const REPULSION_K = 1400
+  const GRAVITY_BETA = 0.018
+  const DAMPING = 0.82
+  const MAX_STEP = 18
+  const TICKS = 250
+  const dx = new Float64Array(N)
+  const dy = new Float64Array(N)
+  let alpha = 1
+  for (let tick = 0; tick < TICKS; tick++) {
+    dx.fill(0)
+    dy.fill(0)
+    // Repulsion: O(N²). For N<300 (~typical garden) this is fine.
+    for (let i = 0; i < N; i++) {
+      for (let j = i + 1; j < N; j++) {
+        let rx = x[i] - x[j]
+        let ry = y[i] - y[j]
+        let d2 = rx * rx + ry * ry
+        if (d2 < 1) {
+          rx = (i - j) * 0.5
+          ry = (j - i) * 0.5
+          d2 = 1
+        }
+        const f = REPULSION_K / d2
+        const inv = 1 / Math.sqrt(d2)
+        dx[i] += f * rx * inv
+        dy[i] += f * ry * inv
+        dx[j] -= f * rx * inv
+        dy[j] -= f * ry * inv
+      }
+    }
+    // Spring attraction along edges
+    for (const e of edges) {
+      const rx = x[e.b] - x[e.a]
+      const ry = y[e.b] - y[e.a]
+      const d = Math.max(1, Math.sqrt(rx * rx + ry * ry))
+      const f = e.k * (d - e.rest)
+      const fx = (rx / d) * f
+      const fy = (ry / d) * f
+      dx[e.a] += fx
+      dy[e.a] += fy
+      dx[e.b] -= fx
+      dy[e.b] -= fy
+    }
+    // Centripetal gravity ∝ centrality (degree / max)
+    for (let i = 0; i < N; i++) {
+      const note = sorted[i]
+      const c = (degreeByNode.get(note.id) ?? 0) / maxDegree
+      dx[i] -= GRAVITY_BETA * (1 + 4 * c) * x[i]
+      dy[i] -= GRAVITY_BETA * (1 + 4 * c) * y[i]
+    }
+    // Integrate with cooling alpha + per-tick step clamp so a single
+    // huge repulsion impulse can't catapult a node off-canvas.
+    for (let i = 0; i < N; i++) {
+      let sx = dx[i] * alpha * DAMPING
+      let sy = dy[i] * alpha * DAMPING
+      const mag = Math.sqrt(sx * sx + sy * sy)
+      if (mag > MAX_STEP) {
+        sx = (sx / mag) * MAX_STEP
+        sy = (sy / mag) * MAX_STEP
+      }
+      x[i] += sx
+      y[i] += sy
+    }
+    alpha *= 0.985
+    if (alpha < 0.05) break
+  }
+  const out: Record<string, { x: number; y: number }> = {}
+  for (let i = 0; i < N; i++) out[sorted[i].id] = { x: x[i], y: y[i] }
+  return out
+}
+
 // Deterministic seed layout: primary tag groups orbit a center, notes
 // without a generic tag form an outer ring. Stable across reloads
 // because order is by sorted id, not insertion order. Cleanly replaced
@@ -400,13 +556,41 @@ function GardenMindmapInner({ notes, workspaceId, onOpenNote }: GardenMindmapPro
     return { dots, extra }
   }, [])
 
+  // Force-layout input: weighted manual links between visible notes,
+  // recomputed when the link set or visible note scope changes. Task
+  // 7e99c724 v1 (no backend): weight = soft-OR(w_kind, w_tag).
+  const weightedLinks = useMemo(() => {
+    const out: { source: string; target: string; weight: number }[] = []
+    for (const l of workspaceLinks) {
+      if (!noteIds.has(l.parent_note_id) || !noteIds.has(l.child_note_id)) continue
+      const shared = sharedGenericTagCount(
+        noteById.get(l.parent_note_id),
+        noteById.get(l.child_note_id),
+      )
+      out.push({
+        source: l.parent_note_id,
+        target: l.child_note_id,
+        weight: edgeWeightV1(l.kind, shared),
+      })
+    }
+    return out
+  }, [workspaceLinks, noteIds, noteById])
+
   // Initial nodes — built once per notes-set; user drag positions
   // are merged from localStorage. We compute outside the useNodesState
   // initializer so that subsequent notes changes (load completes,
   // tag change, focus change) can resync via a setter effect below.
+  // Layout strategy: force-directed when the visible subgraph has
+  // any manual links (the simulator gives an organic, centrality-
+  // driven shape); fall back to the deterministic seedLayout when
+  // there's nothing to attract (a fresh workspace with isolated
+  // notes still gets a tidy ring).
   const initialNodes = useMemo<Node<PlantNodeData>[]>(() => {
     const stored = loadPositions(workspaceId)
-    const seeded = seedLayout(notes, primaryTagFor)
+    const seeded =
+      weightedLinks.length > 0
+        ? forceLayout(notes, weightedLinks, degreeByNode)
+        : seedLayout(notes, primaryTagFor)
     return notes.map((n) => {
       const pos = stored[n.id] ?? seeded[n.id] ?? { x: 0, y: 0 }
       const dimmed = n.maturity === 'dormant' || Boolean(n.promoted_at)
@@ -438,12 +622,23 @@ function GardenMindmapInner({ notes, workspaceId, onOpenNote }: GardenMindmapPro
 
   // Sync nodes when the notes set changes (focus filter toggled,
   // new note created, etc.). Preserves any in-memory user drag
-  // positions for notes that survive across the change.
+  // positions for notes that survive across the change. The force
+  // layout runs only when (a) the visible subgraph has manual links
+  // AND (b) at least one new note appears without a stored or
+  // existing position; otherwise we let the existing positions ride
+  // (re-simulating on every minor change would jitter the whole
+  // canvas under the user's hands).
   useEffect(() => {
     const stored = loadPositions(workspaceId)
-    const seeded = seedLayout(notes, primaryTagFor)
     setNodes((current) => {
       const byId = new Map(current.map((c) => [c.id, c]))
+      const anyUnplaced = notes.some(
+        (n) => !byId.has(n.id) && !stored[n.id],
+      )
+      const seeded =
+        anyUnplaced && weightedLinks.length > 0
+          ? forceLayout(notes, weightedLinks, degreeByNode)
+          : seedLayout(notes, primaryTagFor)
       return notes.map((n) => {
         const existing = byId.get(n.id)
         const pos =
@@ -479,6 +674,7 @@ function GardenMindmapInner({ notes, workspaceId, onOpenNote }: GardenMindmapPro
     degreeByNode,
     entropyByNode,
     tagDotsFor,
+    weightedLinks,
   ])
 
   // Persist position changes (debounced via rAF microtask is overkill
@@ -536,19 +732,35 @@ function GardenMindmapInner({ notes, workspaceId, onOpenNote }: GardenMindmapPro
       .map((l) => {
         const kind = l.kind as LinkKind
         const color = LINK_COLOR[kind] ?? 'var(--moss)'
-        // Per-kind stroke vocabulary:
-        //  atom_of    → thick solid branch (parent feeds child)
-        //  references → thin dashed scent (a passing mention)
-        //  replies_to → medium dashed-rhythm (call-and-response)
-        //  supersedes → solid + arrowhead (old replaced by new)
+        // Per-kind stroke vocabulary, modulated by edge weight v1
+        // (task 7e99c724): the base width is the kind's signature
+        // thickness; the extra millimeter comes from soft-OR(w_kind,
+        // w_tag) so a link reinforced by tag overlap reads as a
+        // stronger filament without changing the kind's identity
+        // (dashed remains dashed, solid remains solid).
+        const shared = sharedGenericTagCount(
+          noteById.get(l.parent_note_id),
+          noteById.get(l.child_note_id),
+        )
+        const w = edgeWeightV1(l.kind, shared)
+        const widthBoost = 0.6 * Math.pow(w, 0.7)
         const style: CSSProperties =
           kind === 'atom_of'
-            ? { stroke: color, strokeWidth: 2.2 }
+            ? { stroke: color, strokeWidth: 2.2 + widthBoost }
             : kind === 'references'
-              ? { stroke: color, strokeWidth: 1.2, strokeDasharray: '3 3', opacity: 0.75 }
+              ? {
+                  stroke: color,
+                  strokeWidth: 1.2 + widthBoost,
+                  strokeDasharray: '3 3',
+                  opacity: 0.75,
+                }
               : kind === 'replies_to'
-                ? { stroke: color, strokeWidth: 1.8, strokeDasharray: '6 2' }
-                : { stroke: color, strokeWidth: 2.0, opacity: 0.9 }
+                ? {
+                    stroke: color,
+                    strokeWidth: 1.8 + widthBoost,
+                    strokeDasharray: '6 2',
+                  }
+                : { stroke: color, strokeWidth: 2.0 + widthBoost, opacity: 0.9 }
         return {
           id: `mm-link-${l.id}`,
           source: l.parent_note_id,
