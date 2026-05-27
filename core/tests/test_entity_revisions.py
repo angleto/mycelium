@@ -101,8 +101,12 @@ def test_snapshot_whitelist_is_subset_of_model_columns() -> None:
 
     task_cols = {c.name for c in Task.__table__.columns}
     note_cols = {c.name for c in Note.__table__.columns}
+    # Phase 6 final (task 1cd8bc0a): ``transcript`` left the Note row
+    # in migration 0012; it stays in _NOTE_SNAPSHOT_FIELDS as a
+    # virtual key filled by snapshot_note from note_part(ord=0)+.
+    note_virtual = {"transcript"}
     task_missing = set(_TASK_SNAPSHOT_FIELDS) - task_cols
-    note_missing = set(_NOTE_SNAPSHOT_FIELDS) - note_cols
+    note_missing = set(_NOTE_SNAPSHOT_FIELDS) - note_cols - note_virtual
     assert not task_missing, (
         f"_TASK_SNAPSHOT_FIELDS references non-existent columns: {task_missing}"
     )
@@ -852,11 +856,15 @@ async def test_note_update_writes_revision_and_restore_back() -> None:
             expected_version=v2,
         )
         n = await notes_svc.get_note(s, org_id=org, note_id=nid)
+        # Phase 6 final: the canonical body lives in note_part(ord=0)
+        # after the column drop. Read it back via the helper.
+        body = await notes_svc.get_body(s, note_id=nid)
 
     # Title comes from _derive_title("body0") -> first non-empty line
-    # = "body0" (no explicit title was provided either time the
-    # transcript was the body source). Check transcript matches.
-    assert n.transcript == "body0"
+    # = "body0" (no explicit title was provided either time the body
+    # was source). Check the restored body matches the snapshot.
+    assert n.title == "N0"
+    assert body == "body0"
 
 
 # Pytest-asyncio is configured ``mode=auto`` in pyproject; every

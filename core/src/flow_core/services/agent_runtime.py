@@ -167,10 +167,14 @@ async def _build_context(
     # primitive a human would receive as a notification, injected here
     # for an llm_agent recipient. Deterministic order (created_at, id).
     incoming = await coordination_svc.incoming_for_context(session, task_id=task.id)
+    # Phase 6 final: note body comes from note_part(ord=0)+ joined,
+    # not the dropped ``transcript`` column.
+    from flow_core.services.notes import get_body as _get_body
+
     for ho, pred, note in incoming:
         lines.append(f"Handoff from [{pred.title}]: {ho.message}")
         if note is not None:
-            body = (note.transcript or "").strip()[:500]
+            body = (await _get_body(session, note_id=note.id)).strip()[:500]
             lines.append(f"Handoff artifact[{note.title or 'untitled'}]: {body}")
     # docs/adr/0029 P3: notes linked to the task come through the
     # typed link (any kind) instead of the legacy ``Note.task_id``.
@@ -191,7 +195,7 @@ async def _build_context(
         else []
     )
     for n in linked:
-        body = (n.transcript or "").strip()
+        body = (await _get_body(session, note_id=n.id)).strip()
         snippet = body[:500]
         lines.append(f"Note[{n.title or 'untitled'}]: {snippet}")
     return [("user", "\n".join(lines))]

@@ -2857,10 +2857,13 @@ def _note(
     primary_task_id: uuid.UUID | None = None,
     include_transcript: bool = True,
     parts: list[Any] | None = None,
+    transcript: str | None = None,
 ) -> dict[str, Any]:
     # docs/adr/0029 P3: ``task_id`` comes from the typed link table.
-    # ``include_transcript`` lets list_notes opt out of the 0.5-3 KB
-    # body so picker payloads stay small (get_note keeps the default).
+    # Phase 6 final (task 1cd8bc0a): the ``transcript`` column is
+    # gone; we derive the field from the parts list when available
+    # or accept an explicit ``transcript`` from the caller
+    # (single-row paths that didn't load parts).
     # ``parts`` (task 7070a456 Phase 3): when supplied, embed the
     # ordered note_part rows so an LLM gets the structured body in
     # one call. list_notes leaves it None for payload economy.
@@ -2875,7 +2878,10 @@ def _note(
         "tags": [_tag_brief(g) for g in (tags or [])],
     }
     if include_transcript:
-        out["transcript"] = n.transcript
+        if parts:
+            out["transcript"] = "\n\n".join((p.body or "") for p in parts)
+        else:
+            out["transcript"] = transcript
     if parts is not None:
         out["parts"] = [_note_part(p) for p in parts]
     return out
@@ -2913,7 +2919,8 @@ async def create_note(
         )
         tagmap = await notes_svc.tags_by_note(s, note_ids=[n.id])
         pid = await note_links_svc.primary_task_id_for_note(s, org_id=org, note_id=n.id)
-        return _note(n, tagmap.get(n.id, []), primary_task_id=pid)
+        body = await notes_svc.get_body(s, note_id=n.id)
+        return _note(n, tagmap.get(n.id, []), primary_task_id=pid, transcript=body)
 
 
 @mcp.tool()
@@ -2947,6 +2954,14 @@ async def list_notes(
         pid_map = await note_links_svc.primary_task_ids_for_notes(
             s, org_id=org, note_ids=[n.id for n in rows]
         )
+        # Phase 6 final: bodies come from note_part(ord=0)+; batched
+        # so the picker stays one round-trip even when
+        # include_transcript=True.
+        bodies = (
+            await notes_svc._bodies_by_note(s, note_ids=[n.id for n in rows])
+            if include_transcript
+            else {}
+        )
         return [
             _project_fields(
                 _note(
@@ -2954,6 +2969,7 @@ async def list_notes(
                     tagmap.get(n.id, []),
                     primary_task_id=pid_map.get(n.id),
                     include_transcript=include_transcript,
+                    transcript=bodies.get(n.id),
                 ),
                 fields,
             )
@@ -3125,7 +3141,8 @@ async def get_or_create_task_note(token: str, org_id: str, task_id: str) -> dict
         )
         tagmap = await notes_svc.tags_by_note(s, note_ids=[n.id])
         pid = await note_links_svc.primary_task_id_for_note(s, org_id=org, note_id=n.id)
-        return _note(n, tagmap.get(n.id, []), primary_task_id=pid)
+        body = await notes_svc.get_body(s, note_id=n.id)
+        return _note(n, tagmap.get(n.id, []), primary_task_id=pid, transcript=body)
 
 
 @mcp.tool()
@@ -3151,7 +3168,8 @@ async def create_task_note(
         )
         tagmap = await notes_svc.tags_by_note(s, note_ids=[n.id])
         pid = await note_links_svc.primary_task_id_for_note(s, org_id=org, note_id=n.id)
-        return _note(n, tagmap.get(n.id, []), primary_task_id=pid)
+        body = await notes_svc.get_body(s, note_id=n.id)
+        return _note(n, tagmap.get(n.id, []), primary_task_id=pid, transcript=body)
 
 
 @mcp.tool()
@@ -3345,7 +3363,8 @@ async def start_conversation_session(
         )
         tagmap = await notes_svc.tags_by_note(s, note_ids=[n.id])
         pid = await note_links_svc.primary_task_id_for_note(s, org_id=org, note_id=n.id)
-        return _note(n, tagmap.get(n.id, []), primary_task_id=pid)
+        body = await notes_svc.get_body(s, note_id=n.id)
+        return _note(n, tagmap.get(n.id, []), primary_task_id=pid, transcript=body)
 
 
 @mcp.tool()
@@ -3380,7 +3399,8 @@ async def transcribe_note(
         )
         tagmap = await notes_svc.tags_by_note(s, note_ids=[n.id])
         pid = await note_links_svc.primary_task_id_for_note(s, org_id=org, note_id=n.id)
-        return _note(n, tagmap.get(n.id, []), primary_task_id=pid)
+        body = await notes_svc.get_body(s, note_id=n.id)
+        return _note(n, tagmap.get(n.id, []), primary_task_id=pid, transcript=body)
 
 
 @mcp.tool()
@@ -3390,7 +3410,8 @@ async def run_command(token: str, org_id: str, text: str) -> dict[str, Any]:
         n = await notes_svc.run_command(s, org_id=org, actor_id=user, text=text)
         tagmap = await notes_svc.tags_by_note(s, note_ids=[n.id])
         pid = await note_links_svc.primary_task_id_for_note(s, org_id=org, note_id=n.id)
-        return _note(n, tagmap.get(n.id, []), primary_task_id=pid)
+        body = await notes_svc.get_body(s, note_id=n.id)
+        return _note(n, tagmap.get(n.id, []), primary_task_id=pid, transcript=body)
 
 
 @mcp.tool()

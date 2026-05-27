@@ -228,7 +228,10 @@ async def test_note_command_creates_note() -> None:
     assert outcome.note_id is not None and outcome.task_id is None
     async with tenant_session(str(org), str(user)) as s:
         note = (await s.execute(select(Note).where(Note.id == outcome.note_id))).scalar_one()
-        assert note.transcript == "Pay invoice tomorrow"
+        # Phase 6 final: body lives in note_part(ord=0).
+        from flow_core.services.notes import get_body as _get_body
+
+        assert (await _get_body(s, note_id=note.id)) == "Pay invoice tomorrow"
 
 
 async def test_plain_text_is_not_stored_and_returns_hint() -> None:

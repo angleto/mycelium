@@ -115,6 +115,13 @@ _TASK_SNAPSHOT_FIELDS: tuple[str, ...] = (
     "duration_minutes",
     "recurrence",
 )
+# Phase 6 final: ``transcript`` left the Note row in migration 0012.
+# It still appears in this tuple for two reasons: (a) the snapshot
+# JSON keeps the key (filled from note_part(ord=0)+ joined inside
+# ``snapshot_note``) so already-sealed revisions remain restorable,
+# and (b) _NOTE_RESTORABLE_FIELDS (below) lists ``transcript`` as a
+# field the restore path is allowed to write back. The two sets
+# must stay in sync (an anti-drift test pins it).
 _NOTE_SNAPSHOT_FIELDS: tuple[str, ...] = (
     "title",
     "transcript",
@@ -128,6 +135,13 @@ _NOTE_SNAPSHOT_FIELDS: tuple[str, ...] = (
     "audio_ref",
     "audio_seconds",
     "promoted_at",
+)
+# Columns that live on the Note row -- the snapshot loader iterates
+# this tuple via ``getattr`` so it never tries to read the dropped
+# ``transcript`` attribute. ``snapshot_note`` adds ``transcript``
+# explicitly from the parts join.
+_NOTE_SNAPSHOT_ROW_FIELDS: tuple[str, ...] = tuple(
+    f for f in _NOTE_SNAPSHOT_FIELDS if f != "transcript"
 )
 # Fields that the restore path is allowed to write back. Identity-,
 # routing- and accountability-bearing columns (owner, assignee,
@@ -185,10 +199,18 @@ async def snapshot_task(session: AsyncSession, task: Task) -> dict[str, Any]:
 
 
 async def snapshot_note(session: AsyncSession, note: Note) -> dict[str, Any]:
-    """Build a complete snapshot payload from a Note ORM row."""
+    """Build a complete snapshot payload from a Note ORM row. Phase 6
+    final: the canonical body is read from ``note_part(ord=0)+`` and
+    stored under the ``transcript`` key so a future restore can
+    recover it (the restore path will route it back to part(ord=0))."""
+    from flow_core.services.notes import get_body as _get_body
+
     payload: dict[str, Any] = {
-        field: _json_safe(getattr(note, field)) for field in _NOTE_SNAPSHOT_FIELDS
+        field: _json_safe(getattr(note, field)) for field in _NOTE_SNAPSHOT_ROW_FIELDS
     }
+    payload["transcript"] = _json_safe(
+        await _get_body(session, note_id=note.id)
+    )
     payload["tags"] = await _tags_for_note(session, note_id=note.id)
     return payload
 

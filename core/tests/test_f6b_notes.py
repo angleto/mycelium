@@ -130,7 +130,10 @@ async def test_transcription_metered_feeds_memory_and_erases(
             s, org_id=org, actor_id=user, note_id=note.id, operation_id="tr1"
         )
         after = await billing.balance(s, org_id=org)
-        assert done.transcript and done.status.value == "ready"
+        # Phase 6 final: the body is in note_part(ord=0); read via the
+        # canonical helper.
+        body = await nt.get_body(s, note_id=done.id)
+        assert body and done.status.value == "ready"
         assert after < before  # STT (+ embedding) debited
         # Transcript is retrievable from memory within the note's project.
         hits = await memory_svc.retrieve(
@@ -138,7 +141,7 @@ async def test_transcription_metered_feeds_memory_and_erases(
             org_id=org,
             actor_id=user,
             project_id=proj,
-            query=done.transcript,
+            query=body,
             operation_id="tr1-q",
         )
         assert len(hits) >= 1

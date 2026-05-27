@@ -91,7 +91,10 @@ class Note(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, Base):
         server_default="captured",
     )
     title: Mapped[str | None] = mapped_column(String(300), nullable=True)
-    transcript: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Phase 6 final (task 1cd8bc0a): ``transcript`` left the Note
+    # row in migration 0012. The canonical body now lives in
+    # ``note_part`` rows ordered by ``ord``; read via
+    # ``services.notes.get_body`` / ``_bodies_by_note``.
     summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     audio_ref: Mapped[str | None] = mapped_column(String(512), nullable=True)
     audio_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)

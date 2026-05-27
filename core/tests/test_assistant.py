@@ -217,8 +217,13 @@ async def test_create_note_via_tool_persists() -> None:
     )
     assert "created note" in reply.lower()
     async with tenant_session(str(org), str(user)) as s:
-        rows = (await s.execute(select(Note).where(Note.transcript == "buy milk"))).scalars().all()
-        assert len(rows) == 1
+        # Phase 6 final: note body lives in note_part(ord=0) now.
+        from flow_core.models.note_part import NotePart
+
+        parts = (
+            await s.execute(select(NotePart).where(NotePart.body == "buy milk"))
+        ).scalars().all()
+        assert len(parts) == 1
 
 
 async def test_create_task_then_set_state_transitions() -> None:

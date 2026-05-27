@@ -285,6 +285,78 @@ async def _log_note_revision(
     )
 
 
+async def get_body(session: AsyncSession, *, note_id: uuid.UUID) -> str:
+    """Return the canonical text body of a note as a single string
+    (task 1cd8bc0a Phase 6 final). The body is the concatenation of
+    every ``note_part`` row ordered by ``ord``, joined by a blank
+    line. Returns an empty string when the note has no parts.
+
+    Replaces the legacy ``note.transcript`` column reads after the
+    DROP. Callers that want the structured shape (with lang per part,
+    individual ords, etc.) should query ``note_parts.list_parts``
+    directly; this helper exists for the "I just want the flat body"
+    sites (search snippets, audit log, LLM summaries)."""
+    from flow_core.models.note_part import NotePart
+
+    rows = (
+        await session.execute(
+            select(NotePart.body)
+            .where(NotePart.note_id == note_id)
+            .order_by(NotePart.ord, NotePart.id)
+        )
+    ).scalars().all()
+    return "\n\n".join((b or "") for b in rows)
+
+
+async def _bodies_by_note(
+    session: AsyncSession, *, note_ids: Sequence[uuid.UUID]
+) -> dict[uuid.UUID, str]:
+    """Batched ``{note_id: canonical body}`` for list endpoints.
+    Single SELECT, ``\\n\\n``-joined in Python. Notes with no parts
+    appear with ``""``."""
+    from flow_core.models.note_part import NotePart
+
+    if not note_ids:
+        return {}
+    rows = (
+        await session.execute(
+            select(NotePart.note_id, NotePart.body, NotePart.ord)
+            .where(NotePart.note_id.in_(list(note_ids)))
+            .order_by(NotePart.note_id, NotePart.ord, NotePart.id)
+        )
+    ).all()
+    out: dict[uuid.UUID, list[str]] = {}
+    for nid, body, _ in rows:
+        out.setdefault(nid, []).append(body or "")
+    return {nid: "\n\n".join(parts) for nid, parts in out.items()}
+
+
+async def _upsert_part_zero(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    note_id: uuid.UUID,
+    body: str,
+) -> None:
+    """Upsert the canonical part(ord=0) of a note with the given body.
+    Used by ``create_note``, ``update_note`` and ``transcribe`` after
+    Phase 6 drops the ``notes.transcript`` column."""
+    from flow_core.models.note_part import NotePart
+
+    existing = (
+        await session.execute(
+            select(NotePart).where(
+                NotePart.note_id == note_id, NotePart.ord == 0
+            )
+        )
+    ).scalar_one_or_none()
+    if existing is None:
+        session.add(NotePart(org_id=org_id, note_id=note_id, ord=0, body=body))
+    else:
+        existing.body = body
+    await session.flush()
+
+
 async def _note_set(
     session: AsyncSession,
     *,
@@ -360,21 +432,41 @@ async def restore_revision(
     payload = _revisions.restorable_payload(revision, fields=fields)
     if not payload:
         raise DomainError(MessageCode.DOMAIN_ERROR)
-    # The snapshot stores the column name ``transcript``; that matches
-    # the DB column so it lands straight in ``values``. No type
-    # coercion needed: both restorable fields are plain strings.
-    return await _note_set(
+    # Phase 6 final: ``transcript`` left the Note row; route a
+    # restored transcript into note_part(ord=0). Other restorable
+    # fields (``title``) flow through the row as before.
+    transcript_target: str | None = None
+    row_values: dict[str, Any] = {}
+    for key, value in payload.items():
+        if key == "transcript":
+            transcript_target = value or ""
+        else:
+            row_values[key] = value
+    if not row_values and transcript_target is None:
+        raise DomainError(MessageCode.DOMAIN_ERROR)
+    if not row_values:
+        # We still need to bump version + write a revision row, but
+        # we have no row columns to set. Touch ``title`` to itself
+        # via _note_set so the lifecycle audit logs the restore.
+        current = await get_note(session, org_id=org_id, note_id=note_id)
+        row_values = {"title": current.title}
+    new_version = await _note_set(
         session,
         org_id=org_id,
         actor_id=actor_id,
         note_id=note_id,
         expected_version=expected_version,
-        values=dict(payload),
+        values=row_values,
         action="restore_revision",
         channel="restore",
         edit_session_id=None,
         restored_from=revision_id,
     )
+    if transcript_target is not None:
+        await _upsert_part_zero(
+            session, org_id=org_id, note_id=note_id, body=transcript_target
+        )
+    return new_version
 
 
 async def update_note(
@@ -402,9 +494,11 @@ async def update_note(
     clears ``notes.task_id`` (an explicit ``None`` unlinks). A target
     task is validated in-org (RLS scopes the lookup); TASK_NOT_FOUND if
     absent. Omitting the argument leaves the existing link untouched."""
+    # Phase 6 final: ``text`` lands in note_part(ord=0), not in a
+    # ``transcript`` column. The Note row's ``values`` carries only
+    # the still-on-row fields (title, audio_ref, ...); the part write
+    # follows the optimistic _note_set so a stale version aborts both.
     values: dict[str, Any] = {}
-    if text is not None:
-        values["transcript"] = text
     eff_title = title if (title and title.strip()) else _derive_title(text)
     values["title"] = eff_title
     # docs/adr/0029 P3: ``note.task_id`` is gone. The same setter API
@@ -437,33 +531,15 @@ async def update_note(
         channel=channel,
         edit_session_id=edit_session_id,
     )
-    # Phase 6 prep (task 1cd8bc0a): mirror the transcript edit into
-    # part(ord=0). If a part(ord=0) already exists, update its body;
-    # otherwise create one. We deliberately keep this transactional
-    # with the optimistic _note_set above so a failed UPDATE on the
-    # note doesn't leave a stale part write behind. Skipped when
-    # ``text`` isn't part of this patch (the user only touched title
-    # or task_id).
+    # Phase 6 final: write the text edit to note_part(ord=0). The
+    # _note_set call above no longer touches a ``transcript`` column
+    # (it's gone in migration 0012); the part write completes the
+    # body edit. Sequenced after _note_set so an optimistic version
+    # conflict aborts both writes together.
     if text is not None:
-        from flow_core.models.note_part import NotePart as _NotePart
-
-        existing = (
-            await session.execute(
-                select(_NotePart).where(
-                    _NotePart.note_id == note_id, _NotePart.ord == 0
-                )
-            )
-        ).scalar_one_or_none()
-        if existing is None:
-            session.add(
-                _NotePart(org_id=org_id, note_id=note_id, ord=0, body=text)
-            )
-        else:
-            # ORM-style update so the identity map stays consistent
-            # (a Core UPDATE bypassed the mapper and a subsequent read
-            # could return the stale body cached on the loaded row).
-            existing.body = text
-        await session.flush()
+        await _upsert_part_zero(
+            session, org_id=org_id, note_id=note_id, body=text
+        )
     if pending_task_link[0]:
         new_task_id = pending_task_link[1]
         if new_task_id is None:
@@ -542,7 +618,13 @@ async def append_to_note_field(
     if target not in _APPEND_TARGETS_NOTE:
         raise DomainError(MessageCode.DOMAIN_ERROR)
     note = await get_note(session, org_id=org_id, note_id=note_id)
-    current: str | None = getattr(note, target)
+    # Phase 6 final: ``transcript`` is no longer a Note column; it
+    # reads (and writes) through note_part(ord=0). ``summary`` still
+    # lives on the Note row.
+    if target == "transcript":
+        current: str | None = await get_body(session, note_id=note_id)
+    else:
+        current = getattr(note, target)
     if dedupe_if_tail_matches and current and current.rstrip().endswith(text.rstrip()):
         return note.version, 0
     new_value = _collapsed_concat(current, separator, text)
@@ -550,15 +632,26 @@ async def append_to_note_field(
     if len(new_value.encode("utf-8")) > max_bytes:
         raise DomainError(MessageCode.BODY_LIMIT_EXCEEDED, max_bytes=str(max_bytes))
     eff_version = expected_version if expected_version is not None else note.version
-    values: dict[str, Any] = {target: new_value}
+    values: dict[str, Any] = {}
     # Re-derive the title from the head of the body when the note has
     # no explicit one yet (same behaviour as update_note's blank-title
-    # path), so the first paragraph appended to an empty transcript
-    # gives the note a visible name.
+    # path), so the first paragraph appended to an empty body gives
+    # the note a visible name.
     if target == "transcript" and not (note.title and note.title.strip()):
         derived = _derive_title(new_value)
         if derived:
             values["title"] = derived
+    # ``summary`` is still a column on Note; transcript moved to part0.
+    if target == "summary":
+        values["summary"] = new_value
+    # Phase 6 final: a transcript append still bumps the note's
+    # version (callers rely on it for optimistic concurrency and the
+    # revision timeline). When there's no other row-column to touch
+    # we re-write ``title`` to itself: idempotent, but it routes
+    # through ``_note_set`` so the version bump + audit + revision
+    # land like before.
+    if target == "transcript" and not values:
+        values["title"] = note.title
     new_version = await _note_set(
         session,
         org_id=org_id,
@@ -569,6 +662,10 @@ async def append_to_note_field(
         action="append",
         channel=channel,
     )
+    if target == "transcript":
+        await _upsert_part_zero(
+            session, org_id=org_id, note_id=note_id, body=new_value
+        )
     return new_version, len(text)
 
 
@@ -652,13 +749,13 @@ async def create_note(
     await require_role(session, org_id, actor_id, Role.member)
     if kind is NoteKind.text:
         status = NoteStatus.ready
-        transcript = text
     elif kind is NoteKind.conversation:
         status = NoteStatus.ready
-        transcript = None
     else:  # voice
         status = NoteStatus.captured
-        transcript = None
+    # Phase 6 final: text/voice content lives in note_part rows, not
+    # on the Note row. ``title`` is still derived from the first line
+    # of the text the caller supplied (when blank).
     if not (title and title.strip()):
         title = _derive_title(text)
     note = Note(
@@ -667,7 +764,6 @@ async def create_note(
         kind=kind,
         status=status,
         title=title,
-        transcript=transcript,
         audio_ref=audio_ref,
         audio_seconds=audio_seconds,
     )
@@ -689,17 +785,13 @@ async def create_note(
         )
     session.add(NoteTag(org_id=org_id, note_id=note.id, tag_id=client_tag_id))
     await session.flush()
-    # Phase 6 prep (task 1cd8bc0a): mirror the initial transcript
-    # into a part(ord=0) so the new readers (SPA NotePartsEditor,
-    # MCP get_note's parts[], flow-cli) see content for every note
-    # created post-deploy. A future PR flips readers to parts as
-    # the source of truth and drops notes.transcript; until then we
-    # double-write so the two surfaces stay in sync.
-    if transcript:
-        from flow_core.models.note_part import NotePart as _NotePart
-
-        session.add(_NotePart(org_id=org_id, note_id=note.id, ord=0, body=transcript))
-        await session.flush()
+    # Phase 6 final: the text the caller supplied lands in
+    # note_part(ord=0). The Note row no longer carries a transcript
+    # column; the parts table is the source of truth.
+    if text:
+        await _upsert_part_zero(
+            session, org_id=org_id, note_id=note.id, body=text
+        )
     await audit.log(
         session,
         org_id=org_id,
@@ -940,7 +1032,13 @@ async def transcribe(
         units_in=Decimal(res.audio_seconds) / Decimal(60),
         basis=CostBasis.local,
     )
-    note.transcript = res.text
+    # Phase 6 final: the STT body lands in note_part(ord=0), not a
+    # transcript column. Status flips to ``ready`` so the rest of the
+    # flow (memory write, audit) sees a finalised note.
+    if res.text:
+        await _upsert_part_zero(
+            session, org_id=org_id, note_id=note.id, body=res.text
+        )
     note.status = NoteStatus.ready
     await session.flush()
     if embed and res.text:

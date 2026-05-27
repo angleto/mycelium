@@ -89,6 +89,21 @@ def _part_out(p: Any, *, ui_collapsed: bool = False) -> NotePartOut:
     )
 
 
+def _derived_transcript(
+    parts: list[NotePartOut] | None,
+    explicit: str | None,
+) -> str | None:
+    """Phase 6 final: ``NoteOut.transcript`` is derived. When the
+    caller already has the parts list at hand we join part bodies by
+    a blank line; otherwise the caller passes an explicit body
+    (single-row paths that didn't bother loading parts). Empty parts
+    + no override returns ``None`` so the SPA / clients still see
+    null-vs-empty distinguished."""
+    if parts is not None and parts:
+        return "\n\n".join((p.body or "") for p in parts)
+    return explicit
+
+
 def _out(
     n: Note,
     tags: list[Tag] | None = None,
@@ -96,6 +111,7 @@ def _out(
     derived_task_ids: list[uuid.UUID] | None = None,
     linked_task_count: int = 0,
     parts: list[NotePartOut] | None = None,
+    transcript: str | None = None,
 ) -> NoteOut:
     # docs/adr/0029 P3: ``task_id`` exposed in the API is derived
     # from the typed link table (primary_task_id_for_note). Callers
@@ -114,7 +130,11 @@ def _out(
         kind=n.kind,
         status=n.status,
         title=n.title,
-        transcript=n.transcript,
+        # Phase 6 final: ``transcript`` is derived from the parts list
+        # when the caller has it loaded; otherwise the caller can
+        # pass an explicit value (single-row paths that skipped the
+        # parts join). The legacy column is gone in migration 0012.
+        transcript=_derived_transcript(parts, transcript),
         summary=n.summary,
         audio_ref=n.audio_ref,
         is_archived=n.is_archived,
@@ -185,6 +205,7 @@ async def create_note(
         tagmap.get(n.id, []),
         primary_task_id=pid,
         derived_task_ids=derived.get(n.id, []),
+        transcript=await svc.get_body(ctx.session, note_id=n.id),
     )
 
 
@@ -231,6 +252,10 @@ async def list_notes(
     count_map = await note_links_svc.linked_task_counts_for_notes(
         ctx.session, org_id=ctx.org_id, note_ids=ids
     )
+    # Phase 6 final: ``transcript`` on the API is derived from
+    # note_part(ord=0)+ joined. One batched query keeps the list
+    # endpoint a single round-trip.
+    bodies = await svc._bodies_by_note(ctx.session, note_ids=ids)
     return [
         _out(
             n,
@@ -238,6 +263,7 @@ async def list_notes(
             primary_task_id=pid_map.get(n.id),
             derived_task_ids=derived_map.get(n.id, []),
             linked_task_count=count_map.get(n.id, 0),
+            transcript=bodies.get(n.id),
         )
         for n in rows
     ]
@@ -686,7 +712,11 @@ async def transcribe(
     pid = await note_links_svc.primary_task_id_for_note(
         ctx.session, org_id=ctx.org_id, note_id=n.id
     )
-    return _out(n, primary_task_id=pid)
+    return _out(
+        n,
+        primary_task_id=pid,
+        transcript=await svc.get_body(ctx.session, note_id=n.id),
+    )
 
 
 @router.post("/conversations", response_model=NoteOut)
@@ -702,7 +732,7 @@ async def start_conversation(
         project_id=body.project_id,
         title=body.title,
     )
-    return _out(n)
+    return _out(n, transcript="")
 
 
 @router.post("/{note_id}/messages", response_model=NoteTurnOut)
@@ -760,7 +790,11 @@ async def command(
     pid = await note_links_svc.primary_task_id_for_note(
         ctx.session, org_id=ctx.org_id, note_id=n.id
     )
-    return _out(n, primary_task_id=pid)
+    return _out(
+        n,
+        primary_task_id=pid,
+        transcript=await svc.get_body(ctx.session, note_id=n.id),
+    )
 
 
 @router.post("/{note_id}/erase", response_model=NoteEraseOut)
@@ -941,7 +975,12 @@ async def set_note_maturity(
     pid = await note_links_svc.primary_task_id_for_note(
         ctx.session, org_id=ctx.org_id, note_id=n.id
     )
-    return _out(n, tagmap.get(n.id, []), primary_task_id=pid)
+    return _out(
+        n,
+        tagmap.get(n.id, []),
+        primary_task_id=pid,
+        transcript=await svc.get_body(ctx.session, note_id=n.id),
+    )
 
 
 @router.post(
@@ -1057,7 +1096,12 @@ async def list_note_links(
         ctx.session, org_id=ctx.org_id, note_id=n.id
     )
     return NoteWithLinksOut(
-        note=_out(n, tagmap.get(n.id, []), primary_task_id=pid),
+        note=_out(
+            n,
+            tagmap.get(n.id, []),
+            primary_task_id=pid,
+            transcript=await svc.get_body(ctx.session, note_id=n.id),
+        ),
         outgoing=[_link_out(o) for o in outgoing],
         incoming=[_link_out(o) for o in incoming],
         task_links=[_task_link_out(o) for o in task_links],

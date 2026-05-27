@@ -736,16 +736,22 @@ async def promote_note_to_task(
     if note.promoted_at is not None:
         raise DomainError(MessageCode.DOMAIN_ERROR)
     chosen_title = (title or note.title or "").strip()
+    # Phase 6 final: read the body from note_part(ord=0)+ rather than
+    # the dropped ``transcript`` column. ``get_body`` joins every
+    # part by blank line.
+    from flow_core.services.notes import get_body as _get_body
+
+    body_text = await _get_body(session, note_id=note_id)
     if not chosen_title:
-        # Derive from the first non-empty line of the transcript.
-        body = (note.transcript or "").strip().splitlines()
-        chosen_title = body[0][:120] if body else "promoted note"
+        # Derive from the first non-empty line of the body.
+        lines = body_text.strip().splitlines()
+        chosen_title = lines[0][:120] if lines else "promoted note"
     task = await tasks_svc.create_task(
         session,
         org_id=org_id,
         actor_id=actor_id,
         title=chosen_title,
-        description=note.summary or note.transcript,
+        description=note.summary or body_text,
     )
     link = await _link_note_task(
         session,

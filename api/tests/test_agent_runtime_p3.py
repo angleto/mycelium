@@ -232,7 +232,10 @@ async def test_happy_path_metered_artifact_and_determinism(
             )
         ).scalar_one_or_none()
         assert art_link is not None
-        assert "Investigated and resolved." in (note.transcript or "")
+        # Phase 6 final: body lives in note_part(ord=0).
+        from flow_core.services.notes import get_body as _get_body
+
+        assert "Investigated and resolved." in (await _get_body(s, note_id=note.id))
 
     # Determinism: two fresh workspaces + the SAME script -> identical
     # terminal run shape (status, steps, credits).

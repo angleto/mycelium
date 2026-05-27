@@ -164,10 +164,13 @@ def _note_out(
     n: Note,
     tags: list[Tag] | None = None,
     primary_task_id: uuid.UUID | None = None,
+    transcript: str | None = None,
 ) -> NoteOut:
     # Built exactly like routers/notes.py::_out so the SPA gets the same
     # NoteOut shape (incl. tags + task_id) from either entry point.
     # docs/adr/0029 P3: task_id is derived from the typed link table.
+    # Phase 6 final: ``transcript`` is derived from note_part(ord=0)+
+    # at the caller, not from a Note column.
     return NoteOut(
         id=n.id,
         project_id=n.project_id,
@@ -175,7 +178,7 @@ def _note_out(
         kind=n.kind,
         status=n.status,
         title=n.title,
-        transcript=n.transcript,
+        transcript=transcript,
         summary=n.summary,
         audio_ref=n.audio_ref,
         is_archived=n.is_archived,
@@ -858,7 +861,12 @@ async def get_or_create_task_note(
     pid = await note_links_svc.primary_task_id_for_note(
         ctx.session, org_id=ctx.org_id, note_id=n.id
     )
-    return _note_out(n, tagmap.get(n.id, []), primary_task_id=pid)
+    return _note_out(
+        n,
+        tagmap.get(n.id, []),
+        primary_task_id=pid,
+        transcript=await notes_svc.get_body(ctx.session, note_id=n.id),
+    )
 
 
 @router.post("/{task_id}/notes", response_model=NoteOut)
@@ -883,7 +891,12 @@ async def create_task_note(
     pid = await note_links_svc.primary_task_id_for_note(
         ctx.session, org_id=ctx.org_id, note_id=n.id
     )
-    return _note_out(n, tagmap.get(n.id, []), primary_task_id=pid)
+    return _note_out(
+        n,
+        tagmap.get(n.id, []),
+        primary_task_id=pid,
+        transcript=await notes_svc.get_body(ctx.session, note_id=n.id),
+    )
 
 
 def _note_task_link_out(link: Any) -> NoteTaskLinkOut:
