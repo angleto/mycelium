@@ -3014,6 +3014,104 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/notes/{note_id}/parts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Note Parts
+         * @description List the ordered parts of a note, with the caller's per-part
+         *     collapse state. Useful when the SPA refetches just the parts
+         *     after a reorder without reloading the whole note.
+         */
+        get: operations["list_note_parts_notes__note_id__parts_get"];
+        put?: never;
+        /**
+         * Create Note Part
+         * @description Append (default) or insert a part. Pass ``ord`` to insert at
+         *     a specific position; every part at or after that ord is shifted
+         *     forward by one in the same transaction.
+         */
+        post: operations["create_note_part_notes__note_id__parts_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/notes/{note_id}/parts/{part_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Note Part
+         * @description Hard-delete a part. Remaining parts keep their ords (no
+         *     compaction) so deep links by ord survive; reorder is explicit.
+         */
+        delete: operations["delete_note_part_notes__note_id__parts__part_id__delete"];
+        options?: never;
+        head?: never;
+        /**
+         * Patch Note Part
+         * @description Edit a part's body and/or lang. Pass ``lang=null`` explicitly
+         *     to clear; omit the key to leave it untouched.
+         */
+        patch: operations["patch_note_part_notes__note_id__parts__part_id__patch"];
+        trace?: never;
+    };
+    "/notes/{note_id}/parts/order": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Reorder Note Parts
+         * @description Rewrite the entire ordering. ``part_ids`` must be the full set
+         *     of the note's parts in the desired order; missing or extra ids
+         *     raise a domain error so a reorder can never silently drop a row.
+         */
+        put: operations["reorder_note_parts_notes__note_id__parts_order_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/notes/{note_id}/parts/{part_id}/ui-state": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Note Part Ui State
+         * @description Toggle the caller's collapse state for a part. User-scoped,
+         *     last-write-wins. The response carries the full NotePartOut so
+         *     the SPA can refresh its local state from a single round-trip.
+         */
+        put: operations["set_note_part_ui_state_notes__note_id__parts__part_id__ui_state_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/notes/{note_id}/append": {
         parameters: {
             query?: never;
@@ -6415,6 +6513,93 @@ export interface components {
              * @default 0
              */
             linked_task_count?: number;
+            /** Parts */
+            parts?: components["schemas"]["NotePartOut"][];
+        };
+        /**
+         * NotePartCreateIn
+         * @description Body for POST /notes/{id}/parts. ``ord`` is optional; when
+         *     omitted the new part lands at the end. When supplied every part
+         *     with ord ≥ value is shifted forward by one.
+         */
+        NotePartCreateIn: {
+            /**
+             * Body
+             * @default
+             */
+            body?: string;
+            /** Lang */
+            lang?: string | null;
+            /** Ord */
+            ord?: number | null;
+        };
+        /**
+         * NotePartOut
+         * @description One ordered markdown block of a note (task 71c9d670 Phase 2a).
+         *     ``ui_collapsed`` is the caller's current collapse state for this
+         *     part; missing/no row → ``false`` (default expanded). Populated
+         *     on GET /notes/{id} only; bulk listings omit it to stay light.
+         */
+        NotePartOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Note Id
+             * Format: uuid
+             */
+            note_id: string;
+            /** Ord */
+            ord: number;
+            /** Body */
+            body: string;
+            /** Lang */
+            lang?: string | null;
+            /** Merged From Note Id */
+            merged_from_note_id?: string | null;
+            /** Version */
+            version: number;
+            /**
+             * Ui Collapsed
+             * @default false
+             */
+            ui_collapsed?: boolean;
+        };
+        /**
+         * NotePartPatchIn
+         * @description Body for PATCH /notes/{id}/parts/{pid}. Either field may be
+         *     omitted to leave it unchanged. Passing ``lang=null`` explicitly
+         *     clears the language tag.
+         */
+        NotePartPatchIn: {
+            /** Expected Version */
+            expected_version: number;
+            /** Body */
+            body?: string | null;
+            /** Lang */
+            lang?: string | null;
+        };
+        /**
+         * NotePartReorderIn
+         * @description Body for PUT /notes/{id}/parts/order. ``part_ids`` must be the
+         *     complete set of the note's parts in the desired order; a missing
+         *     or extra id raises a domain error so the SPA can't accidentally
+         *     drop a row via reorder.
+         */
+        NotePartReorderIn: {
+            /** Part Ids */
+            part_ids: string[];
+        };
+        /**
+         * NotePartUIStateIn
+         * @description Body for PUT /notes/{id}/parts/{pid}/ui-state. User-scoped,
+         *     last-write-wins (no version).
+         */
+        NotePartUIStateIn: {
+            /** Collapsed */
+            collapsed: boolean;
         };
         /** NotePatchIn */
         NotePatchIn: {
@@ -15771,6 +15956,239 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AttachmentOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_note_parts_notes__note_id__parts_get: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                note_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotePartOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_note_part_notes__note_id__parts_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                note_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NotePartCreateIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotePartOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_note_part_notes__note_id__parts__part_id__delete: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                note_id: string;
+                part_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    patch_note_part_notes__note_id__parts__part_id__patch: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                note_id: string;
+                part_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NotePartPatchIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VersionOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reorder_note_parts_notes__note_id__parts_order_put: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                note_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NotePartReorderIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotePartOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_note_part_ui_state_notes__note_id__parts__part_id__ui_state_put: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                note_id: string;
+                part_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NotePartUIStateIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotePartOut"];
                 };
             };
             /** @description Validation Error */

@@ -1680,6 +1680,61 @@ class AppendOut(BaseModel):
     appended_chars: int
 
 
+class NotePartOut(BaseModel):
+    """One ordered markdown block of a note (task 71c9d670 Phase 2a).
+    ``ui_collapsed`` is the caller's current collapse state for this
+    part; missing/no row → ``false`` (default expanded). Populated
+    on GET /notes/{id} only; bulk listings omit it to stay light."""
+
+    id: uuid.UUID
+    note_id: uuid.UUID
+    ord: int
+    body: str
+    lang: str | None = None
+    merged_from_note_id: uuid.UUID | None = None
+    version: int
+    ui_collapsed: bool = False
+
+
+class NotePartCreateIn(BaseModel):
+    """Body for POST /notes/{id}/parts. ``ord`` is optional; when
+    omitted the new part lands at the end. When supplied every part
+    with ord ≥ value is shifted forward by one."""
+
+    body: str = Field(default="")
+    lang: str | None = Field(default=None, max_length=16)
+    ord: int | None = Field(default=None, ge=0)
+
+
+class NotePartPatchIn(BaseModel):
+    """Body for PATCH /notes/{id}/parts/{pid}. Either field may be
+    omitted to leave it unchanged. Passing ``lang=null`` explicitly
+    clears the language tag."""
+
+    expected_version: int
+    body: str | None = None
+    lang: str | None = None
+    # Bit of Pydantic awkwardness: we want to distinguish "lang
+    # absent from the JSON" from "lang explicitly null". The router
+    # peeks at ``model_fields_set`` to make the distinction.
+
+
+class NotePartReorderIn(BaseModel):
+    """Body for PUT /notes/{id}/parts/order. ``part_ids`` must be the
+    complete set of the note's parts in the desired order; a missing
+    or extra id raises a domain error so the SPA can't accidentally
+    drop a row via reorder."""
+
+    part_ids: list[uuid.UUID] = Field(min_length=1)
+
+
+class NotePartUIStateIn(BaseModel):
+    """Body for PUT /notes/{id}/parts/{pid}/ui-state. User-scoped,
+    last-write-wins (no version)."""
+
+    collapsed: bool
+
+
 class NoteOut(BaseModel):
     id: uuid.UUID
     project_id: uuid.UUID | None
@@ -1712,6 +1767,12 @@ class NoteOut(BaseModel):
     # the SPA chip reflects all linked tasks -- not just the two
     # "fruit" kinds that ``derived_task_ids`` covers.
     linked_task_count: int = 0
+    # Task 71c9d670 Phase 2a: the note's ordered markdown blocks
+    # (note_part). Populated on GET /notes/{id} (single-note path);
+    # list endpoints leave it empty to stay light. Empty when no
+    # parts exist yet (a freshly created note, or one whose
+    # transcript was never split).
+    parts: list[NotePartOut] = Field(default_factory=list)
 
 
 class NoteSetMaturityIn(BaseModel):

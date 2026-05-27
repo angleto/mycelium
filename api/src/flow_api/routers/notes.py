@@ -32,6 +32,11 @@ from flow_api.schemas import (
     NoteLinkOut,
     NoteAppendIn,
     NoteOut,
+    NotePartCreateIn,
+    NotePartOut,
+    NotePartPatchIn,
+    NotePartReorderIn,
+    NotePartUIStateIn,
     NotePatchIn,
     NotePromoteIn,
     NoteSetMaturityIn,
@@ -57,6 +62,7 @@ from flow_core.services import agent_tokens as agent_tokens_svc
 from flow_core.services import attachments as att_svc
 from flow_core.services import entity_revisions as rev_svc
 from flow_core.services import note_links as note_links_svc
+from flow_core.services import note_parts as parts_svc
 from flow_core.services import notes as svc
 
 router = APIRouter(prefix="/notes", tags=["notes"])
@@ -66,12 +72,29 @@ def _brief(tag: Tag) -> TagBrief:
     return TagBrief(id=tag.id, kind=tag.kind, name=tag.name, color=tag.color)
 
 
+def _part_out(p: Any, *, ui_collapsed: bool = False) -> NotePartOut:
+    """Project a NotePart ORM row to the schema. ``ui_collapsed`` is
+    user-scoped state from note_part_ui_state; default false (no row
+    materialised means expanded)."""
+    return NotePartOut(
+        id=p.id,
+        note_id=p.note_id,
+        ord=p.ord,
+        body=p.body or "",
+        lang=p.lang,
+        merged_from_note_id=p.merged_from_note_id,
+        version=p.version,
+        ui_collapsed=ui_collapsed,
+    )
+
+
 def _out(
     n: Note,
     tags: list[Tag] | None = None,
     primary_task_id: uuid.UUID | None = None,
     derived_task_ids: list[uuid.UUID] | None = None,
     linked_task_count: int = 0,
+    parts: list[NotePartOut] | None = None,
 ) -> NoteOut:
     # docs/adr/0029 P3: ``task_id`` exposed in the API is derived
     # from the typed link table (primary_task_id_for_note). Callers
@@ -101,6 +124,7 @@ def _out(
         promoted_at=n.promoted_at,
         derived_task_ids=list(derived_task_ids or []),
         linked_task_count=linked_task_count,
+        parts=list(parts or []),
     )
 
 
@@ -234,12 +258,24 @@ async def get_note(
     counts = await note_links_svc.linked_task_counts_for_notes(
         ctx.session, org_id=ctx.org_id, note_ids=[n.id]
     )
+    # Phase 2a: GET /notes/{id} includes the ordered parts plus the
+    # caller's per-part collapse state. List endpoints leave parts
+    # empty for payload economy; the single-note path is the canonical
+    # surface for the SPA editor that needs every block.
+    parts_rows = await parts_svc.list_parts(
+        ctx.session, org_id=ctx.org_id, note_id=n.id
+    )
+    ui = await parts_svc.get_ui_states_for_user(
+        ctx.session, user_id=ctx.user_id, note_id=n.id
+    )
+    parts = [_part_out(p, ui_collapsed=ui.get(p.id, False)) for p in parts_rows]
     return _out(
         n,
         tagmap.get(n.id, []),
         primary_task_id=pid,
         derived_task_ids=derived.get(n.id, []),
         linked_task_count=counts.get(n.id, 0),
+        parts=parts,
     )
 
 
@@ -336,6 +372,161 @@ async def update_note(
         **kwargs,
     )
     return VersionOut(id=note_id, version=v)
+
+
+# --- Note parts CRUD + reorder + ui-state (task 71c9d670 Phase 2a) ---
+
+
+@router.get(
+    "/{note_id}/parts",
+    response_model=list[NotePartOut],
+    tags=["garden"],
+)
+async def list_note_parts(
+    note_id: uuid.UUID,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+) -> list[NotePartOut]:
+    """List the ordered parts of a note, with the caller's per-part
+    collapse state. Useful when the SPA refetches just the parts
+    after a reorder without reloading the whole note."""
+    rows = await parts_svc.list_parts(
+        ctx.session, org_id=ctx.org_id, note_id=note_id
+    )
+    ui = await parts_svc.get_ui_states_for_user(
+        ctx.session, user_id=ctx.user_id, note_id=note_id
+    )
+    return [_part_out(p, ui_collapsed=ui.get(p.id, False)) for p in rows]
+
+
+@router.post(
+    "/{note_id}/parts",
+    response_model=NotePartOut,
+    tags=["garden"],
+)
+async def create_note_part(
+    note_id: uuid.UUID,
+    body: NotePartCreateIn,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+) -> NotePartOut:
+    """Append (default) or insert a part. Pass ``ord`` to insert at
+    a specific position; every part at or after that ord is shifted
+    forward by one in the same transaction."""
+    part = await parts_svc.create_part(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        note_id=note_id,
+        body=body.body,
+        lang=body.lang,
+        ord=body.ord,
+    )
+    return _part_out(part)
+
+
+@router.patch(
+    "/{note_id}/parts/{part_id}",
+    response_model=VersionOut,
+    tags=["garden"],
+)
+async def patch_note_part(
+    note_id: uuid.UUID,
+    part_id: uuid.UUID,
+    body: NotePartPatchIn,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+) -> VersionOut:
+    """Edit a part's body and/or lang. Pass ``lang=null`` explicitly
+    to clear; omit the key to leave it untouched."""
+    # Distinguish 'omit' from 'explicit null'. We need the FastAPI
+    # body's model_fields_set, not just the value.
+    kwargs: dict[str, Any] = {}
+    if "lang" in body.model_fields_set:
+        kwargs["lang"] = body.lang
+    v = await parts_svc.update_part(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        part_id=part_id,
+        expected_version=body.expected_version,
+        body=body.body,
+        **kwargs,
+    )
+    return VersionOut(id=part_id, version=v)
+
+
+@router.delete(
+    "/{note_id}/parts/{part_id}",
+    status_code=204,
+    tags=["garden"],
+)
+async def delete_note_part(
+    note_id: uuid.UUID,
+    part_id: uuid.UUID,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+) -> None:
+    """Hard-delete a part. Remaining parts keep their ords (no
+    compaction) so deep links by ord survive; reorder is explicit."""
+    await parts_svc.delete_part(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        part_id=part_id,
+    )
+
+
+@router.put(
+    "/{note_id}/parts/order",
+    response_model=list[NotePartOut],
+    tags=["garden"],
+)
+async def reorder_note_parts(
+    note_id: uuid.UUID,
+    body: NotePartReorderIn,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+) -> list[NotePartOut]:
+    """Rewrite the entire ordering. ``part_ids`` must be the full set
+    of the note's parts in the desired order; missing or extra ids
+    raise a domain error so a reorder can never silently drop a row."""
+    rows = await parts_svc.reorder_parts(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        note_id=note_id,
+        part_ids=body.part_ids,
+    )
+    return [_part_out(p) for p in rows]
+
+
+@router.put(
+    "/{note_id}/parts/{part_id}/ui-state",
+    response_model=NotePartOut,
+    tags=["garden"],
+)
+async def set_note_part_ui_state(
+    note_id: uuid.UUID,
+    part_id: uuid.UUID,
+    body: NotePartUIStateIn,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+) -> NotePartOut:
+    """Toggle the caller's collapse state for a part. User-scoped,
+    last-write-wins. The response carries the full NotePartOut so
+    the SPA can refresh its local state from a single round-trip."""
+    await parts_svc.set_ui_state(
+        ctx.session,
+        org_id=ctx.org_id,
+        user_id=ctx.user_id,
+        part_id=part_id,
+        collapsed=body.collapsed,
+    )
+    # Re-read so the response carries the canonical part + the new
+    # collapse state in one shape (avoids the SPA needing a second
+    # GET to refresh the row after toggle).
+    rows = await parts_svc.list_parts(
+        ctx.session, org_id=ctx.org_id, note_id=note_id
+    )
+    part = next((p for p in rows if p.id == part_id), None)
+    if part is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    return _part_out(part, ui_collapsed=body.collapsed)
 
 
 @router.post("/{note_id}/append", response_model=AppendOut)
