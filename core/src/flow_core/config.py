@@ -185,6 +185,21 @@ class Settings(BaseSettings):
     # default so a large workspace drains without saturating the API.
     embedding_migration_interval_seconds: int = 60
 
+    # In-cluster open-model LLM for non-interactive labelling
+    # (revision summaries, future tag/title suggestions). Wired via
+    # ``ai_providers.set_llm_override`` at worker startup; the API
+    # process can opt in the same way. Empty URL = no override, the
+    # ``LocalLLM`` stub stays in place and the sweep is a no-op so
+    # CI / dev / unconfigured deploys never hit the network.
+    ollama_url: str = ""
+    open_model: str = "llama3.2:3b"
+    # Revision-summary worker (LLM-generated labels for the
+    # recovery-history timeline). Cadence is slow because each
+    # generation is a multi-second LLM call; the sweep is also bounded
+    # by ``revisions_summary_batch`` per tick.
+    revisions_summary_interval_seconds: int = 30
+    revisions_summary_batch: int = 5
+
     # Cross-encoder reranker (task 27579d6a). Opt-in second-stage
     # scorer that re-orders the top-K from RRF using a cross-encoder
     # model (sees query+doc joined). Off by default because the local

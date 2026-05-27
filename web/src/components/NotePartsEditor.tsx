@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { authFetch, errMessage } from '../api/client'
 import type { components } from '../api/schema'
+import type { EditSession } from '../lib/useEditSession'
 import { GardenIcon } from './GardenIcon'
 import { RichEditor } from './RichEditor'
 
@@ -31,7 +32,13 @@ function truncate(s: string, n: number): string {
   return s.length <= n ? s : s.slice(0, n - 1) + '…'
 }
 
-export function NotePartsEditor({ noteId }: { noteId: string }) {
+export function NotePartsEditor({
+  noteId,
+  editSession,
+}: {
+  noteId: string
+  editSession?: EditSession
+}) {
   const { t } = useTranslation()
   const [parts, setParts] = useState<NotePart[]>([])
   const [err, setErr] = useState('')
@@ -138,8 +145,11 @@ export function NotePartsEditor({ noteId }: { noteId: string }) {
       if (draft === undefined || draft === (part.body ?? '')) return
       setBusyPid(part.id)
       try {
+        const headers: Record<string, string> = {}
+        if (editSession) headers['X-Edit-Session-Id'] = editSession.touch()
         const res = await authFetch(`/notes/${noteId}/parts/${part.id}`, {
           method: 'PATCH',
+          headers,
           body: JSON.stringify({ expected_version: part.version, body: draft }),
         })
         if (!res.ok) {
@@ -159,7 +169,7 @@ export function NotePartsEditor({ noteId }: { noteId: string }) {
         setBusyPid(null)
       }
     },
-    [editingBody, noteId, reload],
+    [editSession, editingBody, noteId, reload],
   )
 
   // Debounced autosave: 1.2s after the last keystroke on a part, push

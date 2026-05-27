@@ -14,7 +14,9 @@ from __future__ import annotations
 import asyncio
 import logging
 
+from flow_core.ai_providers import set_llm_override
 from flow_core.config import get_settings
+from flow_core.llm_ollama import OllamaLLM
 from flow_core.services.mailer import build_system_mailer, set_mailer
 from flow_worker import (
     dispatch,
@@ -23,6 +25,7 @@ from flow_worker import (
     reminders,
     revisions,
     revisions_retention,
+    revisions_summary,
     task_search_backfill,
     telegram_assistant,
 )
@@ -48,6 +51,7 @@ async def _run() -> None:
         task_search_backfill.run_forever(),
         revisions.run_forever(),
         revisions_retention.run_forever(),
+        revisions_summary.run_forever(),
         embedding_migration.run_forever(),
     )
 
@@ -61,6 +65,15 @@ def main() -> None:
     # never imported by the test-suite, so no test mailer is clobbered.
     if settings.smtp_configured:
         set_mailer(build_system_mailer(settings))
+    # Wire the open-model LLM (Ollama) when configured. Without this
+    # the ``LocalLLM`` stub stays in place and the revision-summary
+    # sweep is a no-op -- CI, dev and unconfigured deploys never hit
+    # the network. Build a frozen URL+model snapshot so the override
+    # is callable (signature ``() -> LLMProvider``).
+    if settings.ollama_url and settings.open_model:
+        ollama_url = settings.ollama_url
+        open_model = settings.open_model
+        set_llm_override(lambda: OllamaLLM(base_url=ollama_url, model=open_model))
     logging.getLogger("flow.worker").info(
         "worker started (env=%s); jobs: dispatch-loop, google-calendar-sync, telegram-assistant",
         settings.env,

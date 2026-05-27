@@ -189,12 +189,21 @@ async def update_part(
     expected_version: int,
     body: str | None = None,
     lang: str | None | _Unset = _UNSET,
+    channel: str = "api",
+    edit_session_id: str | None = None,
 ) -> int:
     """Edit a part's ``body`` and/or ``lang``. Returns the new
     version. ``lang`` uses an "omit" sentinel so the caller can
-    explicitly clear it (pass None as a JSON null)."""
+    explicitly clear it (pass None as a JSON null).
+
+    ``channel`` + ``edit_session_id`` flow through to the parent
+    note's recovery-history revision so a debounced SPA autosave
+    coalesces into a single open revision instead of stamping a
+    sealed row per keystroke. The part row's own ``version`` still
+    bumps on every save (optimistic_update); only the note-level
+    revision row coalesces."""
     await require_role(session, org_id, actor_id, Role.member)
-    await _get_part(session, org_id=org_id, part_id=part_id)
+    part = await _get_part(session, org_id=org_id, part_id=part_id)
     values: dict[str, Any] = {}
     if body is not None:
         values["body"] = body
@@ -208,6 +217,26 @@ async def update_part(
         pk=part_id,
         expected_version=expected_version,
         values=values,
+    )
+    # Record a note-level revision so the timeline reflects part
+    # edits. version_from == version_to: the note's row version is
+    # not bumped by part changes (parts carry their own VersionMixin),
+    # but the snapshot (which derives ``transcript`` from parts)
+    # captures the new body. Lazy import: avoids a hard import cycle
+    # between note_parts and notes via entity_revisions.
+    from flow_core.services.notes import _log_note_revision
+
+    note = await _get_note_in_org(session, org_id=org_id, note_id=part.note_id)
+    await _log_note_revision(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        note_id=part.note_id,
+        version_from=note.version,
+        version_to=note.version,
+        changed_fields=["parts.body" if "body" in values else "parts.lang"],
+        channel=channel,
+        edit_session_id=edit_session_id,
     )
     await audit.log(
         session,

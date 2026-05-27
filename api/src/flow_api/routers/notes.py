@@ -25,12 +25,12 @@ from flow_api.schemas import (
     EditSessionSealIn,
     EditSessionSealOut,
     ExpectedVersionIn,
+    NoteAppendIn,
     NoteCreateIn,
     NoteDeriveTaskIn,
     NoteEraseOut,
     NoteLinkIn,
     NoteLinkOut,
-    NoteAppendIn,
     NoteMergeIn,
     NoteOut,
     NotePartCreateIn,
@@ -460,14 +460,21 @@ async def patch_note_part(
     part_id: uuid.UUID,
     body: NotePartPatchIn,
     ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    edit_session_id: Annotated[str | None, Header(alias="X-Edit-Session-Id")] = None,
 ) -> VersionOut:
     """Edit a part's body and/or lang. Pass ``lang=null`` explicitly
-    to clear; omit the key to leave it untouched."""
+    to clear; omit the key to leave it untouched.
+
+    ``X-Edit-Session-Id``: when supplied the note-level recovery
+    revision coalesces with other edits in the same session window
+    (same UX as PATCH /notes/{id}). Without the header the channel
+    falls back to ``api`` and each save seals its own revision."""
     # Distinguish 'omit' from 'explicit null'. We need the FastAPI
     # body's model_fields_set, not just the value.
     kwargs: dict[str, Any] = {}
     if "lang" in body.model_fields_set:
         kwargs["lang"] = body.lang
+    channel = "web" if edit_session_id else "api"
     v = await parts_svc.update_part(
         ctx.session,
         org_id=ctx.org_id,
@@ -475,6 +482,8 @@ async def patch_note_part(
         part_id=part_id,
         expected_version=body.expected_version,
         body=body.body,
+        channel=channel,
+        edit_session_id=edit_session_id,
         **kwargs,
     )
     return VersionOut(id=part_id, version=v)

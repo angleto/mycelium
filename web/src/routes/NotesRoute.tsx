@@ -924,7 +924,7 @@ export function NotesRoute() {
                     still derived from ``note.transcript`` (concatenated
                     parts) so the autosave/revision diff path keeps
                     working until those flows are fully migrated. */}
-                <NotePartsEditor noteId={sel.id} />
+                <NotePartsEditor noteId={sel.id} editSession={editSession} />
                 <Attachments noteId={sel.id} />
                 <LinkedTasksPanel noteId={sel.id} />
                 <RevisionsPanel
