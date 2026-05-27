@@ -437,6 +437,33 @@ async def update_note(
         channel=channel,
         edit_session_id=edit_session_id,
     )
+    # Phase 6 prep (task 1cd8bc0a): mirror the transcript edit into
+    # part(ord=0). If a part(ord=0) already exists, update its body;
+    # otherwise create one. We deliberately keep this transactional
+    # with the optimistic _note_set above so a failed UPDATE on the
+    # note doesn't leave a stale part write behind. Skipped when
+    # ``text`` isn't part of this patch (the user only touched title
+    # or task_id).
+    if text is not None:
+        from flow_core.models.note_part import NotePart as _NotePart
+
+        existing = (
+            await session.execute(
+                select(_NotePart).where(
+                    _NotePart.note_id == note_id, _NotePart.ord == 0
+                )
+            )
+        ).scalar_one_or_none()
+        if existing is None:
+            session.add(
+                _NotePart(org_id=org_id, note_id=note_id, ord=0, body=text)
+            )
+        else:
+            # ORM-style update so the identity map stays consistent
+            # (a Core UPDATE bypassed the mapper and a subsequent read
+            # could return the stale body cached on the loaded row).
+            existing.body = text
+        await session.flush()
     if pending_task_link[0]:
         new_task_id = pending_task_link[1]
         if new_task_id is None:
@@ -662,6 +689,17 @@ async def create_note(
         )
     session.add(NoteTag(org_id=org_id, note_id=note.id, tag_id=client_tag_id))
     await session.flush()
+    # Phase 6 prep (task 1cd8bc0a): mirror the initial transcript
+    # into a part(ord=0) so the new readers (SPA NotePartsEditor,
+    # MCP get_note's parts[], flow-cli) see content for every note
+    # created post-deploy. A future PR flips readers to parts as
+    # the source of truth and drops notes.transcript; until then we
+    # double-write so the two surfaces stay in sync.
+    if transcript:
+        from flow_core.models.note_part import NotePart as _NotePart
+
+        session.add(_NotePart(org_id=org_id, note_id=note.id, ord=0, body=transcript))
+        await session.flush()
     await audit.log(
         session,
         org_id=org_id,

@@ -127,11 +127,11 @@ async def test_note_part_ui_state_defaults_to_expanded() -> None:
         assert row.collapsed is True
 
 
-async def test_backfill_creates_one_part_per_note_with_transcript() -> None:
-    """When a note exists with a non-empty transcript, the Phase 1
-    backfill row from migration 0011 should be visible via the ORM.
-    We exercise the runtime path (create note with text → service
-    populates transcript) and read the part back."""
+async def test_create_note_mirrors_transcript_to_part_zero() -> None:
+    """Phase 6 prep (task 1cd8bc0a): ``create_note(text=...)`` now
+    upserts a part(ord=0) with the same body so the parts surface
+    is in sync from creation onward. Until the column drop lands,
+    the two writes stay coupled; this test pins that contract."""
     org, user = await _org()
     async with tenant_session(str(org), str(user)) as s:
         note = await nt.create_note(
@@ -140,22 +140,55 @@ async def test_backfill_creates_one_part_per_note_with_transcript() -> None:
             actor_id=user,
             kind=NoteKind.text,
             title=None,
-            text="Phase 1 backfill body.",
+            text="Phase 6 mirror body.",
         )
-        # The migration backfilled at MIGRATE time. New notes after
-        # the migration do NOT auto-get a part (service-layer wiring
-        # is Phase 2). We assert the schema accepts a parts row over
-        # this note instead.
-        s.add(
-            NotePart(
-                org_id=org,
-                note_id=note.id,
-                ord=0,
-                body=note.transcript or "",
-            )
-        )
-        await s.flush()
         rows = (
             await s.execute(select(NotePart).where(NotePart.note_id == note.id))
-        ).all()
+        ).scalars().all()
         assert len(rows) == 1
+        assert rows[0].ord == 0
+        assert rows[0].body == "Phase 6 mirror body."
+
+
+async def test_update_note_text_mirrors_into_part_zero() -> None:
+    """``update_note(text=...)`` upserts part(ord=0): updates the body
+    when one exists, creates it when the note had no part yet (e.g.
+    a transcribe arriving on a voice-note row that was created
+    without text)."""
+    org, user = await _org()
+    async with tenant_session(str(org), str(user)) as s:
+        note = await nt.create_note(
+            s, org_id=org, actor_id=user, kind=NoteKind.text, title=None, text=None
+        )
+        # No part yet (create_note with text=None doesn't mirror).
+        assert (
+            await s.execute(select(NotePart).where(NotePart.note_id == note.id))
+        ).scalars().first() is None
+        await nt.update_note(
+            s,
+            org_id=org,
+            actor_id=user,
+            note_id=note.id,
+            expected_version=note.version,
+            text="first edit",
+        )
+        rows = (
+            await s.execute(select(NotePart).where(NotePart.note_id == note.id))
+        ).scalars().all()
+        assert len(rows) == 1
+        assert rows[0].body == "first edit"
+        # A second edit updates in place (no second part row).
+        note2 = await nt.get_note(s, org_id=org, note_id=note.id)
+        await nt.update_note(
+            s,
+            org_id=org,
+            actor_id=user,
+            note_id=note.id,
+            expected_version=note2.version,
+            text="second edit",
+        )
+        rows2 = (
+            await s.execute(select(NotePart).where(NotePart.note_id == note.id))
+        ).scalars().all()
+        assert len(rows2) == 1
+        assert rows2[0].body == "second edit"

@@ -32,10 +32,15 @@ async def _signup(c: AsyncClient) -> dict[str, str]:
 
 
 async def _make_note(c: AsyncClient, h: dict[str, str], title: str) -> str:
+    # Phase 6 prep (task 1cd8bc0a) makes ``create_note(text=...)``
+    # auto-mirror the body into part(ord=0). The parts-CRUD tests
+    # exercise the explicit POST /notes/{id}/parts surface, so we
+    # create the note WITHOUT a text body to keep the parts list
+    # empty until the test populates it on purpose.
     r = await c.post(
         "/notes",
         headers=h,
-        json={"kind": "text", "title": title, "text": f"body of {title}"},
+        json={"kind": "text", "title": title},
     )
     assert r.status_code == 200, r.text
     return r.json()["id"]
