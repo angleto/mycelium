@@ -620,29 +620,47 @@ function GardenMindmapInner({ notes, workspaceId, onOpenNote }: GardenMindmapPro
   )
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([])
 
+  // Track when the force layout has been applied with the current
+  // (notes + links) combination so a links-arrived-after-notes race
+  // doesn't leave the canvas stuck on a seedLayout pile-up. We
+  // re-simulate any time the signature changes; user-dragged
+  // positions still win at the per-node merge below (stored takes
+  // precedence over the simulator's coordinates).
+  const lastForceSig = useRef('')
+
   // Sync nodes when the notes set changes (focus filter toggled,
   // new note created, etc.). Preserves any in-memory user drag
   // positions for notes that survive across the change. The force
-  // layout runs only when (a) the visible subgraph has manual links
-  // AND (b) at least one new note appears without a stored or
-  // existing position; otherwise we let the existing positions ride
-  // (re-simulating on every minor change would jitter the whole
-  // canvas under the user's hands).
+  // layout runs when the (notes, links) shape changes; the
+  // signature gate avoids re-running the simulator on every minor
+  // re-render (e.g. a single tag toggle).
   useEffect(() => {
     const stored = loadPositions(workspaceId)
+    const sig =
+      weightedLinks.length === 0
+        ? `seed:${notes.map((n) => n.id).join(',')}`
+        : `force:${notes.length}:${weightedLinks
+            .map((l) => `${l.source}>${l.target}`)
+            .sort()
+            .join('|')}`
+    const shouldForceLayout =
+      weightedLinks.length > 0 && lastForceSig.current !== sig
+    if (shouldForceLayout) lastForceSig.current = sig
     setNodes((current) => {
       const byId = new Map(current.map((c) => [c.id, c]))
-      const anyUnplaced = notes.some(
-        (n) => !byId.has(n.id) && !stored[n.id],
-      )
-      const seeded =
-        anyUnplaced && weightedLinks.length > 0
-          ? forceLayout(notes, weightedLinks, degreeByNode)
-          : seedLayout(notes, primaryTagFor)
+      const seeded = shouldForceLayout
+        ? forceLayout(notes, weightedLinks, degreeByNode)
+        : seedLayout(notes, primaryTagFor)
       return notes.map((n) => {
         const existing = byId.get(n.id)
-        const pos =
-          existing?.position ?? stored[n.id] ?? seeded[n.id] ?? { x: 0, y: 0 }
+        // When the force layout just (re-)ran for this signature,
+        // its coordinates beat the stale in-memory position from a
+        // previous seedLayout pass — otherwise we'd freeze the
+        // canvas on the pre-links pile-up. User-dragged positions
+        // (``stored``) still win regardless.
+        const pos = shouldForceLayout
+          ? (stored[n.id] ?? seeded[n.id] ?? existing?.position ?? { x: 0, y: 0 })
+          : (existing?.position ?? stored[n.id] ?? seeded[n.id] ?? { x: 0, y: 0 })
         const dimmed = n.maturity === 'dormant' || Boolean(n.promoted_at)
         const { dots, extra } = tagDotsFor(n)
         return {

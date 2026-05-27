@@ -200,31 +200,48 @@ def upgrade() -> None:
     # (ord=0). Notes whose transcript is NULL or "" get nothing --
     # they'll grow parts when the user (or the API) writes the first
     # body, which is the natural moment to materialise the row.
-    op.execute(
-        """
-        INSERT INTO note_part (org_id, note_id, ord, body, lang)
-        SELECT n.org_id, n.id, 0, n.transcript, NULL
-          FROM notes n
-         WHERE n.transcript IS NOT NULL
-           AND n.transcript <> ''
-        """
-    )
-    # Backfill blob_sources.part_id: every note-blob whose source
-    # points at a note that just got a part finds its way to part 0.
-    # Use the canonical (source_kind, source_id) pair the chunker
-    # writes. Out-of-scope sources (task / consolidated / agent) keep
-    # NULL because they have no note ancestor to attribute.
-    op.execute(
-        """
-        UPDATE blob_sources bs
-           SET part_id = np.id
-          FROM note_part np
-         WHERE bs.source_kind = 'note'
-           AND np.ord = 0
-           AND np.note_id::text = bs.source_id
-           AND bs.part_id IS NULL
-        """
-    )
+    #
+    # CRITICAL: the migration runs as the table owner (``flow``) but
+    # the tables carry FORCE ROW LEVEL SECURITY, so even the owner
+    # is gated by the ``app.current_org`` GUC -- and the migration
+    # runs WITHOUT a GUC (no tenant scope). Without the
+    # NO FORCE / FORCE bracket below, the INSERT...SELECT would see
+    # zero rows (RLS fail-closed) and silently no-op. This is the
+    # bug that emptied prod note bodies before the fix: see the
+    # 2026-05-27 incident comment on task 1cd8bc0a.
+    op.execute("ALTER TABLE notes NO FORCE ROW LEVEL SECURITY")
+    op.execute("ALTER TABLE note_part NO FORCE ROW LEVEL SECURITY")
+    op.execute("ALTER TABLE blob_sources NO FORCE ROW LEVEL SECURITY")
+    try:
+        op.execute(
+            """
+            INSERT INTO note_part (org_id, note_id, ord, body, lang)
+            SELECT n.org_id, n.id, 0, n.transcript, NULL
+              FROM notes n
+             WHERE n.transcript IS NOT NULL
+               AND n.transcript <> ''
+            """
+        )
+        # Backfill blob_sources.part_id: every note-blob whose source
+        # points at a note that just got a part finds its way to
+        # part 0. Use the canonical (source_kind, source_id) pair the
+        # chunker writes. Out-of-scope sources (task / consolidated /
+        # agent) keep NULL because they have no note ancestor.
+        op.execute(
+            """
+            UPDATE blob_sources bs
+               SET part_id = np.id
+              FROM note_part np
+             WHERE bs.source_kind = 'note'
+               AND np.ord = 0
+               AND np.note_id::text = bs.source_id
+               AND bs.part_id IS NULL
+            """
+        )
+    finally:
+        op.execute("ALTER TABLE blob_sources FORCE ROW LEVEL SECURITY")
+        op.execute("ALTER TABLE note_part FORCE ROW LEVEL SECURITY")
+        op.execute("ALTER TABLE notes FORCE ROW LEVEL SECURITY")
 
 
 def downgrade() -> None:
