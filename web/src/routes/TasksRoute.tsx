@@ -159,6 +159,10 @@ export function TasksRoute() {
   const [sel, setSel] = useState<Set<string>>(new Set())
   const [bulkState, setBulkState] = useState('')
   const [bulkTag, setBulkTag] = useState('')
+  const [bulkAssigneeHandle, setBulkAssigneeHandle] = useState('')
+  const [bulkImportance, setBulkImportance] = useState('')
+  const [bulkUrgency, setBulkUrgency] = useState('')
+  const [bulkDueDate, setBulkDueDate] = useState('')
   const [bulkMsg, setBulkMsg] = useState<string | null>(null)
   // Kanban hides columns whose state has ``is_hidden=true`` by default
   // (per-state UI hint set in /workflows).
@@ -523,6 +527,76 @@ export function TasksRoute() {
     setSel(new Set())
     await loadTasks()
     setBulkMsg(t('tasks.bulkResult', { applied: done, skipped: picked.length - done }))
+  }
+
+  // Bulk PATCH on a TaskPatchIn field. ``buildBody`` produces the
+  // per-task body so we keep ``expected_version`` aligned with each
+  // task's current row. Stops on the first error per row but never
+  // bails the whole batch (matches bulkApplyState / bulkApplyTag).
+  async function bulkPatch(
+    field: 'importance' | 'urgency' | 'due_date' | 'assignee_handle',
+    rawValue: string,
+  ) {
+    const picked = tasks.filter((x) => sel.has(x.id))
+    if (picked.length === 0) return
+    setErr(null)
+    let applied = 0
+    let skipped = 0
+    for (const tk of picked) {
+      const body: Record<string, unknown> = { expected_version: tk.version }
+      if (field === 'importance' || field === 'urgency') {
+        const n = parseInt(rawValue, 10)
+        if (!Number.isFinite(n) || n < 1 || n > 5) {
+          skipped += 1
+          continue
+        }
+        body[field] = n
+      } else if (field === 'due_date') {
+        // Empty string clears the due date; otherwise we anchor at
+        // local midnight so the date matches the user's calendar day.
+        if (rawValue === '') {
+          body.due_date = null
+        } else {
+          const d = new Date(rawValue)
+          if (Number.isNaN(d.getTime())) {
+            skipped += 1
+            continue
+          }
+          body.due_date = d.toISOString()
+        }
+      } else {
+        body.assignee_handle = rawValue
+      }
+      const { error } = await api.PATCH('/tasks/{task_id}', {
+        params: { header: workspaceHeader(), path: { task_id: tk.id } },
+        body: body as components['schemas']['TaskPatchIn'],
+      })
+      if (error) skipped += 1
+      else applied += 1
+    }
+    setSel(new Set())
+    await loadTasks()
+    setBulkMsg(t('tasks.bulkResult', { applied, skipped }))
+  }
+
+  async function bulkApplyAssignee() {
+    if (!bulkAssigneeHandle) return
+    await bulkPatch('assignee_handle', bulkAssigneeHandle.trim())
+  }
+
+  async function bulkApplyImportance() {
+    if (!bulkImportance) return
+    await bulkPatch('importance', bulkImportance)
+  }
+
+  async function bulkApplyUrgency() {
+    if (!bulkUrgency) return
+    await bulkPatch('urgency', bulkUrgency)
+  }
+
+  async function bulkApplyDueDate() {
+    // Allow explicit clearing: empty due-date input clears the field.
+    await bulkPatch('due_date', bulkDueDate)
   }
 
   async function bulkArchive() {
@@ -950,6 +1024,72 @@ export function TasksRoute() {
                 onClick={() => void bulkApplyTag(false)}
               >
                 {t('tasks.bulkRemoveTag')}
+              </button>
+              <input
+                type="text"
+                value={bulkAssigneeHandle}
+                onChange={(e) => setBulkAssigneeHandle(e.target.value)}
+                placeholder={t('tasks.bulkAssigneePlaceholder')}
+                aria-label={t('tasks.bulkAssignee')}
+                className="filterbar__bulk-input"
+              />
+              <button
+                type="button"
+                className="btn--sm"
+                onClick={() => void bulkApplyAssignee()}
+              >
+                {t('tasks.bulkAssign')}
+              </button>
+              <select
+                value={bulkImportance}
+                onChange={(e) => setBulkImportance(e.target.value)}
+                aria-label={t('tasks.bulkImportance')}
+              >
+                <option value="">{t('tasks.bulkImportance')}</option>
+                {[1, 2, 3, 4, 5].map((n) => (
+                  <option key={n} value={String(n)}>
+                    {n}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                className="btn--sm"
+                onClick={() => void bulkApplyImportance()}
+              >
+                {t('tasks.bulkApply')}
+              </button>
+              <select
+                value={bulkUrgency}
+                onChange={(e) => setBulkUrgency(e.target.value)}
+                aria-label={t('tasks.bulkUrgency')}
+              >
+                <option value="">{t('tasks.bulkUrgency')}</option>
+                {[1, 2, 3, 4, 5].map((n) => (
+                  <option key={n} value={String(n)}>
+                    {n}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                className="btn--sm"
+                onClick={() => void bulkApplyUrgency()}
+              >
+                {t('tasks.bulkApply')}
+              </button>
+              <input
+                type="date"
+                value={bulkDueDate}
+                onChange={(e) => setBulkDueDate(e.target.value)}
+                aria-label={t('tasks.bulkDueDate')}
+              />
+              <button
+                type="button"
+                className="btn--sm"
+                onClick={() => void bulkApplyDueDate()}
+              >
+                {t('tasks.bulkSetDueDate')}
               </button>
               <button
                 type="button"
