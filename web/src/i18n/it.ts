@@ -698,6 +698,9 @@ export const it: Catalog = {
       empty: 'Nessuna nota in questa vista.',
       search: 'Cerca una nota…',
       tagEdges: 'Mostra collegamenti per tag in comune',
+      showCentrality: 'Mostra centralità',
+      showEdgeWeights: 'Mostra peso archi',
+      centralityLegend: 'PageRank',
       createLink: 'Crea collegamento',
       confirmDelete: 'Rimuovere questo collegamento?',
       linkKind: {

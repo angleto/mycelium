@@ -82,11 +82,12 @@ interface PlantNodeData extends Record<string, unknown> {
   highlighted: boolean
   degree: number
   entropy: number
+  centrality: number | null
   onOpen: (id: string) => void
 }
 
 function PlantNode({ data }: NodeProps<Node<PlantNodeData>>) {
-  const { note, tagDots, extraTagCount, dimmed, highlighted, degree, entropy, onOpen } = data
+  const { note, tagDots, extraTagCount, dimmed, highlighted, degree, entropy, centrality, onOpen } = data
   const maturity = note.maturity ?? 'seed'
   const glyph = MATURITY_GLYPH[maturity] ?? '🌱'
   const title = (note.title && note.title.trim()) || '·'
@@ -144,6 +145,14 @@ function PlantNode({ data }: NodeProps<Node<PlantNodeData>>) {
           {extraTagCount > 0 && (
             <span className="mm-node__tag-more">+{extraTagCount}</span>
           )}
+        </span>
+      )}
+      {centrality != null && (
+        <span
+          className="mm-node__centrality"
+          title={`PageRank ${centrality.toFixed(4)}`}
+        >
+          {centrality < 0.0005 ? '<0.001' : centrality.toFixed(3)}
         </span>
       )}
       <Handle
@@ -455,6 +464,10 @@ function GardenMindmapInner({ notes, workspaceId, onOpenNote }: GardenMindmapPro
   const { t } = useTranslation()
   const [workspaceLinks, setWorkspaceLinks] = useState<WorkspaceLink[]>([])
   const [showTagEdges, setShowTagEdges] = useState(true)
+  const [showCentrality, setShowCentrality] = useState(false)
+  const [showEdgeWeights, setShowEdgeWeights] = useState(false)
+  const [centrality, setCentrality] = useState<Record<string, number>>({})
+  const [edgeWeightMap, setEdgeWeightMap] = useState<Record<string, number>>({})
   const [search, setSearch] = useState('')
   const [pendingConnect, setPendingConnect] = useState<Connection | null>(null)
   const [linkKind, setLinkKind] = useState<LinkKind>('references')
@@ -636,6 +649,7 @@ function GardenMindmapInner({ notes, workspaceId, onOpenNote }: GardenMindmapPro
           highlighted: false,
           degree: degreeByNode.get(n.id) ?? 0,
           entropy: entropyByNode.get(n.id) ?? 0,
+          centrality: null,
           onOpen: onOpenNote,
         },
         draggable: true,
@@ -708,6 +722,7 @@ function GardenMindmapInner({ notes, workspaceId, onOpenNote }: GardenMindmapPro
             highlighted: search ? searchMatch(n) : false,
             degree: degreeByNode.get(n.id) ?? 0,
             entropy: entropyByNode.get(n.id) ?? 0,
+            centrality: showCentrality ? (centrality[n.id] ?? 0) : null,
             onOpen: onOpenNote,
           },
           draggable: true,
@@ -726,6 +741,8 @@ function GardenMindmapInner({ notes, workspaceId, onOpenNote }: GardenMindmapPro
     entropyByNode,
     tagDotsFor,
     weightedLinks,
+    showCentrality,
+    centrality,
   ])
 
   // Persist positions ONLY on a real drag-end. The earlier
@@ -799,6 +816,52 @@ function GardenMindmapInner({ notes, workspaceId, onOpenNote }: GardenMindmapPro
     }
   }, [])
 
+  // ---------------------------------------------------------------
+  // Garden analytics (task 8c0a8f08 Phase 1): GET /garden/graph
+  // returns PageRank centrality + materialised edge weights. Cheap
+  // single round-trip; reload triggers piggyback on the same signal
+  // we use for links so the two layers stay coherent.
+  // ---------------------------------------------------------------
+  const reloadGraph = useCallback(async () => {
+    const res = await authFetch('/garden/graph')
+    if (!res.ok) return
+    const data = (await res.json()) as {
+      edges: { src: string; dst: string; weight: number }[]
+      centrality: Record<string, number>
+    }
+    setCentrality(data.centrality || {})
+    const wmap: Record<string, number> = {}
+    for (const e of data.edges) {
+      const k = e.src < e.dst ? `${e.src}::${e.dst}` : `${e.dst}::${e.src}`
+      wmap[k] = e.weight
+    }
+    setEdgeWeightMap(wmap)
+  }, [])
+
+  useEffect(() => {
+    let active = true
+    void (async () => {
+      const res = await authFetch('/garden/graph')
+      if (!active) return
+      if (!res.ok) return
+      const data = (await res.json()) as {
+        edges: { src: string; dst: string; weight: number }[]
+        centrality: Record<string, number>
+      }
+      if (!active) return
+      setCentrality(data.centrality || {})
+      const wmap: Record<string, number> = {}
+      for (const e of data.edges) {
+        const k = e.src < e.dst ? `${e.src}::${e.dst}` : `${e.dst}::${e.src}`
+        wmap[k] = e.weight
+      }
+      setEdgeWeightMap(wmap)
+    })()
+    return () => {
+      active = false
+    }
+  }, [])
+
   // Compute edges: manual links plus, conditionally, tag-derived ones.
   // Manual edges only between visible notes (filtered scope); tag
   // edges always limited to noteIds for the same reason.
@@ -839,13 +902,22 @@ function GardenMindmapInner({ notes, workspaceId, onOpenNote }: GardenMindmapPro
                     strokeDasharray: '6 2',
                   }
                 : { stroke: color, strokeWidth: 2.0 + widthBoost, opacity: 0.9 }
+        const pairKey =
+          l.parent_note_id < l.child_note_id
+            ? `${l.parent_note_id}::${l.child_note_id}`
+            : `${l.child_note_id}::${l.parent_note_id}`
+        const materialisedW = edgeWeightMap[pairKey]
+        const baseLabel = t(`garden.mindmap.linkKind.${l.kind}`)
+        const label = showEdgeWeights && materialisedW != null
+          ? `${baseLabel} · ${materialisedW.toFixed(2)}`
+          : baseLabel
         return {
           id: `mm-link-${l.id}`,
           source: l.parent_note_id,
           target: l.child_note_id,
           type: 'default',
           animated: false,
-          label: t(`garden.mindmap.linkKind.${l.kind}`),
+          label,
           labelStyle: { fontSize: 10, fill: 'var(--text)' },
           labelBgStyle: { fill: 'var(--surface)', fillOpacity: 0.85 },
           style,
@@ -881,7 +953,17 @@ function GardenMindmapInner({ notes, workspaceId, onOpenNote }: GardenMindmapPro
       }
     }
     setEdges([...tagEdges, ...manual])
-  }, [workspaceLinks, notes, noteIds, showTagEdges, t, setEdges])
+  }, [
+    workspaceLinks,
+    notes,
+    noteIds,
+    showTagEdges,
+    showEdgeWeights,
+    edgeWeightMap,
+    t,
+    setEdges,
+    noteById,
+  ])
 
   // ---------------------------------------------------------------
   // Edge creation: drag from a node handle to another node opens a
@@ -921,7 +1003,8 @@ function GardenMindmapInner({ notes, workspaceId, onOpenNote }: GardenMindmapPro
     }
     setPendingConnect(null)
     await reloadLinks()
-  }, [pendingConnect, linkKind, reloadLinks])
+    void reloadGraph()
+  }, [pendingConnect, linkKind, reloadLinks, reloadGraph])
 
   // ---------------------------------------------------------------
   // Edge click: only manual links are interactive. Click → confirm
@@ -950,9 +1033,10 @@ function GardenMindmapInner({ notes, workspaceId, onOpenNote }: GardenMindmapPro
           return
         }
         await reloadLinks()
+        void reloadGraph()
       })()
     },
-    [reloadLinks, t],
+    [reloadLinks, reloadGraph, t],
   )
 
   const onNodeClick = useCallback<NodeMouseHandler<Node<PlantNodeData>>>(
@@ -995,6 +1079,22 @@ function GardenMindmapInner({ notes, workspaceId, onOpenNote }: GardenMindmapPro
             onChange={(e) => setShowTagEdges(e.target.checked)}
           />
           <span>{t('garden.mindmap.tagEdges')}</span>
+        </label>
+        <label className="garden__mindmap-toggle">
+          <input
+            type="checkbox"
+            checked={showCentrality}
+            onChange={(e) => setShowCentrality(e.target.checked)}
+          />
+          <span>{t('garden.mindmap.showCentrality')}</span>
+        </label>
+        <label className="garden__mindmap-toggle">
+          <input
+            type="checkbox"
+            checked={showEdgeWeights}
+            onChange={(e) => setShowEdgeWeights(e.target.checked)}
+          />
+          <span>{t('garden.mindmap.showEdgeWeights')}</span>
         </label>
         <span className="garden__mindmap-legend" aria-hidden="true">
           {LINK_KINDS.map((k) => (

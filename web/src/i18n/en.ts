@@ -699,6 +699,9 @@ export const en = {
       empty: 'No notes in this view yet.',
       search: 'Find a note…',
       tagEdges: 'Show shared-tag links',
+      showCentrality: 'Show centrality',
+      showEdgeWeights: 'Show edge weights',
+      centralityLegend: 'PageRank',
       createLink: 'Create link',
       confirmDelete: 'Remove this link?',
       linkKind: {

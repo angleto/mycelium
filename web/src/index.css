@@ -3506,6 +3506,18 @@ button.btn--danger:hover {
   border: 1px solid var(--border);
   line-height: 1.4;
 }
+.mm-node__centrality {
+  font-size: 0.6rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+  padding: 0 0.25rem;
+  margin-left: 0.25rem;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--bloom) 18%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--bloom) 35%, var(--border));
+  line-height: 1.4;
+  flex: 0 0 auto;
+}
 .mm-node__handle {
   width: 9px;
   height: 9px;
