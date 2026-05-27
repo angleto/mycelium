@@ -737,7 +737,7 @@ function GardenMindmapInner({ notes, workspaceId, onOpenNote }: GardenMindmapPro
   // ``savePositions`` when at least one change is a position update
   // whose dragging flag has flipped to false.
   const handleNodesChange = useCallback(
-    (changes: NodeChange[]) => {
+    (changes: NodeChange<Node<PlantNodeData>>[]) => {
       onNodesChange(changes)
       const dragEnded = changes.some(
         (c) =>
