@@ -30,6 +30,7 @@ import {
   type Edge,
   type EdgeMouseHandler,
   type Node,
+  type NodeChange,
   type NodeMouseHandler,
   type NodeProps,
 } from '@xyflow/react'
@@ -156,8 +157,13 @@ function PlantNode({ data }: NodeProps<Node<PlantNodeData>>) {
 
 const NODE_TYPES = { plant: PlantNode }
 
+// ``v2`` because v1 persisted on every nodes-state change, which
+// burned the first-render seedLayout pile-up into localStorage and
+// then loaded it back over the force layout forever. v2 only writes
+// on a real drag-end, so this key bump is also a clean-slate for
+// every workspace that suffered the v1 behaviour.
 function positionsStorageKey(workspaceId: string): string {
-  return `flow.garden.mindmap.positions.${workspaceId}`
+  return `flow.garden.mindmap.positions.v2.${workspaceId}`
 }
 
 function loadPositions(workspaceId: string): Record<string, { x: number; y: number }> {
@@ -722,17 +728,44 @@ function GardenMindmapInner({ notes, workspaceId, onOpenNote }: GardenMindmapPro
     weightedLinks,
   ])
 
-  // Persist position changes (debounced via rAF microtask is overkill
-  // for human-paced drag; we save on each NodeChange of kind 'position'
-  // whose dragging flag has just flipped to false).
-  useEffect(() => {
-    const positions: Record<string, { x: number; y: number }> = {}
-    for (const n of nodes) {
-      positions[n.id] = { x: n.position.x, y: n.position.y }
-    }
-    positionsRef.current = positions
-    savePositions(workspaceId, positions)
-  }, [nodes, workspaceId])
+  // Persist positions ONLY on a real drag-end. The earlier
+  // every-nodes-change save burned the initial seedLayout pile-up
+  // into localStorage, then loaded it back on top of every
+  // subsequent force layout forever -- the canvas was effectively
+  // pinned to its first race-pose. Hook into the NodeChange stream
+  // through ``handleNodesChange`` (below) and only call
+  // ``savePositions`` when at least one change is a position update
+  // whose dragging flag has flipped to false.
+  const handleNodesChange = useCallback(
+    (changes: NodeChange[]) => {
+      onNodesChange(changes)
+      const dragEnded = changes.some(
+        (c) =>
+          c.type === 'position' &&
+          'dragging' in c &&
+          c.dragging === false,
+      )
+      if (!dragEnded) return
+      // Snapshot the freshest positions after the simulator and
+      // user drag have all flushed. ``positionsRef`` is the
+      // authoritative cache because the ``setNodes`` reducer
+      // hasn't committed yet here.
+      const snap: Record<string, { x: number; y: number }> = {}
+      for (const n of nodes) {
+        snap[n.id] = { x: n.position.x, y: n.position.y }
+      }
+      // Apply the drag delta from the change(s) to the snapshot so
+      // the saved set is post-drop, not pre-drop.
+      for (const c of changes) {
+        if (c.type === 'position' && c.position && 'id' in c) {
+          snap[c.id] = { x: c.position.x, y: c.position.y }
+        }
+      }
+      positionsRef.current = snap
+      savePositions(workspaceId, snap)
+    },
+    [nodes, onNodesChange, workspaceId],
+  )
 
   // ---------------------------------------------------------------
   // Workspace links: fetched once on mount, refreshed after every
@@ -985,7 +1018,7 @@ function GardenMindmapInner({ notes, workspaceId, onOpenNote }: GardenMindmapPro
           <ReactFlow
             nodes={nodes}
             edges={edges}
-            onNodesChange={onNodesChange}
+            onNodesChange={handleNodesChange}
             onEdgesChange={onEdgesChange}
             onConnect={onConnect}
             onEdgeClick={onEdgeClick}
