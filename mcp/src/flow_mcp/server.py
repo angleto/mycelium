@@ -2833,15 +2833,37 @@ async def memory_channel_delete(token: str, org_id: str, channel_id: str) -> dic
 # --- F6b: notes / conversation / canonical intent (FR-16) ---
 
 
+def _note_part(p: Any) -> dict[str, Any]:
+    """Project a NotePart ORM row to a JSON-serialisable dict for the
+    MCP get_note payload (task 7070a456 Phase 3). The UI collapse
+    state is web-only and not returned over MCP -- LLM consumers
+    treat every part as expanded."""
+    return {
+        "id": str(p.id),
+        "note_id": str(p.note_id),
+        "ord": p.ord,
+        "body": p.body or "",
+        "lang": p.lang,
+        "merged_from_note_id": (
+            str(p.merged_from_note_id) if p.merged_from_note_id else None
+        ),
+        "version": p.version,
+    }
+
+
 def _note(
     n: Note,
     tags: list[Tag] | None = None,
     primary_task_id: uuid.UUID | None = None,
     include_transcript: bool = True,
+    parts: list[Any] | None = None,
 ) -> dict[str, Any]:
     # docs/adr/0029 P3: ``task_id`` comes from the typed link table.
     # ``include_transcript`` lets list_notes opt out of the 0.5-3 KB
     # body so picker payloads stay small (get_note keeps the default).
+    # ``parts`` (task 7070a456 Phase 3): when supplied, embed the
+    # ordered note_part rows so an LLM gets the structured body in
+    # one call. list_notes leaves it None for payload economy.
     out: dict[str, Any] = {
         "id": str(n.id),
         "project_id": str(n.project_id) if n.project_id else None,
@@ -2854,6 +2876,8 @@ def _note(
     }
     if include_transcript:
         out["transcript"] = n.transcript
+    if parts is not None:
+        out["parts"] = [_note_part(p) for p in parts]
     return out
 
 
@@ -2939,12 +2963,152 @@ async def list_notes(
 
 @mcp.tool()
 async def get_note(token: str, org_id: str, note_id: str) -> dict[str, Any]:
-    """Read one note."""
+    """Read one note. Includes the ordered ``parts[]`` (markdown
+    blocks) so an LLM gets the structured body in one round-trip;
+    when the note has zero parts the field is an empty list."""
+    from flow_core.services import note_parts as parts_svc_local
+
     async with _tenant(token, org_id) as (s, org, _user):
         note = await notes_svc.get_note(s, org_id=org, note_id=uuid.UUID(note_id))
         tagmap = await notes_svc.tags_by_note(s, note_ids=[note.id])
         pid = await note_links_svc.primary_task_id_for_note(s, org_id=org, note_id=note.id)
-        return _note(note, tagmap.get(note.id, []), primary_task_id=pid)
+        parts = await parts_svc_local.list_parts(s, org_id=org, note_id=note.id)
+        return _note(note, tagmap.get(note.id, []), primary_task_id=pid, parts=parts)
+
+
+@mcp.tool()
+async def add_note_part(
+    token: str,
+    org_id: str,
+    note_id: str,
+    body: str,
+    lang: str | None = None,
+    ord: int | None = None,
+) -> dict[str, Any]:
+    """Append a markdown block to a note (task 7070a456 Phase 3).
+    Pass ``ord`` to insert at a specific position; every part with
+    ord >= value is shifted forward. Omit ``ord`` to land at the end.
+    Returns the new part."""
+    from flow_core.services import note_parts as parts_svc_local
+
+    async with _tenant(token, org_id) as (s, org, user):
+        part = await parts_svc_local.create_part(
+            s,
+            org_id=org,
+            actor_id=user,
+            note_id=uuid.UUID(note_id),
+            body=body,
+            lang=lang,
+            ord=ord,
+        )
+        return _note_part(part)
+
+
+@mcp.tool()
+async def update_note_part(
+    token: str,
+    org_id: str,
+    part_id: str,
+    expected_version: int,
+    body: str | None = None,
+    lang: str | None = None,
+) -> dict[str, Any]:
+    """Edit a part's body / lang. ``expected_version`` enforces
+    optimistic concurrency (same contract as update_note). To clear
+    the language tag pass ``lang=null`` (the omit-vs-clear semantic
+    is preserved through the kwargs)."""
+    from flow_core.services import note_parts as parts_svc_local
+
+    async with _tenant(token, org_id) as (s, org, user):
+        kwargs: dict[str, Any] = {}
+        if lang is not None:
+            kwargs["lang"] = lang
+        version = await parts_svc_local.update_part(
+            s,
+            org_id=org,
+            actor_id=user,
+            part_id=uuid.UUID(part_id),
+            expected_version=expected_version,
+            body=body,
+            **kwargs,
+        )
+        return {"part_id": part_id, "version": version}
+
+
+@mcp.tool()
+async def reorder_note_parts(
+    token: str,
+    org_id: str,
+    note_id: str,
+    part_ids: list[str],
+) -> list[dict[str, Any]]:
+    """Rewrite the entire ordering of a note's parts. ``part_ids``
+    must be the FULL set of the note's parts in the desired order; a
+    missing or extra id raises a domain error. Returns the reordered
+    parts so the caller can verify the new ord values."""
+    from flow_core.services import note_parts as parts_svc_local
+
+    async with _tenant(token, org_id) as (s, org, user):
+        rows = await parts_svc_local.reorder_parts(
+            s,
+            org_id=org,
+            actor_id=user,
+            note_id=uuid.UUID(note_id),
+            part_ids=[uuid.UUID(p) for p in part_ids],
+        )
+        return [_note_part(p) for p in rows]
+
+
+@mcp.tool()
+async def delete_note_part(
+    token: str, org_id: str, part_id: str
+) -> dict[str, Any]:
+    """Hard-delete a part. Remaining parts keep their ord values (no
+    compaction) so deep links by ord survive; reorder is explicit."""
+    from flow_core.services import note_parts as parts_svc_local
+
+    async with _tenant(token, org_id) as (s, org, user):
+        await parts_svc_local.delete_part(
+            s,
+            org_id=org,
+            actor_id=user,
+            part_id=uuid.UUID(part_id),
+        )
+        return {"part_id": part_id, "deleted": True}
+
+
+@mcp.tool()
+async def merge_notes(
+    token: str,
+    org_id: str,
+    source_note_id: str,
+    target_note_id: str,
+    strategy: str = "append",
+) -> dict[str, Any]:
+    """Fold the source note's parts into the target (task 7070a456
+    Phase 3 / 71c9d670 Phase 2b). Soft-deletes the source, stamps
+    every moved part with ``merged_from_note_id``, records target
+    supersedes source via NoteNoteLink. Idempotent on a source that
+    has already been merged or soft-deleted."""
+    from flow_core.services import note_parts as parts_svc_local
+
+    async with _tenant(token, org_id) as (s, org, user):
+        target = await parts_svc_local.merge_notes(
+            s,
+            org_id=org,
+            actor_id=user,
+            source_note_id=uuid.UUID(source_note_id),
+            target_note_id=uuid.UUID(target_note_id),
+            strategy=strategy,
+        )
+        tagmap = await notes_svc.tags_by_note(s, note_ids=[target.id])
+        pid = await note_links_svc.primary_task_id_for_note(
+            s, org_id=org, note_id=target.id
+        )
+        parts = await parts_svc_local.list_parts(
+            s, org_id=org, note_id=target.id
+        )
+        return _note(target, tagmap.get(target.id, []), primary_task_id=pid, parts=parts)
 
 
 @mcp.tool()
