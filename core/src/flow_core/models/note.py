@@ -110,6 +110,14 @@ class Note(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, Base):
     promoted_at: Mapped[datetime.datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # Task 4a718dc4 / ADR-0034: humus = the output of the
+    # decomposition pipeline (distillation/pattern/season). ``humus_
+    # kind`` carries the subtype; ``humus_flag`` is the read-side
+    # eligibility predicate the LLM walk consults.
+    humus_kind: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    humus_flag: Mapped[bool] = mapped_column(
+        nullable=False, server_default="false"
+    )
 
 
 class NoteTurn(UUIDPKMixin, OrgScopedMixin, Base):
