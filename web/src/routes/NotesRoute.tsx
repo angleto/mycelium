@@ -9,7 +9,10 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { api, authFetch, errMessage, workspaceHeader } from '../api/client'
 import { useSession } from '../auth/useSession'
-import { NotePartsEditor } from '../components/NotePartsEditor'
+import {
+  NotePartsEditor,
+  type NotePartsEditorHandle,
+} from '../components/NotePartsEditor'
 import { RichEditor } from '../components/RichEditor'
 import { MarkdownView } from '../components/Markdown'
 import { NoteListItem } from '../components/NoteListItem'
@@ -74,6 +77,11 @@ export function NotesRoute() {
   const [turns, setTurns] = useState<Turn[]>([])
   const [convMsg, setConvMsg] = useState('')
   const [noteSaving, setNoteSaving] = useState(false)
+  // Mirror of NotePartsEditor's dirty flag, so the bottom Save
+  // button can light up when the body changed even though the note
+  // row itself hasn't.
+  const [partsDirty, setPartsDirty] = useState(false)
+  const partsEditorRef = useRef<NotePartsEditorHandle>(null)
   const savedSnap = useRef<{ title: string; text: string }>({
     title: '',
     text: '',
@@ -674,6 +682,17 @@ export function NotesRoute() {
     sel.kind !== 'conversation' &&
     (eTitle !== savedSnap.current.title ||
       eText !== savedSnap.current.text)
+  // The bottom Save button covers BOTH the note row (title/text) and
+  // every dirty part body. NotePartsEditor lifts its dirty flag here
+  // so we can light the button up the moment the user edits a part.
+  const anyDirty = noteDirty || partsDirty
+  const saveAll = useCallback(async () => {
+    // Save parts first; on a clean parts save we chain into the
+    // note PATCH so a 409 on the note doesn't strand dirty parts.
+    const partsOk = (await partsEditorRef.current?.saveAllDirty()) ?? true
+    if (!partsOk) return
+    if (noteDirty) await autoSaveNote()
+  }, [noteDirty, autoSaveNote])
 
   return (
     <section className="card">
@@ -795,7 +814,11 @@ export function NotesRoute() {
               <span className="modal__sp" />
               {!creating && sel && sel.kind !== 'conversation' && (
                 <span className="muted">
-                  {noteSaving ? t('notes.saving') : t('notes.autosaved')}
+                  {noteSaving
+                    ? t('notes.saving')
+                    : anyDirty
+                      ? t('notes.unsaved', { defaultValue: 'Unsaved' })
+                      : t('notes.autosaved')}
                 </span>
               )}
               <button
@@ -924,7 +947,12 @@ export function NotesRoute() {
                     still derived from ``note.transcript`` (concatenated
                     parts) so the autosave/revision diff path keeps
                     working until those flows are fully migrated. */}
-                <NotePartsEditor noteId={sel.id} editSession={editSession} />
+                <NotePartsEditor
+                  ref={partsEditorRef}
+                  noteId={sel.id}
+                  editSession={editSession}
+                  onDirtyChange={setPartsDirty}
+                />
                 <Attachments noteId={sel.id} />
                 <LinkedTasksPanel noteId={sel.id} />
                 <RevisionsPanel
@@ -947,8 +975,8 @@ export function NotesRoute() {
               <div className="modal__foot">
                 <button
                   type="button"
-                  disabled={!noteDirty || noteSaving}
-                  onClick={() => void autoSaveNote()}
+                  disabled={!anyDirty || noteSaving}
+                  onClick={() => void saveAll()}
                 >
                   {noteSaving ? t('notes.saving') : t('notes.saveNote')}
                 </button>
