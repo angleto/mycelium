@@ -903,6 +903,26 @@ class GardenGraphOut(BaseModel):
     centrality: dict[uuid.UUID, float]
 
 
+# --- Garden walk (task 5bf31b63) ----------------------------------------
+# Two regimes packed in one shape: ``focused`` (PPR seeded) returns
+# the top-K notes by induced mass and the step is their rank; ``free_
+# wander`` (Node2Vec) returns the actual trajectory and the step is
+# the hop index. The SPA renders them as the "pollinator trail" with
+# the same component.
+
+
+class GardenWalkStep(BaseModel):
+    note_id: uuid.UUID
+    step: int
+    weight: float
+
+
+class GardenWalkOut(BaseModel):
+    seed: uuid.UUID
+    mode: str  # "focused" | "free_wander"
+    steps: list[GardenWalkStep]
+
+
 # --- F3: calendars, events, schedule (FR-4, docs/adr/0004, 0008) ---
 
 

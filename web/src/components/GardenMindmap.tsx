@@ -83,11 +83,25 @@ interface PlantNodeData extends Record<string, unknown> {
   degree: number
   entropy: number
   centrality: number | null
+  walkStep: number | null
+  isWalkSeed: boolean
   onOpen: (id: string) => void
 }
 
 function PlantNode({ data }: NodeProps<Node<PlantNodeData>>) {
-  const { note, tagDots, extraTagCount, dimmed, highlighted, degree, entropy, centrality, onOpen } = data
+  const {
+    note,
+    tagDots,
+    extraTagCount,
+    dimmed,
+    highlighted,
+    degree,
+    entropy,
+    centrality,
+    walkStep,
+    isWalkSeed,
+    onOpen,
+  } = data
   const maturity = note.maturity ?? 'seed'
   const glyph = MATURITY_GLYPH[maturity] ?? '🌱'
   const title = (note.title && note.title.trim()) || '·'
@@ -114,7 +128,9 @@ function PlantNode({ data }: NodeProps<Node<PlantNodeData>>) {
         'mm-node' +
         (dimmed ? ' mm-node--dimmed' : '') +
         (highlighted ? ' mm-node--highlighted' : '') +
-        (note.promoted_at ? ' mm-node--promoted' : '')
+        (note.promoted_at ? ' mm-node--promoted' : '') +
+        (walkStep != null ? ' mm-node--walk' : '') +
+        (isWalkSeed ? ' mm-node--walk-seed' : '')
       }
       style={style}
       onDoubleClick={() => onOpen(note.id)}
@@ -153,6 +169,11 @@ function PlantNode({ data }: NodeProps<Node<PlantNodeData>>) {
           title={`PageRank ${centrality.toFixed(4)}`}
         >
           {centrality < 0.0005 ? '<0.001' : centrality.toFixed(3)}
+        </span>
+      )}
+      {walkStep != null && (
+        <span className="mm-node__walk-step" title={`walk step ${walkStep}`}>
+          {walkStep}
         </span>
       )}
       <Handle
@@ -468,6 +489,13 @@ function GardenMindmapInner({ notes, workspaceId, onOpenNote }: GardenMindmapPro
   const [showEdgeWeights, setShowEdgeWeights] = useState(false)
   const [centrality, setCentrality] = useState<Record<string, number>>({})
   const [edgeWeightMap, setEdgeWeightMap] = useState<Record<string, number>>({})
+  // Walk (task 5bf31b63): seed + mode + path. The user selects a
+  // node, clicks 'walk', and the path lights up as the pollinator
+  // trail. ``walkPath`` keys the step index per node id so the
+  // PlantNode renderer can render a halo + step badge.
+  const [walkMode, setWalkMode] = useState<'focused' | 'free_wander'>('focused')
+  const [walkSeed, setWalkSeed] = useState<string | null>(null)
+  const [walkPath, setWalkPath] = useState<Record<string, number>>({})
   const [search, setSearch] = useState('')
   const [pendingConnect, setPendingConnect] = useState<Connection | null>(null)
   const [linkKind, setLinkKind] = useState<LinkKind>('references')
@@ -650,6 +678,8 @@ function GardenMindmapInner({ notes, workspaceId, onOpenNote }: GardenMindmapPro
           degree: degreeByNode.get(n.id) ?? 0,
           entropy: entropyByNode.get(n.id) ?? 0,
           centrality: null,
+          walkStep: null,
+          isWalkSeed: false,
           onOpen: onOpenNote,
         },
         draggable: true,
@@ -723,6 +753,8 @@ function GardenMindmapInner({ notes, workspaceId, onOpenNote }: GardenMindmapPro
             degree: degreeByNode.get(n.id) ?? 0,
             entropy: entropyByNode.get(n.id) ?? 0,
             centrality: showCentrality ? (centrality[n.id] ?? 0) : null,
+            walkStep: walkPath[n.id] ?? null,
+            isWalkSeed: walkSeed === n.id,
             onOpen: onOpenNote,
           },
           draggable: true,
@@ -743,6 +775,8 @@ function GardenMindmapInner({ notes, workspaceId, onOpenNote }: GardenMindmapPro
     weightedLinks,
     showCentrality,
     centrality,
+    walkPath,
+    walkSeed,
   ])
 
   // Persist positions ONLY on a real drag-end. The earlier
@@ -1042,10 +1076,12 @@ function GardenMindmapInner({ notes, workspaceId, onOpenNote }: GardenMindmapPro
   const onNodeClick = useCallback<NodeMouseHandler<Node<PlantNodeData>>>(
     (_event, node) => {
       // Single click does nothing destructive — opening the plant
-      // modal is on double-click (PlantNode handles it directly). A
-      // single click could still highlight, so we center on the node
-      // to mimic the search-hit behavior.
+      // modal is on double-click (PlantNode handles it directly).
+      // Centering on the node mimics the search-hit behavior, AND
+      // we mark the node as the walk seed (task 5bf31b63) so the
+      // toolbar 'walk' button has a target.
       rf.setCenter(node.position.x, node.position.y, { duration: 200, zoom: 1.1 })
+      setWalkSeed(node.id)
     },
     [rf],
   )
@@ -1096,6 +1132,59 @@ function GardenMindmapInner({ notes, workspaceId, onOpenNote }: GardenMindmapPro
           />
           <span>{t('garden.mindmap.showEdgeWeights')}</span>
         </label>
+        <select
+          value={walkMode}
+          onChange={(e) =>
+            setWalkMode(e.target.value === 'free_wander' ? 'free_wander' : 'focused')
+          }
+          aria-label={t('garden.mindmap.walkMode')}
+        >
+          <option value="focused">{t('garden.mindmap.walkFocused')}</option>
+          <option value="free_wander">{t('garden.mindmap.walkFree')}</option>
+        </select>
+        <button
+          type="button"
+          className="btn--sm"
+          disabled={!walkSeed}
+          onClick={() => {
+            if (!walkSeed) return
+            void (async () => {
+              const params = new URLSearchParams({
+                seed: walkSeed,
+                mode: walkMode,
+                budget: '12',
+              })
+              const res = await authFetch(`/garden/walk?${params.toString()}`)
+              if (!res.ok) {
+                setErr(`HTTP ${res.status}`)
+                return
+              }
+              const data = (await res.json()) as {
+                steps: { note_id: string; step: number }[]
+              }
+              const next: Record<string, number> = {}
+              for (const s of data.steps) next[s.note_id] = s.step
+              setWalkPath(next)
+            })()
+          }}
+        >
+          {t('garden.mindmap.walkRun')}
+        </button>
+        <button
+          type="button"
+          className="btn--ghost btn--sm"
+          disabled={Object.keys(walkPath).length === 0}
+          onClick={() => setWalkPath({})}
+        >
+          {t('garden.mindmap.walkClear')}
+        </button>
+        {walkSeed && (
+          <span className="muted">
+            {t('garden.mindmap.walkSeed', {
+              title: notes.find((n) => n.id === walkSeed)?.title || '·',
+            })}
+          </span>
+        )}
         <span className="garden__mindmap-legend" aria-hidden="true">
           {LINK_KINDS.map((k) => (
             <span key={k} className="garden__mindmap-legend-item">

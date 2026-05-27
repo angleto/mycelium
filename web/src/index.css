@@ -3521,6 +3521,35 @@ button.btn--danger:hover {
   border: 1px solid var(--border);
   line-height: 1.4;
 }
+/* Walk overlay (task 5bf31b63): nodes on the walk path get a halo
+   in --bloom + a step badge; the seed gets a thicker, warmer ring. */
+.mm-node--walk {
+  box-shadow: 0 0 12px color-mix(in srgb, var(--bloom) 55%, transparent);
+  z-index: 2;
+}
+.mm-node--walk-seed {
+  box-shadow: 0 0 18px color-mix(in srgb, var(--bloom) 85%, transparent);
+  border-color: var(--bloom);
+  z-index: 3;
+}
+.mm-node__walk-step {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  font-size: 0.62rem;
+  font-variant-numeric: tabular-nums;
+  background: var(--bloom);
+  color: var(--surface);
+  border-radius: 999px;
+  min-width: 16px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 4px;
+  line-height: 1;
+  border: 1px solid var(--surface);
+}
 .mm-node__centrality {
   font-size: 0.6rem;
   font-variant-numeric: tabular-nums;

@@ -709,6 +709,12 @@ export const en = {
       showCentrality: 'Show centrality',
       showEdgeWeights: 'Show edge weights',
       centralityLegend: 'PageRank',
+      walkMode: 'Walk mode',
+      walkFocused: 'Focused (PPR)',
+      walkFree: 'Free wander',
+      walkRun: 'Walk',
+      walkClear: 'Clear walk',
+      walkSeed: 'Seed: {{title}}',
       createLink: 'Create link',
       confirmDelete: 'Remove this link?',
       linkKind: {

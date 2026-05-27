@@ -708,6 +708,12 @@ export const it: Catalog = {
       showCentrality: 'Mostra centralità',
       showEdgeWeights: 'Mostra peso archi',
       centralityLegend: 'PageRank',
+      walkMode: 'Modalità walk',
+      walkFocused: 'Focused (PPR)',
+      walkFree: 'Wander libero',
+      walkRun: 'Walk',
+      walkClear: 'Pulisci',
+      walkSeed: 'Seed: {{title}}',
       createLink: 'Crea collegamento',
       confirmDelete: 'Rimuovere questo collegamento?',
       linkKind: {

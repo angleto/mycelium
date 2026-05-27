@@ -298,6 +298,176 @@ async def compute_pagerank(
     return {nodes[i]: rank[i] for i in range(n)}
 
 
+async def compute_personalized_pagerank(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    seed_ids: list[uuid.UUID],
+    damping: float = 0.85,
+    max_iter: int = 100,
+    tol: float = 1e-6,
+) -> dict[uuid.UUID, float]:
+    """Personalised PageRank seeded at ``seed_ids`` (task 5bf31b63).
+
+    Same iteration shape as ``compute_pagerank`` but the teleport
+    distribution is concentrated on the seed set (uniform across the
+    seeds, zero elsewhere). Returns the probability mass per note,
+    summing to 1 across the workspace. Used by ``graph_walk`` in
+    focused mode to rank the subgraph induced by the seed's typed
+    neighbours.
+    """
+    note_rows = (
+        await session.execute(select(Note.id).where(Note.org_id == org_id))
+    ).all()
+    nodes: list[uuid.UUID] = [r[0] for r in note_rows]
+    n = len(nodes)
+    if n == 0:
+        return {}
+    idx = {nid: i for i, nid in enumerate(nodes)}
+    valid_seeds = [idx[s] for s in seed_ids if s in idx]
+    if not valid_seeds:
+        return {nid: 0.0 for nid in nodes}
+    seed_set = set(valid_seeds)
+    teleport_dist = [0.0] * n
+    for s in valid_seeds:
+        teleport_dist[s] = 1.0 / len(valid_seeds)
+    out_neighbours: list[list[int]] = [[] for _ in range(n)]
+    link_rows = (
+        await session.execute(
+            select(NoteNoteLink.parent_note_id, NoteNoteLink.child_note_id).where(
+                NoteNoteLink.org_id == org_id
+            )
+        )
+    ).all()
+    for parent_id, child_id in link_rows:
+        if parent_id == child_id:
+            continue
+        pi = idx.get(parent_id)
+        ci = idx.get(child_id)
+        if pi is None or ci is None:
+            continue
+        out_neighbours[pi].append(ci)
+    rank = list(teleport_dist)
+    for _ in range(max_iter):
+        nxt = [(1.0 - damping) * teleport_dist[u] for u in range(n)]
+        dangling_mass = 0.0
+        for u in range(n):
+            outs = out_neighbours[u]
+            if not outs:
+                dangling_mass += rank[u]
+                continue
+            share = damping * rank[u] / len(outs)
+            for v in outs:
+                nxt[v] += share
+        if dangling_mass > 0:
+            # Dangling mass redistributes via the teleport distribution
+            # (the personalised variant of the classic fix), so dangling
+            # walks restart at the seeds rather than uniformly.
+            for u in range(n):
+                nxt[u] += damping * dangling_mass * teleport_dist[u]
+        delta = 0.0
+        for u in range(n):
+            delta += abs(nxt[u] - rank[u])
+        rank = nxt
+        if delta < tol:
+            break
+    # Sanity: emit the seed mass clamp non-negative.
+    del seed_set
+    return {nodes[i]: rank[i] for i in range(n)}
+
+
+async def biased_random_walk(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    seed_id: uuid.UUID,
+    budget: int = 32,
+    p: float = 1.0,
+    q: float = 1.0,
+    seed_rng: int | None = None,
+) -> list[uuid.UUID]:
+    """Node2Vec-style second-order random walk (task 5bf31b63 / ADR-0034).
+
+    The walk visits up to ``budget`` nodes starting at ``seed_id``.
+    The second-order bias is parameterised by:
+    - ``p`` (return parameter): high p discourages immediate backtrack.
+    - ``q`` (in-out parameter): high q biases toward staying close
+      (BFS-like, structural equivalence); low q lets the walk wander
+      farther (DFS-like, community discovery).
+
+    The graph is treated as *undirected* for the walk: every typed
+    link contributes both directions. Edge weight comes from the
+    materialised ``note_edge_strength`` (computed inline; cheap on
+    workspaces with <10k edges). When a node has no neighbours the
+    walk terminates early.
+    """
+    import random
+
+    rng = random.Random(seed_rng) if seed_rng is not None else random.Random()
+    # Pull the weighted edge list once.
+    edges = await compute_note_edge_weights(session, org_id=org_id)
+    # Undirected adjacency: {node_id: [(neighbour, weight)]}
+    adj: dict[uuid.UUID, list[tuple[uuid.UUID, float]]] = defaultdict(list)
+    for e in edges:
+        adj[e.src].append((e.dst, e.weight))
+        adj[e.dst].append((e.src, e.weight))
+    if seed_id not in adj or not adj[seed_id]:
+        return [seed_id]
+    walk: list[uuid.UUID] = [seed_id]
+    prev: uuid.UUID | None = None
+    cur: uuid.UUID = seed_id
+    for _ in range(max(0, budget - 1)):
+        candidates = adj.get(cur)
+        if not candidates:
+            break
+        if prev is None:
+            # First step: plain weighted pick.
+            weights = [w for _, w in candidates]
+            nxt = _weighted_pick(rng, [n for n, _ in candidates], weights)
+        else:
+            # Second-order bias: distance(prev -> candidate) is 0 if
+            # candidate is prev itself (return), 1 if candidate is a
+            # neighbour of prev (BFS), 2 otherwise (DFS).
+            prev_nbrs = {n for n, _ in adj.get(prev, [])}
+            weights = []
+            ids = []
+            for cand, w in candidates:
+                if cand == prev:
+                    factor = 1.0 / max(p, 1e-9)
+                elif cand in prev_nbrs:
+                    factor = 1.0
+                else:
+                    factor = 1.0 / max(q, 1e-9)
+                weights.append(w * factor)
+                ids.append(cand)
+            nxt = _weighted_pick(rng, ids, weights)
+        if nxt is None:
+            break
+        walk.append(nxt)
+        prev = cur
+        cur = nxt
+    return walk
+
+
+def _weighted_pick(
+    rng: object, ids: list[uuid.UUID], weights: list[float]
+) -> uuid.UUID | None:
+    total = sum(w for w in weights if w > 0)
+    if total <= 0 or not ids:
+        return None
+    # rng is typed as object to keep the import inside biased_random_walk
+    # local; cast via getattr for the .random() call.
+    r = getattr(rng, "random")() * total  # type: ignore[no-any-return]
+    acc = 0.0
+    for i, w in zip(ids, weights, strict=True):
+        if w <= 0:
+            continue
+        acc += w
+        if r <= acc:
+            return i
+    return ids[-1]
+
+
 def _kind_base_weight(kind: str) -> float:
     """Public re-export so callers (tests, future MCP tools) can poke
     the policy without importing the private dict."""
@@ -324,7 +494,9 @@ def softor(values: Iterable[float]) -> float:
 __all__ = [
     "EdgeWeight",
     "adamic_adar_pair",
+    "biased_random_walk",
     "compute_note_edge_weights",
     "compute_pagerank",
+    "compute_personalized_pagerank",
     "softor",
 ]
