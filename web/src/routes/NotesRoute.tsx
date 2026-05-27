@@ -913,15 +913,11 @@ export function NotesRoute() {
                   onAdd={(tid) => void addTag(tid)}
                   onRemove={(tid) => void removeTag(tid)}
                 />
-                <div className="field grow">
-                  {t('notes.text')}
-                  <RichEditor
-                    value={eText}
-                    onChange={setEText}
-                    large
-                    imageUploadParent={{ kind: 'note', id: sel.id }}
-                  />
-                </div>
+                {/* Legacy single-body RichEditor removed: NotePartsEditor
+                    is now the canonical body surface. ``eText`` state is
+                    still derived from ``note.transcript`` (concatenated
+                    parts) so the autosave/revision diff path keeps
+                    working until those flows are fully migrated. */}
                 <NotePartsEditor noteId={sel.id} />
                 <Attachments noteId={sel.id} />
                 <LinkedTasksPanel noteId={sel.id} />
