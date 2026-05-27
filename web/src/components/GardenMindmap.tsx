@@ -556,11 +556,18 @@ function GardenMindmapInner({ notes, workspaceId, onOpenNote }: GardenMindmapPro
     return { dots, extra }
   }, [])
 
-  // Force-layout input: weighted manual links between visible notes,
-  // recomputed when the link set or visible note scope changes. Task
-  // 7e99c724 v1 (no backend): weight = soft-OR(w_kind, w_tag).
+  // Force-layout input: weighted edges between visible notes.
+  // Manual links carry their kind-derived weight (soft-OR of kind +
+  // shared-tag count); tag-derived edges add a light spring so the
+  // simulator still has something to organise around in workspaces
+  // that haven't drawn a single manual link yet -- without them
+  // seedLayout's tag-clustered ring is the only signal and notes
+  // sharing a single client tag collapse into one pile. Tag-spring
+  // weight is capped (0.45) so a manual link always pulls harder.
   const weightedLinks = useMemo(() => {
     const out: { source: string; target: string; weight: number }[] = []
+    const seen = new Set<string>()
+    const pairKey = (a: string, b: string) => (a < b ? `${a}::${b}` : `${b}::${a}`)
     for (const l of workspaceLinks) {
       if (!noteIds.has(l.parent_note_id) || !noteIds.has(l.child_note_id)) continue
       const shared = sharedGenericTagCount(
@@ -572,9 +579,20 @@ function GardenMindmapInner({ notes, workspaceId, onOpenNote }: GardenMindmapPro
         target: l.child_note_id,
         weight: edgeWeightV1(l.kind, shared),
       })
+      seen.add(pairKey(l.parent_note_id, l.child_note_id))
+    }
+    const tagPairs = buildTagEdges(notes, noteIds)
+    for (const e of tagPairs) {
+      const key = pairKey(e.source, e.target)
+      if (seen.has(key)) continue
+      // Soft-cap at 0.45: enough to organise the canvas, light enough
+      // that an authored ``references`` link still wins.
+      const w = Math.min(0.45, 0.18 + 0.12 * e.sharedTags.length)
+      out.push({ source: e.source, target: e.target, weight: w })
+      seen.add(key)
     }
     return out
-  }, [workspaceLinks, noteIds, noteById])
+  }, [workspaceLinks, noteIds, noteById, notes])
 
   // Initial nodes — built once per notes-set; user drag positions
   // are merged from localStorage. We compute outside the useNodesState
@@ -587,8 +605,13 @@ function GardenMindmapInner({ notes, workspaceId, onOpenNote }: GardenMindmapPro
   // notes still gets a tidy ring).
   const initialNodes = useMemo<Node<PlantNodeData>[]>(() => {
     const stored = loadPositions(workspaceId)
+    // Same strategy as the resync effect: always run the simulator
+    // when there are notes; the tag-spring edges in weightedLinks
+    // give the canvas structure even before a single manual link
+    // exists. seedLayout is the fallback when there's nothing to
+    // simulate (empty notes).
     const seeded =
-      weightedLinks.length > 0
+      notes.length > 0
         ? forceLayout(notes, weightedLinks, degreeByNode)
         : seedLayout(notes, primaryTagFor)
     return notes.map((n) => {
@@ -636,15 +659,19 @@ function GardenMindmapInner({ notes, workspaceId, onOpenNote }: GardenMindmapPro
   // re-render (e.g. a single tag toggle).
   useEffect(() => {
     const stored = loadPositions(workspaceId)
-    const sig =
-      weightedLinks.length === 0
-        ? `seed:${notes.map((n) => n.id).join(',')}`
-        : `force:${notes.length}:${weightedLinks
-            .map((l) => `${l.source}>${l.target}`)
-            .sort()
-            .join('|')}`
+    const sig = `force:${notes.length}:${weightedLinks
+      .map((l) => `${l.source}>${l.target}`)
+      .sort()
+      .join('|')}`
+    // Always run the simulator on a signature change. With zero
+    // edges the golden-angle spiral + repulsion still produces a
+    // breathable spread; the tag-derived springs (folded into
+    // ``weightedLinks`` above) organise notes that share generic
+    // tags. seedLayout is kept only as a deterministic initial
+    // pose when the simulator has nothing to converge towards
+    // (truly empty notes set).
     const shouldForceLayout =
-      weightedLinks.length > 0 && lastForceSig.current !== sig
+      notes.length > 0 && lastForceSig.current !== sig
     if (shouldForceLayout) lastForceSig.current = sig
     setNodes((current) => {
       const byId = new Map(current.map((c) => [c.id, c]))
