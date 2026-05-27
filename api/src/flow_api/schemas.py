@@ -923,6 +923,26 @@ class GardenWalkOut(BaseModel):
     steps: list[GardenWalkStep]
 
 
+# --- Link suggestions (task c7d0bb4c) --------------------------------
+# Returned by GET /garden/link-suggestions/{note_id}. ``score`` ∈
+# [0, 1], soft-OR of Adamic-Adar (rare-tag overlap) and PPR-induced
+# mass, damped by candidate degree to avoid hub bias. ``signals``
+# carries the per-feature contribution so the SPA can render a
+# tooltip and ADR-0037's audit log can persist the breakdown.
+
+
+class GardenLinkSuggestion(BaseModel):
+    note_id: uuid.UUID
+    score: float
+    rationale: str
+    signals: dict[str, float]
+
+
+class GardenLinkSuggestionsOut(BaseModel):
+    source_note_id: uuid.UUID
+    suggestions: list[GardenLinkSuggestion]
+
+
 # --- F3: calendars, events, schedule (FR-4, docs/adr/0004, 0008) ---
 
 

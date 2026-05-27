@@ -29,10 +29,13 @@ from flow_api.deps import TenantCtx, tenant_ctx
 from flow_api.schemas import (
     GardenGraphEdge,
     GardenGraphOut,
+    GardenLinkSuggestion,
+    GardenLinkSuggestionsOut,
     GardenWalkOut,
     GardenWalkStep,
 )
 from flow_core.services import graph as svc
+from flow_core.services import link_prediction as linkpred_svc
 
 router = APIRouter(prefix="/garden", tags=["garden"])
 
@@ -119,3 +122,34 @@ async def garden_walk(
         if nid != seed or i == 0
     ]
     return GardenWalkOut(seed=seed, mode=mode, steps=steps)
+
+
+@router.get(
+    "/link-suggestions/{note_id}", response_model=GardenLinkSuggestionsOut
+)
+async def garden_link_suggestions(
+    note_id: uuid.UUID,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    k: Annotated[int, Query(ge=1, le=20)] = 5,
+) -> GardenLinkSuggestionsOut:
+    """Top-K candidate notes to link from ``note_id`` (task c7d0bb4c).
+
+    The score mixes Adamic-Adar tag overlap and PPR-induced mass;
+    already-linked pairs are excluded. The SPA renders them as
+    'suggested links' chips; nothing is created without explicit
+    user confirmation."""
+    rows = await linkpred_svc.suggest_links_for_note(
+        ctx.session, org_id=ctx.org_id, note_id=note_id, k=k
+    )
+    return GardenLinkSuggestionsOut(
+        source_note_id=note_id,
+        suggestions=[
+            GardenLinkSuggestion(
+                note_id=r.note_id,
+                score=r.score,
+                rationale=r.rationale,
+                signals=r.signals,
+            )
+            for r in rows
+        ],
+    )
