@@ -3112,6 +3112,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/notes/merge": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Merge Notes
+         * @description Fold the source note's parts into the target (task 71c9d670
+         *     Phase 2b). Soft-deletes the source, stamps every moved part with
+         *     ``merged_from_note_id``, and records a ``supersedes`` link
+         *     (target → source) so the graph keeps the lineage. Returns the
+         *     target as it now stands, parts included.
+         */
+        post: operations["merge_notes_notes_merge_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/notes/{note_id}/append": {
         parameters: {
             query?: never;
@@ -6463,6 +6487,30 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+        };
+        /**
+         * NoteMergeIn
+         * @description Body for POST /notes/merge (task 71c9d670 Phase 2b). Folds the
+         *     source note's parts into the target with a fresh ord. ``strategy``
+         *     is reserved for future ``interleave`` variants; v1 ships
+         *     ``append`` only.
+         */
+        NoteMergeIn: {
+            /**
+             * Source Note Id
+             * Format: uuid
+             */
+            source_note_id: string;
+            /**
+             * Target Note Id
+             * Format: uuid
+             */
+            target_note_id: string;
+            /**
+             * Strategy
+             * @default append
+             */
+            strategy?: string;
         };
         /** NoteOut */
         NoteOut: {
@@ -16189,6 +16237,44 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["NotePartOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    merge_notes_notes_merge_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NoteMergeIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NoteOut"];
                 };
             };
             /** @description Validation Error */

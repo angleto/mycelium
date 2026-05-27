@@ -1735,6 +1735,17 @@ class NotePartUIStateIn(BaseModel):
     collapsed: bool
 
 
+class NoteMergeIn(BaseModel):
+    """Body for POST /notes/merge (task 71c9d670 Phase 2b). Folds the
+    source note's parts into the target with a fresh ord. ``strategy``
+    is reserved for future ``interleave`` variants; v1 ships
+    ``append`` only."""
+
+    source_note_id: uuid.UUID
+    target_note_id: uuid.UUID
+    strategy: str = Field(default="append", pattern="^(append)$")
+
+
 class NoteOut(BaseModel):
     id: uuid.UUID
     project_id: uuid.UUID | None

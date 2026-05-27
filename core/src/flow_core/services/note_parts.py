@@ -357,11 +357,123 @@ async def get_ui_states_for_user(
     return {pid: bool(collapsed) for pid, collapsed in rows}
 
 
+async def merge_notes(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    source_note_id: uuid.UUID,
+    target_note_id: uuid.UUID,
+    strategy: str = "append",
+) -> Note:
+    """Fold the source note's parts into the target note (Phase 2b).
+
+    Strategy ``append`` (only one shipped in this PR; ``interleave``
+    raises DOMAIN_ERROR until a clear use case asks for it):
+    every source part is moved to the target with a fresh ``ord``
+    starting at ``max(target.ord) + 1``, ``merged_from_note_id`` is
+    set on each moved part so the audit trail survives a future
+    source hard-delete, and the source note is soft-deleted. A
+    ``supersedes`` NoteNoteLink (target -> source) records the
+    relationship so the graph still shows the lineage.
+
+    Idempotency: a second merge of an already-merged source returns
+    the target unchanged (the soft-delete check skips it).
+
+    Refuses self-merge and cross-org merges; both raise DOMAIN_ERROR.
+    Single transaction (the caller's session.flush() commits the
+    move + soft-delete + supersedes link atomically).
+    """
+    from flow_core.models.note_link import NoteNoteLink
+
+    if strategy != "append":
+        raise DomainError(MessageCode.DOMAIN_ERROR)
+    if source_note_id == target_note_id:
+        raise DomainError(MessageCode.DOMAIN_ERROR)
+    await require_role(session, org_id, actor_id, Role.member)
+    source = await _get_note_in_org(session, org_id=org_id, note_id=source_note_id)
+    target = await _get_note_in_org(session, org_id=org_id, note_id=target_note_id)
+    if source.deleted_at is not None:
+        # Idempotent: source already merged or deleted earlier.
+        return target
+    if target.deleted_at is not None:
+        raise DomainError(MessageCode.DOMAIN_ERROR)
+
+    source_parts = await list_parts(
+        session, org_id=org_id, note_id=source_note_id
+    )
+    target_parts = await list_parts(
+        session, org_id=org_id, note_id=target_note_id
+    )
+    next_ord = (target_parts[-1].ord + 1) if target_parts else 0
+    # Move each source part to the target: keep the body / lang, reset
+    # ``ord`` to land at the tail, stamp ``merged_from_note_id``.
+    for offset, sp in enumerate(source_parts):
+        await session.execute(
+            NotePart.__table__.update()
+            .where(NotePart.id == sp.id, NotePart.org_id == org_id)
+            .values(
+                note_id=target_note_id,
+                ord=next_ord + offset,
+                merged_from_note_id=source_note_id,
+            )
+        )
+    # Soft-delete the source (matches services.notes.soft_delete_note
+    # semantics: deleted_at = now(), maturity untouched, FK rows kept).
+    await session.execute(
+        Note.__table__.update()
+        .where(Note.id == source_note_id, Note.org_id == org_id)
+        .values(deleted_at=func.now())
+    )
+    # Lineage: target supersedes source. Idempotent on the unique
+    # (parent, child, kind) triplet.
+    existing = (
+        await session.execute(
+            select(NoteNoteLink).where(
+                NoteNoteLink.org_id == org_id,
+                NoteNoteLink.parent_note_id == target_note_id,
+                NoteNoteLink.child_note_id == source_note_id,
+                NoteNoteLink.kind == "supersedes",
+            )
+        )
+    ).scalar_one_or_none()
+    if existing is None:
+        session.add(
+            NoteNoteLink(
+                org_id=org_id,
+                parent_note_id=target_note_id,
+                child_note_id=source_note_id,
+                kind="supersedes",
+            )
+        )
+    await session.flush()
+    await audit.log(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        entity="note",
+        entity_id=target_note_id,
+        action="merge_in",
+        diff={
+            "source_note_id": str(source_note_id),
+            "moved_parts": str(len(source_parts)),
+        },
+    )
+    # Refresh the target so the caller sees the post-merge state
+    # (e.g. updated_at, version) consistent with what hit the DB.
+    return (
+        await session.execute(
+            select(Note).where(Note.id == target_note_id, Note.org_id == org_id)
+        )
+    ).scalar_one()
+
+
 __all__ = [
     "create_part",
     "delete_part",
     "get_ui_states_for_user",
     "list_parts",
+    "merge_notes",
     "parts_by_note",
     "reorder_parts",
     "set_ui_state",

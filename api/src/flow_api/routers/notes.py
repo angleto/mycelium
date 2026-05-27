@@ -31,6 +31,7 @@ from flow_api.schemas import (
     NoteLinkIn,
     NoteLinkOut,
     NoteAppendIn,
+    NoteMergeIn,
     NoteOut,
     NotePartCreateIn,
     NotePartOut,
@@ -527,6 +528,54 @@ async def set_note_part_ui_state(
     if part is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
     return _part_out(part, ui_collapsed=body.collapsed)
+
+
+@router.post(
+    "/merge",
+    response_model=NoteOut,
+    tags=["garden"],
+)
+async def merge_notes(
+    body: NoteMergeIn,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+) -> NoteOut:
+    """Fold the source note's parts into the target (task 71c9d670
+    Phase 2b). Soft-deletes the source, stamps every moved part with
+    ``merged_from_note_id``, and records a ``supersedes`` link
+    (target → source) so the graph keeps the lineage. Returns the
+    target as it now stands, parts included."""
+    target = await parts_svc.merge_notes(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        source_note_id=body.source_note_id,
+        target_note_id=body.target_note_id,
+        strategy=body.strategy,
+    )
+    tagmap = await svc.tags_by_note(ctx.session, note_ids=[target.id])
+    pid = await note_links_svc.primary_task_id_for_note(
+        ctx.session, org_id=ctx.org_id, note_id=target.id
+    )
+    derived = await note_links_svc.derived_task_ids_for_notes(
+        ctx.session, org_id=ctx.org_id, note_ids=[target.id]
+    )
+    counts = await note_links_svc.linked_task_counts_for_notes(
+        ctx.session, org_id=ctx.org_id, note_ids=[target.id]
+    )
+    parts_rows = await parts_svc.list_parts(
+        ctx.session, org_id=ctx.org_id, note_id=target.id
+    )
+    ui = await parts_svc.get_ui_states_for_user(
+        ctx.session, user_id=ctx.user_id, note_id=target.id
+    )
+    return _out(
+        target,
+        tagmap.get(target.id, []),
+        primary_task_id=pid,
+        derived_task_ids=derived.get(target.id, []),
+        linked_task_count=counts.get(target.id, 0),
+        parts=[_part_out(p, ui_collapsed=ui.get(p.id, False)) for p in parts_rows],
+    )
 
 
 @router.post("/{note_id}/append", response_model=AppendOut)
