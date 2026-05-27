@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { api, authFetch, errMessage, workspaceHeader } from '../api/client'
 import type { components } from '../api/schema'
+import { GardenIcon, type GardenIconName } from './GardenIcon'
 import { NotePickList } from './NotePickList'
 
 type NoteTaskLink = components['schemas']['NoteTaskLinkOut']
@@ -16,6 +17,15 @@ const KINDS: readonly Kind[] = [
   'derived_from',
   'promoted_from',
 ] as const
+
+// Mirror of LinkedTasksPanel: same kind -> forest-metaphor glyph
+// mapping so the two drawers read identically (task 56d80038).
+const KIND_ICON: Record<Kind, GardenIconName> = {
+  subject: 'references',
+  artifact: 'leaf',
+  derived_from: 'derives_from',
+  promoted_from: 'branch',
+}
 
 // Lato task: pannello "Linked notes" speculare a LinkedTasksPanel.
 // Stesse regole per kind: subject/artifact accettano picker;
@@ -151,6 +161,7 @@ export function LinkedNotesPanel({ taskId }: { taskId: string }) {
           <section key={kind} className="linkedpanel__section">
             <header className="linkedpanel__sectionhead">
               <span className={`chip chip--kind chip--kind-${kind}`}>
+                <GardenIcon name={KIND_ICON[kind]} size={14} />
                 {t(`taskLinkKind.${kind}`)}
               </span>
               <span className="muted">({items.length})</span>

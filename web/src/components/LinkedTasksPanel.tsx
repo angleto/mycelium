@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { api, authFetch, errMessage, workspaceHeader } from '../api/client'
 import type { components } from '../api/schema'
 import { useWorkflowStates } from '../lib/useWorkflowStates'
+import { GardenIcon, type GardenIconName } from './GardenIcon'
 import { TaskPickList } from './TaskPickList'
 
 type NoteTaskLink = components['schemas']['NoteTaskLinkOut']
@@ -11,6 +12,18 @@ type Task = components['schemas']['TaskOut']
 type Tag = components['schemas']['TagOut']
 
 type Kind = 'subject' | 'artifact' | 'derived_from' | 'promoted_from'
+
+// Map each link kind to its forest-metaphor glyph (task 56d80038):
+// subject = the task that 'points at' the note (references arc);
+// artifact = the leaf-result of the work; derived_from = root-spread
+// (the note is the soil the task grew out of); promoted_from = the
+// promoted note that branched into a task.
+const KIND_ICON: Record<Kind, GardenIconName> = {
+  subject: 'references',
+  artifact: 'leaf',
+  derived_from: 'derives_from',
+  promoted_from: 'branch',
+}
 
 const KINDS: readonly Kind[] = [
   'subject',
@@ -147,6 +160,7 @@ export function LinkedTasksPanel({ noteId }: { noteId: string }) {
           <section key={kind} className="linkedpanel__section">
             <header className="linkedpanel__sectionhead">
               <span className={`chip chip--kind chip--kind-${kind}`}>
+                <GardenIcon name={KIND_ICON[kind]} size={14} />
                 {t(`taskLinkKind.${kind}`)}
               </span>
               <span className="muted">({items.length})</span>
