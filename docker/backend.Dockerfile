@@ -59,8 +59,21 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PATH="/app/.venv/bin:$PATH" \
     HF_HOME=/app/.cache/huggingface
 
-# libpq5: psycopg runtime (Alembic sync path).
-RUN apt-get update && apt-get install -y --no-install-recommends libpq5 \
+# Runtime shared libs:
+#  - libpq5:               psycopg runtime (Alembic sync path).
+#  - libpango / libharfbuzz / fontconfig + fonts-dejavu-core:
+#                          WeasyPrint (/export/pdf). v60+ no longer
+#                          needs GTK/Cairo, only Pango + HarfBuzz +
+#                          a font path that resolves generic families.
+#                          KaTeX fonts are bundled in
+#                          flow_api/static/katex/ and loaded via
+#                          file:// @font-face, but body text needs at
+#                          least one serif/sans/mono installed so
+#                          fontconfig has something to map to.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libpq5 \
+        libpango-1.0-0 libpangoft2-1.0-0 libharfbuzz0b \
+        fontconfig fonts-dejavu-core \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
