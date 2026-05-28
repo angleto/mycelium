@@ -48,6 +48,9 @@ _DISTILL_SYSTEM = (
 class DistillationResult:
     distilled_note_id: uuid.UUID
     model_id: str
+    # False when an existing distillation was returned untouched
+    # (idempotent re-run); True when a new distillation was generated.
+    created: bool
 
 
 async def distill_note(
@@ -84,7 +87,9 @@ async def distill_note(
         # The previous distillation is still authoritative. The model
         # id is unknown from this row alone (audit log carries it);
         # callers shouldn't rely on this branch's model_id.
-        return DistillationResult(distilled_note_id=existing_row[0], model_id="cached")
+        return DistillationResult(
+            distilled_note_id=existing_row[0], model_id="cached", created=False
+        )
     body = await notes_svc.get_body(session, note_id=note_id)
     if not body or not body.strip():
         raise DomainError(MessageCode.DOMAIN_ERROR)
@@ -138,7 +143,7 @@ async def distill_note(
         )
     )
     await session.flush()
-    return DistillationResult(distilled_note_id=distilled.id, model_id=res.model_id)
+    return DistillationResult(distilled_note_id=distilled.id, model_id=res.model_id, created=True)
 
 
 __all__ = ["DistillationResult", "distill_note"]

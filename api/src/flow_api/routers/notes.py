@@ -22,6 +22,7 @@ from flow_api.schemas import (
     CommandIn,
     ConversationStartIn,
     DerivedTaskOut,
+    DistillationOut,
     EditSessionSealIn,
     EditSessionSealOut,
     ExpectedVersionIn,
@@ -61,6 +62,7 @@ from flow_core.models.project_profile import ProjectProfile
 from flow_core.models.tag import Tag, TagKind
 from flow_core.services import agent_tokens as agent_tokens_svc
 from flow_core.services import attachments as att_svc
+from flow_core.services import decomposition as decomposition_svc
 from flow_core.services import entity_revisions as rev_svc
 from flow_core.services import note_links as note_links_svc
 from flow_core.services import note_parts as parts_svc
@@ -307,6 +309,30 @@ async def get_note(
         derived_task_ids=derived.get(n.id, []),
         linked_task_count=counts.get(n.id, 0),
         parts=parts,
+    )
+
+
+@router.post("/{note_id}/distill", response_model=DistillationOut)
+async def distill_note(
+    note_id: uuid.UUID,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+) -> DistillationOut:
+    """Fungal decomposition (ADR-0034, task 4a718dc4): distil the note's
+    body into a reusable atom note and flag both as humus so the LLM
+    walk can surface them as fertiliser. Idempotent: a note already
+    distilled returns its existing distillation untouched (``created``
+    False). Member role required; metered LLM call inside the service."""
+    res = await decomposition_svc.distill_note(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        note_id=note_id,
+    )
+    return DistillationOut(
+        source_note_id=note_id,
+        distilled_note_id=res.distilled_note_id,
+        model_id=res.model_id,
+        created=res.created,
     )
 
 

@@ -59,6 +59,7 @@ from flow_core.services import billing as billing_svc
 from flow_core.services import budgets as budgets_svc
 from flow_core.services import calendar as calendars
 from flow_core.services import coordination as coordination_svc
+from flow_core.services import decomposition as decomposition_svc
 from flow_core.services import dependencies, scheduler, tasks, taxonomy
 from flow_core.services import dispatch_loop as dispatch_loop_svc
 from flow_core.services import email as email_svc
@@ -3303,6 +3304,28 @@ async def restore_note(
             expected_version=expected_version,
         )
         return {"note_id": note_id, "version": version}
+
+
+@mcp.tool()
+async def distill_note(token: str, org_id: str, note_id: str) -> dict[str, Any]:
+    """Fungal decomposition (ADR-0034): distil a note's body into a
+    reusable atom note and flag both source and distillation as humus so
+    the LLM walk surfaces them as fertiliser. Idempotent: an
+    already-distilled note returns its existing distillation
+    (``created`` false). Member role; metered LLM call inside."""
+    async with _tenant(token, org_id) as (s, org, user):
+        res = await decomposition_svc.distill_note(
+            s,
+            org_id=org,
+            actor_id=user,
+            note_id=uuid.UUID(note_id),
+        )
+        return {
+            "source_note_id": note_id,
+            "distilled_note_id": str(res.distilled_note_id),
+            "model_id": res.model_id,
+            "created": res.created,
+        }
 
 
 @mcp.tool()

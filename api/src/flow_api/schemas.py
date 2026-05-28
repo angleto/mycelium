@@ -1966,6 +1966,17 @@ class SynthOut(BaseModel):
     model_id: str
 
 
+class DistillationOut(BaseModel):
+    # Result of the fungal-decomposition pass (ADR-0034, task 4a718dc4):
+    # the source note's distillation note. ``created`` is False when an
+    # earlier distillation already existed (idempotent no-op), in which
+    # case ``model_id`` is "cached".
+    source_note_id: uuid.UUID
+    distilled_note_id: uuid.UUID
+    model_id: str
+    created: bool
+
+
 class CommandIn(BaseModel):
     text: str = Field(min_length=1)
 
