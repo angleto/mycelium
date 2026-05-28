@@ -535,14 +535,33 @@ export function RichEditor({
   }, [editor])
 
   // Reflect external value changes (loaded task, or raw-mode edits)
-  // without looping. This also keeps the hidden editor synced while in
-  // raw mode, so flipping back to WYSIWYG already shows the latest.
+  // without looping and without clobbering the caret. Comparing the
+  // prop against ``getMd(editor)`` (the original implementation) was
+  // wrong: the Markdown↔ProseMirror round-trip is not idempotent at
+  // the character level (trailing newlines, escape ordering), so the
+  // prop and the re-serialised editor content could diverge even
+  // when the editor *was* the source. The diverged comparison fired
+  // ``setContent`` on every autosave, which in turn resets the
+  // selection to the end of the document — surfacing as the
+  // "cursor jumps to end of page after save" regression.
+  //
+  // The fix is twofold: (a) compare against the last prop we have
+  // seen (``lastPropRef``), so a redundant same-prop re-render is a
+  // no-op, and (b) when setContent really is needed (initial load,
+  // raw-mode flip, switching note), preserve and clamp the prior
+  // selection so the caret stays where the user left it.
+  const lastPropRef = useRef(value)
   useEffect(() => {
     if (!editor) return
-    const current = getMd(editor)
-    if (value !== current) {
-      editor.commands.setContent(value, { emitUpdate: false })
-    }
+    if (value === lastPropRef.current) return
+    lastPropRef.current = value
+    const { from, to } = editor.state.selection
+    editor.commands.setContent(value, { emitUpdate: false })
+    const max = editor.state.doc.content.size
+    editor.commands.setTextSelection({
+      from: Math.min(from, max),
+      to: Math.min(to, max),
+    })
   }, [value, editor])
 
   const fmt = !rawMode && editor != null

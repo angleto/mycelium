@@ -260,6 +260,17 @@ export const NotePartsEditor = forwardRef<NotePartsEditorHandle, Props>(
             setErr(errMessage(await res.json().catch(() => ({}))))
             return false
           }
+          // Sync the canonical part row from the server response *before*
+          // clearing the local draft. Without this, the next render falls
+          // back to ``parts[pid].body`` (the pre-PATCH copy) for one
+          // frame, RichEditor sees a stale ``value`` prop, and its
+          // value-sync effect runs ``setContent`` — which resets the
+          // ProseMirror selection to the end of the document. That was
+          // the "cursor jumps to end of page on autosave" regression.
+          const updated = (await res.json()) as NotePart
+          setParts((cur) =>
+            cur.map((p) => (p.id === part.id ? updated : p)),
+          )
           if (hasBody) {
             setEditingBody((cur) => {
               const out = { ...cur }
