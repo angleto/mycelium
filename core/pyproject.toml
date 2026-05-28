@@ -28,6 +28,13 @@ dependencies = [
 #   uv sync --extra local-embedder
 [project.optional-dependencies]
 local-embedder = ["sentence-transformers>=3"]
+# Opt-in local speech-to-text (ADR-0020, task 44ba3f14): LocalSTT is
+# backed by faster-whisper (CTranslate2). Lazily imported, so CI/dev
+# without it inject a fake STT; a deploy that wants Telegram voice
+# transcription must ship it. Enable with: uv sync --extra stt
+# Model/quantisation via FLOW_STT_MODEL (default small) / FLOW_STT_DEVICE
+# / FLOW_STT_COMPUTE_TYPE (default int8).
+stt = ["faster-whisper>=1.0"]
 
 [build-system]
 requires = ["hatchling"]
