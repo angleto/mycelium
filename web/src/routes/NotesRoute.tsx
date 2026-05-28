@@ -554,9 +554,12 @@ export function NotesRoute() {
   }
 
   // Inherit the note's client tag (always present, added by
-  // create_note) plus its project (carried on Note.project_id, not in
-  // tags) so the derived task lands under the same project/client as
-  // its parent note.
+  // create_note) plus its project tag (also in the junction since
+  // migration 0016) so the derived task lands under the same
+  // project/client as its parent note. ``n.project_id`` is the
+  // derived project-tag id; the guard against duplicates is
+  // belt-and-braces since the project tag should already be in
+  // ``n.tags``.
   function inheritedExtraTagIds(n: Note): string[] {
     const tagIds = (n.tags ?? []).map((g) => g.id)
     if (n.project_id && !tagIds.includes(n.project_id)) tagIds.push(n.project_id)
@@ -873,7 +876,12 @@ export function NotesRoute() {
                 {cKind !== 'conversation' && (
                   <div className="field grow">
                     {t('notes.text')}
-                    <RichEditor value={cText} onChange={setCText} large />
+                    <RichEditor
+                      value={cText}
+                      onChange={setCText}
+                      large
+                      filename={cTitle || 'note'}
+                    />
                   </div>
                 )}
               </div>
@@ -957,6 +965,7 @@ export function NotesRoute() {
                 <NotePartsEditor
                   ref={partsEditorRef}
                   noteId={sel.id}
+                  noteTitle={sel.title ?? eTitle ?? ''}
                   editSession={editSession}
                   onDirtyChange={setPartsDirty}
                 />

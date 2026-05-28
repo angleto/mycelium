@@ -881,6 +881,7 @@ export function TaskDetailRoute() {
               value={description}
               onChange={setDescription}
               imageUploadParent={{ kind: 'task', id: task.id }}
+              filename={task.title}
             />
           </div>
           <div role="tabpanel" hidden={activeTab !== 'checklist'}>

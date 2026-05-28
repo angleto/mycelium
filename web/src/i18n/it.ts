@@ -778,6 +778,11 @@ export const it: Catalog = {
     imageNeedsSave: 'Salva la nota prima di aggiungere immagini.',
     toRaw: 'Modifica come Markdown',
     toWysiwyg: 'Editor ricco',
+    downloadMd: 'Scarica markdown (.md)',
+    downloadMdShort: '.md',
+    exportPdf: 'Esporta PDF',
+    exportPdfShort: '.pdf',
+    exportPdfErr: 'Export PDF: ',
   },
   pomodoro: {
     title: 'Pomodoro',

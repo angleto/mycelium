@@ -29,6 +29,7 @@ from flow_api.routers import (
     dispatch,
     email,
     executors,
+    export,
     garden,
     invoices,
     memory,
@@ -217,6 +218,7 @@ def create_app() -> FastAPI:
     app.include_router(oauth_google.router)
     app.include_router(telegram.router)
     app.include_router(buildinfo.router)
+    app.include_router(export.router)
 
     # MCP streamable-http transport — same process, same DB, same
     # ingress. Authenticated by Authorization: Bearer flow_at_…; the

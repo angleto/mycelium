@@ -47,6 +47,11 @@ function truncate(s: string, n: number): string {
 
 interface Props {
   noteId: string
+  /** Surrounding note title; the parts editor forwards it (suffixed
+   * with the part ord when there are multiple parts) as ``filename``
+   * to each RichEditor so the Download MD / Export PDF actions
+   * produce a recognisable file name. */
+  noteTitle?: string
   editSession?: EditSession
   /** Called whenever the dirty-set of parts changes so the parent
    * modal can enable / disable its single Save button. */
@@ -54,7 +59,10 @@ interface Props {
 }
 
 export const NotePartsEditor = forwardRef<NotePartsEditorHandle, Props>(
-  function NotePartsEditor({ noteId, editSession, onDirtyChange }, ref) {
+  function NotePartsEditor(
+    { noteId, noteTitle, editSession, onDirtyChange },
+    ref,
+  ) {
     const { t } = useTranslation()
     const [parts, setParts] = useState<NotePart[]>([])
     const [err, setErr] = useState('')
@@ -366,6 +374,13 @@ export const NotePartsEditor = forwardRef<NotePartsEditorHandle, Props>(
                       placeholder={t('notes.parts.placeholder', {
                         defaultValue: 'Markdown for this part…',
                       })}
+                      filename={
+                        noteTitle
+                          ? parts.length > 1
+                            ? `${noteTitle} - part ${p.ord}`
+                            : noteTitle
+                          : `note-part-${p.ord}`
+                      }
                     />
                   </div>
                 )}

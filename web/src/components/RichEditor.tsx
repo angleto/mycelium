@@ -19,7 +19,7 @@ import Suggestion, {
   type SuggestionProps,
 } from '@tiptap/suggestion'
 import { InlineMath, BlockMath } from './MarkdownMath'
-import { api, workspaceHeader } from '../api/client'
+import { api, authFetch, workspaceHeader } from '../api/client'
 import { formatMentionHref, type MentionKind } from '../lib/mentions'
 import { useAuthBlobUrl } from '../lib/useAuthBlobUrl'
 import {
@@ -33,6 +33,109 @@ import {
 type MdStorage = { markdown: { getMarkdown: () => string } }
 function getMd(ed: CoreEditor): string {
   return (ed.storage as unknown as MdStorage).markdown.getMarkdown()
+}
+
+// Strip characters that are unsafe or awkward in filenames across
+// macOS / Windows / Linux. Falls back to ``untitled`` for an empty
+// title so the download attribute always carries a usable name.
+function slugifyFilename(name: string | undefined): string {
+  const s = (name ?? '').trim()
+  if (!s) return 'untitled'
+  const FORBIDDEN = /[\\/:*?"<>|]/g
+  const cleaned = s
+    .replace(FORBIDDEN, '-')
+    .replace(/\s+/g, ' ')
+    .trim()
+  return (cleaned || 'untitled').slice(0, 120)
+}
+
+function downloadText(filename: string, mime: string, content: string): void {
+  const blob = new Blob([content], { type: mime })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  a.rel = 'noopener'
+  document.body.append(a)
+  a.click()
+  a.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 0)
+}
+
+// Bearer-auth attachment routes 401 from inside a print iframe (no
+// Authorization header propagates). Fetch each ``/attachments/...``
+// image with the SPA's authFetch and rewrite the src to a data URL
+// so the printable copy is fully self-contained.
+async function inlineAuthImages(html: string): Promise<string> {
+  const tmp = document.createElement('div')
+  tmp.innerHTML = html
+  const imgs = Array.from(tmp.querySelectorAll('img'))
+  await Promise.all(
+    imgs.map(async (img) => {
+      const src = img.getAttribute('src')
+      if (!src || !src.startsWith('/')) return
+      try {
+        const res = await authFetch(src)
+        if (!res.ok) return
+        const blob = await res.blob()
+        const dataUrl = await new Promise<string>((resolve, reject) => {
+          const r = new FileReader()
+          r.onload = () => resolve(String(r.result))
+          r.onerror = () => reject(r.error)
+          r.readAsDataURL(blob)
+        })
+        img.setAttribute('src', dataUrl)
+      } catch {
+        // Leave the original src; the print view will show a broken
+        // image rather than blocking the export.
+      }
+    }),
+  )
+  return tmp.innerHTML
+}
+
+// Server-side WeasyPrint export. The SPA inlines authenticated
+// attachment images so the backend never has to deauthorise itself
+// against /attachments/<id>; the rest (typography, page rules, KaTeX
+// fonts) is handled by the bundled print.css.
+async function exportPdfViaServer(
+  title: string,
+  bodyHtml: string,
+): Promise<void> {
+  const inlined = await inlineAuthImages(bodyHtml)
+  const res = await authFetch('/export/pdf', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title, html: inlined }),
+  })
+  if (!res.ok) {
+    let detail = ''
+    try {
+      const body = (await res.json()) as { detail?: unknown }
+      if (typeof body.detail === 'string') detail = body.detail
+    } catch {
+      detail = await res.text().catch(() => '')
+    }
+    throw new Error(detail || `HTTP ${res.status}`)
+  }
+  const blob = await res.blob()
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filenameFromContentDisposition(
+    res.headers.get('content-disposition'),
+  ) || `${slugifyFilename(title)}.pdf`
+  a.rel = 'noopener'
+  document.body.append(a)
+  a.click()
+  a.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 0)
+}
+
+function filenameFromContentDisposition(header: string | null): string {
+  if (!header) return ''
+  const m = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(header)
+  return m ? decodeURIComponent(m[1]) : ''
 }
 
 // True WYSIWYG (no preview toggle), markdown round-trip via
@@ -239,12 +342,18 @@ export function RichEditor({
   placeholder,
   large,
   imageUploadParent,
+  filename,
 }: {
   value: string
   onChange: (v: string) => void
   placeholder?: string
   large?: boolean
   imageUploadParent?: ImageUploadParent
+  // Base name (no extension) used by the Download / Export-PDF
+  // toolbar actions. Pass the surrounding task or note title; the
+  // editor slugifies it for filesystem safety. Defaults to
+  // ``untitled`` when missing.
+  filename?: string
 }) {
   const { t } = useTranslation()
   // Drop to a plain markdown textarea (paste long blocks, fix a bad
@@ -253,6 +362,8 @@ export function RichEditor({
   const [rawMode, setRawMode] = useState(false)
   const [uploadErr, setUploadErr] = useState<string | null>(null)
   const [uploading, setUploading] = useState(false)
+  const [pdfBusy, setPdfBusy] = useState(false)
+  const [pdfErr, setPdfErr] = useState<string | null>(null)
   const imgInput = useRef<HTMLInputElement>(null)
   const rawRef = useRef<HTMLTextAreaElement>(null)
 
@@ -557,13 +668,52 @@ export function RichEditor({
           {tb('↷', 'editor.redo', () =>
             editor?.chain().focus().redo().run())}
         </span>
-        <button
-          type="button"
-          className="btn--ghost btn--sm"
-          onClick={() => setRawMode((v) => !v)}
-        >
-          {rawMode ? t('editor.toWysiwyg') : t('editor.toRaw')}
-        </button>
+        <span className="rte__actions">
+          <button
+            type="button"
+            className="btn--ghost btn--sm"
+            title={t('editor.downloadMd', {
+              defaultValue: 'Scarica markdown (.md)',
+            })}
+            onClick={() => {
+              const slug = slugifyFilename(filename)
+              downloadText(`${slug}.md`, 'text/markdown;charset=utf-8', value)
+            }}
+          >
+            {t('editor.downloadMdShort', { defaultValue: '.md' })}
+          </button>
+          <button
+            type="button"
+            className="btn--ghost btn--sm"
+            disabled={pdfBusy || !editor}
+            title={t('editor.exportPdf', {
+              defaultValue: 'Esporta PDF',
+            })}
+            onClick={() => {
+              if (!editor) return
+              const html = editor.getHTML()
+              const slug = slugifyFilename(filename)
+              setPdfBusy(true)
+              setPdfErr(null)
+              void exportPdfViaServer(slug, html)
+                .catch((e: unknown) =>
+                  setPdfErr(e instanceof Error ? e.message : String(e)),
+                )
+                .finally(() => setPdfBusy(false))
+            }}
+          >
+            {pdfBusy
+              ? '⏳'
+              : t('editor.exportPdfShort', { defaultValue: '.pdf' })}
+          </button>
+          <button
+            type="button"
+            className="btn--ghost btn--sm"
+            onClick={() => setRawMode((v) => !v)}
+          >
+            {rawMode ? t('editor.toWysiwyg') : t('editor.toRaw')}
+          </button>
+        </span>
       </div>
       <input
         ref={imgInput}
@@ -577,6 +727,12 @@ export function RichEditor({
         }}
       />
       {uploadErr && <p className="err rte__err">{uploadErr}</p>}
+      {pdfErr && (
+        <p className="err rte__err">
+          {t('editor.exportPdfErr', { defaultValue: 'Export PDF: ' })}
+          {pdfErr}
+        </p>
+      )}
       {rawMode ? (
         <textarea
           ref={rawRef}

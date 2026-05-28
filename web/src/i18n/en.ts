@@ -779,6 +779,11 @@ export const en = {
     imageNeedsSave: 'Save the note before adding images.',
     toRaw: 'Edit as Markdown',
     toWysiwyg: 'Rich editor',
+    downloadMd: 'Download markdown (.md)',
+    downloadMdShort: '.md',
+    exportPdf: 'Export PDF',
+    exportPdfShort: '.pdf',
+    exportPdfErr: 'Export PDF: ',
   },
   pomodoro: {
     title: 'Pomodoro',
