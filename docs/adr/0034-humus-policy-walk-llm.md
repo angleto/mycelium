@@ -3,7 +3,7 @@
 Status: Proposed
 Date: 2026-05-27
 Tracks: task `e980e5f9-6028-4ae0-9850-9564c1e8a602`
-Depends on: ADR-0029 (note garden), ADR-0030 (bge-m3), ADR-0032 (`garden_classify`)
+Depends on: ADR-0029 (note garden), ADR-0030 (bge-m3), ADR-0032 (`garden_classify`), ADR-0039 (decomposition pipeline — the humus producer)
 
 ## Context
 
@@ -21,18 +21,22 @@ walk (focused or free wander, see task `5bf31b63`).
 
 ### What qualifies as humus
 
-A node is humus if it carries the `humus` flag (set automatically at
-write time by the decomposition pipeline, task `4a718dc4`) AND
-satisfies one of:
+A node is humus if it carries the `humus_flag` (set at write time by
+the decomposition pipeline, ADR-0039) AND satisfies one of:
 
-- explicit subtype: `note.kind in {distillation, pattern, season}`,
+- explicit subtype: `note.humus_kind in {distillation, pattern,
+  season}` — note this is the dedicated `humus_kind` column (ADR-0039),
+  NOT `note.kind`; a distillation is still a plain `text` note for every
+  other purpose,
 - structural: the node was archived more than 30 days ago AND has
   at least 3 incoming `references` links AND PageRank in the top
-  20% of the workspace.
+  20% of the workspace. Tie-break for the top-20% cut is defined in
+  ADR-0039 (higher PageRank, then older archival date, then id).
 
 The flag is materialised on a `humus_flag` column on `notes` so
-retrieval doesn't recompute the predicate. The decomposition
-pipeline sets it; users can toggle it manually (rare).
+retrieval doesn't recompute the predicate. The decomposition pipeline
+sets the explicit case at write time; the nightly worker materialises
+the structural case; users can toggle it manually (rare).
 
 ### When humus enters context
 
@@ -101,9 +105,14 @@ separately from live notes, so the user can audit.
   reason about and to debug; the explicit cap is simpler and the
   thermostat already adjusts for under-use.
 
-## Open question
+## Resolved questions
 
-Should humus be visible in `garden_classify` as a suggestion source
-(i.e., "here's a humus node you might want to link to")? Probably
-yes, behind a `kind=links_humus` enum on the signal list. Defer to
-the next ADR.
+**Should humus be visible in `garden_classify` as a suggestion source?**
+Yes. Humus participates in the `links` signal of ADR-0032 like any
+other node, but a candidate surfaced *because* it is humus is tagged
+with provenance `humus` (the same leaf marker used in the walk), so the
+UI can show "a long-fermented atom you might link to" and the user can
+tell exploitation of fresh links from resurfacing of humus. No separate
+signal enum is needed — provenance on the existing `links` signal is
+enough, and it keeps the anti-monoculture rescoring (ADR-0033) operating
+over one unified candidate list rather than two.

@@ -134,9 +134,14 @@ the user picks "don't suggest again" explicitly, never silently.
   model crosses the tenant boundary and reproduces the central-
   authority anti-pattern the manifesto refuses.
 
-## Open question
+## Resolved questions
 
-Should the audit panel offer a "diff me against the average user in
-my workspace" mode for shared workspaces? It would help calibrate
-"is the system biased, or is it me?" — but the privacy story is
-delicate. Defer.
+**A "diff me against the average user in my workspace" mode for shared
+workspaces?** No, for the same reason ADR-0035 rejects cross-workspace
+benchmarks: the privacy story does not survive even within one
+workspace. "The average member" reveals aggregate behaviour of named
+colleagues (a 2-person workspace makes the average a thin disguise for
+the other person's priors). The calibration need ("is it the system or
+me?") is served instead by the existing reject-hotspot view and the
+drift bar chart, both of which are about the user's own history, not a
+comparison to others.

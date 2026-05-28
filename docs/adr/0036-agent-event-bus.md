@@ -132,9 +132,14 @@ External MCP agents subscribe via a future
   adjudicator's job is already to serialise the *meaningful*
   propose-commit edges.
 
-## Open question
+## Resolved questions
 
-Should `read` events be persisted (so we can audit "agent X
-classified this node yesterday")? Lean yes for agents, no for
-humans (PII / chilling effect). Defer to ADR-0037's persistence
-schema.
+**Should `read` events be persisted?** Persist `read` events only for
+non-human actors (`actor_kind in ('agent','system')`); never for
+`actor_kind='human'`. Agent reads are an audit need ("agent X
+classified this node yesterday") and carry no chilling effect; human
+reads are PII-adjacent surveillance with no offsetting benefit. The
+outbox trigger drops human `read` events before insert. Agent `read`
+rows follow the same retention as the rest of the outbox (no special
+TTL); ADR-0037 reads commit/reject only, so this choice does not
+affect the learning loop.

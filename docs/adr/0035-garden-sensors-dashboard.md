@@ -3,7 +3,7 @@
 Status: Proposed
 Date: 2026-05-27
 Tracks: task `56d6ee64-4471-4c3b-95d3-e1518cfd7bb4`
-Depends on: ADR-0032 (`garden_classify`), ADR-0037 (online learning loop)
+Depends on: ADR-0032 (`garden_classify`), ADR-0037 (online learning loop), ADR-0039 (decomposition pipeline — source of the `fungal_lag` event)
 
 ## Context
 
@@ -29,11 +29,17 @@ None of them is a vanity metric (no "you wrote N notes this week").
    suggestion). Lower is healthier mycelium.
 3. **`recall_at_k`** — for queries whose user clicked a result
    inside the top-K, the fraction whose clicked node was the top-1
-   prediction of a held-out re-rank. Window: 30d. Computed on real
-   queries only; never on synthetic probes.
+   prediction of a held-out re-rank. Window: 30d. "Held-out" means
+   the re-rank is recomputed with the clicked query excluded from any
+   learning signal, so the metric never trains on its own answer.
+   "Real queries only": rows from the actual search/walk logs, with
+   the synthetic golden-fixture probes (the test corpus) excluded by
+   an `is_probe` flag. Computed in the nightly job, not per query.
 4. **`tag_entropy_local`** — Shannon entropy of generic tags in
-   each node's neighbourhood, aggregated per project. Time-series
-   per project + global. Floor ≥ 1.2.
+   each node's neighbourhood, aggregated per project. "Generic" =
+   `tag.kind='generic'` only; client/project/system tags are excluded
+   (they are organisational, not topical, and would flatten the
+   signal). Time-series per project + global. Floor ≥ 1.2.
 5. **`leiden_modularity`** — global modularity score on the
    weighted graph. Tracked as a time-series; the *direction* matters
    more than the absolute value.
@@ -102,10 +108,11 @@ sparkline.
 - **Real-time push updates.** The metrics are smoothed over days;
   pushing them live would just add noise.
 
-## Open question
+## Resolved questions
 
-Whether the dashboard should reveal *per-other-workspace* anonymised
-benchmarks ("the median garden has X"). Probably no, for two
-reasons: cross-tenant data flow is a hard line, and the median
-garden does not exist (the variance across users is the whole
-product). Defer.
+**Per-other-workspace anonymised benchmarks ("the median garden has
+X")?** No. Two reasons, either sufficient: cross-tenant data flow is a
+hard line (ADR-0007), and the "median garden" is a fiction — the
+variance across users is the whole product, so a benchmark would
+mislead more than it informs. The dashboard compares a workspace only
+against its own history and its own floors.

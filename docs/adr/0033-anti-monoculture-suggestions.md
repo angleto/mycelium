@@ -103,8 +103,15 @@ notified, not asked. The dashboard exposes a manual override.
   *propose* diverse candidates in the first place. Both layers are
   needed.
 
-## Open question
+## Resolved questions
 
-Where to expose lambda / ε / thermostat thresholds: per-workspace
-settings page, or buried under a "garden tuning" advanced panel? Lean
-advanced panel — these are knobs the everyday user should never see.
+**Where to expose lambda / ε / thermostat thresholds?** Under an
+advanced "garden tuning" panel, not the main workspace settings. These
+are knobs the everyday user should never need; surfacing them in the
+primary settings invites cargo-cult tuning that fights the
+thermostat's own adaptation. The panel lives behind a "show advanced"
+disclosure, ships with the documented defaults (λ=0.3, ε=0.10, H floor
+1.2), and a one-click "reset to defaults". The M5 thermostat keeps an
+auto-override even when the user has set a manual ε, but the panel
+shows when the thermostat is currently overriding so the reading is
+honest.

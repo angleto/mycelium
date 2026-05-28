@@ -47,3 +47,4 @@ Format: Status, Context, Decision, Consequences, Alternatives rejected.
 - [0036 Event bus for multi-agent coordination on the graph](0036-agent-event-bus.md)
 - [0037 Online learning loop on garden suggestions](0037-online-learning-loop.md)
 - [0038 UUID-prefix entity resolver (`/lookup/{prefix}`)](0038-uuid-prefix-resolver.md)
+- [0039 Fungal decomposition pipeline (humus producer)](0039-fungal-decomposition-pipeline.md)
