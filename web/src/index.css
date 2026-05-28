@@ -1630,6 +1630,51 @@ button.btn--danger:hover {
   font-size: 0.85em;
   margin-left: 0.1rem;
 }
+/* Prefix mention chip (task b9924a0d): backticked UUID-prefix in note
+   markdown resolves to a clickable chip with a kind glyph and the
+   entity title. Pending state keeps a code-like look so the layout
+   doesn't reflow when the lookup resolves; unresolved (no entity in
+   the workspace) stays as a muted code so the reader still sees the
+   prefix instead of empty space. */
+.md-prefix {
+  font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 0.92em;
+  background: var(--surface-2);
+  padding: 0.05rem 0.35rem;
+  border-radius: 4px;
+}
+.md-prefix--pending {
+  color: var(--muted);
+  opacity: 0.8;
+}
+.md-prefix--unresolved {
+  color: var(--muted);
+  text-decoration: line-through dotted;
+  text-decoration-color: var(--muted);
+}
+.md-prefix-chip .chip__glyph {
+  font-size: 0.85em;
+  margin-right: 0.2rem;
+  opacity: 0.8;
+}
+.md-prefix-chip .chip__more {
+  color: var(--muted);
+  font-size: 0.85em;
+  margin-left: 0.15rem;
+}
+.route-not-found,
+.route-disambig,
+.route-loading {
+  padding: 1.5rem 2rem;
+  max-width: 720px;
+}
+.route-disambig__list {
+  list-style: none;
+  padding: 0;
+  display: grid;
+  gap: 0.4rem;
+  margin-top: 0.8rem;
+}
 /* GFM tables: render them as readable tables with subtle borders.
    ``.md`` is the wrapper produced by MarkdownView (the single
    markdown renderer in the codebase). */

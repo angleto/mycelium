@@ -30,6 +30,7 @@ import { InvoicesRoute } from './routes/InvoicesRoute'
 import { NotificationsRoute } from './routes/NotificationsRoute'
 import { TagManagerRoute } from './routes/TagManagerRoute'
 import { SettingsRoute } from './routes/SettingsRoute'
+import { PrefixOrUuid, PrefixResolver } from './routes/PrefixResolver'
 
 function App() {
   return (
@@ -47,7 +48,15 @@ function App() {
           <Route element={<AppShell />}>
             <Route path="/" element={<Navigate to="/notes" replace />} />
             <Route path="/tasks" element={<TasksRoute />} />
-            <Route path="/tasks/:id" element={<TaskDetailRoute />} />
+            <Route
+              path="/tasks/:id"
+              element={
+                <PrefixOrUuid kind="task">
+                  <TaskDetailRoute />
+                </PrefixOrUuid>
+              }
+            />
+            <Route path="/t/:prefix" element={<PrefixResolver kind="task" />} />
             <Route path="/trash" element={<TrashRoute />} />
             <Route path="/clients" element={<ClientsProjectsRoute />} />
             <Route path="/workflows" element={<WorkflowsRoute />} />
@@ -61,7 +70,15 @@ function App() {
             <Route path="/billing" element={<BillingRoute />} />
             <Route path="/memory" element={<MemoryRoute />} />
             <Route path="/notes" element={<NotesRoute />} />
-            <Route path="/notes/:id" element={<NotesRoute />} />
+            <Route
+              path="/notes/:id"
+              element={
+                <PrefixOrUuid kind="note">
+                  <NotesRoute />
+                </PrefixOrUuid>
+              }
+            />
+            <Route path="/n/:prefix" element={<PrefixResolver kind="note" />} />
             <Route path="/garden" element={<GardenRoute />} />
             <Route path="/invoices" element={<InvoicesRoute />} />
             <Route path="/notifications" element={<NotificationsRoute />} />

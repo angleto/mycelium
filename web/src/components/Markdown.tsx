@@ -13,6 +13,8 @@ import {
   getCachedTaskMention,
   type TaskMentionInfo,
 } from '../lib/taskMentionCache'
+import { isPrefixCandidate } from '../lib/prefixLookup'
+import { PrefixMentionChip } from './PrefixMentionChip'
 
 // Read-side markdown — the only renderer in the codebase, used by
 // /notes turns, /garden plant detail, etc. Links whose href is the
@@ -120,6 +122,23 @@ const components: Components = {
         alt={strOrUndef(alt)}
         title={strOrUndef(title)}
       />
+    )
+  },
+  // Inline ``code`` whose text matches a UUID prefix (4-36 hex, dashes
+  // ok) is turned into a clickable mention chip. The convention in
+  // roadmap notes is `91cf6aaa`-style backticked prefixes; without
+  // this hook they render as dead literals. Block code (fenced /
+  // language-tagged) is untouched because react-markdown passes a
+  // ``className`` like ``language-foo``; we only intercept when there
+  // is no className and children is a single string node.
+  code({ className, children, ...rest }) {
+    if (!className && typeof children === 'string' && isPrefixCandidate(children)) {
+      return <PrefixMentionChip prefix={children} />
+    }
+    return (
+      <code className={className} {...rest}>
+        {children}
+      </code>
     )
   },
 }
