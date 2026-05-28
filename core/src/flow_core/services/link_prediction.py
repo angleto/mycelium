@@ -67,11 +67,7 @@ async def suggest_links_for_note(
     queries are RLS-scoped). Empty list when the workspace has
     fewer than 2 notes or the source has no signal.
     """
-    note_rows = (
-        await session.execute(
-            select(Note.id).where(Note.org_id == org_id)
-        )
-    ).all()
+    note_rows = (await session.execute(select(Note.id).where(Note.org_id == org_id))).all()
     all_ids: set[uuid.UUID] = {r[0] for r in note_rows}
     if note_id not in all_ids or len(all_ids) < 2:
         return []
@@ -105,9 +101,7 @@ async def suggest_links_for_note(
             tag_deg[tid] += 1
     src_tags = note_tags.get(note_id, set())
     # PPR seeded at the source for the structural signal.
-    ppr = await graph_svc.compute_personalized_pagerank(
-        session, org_id=org_id, seed_ids=[note_id]
-    )
+    ppr = await graph_svc.compute_personalized_pagerank(session, org_id=org_id, seed_ids=[note_id])
     ppr_max = max(ppr.values()) if ppr else 1.0
     ppr_max = ppr_max if ppr_max > 0 else 1.0
     # Degree per node (manual links only) for the damping factor.

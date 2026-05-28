@@ -433,7 +433,13 @@ export function TasksRoute() {
       // Skip the loadTasks() round-trip: we're leaving /tasks and the
       // detail route doesn't depend on the list cache. Navigation lands
       // straight on the editable surface (description, tags, assignee).
-      navigate(`/tasks/${data.id}`)
+      // Pass the freshly-created TaskOut via router state so the detail
+      // route hydrates immediately and skips the GET /tasks/{id}: the
+      // GET sometimes raced the create commit and surfaced "Task not
+      // found" until the user refreshed. The other panels still load
+      // their own data (states, tags, deps, reminders, notes,
+      // relations) — only the task itself is hydrated from state.
+      navigate(`/tasks/${data.id}`, { state: { task: data } })
       return
     }
     await loadTasks()

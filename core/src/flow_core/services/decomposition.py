@@ -84,9 +84,7 @@ async def distill_note(
         # The previous distillation is still authoritative. The model
         # id is unknown from this row alone (audit log carries it);
         # callers shouldn't rely on this branch's model_id.
-        return DistillationResult(
-            distilled_note_id=existing_row[0], model_id="cached"
-        )
+        return DistillationResult(distilled_note_id=existing_row[0], model_id="cached")
     body = await notes_svc.get_body(session, note_id=note_id)
     if not body or not body.strip():
         raise DomainError(MessageCode.DOMAIN_ERROR)
@@ -97,6 +95,9 @@ async def distill_note(
     )
     title = (source.title or "").strip()
     distill_title = f"Distillation · {title or 'untitled'}"[:300]
+    # Migration 0016: the source's project lives in the junction;
+    # carry it over so the distillation lands in the same project.
+    source_project_id = await notes_svc.project_tag_for_note(session, note_id=source.id)
     distilled = await notes_svc.create_note(
         session,
         org_id=org_id,
@@ -104,7 +105,7 @@ async def distill_note(
         kind=NoteKind.text,
         title=distill_title,
         text=res.text,
-        project_id=source.project_id,
+        project_id=source_project_id,
     )
     distilled.humus_kind = "distillation"
     distilled.humus_flag = True
@@ -137,9 +138,7 @@ async def distill_note(
         )
     )
     await session.flush()
-    return DistillationResult(
-        distilled_note_id=distilled.id, model_id=res.model_id
-    )
+    return DistillationResult(distilled_note_id=distilled.id, model_id=res.model_id)
 
 
 __all__ = ["DistillationResult", "distill_note"]

@@ -233,4 +233,3 @@ async def test_linked_task_count_includes_all_four_kinds() -> None:
         # (here only the one ``derived_from`` task), so the SPA can
         # still show concrete task titles for that subset.
         assert len(match["derived_task_ids"]) == 1
-

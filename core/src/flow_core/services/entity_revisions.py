@@ -129,7 +129,6 @@ _NOTE_SNAPSHOT_FIELDS: tuple[str, ...] = (
     "status",
     "maturity",
     "kind",
-    "project_id",
     "is_archived",
     "deleted_at",
     "audio_ref",
@@ -208,9 +207,7 @@ async def snapshot_note(session: AsyncSession, note: Note) -> dict[str, Any]:
     payload: dict[str, Any] = {
         field: _json_safe(getattr(note, field)) for field in _NOTE_SNAPSHOT_ROW_FIELDS
     }
-    payload["transcript"] = _json_safe(
-        await _get_body(session, note_id=note.id)
-    )
+    payload["transcript"] = _json_safe(await _get_body(session, note_id=note.id))
     payload["tags"] = await _tags_for_note(session, note_id=note.id)
     return payload
 

@@ -66,9 +66,7 @@ def _build_user_prompt(rev: EntityRevision) -> str:
 
 async def _all_workspaces() -> list[uuid.UUID]:
     async with admin_session() as s:
-        rows = (
-            await s.execute(select(Organization).order_by(Organization.id))
-        ).scalars().all()
+        rows = (await s.execute(select(Organization).order_by(Organization.id))).scalars().all()
         return [o.id for o in sorted(rows, key=lambda o: str(o.id))]
 
 
@@ -117,9 +115,7 @@ async def _summarize_org(org_id: uuid.UUID, owner_id: uuid.UUID, batch: int) -> 
                 )
                 filled += 1
             except Exception:
-                _log.exception(
-                    "revisions summary failed org=%s rev=%s", org_id, rev.id
-                )
+                _log.exception("revisions summary failed org=%s rev=%s", org_id, rev.id)
     return filled
 
 

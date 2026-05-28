@@ -97,8 +97,7 @@ class LocalSTT:
             from faster_whisper import WhisperModel  # type: ignore[import-not-found]
         except ImportError as exc:  # pragma: no cover - optional extra
             raise RuntimeError(
-                "LocalSTT requires the 'faster-whisper' extra "
-                "(pip install faster-whisper)"
+                "LocalSTT requires the 'faster-whisper' extra (pip install faster-whisper)"
             ) from exc
         import os
 
@@ -141,6 +140,7 @@ class LocalSTT:
             tmp.write(audio_bytes)
             tmp_path = tmp.name
         try:
+
             def _run() -> str:
                 model = self._load_model()
                 # faster-whisper returns a (segments, info) tuple; we

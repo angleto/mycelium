@@ -124,9 +124,7 @@ async def garden_walk(
     return GardenWalkOut(seed=seed, mode=mode, steps=steps)
 
 
-@router.get(
-    "/link-suggestions/{note_id}", response_model=GardenLinkSuggestionsOut
-)
+@router.get("/link-suggestions/{note_id}", response_model=GardenLinkSuggestionsOut)
 async def garden_link_suggestions(
     note_id: uuid.UUID,
     ctx: Annotated[TenantCtx, Depends(tenant_ctx)],

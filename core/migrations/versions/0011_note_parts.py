@@ -109,8 +109,7 @@ def upgrade() -> None:
     op.execute("ALTER TABLE note_part ENABLE ROW LEVEL SECURITY")
     op.execute("ALTER TABLE note_part FORCE ROW LEVEL SECURITY")
     op.execute(
-        f"CREATE POLICY p_note_part ON note_part "
-        f"USING ({_ORG_PRED}) WITH CHECK ({_ORG_PRED})"
+        f"CREATE POLICY p_note_part ON note_part USING ({_ORG_PRED}) WITH CHECK ({_ORG_PRED})"
     )
     op.execute("GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE note_part TO flow_app")
 
@@ -166,9 +165,7 @@ def upgrade() -> None:
         f"      AND np.{_ORG_PRED}"
         "))"
     )
-    op.execute(
-        "GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE note_part_ui_state TO flow_app"
-    )
+    op.execute("GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE note_part_ui_state TO flow_app")
 
     # --- blob_sources.part_id ---------------------------------------
     # Nullable because (a) blobs whose source is not a note (tasks,
@@ -246,9 +243,7 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.execute("DROP INDEX IF EXISTS ix_blob_sources_part_id")
-    op.drop_constraint(
-        "fk_blob_sources_part_id_note_part", "blob_sources", type_="foreignkey"
-    )
+    op.drop_constraint("fk_blob_sources_part_id_note_part", "blob_sources", type_="foreignkey")
     op.drop_column("blob_sources", "part_id")
 
     op.execute("DROP POLICY IF EXISTS p_note_part_ui_state ON note_part_ui_state")
@@ -257,7 +252,5 @@ def downgrade() -> None:
     op.execute("DROP POLICY IF EXISTS p_note_part ON note_part")
     op.drop_index("ix_note_part_org_id", table_name="note_part")
     op.drop_index("ix_note_part_note_id", table_name="note_part")
-    op.execute(
-        "ALTER TABLE note_part DROP CONSTRAINT IF EXISTS uq_note_part_note_id_ord"
-    )
+    op.execute("ALTER TABLE note_part DROP CONSTRAINT IF EXISTS uq_note_part_note_id_ord")
     op.drop_table("note_part")

@@ -59,12 +59,16 @@ async def list_parts(
     """Return the parts of a note in ``ord`` order. Member-level
     (RLS already scopes the SELECT to the tenant)."""
     rows = (
-        await session.execute(
-            select(NotePart)
-            .where(NotePart.note_id == note_id, NotePart.org_id == org_id)
-            .order_by(NotePart.ord, NotePart.id)
+        (
+            await session.execute(
+                select(NotePart)
+                .where(NotePart.note_id == note_id, NotePart.org_id == org_id)
+                .order_by(NotePart.ord, NotePart.id)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     return list(rows)
 
 
@@ -79,37 +83,35 @@ async def parts_by_note(
     if not note_ids:
         return {}
     rows = (
-        await session.execute(
-            select(NotePart)
-            .where(
-                NotePart.org_id == org_id,
-                NotePart.note_id.in_(list(note_ids)),
+        (
+            await session.execute(
+                select(NotePart)
+                .where(
+                    NotePart.org_id == org_id,
+                    NotePart.note_id.in_(list(note_ids)),
+                )
+                .order_by(NotePart.note_id, NotePart.ord, NotePart.id)
             )
-            .order_by(NotePart.note_id, NotePart.ord, NotePart.id)
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     out: dict[uuid.UUID, list[NotePart]] = {}
     for part in rows:
         out.setdefault(part.note_id, []).append(part)
     return out
 
 
-async def _get_note_in_org(
-    session: AsyncSession, *, org_id: uuid.UUID, note_id: uuid.UUID
-) -> Note:
+async def _get_note_in_org(session: AsyncSession, *, org_id: uuid.UUID, note_id: uuid.UUID) -> Note:
     note = (
-        await session.execute(
-            select(Note).where(Note.id == note_id, Note.org_id == org_id)
-        )
+        await session.execute(select(Note).where(Note.id == note_id, Note.org_id == org_id))
     ).scalar_one_or_none()
     if note is None:
         raise NotFoundError(MessageCode.NOTE_NOT_FOUND)
     return note
 
 
-async def _get_part(
-    session: AsyncSession, *, org_id: uuid.UUID, part_id: uuid.UUID
-) -> NotePart:
+async def _get_part(session: AsyncSession, *, org_id: uuid.UUID, part_id: uuid.UUID) -> NotePart:
     part = (
         await session.execute(
             select(NotePart).where(NotePart.id == part_id, NotePart.org_id == org_id)
@@ -127,6 +129,7 @@ async def create_part(
     actor_id: uuid.UUID,
     note_id: uuid.UUID,
     body: str,
+    title: str | None = None,
     lang: str | None = None,
     ord: int | None = None,
 ) -> NotePart:
@@ -139,9 +142,7 @@ async def create_part(
     await _get_note_in_org(session, org_id=org_id, note_id=note_id)
     if ord is None:
         max_ord = (
-            await session.execute(
-                select(func.max(NotePart.ord)).where(NotePart.note_id == note_id)
-            )
+            await session.execute(select(func.max(NotePart.ord)).where(NotePart.note_id == note_id))
         ).scalar()
         target_ord = 0 if max_ord is None else int(max_ord) + 1
     else:
@@ -163,6 +164,7 @@ async def create_part(
         org_id=org_id,
         note_id=note_id,
         ord=target_ord,
+        title=title,
         body=body,
         lang=lang,
     )
@@ -188,6 +190,7 @@ async def update_part(
     part_id: uuid.UUID,
     expected_version: int,
     body: str | None = None,
+    title: str | None | _Unset = _UNSET,
     lang: str | None | _Unset = _UNSET,
     channel: str = "api",
     edit_session_id: str | None = None,
@@ -207,6 +210,8 @@ async def update_part(
     values: dict[str, Any] = {}
     if body is not None:
         values["body"] = body
+    if not isinstance(title, _Unset):
+        values["title"] = title
     if not isinstance(lang, _Unset):
         values["lang"] = lang
     if not values:
@@ -234,7 +239,11 @@ async def update_part(
         note_id=part.note_id,
         version_from=note.version,
         version_to=note.version,
-        changed_fields=["parts.body" if "body" in values else "parts.lang"],
+        changed_fields=[
+            "parts.body"
+            if "body" in values
+            else ("parts.title" if "title" in values else "parts.lang")
+        ],
         channel=channel,
         edit_session_id=edit_session_id,
     )
@@ -262,11 +271,7 @@ async def delete_part(
     is an explicit operation."""
     await require_role(session, org_id, actor_id, Role.member)
     part = await _get_part(session, org_id=org_id, part_id=part_id)
-    await session.execute(
-        delete(NotePart).where(
-            NotePart.id == part_id, NotePart.org_id == org_id
-        )
-    )
+    await session.execute(delete(NotePart).where(NotePart.id == part_id, NotePart.org_id == org_id))
     await session.flush()
     await audit.log(
         session,
@@ -428,12 +433,8 @@ async def merge_notes(
     if target.deleted_at is not None:
         raise DomainError(MessageCode.DOMAIN_ERROR)
 
-    source_parts = await list_parts(
-        session, org_id=org_id, note_id=source_note_id
-    )
-    target_parts = await list_parts(
-        session, org_id=org_id, note_id=target_note_id
-    )
+    source_parts = await list_parts(session, org_id=org_id, note_id=source_note_id)
+    target_parts = await list_parts(session, org_id=org_id, note_id=target_note_id)
     next_ord = (target_parts[-1].ord + 1) if target_parts else 0
     # Move each source part to the target: keep the body / lang, reset
     # ``ord`` to land at the tail, stamp ``merged_from_note_id``.
@@ -491,9 +492,7 @@ async def merge_notes(
     # Refresh the target so the caller sees the post-merge state
     # (e.g. updated_at, version) consistent with what hit the DB.
     return (
-        await session.execute(
-            select(Note).where(Note.id == target_note_id, Note.org_id == org_id)
-        )
+        await session.execute(select(Note).where(Note.id == target_note_id, Note.org_id == org_id))
     ).scalar_one()
 
 

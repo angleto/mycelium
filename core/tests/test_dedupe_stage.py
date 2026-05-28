@@ -107,9 +107,7 @@ async def test_dedupe_progressive_drops_legacy_when_real_chunks_present() -> Non
     real_high = _cand_with_source(note_id, chunk_index=2, score=0.6)
     # Order them with the legacy first to verify it doesn't sneak in
     # just because it has the top RRF score.
-    out = await DedupeBySourceStage().run(
-        "q", _ctx_stub(), [legacy, real_high, real_low]
-    )
+    out = await DedupeBySourceStage().run("q", _ctx_stub(), [legacy, real_high, real_low])
     assert len(out) == 1
     assert out[0] is real_high
     assert out[0].chunk_index == 2

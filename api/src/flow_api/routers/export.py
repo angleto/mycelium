@@ -63,11 +63,7 @@ def _wrap_html(title: str, body_html: str) -> str:
     is a styled cover heading that also feeds ``string-set: doc-title``
     so subsequent pages can reprint it in the running header.
     """
-    safe_title = (
-        title.replace("&", "&amp;")
-        .replace("<", "&lt;")
-        .replace(">", "&gt;")
-    )
+    safe_title = title.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
     return (
         "<!doctype html>"
         '<html lang="en"><head><meta charset="utf-8"/>'

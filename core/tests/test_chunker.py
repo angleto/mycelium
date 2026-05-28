@@ -145,7 +145,5 @@ def test_pick_chunker_note_transcribe_returns_note_turn() -> None:
     (turns), not size-based."""
     out_short = pick_chunker(namespace="note_transcribe", text="user: hi")
     assert isinstance(out_short, NoteTurnChunker)
-    out_long = pick_chunker(
-        namespace="note_transcribe", text=" ".join(["word"] * 5000)
-    )
+    out_long = pick_chunker(namespace="note_transcribe", text=" ".join(["word"] * 5000))
     assert isinstance(out_long, NoteTurnChunker)

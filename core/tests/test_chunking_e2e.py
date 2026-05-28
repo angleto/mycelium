@@ -20,13 +20,13 @@ import uuid
 from decimal import Decimal
 
 from _fake_embedder import FakeEmbedder
+from sqlalchemy import select
 
 from flow_core.db import admin_session, tenant_session
 from flow_core.models.memory_blob import BlobSource
 from flow_core.services import billing
 from flow_core.services import memory as mem
 from flow_core.services.auth import signup
-from sqlalchemy import select
 
 _FAKE = FakeEmbedder()
 
@@ -124,8 +124,7 @@ async def test_long_note_chunked_top_hit_carries_correct_chunk_index() -> None:
         assert hits, "marker-bearing chunks must surface for the query"
         top = hits[0]
         assert top.chunk_index >= 1, (
-            f"top chunk_index must point to the marker paragraph "
-            f"(>=1), got {top.chunk_index}"
+            f"top chunk_index must point to the marker paragraph (>=1), got {top.chunk_index}"
         )
 
 

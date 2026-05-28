@@ -387,10 +387,9 @@ async def test_rechunk_endpoint_re_indexes_legacy_long_note(
     re-read the source's BlobSource rows from the public surface
     (the search hits) to confirm the new chunked indexing took.
     """
+    from flow_core.bootstrap_admin import ensure_admin
     from flow_core.services import memory as mem_svc
     from flow_core.services.chunker import WholeChunker
-
-    from flow_core.bootstrap_admin import ensure_admin
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://t") as c:
@@ -403,11 +402,7 @@ async def test_rechunk_endpoint_re_indexes_legacy_long_note(
         login = (
             await c.post("/auth/login", json={"email": admin_email, "password": admin_pw})
         ).json()
-        me = (
-            await c.get(
-                "/auth/me", headers={"Authorization": f"Bearer {login['token']}"}
-            )
-        ).json()
+        me = (await c.get("/auth/me", headers={"Authorization": f"Bearer {login['token']}"})).json()
         orgs = (
             await c.get(
                 "/workspaces",

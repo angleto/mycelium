@@ -26,6 +26,7 @@ from flow_core.models.invoice import (
     InvoiceKind,
 )
 from flow_core.models.note import Note, NoteKind, NoteStatus
+from flow_core.models.note_tag import NoteTag
 from flow_core.models.tag import Tag
 from flow_core.models.task import Task
 from flow_core.services import tasks as tasks_svc
@@ -85,17 +86,17 @@ async def test_purge_project_wipes_subgraph() -> None:
             tag_ids=[pr.id],
         )
         task_id = t.id
-        # A note scoped to the project (project_id is a hard boundary,
-        # not a FK, so purge enumerates explicitly).
-        s.add(
-            Note(
-                org_id=org,
-                project_id=pr.id,
-                kind=NoteKind.text,
-                status=NoteStatus.captured,
-                title="Note in project",
-            )
+        # A note scoped to the project (migration 0016: the project
+        # tag in note_tags is the hard boundary, mirroring task_tags).
+        n = Note(
+            org_id=org,
+            kind=NoteKind.text,
+            status=NoteStatus.captured,
+            title="Note in project",
         )
+        s.add(n)
+        await s.flush()
+        s.add(NoteTag(org_id=org, note_id=n.id, tag_id=pr.id))
         await s.flush()
     async with tenant_session(str(org), str(user)) as s:
         await _archive(s, org_id=org, tag_id=pr.id)
@@ -106,7 +107,17 @@ async def test_purge_project_wipes_subgraph() -> None:
         assert tag_row is None
         task_row = (await s.execute(select(Task).where(Task.id == task_id))).scalar_one_or_none()
         assert task_row is None
-        notes_left = (await s.execute(select(Note).where(Note.project_id == pr.id))).scalars().all()
+        notes_left = (
+            (
+                await s.execute(
+                    select(Note).where(
+                        Note.id.in_(select(NoteTag.note_id).where(NoteTag.tag_id == pr.id))
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
         assert notes_left == []
 
 

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { api, errMessage, workspaceHeader } from '../api/client'
 import { RichEditor } from '../components/RichEditor'
@@ -34,6 +34,17 @@ export function TaskDetailRoute() {
   const { t } = useTranslation()
   const navigate = useNavigate()
   const { id = '' } = useParams()
+  // "Add & Open" from TasksRoute hands us the freshly-created TaskOut
+  // via router state. We hydrate from it on the very first render so
+  // the user lands on the editable surface without a GET round-trip
+  // (and without exposure to the create-commit / read race that
+  // surfaced "Task not found" intermittently). Cleared after consumption
+  // so a navigation away + back via deep link still triggers GET.
+  const location = useLocation()
+  const seedTask = (location.state as { task?: Task } | null)?.task
+  const seededTaskRef = useRef<Task | null>(
+    seedTask && seedTask.id === id ? seedTask : null,
+  )
   const [task, setTask] = useState<Task | null>(null)
   const [states, setStates] = useState<State[]>([])
   const [tags, setTags] = useState<Tag[]>([])
@@ -188,10 +199,36 @@ export function TaskDetailRoute() {
 
   useEffect(() => {
     let active = true
+    // Hydrate the task surface immediately from the navigation seed
+    // (set by TasksRoute's "Add & Open"). The seed is the canonical
+    // TaskOut the create endpoint returned, so we skip the GET on the
+    // task itself — the GET sometimes raced the create commit and
+    // surfaced "Task not found". Drop the ref so a later remount via
+    // deep link refetches normally.
+    const seed = seededTaskRef.current
+    if (seed) {
+      apply(seed)
+      seededTaskRef.current = null
+      // Drop the seed from history.state so back/forward doesn't
+      // resurface a stale snapshot if the user edits then navigates
+      // back. The URL stays put.
+      navigate(location.pathname + location.search, {
+        replace: true,
+        state: null,
+      })
+    }
     void (async () => {
       const h = workspaceHeader()
+      // When we have the seed we skip the task GET; otherwise it goes
+      // in the Promise.all bundle as before. Modelled with a typed
+      // sentinel so the tuple shape stays stable.
+      const tkPromise = seed
+        ? Promise.resolve(null)
+        : api.GET('/tasks/{task_id}', {
+            params: { header: h, path: { task_id: id } },
+          })
       const [tk, st, tg, all, dp, ws, rm, nt, rl] = await Promise.all([
-        api.GET('/tasks/{task_id}', { params: { header: h, path: { task_id: id } } }),
+        tkPromise,
         api.GET('/tasks/{task_id}/states', {
           params: { header: h, path: { task_id: id } },
         }),
@@ -206,8 +243,10 @@ export function TaskDetailRoute() {
         api.GET('/task-relations', { params: { header: h, query: { task_id: id } } }),
       ])
       if (!active) return
-      if (tk.data) apply(tk.data)
-      else setErr(errMessage(tk.error))
+      if (tk) {
+        if (tk.data) apply(tk.data)
+        else setErr(errMessage(tk.error))
+      }
       if (st.data) setStates(st.data)
       if (tg.data) setTags(tg.data)
       if (all.data) setAllTasks(all.data)
@@ -225,6 +264,10 @@ export function TaskDetailRoute() {
     return () => {
       active = false
     }
+    // ``location.*`` and ``navigate`` are only used to clear the
+    // one-shot seed; they're stable identities and listing them would
+    // re-run the whole mount fetch on every URL/state change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, apply])
 
   async function onSave(e: FormEvent) {

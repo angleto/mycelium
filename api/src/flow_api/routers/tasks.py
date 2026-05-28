@@ -171,9 +171,15 @@ def _note_out(
     # docs/adr/0029 P3: task_id is derived from the typed link table.
     # Phase 6 final: ``transcript`` is derived from note_part(ord=0)+
     # at the caller, not from a Note column.
+    # Migration 0016: ``project_id`` is derived from the project-kind
+    # tag in ``tags`` (junction is the source of truth).
+    project_id = next(
+        (t.id for t in (tags or []) if getattr(t.kind, "value", t.kind) == "project"),
+        None,
+    )
     return NoteOut(
         id=n.id,
-        project_id=n.project_id,
+        project_id=project_id,
         task_id=primary_task_id,
         kind=n.kind,
         status=n.status,

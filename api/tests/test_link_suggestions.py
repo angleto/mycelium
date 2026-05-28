@@ -104,9 +104,7 @@ async def test_suggestions_exclude_already_linked() -> None:
         for n in (src, a, b):
             await _attach_tag(c, h, n, tag)
         await _link(c, h, src, a)
-        r = (
-            await c.get(f"/garden/link-suggestions/{src}", headers=h)
-        ).json()
+        r = (await c.get(f"/garden/link-suggestions/{src}", headers=h)).json()
         ids = {s["note_id"] for s in r["suggestions"]}
         assert a not in ids  # already linked
         assert src not in ids  # source itself excluded
@@ -120,9 +118,7 @@ async def test_suggestions_isolated_across_tenants() -> None:
         h1 = await _signup(c, ws="W1")
         h2 = await _signup(c, ws="W2")
         secret = await _note(c, h1, "secret")
-        r = await c.get(
-            f"/garden/link-suggestions/{secret}", headers=h2, params={"k": 5}
-        )
+        r = await c.get(f"/garden/link-suggestions/{secret}", headers=h2, params={"k": 5})
         assert r.status_code == 200, r.text
         # The note is invisible in W2 so the service short-circuits.
         assert r.json()["suggestions"] == []

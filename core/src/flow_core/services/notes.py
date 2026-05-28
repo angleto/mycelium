@@ -163,7 +163,9 @@ async def list_notes(
     if not include_archived:
         stmt = stmt.where(Note.is_archived.is_(False))
     if project_id is not None:
-        stmt = stmt.where(Note.project_id == project_id)
+        # Project lives in the junction (migration 0016): a project
+        # focus is just a tag filter against the project tag.
+        stmt = stmt.where(Note.id.in_(select(NoteTag.note_id).where(NoteTag.tag_id == project_id)))
     if tag_id is not None:
         stmt = stmt.where(Note.id.in_(select(NoteTag.note_id).where(NoteTag.tag_id == tag_id)))
     stmt = stmt.order_by(Note.created_at.desc()).limit(limit)
@@ -181,6 +183,40 @@ async def get_note(
     if n is None or (n.deleted_at is not None and not include_deleted):
         raise NotFoundError(MessageCode.NOTE_NOT_FOUND)
     return n
+
+
+async def project_tag_for_note(session: AsyncSession, *, note_id: uuid.UUID) -> uuid.UUID | None:
+    """The note's project tag id (or ``None`` if unset). Mirrors how
+    tasks find their project from ``task_tags``: the project is just
+    the project-kind tag in the junction. Migration 0016 dropped the
+    legacy ``notes.project_id`` column."""
+    return (
+        await session.execute(
+            select(Tag.id)
+            .join(NoteTag, NoteTag.tag_id == Tag.id)
+            .where(NoteTag.note_id == note_id, Tag.kind == TagKind.project)
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+
+
+async def project_tag_ids_for_notes(
+    session: AsyncSession, *, note_ids: Sequence[uuid.UUID]
+) -> dict[uuid.UUID, uuid.UUID]:
+    """Batched note_id -> project_tag_id; the list endpoint pays one
+    query for the project chip instead of an N+1 per row."""
+    out: dict[uuid.UUID, uuid.UUID] = {}
+    if not note_ids:
+        return out
+    rows = await session.execute(
+        select(NoteTag.note_id, Tag.id)
+        .join(Tag, Tag.id == NoteTag.tag_id)
+        .where(NoteTag.note_id.in_(note_ids), Tag.kind == TagKind.project)
+    )
+    for nid, tid in rows.all():
+        # First project tag wins (contract: a note has at most one).
+        out.setdefault(nid, tid)
+    return out
 
 
 async def tags_by_note(
@@ -299,12 +335,16 @@ async def get_body(session: AsyncSession, *, note_id: uuid.UUID) -> str:
     from flow_core.models.note_part import NotePart
 
     rows = (
-        await session.execute(
-            select(NotePart.body)
-            .where(NotePart.note_id == note_id)
-            .order_by(NotePart.ord, NotePart.id)
+        (
+            await session.execute(
+                select(NotePart.body)
+                .where(NotePart.note_id == note_id)
+                .order_by(NotePart.ord, NotePart.id)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     return "\n\n".join((b or "") for b in rows)
 
 
@@ -345,9 +385,7 @@ async def _upsert_part_zero(
 
     existing = (
         await session.execute(
-            select(NotePart).where(
-                NotePart.note_id == note_id, NotePart.ord == 0
-            )
+            select(NotePart).where(NotePart.note_id == note_id, NotePart.ord == 0)
         )
     ).scalar_one_or_none()
     if existing is None:
@@ -463,9 +501,7 @@ async def restore_revision(
         restored_from=revision_id,
     )
     if transcript_target is not None:
-        await _upsert_part_zero(
-            session, org_id=org_id, note_id=note_id, body=transcript_target
-        )
+        await _upsert_part_zero(session, org_id=org_id, note_id=note_id, body=transcript_target)
     return new_version
 
 
@@ -537,9 +573,7 @@ async def update_note(
     # body edit. Sequenced after _note_set so an optimistic version
     # conflict aborts both writes together.
     if text is not None:
-        await _upsert_part_zero(
-            session, org_id=org_id, note_id=note_id, body=text
-        )
+        await _upsert_part_zero(session, org_id=org_id, note_id=note_id, body=text)
     if pending_task_link[0]:
         new_task_id = pending_task_link[1]
         if new_task_id is None:
@@ -663,9 +697,7 @@ async def append_to_note_field(
         channel=channel,
     )
     if target == "transcript":
-        await _upsert_part_zero(
-            session, org_id=org_id, note_id=note_id, body=new_value
-        )
+        await _upsert_part_zero(session, org_id=org_id, note_id=note_id, body=new_value)
     return new_version, len(text)
 
 
@@ -760,7 +792,6 @@ async def create_note(
         title = _derive_title(text)
     note = Note(
         org_id=org_id,
-        project_id=project_id,
         kind=kind,
         status=status,
         title=title,
@@ -771,7 +802,9 @@ async def create_note(
     await session.flush()
     # Every note must belong to a client: the project's client when a
     # project is set, otherwise the "Personal" default. Stored as a
-    # NoteTag so notes stay queryable/filterable by client.
+    # NoteTag so notes stay queryable/filterable by client. The
+    # project tag itself is carried in the same junction (migration
+    # 0016, ADR-0007 single-source-of-truth, mirrors task_tags).
     client_tag_id: uuid.UUID | None = None
     if project_id is not None:
         client_tag_id = (
@@ -779,6 +812,7 @@ async def create_note(
                 select(ProjectProfile.client_tag_id).where(ProjectProfile.tag_id == project_id)
             )
         ).scalar_one_or_none()
+        session.add(NoteTag(org_id=org_id, note_id=note.id, tag_id=project_id))
     if client_tag_id is None:
         client_tag_id = await taxonomy.ensure_default_client(
             session, org_id=org_id, actor_id=actor_id
@@ -789,9 +823,7 @@ async def create_note(
     # note_part(ord=0). The Note row no longer carries a transcript
     # column; the parts table is the source of truth.
     if text:
-        await _upsert_part_zero(
-            session, org_id=org_id, note_id=note.id, body=text
-        )
+        await _upsert_part_zero(session, org_id=org_id, note_id=note.id, body=text)
     await audit.log(
         session,
         org_id=org_id,
@@ -946,9 +978,10 @@ async def _copy_task_tags_to_note(
     task_id: uuid.UUID,
 ) -> None:
     """Propagate every tag of ``task_id`` onto ``note_id``. Skips rows
-    already present (the project tag becomes ``notes.project_id`` and
-    the client tag is auto-attached by ``create_note``). Audit logs one
-    ``attach_tag`` per newly-added row."""
+    already present (the project tag and the client tag are
+    auto-attached by ``create_note`` into the junction; migration
+    0016 dropped the legacy ``notes.project_id`` column). Audit logs
+    one ``attach_tag`` per newly-added row."""
     task_tag_ids = list(
         (await session.execute(select(TaskTag.tag_id).where(TaskTag.task_id == task_id)))
         .scalars()
@@ -1035,9 +1068,7 @@ async def transcribe(
             att_id = uuid.UUID(note.audio_ref.split(":", 1)[1])
             from flow_core.services import attachments as att_svc
 
-            att = await att_svc.get_attachment(
-                session, org_id=org_id, attachment_id=att_id
-            )
+            att = await att_svc.get_attachment(session, org_id=org_id, attachment_id=att_id)
             audio_bytes = await att_svc.read_attachment_bytes(att)
             mime_type = att.mime_type
         except Exception:
@@ -1065,17 +1096,16 @@ async def transcribe(
     # transcript column. Status flips to ``ready`` so the rest of the
     # flow (memory write, audit) sees a finalised note.
     if res.text:
-        await _upsert_part_zero(
-            session, org_id=org_id, note_id=note.id, body=res.text
-        )
+        await _upsert_part_zero(session, org_id=org_id, note_id=note.id, body=res.text)
     note.status = NoteStatus.ready
     await session.flush()
     if embed and res.text:
+        note_project_id = await project_tag_for_note(session, note_id=note.id)
         await memory_svc.write_blob(
             session,
             org_id=org_id,
             actor_id=actor_id,
-            project_id=note.project_id,
+            project_id=note_project_id,
             text_body=res.text,
             operation_id=f"{operation_id}:mem",
             namespace="note",

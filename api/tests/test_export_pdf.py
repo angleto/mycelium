@@ -46,9 +46,7 @@ async def test_export_pdf_returns_real_pdf() -> None:
         assert r.headers["content-type"] == "application/pdf"
         assert "attachment" in r.headers["content-disposition"]
         # Forbidden char slugified to '-', not silently dropped.
-        assert 'filename="My export - draft 1.pdf"' in r.headers[
-            "content-disposition"
-        ]
+        assert 'filename="My export - draft 1.pdf"' in r.headers["content-disposition"]
         body = r.content
         # %PDF-1.x signature; rules out an HTML error page being
         # returned with the wrong content-type.
@@ -62,9 +60,7 @@ async def test_export_pdf_returns_real_pdf() -> None:
 async def test_export_pdf_requires_auth() -> None:
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://t") as c:
-        r = await c.post(
-            "/export/pdf", json={"title": "x", "html": "<p>x</p>"}
-        )
+        r = await c.post("/export/pdf", json={"title": "x", "html": "<p>x</p>"})
         assert r.status_code == 401
 
 
@@ -83,7 +79,5 @@ async def test_export_pdf_rejects_huge_payload() -> None:
         }
         # 9 MiB > the 8 MiB cap.
         huge = "<p>" + ("a" * (9 * 1024 * 1024)) + "</p>"
-        r = await c.post(
-            "/export/pdf", headers=h, json={"title": "huge", "html": huge}
-        )
+        r = await c.post("/export/pdf", headers=h, json={"title": "huge", "html": huge})
         assert r.status_code == 413

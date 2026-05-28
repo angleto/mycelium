@@ -578,7 +578,6 @@ async def append_to_description(
     notes; description is the symmetric long-form field).
     """
     from flow_core.config import get_settings as _get_settings
-
     from flow_core.services.notes import _collapsed_concat as _concat
 
     task = await get_task(session, org_id=org_id, task_id=task_id)

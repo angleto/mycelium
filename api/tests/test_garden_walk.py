@@ -38,9 +38,7 @@ async def _signup(c: AsyncClient, ws: str = "W") -> dict[str, str]:
 
 
 async def _note(c: AsyncClient, h: dict[str, str], title: str) -> str:
-    r = await c.post(
-        "/notes", headers=h, json={"kind": "text", "title": title, "text": title}
-    )
+    r = await c.post("/notes", headers=h, json={"kind": "text", "title": title, "text": title})
     assert r.status_code == 200, r.text
     return r.json()["id"]
 
@@ -130,6 +128,4 @@ async def test_walk_across_tenants_is_isolated() -> None:
         body = r.json()
         # The seed has no presence in W2, so the focused walk has
         # no mass to distribute -> empty steps.
-        assert body["steps"] == [] or all(
-            s["weight"] == 0 for s in body["steps"]
-        )
+        assert body["steps"] == [] or all(s["weight"] == 0 for s in body["steps"])

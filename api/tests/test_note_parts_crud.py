@@ -98,9 +98,7 @@ async def test_create_list_update_delete_round_trip() -> None:
         assert patched.status_code == 200, patched.text
         assert patched.json()["version"] == 2
 
-        deleted = await c.delete(
-            f"/notes/{note_id}/parts/{b_id}", headers=h
-        )
+        deleted = await c.delete(f"/notes/{note_id}/parts/{b_id}", headers=h)
         assert deleted.status_code == 204
         post = (await c.get(f"/notes/{note_id}/parts", headers=h)).json()
         assert [p["id"] for p in post] == [a_id]
@@ -116,19 +114,9 @@ async def test_create_at_specific_ord_shifts_existing_parts() -> None:
     async with AsyncClient(transport=transport, base_url="http://t") as c:
         h = await _signup(c)
         note_id = await _make_note(c, h, "n")
-        a = (
-            await c.post(
-                f"/notes/{note_id}/parts", headers=h, json={"body": "A"}
-            )
-        ).json()
-        b = (
-            await c.post(
-                f"/notes/{note_id}/parts", headers=h, json={"body": "B"}
-            )
-        ).json()
-        c_resp = await c.post(
-            f"/notes/{note_id}/parts", headers=h, json={"body": "C", "ord": 0}
-        )
+        a = (await c.post(f"/notes/{note_id}/parts", headers=h, json={"body": "A"})).json()
+        b = (await c.post(f"/notes/{note_id}/parts", headers=h, json={"body": "B"})).json()
+        c_resp = await c.post(f"/notes/{note_id}/parts", headers=h, json={"body": "C", "ord": 0})
         assert c_resp.status_code == 200, c_resp.text
         c_part = c_resp.json()
 
@@ -176,9 +164,7 @@ async def test_ui_state_persists_collapse_per_user() -> None:
     async with AsyncClient(transport=transport, base_url="http://t") as c:
         h = await _signup(c)
         note_id = await _make_note(c, h, "n")
-        part = (
-            await c.post(f"/notes/{note_id}/parts", headers=h, json={"body": "x"})
-        ).json()
+        part = (await c.post(f"/notes/{note_id}/parts", headers=h, json={"body": "x"})).json()
         # Default expanded.
         pre = (await c.get(f"/notes/{note_id}", headers=h)).json()
         assert pre["parts"][0]["ui_collapsed"] is False
@@ -260,7 +246,8 @@ async def test_merge_self_or_deleted_target_refused() -> None:
         h = await _signup(c)
         n = await _make_note(c, h, "n")
         r = await c.post(
-            "/notes/merge", headers=h,
+            "/notes/merge",
+            headers=h,
             json={"source_note_id": n, "target_note_id": n},
         )
         assert r.status_code >= 400, r.text
@@ -277,13 +264,15 @@ async def test_merge_idempotent_on_already_merged_source() -> None:
         tgt = await _make_note(c, h, "tgt")
         await c.post(f"/notes/{src}/parts", headers=h, json={"body": "S"})
         first = await c.post(
-            "/notes/merge", headers=h,
+            "/notes/merge",
+            headers=h,
             json={"source_note_id": src, "target_note_id": tgt},
         )
         assert first.status_code == 200, first.text
         n_parts = len(first.json()["parts"])
         again = await c.post(
-            "/notes/merge", headers=h,
+            "/notes/merge",
+            headers=h,
             json={"source_note_id": src, "target_note_id": tgt},
         )
         assert again.status_code == 200, again.text

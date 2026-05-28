@@ -3128,6 +3128,25 @@ button.btn--danger:hover {
   padding: 0.5rem;
   border-top: 1px solid var(--border);
 }
+.parts-editor__title {
+  /* Optional per-part label (migration 0017). Sits above the
+     markdown body, slightly de-emphasised so the body still reads
+     as the main surface. ``maxLength`` mirrors the 300-char DB
+     limit. */
+  width: 100%;
+  margin-bottom: 0.4rem;
+  font-weight: 600;
+  background: transparent;
+  border: 1px dashed var(--border);
+  border-radius: 4px;
+  padding: 0.3rem 0.5rem;
+  color: var(--fg);
+}
+.parts-editor__title:focus {
+  border-style: solid;
+  border-color: var(--accent);
+  outline: none;
+}
 .parts-editor__actions {
   display: flex;
   gap: 0.4rem;

@@ -6578,6 +6578,8 @@ export interface components {
              * @default
              */
             body?: string;
+            /** Title */
+            title?: string | null;
             /** Lang */
             lang?: string | null;
             /** Ord */
@@ -6603,6 +6605,8 @@ export interface components {
             note_id: string;
             /** Ord */
             ord: number;
+            /** Title */
+            title?: string | null;
             /** Body */
             body: string;
             /** Lang */
@@ -6628,6 +6632,8 @@ export interface components {
             expected_version: number;
             /** Body */
             body?: string | null;
+            /** Title */
+            title?: string | null;
             /** Lang */
             lang?: string | null;
         };

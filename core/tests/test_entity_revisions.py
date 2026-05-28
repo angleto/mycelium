@@ -498,25 +498,17 @@ async def test_summary_settable_on_sealed_row() -> None:
         assert out.summary == "renamed task, dropped cost"
 
         # Whitespace / empty -> NULL.
-        out = await revs.set_summary(
-            s, revision_id=sealed.id, summary="   "
-        )
+        out = await revs.set_summary(s, revision_id=sealed.id, summary="   ")
         assert out.summary is None
 
         # None explicit clear.
-        await revs.set_summary(
-            s, revision_id=sealed.id, summary="x"
-        )
-        out = await revs.set_summary(
-            s, revision_id=sealed.id, summary=None
-        )
+        await revs.set_summary(s, revision_id=sealed.id, summary="x")
+        out = await revs.set_summary(s, revision_id=sealed.id, summary=None)
         assert out.summary is None
 
         # Trim to SUMMARY_MAX_LEN.
         long = "a" * (revs.SUMMARY_MAX_LEN + 50)
-        out = await revs.set_summary(
-            s, revision_id=sealed.id, summary=long
-        )
+        out = await revs.set_summary(s, revision_id=sealed.id, summary=long)
         assert out.summary is not None
         assert len(out.summary) == revs.SUMMARY_MAX_LEN
 

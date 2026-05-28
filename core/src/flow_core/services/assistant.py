@@ -259,13 +259,8 @@ async def _run_tool(
         # Phase 6 final: notes' body lives in note_part(ord=0)+; the
         # bodies map is batched so the list endpoint stays a single
         # round-trip even for the title fallback.
-        bodies = await notes_svc._bodies_by_note(
-            session, note_ids=[n.id for n in note_rows]
-        )
-        note_lines = [
-            f"- id={n.id} | {_short(n.title or bodies.get(n.id, ''))}"
-            for n in note_rows
-        ]
+        bodies = await notes_svc._bodies_by_note(session, note_ids=[n.id for n in note_rows])
+        note_lines = [f"- id={n.id} | {_short(n.title or bodies.get(n.id, ''))}" for n in note_rows]
         return "notes:\n" + ("\n".join(note_lines) if note_lines else "(none)")
 
     if tool == "get_note":
@@ -462,9 +457,7 @@ async def _run_tool(
             return "search: (no results)"
         lines: list[str] = []
         for h in hits:
-            ident = (
-                f"task:{h.task_id}" if h.kind == "task" and h.task_id else f"blob:{h.blob_id}"
-            )
+            ident = f"task:{h.task_id}" if h.kind == "task" and h.task_id else f"blob:{h.blob_id}"
             title = _short(h.title or "", 60)
             snippet = _short(h.snippet or "", 120) if h.snippet else ""
             tail = f" -- {snippet}" if snippet else ""

@@ -41,9 +41,7 @@ async def test_note_append_extends_transcript_with_separator() -> None:
     async with AsyncClient(transport=transport, base_url="http://t") as c:
         h = await _signup(c)
         note_id = (
-            await c.post(
-                "/notes", headers=h, json={"kind": "text", "title": "Daily journal"}
-            )
+            await c.post("/notes", headers=h, json={"kind": "text", "title": "Daily journal"})
         ).json()["id"]
 
         r1 = await c.post(
@@ -134,11 +132,9 @@ async def test_note_append_expected_version_mismatch_conflicts() -> None:
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://t") as c:
         h = await _signup(c)
-        note_id = (
-            await c.post(
-                "/notes", headers=h, json={"kind": "text", "title": "v"}
-            )
-        ).json()["id"]
+        note_id = (await c.post("/notes", headers=h, json={"kind": "text", "title": "v"})).json()[
+            "id"
+        ]
 
         r = await c.post(
             f"/notes/{note_id}/append",
@@ -157,11 +153,9 @@ async def test_note_append_body_limit_exceeded() -> None:
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://t") as c:
         h = await _signup(c)
-        note_id = (
-            await c.post(
-                "/notes", headers=h, json={"kind": "text", "title": "big"}
-            )
-        ).json()["id"]
+        note_id = (await c.post("/notes", headers=h, json={"kind": "text", "title": "big"})).json()[
+            "id"
+        ]
 
         # Default cap is 1 MiB; 1.5 MiB of ASCII is comfortably over.
         too_big = "x" * (1_500_000)
@@ -199,6 +193,4 @@ async def test_task_description_append_concat_and_returns_version() -> None:
         assert body["id"] == task_id
 
         got = (await c.get(f"/tasks/{task_id}", headers=h)).json()
-        assert got["description"] == (
-            "Repro: rare\n\nFollow-up: collected stacktraces."
-        )
+        assert got["description"] == ("Repro: rare\n\nFollow-up: collected stacktraces.")

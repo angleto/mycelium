@@ -92,7 +92,10 @@ async def test_project_slot_resolution(_providers: None) -> None:
             actor_id=user,
             text="facciamo una conversazione su una nuova sessione nel progetto bitvision",
         )
-        assert n.kind is NoteKind.conversation and n.project_id is not None
+        # Migration 0016: project lives in the junction, not on the
+        # Note row. Assert the project tag is attached.
+        n_project = await nt.project_tag_for_note(s, note_id=n.id)
+        assert n.kind is NoteKind.conversation and n_project is not None
         # Unknown project -> clarify, never mis-scope.
         with pytest.raises(NotFoundError):
             await nt.run_command(
@@ -113,8 +116,11 @@ async def test_transcription_metered_feeds_memory_and_erases(
     from flow_core.services import memory as memory_svc
 
     org, user = await _org()
-    proj = uuid.uuid4()
     async with tenant_session(str(org), str(user)) as s:
+        # Migration 0016: project_id now references a real Tag row
+        # (was a logical FK on the dropped notes.project_id column).
+        proj_tag = await taxonomy.create_project(s, org_id=org, actor_id=user, name="memproj")
+        proj = proj_tag.id
         await _seed_billing(s, org, user)
         note = await nt.create_note(
             s,

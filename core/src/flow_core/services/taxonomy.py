@@ -1059,8 +1059,9 @@ async def _purge_project_subgraph(
     ``project``): tasks reachable via ``task_tags`` + their CASCADE
     descendants (time entries, comments, attachments, schedules,
     dependencies, handoffs, dispatch requests, agent runs, reminders,
-    recurrences, assignees), notes scoped via ``notes.project_id`` + their
-    descendants (turns, note-tags, attachments — ``time_entries.note_id``
+    recurrences, assignees), notes scoped via the project tag in
+    ``note_tags`` (migration 0016) + their descendants (turns,
+    note-tags, attachments — ``time_entries.note_id``
     is SET NULL by FK so any task-time loses only the back-link), memory
     blobs scoped via ``memory_blobs.project_id`` + their composite-FK
     descendants (blob_sources, memory_blob_tags), and events scoped via
@@ -1081,7 +1082,7 @@ async def _purge_project_subgraph(
         .all()
     )
     note_ids = list(
-        (await session.execute(select(Note.id).where(Note.project_id == project_tag_id)))
+        (await session.execute(select(NoteTag.note_id).where(NoteTag.tag_id == project_tag_id)))
         .scalars()
         .all()
     )

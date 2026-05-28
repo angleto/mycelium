@@ -409,9 +409,7 @@ async def handle_webhook_update(payload: dict[str, object]) -> UpdateOutcome:
                 # body (no transcript -> empty task description).
                 from flow_core.services import note_parts as parts_svc
 
-                parts = await parts_svc.list_parts(
-                    ts, org_id=org_id, note_id=tr_note.id
-                )
+                parts = await parts_svc.list_parts(ts, org_id=org_id, note_id=tr_note.id)
                 transcript_text = (parts[0].body if parts else "") or ""
             except Exception:
                 # Best-effort: an unconfigured STT raises here; the
@@ -437,9 +435,7 @@ async def handle_webhook_update(payload: dict[str, object]) -> UpdateOutcome:
                         title=title[:300],
                     )
                     return UpdateOutcome(
-                        reply_text=render(
-                            MessageCode.TELEGRAM_TASK_CREATED, title=title[:80]
-                        ),
+                        reply_text=render(MessageCode.TELEGRAM_TASK_CREATED, title=title[:80]),
                         task_id=task.id,
                         user_id=user_id,
                     )

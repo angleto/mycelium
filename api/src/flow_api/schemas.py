@@ -1729,6 +1729,7 @@ class NotePartOut(BaseModel):
     id: uuid.UUID
     note_id: uuid.UUID
     ord: int
+    title: str | None = None
     body: str
     lang: str | None = None
     merged_from_note_id: uuid.UUID | None = None
@@ -1742,21 +1743,24 @@ class NotePartCreateIn(BaseModel):
     with ord ≥ value is shifted forward by one."""
 
     body: str = Field(default="")
+    title: str | None = Field(default=None, max_length=300)
     lang: str | None = Field(default=None, max_length=16)
     ord: int | None = Field(default=None, ge=0)
 
 
 class NotePartPatchIn(BaseModel):
-    """Body for PATCH /notes/{id}/parts/{pid}. Either field may be
-    omitted to leave it unchanged. Passing ``lang=null`` explicitly
-    clears the language tag."""
+    """Body for PATCH /notes/{id}/parts/{pid}. Each field may be
+    omitted to leave it unchanged. Passing ``lang=null`` (or
+    ``title=null``) explicitly clears the value."""
 
     expected_version: int
     body: str | None = None
+    title: str | None = None
     lang: str | None = None
-    # Bit of Pydantic awkwardness: we want to distinguish "lang
-    # absent from the JSON" from "lang explicitly null". The router
-    # peeks at ``model_fields_set`` to make the distinction.
+    # Bit of Pydantic awkwardness: we want to distinguish "field
+    # absent from the JSON" from "field explicitly null". The router
+    # peeks at ``model_fields_set`` to make the distinction (same
+    # pattern for both ``lang`` and ``title``).
 
 
 class NotePartReorderIn(BaseModel):

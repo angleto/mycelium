@@ -825,8 +825,8 @@ async def rechunk_legacy_sources(
     should re-invoke until it drops below.
     """
     from flow_core.services.chunker import (
-        get_chunk_threshold_tokens,
         approx_tokens,
+        get_chunk_threshold_tokens,
     )
 
     # No service-level role gate: the only caller is the admin endpoint
@@ -861,19 +861,21 @@ async def rechunk_legacy_sources(
         # one when every chunk_index is 0; defensively pick the
         # first if multiple rows pointed at the same blob).
         bs_row = (
-            await session.execute(
-                select(BlobSource).where(
-                    BlobSource.source_kind == kind,
-                    BlobSource.source_id == sid,
+            (
+                await session.execute(
+                    select(BlobSource).where(
+                        BlobSource.source_kind == kind,
+                        BlobSource.source_id == sid,
+                    )
                 )
             )
-        ).scalars().first()
+            .scalars()
+            .first()
+        )
         if bs_row is None:
             continue
         blob = (
-            await session.execute(
-                select(MemoryBlob).where(MemoryBlob.id == bs_row.blob_id)
-            )
+            await session.execute(select(MemoryBlob).where(MemoryBlob.id == bs_row.blob_id))
         ).scalar_one_or_none()
         if blob is None:
             continue
@@ -907,9 +909,7 @@ async def rechunk_legacy_sources(
         # Cascade-delete the legacy blob (FK ON DELETE CASCADE clears
         # blob_sources + memory_blob_tags + embedding vector + fts).
         await session.execute(
-            delete(MemoryBlob).where(
-                MemoryBlob.id == blob.id, MemoryBlob.org_id == org_id
-            )
+            delete(MemoryBlob).where(MemoryBlob.id == blob.id, MemoryBlob.org_id == org_id)
         )
         await session.flush()
         # Re-write the same text. ``write_blob`` re-runs the chunker;

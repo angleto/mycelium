@@ -81,6 +81,7 @@ def _part_out(p: Any, *, ui_collapsed: bool = False) -> NotePartOut:
         id=p.id,
         note_id=p.note_id,
         ord=p.ord,
+        title=getattr(p, "title", None),
         body=p.body or "",
         lang=p.lang,
         merged_from_note_id=p.merged_from_note_id,
@@ -123,9 +124,15 @@ def _out(
     # links across every kind (subject, artifact, derived_from,
     # promoted_from); the chip now reflects this so subject/artifact-
     # only links also surface.
+    # Migration 0016: ``project_id`` is derived from the project-kind
+    # tag in ``tags`` (junction is the source of truth, like tasks).
+    project_id = next(
+        (t.id for t in (tags or []) if getattr(t.kind, "value", t.kind) == "project"),
+        None,
+    )
     return NoteOut(
         id=n.id,
-        project_id=n.project_id,
+        project_id=project_id,
         task_id=primary_task_id,
         kind=n.kind,
         status=n.status,
@@ -290,12 +297,8 @@ async def get_note(
     # caller's per-part collapse state. List endpoints leave parts
     # empty for payload economy; the single-note path is the canonical
     # surface for the SPA editor that needs every block.
-    parts_rows = await parts_svc.list_parts(
-        ctx.session, org_id=ctx.org_id, note_id=n.id
-    )
-    ui = await parts_svc.get_ui_states_for_user(
-        ctx.session, user_id=ctx.user_id, note_id=n.id
-    )
+    parts_rows = await parts_svc.list_parts(ctx.session, org_id=ctx.org_id, note_id=n.id)
+    ui = await parts_svc.get_ui_states_for_user(ctx.session, user_id=ctx.user_id, note_id=n.id)
     parts = [_part_out(p, ui_collapsed=ui.get(p.id, False)) for p in parts_rows]
     return _out(
         n,
@@ -417,12 +420,8 @@ async def list_note_parts(
     """List the ordered parts of a note, with the caller's per-part
     collapse state. Useful when the SPA refetches just the parts
     after a reorder without reloading the whole note."""
-    rows = await parts_svc.list_parts(
-        ctx.session, org_id=ctx.org_id, note_id=note_id
-    )
-    ui = await parts_svc.get_ui_states_for_user(
-        ctx.session, user_id=ctx.user_id, note_id=note_id
-    )
+    rows = await parts_svc.list_parts(ctx.session, org_id=ctx.org_id, note_id=note_id)
+    ui = await parts_svc.get_ui_states_for_user(ctx.session, user_id=ctx.user_id, note_id=note_id)
     return [_part_out(p, ui_collapsed=ui.get(p.id, False)) for p in rows]
 
 
@@ -445,6 +444,7 @@ async def create_note_part(
         actor_id=ctx.user_id,
         note_id=note_id,
         body=body.body,
+        title=body.title,
         lang=body.lang,
         ord=body.ord,
     )
@@ -471,8 +471,11 @@ async def patch_note_part(
     (same UX as PATCH /notes/{id}). Without the header the channel
     falls back to ``api`` and each save seals its own revision."""
     # Distinguish 'omit' from 'explicit null'. We need the FastAPI
-    # body's model_fields_set, not just the value.
+    # body's model_fields_set, not just the value. Same pattern for
+    # both omittable fields (``title``, ``lang``).
     kwargs: dict[str, Any] = {}
+    if "title" in body.model_fields_set:
+        kwargs["title"] = body.title
     if "lang" in body.model_fields_set:
         kwargs["lang"] = body.lang
     channel = "web" if edit_session_id else "api"
@@ -557,9 +560,7 @@ async def set_note_part_ui_state(
     # Re-read so the response carries the canonical part + the new
     # collapse state in one shape (avoids the SPA needing a second
     # GET to refresh the row after toggle).
-    rows = await parts_svc.list_parts(
-        ctx.session, org_id=ctx.org_id, note_id=note_id
-    )
+    rows = await parts_svc.list_parts(ctx.session, org_id=ctx.org_id, note_id=note_id)
     part = next((p for p in rows if p.id == part_id), None)
     if part is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
@@ -598,12 +599,8 @@ async def merge_notes(
     counts = await note_links_svc.linked_task_counts_for_notes(
         ctx.session, org_id=ctx.org_id, note_ids=[target.id]
     )
-    parts_rows = await parts_svc.list_parts(
-        ctx.session, org_id=ctx.org_id, note_id=target.id
-    )
-    ui = await parts_svc.get_ui_states_for_user(
-        ctx.session, user_id=ctx.user_id, note_id=target.id
-    )
+    parts_rows = await parts_svc.list_parts(ctx.session, org_id=ctx.org_id, note_id=target.id)
+    ui = await parts_svc.get_ui_states_for_user(ctx.session, user_id=ctx.user_id, note_id=target.id)
     return _out(
         target,
         tagmap.get(target.id, []),
@@ -954,7 +951,9 @@ async def quick_create(
             project_id=project_id,
         )
         await session.commit()
-    return QuickCreateOut(id=note.id, project_id=note.project_id, kind=note.kind)
+    # ``project_id`` is now stored in ``note_tags``; the resolved
+    # value comes back as-is for the caller's reference.
+    return QuickCreateOut(id=note.id, project_id=project_id, kind=note.kind)
 
 
 # ---------------------------------------------------------------------------

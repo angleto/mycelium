@@ -69,20 +69,30 @@ export const NotePartsEditor = forwardRef<NotePartsEditorHandle, Props>(
     const [loading, setLoading] = useState(false)
     const [busyPid, setBusyPid] = useState<string | null>(null)
     const [editingBody, setEditingBody] = useState<Record<string, string>>({})
-    // Per-part debounce timer for autosave. Keyed by part.id so each
-    // part's keystrokes reset only its own timer.
+    // Title draft keyed by part.id. Distinct from ``editingBody`` so
+    // a user can edit just the title without bumping the body draft
+    // (and viceversa). Empty string → clear the title (server stores
+    // NULL); undefined here means "not edited" (use part.title).
+    const [editingTitle, setEditingTitle] = useState<Record<string, string>>({})
+    // Per-part debounce timer for autosave. Keyed by ``${pid}::body``
+    // or ``${pid}::title`` so a title edit doesn't reset the body's
+    // pending save (and viceversa).
     const autosaveTimers = useRef<Record<string, number>>({})
     // Latest parts list cached in a ref so the imperative
     // ``saveAllDirty`` from the parent always sees the freshest
     // versions even when called from a closure built earlier.
     const partsRef = useRef<NotePart[]>([])
     const editingBodyRef = useRef<Record<string, string>>({})
+    const editingTitleRef = useRef<Record<string, string>>({})
     useEffect(() => {
       partsRef.current = parts
     }, [parts])
     useEffect(() => {
       editingBodyRef.current = editingBody
     }, [editingBody])
+    useEffect(() => {
+      editingTitleRef.current = editingTitle
+    }, [editingTitle])
 
     const reload = useCallback(async () => {
       setLoading(true)
@@ -104,25 +114,54 @@ export const NotePartsEditor = forwardRef<NotePartsEditorHandle, Props>(
     }, [reload])
 
     // Lift the dirty signal up so the parent modal's Save button
-    // can reflect part-level edits.
+    // can reflect part-level edits (body OR title).
     useEffect(() => {
       if (!onDirtyChange) return
       const anyDirty = parts.some((p) => {
-        const draft = editingBody[p.id]
-        return draft !== undefined && draft !== (p.body ?? '')
+        const bDraft = editingBody[p.id]
+        const tDraft = editingTitle[p.id]
+        const bDirty = bDraft !== undefined && bDraft !== (p.body ?? '')
+        const tDirty = tDraft !== undefined && tDraft !== (p.title ?? '')
+        return bDirty || tDirty
       })
       onDirtyChange(anyDirty)
-    }, [editingBody, parts, onDirtyChange])
+    }, [editingBody, editingTitle, parts, onDirtyChange])
 
-    const addPart = async () => {
+    // ``ord``: when supplied, the new part lands at that index and
+    // every part with ord ≥ value is shifted forward by one (the
+    // backend handles the shift in a single deferred-unique tx). When
+    // omitted the part goes to the tail (max(ord)+1). The "+ add part
+    // below" button on each row passes the next ord so the new block
+    // appears right after the current one without scrolling.
+    const addPart = async (insertOrd?: number) => {
       setErr('')
+      const payload: { body: string; ord?: number } = { body: '' }
+      if (insertOrd !== undefined) payload.ord = insertOrd
       const res = await authFetch(`/notes/${noteId}/parts`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ body: '' }),
+        body: JSON.stringify(payload),
       })
       if (!res.ok) {
-        setErr(errMessage(await res.json().catch(() => ({}))))
+        // Capture both the parsed-error message AND the raw status so
+        // a server error that returns an empty / non-JSON body still
+        // tells the user something useful (the previous version
+        // surfaced "" silently on a 500 with no body).
+        const parsed = await res.json().catch(() => ({}))
+        const msg = errMessage(parsed)
+        setErr(
+          msg && msg !== 'Errore' && msg !== 'Error'
+            ? msg
+            : `HTTP ${res.status} ${res.statusText || ''}`.trim(),
+        )
+        // Surface the full response in the console so the user can
+        // copy/paste it when the banner alone is not enough to
+        // diagnose (used to triage the 63ebd516 silent-failure
+        // report).
+        console.error('[NotePartsEditor] addPart failed', {
+          status: res.status,
+          body: parsed,
+        })
         return
       }
       await reload()
@@ -189,29 +228,52 @@ export const NotePartsEditor = forwardRef<NotePartsEditorHandle, Props>(
       }
     }
 
-    const saveBody = useCallback(
-      async (part: NotePart, draft: string): Promise<boolean> => {
-        if (draft === (part.body ?? '')) return true
+    // Single PATCH path: caller passes the patch payload (body and/or
+    // title) and we route it through. Returns false on failure so the
+    // chained autosaves can stop early. ``title: ''`` is canonicalised
+    // to null so the server treats it as "clear the label".
+    const patchPart = useCallback(
+      async (
+        part: NotePart,
+        patch: { body?: string; title?: string | null },
+      ): Promise<boolean> => {
+        const hasBody = patch.body !== undefined
+        const hasTitle = patch.title !== undefined
+        if (!hasBody && !hasTitle) return true
         setBusyPid(part.id)
         try {
           const headers: Record<string, string> = {
             'Content-Type': 'application/json',
           }
           if (editSession) headers['X-Edit-Session-Id'] = editSession.touch()
+          const payload: Record<string, unknown> = {
+            expected_version: part.version,
+          }
+          if (hasBody) payload.body = patch.body
+          if (hasTitle) payload.title = patch.title === '' ? null : patch.title
           const res = await authFetch(`/notes/${noteId}/parts/${part.id}`, {
             method: 'PATCH',
             headers,
-            body: JSON.stringify({ expected_version: part.version, body: draft }),
+            body: JSON.stringify(payload),
           })
           if (!res.ok) {
             setErr(errMessage(await res.json().catch(() => ({}))))
             return false
           }
-          setEditingBody((cur) => {
-            const out = { ...cur }
-            delete out[part.id]
-            return out
-          })
+          if (hasBody) {
+            setEditingBody((cur) => {
+              const out = { ...cur }
+              delete out[part.id]
+              return out
+            })
+          }
+          if (hasTitle) {
+            setEditingTitle((cur) => {
+              const out = { ...cur }
+              delete out[part.id]
+              return out
+            })
+          }
           return true
         } finally {
           setBusyPid(null)
@@ -220,32 +282,70 @@ export const NotePartsEditor = forwardRef<NotePartsEditorHandle, Props>(
       [editSession, noteId],
     )
 
+    // Compatibility wrapper retained as the body-only entry point for
+    // the autosave + saveAllDirty paths. ``saveTitle`` is its title
+    // sibling; both delegate to ``patchPart``.
+    const saveBody = useCallback(
+      async (part: NotePart, draft: string): Promise<boolean> => {
+        if (draft === (part.body ?? '')) return true
+        return patchPart(part, { body: draft })
+      },
+      [patchPart],
+    )
+
+    const saveTitle = useCallback(
+      async (part: NotePart, draft: string): Promise<boolean> => {
+        if (draft === (part.title ?? '')) return true
+        return patchPart(part, { title: draft })
+      },
+      [patchPart],
+    )
+
     // Debounced autosave: 1.2s after the last keystroke on a part,
     // push the draft to the server. The note-level revision coalesces
     // these into one open row via ``X-Edit-Session-Id`` so the
     // recovery-history stays a single window per editing session.
+    // Body and title have independent timer keys so an in-flight body
+    // draft doesn't get cancelled by a title keystroke (and vice
+    // versa).
     useEffect(() => {
       const timers = autosaveTimers.current
       for (const part of parts) {
-        const draft = editingBody[part.id]
-        if (draft === undefined || draft === (part.body ?? '')) continue
-        if (timers[part.id]) window.clearTimeout(timers[part.id])
-        timers[part.id] = window.setTimeout(() => {
-          delete timers[part.id]
-          void saveBody(part, draft).then((ok) => {
-            if (ok) void reload()
-          })
-        }, 1200)
+        const bDraft = editingBody[part.id]
+        if (bDraft !== undefined && bDraft !== (part.body ?? '')) {
+          const k = `${part.id}::body`
+          if (timers[k]) window.clearTimeout(timers[k])
+          timers[k] = window.setTimeout(() => {
+            delete timers[k]
+            void saveBody(part, bDraft).then((ok) => {
+              if (ok) void reload()
+            })
+          }, 1200)
+        }
+        const tDraft = editingTitle[part.id]
+        if (tDraft !== undefined && tDraft !== (part.title ?? '')) {
+          const k = `${part.id}::title`
+          if (timers[k]) window.clearTimeout(timers[k])
+          timers[k] = window.setTimeout(() => {
+            delete timers[k]
+            void saveTitle(part, tDraft).then((ok) => {
+              if (ok) void reload()
+            })
+          }, 1200)
+        }
       }
       return () => {
-        for (const pid of Object.keys(timers)) {
-          if (editingBody[pid] === undefined) {
-            window.clearTimeout(timers[pid])
-            delete timers[pid]
+        for (const key of Object.keys(timers)) {
+          const [pid, field] = key.split('::') as [string, 'body' | 'title']
+          const draft =
+            field === 'body' ? editingBody[pid] : editingTitle[pid]
+          if (draft === undefined) {
+            window.clearTimeout(timers[key])
+            delete timers[key]
           }
         }
       }
-    }, [editingBody, parts, saveBody, reload])
+    }, [editingBody, editingTitle, parts, saveBody, saveTitle, reload])
 
     useImperativeHandle(
       ref,
@@ -254,15 +354,25 @@ export const NotePartsEditor = forwardRef<NotePartsEditorHandle, Props>(
           // Cancel any pending autosave timers; we're about to fire
           // the saves explicitly.
           const timers = autosaveTimers.current
-          for (const pid of Object.keys(timers)) {
-            window.clearTimeout(timers[pid])
-            delete timers[pid]
+          for (const key of Object.keys(timers)) {
+            window.clearTimeout(timers[key])
+            delete timers[key]
           }
           let allOk = true
           for (const part of partsRef.current) {
-            const draft = editingBodyRef.current[part.id]
-            if (draft === undefined || draft === (part.body ?? '')) continue
-            const ok = await saveBody(part, draft)
+            const bDraft = editingBodyRef.current[part.id]
+            const tDraft = editingTitleRef.current[part.id]
+            const bDirty =
+              bDraft !== undefined && bDraft !== (part.body ?? '')
+            const tDirty =
+              tDraft !== undefined && tDraft !== (part.title ?? '')
+            if (!bDirty && !tDirty) continue
+            // Flush body + title together in one PATCH so the
+            // server bumps ``version`` once per part, not twice.
+            const ok = await patchPart(part, {
+              ...(bDirty ? { body: bDraft } : {}),
+              ...(tDirty ? { title: tDraft } : {}),
+            })
             if (!ok) {
               allOk = false
               break
@@ -274,7 +384,7 @@ export const NotePartsEditor = forwardRef<NotePartsEditorHandle, Props>(
           return allOk
         },
       }),
-      [saveBody, reload],
+      [patchPart, reload],
     )
 
     return (
@@ -305,7 +415,15 @@ export const NotePartsEditor = forwardRef<NotePartsEditorHandle, Props>(
         <ol className="parts-editor__list">
           {parts.map((p, i) => {
             const draft = editingBody[p.id] ?? p.body ?? ''
+            const titleDraft = editingTitle[p.id] ?? p.title ?? ''
             const busy = busyPid === p.id
+            // Insert position for the per-row "Add below" action:
+            // ``ord + 1`` lands the new part immediately after this
+            // one and shifts the rest forward in a single deferred-
+            // unique tx server-side. We pass the explicit value
+            // instead of trusting ``i + 1`` because parts can have
+            // sparse ords after a reorder.
+            const insertAfterOrd = p.ord + 1
             return (
               <li key={p.id} className="parts-editor__item">
                 <header className="parts-editor__item-head">
@@ -330,7 +448,10 @@ export const NotePartsEditor = forwardRef<NotePartsEditorHandle, Props>(
                   )}
                   {p.ui_collapsed && (
                     <span className="parts-editor__preview muted">
-                      {truncate(firstNonEmptyLine(p.body ?? ''), 80)}
+                      {truncate(
+                        p.title || firstNonEmptyLine(p.body ?? ''),
+                        80,
+                      )}
                     </span>
                   )}
                   <span className="parts-editor__spacer" />
@@ -354,6 +475,20 @@ export const NotePartsEditor = forwardRef<NotePartsEditorHandle, Props>(
                   </button>
                   <button
                     type="button"
+                    className="btn--sm btn--ghost"
+                    disabled={busy}
+                    onClick={() => void addPart(insertAfterOrd)}
+                    title={t('notes.parts.addBelowHint', {
+                      defaultValue: 'Add a new part below this one',
+                    })}
+                  >
+                    +{' '}
+                    {t('notes.parts.addBelow', {
+                      defaultValue: 'Add below',
+                    })}
+                  </button>
+                  <button
+                    type="button"
                     className="btn--sm btn--danger"
                     disabled={busy}
                     onClick={() => void removePart(p.id)}
@@ -366,6 +501,24 @@ export const NotePartsEditor = forwardRef<NotePartsEditorHandle, Props>(
                 </header>
                 {!p.ui_collapsed && (
                   <div className="parts-editor__body">
+                    <input
+                      type="text"
+                      className="parts-editor__title"
+                      value={titleDraft}
+                      onChange={(e) =>
+                        setEditingTitle((cur) => ({
+                          ...cur,
+                          [p.id]: e.target.value,
+                        }))
+                      }
+                      placeholder={t('notes.parts.titlePlaceholder', {
+                        defaultValue: 'Part title (optional)',
+                      })}
+                      maxLength={300}
+                      aria-label={t('notes.parts.titleAria', {
+                        defaultValue: 'Part title',
+                      })}
+                    />
                     <RichEditor
                       value={draft}
                       onChange={(v) =>

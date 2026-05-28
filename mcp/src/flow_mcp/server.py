@@ -2844,9 +2844,7 @@ def _note_part(p: Any) -> dict[str, Any]:
         "ord": p.ord,
         "body": p.body or "",
         "lang": p.lang,
-        "merged_from_note_id": (
-            str(p.merged_from_note_id) if p.merged_from_note_id else None
-        ),
+        "merged_from_note_id": (str(p.merged_from_note_id) if p.merged_from_note_id else None),
         "version": p.version,
     }
 
@@ -2867,9 +2865,15 @@ def _note(
     # ``parts`` (task 7070a456 Phase 3): when supplied, embed the
     # ordered note_part rows so an LLM gets the structured body in
     # one call. list_notes leaves it None for payload economy.
+    # Migration 0016: ``project_id`` is the project-kind tag in
+    # ``tags`` (junction is the source of truth, like task_tags).
+    project_tag_id = next(
+        (g.id for g in (tags or []) if getattr(g.kind, "value", g.kind) == "project"),
+        None,
+    )
     out: dict[str, Any] = {
         "id": str(n.id),
-        "project_id": str(n.project_id) if n.project_id else None,
+        "project_id": str(project_tag_id) if project_tag_id else None,
         "task_id": str(primary_task_id) if primary_task_id else None,
         "kind": n.kind.value,
         "status": n.status.value,
@@ -3076,9 +3080,7 @@ async def reorder_note_parts(
 
 
 @mcp.tool()
-async def delete_note_part(
-    token: str, org_id: str, part_id: str
-) -> dict[str, Any]:
+async def delete_note_part(token: str, org_id: str, part_id: str) -> dict[str, Any]:
     """Hard-delete a part. Remaining parts keep their ord values (no
     compaction) so deep links by ord survive; reorder is explicit."""
     from flow_core.services import note_parts as parts_svc_local
@@ -3118,12 +3120,8 @@ async def merge_notes(
             strategy=strategy,
         )
         tagmap = await notes_svc.tags_by_note(s, note_ids=[target.id])
-        pid = await note_links_svc.primary_task_id_for_note(
-            s, org_id=org, note_id=target.id
-        )
-        parts = await parts_svc_local.list_parts(
-            s, org_id=org, note_id=target.id
-        )
+        pid = await note_links_svc.primary_task_id_for_note(s, org_id=org, note_id=target.id)
+        parts = await parts_svc_local.list_parts(s, org_id=org, note_id=target.id)
         return _note(target, tagmap.get(target.id, []), primary_task_id=pid, parts=parts)
 
 

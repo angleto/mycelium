@@ -38,6 +38,7 @@ import uuid
 from collections import defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -86,9 +87,7 @@ def _pair_key(a: uuid.UUID, b: uuid.UUID) -> tuple[uuid.UUID, uuid.UUID]:
     return (a, b) if str(a) <= str(b) else (b, a)
 
 
-async def _generic_tag_degrees(
-    session: AsyncSession, *, org_id: uuid.UUID
-) -> dict[uuid.UUID, int]:
+async def _generic_tag_degrees(session: AsyncSession, *, org_id: uuid.UUID) -> dict[uuid.UUID, int]:
     """Count how many in-org notes carry each generic tag. The Adamic-
     Adar denominator depends on the degree of each tag in the bipartite
     note↔tag graph; we restrict to ``kind='generic'`` because client
@@ -211,9 +210,7 @@ async def compute_note_edge_weights(
                 if any(k[:2] == pk and k[2] == "__tag" for k in seen_kind):
                     continue
                 seen_kind[(pk[0], pk[1], "__tag")] = True
-                w_tag = _adamic_adar_pair(
-                    note_tags[pk[0]], note_tags[pk[1]], tag_deg
-                )
+                w_tag = _adamic_adar_pair(note_tags[pk[0]], note_tags[pk[1]], tag_deg)
                 if w_tag > 0:
                     by_pair[pk].append(w_tag)
 
@@ -246,9 +243,7 @@ async def compute_pagerank(
     probability mass per note, summing to 1 across the workspace; an
     empty workspace returns ``{}``.
     """
-    note_rows = (
-        await session.execute(select(Note.id).where(Note.org_id == org_id))
-    ).all()
+    note_rows = (await session.execute(select(Note.id).where(Note.org_id == org_id))).all()
     nodes: list[uuid.UUID] = [r[0] for r in note_rows]
     n = len(nodes)
     if n == 0:
@@ -316,9 +311,7 @@ async def compute_personalized_pagerank(
     focused mode to rank the subgraph induced by the seed's typed
     neighbours.
     """
-    note_rows = (
-        await session.execute(select(Note.id).where(Note.org_id == org_id))
-    ).all()
+    note_rows = (await session.execute(select(Note.id).where(Note.org_id == org_id))).all()
     nodes: list[uuid.UUID] = [r[0] for r in note_rows]
     n = len(nodes)
     if n == 0:
@@ -449,15 +442,13 @@ async def biased_random_walk(
     return walk
 
 
-def _weighted_pick(
-    rng: object, ids: list[uuid.UUID], weights: list[float]
-) -> uuid.UUID | None:
+def _weighted_pick(rng: object, ids: list[uuid.UUID], weights: list[float]) -> uuid.UUID | None:
     total = sum(w for w in weights if w > 0)
     if total <= 0 or not ids:
         return None
     # rng is typed as object to keep the import inside biased_random_walk
     # local; cast via getattr for the .random() call.
-    r = getattr(rng, "random")() * total  # type: ignore[no-any-return]
+    r = rng.random() * total  # type: ignore[no-any-return]
     acc = 0.0
     for i, w in zip(ids, weights, strict=True):
         if w <= 0:

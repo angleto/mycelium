@@ -43,9 +43,7 @@ def _email() -> str:
 
 async def _org() -> tuple[uuid.UUID, uuid.UUID]:
     async with admin_session() as s:
-        r = await signup(
-            s, email=_email(), password="pw-strong-123", org_name="DECOMP"
-        )
+        r = await signup(s, email=_email(), password="pw-strong-123", org_name="DECOMP")
     return r.org_id, r.user_id
 
 
@@ -89,9 +87,7 @@ async def test_distill_note_creates_humus_atom(_wire_llm: None) -> None:
                 "drift between staging and prod."
             ),
         )
-        res = await decomp.distill_note(
-            s, org_id=org, actor_id=user, note_id=source.id
-        )
+        res = await decomp.distill_note(s, org_id=org, actor_id=user, note_id=source.id)
         distilled = (
             await s.execute(select(Note).where(Note.id == res.distilled_note_id))
         ).scalar_one()
@@ -122,19 +118,19 @@ async def test_distill_note_is_idempotent(_wire_llm: None) -> None:
             title="t",
             text="some non-trivial body the LLM will distill on the first pass",
         )
-        r1 = await decomp.distill_note(
-            s, org_id=org, actor_id=user, note_id=source.id
-        )
-        r2 = await decomp.distill_note(
-            s, org_id=org, actor_id=user, note_id=source.id
-        )
+        r1 = await decomp.distill_note(s, org_id=org, actor_id=user, note_id=source.id)
+        r2 = await decomp.distill_note(s, org_id=org, actor_id=user, note_id=source.id)
         assert r1.distilled_note_id == r2.distilled_note_id
         rows = (
-            await s.execute(
-                select(NoteNoteLink).where(
-                    NoteNoteLink.parent_note_id == source.id,
-                    NoteNoteLink.kind == "atom_of",
+            (
+                await s.execute(
+                    select(NoteNoteLink).where(
+                        NoteNoteLink.parent_note_id == source.id,
+                        NoteNoteLink.kind == "atom_of",
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         assert len(rows) == 1

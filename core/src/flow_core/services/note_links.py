@@ -941,8 +941,8 @@ async def tick_maturity_transitions(
 __all__ = [
     "derive_task_from_note",
     "derived_task_ids_for_notes",
-    "linked_task_counts_for_notes",
     "link_notes",
+    "linked_task_counts_for_notes",
     "list_note_links",
     "list_note_task_links",
     "list_workspace_note_links",

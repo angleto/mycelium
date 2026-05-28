@@ -143,8 +143,8 @@ async def test_create_note_mirrors_transcript_to_part_zero() -> None:
             text="Phase 6 mirror body.",
         )
         rows = (
-            await s.execute(select(NotePart).where(NotePart.note_id == note.id))
-        ).scalars().all()
+            (await s.execute(select(NotePart).where(NotePart.note_id == note.id))).scalars().all()
+        )
         assert len(rows) == 1
         assert rows[0].ord == 0
         assert rows[0].body == "Phase 6 mirror body."
@@ -173,8 +173,8 @@ async def test_update_note_text_mirrors_into_part_zero() -> None:
             text="first edit",
         )
         rows = (
-            await s.execute(select(NotePart).where(NotePart.note_id == note.id))
-        ).scalars().all()
+            (await s.execute(select(NotePart).where(NotePart.note_id == note.id))).scalars().all()
+        )
         assert len(rows) == 1
         assert rows[0].body == "first edit"
         # A second edit updates in place (no second part row).
@@ -188,7 +188,7 @@ async def test_update_note_text_mirrors_into_part_zero() -> None:
             text="second edit",
         )
         rows2 = (
-            await s.execute(select(NotePart).where(NotePart.note_id == note.id))
-        ).scalars().all()
+            (await s.execute(select(NotePart).where(NotePart.note_id == note.id))).scalars().all()
+        )
         assert len(rows2) == 1
         assert rows2[0].body == "second edit"

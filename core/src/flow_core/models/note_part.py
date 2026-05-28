@@ -67,6 +67,10 @@ class NotePart(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, Base):
     # Integer, sparse OK. The service layer normalises (0, 1, 2, ...)
     # on every reorder so reading by ord still gives a tidy sequence.
     ord: Mapped[int] = mapped_column(Integer, nullable=False)
+    # Optional user-facing label for the part. NULL = no label set;
+    # the SPA falls back to the first non-empty line of ``body`` so
+    # the historical "untitled blocks" UX still works for legacy data.
+    title: Mapped[str | None] = mapped_column(String(300), nullable=True)
     body: Mapped[str] = mapped_column(Text, nullable=False, server_default="")
     # ISO 639-1 (e.g. "en", "it") or longer subtag ("pt-BR"). NULL =
     # unspecified / mixed; the SPA can't yet route retrieval by lang
@@ -88,9 +92,7 @@ class NotePartUIState(Base):
     cascade on ``part_id`` cleans up when the part disappears."""
 
     __tablename__ = "note_part_ui_state"
-    __table_args__ = (
-        PrimaryKeyConstraint("user_id", "part_id", name="pk_note_part_ui_state"),
-    )
+    __table_args__ = (PrimaryKeyConstraint("user_id", "part_id", name="pk_note_part_ui_state"),)
 
     user_id: Mapped[uuid.UUID] = mapped_column(
         PG_UUID(as_uuid=True),
@@ -102,9 +104,7 @@ class NotePartUIState(Base):
         ForeignKey("note_part.id", ondelete="CASCADE"),
         nullable=False,
     )
-    collapsed: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, server_default="false"
-    )
+    collapsed: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     updated_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

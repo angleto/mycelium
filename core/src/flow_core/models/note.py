@@ -71,9 +71,12 @@ class TurnRole(enum.StrEnum):
 class Note(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, Base):
     __tablename__ = "notes"
 
-    project_id: Mapped[uuid.UUID | None] = mapped_column(
-        PG_UUID(as_uuid=True), nullable=True, index=True
-    )
+    # The note's project (and through it, its client) lives in the
+    # ``note_tags`` junction as a project-kind tag row, mirroring how
+    # ``task_tags`` carries the project for tasks. Migration 0016
+    # dropped the legacy ``notes.project_id`` column; query the
+    # junction via ``services.notes.project_tag_for_note`` /
+    # ``project_tag_ids_for_notes`` to recover it.
     # docs/adr/0029 P3: ``notes.task_id`` (Proposal A's single FK) is
     # gone. The bidirectional note <-> task relation lives in
     # ``note_task_link`` with one of four typed kinds (subject,
@@ -115,9 +118,7 @@ class Note(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, Base):
     # kind`` carries the subtype; ``humus_flag`` is the read-side
     # eligibility predicate the LLM walk consults.
     humus_kind: Mapped[str | None] = mapped_column(String(32), nullable=True)
-    humus_flag: Mapped[bool] = mapped_column(
-        nullable=False, server_default="false"
-    )
+    humus_flag: Mapped[bool] = mapped_column(nullable=False, server_default="false")
 
 
 class NoteTurn(UUIDPKMixin, OrgScopedMixin, Base):

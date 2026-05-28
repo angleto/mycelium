@@ -311,9 +311,7 @@ def _resolve_part(c: Any, note_id: str, partial: str) -> str:
     if not matches:
         raise CLIError(f"no part matching '{partial}' on note {short_id(note_id)}.")
     if len(matches) > 1:
-        raise CLIError(
-            f"part prefix '{partial}' is ambiguous on note {short_id(note_id)}."
-        )
+        raise CLIError(f"part prefix '{partial}' is ambiguous on note {short_id(note_id)}.")
     return str(matches[0]["id"])
 
 
@@ -444,9 +442,7 @@ def parts_reorder(
     with client() as c:
         full = _resolve_note(c, note_id)
         resolved = [_resolve_part(c, full, p) for p in part_ids]
-        rows = get_json(
-            c.put(f"/notes/{full}/parts/order", json={"part_ids": resolved})
-        )
+        rows = get_json(c.put(f"/notes/{full}/parts/order", json={"part_ids": resolved}))
     if json_mode():
         emit_json(rows)
         return

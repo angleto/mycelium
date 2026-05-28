@@ -13,14 +13,13 @@ import uuid
 from collections.abc import AsyncIterator, Callable, Sequence
 
 import pytest
-from sqlalchemy import delete, select
-
 from _fake_embedder import FakeEmbedder
+from sqlalchemy import delete, select
 
 from flow_core.ai_providers import LLMResult, set_llm_override
 from flow_core.db import admin_session, tenant_session
 from flow_core.embedder import set_embedder_override
-from flow_core.models.note import Note, NoteKind
+from flow_core.models.note import NoteKind
 from flow_core.models.task import Task
 from flow_core.models.telegram import TelegramAssistantJob, TelegramConversation
 from flow_core.services import assistant as svc
@@ -221,8 +220,8 @@ async def test_create_note_via_tool_persists() -> None:
         from flow_core.models.note_part import NotePart
 
         parts = (
-            await s.execute(select(NotePart).where(NotePart.body == "buy milk"))
-        ).scalars().all()
+            (await s.execute(select(NotePart).where(NotePart.body == "buy milk"))).scalars().all()
+        )
         assert len(parts) == 1
 
 

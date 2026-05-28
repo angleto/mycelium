@@ -42,9 +42,7 @@ async def _signup(c: AsyncClient, ws: str = "G") -> dict[str, str]:
 
 
 async def _make_note(c: AsyncClient, h: dict[str, str], title: str) -> str:
-    r = await c.post(
-        "/notes", headers=h, json={"kind": "text", "title": title, "text": title}
-    )
+    r = await c.post("/notes", headers=h, json={"kind": "text", "title": title, "text": title})
     assert r.status_code == 200, r.text
     return r.json()["id"]
 
@@ -125,7 +123,9 @@ async def test_undirected_dedup_one_row_per_pair() -> None:
         assert pairs.count(tuple(sorted([a, b]))) == 1
         # Weight = soft_or(0.85, 0.4) = 1 - 0.15 * 0.6 = 0.91.
         w = next(
-            e["weight"] for e in body["edges"] if tuple(sorted([e["src"], e["dst"]])) == tuple(sorted([a, b]))
+            e["weight"]
+            for e in body["edges"]
+            if tuple(sorted([e["src"], e["dst"]])) == tuple(sorted([a, b]))
         )
         assert isclose(w, 1 - 0.15 * 0.6, abs_tol=1e-6), w
 
