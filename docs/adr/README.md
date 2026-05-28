@@ -46,3 +46,4 @@ Format: Status, Context, Decision, Consequences, Alternatives rejected.
 - [0035 Garden health sensors dashboard](0035-garden-sensors-dashboard.md)
 - [0036 Event bus for multi-agent coordination on the graph](0036-agent-event-bus.md)
 - [0037 Online learning loop on garden suggestions](0037-online-learning-loop.md)
+- [0038 UUID-prefix entity resolver (`/lookup/{prefix}`)](0038-uuid-prefix-resolver.md)
