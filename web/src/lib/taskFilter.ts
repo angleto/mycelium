@@ -27,6 +27,14 @@
 
 import type { components } from '../api/schema'
 
+// Per-tab memory of the last /tasks URL search (``?q=…&filter=…``). The
+// query and tag filter live in the URL (source of truth) so the browser
+// Back button restores them; this key lets the task detail view's
+// in-app "back to tasks" link return to the same filtered list whatever
+// entry point opened the task. sessionStorage, so it is tab-scoped and
+// ephemeral.
+export const TASKS_LASTSEARCH_KEY = 'flow.tasks.lastSearch'
+
 type Task = components['schemas']['TaskOut']
 
 export type FilterCtx = {

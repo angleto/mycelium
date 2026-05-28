@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { api, errMessage, searchTasksByText, workspaceHeader } from '../api/client'
 import { useSession } from '../auth/useSession'
@@ -12,7 +12,11 @@ import { TaskTimer } from '../components/TaskTimer'
 import { TagPickerGrid } from '../components/TagPickerGrid'
 import { useFocus } from '../lib/focus'
 import { useLinkedClientProject } from '../lib/linkedClientProject'
-import { getFreeTextTokens, parseFilter } from '../lib/taskFilter'
+import {
+  getFreeTextTokens,
+  parseFilter,
+  TASKS_LASTSEARCH_KEY,
+} from '../lib/taskFilter'
 import type { components } from '../api/schema'
 
 type View = 'kanban' | 'list'
@@ -120,6 +124,7 @@ type Client = components['schemas']['ClientOut']
 export function TasksRoute() {
   const { t } = useTranslation()
   const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
   const session = useSession()
   const activeId = session?.workspaceId
   const {
@@ -141,14 +146,51 @@ export function TasksRoute() {
   // the parallel /tags load (a brand-new user otherwise saw an empty
   // required client select until they reloaded).
   const [clientsList, setClientsList] = useState<Client[]>([])
-  const [filter, setFilter] = useState('')
+  // ``filter`` (tag filter) and ``q`` (the structured + free-text query)
+  // are the URL's source of truth, so they survive navigation away and
+  // back, are bookmarkable, and reload cleanly. Earlier they were plain
+  // component state and were silently dropped when the user opened a
+  // task and returned (e.g. losing ``state:verify`` mid-triage). Writes
+  // use ``replace`` so typing in the search box does not push a history
+  // entry per keystroke; the prior list URL stays the Back target.
+  const filter = searchParams.get('filter') ?? ''
+  const q = searchParams.get('q') ?? ''
+  const setFilter = useCallback(
+    (next: string | ((cur: string) => string)) => {
+      setSearchParams(
+        (prev) => {
+          const cur = prev.get('filter') ?? ''
+          const val = typeof next === 'function' ? next(cur) : next
+          const out = new URLSearchParams(prev)
+          if (val) out.set('filter', val)
+          else out.delete('filter')
+          return out
+        },
+        { replace: true },
+      )
+    },
+    [setSearchParams],
+  )
+  const setQ = useCallback(
+    (next: string) => {
+      setSearchParams(
+        (prev) => {
+          const out = new URLSearchParams(prev)
+          if (next) out.set('q', next)
+          else out.delete('q')
+          return out
+        },
+        { replace: true },
+      )
+    },
+    [setSearchParams],
+  )
   const [title, setTitle] = useState('')
   // Eisenhower axes are NOT exposed in quick-add: the backend supplies
   // the Low/Low default (migration 0102), and the policy is that any
   // default lives in the service, not in the SPA. The user picks the
   // axes from the task detail view when needed.
   const [due, setDue] = useState('')
-  const [q, setQ] = useState('')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   // Workflow meta for inline + bulk state changes. Tasks share the
@@ -204,6 +246,18 @@ export function TasksRoute() {
       /* ignore */
     }
   }, [dateFocus])
+  // Remember the current list URL (query string) for this tab so the
+  // detail view's "back to tasks" link returns to the same filtered
+  // list. sessionStorage (not localStorage) keeps it tab-scoped and
+  // ephemeral, which matches "where I just was", not a saved default.
+  useEffect(() => {
+    try {
+      const s = searchParams.toString()
+      sessionStorage.setItem(TASKS_LASTSEARCH_KEY, s ? `?${s}` : '')
+    } catch {
+      /* ignore */
+    }
+  }, [searchParams])
 
   // Server-side task search. The structured DSL stays client-side
   // (instant, no network); the free-text portion of the query goes to

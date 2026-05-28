@@ -18,6 +18,7 @@ import { LinkedNotesPanel } from '../components/LinkedNotesPanel'
 import { RevisionsPanel } from '../components/RevisionsPanel'
 import { TaskTimer } from '../components/TaskTimer'
 import { formatHours } from '../lib/estimate'
+import { TASKS_LASTSEARCH_KEY } from '../lib/taskFilter'
 import { useEditSession } from '../lib/useEditSession'
 
 import type { components } from '../api/schema'
@@ -41,6 +42,19 @@ export function TaskDetailRoute() {
   // surfaced "Task not found" intermittently). Cleared after consumption
   // so a navigation away + back via deep link still triggers GET.
   const location = useLocation()
+  // The "back to tasks" link returns to the filtered list the user came
+  // from. ``q`` + tag filter live in the /tasks URL; the list route
+  // mirrors its current search into sessionStorage per tab, so the link
+  // restores it whatever entry point (row / kanban / recent) opened this
+  // task. Read once on mount: stable for this view, and the browser Back
+  // button independently restores the same URL from history.
+  const [tasksBackSearch] = useState(() => {
+    try {
+      return sessionStorage.getItem(TASKS_LASTSEARCH_KEY) ?? ''
+    } catch {
+      return ''
+    }
+  })
   const seedTask = (location.state as { task?: Task } | null)?.task
   const seededTaskRef = useRef<Task | null>(
     seedTask && seedTask.id === id ? seedTask : null,
@@ -342,7 +356,7 @@ export function TaskDetailRoute() {
       setErr(errMessage(error))
       return
     }
-    navigate('/tasks')
+    navigate(`/tasks${tasksBackSearch}`)
   }
 
   async function onArchive() {
@@ -356,7 +370,7 @@ export function TaskDetailRoute() {
       setErr(errMessage(error))
       return
     }
-    navigate('/tasks')
+    navigate(`/tasks${tasksBackSearch}`)
   }
 
   async function onRestore() {
@@ -807,7 +821,7 @@ export function TaskDetailRoute() {
     <section className="card">
       <div className="taskdetail__top">
         <p className="hint">
-          <Link to="/tasks">{t('tasks.back')}</Link>
+          <Link to={`/tasks${tasksBackSearch}`}>{t('tasks.back')}</Link>
         </p>
         {/* State select sits immediately left of the timer: the two
             most-used actions on this surface (advance the state,
