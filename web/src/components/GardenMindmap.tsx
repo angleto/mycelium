@@ -492,10 +492,19 @@ function GardenMindmapInner({ notes, workspaceId, onOpenNote }: GardenMindmapPro
   // Walk (task 5bf31b63): seed + mode + path. The user selects a
   // node, clicks 'walk', and the path lights up as the pollinator
   // trail. ``walkPath`` keys the step index per node id so the
-  // PlantNode renderer can render a halo + step badge.
+  // PlantNode renderer can render a halo + step badge. ``walkSeq`` is
+  // the ordered list of visited node ids (free_wander includes
+  // revisits) and ``walkResultMode`` records the mode that produced the
+  // current walk: together they drive the illuminated trail overlaid on
+  // the edges. Focused walks are a PPR-ranked set, not a path, so they
+  // light up nodes only — there is no trajectory to draw.
   const [walkMode, setWalkMode] = useState<'focused' | 'free_wander'>('focused')
   const [walkSeed, setWalkSeed] = useState<string | null>(null)
   const [walkPath, setWalkPath] = useState<Record<string, number>>({})
+  const [walkSeq, setWalkSeq] = useState<string[]>([])
+  const [walkResultMode, setWalkResultMode] = useState<
+    'focused' | 'free_wander'
+  >('focused')
   const [search, setSearch] = useState('')
   const [pendingConnect, setPendingConnect] = useState<Connection | null>(null)
   const [linkKind, setLinkKind] = useState<LinkKind>('references')
@@ -986,7 +995,44 @@ function GardenMindmapInner({ notes, workspaceId, onOpenNote }: GardenMindmapPro
         })
       }
     }
-    setEdges([...tagEdges, ...manual])
+    // Illuminated trail: the pollinator's path overlaid on the graph.
+    // free_wander visits nodes in sequence, so consecutive steps draw a
+    // luminous, animated, directed filament on top of the base edges —
+    // visible even when the underlying edge type (tag / manual) is
+    // toggled off. focused walks are a PPR-ranked set with no traversal
+    // order, so they light up nodes only (handled in PlantNode).
+    const walkEdges: Edge[] = []
+    if (walkResultMode === 'free_wander' && walkSeq.length > 1) {
+      for (let i = 0; i < walkSeq.length - 1; i++) {
+        const source = walkSeq[i]
+        const target = walkSeq[i + 1]
+        if (!source || !target || source === target) continue
+        if (!noteIds.has(source) || !noteIds.has(target)) continue
+        walkEdges.push({
+          id: `mm-walk-${i}`,
+          source,
+          target,
+          type: 'straight',
+          animated: true,
+          selectable: false,
+          focusable: false,
+          zIndex: 5,
+          style: {
+            stroke: 'var(--bloom)',
+            strokeWidth: 3,
+            opacity: 0.95,
+          },
+          markerEnd: {
+            type: MarkerType.ArrowClosed,
+            color: 'var(--bloom)',
+            width: 16,
+            height: 16,
+          },
+          data: { isManual: false, isWalk: true },
+        })
+      }
+    }
+    setEdges([...tagEdges, ...manual, ...walkEdges])
   }, [
     workspaceLinks,
     notes,
@@ -994,6 +1040,8 @@ function GardenMindmapInner({ notes, workspaceId, onOpenNote }: GardenMindmapPro
     showTagEdges,
     showEdgeWeights,
     edgeWeightMap,
+    walkSeq,
+    walkResultMode,
     t,
     setEdges,
     noteById,
@@ -1162,9 +1210,17 @@ function GardenMindmapInner({ notes, workspaceId, onOpenNote }: GardenMindmapPro
               const data = (await res.json()) as {
                 steps: { note_id: string; step: number }[]
               }
+              const sorted = [...data.steps].sort((a, b) => a.step - b.step)
               const next: Record<string, number> = {}
-              for (const s of data.steps) next[s.note_id] = s.step
+              // First visit wins the badge step so a revisited node keeps
+              // a stable number; the full sequence (with revisits) lives
+              // in walkSeq and drives the trail.
+              for (const s of sorted) {
+                if (!(s.note_id in next)) next[s.note_id] = s.step
+              }
               setWalkPath(next)
+              setWalkSeq(sorted.map((s) => s.note_id))
+              setWalkResultMode(walkMode)
             })()
           }}
         >
@@ -1174,7 +1230,10 @@ function GardenMindmapInner({ notes, workspaceId, onOpenNote }: GardenMindmapPro
           type="button"
           className="btn--ghost btn--sm"
           disabled={Object.keys(walkPath).length === 0}
-          onClick={() => setWalkPath({})}
+          onClick={() => {
+            setWalkPath({})
+            setWalkSeq([])
+          }}
         >
           {t('garden.mindmap.walkClear')}
         </button>
