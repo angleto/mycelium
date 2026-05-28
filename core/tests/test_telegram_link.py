@@ -153,6 +153,18 @@ def _text_update(*, update_id: int, chat_id: int, text: str) -> dict[str, object
     }
 
 
+def _voice_update(
+    *, update_id: int, chat_id: int, file_id: str, caption: str | None = None
+) -> dict[str, object]:
+    message: dict[str, object] = {
+        "chat": {"id": chat_id, "type": "private"},
+        "voice": {"file_id": file_id, "duration": 3, "mime_type": "audio/ogg"},
+    }
+    if caption is not None:
+        message["caption"] = caption
+    return {"update_id": update_id, "message": message}
+
+
 async def test_start_with_valid_code_links_and_syncs_pref(_fake_tg: FakeTelegramApi) -> None:
     org, user = await _signup()
     async with tenant_session(str(org), str(user)) as s:
@@ -351,6 +363,44 @@ async def test_link_codes_are_org_isolated() -> None:
 # ---------------------------------------------------------------------------
 # Outgoing notification via the Telegram sender
 # ---------------------------------------------------------------------------
+
+
+async def test_voice_transcription_failure_tells_user(_fake_tg: FakeTelegramApi) -> None:
+    """When STT is unavailable (e.g. the faster-whisper extra is missing
+    from the image, task 44ba3f14), the voice note is still saved and the
+    reply says transcription is unavailable instead of implying success.
+    Any transcribe failure (STT or metering) takes this branch."""
+    from flow_core.ai_providers import set_stt_override
+
+    class _RaisingSTT:
+        model_id = "raising-stt"
+
+        async def transcribe(self, **_: object) -> object:
+            raise RuntimeError("STT unavailable")
+
+    org, user = await _signup()
+    async with tenant_session(str(org), str(user)) as s:
+        issued = await svc.create_link_code(
+            s, org_id=org, user_id=user, bot_username="flow_test_bot"
+        )
+    chat_id = uuid.uuid4().int & 0xFFFFFFFF
+    await svc.handle_webhook_update(
+        _start_update(update_id=_uid(), code=issued.code, chat_id=chat_id)
+    )
+    _fake_tg.files["voice/vf1.oga"] = b"fake-ogg-bytes"
+
+    set_stt_override(lambda: _RaisingSTT())  # type: ignore[arg-type,return-value]
+    try:
+        outcome = await svc.handle_webhook_update(
+            _voice_update(update_id=_uid(), chat_id=chat_id, file_id="vf1")
+        )
+    finally:
+        set_stt_override(None)
+
+    assert outcome.reply_text is not None
+    assert "transcription is unavailable" in outcome.reply_text
+    # The audio is still saved as a note for later replay.
+    assert outcome.note_id is not None
 
 
 async def test_telegram_notification_sender_calls_api(_fake_tg: FakeTelegramApi) -> None:

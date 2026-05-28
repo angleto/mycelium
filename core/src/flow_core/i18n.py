@@ -135,6 +135,7 @@ class MessageCode(enum.StrEnum):
     TELEGRAM_NO_WORKSPACE = "telegram.no_workspace"
     TELEGRAM_VOICE_FAILED = "telegram.voice_failed"
     TELEGRAM_VOICE_SAVED = "telegram.voice_saved"
+    TELEGRAM_VOICE_SAVED_NO_TRANSCRIPT = "telegram.voice_saved_no_transcript"
     TELEGRAM_EMPTY_IGNORED = "telegram.empty_ignored"
     TELEGRAM_TASK_CREATED = "telegram.task_created"
     TELEGRAM_NOTE_SAVED = "telegram.note_saved"
@@ -343,6 +344,10 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
         ),
         MessageCode.TELEGRAM_VOICE_FAILED: "Could not download voice message. Try again.",
         MessageCode.TELEGRAM_VOICE_SAVED: "Voice note saved.",
+        MessageCode.TELEGRAM_VOICE_SAVED_NO_TRANSCRIPT: (
+            "Voice note saved, but transcription is unavailable. "
+            "You can still play it back from the note."
+        ),
         MessageCode.TELEGRAM_EMPTY_IGNORED: (
             "Empty message ignored. Send /note <text> to save a note."
         ),

@@ -395,6 +395,7 @@ async def handle_webhook_update(payload: dict[str, object]) -> UpdateOutcome:
                 audio_ref=f"attachment:{att.id}",
             )
             transcript_text: str = ""
+            transcribed_ok = False
             try:
                 tr_note = await notes_svc.transcribe(
                     ts,
@@ -411,9 +412,13 @@ async def handle_webhook_update(payload: dict[str, object]) -> UpdateOutcome:
 
                 parts = await parts_svc.list_parts(ts, org_id=org_id, note_id=tr_note.id)
                 transcript_text = (parts[0].body if parts else "") or ""
+                transcribed_ok = True
             except Exception:
-                # Best-effort: an unconfigured STT raises here; the
-                # audio is still saved on the note for later replay.
+                # Best-effort: an unconfigured STT (faster-whisper extra
+                # missing from the image) raises here; the audio is still
+                # saved on the note for later replay. We tell the user the
+                # transcript is unavailable rather than silently implying
+                # success (task 44ba3f14).
                 logger.exception("telegram voice transcribe failed for note=%s", note.id)
             # Caption-driven promotion (task 44ba3f14).
             if as_task:
@@ -447,7 +452,11 @@ async def handle_webhook_update(payload: dict[str, object]) -> UpdateOutcome:
                         note.id,
                     )
         return UpdateOutcome(
-            reply_text=render(MessageCode.TELEGRAM_VOICE_SAVED),
+            reply_text=render(
+                MessageCode.TELEGRAM_VOICE_SAVED
+                if transcribed_ok
+                else MessageCode.TELEGRAM_VOICE_SAVED_NO_TRANSCRIPT
+            ),
             note_id=note.id,
             user_id=user_id,
         )

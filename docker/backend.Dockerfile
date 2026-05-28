@@ -32,10 +32,20 @@ RUN --mount=type=cache,target=/root/.cache/uv uv sync --no-dev
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --python /app/.venv/bin/python "sentence-transformers>=3"
 
-# Pre-fetch the embedding checkpoint so a freshly-rolled pod does not
-# pay an HF download (and does not depend on egress to huggingface.co).
+# Local STT (faster-whisper / CTranslate2): the Telegram voice webhook
+# transcribes inline in this (API) process, so the dep must live here.
+# Without it LocalSTT raises and voice notes save with no transcript
+# (task 44ba3f14). Explicit install, same rationale as the embedder.
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --python /app/.venv/bin/python "faster-whisper>=1.0"
+
+# Pre-fetch the embedding + STT checkpoints so a freshly-rolled pod does
+# not pay an HF download (and does not depend on egress to
+# huggingface.co). STT size/quant mirror the LocalSTT defaults
+# (FLOW_STT_MODEL=small, FLOW_STT_COMPUTE_TYPE=int8, CPU).
 ENV HF_HOME=/app/.cache/huggingface
 RUN /app/.venv/bin/python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('intfloat/multilingual-e5-small')"
+RUN /app/.venv/bin/python -c "from faster_whisper import WhisperModel; WhisperModel('small', device='cpu', compute_type='int8')"
 
 # ---
 
@@ -70,10 +80,14 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 #                          file:// @font-face, but body text needs at
 #                          least one serif/sans/mono installed so
 #                          fontconfig has something to map to.
+#  - libgomp1:             OpenMP runtime for CTranslate2 (faster-whisper
+#                          STT). The CT2 wheel bundles most libs but not
+#                          libgomp.so.1, which slim Debian lacks.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         libpq5 \
         libpango-1.0-0 libpangoft2-1.0-0 libharfbuzz0b \
         fontconfig fonts-dejavu-core \
+        libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
