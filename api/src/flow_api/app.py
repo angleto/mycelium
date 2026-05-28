@@ -32,6 +32,7 @@ from flow_api.routers import (
     export,
     garden,
     invoices,
+    lookup,
     memory,
     memory_channels,
     mfa,
@@ -209,6 +210,7 @@ def create_app() -> FastAPI:
     app.include_router(memory.router)
     app.include_router(memory_channels.router)
     app.include_router(search.router)
+    app.include_router(lookup.router)
     app.include_router(notes.router)
     app.include_router(garden.router)
     app.include_router(attachments.router)
