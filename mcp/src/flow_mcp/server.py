@@ -3279,22 +3279,17 @@ async def replace_in_note_part(
     absent or empty) returns replacements=0 and does not bump the
     version."""
     async with _tenant(token, org_id) as (s, org, user):
-        part = await note_parts_svc.get_part(s, org_id=org, part_id=uuid.UUID(part_id))
-        body = part.body or ""
-        occurrences = body.count(find) if find else 0
-        if occurrences == 0:
-            return {"part_id": part_id, "version": part.version, "replacements": 0}
-        n = occurrences if count <= 0 else min(count, occurrences)
-        new_body = body.replace(find, replace) if count <= 0 else body.replace(find, replace, count)
-        version = await note_parts_svc.update_part(
+        version, replacements = await note_parts_svc.replace_in_part(
             s,
             org_id=org,
             actor_id=user,
             part_id=uuid.UUID(part_id),
+            find=find,
+            replace=replace,
             expected_version=expected_version,
-            body=new_body,
+            count=count,
         )
-        return {"part_id": part_id, "version": version, "replacements": n}
+        return {"part_id": part_id, "version": version, "replacements": replacements}
 
 
 @mcp.tool()

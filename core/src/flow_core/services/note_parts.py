@@ -418,6 +418,79 @@ async def prepend_to_part(
     return new_version, len(text)
 
 
+async def replace_in_part(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    part_id: uuid.UUID,
+    find: str,
+    replace: str,
+    expected_version: int,
+    count: int = 0,
+    operation_id: str | None = None,
+    channel: str = "api",
+) -> tuple[int, int]:
+    """Anchored find/replace inside ONE part without resending the body
+    (task 5662a07f): swap the literal ``find`` for ``replace``. ``count``
+    <= 0 replaces every occurrence; a positive ``count`` only the first N.
+    Concurrency-safe via ``expected_version`` (mismatch raises
+    ``stale_version``, no last-write-wins). Returns ``(new_version,
+    replacements)``.
+
+    A no-op -- ``find`` empty or absent from the body -- returns
+    ``(current_version, 0)`` WITHOUT bumping the version and without
+    asserting ``expected_version`` (nothing changed, so nothing to race).
+    Refuses with ``body.limit_exceeded`` when the result would exceed
+    ``FLOW_NOTE_BODY_MAX_BYTES`` (a replacement can grow the body).
+    """
+    await require_role(session, org_id, actor_id, Role.member)
+    part = await _get_part(session, org_id=org_id, part_id=part_id)
+    body = part.body or ""
+    occurrences = body.count(find) if find else 0
+    if occurrences == 0:
+        return part.version, 0
+    n = occurrences if count <= 0 else min(count, occurrences)
+    new_body = body.replace(find, replace) if count <= 0 else body.replace(find, replace, count)
+    max_bytes = get_settings().note_body_max_bytes
+    if len(new_body.encode("utf-8")) > max_bytes:
+        raise DomainError(MessageCode.BODY_LIMIT_EXCEEDED, max_bytes=str(max_bytes))
+    new_version = await optimistic_update(
+        session,
+        NotePart,
+        pk=part_id,
+        expected_version=expected_version,
+        values={"body": new_body},
+    )
+    # Single-shot edit: seal the recovery revision now (same pattern as
+    # prepend_to_part). version_from == version_to: the note row's own
+    # version is unchanged by part edits.
+    from flow_core.services.notes import _log_note_revision
+
+    note = await _get_note_in_org(session, org_id=org_id, note_id=part.note_id)
+    await _log_note_revision(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        note_id=part.note_id,
+        version_from=note.version,
+        version_to=note.version,
+        changed_fields=["parts.body"],
+        channel=channel,
+        edit_session_id=operation_id,
+    )
+    await audit.log(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        entity="note_part",
+        entity_id=part_id,
+        action="replace",
+        diff={"replacements": str(n)},
+    )
+    return new_version, n
+
+
 async def delete_part(
     session: AsyncSession,
     *,
@@ -667,6 +740,7 @@ __all__ = [
     "merge_notes",
     "parts_by_note",
     "reorder_parts",
+    "replace_in_part",
     "set_ui_state",
     "update_part",
 ]

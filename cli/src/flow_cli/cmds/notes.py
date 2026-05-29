@@ -439,6 +439,89 @@ def parts_append(
     )
 
 
+@parts_app.command("prepend")
+def parts_prepend(
+    note_id: str = typer.Argument(..., autocompletion=complete_note_id),
+    part_id: str = typer.Argument(...),
+    text: str | None = typer.Option(
+        None,
+        "--text",
+        "-m",
+        help="Text to prepend. Use '-' for stdin; omit to open $EDITOR.",
+    ),
+) -> None:
+    """Prepend markdown text to the FRONT of a part without resending the
+    body (task 5662a07f). Concatenated raw, so include any trailing
+    newline yourself (e.g. a heading: '# Title\\n\\n'). Concurrency-safe."""
+    if text == "-":
+        text = sys.stdin.read()
+    elif text is None:
+        text = edit_in_editor("")
+    if not text:
+        raise CLIError("nothing to prepend (empty text).")
+    with client() as c:
+        full = _resolve_note(c, note_id)
+        pid = _resolve_part(c, full, part_id)
+        rows = get_json(c.get(f"/notes/{full}/parts"))
+        part = next(p for p in rows if p["id"] == pid)
+        resp = get_json(
+            c.post(
+                f"/notes/{full}/parts/{pid}/prepend",
+                json={"text": text, "expected_version": part["version"]},
+            )
+        )
+    if json_mode():
+        emit_json(resp)
+        return
+    success(
+        f"prepended {resp.get('appended_chars')} chars to part {short_id(pid)} "
+        f"on note {short_id(full)} (v{resp.get('version')})"
+    )
+
+
+@parts_app.command("replace")
+def parts_replace(
+    note_id: str = typer.Argument(..., autocompletion=complete_note_id),
+    part_id: str = typer.Argument(...),
+    find: str = typer.Argument(..., help="Literal text to find."),
+    replace: str = typer.Argument(..., help="Replacement text."),
+    count: int = typer.Option(
+        0, "--count", "-c", min=0, help="Max replacements; 0 (default) = all occurrences."
+    ),
+) -> None:
+    """Find-and-replace literal text inside one part without resending the
+    body (task 5662a07f). ``--count 0`` (default) replaces every
+    occurrence; a positive count only the first N. Concurrency-safe; a
+    no-op (text not found) reports 0 replacements without bumping."""
+    with client() as c:
+        full = _resolve_note(c, note_id)
+        pid = _resolve_part(c, full, part_id)
+        rows = get_json(c.get(f"/notes/{full}/parts"))
+        part = next(p for p in rows if p["id"] == pid)
+        resp = get_json(
+            c.post(
+                f"/notes/{full}/parts/{pid}/replace",
+                json={
+                    "find": find,
+                    "replace": replace,
+                    "expected_version": part["version"],
+                    "count": count,
+                },
+            )
+        )
+    if json_mode():
+        emit_json(resp)
+        return
+    n = resp.get("replacements", 0)
+    if n == 0:
+        info(f"'{find}' not found in part {short_id(pid)}; no change.")
+        return
+    success(
+        f"replaced {n} occurrence(s) in part {short_id(pid)} "
+        f"on note {short_id(full)} (v{resp.get('version')})"
+    )
+
+
 @parts_app.command("list")
 def parts_list(
     note_id: str = typer.Argument(..., autocompletion=complete_note_id),

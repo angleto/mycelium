@@ -255,3 +255,106 @@ async def test_note_part_prepend_puts_text_at_front_of_part() -> None:
             json={"text": "x", "expected_version": part["version"]},
         )
         assert stale.status_code >= 400 and "stale_version" in stale.text
+
+
+async def test_note_part_replace_swaps_text_and_counts() -> None:
+    """POST /notes/{id}/parts/{pid}/replace swaps the literal ``find`` for
+    ``replace`` inside one part, returns the count, and is concurrency-safe
+    (task 5662a07f)."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as c:
+        h = await _signup(c)
+        note_id = (await c.post("/notes", headers=h, json={"kind": "text", "title": "R"})).json()[
+            "id"
+        ]
+        part = (
+            await c.post(
+                f"/notes/{note_id}/parts",
+                headers=h,
+                json={"body": "foo bar foo baz foo"},
+            )
+        ).json()
+        pid = part["id"]
+
+        # count=0 (default) replaces every occurrence.
+        r = await c.post(
+            f"/notes/{note_id}/parts/{pid}/replace",
+            headers=h,
+            json={"find": "foo", "replace": "QUX", "expected_version": part["version"]},
+        )
+        assert r.status_code == 200, r.text
+        assert r.json()["replacements"] == 3
+        got = (await c.get(f"/notes/{note_id}", headers=h)).json()
+        body = next(p["body"] for p in got["parts"] if p["id"] == pid)
+        assert body == "QUX bar QUX baz QUX"
+
+
+async def test_note_part_replace_count_limits_first_n() -> None:
+    """A positive ``count`` replaces only the first N occurrences."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as c:
+        h = await _signup(c)
+        note_id = (await c.post("/notes", headers=h, json={"kind": "text", "title": "R"})).json()[
+            "id"
+        ]
+        part = (await c.post(f"/notes/{note_id}/parts", headers=h, json={"body": "a a a a"})).json()
+        pid = part["id"]
+
+        r = await c.post(
+            f"/notes/{note_id}/parts/{pid}/replace",
+            headers=h,
+            json={"find": "a", "replace": "b", "count": 2, "expected_version": part["version"]},
+        )
+        assert r.status_code == 200, r.text
+        assert r.json()["replacements"] == 2
+        got = (await c.get(f"/notes/{note_id}", headers=h)).json()
+        body = next(p["body"] for p in got["parts"] if p["id"] == pid)
+        assert body == "b b a a"
+
+
+async def test_note_part_replace_no_op_when_find_absent() -> None:
+    """When ``find`` is absent the call is a no-op: ``replacements=0`` and
+    the version does NOT bump (so a stale cursor is irrelevant on a no-op)."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as c:
+        h = await _signup(c)
+        note_id = (await c.post("/notes", headers=h, json={"kind": "text", "title": "R"})).json()[
+            "id"
+        ]
+        part = (
+            await c.post(f"/notes/{note_id}/parts", headers=h, json={"body": "unchanged"})
+        ).json()
+        pid = part["id"]
+
+        r = await c.post(
+            f"/notes/{note_id}/parts/{pid}/replace",
+            headers=h,
+            json={"find": "absent", "replace": "x", "expected_version": part["version"]},
+        )
+        assert r.status_code == 200, r.text
+        out = r.json()
+        assert out["replacements"] == 0
+        assert out["version"] == part["version"]  # no bump on no-op
+
+
+async def test_note_part_replace_stale_version_conflicts() -> None:
+    """A real replacement with a stale ``expected_version`` raises
+    stale_version (no last-write-wins)."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as c:
+        h = await _signup(c)
+        note_id = (await c.post("/notes", headers=h, json={"kind": "text", "title": "R"})).json()[
+            "id"
+        ]
+        part = (
+            await c.post(f"/notes/{note_id}/parts", headers=h, json={"body": "hit here"})
+        ).json()
+        pid = part["id"]
+
+        r = await c.post(
+            f"/notes/{note_id}/parts/{pid}/replace",
+            headers=h,
+            json={"find": "hit", "replace": "x", "expected_version": 999},
+        )
+        assert r.status_code >= 400, r.text
+        assert "stale_version" in r.text

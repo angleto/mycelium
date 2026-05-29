@@ -325,6 +325,12 @@ app.add_typer(remind_app, name="remind")
 attach_app = typer.Typer(no_args_is_help=True, help="Attachments on a task.")
 app.add_typer(attach_app, name="attach")
 
+desc_app = typer.Typer(
+    no_args_is_help=True,
+    help="Partial writes on a task's description (append/prepend) without resending the body.",
+)
+app.add_typer(desc_app, name="desc")
+
 
 @tag_app.command("add")
 def tag_add(
@@ -486,6 +492,76 @@ def attach_list(task_id: str = typer.Argument(..., autocompletion=complete_task_
             )
             for r in rows
         ],
+    )
+
+
+@desc_app.command("append")
+def desc_append(
+    task_id: str = typer.Argument(..., autocompletion=complete_task_id),
+    text: str | None = typer.Option(
+        None, "--text", "-m", help="Text to append. Use '-' for stdin; omit to open $EDITOR."
+    ),
+    separator: str = typer.Option(
+        "\n\n", "--separator", help="Inserted between the old body and the new text."
+    ),
+) -> None:
+    """Append text to the END of a task's description without resending
+    the body (task 5662a07f). Joined to the existing body by --separator."""
+    text = _read_body_text(text)
+    with client() as c:
+        full = _resolve_task(c, task_id)
+        current = get_json(c.get(f"/tasks/{full}"))
+        resp = get_json(
+            c.post(
+                f"/tasks/{full}/description/append",
+                json={
+                    "text": text,
+                    "separator": separator,
+                    "expected_version": current["version"],
+                },
+            )
+        )
+    if json_mode():
+        emit_json(resp)
+        return
+    success(
+        f"appended {resp.get('appended_chars')} chars to task {short_id(full)} "
+        f"description (v{resp.get('version')})"
+    )
+
+
+@desc_app.command("prepend")
+def desc_prepend(
+    task_id: str = typer.Argument(..., autocompletion=complete_task_id),
+    text: str | None = typer.Option(
+        None, "--text", "-m", help="Text to prepend. Use '-' for stdin; omit to open $EDITOR."
+    ),
+    separator: str = typer.Option(
+        "\n\n", "--separator", help="Inserted between the new text and the old body."
+    ),
+) -> None:
+    """Prepend text to the FRONT of a task's description without resending
+    the body (task 5662a07f). Joined to the existing body by --separator."""
+    text = _read_body_text(text)
+    with client() as c:
+        full = _resolve_task(c, task_id)
+        current = get_json(c.get(f"/tasks/{full}"))
+        resp = get_json(
+            c.post(
+                f"/tasks/{full}/description/prepend",
+                json={
+                    "text": text,
+                    "separator": separator,
+                    "expected_version": current["version"],
+                },
+            )
+        )
+    if json_mode():
+        emit_json(resp)
+        return
+    success(
+        f"prepended {resp.get('appended_chars')} chars to task {short_id(full)} "
+        f"description (v{resp.get('version')})"
     )
 
 
@@ -663,6 +739,21 @@ def _render_tasks(rows: list[dict[str, Any]]) -> None:
             for t in rows
         ],
     )
+
+
+def _read_body_text(text: str | None) -> str:
+    """Resolve a ``--text`` option to a non-empty string: ``-`` reads
+    stdin, ``None`` opens $EDITOR, anything else is taken literally.
+    Raises ``CLIError`` on empty input."""
+    if text == "-":
+        import sys as _sys
+
+        text = _sys.stdin.read()
+    elif text is None:
+        text = edit_in_editor("")
+    if not text:
+        raise CLIError("empty text, aborting.")
+    return text
 
 
 def _parse_due(spec: str | None) -> dt.date | None:

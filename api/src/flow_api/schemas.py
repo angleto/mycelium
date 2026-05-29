@@ -1837,6 +1837,16 @@ class AppendOut(BaseModel):
     appended_chars: int
 
 
+class ReplaceOut(BaseModel):
+    """Response for the note-part replace endpoint. ``replacements`` is
+    the number of occurrences swapped (0 on a no-op, in which case the
+    version is unchanged)."""
+
+    id: uuid.UUID
+    version: int
+    replacements: int
+
+
 class NotePartAppendIn(BaseModel):
     """Body for POST /notes/{id}/parts/{pid}/append (task 27f4d6c9).
     Chunked append: stream a large markdown body in N ordered chunks,
@@ -1864,6 +1874,21 @@ class NotePartPrependIn(BaseModel):
 
     text: str = Field(min_length=1)
     expected_version: int
+    operation_id: str | None = None
+
+
+class NotePartReplaceIn(BaseModel):
+    """Body for POST /notes/{id}/parts/{pid}/replace (task 5662a07f):
+    anchored find/replace inside one part without resending the body.
+    ``count=0`` (default) replaces every occurrence of the literal
+    ``find``; a positive ``count`` only the first N. ``expected_version``
+    is the optimistic cursor. A no-op (``find`` absent) returns
+    ``replacements=0`` and does not bump the version."""
+
+    find: str = Field(min_length=1)
+    replace: str
+    expected_version: int
+    count: int = Field(default=0, ge=0)
     operation_id: str | None = None
 
 

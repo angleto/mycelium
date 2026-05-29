@@ -40,6 +40,7 @@ from flow_api.schemas import (
     NotePartPatchIn,
     NotePartPrependIn,
     NotePartReorderIn,
+    NotePartReplaceIn,
     NotePartUIStateIn,
     NotePatchIn,
     NotePromoteIn,
@@ -50,6 +51,7 @@ from flow_api.schemas import (
     NoteTranscribeIn,
     NoteTurnOut,
     NoteWithLinksOut,
+    ReplaceOut,
     RevisionOut,
     RevisionRestoreIn,
     RevisionSummaryIn,
@@ -665,6 +667,39 @@ async def prepend_note_part(
         channel=channel,
     )
     return AppendOut(id=part_id, version=v, appended_chars=prepended)
+
+
+@router.post(
+    "/{note_id}/parts/{part_id}/replace",
+    response_model=ReplaceOut,
+    tags=["garden"],
+)
+async def replace_in_note_part(
+    note_id: uuid.UUID,
+    part_id: uuid.UUID,
+    body: NotePartReplaceIn,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    edit_session_id: Annotated[str | None, Header(alias="X-Edit-Session-Id")] = None,
+) -> ReplaceOut:
+    """Anchored find/replace inside ONE part without resending the body
+    (task 5662a07f): swap the literal ``find`` for ``replace``.
+    ``count=0`` replaces every occurrence; a positive ``count`` only the
+    first N. Concurrency-safe via ``expected_version``. A no-op (``find``
+    absent) returns ``replacements=0`` and leaves the version untouched."""
+    channel = "web" if edit_session_id else "api"
+    v, replacements = await parts_svc.replace_in_part(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        part_id=part_id,
+        find=body.find,
+        replace=body.replace,
+        expected_version=body.expected_version,
+        count=body.count,
+        operation_id=body.operation_id or edit_session_id,
+        channel=channel,
+    )
+    return ReplaceOut(id=part_id, version=v, replacements=replacements)
 
 
 @router.patch(
