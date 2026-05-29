@@ -913,6 +913,19 @@ class GardenGraphOut(BaseModel):
     centrality: dict[uuid.UUID, float]
 
 
+class GardenClustersOut(BaseModel):
+    """Response of GET /garden/clusters (task 8c0a8f08): the Leiden
+    community index per note plus the partition's global modularity.
+    ``clusters`` is ``{note_id: community_index}`` (0-based, dense);
+    ``modularity`` is the structure thermometer (ADR-0035), or null when
+    the optional clustering extra is not installed (graceful degrade).
+    ``count`` is the number of distinct communities."""
+
+    clusters: dict[uuid.UUID, int]
+    modularity: float | None
+    count: int
+
+
 # --- Garden walk (task 5bf31b63) ----------------------------------------
 # Two regimes packed in one shape: ``focused`` (PPR seeded) returns
 # the top-K notes by induced mass and the step is their rank; ``free_

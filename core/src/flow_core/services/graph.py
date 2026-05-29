@@ -67,6 +67,21 @@ class EdgeWeight:
     weight: float
 
 
+@dataclass(frozen=True)
+class ClusterResult:
+    """Leiden community assignment over the weighted note graph.
+
+    ``clusters`` maps each note to its community index (0-based, dense).
+    ``modularity`` is the global modularity of the partition (ADR-0035's
+    ``leiden_modularity`` sensor), or ``None`` when clustering could not
+    run (the optional ``clustering`` extra is not installed) — the
+    caller degrades gracefully rather than failing the request.
+    """
+
+    clusters: dict[uuid.UUID, int]
+    modularity: float | None
+
+
 def _softor(values: Iterable[float]) -> float:
     """Saturating OR over [0, 1] weights. Two evidence sources never
     push past 1; a missing source is neutral (contributes ``1 - 0``).
@@ -367,6 +382,76 @@ async def compute_personalized_pagerank(
     # Sanity: emit the seed mass clamp non-negative.
     del seed_set
     return {nodes[i]: rank[i] for i in range(n)}
+
+
+async def compute_leiden_clusters(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    seed: int = 0,
+) -> ClusterResult:
+    """Partition the workspace note graph into communities with the
+    Leiden algorithm (task 8c0a8f08, ADR-0031 v2). Runs over the same
+    undirected weighted graph as ``compute_note_edge_weights`` (per-kind
+    base + Adamic-Adar tag overlap), so visually-clustered notes and
+    co-tagged notes fall together. Leiden over Louvain because it
+    guarantees well-connected communities (no internally-disconnected
+    clusters).
+
+    Returns a dense 0-based community index per note plus the partition's
+    global modularity (the "is this garden structured or magma?"
+    thermometer of ADR-0035). Notes with no qualifying edge become
+    singleton communities. Deterministic given ``seed``.
+
+    ``python-igraph`` + ``leidenalg`` are an optional extra
+    (``clustering``); when absent the function returns an empty mapping
+    and ``modularity=None`` so the endpoint degrades to "no colours"
+    instead of 500-ing. Bounded cost: the garden graph is small per
+    workspace (< 1k notes); materialisation/caching is a later concern,
+    same as the other graph helpers here.
+    """
+    try:
+        import igraph
+        import leidenalg
+    except ImportError:
+        return ClusterResult(clusters={}, modularity=None)
+
+    note_rows = (await session.execute(select(Note.id).where(Note.org_id == org_id))).all()
+    nodes: list[uuid.UUID] = [r[0] for r in note_rows]
+    if not nodes:
+        return ClusterResult(clusters={}, modularity=None)
+    idx = {nid: i for i, nid in enumerate(nodes)}
+
+    edges = await compute_note_edge_weights(session, org_id=org_id)
+    ig_edges: list[tuple[int, int]] = []
+    weights: list[float] = []
+    for e in edges:
+        si = idx.get(e.src)
+        di = idx.get(e.dst)
+        if si is None or di is None or si == di:
+            continue
+        ig_edges.append((si, di))
+        weights.append(e.weight)
+
+    g = igraph.Graph(n=len(nodes), edges=ig_edges, directed=False)
+    weight_arg = None
+    if weights:
+        g.es["weight"] = weights
+        weight_arg = "weight"
+    # ModularityVertexPartition: the canonical objective, so the score we
+    # report is exactly the modularity ADR-0035 tracks. A tunable
+    # resolution (RBConfigurationVertexPartition) is the future knob for
+    # the anti-monoculture work (ADR-0033) but not needed for v1.
+    partition = leidenalg.find_partition(
+        g,
+        leidenalg.ModularityVertexPartition,
+        weights=weight_arg,
+        seed=seed,
+    )
+    membership: list[int] = list(partition.membership)
+    clusters = {nodes[i]: int(membership[i]) for i in range(len(nodes))}
+    modularity = float(g.modularity(membership, weights=weight_arg))
+    return ClusterResult(clusters=clusters, modularity=modularity)
 
 
 async def biased_random_walk(

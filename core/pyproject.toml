@@ -35,6 +35,12 @@ local-embedder = ["sentence-transformers>=3"]
 # Model/quantisation via FLOW_STT_MODEL (default small) / FLOW_STT_DEVICE
 # / FLOW_STT_COMPUTE_TYPE (default int8).
 stt = ["faster-whisper>=1.0"]
+# Opt-in graph clustering (task 8c0a8f08, ADR-0031 v2): Leiden community
+# detection + modularity for the garden mindmap. Lazily imported in
+# graph.compute_leiden_clusters, so CI/dev without it degrade to "no
+# clusters" (modularity=null); a deploy that wants cluster-colouring +
+# the ADR-0035 modularity sensor must ship it. Enable: uv sync --extra clustering
+clustering = ["python-igraph>=0.11", "leidenalg>=0.10"]
 
 [build-system]
 requires = ["hatchling"]

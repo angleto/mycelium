@@ -72,6 +72,8 @@ module = [
     "reportlab.*",
     "boto3.*",
     "lxml.*",
+    "igraph.*",
+    "leidenalg.*",
 ]
 ignore_missing_imports = true
 
