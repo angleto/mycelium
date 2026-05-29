@@ -30,6 +30,11 @@ class User(UUIDPKMixin, TimestampMixin, Base):
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     is_active: Mapped[bool] = mapped_column(nullable=False, server_default=text("true"))
     display_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    # IANA timezone (migration 0019), e.g. "Europe/Rome". Drives the
+    # local-time rendering of reminder labels and the date-only ("no time
+    # set") detection in ``scan_reminders``. NULL = UTC. Captured from the
+    # browser on signup/settings; user-overridable.
+    timezone: Mapped[str | None] = mapped_column(String(64), nullable=True)
     is_admin: Mapped[bool] = mapped_column(nullable=False, server_default=text("false"))
 
     # Email verification (gated by FLOW_REQUIRE_EMAIL_VERIFICATION).

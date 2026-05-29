@@ -11,18 +11,27 @@ import datetime as dt
 import uuid
 from collections.abc import Iterator
 from decimal import Decimal
+from zoneinfo import ZoneInfo
 
 import pytest
 
 from flow_core.db import admin_session, tenant_session
 from flow_core.errors import DomainError
 from flow_core.models.dependency import DependencyType
-from flow_core.models.notification import NotificationChannelKind, RecurrenceFreq
+from flow_core.models.notification import (
+    NotificationChannelKind,
+    NotificationStatus,
+    RecurrenceFreq,
+)
 from flow_core.notification_channel import set_sender_override
 from flow_core.services import dependencies as deps
 from flow_core.services import notifications as nf
 from flow_core.services import tasks as tasks_svc
+from flow_core.services import users as users_svc
 from flow_core.services.auth import signup
+from flow_core.services.mailer import OutboundEmail, set_mailer
+from flow_core.services.notification_sender import build_notification_sender
+from flow_core.telegram_client import set_telegram_api_override
 
 
 class FakeSender:
@@ -330,3 +339,272 @@ async def test_delete_notification_dismisses_own_only() -> None:
             await nf.delete_notification(s, org_id=org, actor_id=uuid.uuid4(), notification_id=n.id)
         await nf.delete_notification(s, org_id=org, actor_id=user, notification_id=n.id)
         assert await nf.list_notifications(s, org_id=org, user_id=user) == []
+
+
+async def _enable_email(s, org, user, target: str = "me@example.test") -> None:
+    await nf.set_pref(
+        s,
+        org_id=org,
+        actor_id=user,
+        user_id=user,
+        channel=NotificationChannelKind.email,
+        enabled=True,
+        target=target,
+    )
+
+
+async def test_dispatch_gates_on_fire_at() -> None:
+    """A reminder enqueued ahead of its firing moment is HELD by
+    dispatch_pending until ``fire_at`` arrives; ``fire_at`` in the past
+    or NULL sends immediately."""
+    org, user = await _org()
+    snd = FakeSender()
+    now = dt.datetime.now(tz=dt.UTC)
+    async with tenant_session(str(org), str(user)) as s:
+        await _enable_email(s, org, user)
+        await nf.enqueue(
+            s,
+            org_id=org,
+            actor_id=user,
+            user_id=user,
+            channel=NotificationChannelKind.email,
+            kind="reminder",
+            title="future",
+            body="b",
+            dedupe_key="future",
+            fire_at=now + dt.timedelta(hours=3),
+        )
+        await nf.enqueue(
+            s,
+            org_id=org,
+            actor_id=user,
+            user_id=user,
+            channel=NotificationChannelKind.email,
+            kind="reminder",
+            title="due",
+            body="b",
+            dedupe_key="due",
+            fire_at=now - dt.timedelta(minutes=1),
+        )
+        await nf.enqueue(
+            s,
+            org_id=org,
+            actor_id=user,
+            user_id=user,
+            channel=NotificationChannelKind.email,
+            kind="offer",
+            title="immediate",
+            body="b",
+            dedupe_key="imm",
+            fire_at=None,
+        )
+        r = await nf.dispatch_pending(s, org_id=org, actor_id=user, sender=snd)
+        pending = await nf.list_notifications(
+            s, org_id=org, user_id=user, status=NotificationStatus.pending
+        )
+    assert (r.sent, r.failed) == (2, 0)
+    assert {title for _t, title in snd.sent} == {"due", "immediate"}  # "future" held
+    assert [n.title for n in pending] == ["future"]
+
+
+async def test_scan_skips_reminder_beyond_horizon() -> None:
+    """The negative case for the look-ahead window: an appointment 5 days
+    out with a 30-min reminder is NOT enqueued under within_days=1 (its
+    fire_at is beyond the horizon)."""
+    org, user = await _org()
+    async with tenant_session(str(org), str(user)) as s:
+        await _enable_email(s, org, user)
+        start = dt.datetime.now(tz=dt.UTC) + dt.timedelta(days=5)
+        task = await tasks_svc.create_task(
+            s,
+            org_id=org,
+            actor_id=user,
+            title="far meeting",
+            start_at=start,
+            duration_minutes=30,
+            assignee_ids=[user],
+        )
+        await nf.add_reminder(s, org_id=org, actor_id=user, task_id=task.id, offset_minutes=30)
+        n = await nf.scan_reminders(s, org_id=org, actor_id=user, within_days=1)
+        notes = await nf.list_notifications(s, org_id=org, user_id=user)
+    assert n == 0
+    assert [x for x in notes if x.kind == "reminder"] == []
+
+
+async def test_failed_reminder_revived_for_retry() -> None:
+    """A transient send failure marks the row failed; a later enqueue
+    (same dedupe_key) revives it to pending so the next dispatch retries.
+    A working sender then delivers it."""
+    org, user = await _org()
+    failing = FakeSender(fail_targets={"me@example.test"})
+    ok = FakeSender()
+    async with tenant_session(str(org), str(user)) as s:
+        await _enable_email(s, org, user)
+        await nf.enqueue(
+            s,
+            org_id=org,
+            actor_id=user,
+            user_id=user,
+            channel=NotificationChannelKind.email,
+            kind="reminder",
+            title="T",
+            body="b",
+            dedupe_key="k",
+            fire_at=None,
+        )
+        r1 = await nf.dispatch_pending(s, org_id=org, actor_id=user, sender=failing)
+        assert (r1.sent, r1.failed) == (0, 1)
+        revived = await nf.enqueue(
+            s,
+            org_id=org,
+            actor_id=user,
+            user_id=user,
+            channel=NotificationChannelKind.email,
+            kind="reminder",
+            title="T",
+            body="b",
+            dedupe_key="k",
+            fire_at=None,
+        )
+        assert revived.status is NotificationStatus.pending and revived.attempts == 1
+        r2 = await nf.dispatch_pending(s, org_id=org, actor_id=user, sender=ok)
+        assert (r2.sent, r2.failed) == (1, 0)
+        assert revived.status is NotificationStatus.sent
+
+
+async def test_failed_reminder_retry_capped() -> None:
+    """Retry of a permanently-failing target is bounded: after
+    MAX_NOTIFICATION_ATTEMPTS failures the row is no longer revived."""
+    org, user = await _org()
+    failing = FakeSender(fail_targets={"me@example.test"})
+    async with tenant_session(str(org), str(user)) as s:
+        await _enable_email(s, org, user)
+        for _ in range(nf.MAX_NOTIFICATION_ATTEMPTS):
+            await nf.enqueue(
+                s,
+                org_id=org,
+                actor_id=user,
+                user_id=user,
+                channel=NotificationChannelKind.email,
+                kind="reminder",
+                title="T",
+                body="b",
+                dedupe_key="cap",
+                fire_at=None,
+            )
+            await nf.dispatch_pending(s, org_id=org, actor_id=user, sender=failing)
+        capped = await nf.enqueue(
+            s,
+            org_id=org,
+            actor_id=user,
+            user_id=user,
+            channel=NotificationChannelKind.email,
+            kind="reminder",
+            title="T",
+            body="b",
+            dedupe_key="cap",
+            fire_at=None,
+        )
+    assert capped.attempts == nf.MAX_NOTIFICATION_ATTEMPTS
+    assert capped.status is NotificationStatus.failed  # cap reached: not revived
+
+
+async def test_reminder_label_and_dateonly_in_user_timezone() -> None:
+    """A date-only due (end-of-day in the user's own timezone) is detected
+    as date-only and the offset promoted, even though the stored instant
+    is not 23:59:59 in UTC. The label is rendered in the user's zone."""
+    org, user = await _org()
+    async with admin_session() as s:
+        await users_svc.set_timezone(s, user_id=user, timezone="America/New_York")
+    ny = ZoneInfo("America/New_York")
+    due_day = (dt.datetime.now(tz=ny) + dt.timedelta(days=2)).date()
+    due = dt.datetime.combine(due_day, dt.time(23, 59, 59), tzinfo=ny).astimezone(dt.UTC)
+    # Sanity: the stored UTC instant is NOT 23:59:59 (so the old UTC-only
+    # heuristic would have missed it).
+    assert (due.hour, due.minute, due.second) != (23, 59, 59)
+    async with tenant_session(str(org), str(user)) as s:
+        await _enable_email(s, org, user)
+        task = await tasks_svc.create_task(
+            s,
+            org_id=org,
+            actor_id=user,
+            title="ny deadline",
+            due_date=due,
+            assignee_ids=[user],
+        )
+        await nf.add_reminder(s, org_id=org, actor_id=user, task_id=task.id, offset_minutes=60)
+        n = await nf.scan_reminders(s, org_id=org, actor_id=user, within_days=7)
+        notes = await nf.list_notifications(s, org_id=org, user_id=user)
+    assert n == 1
+    reminder = next(x for x in notes if x.kind == "reminder")
+    # Promoted to "at due" (date-only) and labelled with the local date,
+    # not a UTC time.
+    assert "at due" in reminder.body
+    assert due_day.isoformat() in reminder.body
+    assert "UTC" not in reminder.body
+
+
+async def test_recurrence_spawn_copies_timing_and_reminders() -> None:
+    """A spawned occurrence is anchored on the recurrence's next_run and
+    inherits the template's reminder offsets (so recurring tasks actually
+    fire reminders)."""
+    org, user = await _org()
+    next_run = dt.datetime(2026, 1, 5, 9, 0, tzinfo=dt.UTC)
+    async with tenant_session(str(org), str(user)) as s:
+        tmpl = await tasks_svc.create_task(
+            s,
+            org_id=org,
+            actor_id=user,
+            title="Weekly report",
+            due_date=dt.datetime(2026, 1, 1, 23, 59, 59, tzinfo=dt.UTC),
+            assignee_ids=[user],
+        )
+        await nf.add_reminder(s, org_id=org, actor_id=user, task_id=tmpl.id, offset_minutes=60)
+        await nf.create_recurrence(
+            s,
+            org_id=org,
+            actor_id=user,
+            task_id=tmpl.id,
+            freq=RecurrenceFreq.weekly,
+            next_run=next_run,
+        )
+        n = await nf.spawn_due(
+            s, org_id=org, actor_id=user, now=dt.datetime(2026, 1, 6, tzinfo=dt.UTC)
+        )
+        all_tasks = await tasks_svc.list_tasks(s, org_id=org)
+        spawned = [t for t in all_tasks if t.title == "Weekly report" and t.id != tmpl.id]
+        occ = spawned[0]
+        rems = await nf.list_reminders(s, org_id=org, task_id=occ.id)
+    assert n == 1 and len(spawned) == 1
+    assert occ.due_date == next_run  # anchored on next_run, not the template's date
+    assert [r.offset_minutes for r in rems] == [60]
+
+
+async def test_build_notification_sender_routes_by_channel() -> None:
+    """The wired sender delegates email to the system mailer and telegram
+    to the Telegram API (the seam that was never installed in prod)."""
+    emails: list[OutboundEmail] = []
+    tg: list[tuple[int, str]] = []
+
+    class _FakeMailer:
+        async def send(self, message: OutboundEmail) -> None:
+            emails.append(message)
+
+    class _FakeTg:
+        async def send_message(self, *, chat_id: int, text: str) -> None:
+            tg.append((chat_id, text))
+
+    set_mailer(_FakeMailer())  # reset to LogMailer by the conftest autouse fixture
+    set_telegram_api_override(lambda: _FakeTg())  # type: ignore[arg-type]  # only send_message used
+    try:
+        sender = build_notification_sender()
+        await sender.send(
+            channel=NotificationChannelKind.email, target="x@y.test", title="S", body="B"
+        )
+        await sender.send(
+            channel=NotificationChannelKind.telegram, target="123", title="S", body="B"
+        )
+    finally:
+        set_telegram_api_override(None)
+    assert len(emails) == 1 and emails[0].to == "x@y.test"
+    assert tg == [(123, "S\n\nB")]

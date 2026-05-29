@@ -16,6 +16,7 @@ import { AiAssistantsSettings } from '../components/AiAssistantsSettings'
 import { MemoryChannelsAdmin } from '../components/MemoryChannelsAdmin'
 import { PomodoroSettings } from '../components/PomodoroSettings'
 import { TelegramLink } from '../components/TelegramLink'
+import { TimezoneSettings } from '../components/TimezoneSettings'
 import { useMe } from '../auth/useMe'
 import { isAdminMode } from '../auth/session'
 import type { components } from '../api/schema'
@@ -167,6 +168,7 @@ export function SettingsRoute() {
     </section>
     <GmailConnect />
     <TelegramLink />
+    <TimezoneSettings />
     <AiAssistantsSettings />
     {me?.is_admin && isAdminMode() && <MemoryChannelsAdmin />}
     {/* ExecutorsAdmin removed in v1.2.27, #21 Stage B */}

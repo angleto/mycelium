@@ -17,7 +17,9 @@ import logging
 from flow_core.ai_providers import set_llm_override
 from flow_core.config import get_settings
 from flow_core.llm_ollama import OllamaLLM
+from flow_core.notification_channel import set_sender_override
 from flow_core.services.mailer import build_system_mailer, set_mailer
+from flow_core.services.notification_sender import build_notification_sender
 from flow_worker import (
     dispatch,
     embedding_migration,
@@ -65,6 +67,13 @@ def main() -> None:
     # never imported by the test-suite, so no test mailer is clobbered.
     if settings.smtp_configured:
         set_mailer(build_system_mailer(settings))
+    # Install the concrete notification sender (telegram over an email
+    # fallback that uses the mailer wired just above). Without this the
+    # reminders job's dispatch_pending hits DefaultSender and marks every
+    # notification failed -- reminders silently never arrive. Mirrors the
+    # API lifespan wiring; must run after set_mailer.
+    _sender = build_notification_sender()
+    set_sender_override(lambda: _sender)
     # Wire the open-model LLM (Ollama) when configured. Without this
     # the ``LocalLLM`` stub stays in place and the revision-summary
     # sweep is a no-op -- CI, dev and unconfigured deploys never hit

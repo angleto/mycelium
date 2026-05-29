@@ -84,6 +84,22 @@ class Notification(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, Ba
         nullable=False,
         server_default="pending",
     )
+    # The moment this notification becomes eligible to send (migration
+    # 0018). ``scan_reminders`` enqueues a reminder as soon as its firing
+    # moment enters the look-ahead window, but ``dispatch_pending`` must
+    # HOLD it until ``fire_at`` actually arrives -- before 0018 the value
+    # lived only inside ``dedupe_key`` and was never queryable, so every
+    # pending reminder was sent in the next tick (up to ~2 days early).
+    # NULL = send immediately (non-reminder notifications, e.g. handoff
+    # offers): the dispatch gate is ``fire_at IS NULL OR fire_at <= now``.
+    fire_at: Mapped[datetime.datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
+    # Dispatch attempt count (migration 0018). A transient send failure
+    # marks the row ``failed``; a later scan revives it to ``pending`` for
+    # retry, but only while ``attempts`` is under the cap, so a
+    # permanently-broken target is not retried every tick forever.
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     sent_at: Mapped[datetime.datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )

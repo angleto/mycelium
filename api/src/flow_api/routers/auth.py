@@ -19,6 +19,7 @@ from flow_api.schemas import (
     LoginMfaIn,
     LogoutIn,
     MeOut,
+    MePatchIn,
     RefreshIn,
     ResetPasswordIn,
     SignupIn,
@@ -43,6 +44,7 @@ from flow_core.services.auth import (
     signup,
     verify_email,
 )
+from flow_core.services.users import set_timezone
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -115,8 +117,29 @@ async def me_endpoint(
         user_id=user.id,
         email=user.email,
         display_name=user.display_name,
+        timezone=user.timezone,
         is_admin=user.is_admin,
     )
+
+
+@router.patch("/me", response_model=MeOut)
+async def patch_me_endpoint(
+    body: MePatchIn,
+    user: Annotated[User, Depends(current_user)],
+) -> MeOut:
+    """Update the caller's profile. Currently the IANA timezone used to
+    render reminder labels in local time; validated server-side. The
+    users table is global (no tenant RLS), so the write goes through the
+    no-tenant admin session like the other auth flows."""
+    async with admin_session() as session:
+        updated = await set_timezone(session, user_id=user.id, timezone=body.timezone)
+        return MeOut(
+            user_id=updated.id,
+            email=updated.email,
+            display_name=updated.display_name,
+            timezone=updated.timezone,
+            is_admin=updated.is_admin,
+        )
 
 
 @router.post("/verify-email", response_model=TokenOut)

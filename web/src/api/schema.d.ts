@@ -116,7 +116,14 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
-        patch?: never;
+        /**
+         * Patch Me Endpoint
+         * @description Update the caller's profile. Currently the IANA timezone used to
+         *     render reminder labels in local time; validated server-side. The
+         *     users table is global (no tenant RLS), so the write goes through the
+         *     no-tenant admin session like the other auth flows.
+         */
+        patch: operations["patch_me_endpoint_auth_me_patch"];
         trace?: never;
     };
     "/auth/verify-email": {
@@ -2909,6 +2916,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/lookup/{prefix}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Lookup Prefix */
+        get: operations["lookup_prefix_lookup__prefix__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/notes": {
         parameters: {
             query?: never;
@@ -2960,6 +2984,30 @@ export interface paths {
         head?: never;
         /** Update Note */
         patch: operations["update_note_notes__note_id__patch"];
+        trace?: never;
+    };
+    "/notes/{note_id}/distill": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Distill Note
+         * @description Fungal decomposition (ADR-0034, task 4a718dc4): distil the note's
+         *     body into a reusable atom note and flag both as humus so the LLM
+         *     walk can surface them as fertiliser. Idempotent: a note already
+         *     distilled returns its existing distillation untouched (``created``
+         *     False). Member role required; metered LLM call inside the service.
+         */
+        post: operations["distill_note_notes__note_id__distill_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/notes/{note_id}/tags": {
@@ -3064,6 +3112,11 @@ export interface paths {
          * Patch Note Part
          * @description Edit a part's body and/or lang. Pass ``lang=null`` explicitly
          *     to clear; omit the key to leave it untouched.
+         *
+         *     ``X-Edit-Session-Id``: when supplied the note-level recovery
+         *     revision coalesces with other edits in the same session window
+         *     (same UX as PATCH /notes/{id}). Without the header the channel
+         *     falls back to ``api`` and each save seals its own revision.
          */
         patch: operations["patch_note_part_notes__note_id__parts__part_id__patch"];
         trace?: never;
@@ -3577,6 +3630,60 @@ export interface paths {
          *     second.
          */
         get: operations["garden_graph_garden_graph_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/garden/walk": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Garden Walk
+         * @description Two graph walks rooted at ``seed``.
+         *
+         *     ``focused`` runs personalised PageRank teleporting on ``seed`` and
+         *     returns the top ``budget`` nodes by induced mass. Use when the
+         *     user wants "neighbourhood of attention".
+         *
+         *     ``free_wander`` runs a Node2Vec second-order biased random walk
+         *     of length ``budget`` from ``seed`` with parameters ``p`` (return
+         *     bias) and ``q`` (in-out bias). Use for cross-domain exploration
+         *     in the mindmap pollinator-trail animation.
+         */
+        get: operations["garden_walk_garden_walk_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/garden/link-suggestions/{note_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Garden Link Suggestions
+         * @description Top-K candidate notes to link from ``note_id`` (task c7d0bb4c).
+         *
+         *     The score mixes Adamic-Adar tag overlap and PPR-induced mass;
+         *     already-linked pairs are excluded. The SPA renders them as
+         *     'suggested links' chips; nothing is created without explicit
+         *     user confirmation.
+         */
+        get: operations["garden_link_suggestions_garden_link_suggestions__note_id__get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -4195,6 +4302,31 @@ export interface paths {
         get: operations["get_buildinfo_buildinfo_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/export/pdf": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Export Pdf
+         * @description Render ``payload.html`` to a vector PDF and stream it back.
+         *
+         *     The endpoint is per-tenant authenticated (the dependency runs the
+         *     full identity + RLS check) but does not touch the database: the
+         *     rendered HTML is the only input the SPA has just produced, and the
+         *     PDF is not persisted.
+         */
+        post: operations["export_pdf_export_pdf_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -5105,6 +5237,23 @@ export interface components {
             /** Projected Credit Cost */
             projected_credit_cost: string;
         };
+        /** DistillationOut */
+        DistillationOut: {
+            /**
+             * Source Note Id
+             * Format: uuid
+             */
+            source_note_id: string;
+            /**
+             * Distilled Note Id
+             * Format: uuid
+             */
+            distilled_note_id: string;
+            /** Model Id */
+            model_id: string;
+            /** Created */
+            created: boolean;
+        };
         /**
          * DocumentType
          * @enum {string}
@@ -5505,6 +5654,56 @@ export interface components {
             centrality: {
                 [key: string]: number;
             };
+        };
+        /** GardenLinkSuggestion */
+        GardenLinkSuggestion: {
+            /**
+             * Note Id
+             * Format: uuid
+             */
+            note_id: string;
+            /** Score */
+            score: number;
+            /** Rationale */
+            rationale: string;
+            /** Signals */
+            signals: {
+                [key: string]: number;
+            };
+        };
+        /** GardenLinkSuggestionsOut */
+        GardenLinkSuggestionsOut: {
+            /**
+             * Source Note Id
+             * Format: uuid
+             */
+            source_note_id: string;
+            /** Suggestions */
+            suggestions: components["schemas"]["GardenLinkSuggestion"][];
+        };
+        /** GardenWalkOut */
+        GardenWalkOut: {
+            /**
+             * Seed
+             * Format: uuid
+             */
+            seed: string;
+            /** Mode */
+            mode: string;
+            /** Steps */
+            steps: components["schemas"]["GardenWalkStep"][];
+        };
+        /** GardenWalkStep */
+        GardenWalkStep: {
+            /**
+             * Note Id
+             * Format: uuid
+             */
+            note_id: string;
+            /** Step */
+            step: number;
+            /** Weight */
+            weight: number;
         };
         /** GrantIn */
         GrantIn: {
@@ -6109,6 +6308,32 @@ export interface components {
             /** Refresh Token */
             refresh_token?: string | null;
         };
+        /** LookupMatchOut */
+        LookupMatchOut: {
+            /** Kind */
+            kind: string;
+            /** Id */
+            id: string;
+            /** Title */
+            title: string | null;
+            /** State Name */
+            state_name: string | null;
+            /** Is Terminal */
+            is_terminal: boolean | null;
+            /** Is Archived */
+            is_archived: boolean;
+            /** Is Deleted */
+            is_deleted: boolean;
+            /** Route Url */
+            route_url: string;
+        };
+        /** LookupOut */
+        LookupOut: {
+            /** Prefix */
+            prefix: string;
+            /** Matches */
+            matches: components["schemas"]["LookupMatchOut"][];
+        };
         /**
          * MeOut
          * @description Canonical identity for the SPA (hydrated on load). is_admin is
@@ -6124,8 +6349,20 @@ export interface components {
             email: string;
             /** Display Name */
             display_name?: string | null;
+            /** Timezone */
+            timezone?: string | null;
             /** Is Admin */
             is_admin: boolean;
+        };
+        /**
+         * MePatchIn
+         * @description Profile update for the caller. Currently the IANA timezone used to
+         *     render reminder labels in local time; an empty/absent value clears it
+         *     (-> UTC). Validated server-side against the IANA database.
+         */
+        MePatchIn: {
+            /** Timezone */
+            timezone?: string | null;
         };
         /** MemberAddIn */
         MemberAddIn: {
@@ -6623,9 +6860,9 @@ export interface components {
         };
         /**
          * NotePartPatchIn
-         * @description Body for PATCH /notes/{id}/parts/{pid}. Either field may be
-         *     omitted to leave it unchanged. Passing ``lang=null`` explicitly
-         *     clears the language tag.
+         * @description Body for PATCH /notes/{id}/parts/{pid}. Each field may be
+         *     omitted to leave it unchanged. Passing ``lang=null`` (or
+         *     ``title=null``) explicitly clears the value.
          */
         NotePartPatchIn: {
             /** Expected Version */
@@ -6898,6 +7135,20 @@ export interface components {
          * @enum {string}
          */
         PaymentStatus: "unpaid" | "paid";
+        /**
+         * PdfExportIn
+         * @description Inbound payload for /export/pdf.
+         *
+         *     ``title`` becomes the PDF ``<title>`` and the ``Content-Disposition``
+         *     filename. ``html`` is the editor body (no ``<html>`` / ``<head>``);
+         *     the router builds the full document around it.
+         */
+        PdfExportIn: {
+            /** Title */
+            title: string;
+            /** Html */
+            html: string;
+        };
         /** ProjectCreateIn */
         ProjectCreateIn: {
             /** Name */
@@ -8704,6 +8955,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MeOut"];
+                };
+            };
+        };
+    };
+    patch_me_endpoint_auth_me_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MePatchIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MeOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -15688,6 +15972,47 @@ export interface operations {
             };
         };
     };
+    lookup_prefix_lookup__prefix__get: {
+        parameters: {
+            query?: {
+                kinds?: string | null;
+                include_archived?: boolean;
+                include_deleted?: boolean;
+                limit?: number;
+            };
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                prefix: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LookupOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_notes_notes_get: {
         parameters: {
             query?: {
@@ -15863,6 +16188,42 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["VersionOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    distill_note_notes__note_id__distill_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                note_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DistillationOut"];
                 };
             };
             /** @description Validation Error */
@@ -16140,6 +16501,7 @@ export interface operations {
         parameters: {
             query?: never;
             header: {
+                "X-Edit-Session-Id"?: string | null;
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
                 "x-workspace-role"?: string | null;
@@ -17326,6 +17688,87 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["GardenGraphOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    garden_walk_garden_walk_get: {
+        parameters: {
+            query: {
+                /** @description Note id to seed the walk on */
+                seed: string;
+                /** @description focused = PPR seeded; free_wander = Node2Vec walk */
+                mode?: "focused" | "free_wander";
+                budget?: number;
+                p?: number;
+                q?: number;
+                seed_rng?: number | null;
+            };
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GardenWalkOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    garden_link_suggestions_garden_link_suggestions__note_id__get: {
+        parameters: {
+            query?: {
+                k?: number;
+            };
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                note_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GardenLinkSuggestionsOut"];
                 };
             };
             /** @description Validation Error */
@@ -18993,6 +19436,45 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BuildInfoOut"];
+                };
+            };
+        };
+    };
+    export_pdf_export_pdf_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PdfExportIn"];
+            };
+        };
+        responses: {
+            /** @description Rendered PDF bytes (attachment). */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                    "application/pdf": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
