@@ -3010,6 +3010,80 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/notes/{note_id}/checklist": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Note Checklist
+         * @description A note's checklist (task bae178d2): same shape and widget as the
+         *     task checklist. Items may carry an optional markdown ``body``.
+         */
+        get: operations["list_note_checklist_notes__note_id__checklist_get"];
+        put?: never;
+        /** Add Note Checklist Item */
+        post: operations["add_note_checklist_item_notes__note_id__checklist_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/notes/{note_id}/checklist/{item_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete Note Checklist Item */
+        delete: operations["delete_note_checklist_item_notes__note_id__checklist__item_id__delete"];
+        options?: never;
+        head?: never;
+        /** Update Note Checklist Item */
+        patch: operations["update_note_checklist_item_notes__note_id__checklist__item_id__patch"];
+        trace?: never;
+    };
+    "/notes/{note_id}/checklist:clear_done": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Clear Note Checklist Done */
+        post: operations["clear_note_checklist_done_notes__note_id__checklist_clear_done_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/notes/{note_id}/checklist:reorder": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reorder Note Checklist */
+        post: operations["reorder_note_checklist_notes__note_id__checklist_reorder_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/notes/{note_id}/tags": {
         parameters: {
             query?: never;
@@ -3084,6 +3158,34 @@ export interface paths {
          *     forward by one in the same transaction.
          */
         post: operations["create_note_part_notes__note_id__parts_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/notes/{note_id}/parts/{part_id}/append": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Append Note Part
+         * @description Append one chunk to a part's body without resending it -- stream a
+         *     large markdown file in N ordered chunks (task 27f4d6c9). Each call
+         *     asserts ``expected_version`` (the cursor returned by the previous
+         *     chunk); chunks concatenate raw for byte-exact reassembly. Idempotent
+         *     on replay; a different-version writer racing the same part gets
+         *     ``stale_version``. Create the target part first with POST
+         *     ``/{note_id}/parts`` (its body becomes chunk 0), then append the
+         *     rest here. ``X-Edit-Session-Id`` (or ``operation_id`` in the body)
+         *     coalesces the per-upload recovery revision.
+         */
+        post: operations["append_note_part_notes__note_id__parts__part_id__append_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3630,6 +3732,35 @@ export interface paths {
          *     second.
          */
         get: operations["garden_graph_garden_graph_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/garden/clusters": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Garden Clusters
+         * @description Leiden communities over the weighted note graph (task 8c0a8f08).
+         *
+         *     Separate from ``/graph`` on purpose: clustering is heavier than the
+         *     edge/PageRank pass and the SPA only needs it when the user toggles
+         *     cluster-colouring on, so it is not paid on every mindmap load.
+         *     Returns ``{note_id: community_index}`` plus the global modularity
+         *     (ADR-0035 structure thermometer). When the optional ``clustering``
+         *     extra (python-igraph + leidenalg) is absent the result is an empty
+         *     map with ``modularity=null`` — the mindmap simply renders no cluster
+         *     colours rather than erroring.
+         */
+        get: operations["garden_clusters_garden_clusters_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -5617,6 +5748,25 @@ export interface components {
             remaining_minutes: number;
         };
         /**
+         * GardenClustersOut
+         * @description Response of GET /garden/clusters (task 8c0a8f08): the Leiden
+         *     community index per note plus the partition's global modularity.
+         *     ``clusters`` is ``{note_id: community_index}`` (0-based, dense);
+         *     ``modularity`` is the structure thermometer (ADR-0035), or null when
+         *     the optional clustering extra is not installed (graceful degrade).
+         *     ``count`` is the number of distinct communities.
+         */
+        GardenClustersOut: {
+            /** Clusters */
+            clusters: {
+                [key: string]: number;
+            };
+            /** Modularity */
+            modularity: number | null;
+            /** Count */
+            count: number;
+        };
+        /**
          * GardenGraphEdge
          * @description One undirected weighted edge between two notes. ``src`` and
          *     ``dst`` are canonically ordered (sorted by string repr) so two
@@ -6804,6 +6954,36 @@ export interface components {
             parts?: components["schemas"]["NotePartOut"][];
         };
         /**
+         * NotePartAppendIn
+         * @description Body for POST /notes/{id}/parts/{pid}/append (task 27f4d6c9).
+         *     Chunked append: stream a large markdown body in N ordered chunks,
+         *     each asserting ``expected_version`` (the cursor returned by the
+         *     previous chunk). Chunks concatenate **raw** (no separator) for
+         *     byte-exact reassembly. Recommended client chunk size ~32k chars to
+         *     stay under any transport payload cap. ``chunk_index`` is advisory
+         *     (client-side ordering / progress); idempotency is version-based.
+         *     Set ``is_last=True`` on the final chunk so the recovery-history
+         *     revision is sealed once for the whole upload.
+         */
+        NotePartAppendIn: {
+            /** Chunk */
+            chunk: string;
+            /** Expected Version */
+            expected_version: number;
+            /**
+             * Chunk Index
+             * @default 0
+             */
+            chunk_index?: number;
+            /**
+             * Is Last
+             * @default true
+             */
+            is_last?: boolean;
+            /** Operation Id */
+            operation_id?: string | null;
+        };
+        /**
          * NotePartCreateIn
          * @description Body for POST /notes/{id}/parts. ``ord`` is optional; when
          *     omitted the new part lands at the end. When supplied every part
@@ -7904,6 +8084,8 @@ export interface components {
         TaskChecklistItemCreateIn: {
             /** Text */
             text: string;
+            /** Body */
+            body?: string | null;
             /** Position */
             position?: number | null;
         };
@@ -7920,13 +8102,14 @@ export interface components {
              * Format: uuid
              */
             id: string;
-            /**
-             * Task Id
-             * Format: uuid
-             */
-            task_id: string;
+            /** Task Id */
+            task_id?: string | null;
+            /** Note Id */
+            note_id?: string | null;
             /** Text */
             text: string;
+            /** Body */
+            body?: string | null;
             /** Done */
             done: boolean;
             /** Position */
@@ -7956,6 +8139,8 @@ export interface components {
             expected_version: number;
             /** Text */
             text?: string | null;
+            /** Body */
+            body?: string | null;
             /** Done */
             done?: boolean | null;
             /** Position */
@@ -16237,6 +16422,234 @@ export interface operations {
             };
         };
     };
+    list_note_checklist_notes__note_id__checklist_get: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                note_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskChecklistItemOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    add_note_checklist_item_notes__note_id__checklist_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                note_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TaskChecklistItemCreateIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskChecklistItemOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_note_checklist_item_notes__note_id__checklist__item_id__delete: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                note_id: string;
+                item_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_note_checklist_item_notes__note_id__checklist__item_id__patch: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                note_id: string;
+                item_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TaskChecklistItemPatchIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskChecklistItemOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    clear_note_checklist_done_notes__note_id__checklist_clear_done_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                note_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskChecklistClearDoneOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reorder_note_checklist_notes__note_id__checklist_reorder_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                note_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TaskChecklistReorderIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskChecklistItemOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     attach_note_tag_notes__note_id__tags_post: {
         parameters: {
             query?: never;
@@ -16449,6 +16862,48 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["NotePartOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    append_note_part_notes__note_id__parts__part_id__append_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-Edit-Session-Id"?: string | null;
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                note_id: string;
+                part_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NotePartAppendIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AppendOut"];
                 };
             };
             /** @description Validation Error */
@@ -17688,6 +18143,40 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["GardenGraphOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    garden_clusters_garden_clusters_get: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GardenClustersOut"];
                 };
             };
             /** @description Validation Error */
