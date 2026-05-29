@@ -36,14 +36,27 @@ _SEND_TIMEOUT_S = 30.0
 def _mtls_ssl_context(
     *, client_cert: str, client_key: str, ca_bundle: str | None
 ) -> ssl.SSLContext:
-    """Build the SSL context used for the SdI mutual-TLS POST: trust either
-    the explicit CA bundle (system trust store by default) and load the
-    client certificate chain. Replaces httpx's deprecated ``cert=`` kwarg
-    (httpx 0.28+); the context is a Python stdlib type so unit tests stay
-    portable and respx is unaffected (it intercepts before TLS)."""
-    ctx = (
-        ssl.create_default_context(cafile=ca_bundle) if ca_bundle else ssl.create_default_context()
-    )
+    """Build the SSL context for the SdI mutual-TLS POST: trust the curated
+    CA bundle (or the system store when none is given) and load the client
+    certificate chain. Replaces httpx's deprecated ``cert=`` kwarg (httpx
+    0.28+); the context is a Python stdlib type so unit tests stay portable
+    and respx is unaffected (it intercepts before TLS).
+
+    With an explicit ``ca_bundle`` we enable PARTIAL_CHAIN. AdE distributes
+    the SdI trust anchors as the certs to import, and the production server
+    ``servizi.fatturapa.it`` chains to ``Sectigo Public Server Authentication
+    Root R46`` in its USERTrust-cross-signed (i.e. *not* self-signed) form.
+    Without PARTIAL_CHAIN OpenSSL refuses to treat R46 as a terminal anchor
+    and keeps walking up looking for USERTrust, so the handshake fails even
+    though R46+R36 are in the bundle. PARTIAL_CHAIN lets validation stop at
+    any anchor present in the bundle, so the AdE-supplied Sectigo R46+R36
+    pair verifies the prod leaf on its own. The test endpoint's AdE-internal
+    CA (a self-signed root) is unaffected by the flag."""
+    if ca_bundle:
+        ctx = ssl.create_default_context(cafile=ca_bundle)
+        ctx.verify_flags |= ssl.VERIFY_X509_PARTIAL_CHAIN
+    else:
+        ctx = ssl.create_default_context()
     ctx.load_cert_chain(certfile=client_cert, keyfile=client_key)
     return ctx
 
