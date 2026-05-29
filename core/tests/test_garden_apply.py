@@ -104,19 +104,21 @@ async def test_apply_accept_link_creates_typed_link() -> None:
             actor_id=user,
             node_id=a.id,
             suggestion_type="link",
-            suggestion_value={"target_id": str(b.id), "link_kind": "references"},
+            suggestion_value={"target_id": str(b.id), "link_kind": "related"},
             action="accept",
         )
+        # ``related`` is undirected (the service canonicalises parent <
+        # child), so match the pair order-agnostically.
         link = (
             await s.execute(
                 select(NoteNoteLink).where(
-                    NoteNoteLink.parent_note_id == a.id,
-                    NoteNoteLink.child_note_id == b.id,
+                    NoteNoteLink.parent_note_id.in_([a.id, b.id]),
+                    NoteNoteLink.child_note_id.in_([a.id, b.id]),
                 )
             )
         ).scalar_one_or_none()
     assert link is not None
-    assert link.kind == "references"
+    assert link.kind == "related"
 
 
 async def test_apply_accept_maturity_sets_value() -> None:
@@ -206,7 +208,7 @@ async def _growing_hub(s: object, org: uuid.UUID, user: uuid.UUID, in_links: int
             actor_id=user,
             parent_note_id=leaf.id,
             child_note_id=hub.id,
-            kind="references",
+            kind="related",
         )
     await note_links.set_maturity(
         s,  # type: ignore[arg-type]

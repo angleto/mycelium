@@ -4,7 +4,7 @@
 The integration tests build a few notes + manual links + shared
 tags, hit the endpoint, and assert:
 
-- soft-OR aggregation: a pair joined by both atom_of AND a shared
+- soft-OR aggregation: a pair joined by both hypha_of AND a shared
   rare tag outweighs a pair joined by references only;
 - canonical undirected edges: a single row per pair regardless of
   link direction;
@@ -81,7 +81,7 @@ async def test_empty_workspace_returns_empty_graph() -> None:
 
 
 async def test_edge_weight_softor_orders_pairs_correctly() -> None:
-    """A pair joined by atom_of + a shared rare tag must outweigh a
+    """A pair joined by hypha_of + a shared rare tag must outweigh a
     pair joined only by references. The soft-OR rule guarantees this
     monotonicity by construction."""
     transport = ASGITransport(app=app)
@@ -91,13 +91,13 @@ async def test_edge_weight_softor_orders_pairs_correctly() -> None:
         b = await _make_note(c, h, "B")
         cnote = await _make_note(c, h, "C")
         d = await _make_note(c, h, "D")
-        # Strong pair: atom_of + a shared rare tag (only A and B carry it).
+        # Strong pair: hypha_of + a shared rare tag (only A and B carry it).
         rare = await _tag(c, h, "rare-marker")
         await _attach_tag(c, h, a, rare)
         await _attach_tag(c, h, b, rare)
-        await _link(c, h, a, b, "atom_of")
+        await _link(c, h, a, b, "hypha_of")
         # Weak pair: a single references link, no shared tag.
-        await _link(c, h, cnote, d, "references")
+        await _link(c, h, cnote, d, "related")
 
         body = (await c.get("/garden/graph", headers=h)).json()
         weights = {tuple(sorted([e["src"], e["dst"]])): e["weight"] for e in body["edges"]}
@@ -108,26 +108,26 @@ async def test_edge_weight_softor_orders_pairs_correctly() -> None:
 
 async def test_undirected_dedup_one_row_per_pair() -> None:
     """Two manual rows with reversed direction between the same pair
-    (A->B as atom_of and B->A as references) collapse to a single
+    (A->B as hypha_of and B->A as related) collapse to a single
     undirected edge whose weight is the soft-OR of both kinds."""
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://t") as c:
         h = await _signup(c)
         a = await _make_note(c, h, "A")
         b = await _make_note(c, h, "B")
-        await _link(c, h, a, b, "atom_of")
-        await _link(c, h, b, a, "references")
+        await _link(c, h, a, b, "hypha_of")
+        await _link(c, h, b, a, "related")
         body = (await c.get("/garden/graph", headers=h)).json()
         # Exactly one row for the pair (canonical (src, dst) order).
         pairs = [tuple(sorted([e["src"], e["dst"]])) for e in body["edges"]]
         assert pairs.count(tuple(sorted([a, b]))) == 1
-        # Weight = soft_or(0.85, 0.4) = 1 - 0.15 * 0.6 = 0.91.
+        # Weight = soft_or(0.85, 0.45) = 1 - 0.15 * 0.55 = 0.9175.
         w = next(
             e["weight"]
             for e in body["edges"]
             if tuple(sorted([e["src"], e["dst"]])) == tuple(sorted([a, b]))
         )
-        assert isclose(w, 1 - 0.15 * 0.6, abs_tol=1e-6), w
+        assert isclose(w, 1 - 0.15 * 0.55, abs_tol=1e-6), w
 
 
 async def test_pagerank_sums_to_one_and_hubs_outrank_leaves() -> None:
@@ -140,7 +140,7 @@ async def test_pagerank_sums_to_one_and_hubs_outrank_leaves() -> None:
         hub = await _make_note(c, h, "Hub")
         leaves = [await _make_note(c, h, f"Leaf {i}") for i in range(4)]
         for leaf in leaves:
-            await _link(c, h, leaf, hub, "atom_of")
+            await _link(c, h, leaf, hub, "hypha_of")
         body = (await c.get("/garden/graph", headers=h)).json()
         ranks = body["centrality"]
         total = sum(ranks.values())
@@ -160,10 +160,10 @@ async def test_cross_tenant_isolation() -> None:
         h_b = await _signup(c, ws="B")
         a_a = await _make_note(c, h_a, "A1")
         a_b = await _make_note(c, h_a, "A2")
-        await _link(c, h_a, a_a, a_b, "atom_of")
+        await _link(c, h_a, a_a, a_b, "hypha_of")
         b_a = await _make_note(c, h_b, "B1")
         b_b = await _make_note(c, h_b, "B2")
-        await _link(c, h_b, b_a, b_b, "references")
+        await _link(c, h_b, b_a, b_b, "related")
 
         body_b = (await c.get("/garden/graph", headers=h_b)).json()
         ids_in_b = {e["src"] for e in body_b["edges"]} | {e["dst"] for e in body_b["edges"]}

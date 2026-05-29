@@ -141,7 +141,7 @@ async def test_execute_domain_error_is_structured_with_code_and_params() -> None
             arguments={"parent_note_id": a["id"], "child_note_id": b["id"], "kind": "sibling"},
         )
         assert res["error"]["code"] == "note.link.kind_invalid"
-        assert "atom_of" in res["error"]["params"]["valid"]
+        assert "hypha_of" in res["error"]["params"]["valid"]
     finally:
         _PRINCIPAL.reset(tok)
 

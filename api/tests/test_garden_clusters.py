@@ -54,9 +54,9 @@ async def _triangle(c: AsyncClient, h: dict[str, str], prefix: str) -> list[str]
     a = await _make_note(c, h, f"{prefix}1")
     b = await _make_note(c, h, f"{prefix}2")
     d = await _make_note(c, h, f"{prefix}3")
-    await _link(c, h, a, b, "atom_of")
-    await _link(c, h, b, d, "atom_of")
-    await _link(c, h, d, a, "atom_of")
+    await _link(c, h, a, b, "hypha_of")
+    await _link(c, h, b, d, "hypha_of")
+    await _link(c, h, d, a, "hypha_of")
     return [a, b, d]
 
 
@@ -69,7 +69,7 @@ async def test_clusters_split_two_triangles() -> None:
         a1, a2, a3 = await _triangle(c, h, "A")
         b1, b2, b3 = await _triangle(c, h, "B")
         # One weak cross-cluster bridge: not enough to merge them.
-        await _link(c, h, a1, b1, "references")
+        await _link(c, h, a1, b1, "related")
 
         r = await c.get("/garden/clusters", headers=h)
         assert r.status_code == 200, r.text

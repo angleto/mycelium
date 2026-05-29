@@ -8,9 +8,9 @@ same query traversal:
 - ``compute_note_edge_weights`` exposes the materialised v1 of the
   ``note_edge_strength`` model. The weight per pair ``(a, b)`` is a
   soft-OR of two evidence sources:
-    - a per-kind base contribution (atom_of > supersedes > replies_to
-      > references), aggregated soft-OR across every typed manual
-      link between the pair;
+    - a per-kind base contribution (hypha_of > supersedes > contradicts
+      > related), aggregated soft-OR across every typed link between the
+      pair;
     - an Adamic-Adar style overlap of shared generic tags (a rare
       tag contributes more than a common one, ``1 / log(1 + deg(t))``),
       then squashed to [0, 1] via ``1 - 1 / (1 + sum)`` so multiple
@@ -20,9 +20,12 @@ same query traversal:
   no aggregation worker exists yet).
 
 - ``compute_pagerank`` runs a deterministic power iteration on the
-  same manual-link graph. PageRank global (no personalisation, no
-  topic teleportation) is Phase 1 of the larger centrality stack;
-  PPR seeded + Leiden + betweenness are Phase 2 (see ADR-0031).
+  UNDIRECTED, weighted weave (the edges of ``compute_note_edge_weights``).
+  Importance is emergent connectivity, not authorship: the stored link
+  direction (genesis) is ignored on purpose, since a child idea can
+  outrank the idea that generated it. Genesis stays on the directional
+  kinds (``hypha_of`` derivation, ``supersedes`` / ``contradicts``) +
+  timestamps, a separate axis. PPR + Leiden + betweenness are Phase 2.
 
 Both helpers run on-demand in a single round-trip and avoid any
 materialised view; the cost is bounded because the link / tag
@@ -52,10 +55,10 @@ from flow_core.models.tag import Tag, TagKind
 # server-side authoritative weight reads identically when the client
 # moves from the local computation to the API.
 _KIND_WEIGHT: dict[str, float] = {
-    "atom_of": 0.85,
+    "hypha_of": 0.85,
     "supersedes": 0.70,
-    "replies_to": 0.60,
-    "references": 0.40,
+    "contradicts": 0.65,
+    "related": 0.45,
 }
 
 
@@ -172,7 +175,7 @@ async def compute_note_edge_weights(
 ) -> list[EdgeWeight]:
     """Materialise the v1 ``note_edge_strength`` over the org's manual
     note↔note link graph. Returns one row per *undirected* pair (the
-    typed kind is collapsed; ``A atom_of B`` and ``B references A``
+    typed kind is collapsed; ``A hypha_of B`` and ``B related A``
     fold into the same weighted edge). Cost: two batched SELECTs
     (links + tags), O(L + N·avgTags) Python aggregation.
     """
@@ -249,15 +252,24 @@ async def compute_pagerank(
     max_iter: int = 100,
     tol: float = 1e-6,
 ) -> dict[uuid.UUID, float]:
-    """Deterministic power-iteration PageRank over the org's manual
-    note↔note link graph (directed; ``parent_note_id`` is the source
-    of authority that flows toward ``child_note_id``).
+    """Deterministic power-iteration PageRank over the org's note weave,
+    treated as an UNDIRECTED, weighted graph (the edges of
+    ``compute_note_edge_weights``: per-kind base soft-OR'd with shared-
+    tag overlap).
 
-    Notes with zero out-degree ("dangling") redistribute their mass
-    uniformly across all nodes to keep the power iteration converging
-    on a stochastic matrix (classic PageRank fix). Returns the
-    probability mass per note, summing to 1 across the workspace; an
-    empty workspace returns ``{}``.
+    Importance is emergent connectivity, not authorship: the stored link
+    direction (``parent_note_id`` / ``child_note_id``, i.e. genesis) is
+    deliberately ignored, since a child idea can outrank the idea that
+    generated it. Each undirected weighted edge ``w(a, b)`` contributes
+    symmetrically and a node spreads its rank to neighbours in
+    proportion to edge weight. Provenance / genesis lives on the
+    directional kinds (``supersedes``) and on timestamps; it is a
+    separate axis and is not allowed to bias centrality here.
+
+    Notes with no weighted edge ("dangling") redistribute their mass
+    uniformly to keep the iteration on a stochastic matrix. Returns the
+    probability mass per note, summing to 1; an empty workspace returns
+    ``{}``.
     """
     note_rows = (await session.execute(select(Note.id).where(Note.org_id == org_id))).all()
     nodes: list[uuid.UUID] = [r[0] for r in note_rows]
@@ -265,35 +277,34 @@ async def compute_pagerank(
     if n == 0:
         return {}
     idx = {nid: i for i, nid in enumerate(nodes)}
-    out_neighbours: list[list[int]] = [[] for _ in range(n)]
-    link_rows = (
-        await session.execute(
-            select(NoteNoteLink.parent_note_id, NoteNoteLink.child_note_id).where(
-                NoteNoteLink.org_id == org_id
-            )
-        )
-    ).all()
-    for parent_id, child_id in link_rows:
-        if parent_id == child_id:
+    # Undirected weighted adjacency from the materialised edge weights.
+    # Each edge is added in both directions; out-strength is its weight
+    # sum, so rank spreads proportionally to how strongly two ideas are
+    # woven together, regardless of who linked to whom.
+    edges = await compute_note_edge_weights(session, org_id=org_id)
+    neighbours: list[list[tuple[int, float]]] = [[] for _ in range(n)]
+    out_strength = [0.0] * n
+    for e in edges:
+        i = idx.get(e.src)
+        j = idx.get(e.dst)
+        if i is None or j is None or i == j or e.weight <= 0:
             continue
-        pi = idx.get(parent_id)
-        ci = idx.get(child_id)
-        if pi is None or ci is None:
-            continue
-        out_neighbours[pi].append(ci)
+        neighbours[i].append((j, e.weight))
+        neighbours[j].append((i, e.weight))
+        out_strength[i] += e.weight
+        out_strength[j] += e.weight
     rank = [1.0 / n] * n
     teleport = (1.0 - damping) / n
     for _ in range(max_iter):
         nxt = [teleport] * n
         dangling_mass = 0.0
         for u in range(n):
-            outs = out_neighbours[u]
-            if not outs:
+            if out_strength[u] <= 0:
                 dangling_mass += rank[u]
                 continue
-            share = damping * rank[u] / len(outs)
-            for v in outs:
-                nxt[v] += share
+            base = damping * rank[u] / out_strength[u]
+            for v, w in neighbours[u]:
+                nxt[v] += base * w
         if dangling_mass > 0:
             extra = damping * dangling_mass / n
             for u in range(n):
@@ -322,10 +333,12 @@ async def compute_personalized_pagerank(
 
     Same iteration shape as ``compute_pagerank`` but the teleport
     distribution is concentrated on the seed set (uniform across the
-    seeds, zero elsewhere). Returns the probability mass per note,
-    summing to 1 across the workspace. Used by ``graph_walk`` in
-    focused mode to rank the subgraph induced by the seed's typed
-    neighbours.
+    seeds, zero elsewhere). The link graph is traversed UNDIRECTED (the
+    pollinator wanders the weave both ways; exploration, like
+    importance, does not follow genesis direction). Returns the
+    probability mass per note, summing to 1 across the workspace. Used
+    by ``graph_walk`` in focused mode to rank the subgraph around the
+    seed.
     """
     note_rows = (await session.execute(select(Note.id).where(Note.org_id == org_id))).all()
     nodes: list[uuid.UUID] = [r[0] for r in note_rows]
@@ -355,7 +368,9 @@ async def compute_personalized_pagerank(
         ci = idx.get(child_id)
         if pi is None or ci is None:
             continue
+        # Undirected: walk the filament both ways.
         out_neighbours[pi].append(ci)
+        out_neighbours[ci].append(pi)
     rank = list(teleport_dist)
     for _ in range(max_iter):
         nxt = [(1.0 - damping) * teleport_dist[u] for u in range(n)]

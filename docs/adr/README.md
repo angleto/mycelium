@@ -48,3 +48,4 @@ Format: Status, Context, Decision, Consequences, Alternatives rejected.
 - [0037 Online learning loop on garden suggestions](0037-online-learning-loop.md)
 - [0038 UUID-prefix entity resolver (`/lookup/{prefix}`)](0038-uuid-prefix-resolver.md)
 - [0039 Fungal decomposition pipeline (humus producer)](0039-fungal-decomposition-pipeline.md)
+- [0040 Mycelial 4-verb note-note link model](0040-mycelial-link-model.md) — revises ADR-0029 D3

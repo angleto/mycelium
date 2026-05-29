@@ -30,6 +30,8 @@ _CASES = [
     (["note", "attach", "--help"], "add"),
     (["note", "parts", "--help"], "prepend"),
     (["note", "parts", "replace", "--help"], "--count"),
+    (["note", "link", "--help"], "supersedes"),
+    (["note", "unlink", "--help"], "contradicts"),
     (["timer", "--help"], "entry"),
     (["timer", "entry", "--help"], "add"),
     (["auth", "--help"], "mfa"),

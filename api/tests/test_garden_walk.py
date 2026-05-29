@@ -50,7 +50,7 @@ async def _link(c: AsyncClient, h: dict[str, str], parent: str, child: str) -> N
         json={
             "parent_note_id": parent,
             "child_note_id": child,
-            "kind": "references",
+            "kind": "related",
         },
     )
     assert r.status_code == 200, r.text

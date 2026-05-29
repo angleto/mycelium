@@ -536,7 +536,12 @@ function PlantDetail({
           <ul className="plant-detail__links">
             {outgoing.map((l) => (
               <li key={l.id}>
-                <span className="chip chip--linkkind">{l.kind}</span>{' '}
+                <span
+                  className="chip chip--linkkind"
+                  title={t(`garden.mindmap.linkKindHint.${l.kind}`)}
+                >
+                  {t(`garden.mindmap.linkKind.${l.kind}`)}
+                </span>{' '}
                 <Link to={`/notes/${l.child_note_id}`}>
                   {titleById(l.child_note_id)}
                 </Link>{' '}
@@ -560,7 +565,12 @@ function PlantDetail({
           <ul className="plant-detail__links">
             {incoming.map((l) => (
               <li key={l.id}>
-                <span className="chip chip--linkkind">{l.kind}</span>{' '}
+                <span
+                  className="chip chip--linkkind"
+                  title={t(`garden.mindmap.linkKindHint.${l.kind}`)}
+                >
+                  {t(`garden.mindmap.linkKind.${l.kind}`)}
+                </span>{' '}
                 <Link to={`/notes/${l.parent_note_id}`}>
                   {titleById(l.parent_note_id)}
                 </Link>

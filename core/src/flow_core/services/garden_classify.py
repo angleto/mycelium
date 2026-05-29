@@ -189,7 +189,7 @@ async def _suggest_links(
     return [
         LinkCandidate(
             target_id=r.note_id,
-            link_kind="references",  # v1 default; the kind MLP is v2 (ADR-0032)
+            link_kind="related",  # v1 default (neutral association); kind MLP is v2 (ADR-0032)
             confidence=r.score,
             rationale=r.rationale,
         )
@@ -384,7 +384,7 @@ async def _mutate(
             actor_id=actor_id,
             parent_note_id=node_id,
             child_note_id=uuid.UUID(str(value["target_id"])),
-            kind=str(value.get("link_kind", "references")),
+            kind=str(value.get("link_kind", "related")),
         )
     elif suggestion_type == "maturity":
         await note_links.set_maturity(

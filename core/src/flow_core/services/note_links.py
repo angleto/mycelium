@@ -8,9 +8,11 @@ Six named operations + maturity setter:
   is the always-allowed manual setter.
 
 - ``link_notes(parent, child, kind)`` / ``unlink_notes(...)``: typed
-  M:N between notes (atom_of, references, replies_to, supersedes).
-  Used to build the Zettelkasten structure (index note + atomic
-  children, citation backlinks, threaded replies, supersession).
+  M:N between notes, the mycelial 4-verb model (ADR-0040): ``hypha_of``
+  (derived from, directional), ``related`` (UNDIRECTED association,
+  canonicalised to parent < child here), ``supersedes`` / ``contradicts``
+  (directional; both decay the target toward ``dormant`` on creation,
+  feeding the deadwood -> humus cycle).
 
 - ``derive_task_from_note(note_id, title, ...)``: the note remains
   alive; a new task is created with a ``derived_from`` link. Use
@@ -49,7 +51,9 @@ from flow_core.models.identity import Identity
 from flow_core.models.membership import Role
 from flow_core.models.note import Note, NoteMaturity
 from flow_core.models.note_link import (
+    NOTE_NOTE_LINK_KILLING_KINDS,
     NOTE_NOTE_LINK_KINDS,
+    NOTE_NOTE_LINK_UNDIRECTED_KINDS,
     NOTE_TASK_LINK_KINDS,
     NoteNoteLink,
     NoteTaskLink,
@@ -165,11 +169,16 @@ async def link_notes(
         )
     if parent_note_id == child_note_id:
         raise DomainError(MessageCode.NOTE_LINK_SELF)
+    # Undirected kinds (``related``) have unordered endpoints:
+    # canonicalise to parent < child by id string so (a, b) and (b, a)
+    # collapse to one edge under the UNIQUE constraint.
+    if kind in NOTE_NOTE_LINK_UNDIRECTED_KINDS and str(parent_note_id) > str(child_note_id):
+        parent_note_id, child_note_id = child_note_id, parent_note_id
     await require_role(session, org_id, actor_id, Role.member)
     # Both notes must exist in this org (FK alone does not enforce
     # org match; defence in depth).
     await _get_note(session, org_id=org_id, note_id=parent_note_id)
-    await _get_note(session, org_id=org_id, note_id=child_note_id)
+    child_note = await _get_note(session, org_id=org_id, note_id=child_note_id)
 
     existing = (
         await session.execute(
@@ -222,6 +231,28 @@ async def link_notes(
             "kind": kind,
         },
     )
+    # ``supersedes`` / ``contradicts`` decay the target idea toward
+    # ``dormant``: a superseded or refuted idea rots into the deadwood ->
+    # humus cycle. One-way nudge (removing the link does not revive it),
+    # manual maturity still overrides, and a transplanted (promoted) note
+    # is left read-only.
+    if (
+        kind in NOTE_NOTE_LINK_KILLING_KINDS
+        and child_note.promoted_at is None
+        and child_note.maturity != NoteMaturity.dormant.value
+    ):
+        prior = child_note.maturity
+        child_note.maturity = NoteMaturity.dormant.value
+        await session.flush()
+        await audit.log(
+            session,
+            org_id=org_id,
+            actor_id=actor_id,
+            entity="note",
+            entity_id=child_note_id,
+            action="auto_dormant",
+            diff={"from": prior, "to": NoteMaturity.dormant.value, "cause": kind},
+        )
     return link
 
 
@@ -235,6 +266,10 @@ async def unlink_notes(
     kind: str,
 ) -> bool:
     await require_role(session, org_id, actor_id, Role.member)
+    # Match the canonical orientation used on creation for undirected
+    # kinds, so unlinking (b, a) finds the row stored as (a, b).
+    if kind in NOTE_NOTE_LINK_UNDIRECTED_KINDS and str(parent_note_id) > str(child_note_id):
+        parent_note_id, child_note_id = child_note_id, parent_note_id
     row = (
         await session.execute(
             select(NoteNoteLink).where(

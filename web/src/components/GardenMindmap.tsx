@@ -43,8 +43,15 @@ import type { components } from '../api/schema'
 type Note = components['schemas']['NoteOut']
 type TagBrief = components['schemas']['TagBrief']
 
-type LinkKind = 'atom_of' | 'references' | 'replies_to' | 'supersedes'
-const LINK_KINDS: LinkKind[] = ['references', 'atom_of', 'replies_to', 'supersedes']
+// The mycelial 4-verb model (ADR-0040). ``related`` is UNDIRECTED (the
+// server canonicalises its endpoints); the others are directional. All
+// four are user-creatable. ``supersedes`` / ``contradicts`` also decay
+// the target toward dormant server-side.
+type LinkKind = 'hypha_of' | 'related' | 'supersedes' | 'contradicts'
+const LINK_KINDS: LinkKind[] = ['hypha_of', 'related', 'supersedes', 'contradicts']
+// Undirected kinds: the two connection handles are interchangeable and
+// the create dialog shows no direction control.
+const UNDIRECTED_KINDS: ReadonlySet<LinkKind> = new Set<LinkKind>(['related'])
 
 interface WorkspaceLink {
   id: string
@@ -62,14 +69,15 @@ const MATURITY_GLYPH: Record<string, string> = {
 }
 
 // Forest palette: each edge kind takes a natural metaphor.
-// references = a passing scent (muted dashed); atom_of = a solid
-// branch (moss, parent→child); replies_to = water/dialogue (blue);
-// supersedes = bark, the old replaced by the new.
+// hypha_of = a living filament grown from another idea (moss, directional);
+// related = a neutral connection in the weave (muted, undirected);
+// supersedes = bark, the old replaced by the new; contradicts = a struck
+// filament that kills the target (rust-red).
 const LINK_COLOR: Record<LinkKind, string> = {
-  references: 'var(--muted)',
-  atom_of: 'var(--moss)',
-  replies_to: '#5c89a8',
+  hypha_of: 'var(--moss)',
+  related: 'var(--muted)',
   supersedes: 'var(--bark)',
+  contradicts: '#b0553f',
 }
 
 const MAX_TAG_DOTS = 4
@@ -241,14 +249,14 @@ function softOr(a: number, b: number): number {
 }
 
 // Per-kind base weight contribution: how much each link type pulls
-// two nodes together. Tuned so that an atom_of edge alone gives a
-// noticeably thicker line than references, in line with the existing
-// visual vocabulary (atom_of = trunk, references = scent).
+// two nodes together. Mirrors the server's _KIND_WEIGHT so the rendered
+// thickness matches the materialised edge strength (hypha_of = the
+// strongest filament, related = a light neutral thread).
 const KIND_WEIGHT: Record<string, number> = {
-  atom_of: 0.85,
+  hypha_of: 0.85,
   supersedes: 0.7,
-  replies_to: 0.6,
-  references: 0.4,
+  contradicts: 0.65,
+  related: 0.45,
 }
 
 // Edge weight v1 = soft-OR of the kind base and a tag-overlap term
@@ -288,28 +296,74 @@ function sharedGenericTagCount(a: Note | undefined, b: Note | undefined): number
 function forceLayout(
   notes: Note[],
   links: { source: string; target: string; weight: number }[],
-  degreeByNode: Map<string, number>,
+  opts: {
+    centrality: Map<string, number>
+    clusterOf: (id: string) => string
+  },
 ): Record<string, { x: number; y: number }> {
   const N = notes.length
   if (N === 0) return {}
-  const maxDegree = Math.max(1, ...Array.from(degreeByNode.values()))
-  // Deterministic initial spread: golden-angle spiral so neighbours
-  // don't pile up before the first iteration runs.
+  // Centrality (PageRank from /garden/graph) normalised to [0,1]. The
+  // hub of each cluster is its highest-centrality node and is pulled
+  // hardest toward the cluster centroid, so it sits visually central
+  // while leaves splay outward into rings ("roots at the centre,
+  // leaves at the rim").
+  let maxC = 0
+  for (const n of notes) maxC = Math.max(maxC, opts.centrality.get(n.id) ?? 0)
+  const cNorm = (id: string): number =>
+    maxC > 0 ? (opts.centrality.get(id) ?? 0) / maxC : 0
   const phi = Math.PI * (3 - Math.sqrt(5))
   const sorted = [...notes].sort((a, b) => a.id.localeCompare(b.id))
   const idx = new Map<string, number>(sorted.map((n, i) => [n.id, i]))
   const x = new Float64Array(N)
   const y = new Float64Array(N)
+  // Per-node cluster centroid + gravity weight (filled per glade).
+  const cgx = new Float64Array(N)
+  const cgy = new Float64Array(N)
+  const gravW = new Float64Array(N)
+  // Group notes into clusters ("glades"): Leiden community when
+  // available, else the primary-tag bucket, else one shared glade.
+  // Each glade gets a centroid on a golden spiral, spaced by its size
+  // so big communities claim more room and the glades stay clear.
+  const groups = new Map<string, number[]>()
   for (let i = 0; i < N; i++) {
-    // Wider than before (was 60 + 22*sqrt): the chips are ~180px
-    // boxes, so a tighter spiral starts the sim buried in overlap and
-    // it spends its whole alpha budget digging out. ~one chip-width
-    // of initial breathing room lets it converge clean.
-    const r = 90 + 46 * Math.sqrt(i)
-    const a = i * phi
-    x[i] = Math.cos(a) * r
-    y[i] = Math.sin(a) * r
+    const key = opts.clusterOf(sorted[i].id)
+    const arr = groups.get(key) ?? []
+    arr.push(i)
+    groups.set(key, arr)
   }
+  const clusterKeys = [...groups.keys()].sort((a, b) => {
+    const sa = groups.get(a)?.length ?? 0
+    const sb = groups.get(b)?.length ?? 0
+    return sb - sa || a.localeCompare(b)
+  })
+  clusterKeys.forEach((key, ci) => {
+    const members = groups.get(key) ?? []
+    const size = members.length
+    const rIntra = 110 + 44 * Math.sqrt(size)
+    const ca = ci * phi
+    const rCent = (rIntra + 240) * Math.sqrt(ci + 0.5)
+    const ccx = Math.cos(ca) * rCent
+    const ccy = Math.sin(ca) * rCent
+    // Highest centrality at the centroid; the rest on rings by
+    // centrality rank with a golden-angle angular slot.
+    const ordered = [...members].sort((ia, ib) => {
+      const da = cNorm(sorted[ia].id)
+      const db = cNorm(sorted[ib].id)
+      return db - da || sorted[ia].id.localeCompare(sorted[ib].id)
+    })
+    const ringUnit = rIntra / Math.max(1, Math.sqrt(size))
+    ordered.forEach((i, rank) => {
+      cgx[i] = ccx
+      cgy[i] = ccy
+      // Hubs cling to the centroid; leaves drift out.
+      gravW[i] = 0.4 + 1.6 * cNorm(sorted[i].id)
+      const rr = Math.sqrt(rank) * ringUnit
+      const aa = rank * phi
+      x[i] = ccx + Math.cos(aa) * rr
+      y[i] = ccy + Math.sin(aa) * rr
+    })
+  })
   // Edge list with weighted spring rest length: heavy edge = short
   // rest length (nodes pulled closer). Skip edges with an endpoint
   // outside the visible set.
@@ -367,15 +421,14 @@ function forceLayout(
       dx[e.b] -= fx
       dy[e.b] -= fy
     }
-    // Centripetal gravity ∝ centrality (degree / max)
+    // Centripetal gravity toward each node's CLUSTER centroid (not the
+    // global origin), scaled by centrality: hubs are pulled hard to the
+    // glade centre, leaves only lightly, so each glade reads as a hub
+    // ringed by its leaves. Replaces the old degree-to-origin pull that
+    // produced an undifferentiated blob.
     for (let i = 0; i < N; i++) {
-      const note = sorted[i]
-      const c = (degreeByNode.get(note.id) ?? 0) / maxDegree
-      // (1 + 1.5c), softened from (1 + 4c): hubs already gather spring
-      // pull from their many edges, so yanking them hardest into the
-      // exact centre just stacked them on top of each other there.
-      dx[i] -= GRAVITY_BETA * (1 + 1.5 * c) * x[i]
-      dy[i] -= GRAVITY_BETA * (1 + 1.5 * c) * y[i]
+      dx[i] -= GRAVITY_BETA * gravW[i] * (x[i] - cgx[i])
+      dy[i] -= GRAVITY_BETA * gravW[i] * (y[i] - cgy[i])
     }
     // Integrate with cooling alpha + per-tick step clamp so a single
     // huge repulsion impulse can't catapult a node off-canvas.
@@ -551,6 +604,10 @@ function GardenMindmapInner({ notes, workspaceId, onOpenNote }: GardenMindmapPro
   const [showEdgeWeights, setShowEdgeWeights] = useState(false)
   const [centrality, setCentrality] = useState<Record<string, number>>({})
   const [edgeWeightMap, setEdgeWeightMap] = useState<Record<string, number>>({})
+  // Leiden communities from /garden/clusters (task 8c0a8f08). Empty when
+  // the optional clustering extra (igraph + leidenalg) is not installed;
+  // the layout then falls back to primary-tag glades.
+  const [clusters, setClusters] = useState<Record<string, number>>({})
   // Walk (task 5bf31b63): seed + mode + path. The user selects a
   // node, clicks 'walk', and the path lights up as the pollinator
   // trail. ``walkPath`` keys the step index per node id so the
@@ -569,7 +626,7 @@ function GardenMindmapInner({ notes, workspaceId, onOpenNote }: GardenMindmapPro
   >('focused')
   const [search, setSearch] = useState('')
   const [pendingConnect, setPendingConnect] = useState<Connection | null>(null)
-  const [linkKind, setLinkKind] = useState<LinkKind>('references')
+  const [linkKind, setLinkKind] = useState<LinkKind>('related')
   const [err, setErr] = useState('')
   // Focus+context: hovering a node sets a transient focus; clicking
   // pins it (toggle) so it survives the mouse leaving. The effective
@@ -600,6 +657,25 @@ function GardenMindmapInner({ notes, workspaceId, onOpenNote }: GardenMindmapPro
     for (const n of notes) m.set(n.id, n)
     return m
   }, [notes])
+
+  // Centrality as a Map for the layout (PageRank from /garden/graph).
+  const centralityMap = useMemo(
+    () => new Map(Object.entries(centrality)),
+    [centrality],
+  )
+  // Cluster key per note for the layout: Leiden community when present,
+  // else the primary-tag bucket, else a single shared glade. This is
+  // the grouping the cluster-radial layout lays out as separate glades.
+  const clusterKeyFor = useCallback(
+    (id: string): string => {
+      const c = clusters[id]
+      if (c != null) return `c${c}`
+      const note = noteById.get(id)
+      const tag = note ? primaryTagFor(note) : null
+      return tag ? `t${tag.id}` : 'none'
+    },
+    [clusters, noteById, primaryTagFor],
+  )
 
   // Effective focus, derived (not stored) so it self-heals: a pin or
   // hover whose note has left the visible set (focus filter, delete)
@@ -771,7 +847,10 @@ function GardenMindmapInner({ notes, workspaceId, onOpenNote }: GardenMindmapPro
     // simulate (empty notes).
     const seeded =
       notes.length > 0
-        ? forceLayout(notes, weightedLinks, degreeByNode)
+        ? forceLayout(notes, weightedLinks, {
+          centrality: centralityMap,
+          clusterOf: clusterKeyFor,
+        })
         : seedLayout(notes, primaryTagFor)
     return notes.map((n) => {
       const pos = stored[n.id] ?? seeded[n.id] ?? { x: 0, y: 0 }
@@ -821,7 +900,13 @@ function GardenMindmapInner({ notes, workspaceId, onOpenNote }: GardenMindmapPro
   // re-render (e.g. a single tag toggle).
   useEffect(() => {
     const stored = loadPositions(workspaceId)
-    const sig = `force:${notes.length}:${weightedLinks
+    // Re-run the layout when the link shape changes AND when the
+    // async analytics arrive: ``c<n>`` flips once PageRank centrality
+    // loads, ``k<n>`` once Leiden clusters load, so the first paint's
+    // centrality-blind glades get re-laid once the real signal is in.
+    const sig = `force:${notes.length}:c${centralityMap.size}:k${
+      Object.keys(clusters).length
+    }:${weightedLinks
       .map((l) => `${l.source}>${l.target}`)
       .sort()
       .join('|')}`
@@ -838,7 +923,10 @@ function GardenMindmapInner({ notes, workspaceId, onOpenNote }: GardenMindmapPro
     setNodes((current) => {
       const byId = new Map(current.map((c) => [c.id, c]))
       const seeded = shouldForceLayout
-        ? forceLayout(notes, weightedLinks, degreeByNode)
+        ? forceLayout(notes, weightedLinks, {
+          centrality: centralityMap,
+          clusterOf: clusterKeyFor,
+        })
         : seedLayout(notes, primaryTagFor)
       return notes.map((n) => {
         const existing = byId.get(n.id)
@@ -887,6 +975,9 @@ function GardenMindmapInner({ notes, workspaceId, onOpenNote }: GardenMindmapPro
     weightedLinks,
     showCentrality,
     centrality,
+    centralityMap,
+    clusters,
+    clusterKeyFor,
     walkPath,
     walkSeed,
   ])
@@ -992,6 +1083,14 @@ function GardenMindmapInner({ notes, workspaceId, onOpenNote }: GardenMindmapPro
       wmap[k] = e.weight
     }
     setEdgeWeightMap(wmap)
+    // Leiden communities (separate, heavier endpoint). Empty when the
+    // clustering extra is absent; the layout then falls back to tag
+    // glades.
+    const cres = await authFetch('/garden/clusters')
+    if (cres.ok) {
+      const cdata = (await cres.json()) as { clusters: Record<string, number> }
+      setClusters(cdata.clusters || {})
+    }
   }, [])
 
   useEffect(() => {
@@ -1012,6 +1111,12 @@ function GardenMindmapInner({ notes, workspaceId, onOpenNote }: GardenMindmapPro
         wmap[k] = e.weight
       }
       setEdgeWeightMap(wmap)
+      const cres = await authFetch('/garden/clusters')
+      if (!active) return
+      if (cres.ok) {
+        const cdata = (await cres.json()) as { clusters: Record<string, number> }
+        if (active) setClusters(cdata.clusters || {})
+      }
     })()
     return () => {
       active = false
@@ -1042,25 +1147,28 @@ function GardenMindmapInner({ notes, workspaceId, onOpenNote }: GardenMindmapPro
         const w = edgeWeightV1(l.kind, shared)
         const widthBoost = 0.6 * Math.pow(w, 0.7)
         const style: CSSProperties =
-          kind === 'atom_of'
-            ? { stroke: color, strokeWidth: 2.2 + widthBoost }
-            : kind === 'references'
+          kind === 'hypha_of'
+            ? // a solid living filament grown from another idea
+              { stroke: color, strokeWidth: 2.2 + widthBoost }
+            : kind === 'related'
               ? {
-                  // references is the most common kind; lift it off
-                  // the lowest-contrast grey so it still reads on the
-                  // moss-tinted canvas gradient.
-                  stroke: 'color-mix(in srgb, var(--moss) 55%, var(--muted))',
+                  // the neutral associative thread: dashed, low-contrast
+                  // so it reads as background weave, lifted off the
+                  // lowest-contrast grey to stay visible on the canvas.
+                  stroke: 'color-mix(in srgb, var(--moss) 45%, var(--muted))',
                   strokeWidth: 1.5 + widthBoost,
                   strokeDasharray: '3 3',
-                  opacity: 0.85,
+                  opacity: 0.8,
                 }
-              : kind === 'replies_to'
-                ? {
+              : kind === 'supersedes'
+                ? { stroke: color, strokeWidth: 2.0 + widthBoost, opacity: 0.9 }
+                : // contradicts: a struck filament (rust), dashed + arrow
+                  {
                     stroke: color,
-                    strokeWidth: 1.8 + widthBoost,
-                    strokeDasharray: '6 2',
+                    strokeWidth: 2.0 + widthBoost,
+                    strokeDasharray: '5 3',
+                    opacity: 0.95,
                   }
-                : { stroke: color, strokeWidth: 2.0 + widthBoost, opacity: 0.9 }
         const pairKey =
           l.parent_note_id < l.child_note_id
             ? `${l.parent_note_id}::${l.child_note_id}`
@@ -1079,7 +1187,7 @@ function GardenMindmapInner({ notes, workspaceId, onOpenNote }: GardenMindmapPro
           animated: false,
           style,
           markerEnd:
-            kind === 'supersedes'
+            kind === 'supersedes' || kind === 'contradicts'
               ? { type: MarkerType.ArrowClosed, color, width: 14, height: 14 }
               : undefined,
           data: {
@@ -1293,12 +1401,15 @@ function GardenMindmapInner({ notes, workspaceId, onOpenNote }: GardenMindmapPro
     }
     positionsRef.current = {}
     lastForceSig.current = ''
-    const seeded = forceLayout(notes, weightedLinks, degreeByNode)
+    const seeded = forceLayout(notes, weightedLinks, {
+          centrality: centralityMap,
+          clusterOf: clusterKeyFor,
+        })
     setNodes((cur) =>
       cur.map((n) => ({ ...n, position: seeded[n.id] ?? n.position })),
     )
     window.setTimeout(() => rf.fitView({ padding: 0.2, maxZoom: 1.4 }), 60)
-  }, [t, workspaceId, notes, weightedLinks, degreeByNode, setNodes, rf])
+  }, [t, workspaceId, notes, weightedLinks, centralityMap, clusterKeyFor, setNodes, rf])
 
   // ---------------------------------------------------------------
   // Edge creation: drag from a node handle to another node opens a
@@ -1310,7 +1421,7 @@ function GardenMindmapInner({ notes, workspaceId, onOpenNote }: GardenMindmapPro
     (conn: Connection) => {
       if (!conn.source || !conn.target || conn.source === conn.target) return
       setPendingConnect(conn)
-      setLinkKind('references')
+      setLinkKind('related')
     },
     [],
   )
@@ -1591,14 +1702,28 @@ function GardenMindmapInner({ notes, workspaceId, onOpenNote }: GardenMindmapPro
               </button>
             </div>
             <div className="modal__body">
-              <p className="hint">
+              <p className="hint garden__mindmap-linkdir">
                 <strong>
                   {noteById.get(pendingConnect.source ?? '')?.title || '·'}
                 </strong>
-                {' → '}
+                {UNDIRECTED_KINDS.has(linkKind) ? ' ↔ ' : ' → '}
                 <strong>
                   {noteById.get(pendingConnect.target ?? '')?.title || '·'}
                 </strong>
+                {!UNDIRECTED_KINDS.has(linkKind) && (
+                  <button
+                    type="button"
+                    className="btn--ghost btn--sm"
+                    title={t('garden.mindmap.swapDirection')}
+                    onClick={() =>
+                      setPendingConnect((c) =>
+                        c ? { ...c, source: c.target, target: c.source } : c,
+                      )
+                    }
+                  >
+                    ⇄
+                  </button>
+                )}
               </p>
               <div className="garden__mindmap-kindlist" role="radiogroup">
                 {LINK_KINDS.map((k) => (
@@ -1618,6 +1743,9 @@ function GardenMindmapInner({ notes, workspaceId, onOpenNote }: GardenMindmapPro
                   </label>
                 ))}
               </div>
+              <p className="hint garden__mindmap-kindhint">
+                {t(`garden.mindmap.linkKindHint.${linkKind}`)}
+              </p>
               <div className="modal__foot">
                 <button
                   type="button"

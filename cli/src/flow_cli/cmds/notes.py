@@ -31,6 +31,10 @@ from flow_cli.ui import (
 
 app = typer.Typer(no_args_is_help=True, help="Notes: capture text or voice memos.")
 
+# Mycelial 4-verb note↔note link model (ADR-0040). The set is closed; the
+# server rejects anything else, so we validate client-side for a clearer error.
+_LINK_KINDS = ("hypha_of", "related", "supersedes", "contradicts")
+
 
 def _resolve_note(c: Any, partial: str) -> str:
     return resolve_id(c, partial, endpoint="/notes", kind="note")
@@ -648,6 +652,73 @@ def merge(
         f"merged note {short_id(src_id)} → {short_id(tgt_id)} "
         f"({len(out_note.get('parts', []))} parts now on target)"
     )
+
+
+# --- note↔note links (mycelial 4-verb model, ADR-0040) --------------
+
+
+def _check_link_kind(kind: str) -> str:
+    if kind not in _LINK_KINDS:
+        raise CLIError(
+            f"unknown link kind '{kind}'.",
+            hint="Valid kinds: " + ", ".join(_LINK_KINDS) + ".",
+        )
+    return kind
+
+
+@app.command()
+def link(
+    parent: str = typer.Argument(..., autocompletion=complete_note_id),
+    child: str = typer.Argument(..., autocompletion=complete_note_id),
+    kind: str = typer.Argument(...),
+) -> None:
+    """Link two notes with one of the 4 verbs (ADR-0040):
+    hypha_of (CHILD grew from PARENT), related (just connected),
+    supersedes (PARENT makes CHILD obsolete), contradicts (PARENT refutes
+    CHILD). 'related' is undirected: the server canonicalises the two
+    notes, so the order you pass them does not matter. 'supersedes' and
+    'contradicts' decay the target (CHILD) toward dormant."""
+    _check_link_kind(kind)
+    with client() as c:
+        parent_id = _resolve_note(c, parent)
+        child_id = _resolve_note(c, child)
+        out_link = get_json(
+            c.post(
+                f"/notes/{parent_id}/links",
+                json={
+                    "parent_note_id": parent_id,
+                    "child_note_id": child_id,
+                    "kind": kind,
+                },
+            )
+        )
+    if json_mode():
+        emit_json(out_link)
+        return
+    success(f"linked {short_id(parent_id)} —[{kind}]→ {short_id(child_id)}")
+
+
+@app.command()
+def unlink(
+    parent: str = typer.Argument(..., autocompletion=complete_note_id),
+    child: str = typer.Argument(..., autocompletion=complete_note_id),
+    kind: str = typer.Argument(...),
+) -> None:
+    """Remove a note↔note link of the given verb (ADR-0040): one of
+    hypha_of, related, supersedes, contradicts. For 'related' the link is
+    undirected, so PARENT/CHILD order does not matter; the server
+    canonicalises the endpoints before deleting."""
+    _check_link_kind(kind)
+    with client() as c:
+        parent_id = _resolve_note(c, parent)
+        child_id = _resolve_note(c, child)
+        resp = c.delete(
+            f"/notes/{parent_id}/links",
+            params={"child_note_id": child_id, "kind": kind},
+        )
+        if resp.status_code not in (200, 204):
+            get_json(resp)
+    success(f"unlinked {short_id(parent_id)} —[{kind}]✗ {short_id(child_id)}")
 
 
 # --- voice ----------------------------------------------------------

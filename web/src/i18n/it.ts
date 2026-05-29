@@ -758,19 +758,19 @@ export const it: Catalog = {
       swapDirection: 'Inverti direzione',
       linkKind: {
         hypha_of: 'ifa di',
-        references: 'riferimento',
-        replies_to: 'risposta a',
+        related: 'collegata a',
         supersedes: 'sostituisce',
-        humus_of: 'humus di',
+        contradicts: 'contraddice',
       },
       linkKindHint: {
         hypha_of:
-          'Questa nota è un’ifa (filamento) dell’altra: un filamento che compone l’idea più grande (il genitore è l’insieme / nota-indice).',
-        references: 'Un backlink di citazione: questa nota rimanda all’altra.',
-        replies_to: 'Una risposta o elaborazione a thread sull’altra nota.',
-        supersedes: 'Questa nota sostituisce l’altra (la precedente, superata).',
-        humus_of:
-          'Generato dal sistema: l’humus distillato dall’altra nota (decomposizione fungina). Non modificabile a mano.',
+          'Questa nota è cresciuta dall’altra: un’ifa (filamento) germogliata dall’idea sorgente. Direzionale.',
+        related:
+          'Le due idee sono semplicemente collegate nel tessuto. Nessun verso, nessuna gerarchia.',
+        supersedes:
+          'Questa nota rende l’altra obsoleta (la precedente). Il target decade verso dormiente.',
+        contradicts:
+          'Questa nota confuta l’altra come falsa. Il target decade verso dormiente.',
       },
     },
     maturity: {

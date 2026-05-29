@@ -4,7 +4,7 @@ Asserts the Phase 1 invariants:
 - a non-trivial note can be distilled exactly once;
 - the distillation note carries ``humus_kind='distillation'`` and
   ``humus_flag=True``;
-- a NoteNoteLink (``atom_of``) joins the source to the distillation
+- a NoteNoteLink (``hypha_of``) joins the source to the distillation
   so the graph can navigate the lineage;
 - re-running on an already-distilled source is a no-op (returns the
   cached distillation id).
@@ -103,7 +103,7 @@ async def test_distill_note_creates_humus_atom(_wire_llm: None) -> None:
                 )
             )
         ).scalar_one()
-        assert link.kind == "atom_of"
+        assert link.kind == "hypha_of"
 
 
 async def test_distill_note_is_idempotent(_wire_llm: None) -> None:
@@ -126,7 +126,7 @@ async def test_distill_note_is_idempotent(_wire_llm: None) -> None:
                 await s.execute(
                     select(NoteNoteLink).where(
                         NoteNoteLink.parent_note_id == source.id,
-                        NoteNoteLink.kind == "atom_of",
+                        NoteNoteLink.kind == "hypha_of",
                     )
                 )
             )

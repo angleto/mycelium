@@ -7,19 +7,20 @@ import { GardenIcon, type GardenIconName } from './GardenIcon'
 type Classify = components['schemas']['GardenClassifyOut']
 type SuggestionType = 'tag' | 'link' | 'maturity'
 
+// ADR-0040 4-verb note<->note link model: each kind maps to its own
+// forest glyph in GardenIcon; unknown kinds fall back to 'related'
+// (the neutral undirected connector).
 const LINK_ICON_KINDS: readonly GardenIconName[] = [
-  'atom_of',
-  'references',
+  'hypha_of',
+  'related',
+  'supersedes',
   'contradicts',
-  'extends',
-  'derives_from',
-  'cites',
 ] as const
 
 function linkIcon(kind: string): GardenIconName {
   return (LINK_ICON_KINDS as readonly string[]).includes(kind)
     ? (kind as GardenIconName)
-    : 'references'
+    : 'related'
 }
 
 // ADR-0032 proposal engine, consumer side. Read-only suggestions
@@ -196,7 +197,7 @@ export function GardenSuggestionsPanel({
         <section className="linkedpanel__section">
           <header className="linkedpanel__sectionhead">
             <span className="chip">
-              <GardenIcon name="references" size={14} />
+              <GardenIcon name="related" size={14} />
               {t('gardenSuggest.links')}
             </span>
             <span className="muted">({data.links.length})</span>
@@ -213,6 +214,12 @@ export function GardenSuggestionsPanel({
                   <GardenIcon name={linkIcon(s.link_kind)} size={14} />
                   <span className="linkedpanel__title">
                     {notesById[s.target_id] ?? t('gardenSuggest.unknownNote')}
+                  </span>
+                  <span
+                    className="muted"
+                    title={t(`garden.mindmap.linkKindHint.${s.link_kind}`)}
+                  >
+                    {t(`garden.mindmap.linkKind.${s.link_kind}`)}
                   </span>
                   <span className="muted">{pct(s.confidence)}%</span>
                   <button

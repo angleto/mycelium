@@ -9,9 +9,13 @@
 // badges.
 //
 // Naming groups (with their forest metaphor in parens):
-//   - link kinds: atom_of (compound part), references (pointing arc),
-//     contradicts (broken twig), extends (branching), derives_from
-//     (root spread), cites (quote leaf)
+//   - note<->note link kinds (ADR-0040 4-verb model): hypha_of
+//     (filament branching off a node), related (two nodes joined by a
+//     plain line), supersedes (one shape overtaking another),
+//     contradicts (broken twig)
+//   - note<->task link kinds: references (pointing arc) and
+//     derives_from (root spread); leaf / branch double as task-link
+//     glyphs (see LinkedTasksPanel)
 //   - maturity: seed (buried seed), sprout (two cotyledons),
 //     branch (forked stem), leaf (full leaf), compost (decomposing
 //     leaf)
@@ -19,13 +23,14 @@
 //     cluster (mushroom trio for community groups)
 
 export type GardenIconName =
-  // Link kinds
-  | 'atom_of'
-  | 'references'
+  // note<->note link kinds (ADR-0040)
+  | 'hypha_of'
+  | 'related'
+  | 'supersedes'
   | 'contradicts'
-  | 'extends'
+  // note<->task link kinds (LinkedTasksPanel)
+  | 'references'
   | 'derives_from'
-  | 'cites'
   // Maturity
   | 'seed'
   | 'sprout'
@@ -37,24 +42,28 @@ export type GardenIconName =
   | 'cluster'
 
 const PATH: Record<GardenIconName, string> = {
-  // --- Link kinds ----------------------------------------------------
-  // Compound: four nodes joined at a centre (atom of a larger
-  // structure).
-  atom_of:
-    'M12 4a2 2 0 1 1 0 4 2 2 0 0 1 0-4ZM6 18a2 2 0 1 1 0-4 2 2 0 0 1 0 4ZM18 18a2 2 0 1 1 0-4 2 2 0 0 1 0 4ZM12 8v6M12 14l-4 2M12 14l4 2',
-  // Pointing arc: classic right-arrow trimmed to a citation gesture.
-  references: 'M4 12h13M11 6l6 6-6 6',
+  // --- note<->note link kinds (ADR-0040 4-verb model) ---------------
+  // Hypha: a filament sprouting off a parent node (derived-from /
+  // grew-from). Directional, origin at the node on the left.
+  hypha_of:
+    'M5 12a2 2 0 1 1 0-0.01M7 12c4 0 6-3 10-5M17 7l1 3M17 7l-3 1M7 12c4 0 6 3 10 5M17 17l1-3M17 17l-3-1',
+  // Related: two small nodes joined by a plain undirected line.
+  related:
+    'M6 12a2.2 2.2 0 1 1 0-0.01M18 12a2.2 2.2 0 1 1 0-0.01M8.2 12h7.6',
+  // Supersedes: one shape overtaking another, an arrow replacing the
+  // old node (the target decays toward dormant).
+  supersedes:
+    'M6 9a3 3 0 1 0 0 6M4 12h11M11 8l4 4-4 4M18 7v10',
   // Broken twig: a snapped stem (contradiction = severed link).
   contradicts:
     'M4 6c4 2 6 4 7 6M20 18c-4-2-6-4-7-6M11 12l-2 1M13 12l2-1M9 13l-3 1M15 11l3-1',
-  // Branching: trunk with two new shoots (kind that grows outward).
-  extends: 'M12 22V8M12 16l-5-4M12 16l5-4M12 8l-3-3M12 8l3-3',
+
+  // --- note<->task link kinds (LinkedTasksPanel) --------------------
+  // Pointing arc: classic right-arrow trimmed to a citation gesture.
+  references: 'M4 12h13M11 6l6 6-6 6',
   // Roots spreading: source-of (derives_from = origin in the soil).
   derives_from:
     'M12 3v8M12 11c-2 0-3 1-5 4M12 11c2 0 3 1 5 4M5 18v3M12 11v10M19 18v3',
-  // Quote-on-leaf: a leaf bearing a typographic citation mark.
-  cites:
-    'M5 19c1-9 7-15 14-15-1 9-7 15-14 15ZM8 10q0 2 2 2v2M12 8q0 2 2 2v2',
 
   // --- Maturity ------------------------------------------------------
   // Seed: a small oval cotyledon under the soil line.

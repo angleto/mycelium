@@ -115,9 +115,9 @@ async def test_link_and_unlink_notes_typed() -> None:
             actor_id=user,
             parent_note_id=parent.id,
             child_note_id=child.id,
-            kind="atom_of",
+            kind="hypha_of",
         )
-        assert link.kind == "atom_of"
+        assert link.kind == "hypha_of"
         # Idempotent
         link2 = await note_links.link_notes(
             s,
@@ -125,7 +125,7 @@ async def test_link_and_unlink_notes_typed() -> None:
             actor_id=user,
             parent_note_id=parent.id,
             child_note_id=child.id,
-            kind="atom_of",
+            kind="hypha_of",
         )
         assert link2.id == link.id
         # Outgoing visible from parent, incoming from child
@@ -142,7 +142,7 @@ async def test_link_and_unlink_notes_typed() -> None:
             actor_id=user,
             parent_note_id=parent.id,
             child_note_id=child.id,
-            kind="atom_of",
+            kind="hypha_of",
         )
         assert removed is True
         # Second unlink is a no-op
@@ -152,7 +152,7 @@ async def test_link_and_unlink_notes_typed() -> None:
             actor_id=user,
             parent_note_id=parent.id,
             child_note_id=child.id,
-            kind="atom_of",
+            kind="hypha_of",
         )
         assert removed2 is False
 
@@ -171,7 +171,7 @@ async def test_list_workspace_note_links_returns_full_edge_set() -> None:
             actor_id=user,
             parent_note_id=a.id,
             child_note_id=b.id,
-            kind="references",
+            kind="related",
         )
         await note_links.link_notes(
             s,
@@ -179,13 +179,15 @@ async def test_list_workspace_note_links_returns_full_edge_set() -> None:
             actor_id=user,
             parent_note_id=b.id,
             child_note_id=c.id,
-            kind="atom_of",
+            kind="hypha_of",
         )
         rows = await note_links.list_workspace_note_links(s, org_id=org)
         assert len(rows) == 2
-        edges = {(r.parent_note_id, r.child_note_id, r.kind) for r in rows}
-        assert (a.id, b.id, "references") in edges
-        assert (b.id, c.id, "atom_of") in edges
+        # ``related`` is undirected (canonicalised), so match its pair
+        # order-agnostically; ``hypha_of`` keeps its direction.
+        edges = {(frozenset({r.parent_note_id, r.child_note_id}), r.kind) for r in rows}
+        assert (frozenset({a.id, b.id}), "related") in edges
+        assert (frozenset({b.id, c.id}), "hypha_of") in edges
 
     # Links from a different workspace must not leak.
     other_org, other_user = await _make_workspace()
@@ -198,7 +200,7 @@ async def test_list_workspace_note_links_returns_full_edge_set() -> None:
             actor_id=other_user,
             parent_note_id=x.id,
             child_note_id=y.id,
-            kind="references",
+            kind="related",
         )
     async with tenant_session(str(org), str(user)) as s:
         rows = await note_links.list_workspace_note_links(s, org_id=org)
@@ -216,7 +218,7 @@ async def test_link_notes_rejects_self_link_and_unknown_kind() -> None:
                 actor_id=user,
                 parent_note_id=n.id,
                 child_note_id=n.id,
-                kind="references",
+                kind="related",
             )
         assert self_err.value.code == MessageCode.NOTE_LINK_SELF
         other = await _make_note(s, org, user, "other")
@@ -232,7 +234,7 @@ async def test_link_notes_rejects_self_link_and_unknown_kind() -> None:
         # The kind error names the valid kinds (closes the report's P3:
         # the client guessed sibling/see_also/derives_from blindly).
         assert kind_err.value.code == MessageCode.NOTE_LINK_KIND_INVALID
-        assert "atom_of" in kind_err.value.params["valid"]
+        assert "hypha_of" in kind_err.value.params["valid"]
 
 
 # ---------------------------------------------------------------------------
@@ -488,7 +490,7 @@ async def test_note_note_link_unique_constraint_dedupes() -> None:
             actor_id=user,
             parent_note_id=a.id,
             child_note_id=b.id,
-            kind="references",
+            kind="related",
         )
         l2 = await note_links.link_notes(
             s,
@@ -496,7 +498,7 @@ async def test_note_note_link_unique_constraint_dedupes() -> None:
             actor_id=user,
             parent_note_id=a.id,
             child_note_id=b.id,
-            kind="references",
+            kind="related",
         )
         assert l1.id == l2.id
         # Different kind on the same pair is a different row.
@@ -506,15 +508,17 @@ async def test_note_note_link_unique_constraint_dedupes() -> None:
             actor_id=user,
             parent_note_id=a.id,
             child_note_id=b.id,
-            kind="replies_to",
+            kind="hypha_of",
         )
         assert l3.id != l1.id
+        # ``related`` is canonicalised (parent < child) while ``hypha_of``
+        # keeps its direction, so match the pair order-agnostically.
         rows = (
             (
                 await s.execute(
                     select(NoteNoteLink).where(
-                        NoteNoteLink.parent_note_id == a.id,
-                        NoteNoteLink.child_note_id == b.id,
+                        NoteNoteLink.parent_note_id.in_([a.id, b.id]),
+                        NoteNoteLink.child_note_id.in_([a.id, b.id]),
                     )
                 )
             )
@@ -522,6 +526,53 @@ async def test_note_note_link_unique_constraint_dedupes() -> None:
             .all()
         )
         assert len(rows) == 2
+
+
+async def test_supersedes_and_contradicts_auto_prune_target() -> None:
+    # ADR-0040: a superseded or refuted idea rots toward ``dormant``
+    # (one-way nudge), while neutral kinds leave maturity untouched.
+    org, user = await _make_workspace()
+    async with tenant_session(str(org), str(user)) as s:
+        a = await _make_note(s, org, user, "new")
+        b = await _make_note(s, org, user, "old")
+        assert b.maturity != "dormant"
+        await note_links.link_notes(
+            s,
+            org_id=org,
+            actor_id=user,
+            parent_note_id=a.id,
+            child_note_id=b.id,
+            kind="supersedes",
+        )
+        await s.refresh(b)
+        assert b.maturity == "dormant"
+
+        c = await _make_note(s, org, user, "claim")
+        d = await _make_note(s, org, user, "wrong")
+        await note_links.link_notes(
+            s,
+            org_id=org,
+            actor_id=user,
+            parent_note_id=c.id,
+            child_note_id=d.id,
+            kind="contradicts",
+        )
+        await s.refresh(d)
+        assert d.maturity == "dormant"
+
+        # hypha_of / related must NOT prune the target.
+        e = await _make_note(s, org, user, "e")
+        f = await _make_note(s, org, user, "f")
+        await note_links.link_notes(
+            s,
+            org_id=org,
+            actor_id=user,
+            parent_note_id=e.id,
+            child_note_id=f.id,
+            kind="hypha_of",
+        )
+        await s.refresh(f)
+        assert f.maturity != "dormant"
 
 
 async def test_note_task_link_unique_constraint_dedupes() -> None:

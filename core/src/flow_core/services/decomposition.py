@@ -65,12 +65,14 @@ async def distill_note(
     """Read the source note's body, generate a distillation via the
     LLM provider, and persist it as a new note linked to the source.
 
-    Idempotent: if a distillation note already references this source
-    via ``derives_from``, the existing one is returned untouched.
+    Idempotent: if a distillation note already derives from this source
+    (a ``hypha_of`` link to a note marked ``humus_kind='distillation'``),
+    the existing one is returned untouched.
     """
     await require_role(session, org_id, actor_id, Role.member)
     source = await notes_svc.get_note(session, org_id=org_id, note_id=note_id)
-    # Idempotency: look for an existing derives_from -> distillation.
+    # Idempotency: look for an existing distillation derived from this
+    # source (a hypha_of edge source -> a humus_kind='distillation' note).
     existing_row = (
         await session.execute(
             select(NoteNoteLink.child_note_id)
@@ -78,7 +80,7 @@ async def distill_note(
             .where(
                 NoteNoteLink.org_id == org_id,
                 NoteNoteLink.parent_note_id == note_id,
-                NoteNoteLink.kind == "atom_of",
+                NoteNoteLink.kind == "hypha_of",
                 Note.humus_kind == "distillation",
             )
             .limit(1)
@@ -119,11 +121,14 @@ async def distill_note(
     # walk can now surface it as fertiliser.
     source.humus_flag = True
     await session.flush()
-    # Link: distillation derives_from source. The parent is the source
-    # (the authority); the child is the new distillation note.
-    # Use ``atom_of``: the distillation is an atom of the source. The
-    # set of NOTE_NOTE_LINK_KINDS is closed by CHECK constraint; this
-    # is the kind that semantically fits decomposition output.
+    # Link: the distillation DERIVED FROM the source, so it is an
+    # ordinary ``hypha_of`` (parent = source / origin, child = the new
+    # distillation). The fact that it is humus lives in the node facet
+    # (``humus_kind``), not in the link kind (ADR-0040): a 1:1
+    # distillation keeps the thread to its single source so the lesson
+    # can be decompressed back to the rich note it came from. We write
+    # the row directly (the pipeline already gated on role above) rather
+    # than via ``link_notes``.
     # ``created_by`` on note_note_link is an Identity FK, not a
     # raw user id — resolve the actor's Identity row in this org.
     identity_id = (
@@ -139,7 +144,7 @@ async def distill_note(
             org_id=org_id,
             parent_note_id=source.id,
             child_note_id=distilled.id,
-            kind="atom_of",
+            kind="hypha_of",
             created_by=identity_id,
         )
     )

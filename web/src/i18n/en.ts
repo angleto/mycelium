@@ -759,19 +759,19 @@ export const en = {
       swapDirection: 'Swap direction',
       linkKind: {
         hypha_of: 'hypha of',
-        references: 'references',
-        replies_to: 'replies to',
+        related: 'related to',
         supersedes: 'supersedes',
-        humus_of: 'humus of',
+        contradicts: 'contradicts',
       },
       linkKindHint: {
         hypha_of:
-          'This note is a hypha (filament) of the other: a strand composing the larger idea (the parent is the whole / index note).',
-        references: 'A citation backlink: this note points at the other.',
-        replies_to: 'A threaded reply or elaboration on the other note.',
-        supersedes: 'This note replaces the other (the older, superseded one).',
-        humus_of:
-          'System-generated: the distilled humus of the other note (fungal decomposition). Not user-editable.',
+          'This note grew from the other: a hypha (filament) sprouted from the source idea. Directional.',
+        related:
+          'These two ideas are simply connected in the weave. No direction, no hierarchy.',
+        supersedes:
+          'This note makes the other obsolete (the older one). The target decays toward dormant.',
+        contradicts:
+          'This note refutes the other as false. The target decays toward dormant.',
       },
     },
     maturity: {

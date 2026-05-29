@@ -55,13 +55,13 @@ async def test_list_workspace_note_links_returns_every_edge() -> None:
         r1 = await c.post(
             f"/notes/{a}/links",
             headers=h,
-            json={"parent_note_id": a, "child_note_id": b, "kind": "references"},
+            json={"parent_note_id": a, "child_note_id": b, "kind": "related"},
         )
         assert r1.status_code == 200, r1.text
         r2 = await c.post(
             f"/notes/{b}/links",
             headers=h,
-            json={"parent_note_id": b, "child_note_id": cc, "kind": "atom_of"},
+            json={"parent_note_id": b, "child_note_id": cc, "kind": "hypha_of"},
         )
         assert r2.status_code == 200, r2.text
 
@@ -69,9 +69,11 @@ async def test_list_workspace_note_links_returns_every_edge() -> None:
         assert r.status_code == 200, r.text
         rows = r.json()
         assert len(rows) == 2
-        edges = {(x["parent_note_id"], x["child_note_id"], x["kind"]) for x in rows}
-        assert (a, b, "references") in edges
-        assert (b, cc, "atom_of") in edges
+        # ``related`` is undirected (canonicalised parent < child), so
+        # match its pair order-agnostically; ``hypha_of`` is directional.
+        edges = {(frozenset({x["parent_note_id"], x["child_note_id"]}), x["kind"]) for x in rows}
+        assert (frozenset({a, b}), "related") in edges
+        assert (frozenset({b, cc}), "hypha_of") in edges
 
 
 async def test_list_workspace_note_links_isolated_per_workspace() -> None:
@@ -83,7 +85,7 @@ async def test_list_workspace_note_links_isolated_per_workspace() -> None:
         await c.post(
             f"/notes/{a}/links",
             headers=h1,
-            json={"parent_note_id": a, "child_note_id": b, "kind": "references"},
+            json={"parent_note_id": a, "child_note_id": b, "kind": "related"},
         )
 
         h2 = await _signup(c)
@@ -92,7 +94,7 @@ async def test_list_workspace_note_links_isolated_per_workspace() -> None:
         await c.post(
             f"/notes/{x}/links",
             headers=h2,
-            json={"parent_note_id": x, "child_note_id": y, "kind": "atom_of"},
+            json={"parent_note_id": x, "child_note_id": y, "kind": "hypha_of"},
         )
 
         r1 = await c.get("/notes/links", headers=h1)
@@ -100,8 +102,8 @@ async def test_list_workspace_note_links_isolated_per_workspace() -> None:
         assert r1.status_code == 200 and r2.status_code == 200
         rows1 = r1.json()
         rows2 = r2.json()
-        assert len(rows1) == 1 and rows1[0]["kind"] == "references"
-        assert len(rows2) == 1 and rows2[0]["kind"] == "atom_of"
+        assert len(rows1) == 1 and rows1[0]["kind"] == "related"
+        assert len(rows2) == 1 and rows2[0]["kind"] == "hypha_of"
 
 
 async def test_list_workspace_links_does_not_shadow_single_note_route() -> None:

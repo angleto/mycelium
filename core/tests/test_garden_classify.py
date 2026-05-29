@@ -75,7 +75,7 @@ async def _link(
         actor_id=user,
         parent_note_id=parent,
         child_note_id=child,
-        kind="references",
+        kind="related",
     )
 
 
@@ -163,7 +163,7 @@ async def test_link_suggestion_excludes_linked_and_surfaces_shared_tag_candidate
     assert a.id not in targets  # never self
     assert d.id in targets
     assert all(lc.confidence >= gc.LINK_FLOOR for lc in res.links)
-    assert all(lc.link_kind == "references" for lc in res.links)  # v1 default
+    assert all(lc.link_kind == "related" for lc in res.links)  # v1 default
 
 
 # ---------------------------------------------------------------------------
