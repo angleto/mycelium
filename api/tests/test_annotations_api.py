@@ -31,9 +31,7 @@ def _email() -> str:
 
 
 async def _signup(c: AsyncClient) -> dict[str, str]:
-    a = (
-        await c.post("/auth/signup", json={"email": _email(), "password": "pw-strong-123"})
-    ).json()
+    a = (await c.post("/auth/signup", json={"email": _email(), "password": "pw-strong-123"})).json()
     return {"Authorization": f"Bearer {a['token']}", "X-Workspace-Id": a["workspace_id"]}
 
 
@@ -104,7 +102,12 @@ async def test_note_part_anchored_comment_and_reply() -> None:
             await c.post(
                 "/annotations/comment",
                 headers=h,
-                json={"doc_kind": "note_part", "doc_id": pid, "body": "agreed", "parent_id": parent["id"]},
+                json={
+                    "doc_kind": "note_part",
+                    "doc_id": pid,
+                    "body": "agreed",
+                    "parent_id": parent["id"],
+                },
             )
         ).json()
         assert reply["parent_id"] == parent["id"]

@@ -19,7 +19,6 @@ from flow_api.routers import (
     agent_runs,
     agent_tokens,
     ai_assistants,
-    annotations as annotations_router,
     attachments,
     auth,
     billing,
@@ -51,6 +50,9 @@ from flow_api.routers import (
     time_tracking,
     workflows,
     workspace,
+)
+from flow_api.routers import (
+    annotations as annotations_router,
 )
 from flow_core.config import get_settings
 from flow_core.errors import (
