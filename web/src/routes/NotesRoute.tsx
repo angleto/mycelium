@@ -23,6 +23,7 @@ import { TaskTimer } from '../components/TaskTimer'
 import { Attachments } from '../components/Attachments'
 import { VoicePlayer } from '../components/VoicePlayer'
 import { LinkedTasksPanel } from '../components/LinkedTasksPanel'
+import { GardenSuggestionsPanel } from '../components/GardenSuggestionsPanel'
 import { ChecklistPanel } from '../components/ChecklistPanel'
 import { RevisionsPanel } from '../components/RevisionsPanel'
 import { useFocus } from '../lib/focus'
@@ -981,6 +982,10 @@ export function NotesRoute() {
                   />
                 </section>
                 <LinkedTasksPanel noteId={sel.id} />
+                <GardenSuggestionsPanel
+                  noteId={sel.id}
+                  onApplied={() => void refreshSel()}
+                />
                 <RevisionsPanel
                   kind="note"
                   id={sel.id}
