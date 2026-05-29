@@ -10,9 +10,8 @@ import { useTranslation } from 'react-i18next'
 import { authFetch, errMessage } from '../api/client'
 import type { components } from '../api/schema'
 import type { EditSession } from '../lib/useEditSession'
-import { AnnotationsPanel } from './AnnotationsPanel'
 import { GardenIcon } from './GardenIcon'
-import { RichEditor } from './RichEditor'
+import { PartAnnotated } from './PartAnnotated'
 
 type NotePart = components['schemas']['NotePartOut']
 
@@ -69,9 +68,6 @@ export const NotePartsEditor = forwardRef<NotePartsEditorHandle, Props>(
     const [err, setErr] = useState('')
     const [loading, setLoading] = useState(false)
     const [busyPid, setBusyPid] = useState<string | null>(null)
-    // Per-part toggle for the inline annotation panel (comments +
-    // suggestions on that block). Keyed by part id.
-    const [openComments, setOpenComments] = useState<Record<string, boolean>>({})
     const [editingBody, setEditingBody] = useState<Record<string, string>>({})
     // Title draft keyed by part.id. Distinct from ``editingBody`` so
     // a user can edit just the title without bumping the body draft
@@ -537,8 +533,10 @@ export const NotePartsEditor = forwardRef<NotePartsEditorHandle, Props>(
                         defaultValue: 'Part title',
                       })}
                     />
-                    <RichEditor
+                    <PartAnnotated
+                      partId={p.id}
                       value={draft}
+                      onDocMutated={reload}
                       onChange={(v) =>
                         setEditingBody((cur) => ({ ...cur, [p.id]: v }))
                       }
@@ -553,21 +551,6 @@ export const NotePartsEditor = forwardRef<NotePartsEditorHandle, Props>(
                           : `note-part-${p.ord}`
                       }
                     />
-                    <div className="parts-editor__comments">
-                      <button
-                        type="button"
-                        className="btn--sm btn--ghost"
-                        onClick={() =>
-                          setOpenComments((cur) => ({ ...cur, [p.id]: !cur[p.id] }))
-                        }
-                        aria-expanded={!!openComments[p.id]}
-                      >
-                        {t('notes.parts.comments', { defaultValue: '💬 Comments' })}
-                      </button>
-                      {openComments[p.id] && (
-                        <AnnotationsPanel docKind="note_part" docId={p.id} />
-                      )}
-                    </div>
                   </div>
                 )}
               </li>

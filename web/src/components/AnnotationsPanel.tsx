@@ -1,21 +1,27 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { authFetch, errMessage } from '../api/client'
-import type { components } from '../api/schema'
-
-type Annotation = components['schemas']['AnnotationOut']
-type DocKind = 'note_part' | 'task_description'
+import type { Annotation, DocKind } from '../lib/useAnnotations'
 
 // The inline annotation layer (comments + suggestions) for a single
 // markdown document, addressed by the generic (docKind, docId) handle.
-// The same data renders on web/CLI/MCP; here a suggestion shows the
-// struck original + the proposed replacement (Google-Docs "suggesting"
-// mode), accepted/rejected in place. The canonical markdown is never
-// touched until a suggestion is accepted.
+// Controlled: ``rows`` + ``reload`` come from the shared useAnnotations
+// hook, so the panel and the editor's inline decorations stay in sync
+// (a resolve/accept here refreshes the marks too). A suggestion shows
+// the struck original + the proposed replacement; the canonical
+// markdown is untouched until a suggestion is accepted.
 interface Props {
   docKind: DocKind
   docId: string
+  rows: Annotation[]
+  reload: () => Promise<void>
+  /** Surfaced load error from the shared hook (a failed GET must not
+   * look like "no annotations"). */
+  loadError?: string
+  /** Called after a mutation that changes the document body (accepting a
+   * suggestion) so the host can refetch the prose. */
+  onDocMutated?: () => void | Promise<void>
   /** Heading; e.g. "Work diary" for a task description. */
   title?: string
   /** Whether the suggestion composer is offered (only where the document
@@ -30,13 +36,15 @@ function shortId(id: string | null | undefined): string {
 export function AnnotationsPanel({
   docKind,
   docId,
+  rows,
+  reload,
+  loadError,
+  onDocMutated,
   title,
   allowSuggest = true,
 }: Props) {
   const { t } = useTranslation()
-  const [rows, setRows] = useState<Annotation[]>([])
   const [err, setErr] = useState('')
-  const [loaded, setLoaded] = useState(false)
   const [includeResolved, setIncludeResolved] = useState(true)
 
   const [body, setBody] = useState('')
@@ -50,42 +58,6 @@ export function AnnotationsPanel({
   const [replyBody, setReplyBody] = useState('')
   const [editId, setEditId] = useState<string | null>(null)
   const [editBody, setEditBody] = useState('')
-
-  const reload = useCallback(async () => {
-    // All setState happen after the first await so the on-mount effect
-    // never sets state synchronously (react-hooks/set-state-in-effect).
-    // Always fetch the full set; the "show resolved" toggle filters
-    // client-side, so reload depends only on the (stable) document
-    // handle — no stateful dep that would make the on-mount effect a
-    // cascading-render risk (react-hooks/set-state-in-effect).
-    const qs = new URLSearchParams({
-      doc_kind: docKind,
-      doc_id: docId,
-      include_resolved: 'true',
-    })
-    try {
-      const res = await authFetch(`/annotations?${qs.toString()}`)
-      if (!res.ok) {
-        setErr(`HTTP ${res.status}`)
-        return
-      }
-      setRows((await res.json()) as Annotation[])
-      setErr('')
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e))
-    } finally {
-      setLoaded(true)
-    }
-  }, [docKind, docId])
-
-  useEffect(() => {
-    // Fetch-on-mount: reload() only setStates after its first await, so
-    // there is no synchronous cascade; the lint rule cannot see through
-    // the awaited body. Disabled here as the SPA does for data-load
-    // effects.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    void reload()
-  }, [reload])
 
   const send = useCallback(
     async (
@@ -142,8 +114,13 @@ export function AnnotationsPanel({
   }
 
   const act = async (a: Annotation, verb: string) => {
-    if (await send(`/annotations/${a.id}/${verb}`, 'POST', { expected_version: a.version }))
+    if (await send(`/annotations/${a.id}/${verb}`, 'POST', { expected_version: a.version })) {
       await reload()
+      // Accepting a suggestion splices the proposed text into the body
+      // server-side; ask the host to refetch the prose so the editor
+      // reflects it (resolve/reopen/reject leave the body untouched).
+      if (verb === 'accept') await onDocMutated?.()
+    }
   }
 
   const sendReply = async (parent: Annotation) => {
@@ -185,10 +162,20 @@ export function AnnotationsPanel({
       await reload()
   }
 
+  // A root stays visible when it (or any of its replies) is still open,
+  // so unchecking "show resolved" never hides live discussion under a
+  // resolved parent.
   const roots = rows.filter(
-    (r) => !r.parent_id && (includeResolved || r.status === 'open'),
+    (r) =>
+      !r.parent_id &&
+      (includeResolved ||
+        r.status === 'open' ||
+        rows.some((x) => x.parent_id === r.id && x.status === 'open')),
   )
-  const repliesOf = (id: string) => rows.filter((r) => r.parent_id === id)
+  const repliesOf = (id: string) =>
+    rows.filter(
+      (r) => r.parent_id === id && (includeResolved || r.status === 'open'),
+    )
 
   const renderCard = (a: Annotation, isReply: boolean) => {
     const open = a.status === 'open'
@@ -338,9 +325,8 @@ export function AnnotationsPanel({
         </label>
       </header>
 
-      {err && <p className="error">{err}</p>}
-      {!loaded && <p className="hint">{t('common.loading', { defaultValue: 'Loading…' })}</p>}
-      {loaded && roots.length === 0 && (
+      {(err || loadError) && <p className="error">{err || loadError}</p>}
+      {roots.length === 0 && (
         <p className="hint">
           {t('annotations.empty', { defaultValue: 'No comments yet.' })}
         </p>

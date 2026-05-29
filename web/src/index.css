@@ -4157,3 +4157,21 @@ button.btn--danger:hover {
 .parts-editor__comments {
   margin-top: 0.4rem;
 }
+
+/* Inline decorations painted over the live prose by the editor. */
+.anno-mark--comment {
+  background: rgba(255, 214, 102, 0.4);
+  border-bottom: 1px solid #d9a400;
+  cursor: pointer;
+}
+.anno-mark--del {
+  color: #b00020;
+  text-decoration: line-through;
+  text-decoration-color: #b00020;
+}
+.anno-mark--ins {
+  color: #176f2c;
+  background: #e3f7e3;
+  border-radius: 2px;
+  padding: 0 1px;
+}

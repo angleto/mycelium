@@ -19,6 +19,11 @@ import Suggestion, {
   type SuggestionProps,
 } from '@tiptap/suggestion'
 import { InlineMath, BlockMath } from './MarkdownMath'
+import {
+  AnnotationDecorations,
+  annotationKey,
+  type AnnotationAnchor,
+} from '../lib/annotationDecorations'
 import { EntityPrefix } from '../lib/entityPrefixExtension'
 import { api, authFetch, workspaceHeader } from '../api/client'
 import { formatMentionHref, type MentionKind } from '../lib/mentions'
@@ -344,6 +349,7 @@ export function RichEditor({
   large,
   imageUploadParent,
   filename,
+  annotations,
 }: {
   value: string
   onChange: (v: string) => void
@@ -355,6 +361,9 @@ export function RichEditor({
   // editor slugifies it for filesystem safety. Defaults to
   // ``untitled`` when missing.
   filename?: string
+  // Inline annotation anchors (comments + suggestions) rendered as
+  // decorations over the live prose. Purely presentational.
+  annotations?: AnnotationAnchor[]
 }) {
   const { t } = useTranslation()
   // Drop to a plain markdown textarea (paste long blocks, fix a bad
@@ -536,6 +545,9 @@ export function RichEditor({
       // convention) read inside the editor. Decoration-only; routing
       // is the global AppShell interceptor (data-entity-prefix).
       EntityPrefix,
+      // Inline comment/suggestion decorations (presentational; updated
+      // via a meta transaction in the effect below).
+      AnnotationDecorations.configure({ anchors: annotations ?? [] }),
     ],
     content: value,
     editorProps,
@@ -549,6 +561,14 @@ export function RichEditor({
   useEffect(() => {
     editorRef.current = editor
   }, [editor])
+
+  // Push the current annotation anchors into the decoration plugin
+  // whenever they change. This is a meta-only transaction (no doc
+  // change), so it never affects the markdown round-trip or the caret.
+  useEffect(() => {
+    if (!editor) return
+    editor.view.dispatch(editor.state.tr.setMeta(annotationKey, annotations ?? []))
+  }, [annotations, editor])
 
   // Reflect *external* value changes (a different part/note loaded, a
   // raw-mode edit, a conflict reload) onto the editor, while leaving
