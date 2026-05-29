@@ -40,7 +40,7 @@ Format: Status, Context, Decision, Consequences, Alternatives rejected.
 - [0029 Note garden ecosystem and typed note/task relations](0029-note-garden-ecosystem.md)
 - [0030 Embedding model migration (dual-column)](0030-embedding-model-migration.md)
 - [0031 Mindmap layout and edge weights](0031-mindmap-layout-edge-weights.md)
-- [0032 `garden_classify(node_id)` API contract](0032-garden-classify-api.md)
+- [0032 `garden_classify(node_id)`: the proposal engine (incl. automatic maturity promotion)](0032-garden-classify-api.md)
 - [0033 Anti-monoculture safeguards in `garden_classify`](0033-anti-monoculture-suggestions.md)
 - [0034 Humus policy in the LLM walk](0034-humus-policy-walk-llm.md)
 - [0035 Garden health sensors dashboard](0035-garden-sensors-dashboard.md)
