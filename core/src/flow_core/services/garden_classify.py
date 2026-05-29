@@ -37,18 +37,28 @@ import math
 import uuid
 from collections import defaultdict
 from dataclasses import dataclass, field
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from flow_core.errors import NotFoundError
+from flow_core.errors import DomainError, NotFoundError
 from flow_core.i18n import MessageCode
+from flow_core.models.classification_feedback import (
+    FEEDBACK_ACTIONS,
+    SUGGESTION_TYPES,
+    ClassificationFeedback,
+)
+from flow_core.models.membership import Role
 from flow_core.models.note import Note
 from flow_core.models.note_link import NoteNoteLink
 from flow_core.models.note_tag import NoteTag
 from flow_core.models.tag import Tag, TagKind
+from flow_core.services import audit, note_links
 from flow_core.services import graph as graph_svc
 from flow_core.services import link_prediction as linkpred_svc
+from flow_core.services import notes as notes_svc
+from flow_core.services.rbac import require_role
 
 MODEL_VERSION = "garden-classify-v1"
 
@@ -188,6 +198,21 @@ async def _suggest_links(
     ]
 
 
+def _pr_percentile(pageranks: dict[uuid.UUID, float], node_id: uuid.UUID) -> float:
+    """Rank percentile of ``node_id`` in the workspace PageRank
+    distribution, in [0, 1]. The unique maximum scores 1.0 regardless of
+    the raw value (rank-based, so the maturity tiers are stable across
+    workspaces); 0.0 for an empty/singleton workspace. Shared by the
+    interactive ``_suggest_maturity`` and the batch ``auto_promote_mature``
+    so the two never diverge on the policy."""
+    n = len(pageranks)
+    if n <= 1:
+        return 0.0
+    node_pr = pageranks.get(node_id, 0.0)
+    rank = sum(1 for v in pageranks.values() if v <= node_pr)
+    return (rank - 1) / (n - 1)
+
+
 async def _suggest_maturity(
     session: AsyncSession, *, org_id: uuid.UUID, note: Note
 ) -> tuple[MaturitySuggestion | None, dict[str, float]]:
@@ -207,13 +232,7 @@ async def _suggest_maturity(
         return None, diag
 
     pageranks = await graph_svc.compute_pagerank(session, org_id=org_id)
-    n = len(pageranks)
-    node_pr = pageranks.get(note.id, 0.0)
-    if n > 1:
-        rank = sum(1 for v in pageranks.values() if v <= node_pr)
-        pr_pct = (rank - 1) / (n - 1)
-    else:
-        pr_pct = 0.0
+    pr_pct = _pr_percentile(pageranks, note.id)
 
     degree = await _manual_link_degree(session, org_id=org_id, note_id=note.id)
     deg_term = min(1.0, degree / DEG_SATURATION)
@@ -336,11 +355,202 @@ async def classify_node(
     )
 
 
+async def _mutate(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    node_id: uuid.UUID,
+    suggestion_type: str,
+    value: dict[str, Any] | None,
+) -> None:
+    """Perform the accepted mutation via the existing services (each is
+    idempotent and audited on its own). ``cluster`` is informational in v1
+    (clusters are computed, not stored on the note) so it is a no-op."""
+    if not value:
+        return
+    if suggestion_type == "tag":
+        await notes_svc.attach_tag(
+            session,
+            org_id=org_id,
+            actor_id=actor_id,
+            note_id=node_id,
+            tag_id=uuid.UUID(str(value["tag_id"])),
+        )
+    elif suggestion_type == "link":
+        await note_links.link_notes(
+            session,
+            org_id=org_id,
+            actor_id=actor_id,
+            parent_note_id=node_id,
+            child_note_id=uuid.UUID(str(value["target_id"])),
+            kind=str(value.get("link_kind", "references")),
+        )
+    elif suggestion_type == "maturity":
+        await note_links.set_maturity(
+            session,
+            org_id=org_id,
+            actor_id=actor_id,
+            note_id=node_id,
+            maturity=str(value["value"]),
+        )
+
+
+async def apply_suggestion(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    node_id: uuid.UUID,
+    suggestion_type: str,
+    suggestion_value: dict[str, Any],
+    action: str,
+    override_value: dict[str, Any] | None = None,
+    model_version: str = MODEL_VERSION,
+    signals_snapshot: dict[str, Any] | None = None,
+) -> ClassificationFeedback:
+    """Apply (or decline) a ``classify_node`` suggestion and record the
+    decision (ADR-0032 / ADR-0037).
+
+    The mutating, reversible counterpart to ``classify_node``:
+    ``accept``/``override`` perform the mutation through the existing
+    idempotent services; ``reject``/``ignore`` mutate nothing. Either way
+    an append-only ``classification_feedback`` row is written — the event
+    that makes the decision auditable and the learning loop / rollback
+    possible. Member role required; RLS-scoped.
+    """
+    if suggestion_type not in SUGGESTION_TYPES:
+        raise DomainError(
+            MessageCode.GARDEN_SUGGESTION_TYPE_INVALID,
+            suggestion_type=suggestion_type,
+            valid=", ".join(sorted(SUGGESTION_TYPES)),
+        )
+    if action not in FEEDBACK_ACTIONS:
+        raise DomainError(
+            MessageCode.GARDEN_ACTION_INVALID,
+            action=action,
+            valid=", ".join(sorted(FEEDBACK_ACTIONS)),
+        )
+    await require_role(session, org_id, actor_id, Role.member)
+
+    if action in {"accept", "override", "auto"}:
+        effective = override_value if action == "override" else suggestion_value
+        await _mutate(
+            session,
+            org_id=org_id,
+            actor_id=actor_id,
+            node_id=node_id,
+            suggestion_type=suggestion_type,
+            value=effective,
+        )
+
+    feedback = ClassificationFeedback(
+        org_id=org_id,
+        user_id=actor_id,
+        node_id=node_id,
+        suggestion_type=suggestion_type,
+        suggestion_value=suggestion_value,
+        action=action,
+        override_value=override_value,
+        model_version=model_version,
+        signals_snapshot=signals_snapshot or {},
+    )
+    session.add(feedback)
+    await session.flush()
+    await audit.log(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        entity="note",
+        entity_id=node_id,
+        action=f"garden_apply:{suggestion_type}:{action}",
+    )
+    return feedback
+
+
+async def auto_promote_mature(
+    session: AsyncSession, *, org_id: uuid.UUID, actor_id: uuid.UUID
+) -> int:
+    """Batch value-axis auto-promotion ``growing → mature`` for a
+    workspace — the worker step behind ADR-0032's automatic idea evolution.
+
+    PageRank + degree are computed once; every growing, non-promoted note
+    is evaluated with the same ``min(pr_pct, deg_term)`` policy as
+    ``classify_node``. Notes clearing ``MATURE_AUTO`` (central AND curated)
+    are promoted via ``set_maturity`` (which audits) and get an append-only
+    ``classification_feedback`` row with ``action='auto'`` so the automatic
+    decision is transparent and reversible. Returns the count promoted. The
+    worker runs this as the workspace owner.
+    """
+    pageranks = await graph_svc.compute_pagerank(session, org_id=org_id)
+    if len(pageranks) <= 1:
+        return 0
+    growing = (
+        (
+            await session.execute(
+                select(Note).where(
+                    Note.org_id == org_id,
+                    Note.maturity == "growing",
+                    Note.promoted_at.is_(None),
+                    Note.deleted_at.is_(None),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if not growing:
+        return 0
+    link_rows = (
+        await session.execute(
+            select(NoteNoteLink.parent_note_id, NoteNoteLink.child_note_id).where(
+                NoteNoteLink.org_id == org_id
+            )
+        )
+    ).all()
+    degree: dict[uuid.UUID, int] = defaultdict(int)
+    for parent_id, child_id in link_rows:
+        degree[parent_id] += 1
+        degree[child_id] += 1
+
+    promoted = 0
+    for note in growing:
+        pr_pct = _pr_percentile(pageranks, note.id)
+        deg_term = min(1.0, degree.get(note.id, 0) / DEG_SATURATION)
+        conf = min(pr_pct, deg_term)
+        if conf < MATURE_AUTO:
+            continue
+        await note_links.set_maturity(
+            session, org_id=org_id, actor_id=actor_id, note_id=note.id, maturity="mature"
+        )
+        session.add(
+            ClassificationFeedback(
+                org_id=org_id,
+                user_id=actor_id,
+                node_id=note.id,
+                suggestion_type="maturity",
+                suggestion_value={"value": "mature"},
+                action="auto",
+                model_version=MODEL_VERSION,
+                signals_snapshot={
+                    "pr_pct": pr_pct,
+                    "manual_degree": float(degree.get(note.id, 0)),
+                    "conf_mature": conf,
+                },
+            )
+        )
+        promoted += 1
+    await session.flush()
+    return promoted
+
+
 __all__ = [
     "ClassifyResult",
     "ClusterSuggestion",
     "LinkCandidate",
     "MaturitySuggestion",
     "TagSuggestion",
+    "apply_suggestion",
+    "auto_promote_mature",
     "classify_node",
 ]

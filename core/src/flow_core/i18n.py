@@ -158,6 +158,8 @@ class MessageCode(enum.StrEnum):
     NOTE_TASK_LINK_ANCHOR_REQUIRED = "note.task_link.anchor_required"
     NOTE_TASK_LINK_PROMOTED_IMMUTABLE = "note.task_link.promoted_immutable"
     NOTE_PART_ANCHOR_REQUIRED = "note.part.anchor_required"
+    GARDEN_SUGGESTION_TYPE_INVALID = "garden.suggestion_type_invalid"
+    GARDEN_ACTION_INVALID = "garden.action_invalid"
     IDENTITY_HANDLE_REQUIRED = "identity.handle_required"
     IDENTITY_NOT_FOUND = "identity.not_found"
     DOMAIN_ERROR = "domain.error"
@@ -389,6 +391,10 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
         ),
         MessageCode.NOTE_LINK_KIND_INVALID: "Invalid note link kind '{kind}'. Allowed: {valid}.",
         MessageCode.NOTE_LINK_SELF: "A note cannot be linked to itself.",
+        MessageCode.GARDEN_SUGGESTION_TYPE_INVALID: (
+            "Invalid suggestion type '{suggestion_type}'. Allowed: {valid}."
+        ),
+        MessageCode.GARDEN_ACTION_INVALID: "Invalid apply action '{action}'. Allowed: {valid}.",
         MessageCode.NOTE_TASK_LINK_KIND_INVALID: (
             "Invalid note-task link kind '{kind}'. Allowed: {valid}."
         ),

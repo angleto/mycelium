@@ -152,6 +152,13 @@ class Settings(BaseSettings):
     # FLOW_DISPATCH_LOOP_INTERVAL_SECONDS like the other worker knobs.
     dispatch_loop_interval_seconds: int = 60
 
+    # Garden auto-maturity (docs/adr/0032): the worker auto-promotes
+    # growing notes to ``mature`` when they clear the high-confidence tier
+    # (central AND curated). Reversible (label-only, audited + a feedback
+    # event). Per-workspace opt-out is a later knob; this global flag
+    # disables it outright. FLOW_GARDEN_AUTO_MATURE_ENABLED=false to turn off.
+    garden_auto_mature_enabled: bool = True
+
     # Reminders + notification-dispatch worker. One periodic tick scans
     # due reminders into pending Notifications (idempotent by
     # dedupe_key) and then dispatches all pending notifications through

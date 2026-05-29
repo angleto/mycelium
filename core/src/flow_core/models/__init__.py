@@ -37,6 +37,7 @@ from flow_core.models.calendar import (
     UserCalendar,
     WorkingCalendar,
 )
+from flow_core.models.classification_feedback import ClassificationFeedback
 from flow_core.models.client_profile import ClientProfile
 from flow_core.models.comment import Comment
 from flow_core.models.dependency import DependencyType, TaskDependency
@@ -154,6 +155,7 @@ __all__ = [
     "BuyerVerdict",
     "CalendarHoliday",
     "CalendarSubscription",
+    "ClassificationFeedback",
     "ClientProfile",
     "Comment",
     "CommittenteVerdict",

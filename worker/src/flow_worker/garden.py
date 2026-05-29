@@ -29,7 +29,7 @@ from flow_core.config import get_settings
 from flow_core.db import admin_session, tenant_session
 from flow_core.models.membership import Membership, Role
 from flow_core.models.organization import Organization
-from flow_core.services import note_links
+from flow_core.services import garden_classify, note_links
 
 _log = logging.getLogger("flow.worker.garden")
 
@@ -77,14 +77,24 @@ async def run_once() -> int:
                 counters = await note_links.tick_maturity_transitions(
                     s, org_id=org_id, actor_id=owner
                 )
-            n = sum(counters.values())
+                # Value-axis auto-promotion growing -> mature (ADR-0032).
+                # Reversible (label-only, audited + feedback event); the
+                # global flag disables it outright.
+                auto_matured = 0
+                if get_settings().garden_auto_mature_enabled:
+                    auto_matured = await garden_classify.auto_promote_mature(
+                        s, org_id=org_id, actor_id=owner
+                    )
+            n = sum(counters.values()) + auto_matured
             if n > 0:
                 _log.info(
-                    "garden tick org=%s seed_to_growing=%d to_dormant=%d dormant_to_growing=%d",
+                    "garden tick org=%s seed_to_growing=%d to_dormant=%d "
+                    "dormant_to_growing=%d auto_matured=%d",
                     org_id,
                     counters["seed_to_growing"],
                     counters["to_dormant"],
                     counters["dormant_to_growing"],
+                    auto_matured,
                 )
                 total += n
         except Exception:
