@@ -28,10 +28,17 @@ Safety:
   the canonical ``note_parts.update_part`` path (bumps version, records
   the note revision + audit entry).
 
-Enumerates every workspace with the no-tenant admin session, then acts
-inside each workspace's tenant session as its earliest owner, so all
-writes satisfy RLS (ADR-0015) without bypassing it -- the same
-cross-tenant pattern as ``migrate_attachments``.
+Cross-tenant enumeration (managed-Postgres safe): ``admin_session``
+cannot be used to list workspaces here -- ``organizations`` and
+``memberships`` are FORCE-RLS keyed on ``app.current_org`` /
+``app.current_user``, and on managed Postgres nothing (not even a
+SECURITY DEFINER body) sees org-scoped rows without those GUCs set (see
+``delete_organization`` in 0001). The ``users`` table is deliberately
+NOT org-scoped (login resolves the email before any tenant context), so
+we enumerate users and ask the SECURITY DEFINER ``list_user_organizations``
+(migration 0014) -- the primitive the in-app workspace switcher uses --
+for each user's orgs, then act inside each workspace's own tenant
+session so reads + writes satisfy RLS (ADR-0015) without bypassing it.
 
 Run (backend image, same DB URL as the app):
 
@@ -49,14 +56,13 @@ import sys
 import uuid
 from re import Match
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from flow_core.db import admin_session, tenant_session
+from flow_core.db import get_sessionmaker, tenant_session
 from flow_core.errors import DomainError
-from flow_core.models.membership import Membership, Role
 from flow_core.models.note import Note
-from flow_core.models.organization import Organization
+from flow_core.models.user import User
 from flow_core.services import lookup as lookup_svc
 from flow_core.services import note_parts as parts_svc
 
@@ -162,30 +168,35 @@ async def _resolves(session: AsyncSession, token: str, cache: dict[str, bool]) -
     return cache[token]
 
 
-async def _all_org_ids() -> list[uuid.UUID]:
-    async with admin_session() as s:
-        orgs = (await s.execute(select(Organization).order_by(Organization.id))).scalars().all()
-    return [o.id for o in sorted(orgs, key=lambda o: str(o.id))]
+async def _orgs_with_actor() -> dict[uuid.UUID, uuid.UUID]:
+    """Map every workspace to a user_id to act as (an owner when known).
 
-
-async def _owner_of(org_id: uuid.UUID) -> uuid.UUID | None:
-    """The earliest owner of the workspace, used as the actor for the
-    tenant session so the writes satisfy RLS. ``None`` -> skip."""
-    async with admin_session() as s:
-        rows = (
-            (
-                await s.execute(
-                    select(Membership)
-                    .where(Membership.org_id == org_id, Membership.role == Role.owner)
-                    .order_by(Membership.created_at, Membership.user_id)
-                )
-            )
-            .scalars()
-            .all()
-        )
-    if not rows:
-        return None
-    return sorted(rows, key=lambda m: (m.created_at, str(m.user_id)))[0].user_id
+    Enumerated via the non-org-scoped ``users`` table + the SECURITY
+    DEFINER ``list_user_organizations`` function, the managed-Postgres
+    safe path (see module docstring). Owners win as the actor so the
+    tenant-session writes are attributed to the workspace owner."""
+    sm = get_sessionmaker()
+    async with sm() as s:
+        async with s.begin():
+            user_ids = (await s.execute(select(User.id))).scalars().all()
+    org_actor: dict[uuid.UUID, uuid.UUID] = {}
+    org_has_owner: set[uuid.UUID] = set()
+    async with sm() as s:
+        async with s.begin():
+            for uid in user_ids:
+                rows = (
+                    await s.execute(
+                        text("SELECT org_id, role FROM list_user_organizations(:u)"),
+                        {"u": str(uid)},
+                    )
+                ).all()
+                for org_id, role in rows:
+                    if role == "owner":
+                        org_actor[org_id] = uid
+                        org_has_owner.add(org_id)
+                    elif org_id not in org_has_owner and org_id not in org_actor:
+                        org_actor[org_id] = uid
+    return org_actor
 
 
 async def _normalize_org(org_id: uuid.UUID, actor_id: uuid.UUID, *, apply: bool) -> tuple[int, int]:
@@ -240,12 +251,10 @@ async def normalize_note_uuids(*, apply: bool) -> tuple[int, int]:
     ``(parts_changed, refs_wrapped)``."""
     parts_total = 0
     refs_total = 0
-    for org_id in await _all_org_ids():
-        owner = await _owner_of(org_id)
-        if owner is None:
-            logger.info("org %s has no owner; skipped", org_id)
-            continue
-        parts, refs = await _normalize_org(org_id, owner, apply=apply)
+    org_actor = await _orgs_with_actor()
+    logger.info("enumerated %d workspace(s)", len(org_actor))
+    for org_id, actor_id in org_actor.items():
+        parts, refs = await _normalize_org(org_id, actor_id, apply=apply)
         parts_total += parts
         refs_total += refs
     logger.info(
