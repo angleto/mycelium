@@ -4028,3 +4028,132 @@ button.btn--danger:hover {
   justify-content: flex-end;
   margin-top: 0.5rem;
 }
+
+/* --- Inline annotations (comments + suggestions) ------------------- */
+.anno-panel {
+  margin-top: 0.75rem;
+  border-top: 1px solid var(--border, #ddd);
+  padding-top: 0.5rem;
+  font-size: 0.9rem;
+}
+.anno-panel__head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.4rem;
+}
+.anno-panel__spacer {
+  flex: 1;
+}
+.anno-panel__filter {
+  font-size: 0.8rem;
+  opacity: 0.8;
+}
+.anno-panel__list,
+.anno__replies {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.anno__replies {
+  margin-top: 0.4rem;
+  padding-left: 1rem;
+  border-left: 2px solid var(--border, #eee);
+}
+.anno {
+  border: 1px solid var(--border, #e3e3e3);
+  border-radius: 6px;
+  padding: 0.4rem 0.5rem;
+  background: var(--surface, #fafafa);
+}
+.anno--suggestion {
+  border-left: 3px solid #d08700;
+}
+.anno--resolved,
+.anno--accepted,
+.anno--rejected {
+  opacity: 0.6;
+}
+.anno__head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.78rem;
+}
+.anno__author {
+  font-family: var(--mono, monospace);
+  opacity: 0.75;
+}
+.anno__status {
+  text-transform: uppercase;
+  font-size: 0.68rem;
+  letter-spacing: 0.03em;
+  padding: 0 0.3rem;
+  border-radius: 3px;
+  background: var(--chip-bg, #eee);
+}
+.anno__status--open {
+  background: #e6f0ff;
+}
+.anno__status--accepted {
+  background: #e3f7e3;
+}
+.anno__status--rejected {
+  background: #fde8e8;
+}
+.anno__quote {
+  font-style: italic;
+  opacity: 0.7;
+}
+.anno__diff {
+  margin: 0.25rem 0;
+}
+.anno-del {
+  color: #b00020;
+  text-decoration: line-through;
+}
+.anno-ins {
+  color: #176f2c;
+  text-decoration: none;
+  background: #e3f7e3;
+}
+.anno__body {
+  margin: 0.25rem 0;
+  white-space: pre-wrap;
+}
+.anno__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin-top: 0.3rem;
+}
+.anno__reply-box,
+.anno__edit,
+.anno-panel__composer,
+.anno-panel__suggest {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin-top: 0.4rem;
+}
+.anno-panel__composer textarea,
+.anno-panel__suggest input,
+.anno-panel__composer input,
+.anno__reply-box textarea,
+.anno__edit textarea {
+  width: 100%;
+  font: inherit;
+  padding: 0.3rem;
+  border: 1px solid var(--border, #ccc);
+  border-radius: 4px;
+}
+.anno-panel__composer-actions {
+  display: flex;
+  gap: 0.3rem;
+}
+.parts-editor__comments {
+  margin-top: 0.4rem;
+}

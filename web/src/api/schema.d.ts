@@ -1340,6 +1340,144 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/annotations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Annotations */
+        get: operations["list_annotations_annotations_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/annotations/comment": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create Comment */
+        post: operations["create_comment_annotations_comment_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/annotations/suggestion": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Propose Suggestion */
+        post: operations["propose_suggestion_annotations_suggestion_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/annotations/{annotation_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Annotation */
+        get: operations["get_annotation_annotations__annotation_id__get"];
+        put?: never;
+        post?: never;
+        /** Delete Annotation */
+        delete: operations["delete_annotation_annotations__annotation_id__delete"];
+        options?: never;
+        head?: never;
+        /** Edit Annotation */
+        patch: operations["edit_annotation_annotations__annotation_id__patch"];
+        trace?: never;
+    };
+    "/annotations/{annotation_id}/resolve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Resolve Annotation */
+        post: operations["resolve_annotation_annotations__annotation_id__resolve_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/annotations/{annotation_id}/reopen": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reopen Annotation */
+        post: operations["reopen_annotation_annotations__annotation_id__reopen_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/annotations/{annotation_id}/accept": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Accept Suggestion */
+        post: operations["accept_suggestion_annotations__annotation_id__accept_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/annotations/{annotation_id}/reject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reject Suggestion */
+        post: operations["reject_suggestion_annotations__annotation_id__reject_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/workflows": {
         parameters: {
             query?: never;
@@ -3237,6 +3375,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/notes/{note_id}/parts/{part_id}/replace": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Replace In Note Part
+         * @description Anchored find/replace inside ONE part without resending the body
+         *     (task 5662a07f): swap the literal ``find`` for ``replace``.
+         *     ``count=0`` replaces every occurrence; a positive ``count`` only the
+         *     first N. Concurrency-safe via ``expected_version``. A no-op (``find``
+         *     absent) returns ``replacements=0`` and leaves the version untouched.
+         */
+        post: operations["replace_in_note_part_notes__note_id__parts__part_id__replace_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/notes/{note_id}/parts/{part_id}": {
         parameters: {
             query?: never;
@@ -4803,6 +4965,97 @@ export interface components {
             /** Is Active */
             is_active?: boolean | null;
         };
+        /** AnnotationCommentIn */
+        AnnotationCommentIn: {
+            /**
+             * Doc Kind
+             * @enum {string}
+             */
+            doc_kind: "note_part" | "task_description";
+            /**
+             * Doc Id
+             * Format: uuid
+             */
+            doc_id: string;
+            /** Body */
+            body: string;
+            /** Anchor Quote */
+            anchor_quote?: string | null;
+            /** Anchor Prefix */
+            anchor_prefix?: string | null;
+            /** Anchor Suffix */
+            anchor_suffix?: string | null;
+            /** Parent Id */
+            parent_id?: string | null;
+        };
+        /** AnnotationEditIn */
+        AnnotationEditIn: {
+            /** Body */
+            body: string;
+            /** Expected Version */
+            expected_version: number;
+        };
+        /**
+         * AnnotationOut
+         * @description An inline comment or suggestion on a markdown document. ``doc_kind``
+         *     + ``doc_id`` is the generic document handle (note_part | task
+         *     description); the inline rendering is web-only but the data is the
+         *     same on every surface.
+         */
+        AnnotationOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Doc Kind */
+            doc_kind: string;
+            /**
+             * Doc Id
+             * Format: uuid
+             */
+            doc_id: string;
+            /** Kind */
+            kind: string;
+            /** Body */
+            body: string;
+            /** Anchor Quote */
+            anchor_quote?: string | null;
+            /** Anchor Prefix */
+            anchor_prefix?: string | null;
+            /** Anchor Suffix */
+            anchor_suffix?: string | null;
+            /** Original Text */
+            original_text?: string | null;
+            /** Proposed Text */
+            proposed_text?: string | null;
+            /** Status */
+            status: string;
+            /** Parent Id */
+            parent_id?: string | null;
+            /** Author Identity Id */
+            author_identity_id?: string | null;
+            /** Resolved By Identity Id */
+            resolved_by_identity_id?: string | null;
+            /** Resolved At */
+            resolved_at?: string | null;
+            /** Edited At */
+            edited_at?: string | null;
+            /** Deleted At */
+            deleted_at?: string | null;
+            /** Version */
+            version: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
         /** AppendMessageIn */
         AppendMessageIn: {
             /** Content */
@@ -5227,25 +5480,6 @@ export interface components {
         CommentCreateIn: {
             /** Body */
             body: string;
-        };
-        /** CommentOut */
-        CommentOut: {
-            /**
-             * Id
-             * Format: uuid
-             */
-            id: string;
-            /**
-             * Task Id
-             * Format: uuid
-             */
-            task_id: string;
-            /** User Id */
-            user_id: string | null;
-            /** Body */
-            body: string;
-            /** Version */
-            version: number;
         };
         /**
          * ConnectorInfoOut
@@ -7310,6 +7544,30 @@ export interface components {
             part_ids: string[];
         };
         /**
+         * NotePartReplaceIn
+         * @description Body for POST /notes/{id}/parts/{pid}/replace (task 5662a07f):
+         *     anchored find/replace inside one part without resending the body.
+         *     ``count=0`` (default) replaces every occurrence of the literal
+         *     ``find``; a positive ``count`` only the first N. ``expected_version``
+         *     is the optimistic cursor. A no-op (``find`` absent) returns
+         *     ``replacements=0`` and does not bump the version.
+         */
+        NotePartReplaceIn: {
+            /** Find */
+            find: string;
+            /** Replace */
+            replace: string;
+            /** Expected Version */
+            expected_version: number;
+            /**
+             * Count
+             * @default 0
+             */
+            count?: number;
+            /** Operation Id */
+            operation_id?: string | null;
+        };
+        /**
          * NotePartUIStateIn
          * @description Body for PUT /notes/{id}/parts/{pid}/ui-state. User-scoped,
          *     last-write-wins (no version).
@@ -7846,6 +8104,23 @@ export interface components {
             offset_minutes: number;
         };
         /**
+         * ReplaceOut
+         * @description Response for the note-part replace endpoint. ``replacements`` is
+         *     the number of occurrences swapped (0 on a no-op, in which case the
+         *     version is unchanged).
+         */
+        ReplaceOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Version */
+            version: number;
+            /** Replacements */
+            replacements: number;
+        };
+        /**
          * ReportGroup
          * @enum {string}
          */
@@ -8213,6 +8488,32 @@ export interface components {
             kind: components["schemas"]["StorageKind"];
             /** Credits Per Gb Month */
             credits_per_gb_month: number | string;
+        };
+        /** SuggestionIn */
+        SuggestionIn: {
+            /**
+             * Doc Kind
+             * @enum {string}
+             */
+            doc_kind: "note_part" | "task_description";
+            /**
+             * Doc Id
+             * Format: uuid
+             */
+            doc_id: string;
+            /** Original Text */
+            original_text: string;
+            /** Proposed Text */
+            proposed_text: string;
+            /**
+             * Rationale
+             * @default
+             */
+            rationale?: string;
+            /** Anchor Prefix */
+            anchor_prefix?: string | null;
+            /** Anchor Suffix */
+            anchor_suffix?: string | null;
         };
         /** SyncResultOut */
         SyncResultOut: {
@@ -11404,7 +11705,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["CommentOut"][];
+                    "application/json": components["schemas"]["AnnotationOut"][];
                 };
             };
             /** @description Validation Error */
@@ -11444,7 +11745,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["CommentOut"];
+                    "application/json": components["schemas"]["AnnotationOut"];
                 };
             };
             /** @description Validation Error */
@@ -12391,6 +12692,394 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["EditSessionSealOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_annotations_annotations_get: {
+        parameters: {
+            query: {
+                doc_kind: string;
+                doc_id: string;
+                include_resolved?: boolean;
+            };
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnnotationOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_comment_annotations_comment_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AnnotationCommentIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnnotationOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    propose_suggestion_annotations_suggestion_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SuggestionIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnnotationOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_annotation_annotations__annotation_id__get: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                annotation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnnotationOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_annotation_annotations__annotation_id__delete: {
+        parameters: {
+            query: {
+                expected_version: number;
+            };
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                annotation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VersionOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    edit_annotation_annotations__annotation_id__patch: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                annotation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AnnotationEditIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VersionOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    resolve_annotation_annotations__annotation_id__resolve_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                annotation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExpectedVersionIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VersionOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reopen_annotation_annotations__annotation_id__reopen_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                annotation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExpectedVersionIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VersionOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    accept_suggestion_annotations__annotation_id__accept_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                annotation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExpectedVersionIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VersionOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reject_suggestion_annotations__annotation_id__reject_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                annotation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExpectedVersionIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VersionOut"];
                 };
             };
             /** @description Validation Error */
@@ -17253,6 +17942,48 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AppendOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    replace_in_note_part_notes__note_id__parts__part_id__replace_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-Edit-Session-Id"?: string | null;
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                note_id: string;
+                part_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NotePartReplaceIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReplaceOut"];
                 };
             };
             /** @description Validation Error */

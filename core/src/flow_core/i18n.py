@@ -162,6 +162,14 @@ class MessageCode(enum.StrEnum):
     GARDEN_ACTION_INVALID = "garden.action_invalid"
     IDENTITY_HANDLE_REQUIRED = "identity.handle_required"
     IDENTITY_NOT_FOUND = "identity.not_found"
+    ANNOTATION_NOT_FOUND = "annotation.not_found"
+    ANNOTATION_FORBIDDEN = "annotation.forbidden"
+    ANNOTATION_DELETED = "annotation.deleted"
+    ANNOTATION_DOC_KIND_INVALID = "annotation.doc_kind_invalid"
+    ANNOTATION_NOT_SUGGESTION = "annotation.not_suggestion"
+    SUGGESTION_NOT_PENDING = "annotation.suggestion_not_pending"
+    SUGGESTION_STALE = "annotation.suggestion_stale"
+    SUGGESTION_TEXT_REQUIRED = "annotation.suggestion_text_required"
     DOMAIN_ERROR = "domain.error"
 
 
@@ -409,6 +417,21 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
             "Cannot create an identity for a {kind} without a handle."
         ),
         MessageCode.IDENTITY_NOT_FOUND: "Identity not found",
+        MessageCode.ANNOTATION_NOT_FOUND: "Annotation not found",
+        MessageCode.ANNOTATION_FORBIDDEN: (
+            "Only the author or an admin can edit or delete this annotation"
+        ),
+        MessageCode.ANNOTATION_DELETED: "This annotation has been deleted",
+        MessageCode.ANNOTATION_DOC_KIND_INVALID: (
+            "Invalid document kind: expected one of note_part, task_description."
+        ),
+        MessageCode.ANNOTATION_NOT_SUGGESTION: "This action applies only to a suggestion",
+        MessageCode.SUGGESTION_NOT_PENDING: "This suggestion is no longer pending",
+        MessageCode.SUGGESTION_STALE: (
+            "The text this suggestion targets has changed; "
+            "it can no longer be applied automatically."
+        ),
+        MessageCode.SUGGESTION_TEXT_REQUIRED: ("A suggestion needs the original text it replaces."),
         MessageCode.DOMAIN_ERROR: "Domain error",
     },
 }

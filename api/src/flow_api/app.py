@@ -19,6 +19,7 @@ from flow_api.routers import (
     agent_runs,
     agent_tokens,
     ai_assistants,
+    annotations as annotations_router,
     attachments,
     auth,
     billing,
@@ -193,6 +194,7 @@ def create_app() -> FastAPI:
     app.include_router(workspace.router)
     app.include_router(tags.router)
     app.include_router(tasks.router)
+    app.include_router(annotations_router.router)
     app.include_router(workflows.router)
     app.include_router(dependencies.router)
     app.include_router(task_relations.router)

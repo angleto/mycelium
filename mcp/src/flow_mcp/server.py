@@ -54,6 +54,7 @@ from flow_core.models.workflow import WorkflowDefinition, WorkflowState, Workflo
 from flow_core.security import decode_token_async
 from flow_core.services import advisory as advisory_svc
 from flow_core.services import agent_runtime as agent_runtime_svc
+from flow_core.services import annotations as annotations_svc
 from flow_core.services import attachments as attachments_svc
 from flow_core.services import billing as billing_svc
 from flow_core.services import budgets as budgets_svc
@@ -611,16 +612,20 @@ async def list_tasks(
 
 @mcp.tool()
 async def add_comment(token: str, org_id: str, task_id: str, body: str) -> dict[str, Any]:
-    """Add a comment to a task."""
+    """Add a comment to a task (a chronological work-diary entry on the
+    task description). Authorship is the calling identity -- an
+    ai_assistant when the call uses an agent token."""
     async with _tenant(token, org_id) as (s, org, user):
+        author_id, _tok = await _resolve_agent_context(s, org)
         c = await tasks.add_comment(
             s,
             org_id=org,
             actor_id=user,
             task_id=uuid.UUID(task_id),
             body=body,
+            author_identity_id=author_id,
         )
-        return {"id": str(c.id), "task_id": str(c.task_id)}
+        return {"id": str(c.id), "task_id": task_id}
 
 
 @mcp.tool()
@@ -1017,19 +1022,225 @@ async def unassign_task(token: str, org_id: str, task_id: str, user_id: str) -> 
 
 @mcp.tool()
 async def list_comments(token: str, org_id: str, task_id: str) -> list[dict[str, Any]]:
-    """List a task's comments, oldest first."""
+    """List a task's comments (its work diary), oldest first."""
     async with _tenant(token, org_id) as (s, org, _user):
         rows = await tasks.list_comments(s, org_id=org, task_id=uuid.UUID(task_id))
-        return [
-            {
-                "id": str(c.id),
-                "task_id": str(c.task_id),
-                "user_id": str(c.user_id) if c.user_id else None,
-                "body": c.body,
-                "created_at": c.created_at.isoformat(),
-            }
-            for c in rows
-        ]
+        return [_annotation_dict(c) for c in rows]
+
+
+def _annotation_dict(a: Any) -> dict[str, Any]:
+    """Serialise an annotation row for MCP. ``doc_id`` collapses the
+    typed FKs back to the generic markdown-document handle."""
+    doc_id = a.task_id if a.doc_kind == "task_description" else a.note_part_id
+    return {
+        "id": str(a.id),
+        "doc_kind": a.doc_kind,
+        "doc_id": str(doc_id),
+        "kind": a.kind,
+        "body": a.body,
+        "status": a.status,
+        "anchor_quote": a.anchor_quote,
+        "original_text": a.original_text,
+        "proposed_text": a.proposed_text,
+        "parent_id": str(a.parent_id) if a.parent_id else None,
+        "author_identity_id": (str(a.author_identity_id) if a.author_identity_id else None),
+        "version": a.version,
+        "created_at": a.created_at.isoformat(),
+    }
+
+
+@mcp.tool()
+async def add_annotation(
+    token: str,
+    org_id: str,
+    doc_kind: str,
+    doc_id: str,
+    body: str,
+    anchor_quote: str | None = None,
+    parent_id: str | None = None,
+) -> dict[str, Any]:
+    """Add an inline comment to a markdown document. ``doc_kind`` is
+    ``note_part`` (``doc_id`` = note-part id) or ``task_description``
+    (``doc_id`` = task id). ``anchor_quote`` pins it to a passage; omit
+    it for a whole-document / work-diary comment. ``parent_id`` makes it
+    a reply. Authorship is the calling identity (ai_assistant under an
+    agent token)."""
+    async with _tenant(token, org_id) as (s, org, user):
+        author_id, _tok = await _resolve_agent_context(s, org)
+        a = await annotations_svc.create_comment(
+            s,
+            org_id=org,
+            actor_id=user,
+            doc_kind=doc_kind,
+            doc_id=uuid.UUID(doc_id),
+            body=body,
+            anchor_quote=anchor_quote,
+            parent_id=uuid.UUID(parent_id) if parent_id else None,
+            author_identity_id=author_id,
+        )
+        return _annotation_dict(a)
+
+
+@mcp.tool()
+async def propose_suggestion(
+    token: str,
+    org_id: str,
+    doc_kind: str,
+    doc_id: str,
+    original_text: str,
+    proposed_text: str,
+    rationale: str = "",
+) -> dict[str, Any]:
+    """Propose an edit to a markdown document: replace ``original_text``
+    with ``proposed_text`` (with an optional rationale). Nothing changes
+    in the document until the suggestion is accepted. ``doc_kind`` is
+    ``note_part`` or ``task_description``. The natural output of an LLM
+    review pass."""
+    async with _tenant(token, org_id) as (s, org, user):
+        author_id, _tok = await _resolve_agent_context(s, org)
+        a = await annotations_svc.propose_suggestion(
+            s,
+            org_id=org,
+            actor_id=user,
+            doc_kind=doc_kind,
+            doc_id=uuid.UUID(doc_id),
+            original_text=original_text,
+            proposed_text=proposed_text,
+            rationale=rationale,
+            author_identity_id=author_id,
+        )
+        return _annotation_dict(a)
+
+
+@mcp.tool()
+async def list_annotations(
+    token: str,
+    org_id: str,
+    doc_kind: str,
+    doc_id: str,
+    include_resolved: bool = True,
+) -> list[dict[str, Any]]:
+    """List the annotations (comments + suggestions) on a markdown
+    document, oldest first."""
+    async with _tenant(token, org_id) as (s, org, _user):
+        rows = await annotations_svc.list_for_doc(
+            s,
+            org_id=org,
+            doc_kind=doc_kind,
+            doc_id=uuid.UUID(doc_id),
+            include_resolved=include_resolved,
+        )
+        return [_annotation_dict(a) for a in rows]
+
+
+@mcp.tool()
+async def edit_annotation(
+    token: str, org_id: str, annotation_id: str, body: str, expected_version: int
+) -> dict[str, Any]:
+    """Edit an annotation's body (author or admin only)."""
+    async with _tenant(token, org_id) as (s, org, user):
+        ident, _tok = await _resolve_agent_context(s, org)
+        v = await annotations_svc.edit(
+            s,
+            org_id=org,
+            actor_id=user,
+            annotation_id=uuid.UUID(annotation_id),
+            body=body,
+            expected_version=expected_version,
+            actor_identity_id=ident,
+        )
+        return {"id": annotation_id, "version": v}
+
+
+@mcp.tool()
+async def delete_annotation(
+    token: str, org_id: str, annotation_id: str, expected_version: int
+) -> dict[str, Any]:
+    """Soft-delete an annotation / withdraw a pending suggestion (author
+    or admin only)."""
+    async with _tenant(token, org_id) as (s, org, user):
+        ident, _tok = await _resolve_agent_context(s, org)
+        v = await annotations_svc.soft_delete(
+            s,
+            org_id=org,
+            actor_id=user,
+            annotation_id=uuid.UUID(annotation_id),
+            expected_version=expected_version,
+            actor_identity_id=ident,
+        )
+        return {"id": annotation_id, "version": v, "deleted": True}
+
+
+@mcp.tool()
+async def resolve_annotation(
+    token: str, org_id: str, annotation_id: str, expected_version: int
+) -> dict[str, Any]:
+    """Mark a comment thread resolved."""
+    async with _tenant(token, org_id) as (s, org, user):
+        by, _tok = await _resolve_agent_context(s, org)
+        v = await annotations_svc.resolve(
+            s,
+            org_id=org,
+            actor_id=user,
+            annotation_id=uuid.UUID(annotation_id),
+            expected_version=expected_version,
+            resolved_by_identity_id=by,
+        )
+        return {"id": annotation_id, "version": v, "status": "resolved"}
+
+
+@mcp.tool()
+async def reopen_annotation(
+    token: str, org_id: str, annotation_id: str, expected_version: int
+) -> dict[str, Any]:
+    """Reopen a resolved comment thread."""
+    async with _tenant(token, org_id) as (s, org, user):
+        v = await annotations_svc.reopen(
+            s,
+            org_id=org,
+            actor_id=user,
+            annotation_id=uuid.UUID(annotation_id),
+            expected_version=expected_version,
+        )
+        return {"id": annotation_id, "version": v, "status": "open"}
+
+
+@mcp.tool()
+async def accept_suggestion(
+    token: str, org_id: str, annotation_id: str, expected_version: int
+) -> dict[str, Any]:
+    """Accept a suggestion: splice the proposed text into the document
+    body and mark it accepted. Errors with a stale signal (and changes
+    nothing) if the target text has moved or gone."""
+    async with _tenant(token, org_id) as (s, org, user):
+        by, _tok = await _resolve_agent_context(s, org)
+        v = await annotations_svc.accept_suggestion(
+            s,
+            org_id=org,
+            actor_id=user,
+            annotation_id=uuid.UUID(annotation_id),
+            expected_version=expected_version,
+            resolved_by_identity_id=by,
+        )
+        return {"id": annotation_id, "version": v, "status": "accepted"}
+
+
+@mcp.tool()
+async def reject_suggestion(
+    token: str, org_id: str, annotation_id: str, expected_version: int
+) -> dict[str, Any]:
+    """Reject a pending suggestion; the document body is untouched."""
+    async with _tenant(token, org_id) as (s, org, user):
+        by, _tok = await _resolve_agent_context(s, org)
+        v = await annotations_svc.reject_suggestion(
+            s,
+            org_id=org,
+            actor_id=user,
+            annotation_id=uuid.UUID(annotation_id),
+            expected_version=expected_version,
+            resolved_by_identity_id=by,
+        )
+        return {"id": annotation_id, "version": v, "status": "rejected"}
 
 
 # --- task dependencies: remove + list (FR-3) ---
@@ -4424,13 +4635,18 @@ async def link_notes(
     child_note_id: str,
     kind: str,
 ) -> dict[str, Any]:
-    """Link two notes with a typed relation. Kinds: atom_of, references, replies_to, supersedes.
+    """Link two notes with a typed relation. The mycelial 4-verb model
+    (ADR-0040). Kinds: hypha_of, related, supersedes, contradicts.
 
-    ``atom_of`` = atomic child of an index parent; ``references`` =
-    citation backlink; ``replies_to`` = threaded elaboration;
-    ``supersedes`` = this note replaces the target. "Sibling" is not a
-    relation: link several notes as ``atom_of`` of one shared index note
-    to make them siblings (Zettelkasten)."""
+    ``hypha_of`` = this note (child) DERIVED / sprouted from the other
+    (parent = origin), directional; ``related`` = simply connected,
+    UNDIRECTED (the order of parent/child does not matter, the server
+    canonicalises it); ``supersedes`` = this note makes the target
+    obsolete; ``contradicts`` = this note refutes the target as false.
+    ``supersedes`` and ``contradicts`` decay the target toward
+    ``dormant`` (the killed idea rots into the deadwood -> humus cycle).
+    Importance is computed undirected, so a derived idea can outrank the
+    idea it grew from. Humus is a node facet, not a link kind."""
     async with _tenant(token, org_id) as (s, org, user):
         link = await note_links_svc.link_notes(
             s,
@@ -4630,8 +4846,10 @@ async def list_note_links(token: str, org_id: str, note_id: str) -> dict[str, An
     ``{outgoing, incoming}``: ``outgoing`` are links where this note is
     the parent, ``incoming`` are backlinks where it is the child. Each
     link is ``{link_id, parent_note_id, child_note_id, kind}`` with kind
-    in atom_of | references | replies_to | supersedes. Read counterpart
-    of ``link_notes`` / ``unlink_notes``."""
+    in hypha_of | related | supersedes | contradicts (ADR-0040). For the
+    undirected ``related`` kind, parent/child are the canonical order,
+    not a direction. Read counterpart of ``link_notes`` /
+    ``unlink_notes``."""
     async with _tenant(token, org_id) as (s, org, _user):
         outgoing, incoming = await note_links_svc.list_note_links(
             s, org_id=org, note_id=uuid.UUID(note_id)

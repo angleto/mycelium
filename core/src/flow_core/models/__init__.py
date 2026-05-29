@@ -11,6 +11,12 @@ from flow_core.models.adjudication import (
 )
 from flow_core.models.agent_run import AgentRun, AgentRunStatus
 from flow_core.models.agent_token import AgentToken
+from flow_core.models.annotation import (
+    ANNOTATION_DOC_KINDS,
+    ANNOTATION_KINDS,
+    ANNOTATION_STATUSES,
+    Annotation,
+)
 from flow_core.models.attachment import Attachment
 from flow_core.models.auth_tokens import (
     EmailVerificationToken,
@@ -39,7 +45,6 @@ from flow_core.models.calendar import (
 )
 from flow_core.models.classification_feedback import ClassificationFeedback
 from flow_core.models.client_profile import ClientProfile
-from flow_core.models.comment import Comment
 from flow_core.models.dependency import DependencyType, TaskDependency
 from flow_core.models.dispatch_request import (
     ACTIVE_DISPATCH_STATUSES,
@@ -134,6 +139,9 @@ from flow_core.models.workflow import (
 
 __all__ = [
     "ACTIVE_DISPATCH_STATUSES",
+    "ANNOTATION_DOC_KINDS",
+    "ANNOTATION_KINDS",
+    "ANNOTATION_STATUSES",
     "DEFAULT_AUTONOMOUS_DISPATCH",
     "NOTE_NOTE_LINK_KINDS",
     "NOTE_TASK_LINK_KINDS",
@@ -145,6 +153,7 @@ __all__ = [
     "AgentRun",
     "AgentRunStatus",
     "AgentToken",
+    "Annotation",
     "Attachment",
     "AutonomousDispatch",
     "Base",
@@ -157,7 +166,6 @@ __all__ = [
     "CalendarSubscription",
     "ClassificationFeedback",
     "ClientProfile",
-    "Comment",
     "CommittenteVerdict",
     "ConservationAdhesion",
     "ConservationStatus",

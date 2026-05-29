@@ -14,6 +14,7 @@ from typing import Annotated
 import typer
 
 from flow_cli import __version__
+from flow_cli.cmds import annotations as annotations_cmd
 from flow_cli.cmds import auth as auth_cmd
 from flow_cli.cmds import clients as clients_cmd
 from flow_cli.cmds import notes as notes_cmd
@@ -74,6 +75,7 @@ def root(
 app.add_typer(auth_cmd.app, name="auth")
 app.add_typer(tasks_cmd.app, name="task")
 app.add_typer(notes_cmd.app, name="note")
+app.add_typer(annotations_cmd.app, name="annotate")
 app.add_typer(timer_cmd.app, name="timer")
 app.add_typer(tags_cmd.app, name="tag")
 app.add_typer(clients_cmd.clients_app, name="client")

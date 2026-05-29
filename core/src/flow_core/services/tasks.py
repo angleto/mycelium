@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from flow_core.concurrency import optimistic_update
 from flow_core.errors import ConflictError, DomainError, NotFoundError
 from flow_core.i18n import MessageCode
-from flow_core.models.comment import Comment
+from flow_core.models.annotation import Annotation
 from flow_core.models.identity import Identity, IdentityKind
 from flow_core.models.membership import Role
 from flow_core.models.project_profile import ProjectProfile
@@ -27,6 +27,7 @@ from flow_core.models.task_collaborator import TaskCollaborator
 from flow_core.models.task_tag import TaskTag
 from flow_core.models.user import User
 from flow_core.models.workflow import WorkflowState
+from flow_core.services import annotations as _annotations
 from flow_core.services import audit, lifecycle, taxonomy
 from flow_core.services import entity_revisions as _revisions
 from flow_core.services import identities as identities_svc
@@ -1120,25 +1121,27 @@ async def add_comment(
     actor_id: uuid.UUID,
     task_id: uuid.UUID,
     body: str,
-) -> Comment:
-    await require_role(session, org_id, actor_id, Role.member)
-    await get_task(session, org_id=org_id, task_id=task_id)
-    comment = Comment(org_id=org_id, task_id=task_id, user_id=actor_id, body=body)
-    session.add(comment)
-    await session.flush()
-    await audit.log(
+    author_identity_id: uuid.UUID | None = None,
+) -> Annotation:
+    """A task comment is an annotation on the task description
+    (``doc_kind='task_description'``, no anchor); a task's chronological
+    general comments are its work diary. Delegates to the annotation
+    service so tasks and notes share one model. ``author_identity_id``
+    lets the MCP layer record an ai_assistant author."""
+    return await _annotations.create_comment(
         session,
         org_id=org_id,
         actor_id=actor_id,
-        entity="comment",
-        entity_id=comment.id,
-        action="create",
+        doc_kind="task_description",
+        doc_id=task_id,
+        body=body,
+        author_identity_id=author_identity_id,
     )
-    return comment
 
 
 async def list_comments(
     session: AsyncSession, *, org_id: uuid.UUID, task_id: uuid.UUID
-) -> list[Comment]:
-    stmt = select(Comment).where(Comment.task_id == task_id).order_by(Comment.created_at)
-    return list((await session.execute(stmt)).scalars().all())
+) -> list[Annotation]:
+    return await _annotations.list_for_doc(
+        session, org_id=org_id, doc_kind="task_description", doc_id=task_id
+    )

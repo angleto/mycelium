@@ -10,13 +10,14 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from sqlalchemy import select
 
 from flow_api.deps import TenantCtx, tenant_ctx
+from flow_api.routers.annotations import annotation_out
 from flow_api.routers.attachments import att_out, read_capped, upload_file_field
 from flow_api.schemas import (
+    AnnotationOut,
     AppendOut,
     AssigneeIn,
     AttachmentOut,
     CommentCreateIn,
-    CommentOut,
     EditSessionSealIn,
     EditSessionSealOut,
     ExpectedVersionIn,
@@ -49,7 +50,6 @@ from flow_api.schemas import (
     TaskStateIn,
     VersionOut,
 )
-from flow_core.models.comment import Comment
 from flow_core.models.identity import IdentityKind
 from flow_core.models.note import Note
 from flow_core.models.tag import Tag
@@ -150,16 +150,6 @@ def _out(
         duration_minutes=t.duration_minutes,
         recurrence=t.recurrence,
         checklist=[_checklist_item_out(it) for it in (checklist or [])],
-    )
-
-
-def _comment_out(c: Comment) -> CommentOut:
-    return CommentOut(
-        id=c.id,
-        task_id=c.task_id,
-        user_id=c.user_id,
-        body=c.body,
-        version=c.version,
     )
 
 
@@ -750,12 +740,12 @@ async def unassign(
     )
 
 
-@router.post("/{task_id}/comments", response_model=CommentOut)
+@router.post("/{task_id}/comments", response_model=AnnotationOut)
 async def add_comment(
     task_id: uuid.UUID,
     body: CommentCreateIn,
     ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
-) -> CommentOut:
+) -> AnnotationOut:
     c = await svc.add_comment(
         ctx.session,
         org_id=ctx.org_id,
@@ -763,15 +753,15 @@ async def add_comment(
         task_id=task_id,
         body=body.body,
     )
-    return _comment_out(c)
+    return annotation_out(c)
 
 
-@router.get("/{task_id}/comments", response_model=list[CommentOut])
+@router.get("/{task_id}/comments", response_model=list[AnnotationOut])
 async def list_comments(
     task_id: uuid.UUID, ctx: Annotated[TenantCtx, Depends(tenant_ctx)]
-) -> list[CommentOut]:
+) -> list[AnnotationOut]:
     rows = await svc.list_comments(ctx.session, org_id=ctx.org_id, task_id=task_id)
-    return [_comment_out(c) for c in rows]
+    return [annotation_out(c) for c in rows]
 
 
 # Participants on appointment-tasks (migration 0095/0096, ADR-0008

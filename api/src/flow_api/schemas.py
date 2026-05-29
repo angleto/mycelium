@@ -778,12 +778,57 @@ class CommentCreateIn(BaseModel):
     body: str = Field(min_length=1)
 
 
-class CommentOut(BaseModel):
+class AnnotationOut(BaseModel):
+    """An inline comment or suggestion on a markdown document. ``doc_kind``
+    + ``doc_id`` is the generic document handle (note_part | task
+    description); the inline rendering is web-only but the data is the
+    same on every surface."""
+
     id: uuid.UUID
-    task_id: uuid.UUID
-    user_id: uuid.UUID | None
+    doc_kind: str
+    doc_id: uuid.UUID
+    kind: str
     body: str
+    anchor_quote: str | None = None
+    anchor_prefix: str | None = None
+    anchor_suffix: str | None = None
+    original_text: str | None = None
+    proposed_text: str | None = None
+    status: str
+    parent_id: uuid.UUID | None = None
+    author_identity_id: uuid.UUID | None = None
+    resolved_by_identity_id: uuid.UUID | None = None
+    resolved_at: datetime.datetime | None = None
+    edited_at: datetime.datetime | None = None
+    deleted_at: datetime.datetime | None = None
     version: int
+    created_at: datetime.datetime
+    updated_at: datetime.datetime
+
+
+class AnnotationCommentIn(BaseModel):
+    doc_kind: Literal["note_part", "task_description"]
+    doc_id: uuid.UUID
+    body: str = Field(min_length=1)
+    anchor_quote: str | None = None
+    anchor_prefix: str | None = None
+    anchor_suffix: str | None = None
+    parent_id: uuid.UUID | None = None
+
+
+class SuggestionIn(BaseModel):
+    doc_kind: Literal["note_part", "task_description"]
+    doc_id: uuid.UUID
+    original_text: str = Field(min_length=1)
+    proposed_text: str
+    rationale: str = ""
+    anchor_prefix: str | None = None
+    anchor_suffix: str | None = None
+
+
+class AnnotationEditIn(BaseModel):
+    body: str = Field(min_length=1)
+    expected_version: int = Field(ge=1)
 
 
 class TagRefIn(BaseModel):
@@ -2024,7 +2069,10 @@ class NoteDeriveTaskIn(BaseModel):
 class NoteLinkIn(BaseModel):
     parent_note_id: uuid.UUID
     child_note_id: uuid.UUID
-    kind: str = Field(pattern="^(atom_of|references|replies_to|supersedes)$")
+    # The mycelial 4-verb model (ADR-0040). ``related`` is undirected:
+    # the service canonicalises (parent, child) regardless of the order
+    # the client sends.
+    kind: str = Field(pattern="^(hypha_of|related|supersedes|contradicts)$")
 
 
 class NoteLinkOut(BaseModel):

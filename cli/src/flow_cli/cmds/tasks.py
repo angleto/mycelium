@@ -401,9 +401,25 @@ def comment_list(task_id: str = typer.Argument(..., autocompletion=complete_task
         return
     emit_table(
         None,
-        ["id", "user", "body"],
-        [(short_id(r.get("id")), short_id(r.get("user_id")), r.get("body")) for r in rows],
+        ["id", "author", "body"],
+        [
+            (short_id(r.get("id")), short_id(r.get("author_identity_id")), r.get("body"))
+            for r in rows
+        ],
     )
+
+
+@comment_app.command("resolve")
+def comment_resolve(
+    annotation_id: str = typer.Argument(..., help="Comment id (full UUID)."),
+) -> None:
+    """Mark a task comment resolved."""
+    with client() as c:
+        version = int(get_json(c.get(f"/annotations/{annotation_id}"))["version"])
+        get_json(
+            c.post(f"/annotations/{annotation_id}/resolve", json={"expected_version": version})
+        )
+    success(f"resolved comment {short_id(annotation_id)}")
 
 
 @remind_app.command("add")

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { api, errMessage, workspaceHeader } from '../api/client'
+import { AnnotationsPanel } from '../components/AnnotationsPanel'
 import { RichEditor } from '../components/RichEditor'
 import { AssigneePicker } from '../components/AssigneePicker'
 import { OwnerPicker } from '../components/OwnerPicker'
@@ -939,6 +940,13 @@ export function TaskDetailRoute() {
               onChange={setDescription}
               imageUploadParent={{ kind: 'task', id: task.id }}
               filename={task.title}
+            />
+            <AnnotationsPanel
+              docKind="task_description"
+              docId={task.id}
+              title={t('annotations.diaryTitle', {
+                defaultValue: 'Work diary, comments & suggestions',
+              })}
             />
           </div>
           <div role="tabpanel" hidden={activeTab !== 'checklist'}>
