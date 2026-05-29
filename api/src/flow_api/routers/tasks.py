@@ -74,7 +74,9 @@ def _checklist_item_out(it: TaskChecklistItem) -> TaskChecklistItemOut:
     return TaskChecklistItemOut(
         id=it.id,
         task_id=it.task_id,
+        note_id=it.note_id,
         text=it.text,
+        body=it.body,
         done=it.done,
         position=it.position,
         done_at=it.done_at,
@@ -1131,6 +1133,7 @@ async def add_checklist_item(
         actor_id=ctx.user_id,
         task_id=task_id,
         text=body.text,
+        body=body.body,
         position=body.position,
     )
     return _checklist_item_out(item)
@@ -1154,6 +1157,7 @@ async def update_checklist_item(
         item_id=item_id,
         expected_version=body.expected_version,
         text=body.text,
+        body=body.body,
         done=body.done,
         position=body.position,
     )

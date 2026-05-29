@@ -1,9 +1,13 @@
-"""Checklist items attached to a task.
+"""Checklist items attached to a task OR a note (polymorphic owner).
 
-Lightweight ticked items inside a task (not sub-tasks): the SPA shows
-the markdown description and the checklist as two tabs in the task
-view. The model carries only what a "shopping-list" idiom needs (text,
-done, position) plus the standard org/timestamp/version footprint.
+Lightweight ticked items inside a task or a note (not sub-tasks): the
+SPA shows the markdown description and the checklist as two tabs in the
+task / note view, via one shared widget. The owner is exactly one of
+``task_id`` / ``note_id`` (XOR check). Beyond the "shopping-list" core
+(text, done, position) an item may carry an optional ``body``: an
+articulate markdown comment, edited / opened as markdown in the widget
+(task bae178d2). The legacy table name ``task_checklist_items`` is kept
+(it predates the note owner); it is no longer task-only.
 """
 
 from __future__ import annotations
@@ -38,15 +42,29 @@ class TaskChecklistItem(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixi
             "length(btrim(text)) > 0",
             name="ck_task_checklist_items_text_nonempty",
         ),
+        # Exactly one owner: task XOR note (migration 0020).
+        CheckConstraint(
+            "(task_id IS NULL) <> (note_id IS NULL)",
+            name="ck_task_checklist_items_owner_xor",
+        ),
     )
 
-    task_id: Mapped[uuid.UUID] = mapped_column(
+    # Polymorphic owner: exactly one of task_id / note_id is set.
+    task_id: Mapped[uuid.UUID | None] = mapped_column(
         PG_UUID(as_uuid=True),
         ForeignKey("tasks.id", ondelete="CASCADE"),
-        nullable=False,
+        nullable=True,
+        index=True,
+    )
+    note_id: Mapped[uuid.UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("notes.id", ondelete="CASCADE"),
+        nullable=True,
         index=True,
     )
     text: Mapped[str] = mapped_column(Text, nullable=False)
+    # Optional articulate markdown comment for the item (bae178d2).
+    body: Mapped[str | None] = mapped_column(Text, nullable=True)
     done: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     # Sparse integer position with gap-based ordering. Reorder is a
     # bulk re-write (small N: a task's checklist is bounded by UX, not

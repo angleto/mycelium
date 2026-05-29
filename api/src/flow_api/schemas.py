@@ -638,8 +638,14 @@ class TaskChecklistItemOut(BaseModel):
     updates; ``done_by``/``done_at`` are stamped on toggle."""
 
     id: uuid.UUID
-    task_id: uuid.UUID
+    # Polymorphic owner: exactly one of task_id / note_id is set (note
+    # checklists, task bae178d2).
+    task_id: uuid.UUID | None = None
+    note_id: uuid.UUID | None = None
     text: str
+    # Optional articulate markdown comment, opened / edited as markdown
+    # in the shared checklist widget.
+    body: str | None = None
     done: bool
     position: int
     done_at: datetime.datetime | None = None
@@ -652,6 +658,7 @@ class TaskChecklistItemOut(BaseModel):
 
 class TaskChecklistItemCreateIn(BaseModel):
     text: str = Field(min_length=1, max_length=2000)
+    body: str | None = None
     # When NULL, append at the end. Explicit positions are accepted so
     # an MCP/voice caller can insert at an arbitrary slot.
     position: int | None = None
@@ -660,6 +667,8 @@ class TaskChecklistItemCreateIn(BaseModel):
 class TaskChecklistItemPatchIn(BaseModel):
     expected_version: int = Field(ge=1)
     text: str | None = Field(default=None, min_length=1, max_length=2000)
+    # Empty string clears the comment; null leaves it unchanged.
+    body: str | None = None
     done: bool | None = None
     position: int | None = None
 

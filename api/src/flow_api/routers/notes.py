@@ -55,12 +55,18 @@ from flow_api.schemas import (
     SynthesizeIn,
     SynthOut,
     TagBrief,
+    TaskChecklistClearDoneOut,
+    TaskChecklistItemCreateIn,
+    TaskChecklistItemOut,
+    TaskChecklistItemPatchIn,
+    TaskChecklistReorderIn,
     VersionOut,
 )
 from flow_core.db import admin_session
 from flow_core.models.note import Note, NoteKind, NoteTurn
 from flow_core.models.project_profile import ProjectProfile
 from flow_core.models.tag import Tag, TagKind
+from flow_core.models.task_checklist_item import TaskChecklistItem
 from flow_core.services import agent_tokens as agent_tokens_svc
 from flow_core.services import attachments as att_svc
 from flow_core.services import decomposition as decomposition_svc
@@ -68,6 +74,7 @@ from flow_core.services import entity_revisions as rev_svc
 from flow_core.services import note_links as note_links_svc
 from flow_core.services import note_parts as parts_svc
 from flow_core.services import notes as svc
+from flow_core.services import task_checklist as checklist_svc
 
 router = APIRouter(prefix="/notes", tags=["notes"])
 
@@ -335,6 +342,121 @@ async def distill_note(
         model_id=res.model_id,
         created=res.created,
     )
+
+
+def _checklist_item_out(it: TaskChecklistItem) -> TaskChecklistItemOut:
+    return TaskChecklistItemOut(
+        id=it.id,
+        task_id=it.task_id,
+        note_id=it.note_id,
+        text=it.text,
+        body=it.body,
+        done=it.done,
+        position=it.position,
+        done_at=it.done_at,
+        done_by=it.done_by,
+        created_by=it.created_by,
+        created_at=it.created_at,
+        updated_at=it.updated_at,
+        version=it.version,
+    )
+
+
+@router.get("/{note_id}/checklist", response_model=list[TaskChecklistItemOut])
+async def list_note_checklist(
+    note_id: uuid.UUID,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+) -> list[TaskChecklistItemOut]:
+    """A note's checklist (task bae178d2): same shape and widget as the
+    task checklist. Items may carry an optional markdown ``body``."""
+    rows = await checklist_svc.list_items(ctx.session, org_id=ctx.org_id, note_id=note_id)
+    return [_checklist_item_out(r) for r in rows]
+
+
+@router.post(
+    "/{note_id}/checklist",
+    response_model=TaskChecklistItemOut,
+    status_code=status.HTTP_201_CREATED,
+)
+async def add_note_checklist_item(
+    note_id: uuid.UUID,
+    body: TaskChecklistItemCreateIn,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+) -> TaskChecklistItemOut:
+    item = await checklist_svc.add_item(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        note_id=note_id,
+        text=body.text,
+        body=body.body,
+        position=body.position,
+    )
+    return _checklist_item_out(item)
+
+
+@router.patch("/{note_id}/checklist/{item_id}", response_model=TaskChecklistItemOut)
+async def update_note_checklist_item(
+    note_id: uuid.UUID,
+    item_id: uuid.UUID,
+    body: TaskChecklistItemPatchIn,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+) -> TaskChecklistItemOut:
+    item = await checklist_svc.update_item(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        note_id=note_id,
+        item_id=item_id,
+        expected_version=body.expected_version,
+        text=body.text,
+        body=body.body,
+        done=body.done,
+        position=body.position,
+    )
+    return _checklist_item_out(item)
+
+
+@router.delete("/{note_id}/checklist/{item_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_note_checklist_item(
+    note_id: uuid.UUID,
+    item_id: uuid.UUID,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+) -> None:
+    await checklist_svc.delete_item(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        note_id=note_id,
+        item_id=item_id,
+    )
+
+
+@router.post("/{note_id}/checklist:clear_done", response_model=TaskChecklistClearDoneOut)
+async def clear_note_checklist_done(
+    note_id: uuid.UUID,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+) -> TaskChecklistClearDoneOut:
+    removed = await checklist_svc.clear_done(
+        ctx.session, org_id=ctx.org_id, actor_id=ctx.user_id, note_id=note_id
+    )
+    return TaskChecklistClearDoneOut(removed=removed)
+
+
+@router.post("/{note_id}/checklist:reorder", response_model=list[TaskChecklistItemOut])
+async def reorder_note_checklist(
+    note_id: uuid.UUID,
+    body: TaskChecklistReorderIn,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+) -> list[TaskChecklistItemOut]:
+    rows = await checklist_svc.reorder_items(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        note_id=note_id,
+        ordered_ids=body.ids,
+    )
+    return [_checklist_item_out(r) for r in rows]
 
 
 @router.post("/{note_id}/tags", status_code=204)
