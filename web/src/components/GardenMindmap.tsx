@@ -114,6 +114,11 @@ function PlantNode({ data }: NodeProps<Node<PlantNodeData>>) {
   // developed plant). Log-scale so the high-degree hubs don't dwarf
   // the rest. Cap at 4px so we never blow the layout.
   const borderWidth = Math.min(4, 1.2 + Math.log(1 + degree) * 0.7)
+  // Bloom halo: variety of the neighbourhood's generic tags
+  // (Shannon entropy 0..1). High variety = the idea sits at a
+  // cross-pollination point, so its halo glows wider. Below a
+  // small threshold we drop the halo entirely so quiet nodes look
+  // quiet.
   // Only genuinely cross-pollinating nodes (high neighbourhood tag
   // entropy) bloom, and the radius is capped tighter than before: an
   // always-on glow on every connected node merged into fog in dense
@@ -693,7 +698,10 @@ function GardenMindmapInner({ notes, workspaceId, onOpenNote }: GardenMindmapPro
   // Manual links carry their kind-derived weight (soft-OR of kind +
   // shared-tag count); tag-derived edges add a light spring so the
   // simulator still has something to organise around in workspaces
-  // that haven't drawn a single manual link yet.
+  // that haven't drawn a single manual link yet -- without them
+  // seedLayout's tag-clustered ring is the only signal and notes
+  // sharing a single client tag collapse into one pile. Tag-spring
+  // weight is capped (0.45) so a manual link always pulls harder.
   const weightedLinks = useMemo(() => {
     const out: { source: string; target: string; weight: number }[] = []
     const seen = new Set<string>()
@@ -1021,20 +1029,26 @@ function GardenMindmapInner({ notes, workspaceId, onOpenNote }: GardenMindmapPro
       .map((l) => {
         const kind = l.kind as LinkKind
         const color = LINK_COLOR[kind] ?? 'var(--moss)'
+        // Per-kind stroke vocabulary, modulated by edge weight v1
+        // (task 7e99c724): the base width is the kind's signature
+        // thickness; the extra millimeter comes from soft-OR(w_kind,
+        // w_tag) so a link reinforced by tag overlap reads as a
+        // stronger filament without changing the kind's identity
+        // (dashed remains dashed, solid remains solid).
         const shared = sharedGenericTagCount(
           noteById.get(l.parent_note_id),
           noteById.get(l.child_note_id),
         )
         const w = edgeWeightV1(l.kind, shared)
         const widthBoost = 0.6 * Math.pow(w, 0.7)
-        // Per-kind stroke vocabulary, modulated by edge weight v1.
-        // ``references`` is lifted off the lowest-contrast grey so the
-        // most common kind still reads on the moss-tinted canvas.
         const style: CSSProperties =
           kind === 'atom_of'
             ? { stroke: color, strokeWidth: 2.2 + widthBoost }
             : kind === 'references'
               ? {
+                  // references is the most common kind; lift it off
+                  // the lowest-contrast grey so it still reads on the
+                  // moss-tinted canvas gradient.
                   stroke: 'color-mix(in srgb, var(--moss) 55%, var(--muted))',
                   strokeWidth: 1.5 + widthBoost,
                   strokeDasharray: '3 3',
