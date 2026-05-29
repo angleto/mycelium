@@ -708,6 +708,10 @@ export const en = {
       tagEdges: 'Show shared-tag links',
       showCentrality: 'Show centrality',
       showEdgeWeights: 'Show edge weights',
+      replant: 'Re-plant',
+      replantHint: 'Recompute the layout and reframe the view',
+      replantConfirm:
+        'Recompute the layout from scratch? This discards the positions you dragged in this view.',
       centralityLegend: 'PageRank',
       walkMode: 'Walk mode',
       walkFocused: 'Focused (PPR)',

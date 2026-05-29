@@ -85,6 +85,10 @@ interface PlantNodeData extends Record<string, unknown> {
   centrality: number | null
   walkStep: number | null
   isWalkSeed: boolean
+  // Focus+context overlay (render-only): set by the displayNodes
+  // memo when a node is hovered/pinned. ``focus`` = the node itself,
+  // ``neighbor`` = directly linked, ``faded`` = out of focus.
+  focusState?: 'focus' | 'neighbor' | 'faded' | null
   onOpen: (id: string) => void
 }
 
@@ -100,6 +104,7 @@ function PlantNode({ data }: NodeProps<Node<PlantNodeData>>) {
     centrality,
     walkStep,
     isWalkSeed,
+    focusState,
     onOpen,
   } = data
   const maturity = note.maturity ?? 'seed'
@@ -109,13 +114,12 @@ function PlantNode({ data }: NodeProps<Node<PlantNodeData>>) {
   // developed plant). Log-scale so the high-degree hubs don't dwarf
   // the rest. Cap at 4px so we never blow the layout.
   const borderWidth = Math.min(4, 1.2 + Math.log(1 + degree) * 0.7)
-  // Bloom halo: variety of the neighbourhood's generic tags
-  // (Shannon entropy 0..1). High variety = the idea sits at a
-  // cross-pollination point, so its halo glows wider. Below a
-  // small threshold we drop the halo entirely so quiet nodes look
-  // quiet.
-  const haloRadius = entropy > 0.05 ? 6 + entropy * 18 : 0
-  const haloMix = Math.round(25 + entropy * 55)
+  // Only genuinely cross-pollinating nodes (high neighbourhood tag
+  // entropy) bloom, and the radius is capped tighter than before: an
+  // always-on glow on every connected node merged into fog in dense
+  // clusters and read as extra crowding.
+  const haloRadius = entropy > 0.35 ? 4 + entropy * 10 : 0
+  const haloMix = Math.round(20 + entropy * 35)
   const style: CSSProperties = {
     borderWidth,
   }
@@ -129,6 +133,9 @@ function PlantNode({ data }: NodeProps<Node<PlantNodeData>>) {
         (dimmed ? ' mm-node--dimmed' : '') +
         (highlighted ? ' mm-node--highlighted' : '') +
         (note.promoted_at ? ' mm-node--promoted' : '') +
+        (focusState === 'faded' ? ' mm-node--faded' : '') +
+        (focusState === 'neighbor' ? ' mm-node--neighbor' : '') +
+        (focusState === 'focus' ? ' mm-node--focus' : '') +
         (walkStep != null ? ' mm-node--walk' : '') +
         (isWalkSeed ? ' mm-node--walk-seed' : '')
       }
@@ -289,7 +296,11 @@ function forceLayout(
   const x = new Float64Array(N)
   const y = new Float64Array(N)
   for (let i = 0; i < N; i++) {
-    const r = 60 + 22 * Math.sqrt(i)
+    // Wider than before (was 60 + 22*sqrt): the chips are ~180px
+    // boxes, so a tighter spiral starts the sim buried in overlap and
+    // it spends its whole alpha budget digging out. ~one chip-width
+    // of initial breathing room lets it converge clean.
+    const r = 90 + 46 * Math.sqrt(i)
     const a = i * phi
     x[i] = Math.cos(a) * r
     y[i] = Math.sin(a) * r
@@ -303,10 +314,12 @@ function forceLayout(
     const ib = idx.get(l.target)
     if (ia === undefined || ib === undefined) continue
     const w = Math.max(0, Math.min(1, l.weight))
-    // L0 = 80 / (0.3 + 0.7w): w=1 -> ~80, w=0 -> ~267
-    edges.push({ a: ia, b: ib, rest: 80 / (0.3 + 0.7 * w), k: 0.06 + 0.12 * w })
+    // L0 = 150 / (0.35 + 0.65w): w=1 -> ~150 (one chip width, so even
+    // a heavy edge settles with the two chips clear of each other),
+    // w=0 -> ~430. Was 80/(0.3+0.7w) which let linked chips overlap.
+    edges.push({ a: ia, b: ib, rest: 150 / (0.35 + 0.65 * w), k: 0.06 + 0.12 * w })
   }
-  const REPULSION_K = 1400
+  const REPULSION_K = 2600
   const GRAVITY_BETA = 0.018
   const DAMPING = 0.82
   const MAX_STEP = 18
@@ -353,8 +366,11 @@ function forceLayout(
     for (let i = 0; i < N; i++) {
       const note = sorted[i]
       const c = (degreeByNode.get(note.id) ?? 0) / maxDegree
-      dx[i] -= GRAVITY_BETA * (1 + 4 * c) * x[i]
-      dy[i] -= GRAVITY_BETA * (1 + 4 * c) * y[i]
+      // (1 + 1.5c), softened from (1 + 4c): hubs already gather spring
+      // pull from their many edges, so yanking them hardest into the
+      // exact centre just stacked them on top of each other there.
+      dx[i] -= GRAVITY_BETA * (1 + 1.5 * c) * x[i]
+      dy[i] -= GRAVITY_BETA * (1 + 1.5 * c) * y[i]
     }
     // Integrate with cooling alpha + per-tick step clamp so a single
     // huge repulsion impulse can't catapult a node off-canvas.
@@ -371,6 +387,43 @@ function forceLayout(
     }
     alpha *= 0.985
     if (alpha < 0.05) break
+  }
+  // Overlap relaxation. The force field above treats every node as a
+  // point, but a chip is a wide-short box, so its equilibrium spacing
+  // is happily smaller than the node itself and chips end up sitting
+  // on top of each other -- the literal "crowded chips". Treat each
+  // node as an axis-aligned box (half-extents incl. margin) and push
+  // overlapping pairs apart along their axis of least penetration.
+  // Fully deterministic (id-sorted order + a fixed i<j tie-break),
+  // one-shot, O(N^2 * passes) which is sub-ms at a few hundred nodes.
+  // forceLayout's output is still overridden by stored drag positions
+  // at the call site, so user placement keeps winning.
+  const HALF_W = 96
+  const HALF_H = 28
+  for (let pass = 0; pass < 16; pass++) {
+    let moved = false
+    for (let i = 0; i < N; i++) {
+      for (let j = i + 1; j < N; j++) {
+        const rx = x[i] - x[j]
+        const ry = y[i] - y[j]
+        const ox = 2 * HALF_W - Math.abs(rx)
+        const oy = 2 * HALF_H - Math.abs(ry)
+        if (ox <= 0 || oy <= 0) continue
+        if (ox < oy) {
+          const push = ox / 2
+          const s = rx === 0 ? 1 : Math.sign(rx)
+          x[i] += s * push
+          x[j] -= s * push
+        } else {
+          const push = oy / 2
+          const s = ry === 0 ? 1 : Math.sign(ry)
+          y[i] += s * push
+          y[j] -= s * push
+        }
+        moved = true
+      }
+    }
+    if (!moved) break
   }
   const out: Record<string, { x: number; y: number }> = {}
   for (let i = 0; i < N; i++) out[sorted[i].id] = { x: x[i], y: y[i] }
@@ -484,7 +537,11 @@ export function GardenMindmap(props: GardenMindmapProps) {
 function GardenMindmapInner({ notes, workspaceId, onOpenNote }: GardenMindmapProps) {
   const { t } = useTranslation()
   const [workspaceLinks, setWorkspaceLinks] = useState<WorkspaceLink[]>([])
-  const [showTagEdges, setShowTagEdges] = useState(true)
+  // Off by default: the all-pairs shared-tag layer is the bulk of the
+  // hairball on first paint. The toggle keeps it one click away, and
+  // the layout still clusters by tag via the tag-springs above, so
+  // turning the visual layer off doesn't move any nodes.
+  const [showTagEdges, setShowTagEdges] = useState(false)
   const [showCentrality, setShowCentrality] = useState(false)
   const [showEdgeWeights, setShowEdgeWeights] = useState(false)
   const [centrality, setCentrality] = useState<Record<string, number>>({})
@@ -509,6 +566,18 @@ function GardenMindmapInner({ notes, workspaceId, onOpenNote }: GardenMindmapPro
   const [pendingConnect, setPendingConnect] = useState<Connection | null>(null)
   const [linkKind, setLinkKind] = useState<LinkKind>('references')
   const [err, setErr] = useState('')
+  // Focus+context: hovering a node sets a transient focus; clicking
+  // pins it (toggle) so it survives the mouse leaving. The effective
+  // focus (activeFocus) is derived further down, once noteIds exists,
+  // by validating the pin/hover against the live note set. ``lod`` is
+  // a coarse zoom bucket ('far' collapses chips to their glyph),
+  // flipped by onMove only on a threshold crossing. ``isDragging``
+  // gates the focus overlay so a hover during a drag doesn't re-map
+  // every node on each pointer tick.
+  const [hoverId, setHoverId] = useState<string | null>(null)
+  const [pinnedId, setPinnedId] = useState<string | null>(null)
+  const [lod, setLod] = useState<'near' | 'far'>('near')
+  const [isDragging, setIsDragging] = useState(false)
   const positionsRef = useRef<Record<string, { x: number; y: number }>>({})
   const rf = useReactFlow()
 
@@ -526,6 +595,14 @@ function GardenMindmapInner({ notes, workspaceId, onOpenNote }: GardenMindmapPro
     for (const n of notes) m.set(n.id, n)
     return m
   }, [notes])
+
+  // Effective focus, derived (not stored) so it self-heals: a pin or
+  // hover whose note has left the visible set (focus filter, delete)
+  // is ignored rather than greying out the whole canvas, and hover
+  // can take over immediately without the user clearing a dead pin.
+  const activeFocus =
+    (pinnedId && noteIds.has(pinnedId) ? pinnedId : null) ??
+    (hoverId && noteIds.has(hoverId) ? hoverId : null)
 
   const searchMatch = useCallback(
     (n: Note): boolean => {
@@ -616,10 +693,7 @@ function GardenMindmapInner({ notes, workspaceId, onOpenNote }: GardenMindmapPro
   // Manual links carry their kind-derived weight (soft-OR of kind +
   // shared-tag count); tag-derived edges add a light spring so the
   // simulator still has something to organise around in workspaces
-  // that haven't drawn a single manual link yet -- without them
-  // seedLayout's tag-clustered ring is the only signal and notes
-  // sharing a single client tag collapse into one pile. Tag-spring
-  // weight is capped (0.45) so a manual link always pulls harder.
+  // that haven't drawn a single manual link yet.
   const weightedLinks = useMemo(() => {
     const out: { source: string; target: string; weight: number }[] = []
     const seen = new Set<string>()
@@ -637,15 +711,36 @@ function GardenMindmapInner({ notes, workspaceId, onOpenNote }: GardenMindmapPro
       })
       seen.add(pairKey(l.parent_note_id, l.child_note_id))
     }
-    const tagPairs = buildTagEdges(notes, noteIds)
-    for (const e of tagPairs) {
-      const key = pairKey(e.source, e.target)
-      if (seen.has(key)) continue
-      // Soft-cap at 0.45: enough to organise the canvas, light enough
-      // that an authored ``references`` link still wins.
-      const w = Math.min(0.45, 0.18 + 0.12 * e.sharedTags.length)
-      out.push({ source: e.source, target: e.target, weight: w })
-      seen.add(key)
+    // Tag-springs give the simulator something to cluster around in
+    // workspaces with few manual links. A naive all-pairs spring per
+    // shared tag is O(k^2) and collapses a 20-note tag into one tight
+    // pile regardless of repulsion, so instead anchor each tagged
+    // note to its tag group's lowest-id member: a deterministic star
+    // (k-1 springs, not k(k-1)/2). Spatial clustering is preserved,
+    // the quadratic crush is gone. The VISUAL tag-edge layer (in the
+    // edges effect) is independent and unaffected by this.
+    const genericGroups = new Map<string, string[]>()
+    for (const n of notes) {
+      if (!noteIds.has(n.id)) continue
+      for (const tg of n.tags ?? []) {
+        if (tg.kind !== 'generic') continue
+        const arr = genericGroups.get(tg.id) ?? []
+        arr.push(n.id)
+        genericGroups.set(tg.id, arr)
+      }
+    }
+    for (const members of genericGroups.values()) {
+      if (members.length < 2) continue
+      const sortedMembers = [...members].sort((a, b) => a.localeCompare(b))
+      const anchor = sortedMembers[0]
+      for (let i = 1; i < sortedMembers.length; i++) {
+        const key = pairKey(anchor, sortedMembers[i])
+        if (seen.has(key)) continue
+        // Light, flat weight: enough to organise, light enough that an
+        // authored link always pulls harder.
+        out.push({ source: anchor, target: sortedMembers[i], weight: 0.35 })
+        seen.add(key)
+      }
     }
     return out
   }, [workspaceLinks, noteIds, noteById, notes])
@@ -799,6 +894,15 @@ function GardenMindmapInner({ notes, workspaceId, onOpenNote }: GardenMindmapPro
   const handleNodesChange = useCallback(
     (changes: NodeChange<Node<PlantNodeData>>[]) => {
       onNodesChange(changes)
+      // setIsDragging(true) is a no-op re-render once true (React bails
+      // on an unchanged value), so calling it per tick is cheap.
+      if (
+        changes.some(
+          (c) => c.type === 'position' && 'dragging' in c && c.dragging === true,
+        )
+      ) {
+        setIsDragging(true)
+      }
       const dragEnded = changes.some(
         (c) =>
           c.type === 'position' &&
@@ -806,6 +910,7 @@ function GardenMindmapInner({ notes, workspaceId, onOpenNote }: GardenMindmapPro
           c.dragging === false,
       )
       if (!dragEnded) return
+      setIsDragging(false)
       // Snapshot the freshest positions after the simulator and
       // user drag have all flushed. ``positionsRef`` is the
       // authoritative cache because the ``setNodes`` reducer
@@ -916,27 +1021,24 @@ function GardenMindmapInner({ notes, workspaceId, onOpenNote }: GardenMindmapPro
       .map((l) => {
         const kind = l.kind as LinkKind
         const color = LINK_COLOR[kind] ?? 'var(--moss)'
-        // Per-kind stroke vocabulary, modulated by edge weight v1
-        // (task 7e99c724): the base width is the kind's signature
-        // thickness; the extra millimeter comes from soft-OR(w_kind,
-        // w_tag) so a link reinforced by tag overlap reads as a
-        // stronger filament without changing the kind's identity
-        // (dashed remains dashed, solid remains solid).
         const shared = sharedGenericTagCount(
           noteById.get(l.parent_note_id),
           noteById.get(l.child_note_id),
         )
         const w = edgeWeightV1(l.kind, shared)
         const widthBoost = 0.6 * Math.pow(w, 0.7)
+        // Per-kind stroke vocabulary, modulated by edge weight v1.
+        // ``references`` is lifted off the lowest-contrast grey so the
+        // most common kind still reads on the moss-tinted canvas.
         const style: CSSProperties =
           kind === 'atom_of'
             ? { stroke: color, strokeWidth: 2.2 + widthBoost }
             : kind === 'references'
               ? {
-                  stroke: color,
-                  strokeWidth: 1.2 + widthBoost,
+                  stroke: 'color-mix(in srgb, var(--moss) 55%, var(--muted))',
+                  strokeWidth: 1.5 + widthBoost,
                   strokeDasharray: '3 3',
-                  opacity: 0.75,
+                  opacity: 0.85,
                 }
               : kind === 'replies_to'
                 ? {
@@ -950,47 +1052,77 @@ function GardenMindmapInner({ notes, workspaceId, onOpenNote }: GardenMindmapPro
             ? `${l.parent_note_id}::${l.child_note_id}`
             : `${l.child_note_id}::${l.parent_note_id}`
         const materialisedW = edgeWeightMap[pairKey]
-        const baseLabel = t(`garden.mindmap.linkKind.${l.kind}`)
-        const label = showEdgeWeights && materialisedW != null
-          ? `${baseLabel} · ${materialisedW.toFixed(2)}`
-          : baseLabel
+        // The kind name (and optional weight) used to be drawn on
+        // every edge, which blanketed the canvas in overlapping label
+        // rects. They now live in ``data`` and the focus overlay
+        // surfaces them only for edges touching the hovered/pinned
+        // node; the legend carries kind→colour at rest.
         return {
           id: `mm-link-${l.id}`,
           source: l.parent_note_id,
           target: l.child_note_id,
           type: 'default',
           animated: false,
-          label,
-          labelStyle: { fontSize: 10, fill: 'var(--text)' },
-          labelBgStyle: { fill: 'var(--surface)', fillOpacity: 0.85 },
           style,
           markerEnd:
             kind === 'supersedes'
               ? { type: MarkerType.ArrowClosed, color, width: 14, height: 14 }
               : undefined,
-          data: { kind: l.kind, linkId: l.id, isManual: true },
+          data: {
+            kind: l.kind,
+            linkId: l.id,
+            isManual: true,
+            kindLabel: t(`garden.mindmap.linkKind.${l.kind}`),
+            weightLabel: materialisedW != null ? materialisedW.toFixed(2) : null,
+          },
         }
       })
     const tagEdges: Edge[] = []
     if (showTagEdges) {
       const computed = buildTagEdges(notes, noteIds)
+      // Cap fan-out: a popular generic tag pairs O(k^2) notes, which
+      // is the bulk of the hairball. Keep only each node's top-K
+      // strongest shared-tag links (rank by overlap, deterministic
+      // tie-break by pair key), turning a clique into a sparse ring.
+      const TOP_K = 3
+      const pkey = (a: string, b: string) => (a < b ? `${a}::${b}` : `${b}::${a}`)
+      const byNode = new Map<string, { key: string; strength: number }[]>()
       for (const e of computed) {
-        const w = Math.min(0.6, 0.25 + 0.1 * e.sharedTags.length)
+        const key = pkey(e.source, e.target)
+        const strength = e.sharedTags.length
+        for (const nid of [e.source, e.target]) {
+          const arr = byNode.get(nid) ?? []
+          arr.push({ key, strength })
+          byNode.set(nid, arr)
+        }
+      }
+      const keep = new Set<string>()
+      for (const arr of byNode.values()) {
+        arr.sort((a, b) => b.strength - a.strength || a.key.localeCompare(b.key))
+        for (let i = 0; i < Math.min(TOP_K, arr.length); i++) keep.add(arr[i].key)
+      }
+      for (const e of computed) {
+        if (!keep.has(pkey(e.source, e.target))) continue
+        const n = e.sharedTags.length
         tagEdges.push({
           id: `mm-tag-${e.source}-${e.target}`,
           source: e.source,
           target: e.target,
           type: 'straight',
-          label: e.sharedTags.map((tg) => tg.name).join(' · '),
-          labelStyle: { fontSize: 9, fill: 'var(--muted)' },
-          labelBgStyle: { fill: 'var(--surface)', fillOpacity: 0.7 },
+          // No label at rest (the focus overlay surfaces the tag
+          // names on hover). One neutral hue so the constellation
+          // never competes chromatically with the four kind colours,
+          // and a low opacity so it reads as a backdrop, not a mesh.
           style: {
-            stroke: e.sharedTags[0]?.color || 'var(--muted)',
-            strokeWidth: 1,
+            stroke: 'color-mix(in srgb, var(--moss) 35%, transparent)',
+            strokeWidth: 0.75,
             strokeDasharray: '4 3',
-            opacity: w,
+            opacity: Math.min(0.22, 0.1 + 0.04 * n),
           },
-          data: { isManual: false },
+          data: {
+            isManual: false,
+            tagLabel: e.sharedTags.map((tg) => tg.name).join(' · '),
+          },
           selectable: false,
         })
       }
@@ -1038,7 +1170,6 @@ function GardenMindmapInner({ notes, workspaceId, onOpenNote }: GardenMindmapPro
     notes,
     noteIds,
     showTagEdges,
-    showEdgeWeights,
     edgeWeightMap,
     walkSeq,
     walkResultMode,
@@ -1046,6 +1177,114 @@ function GardenMindmapInner({ notes, workspaceId, onOpenNote }: GardenMindmapPro
     setEdges,
     noteById,
   ])
+
+  // Adjacency + edge-incidence index derived from the final edge set
+  // (manual + any shown tag edges; the walk-trail overlay is excluded
+  // since it duplicates real edges and free_wander can jump). Lets
+  // hover/pin focus look up a node's neighbours and incident edges in
+  // O(deg), never rescanning links on every mouse move.
+  const graphIndex = useMemo(() => {
+    const neighbors = new Map<string, Set<string>>()
+    const incident = new Map<string, Set<string>>()
+    const touch = (a: string, b: string, edgeId: string) => {
+      let ns = neighbors.get(a)
+      if (!ns) neighbors.set(a, (ns = new Set()))
+      ns.add(b)
+      let es = incident.get(a)
+      if (!es) incident.set(a, (es = new Set()))
+      es.add(edgeId)
+    }
+    for (const e of edges) {
+      if (!e.source || !e.target) continue
+      if ((e.data as { isWalk?: boolean } | undefined)?.isWalk) continue
+      touch(e.source, e.target, e.id)
+      touch(e.target, e.source, e.id)
+    }
+    return { neighbors, incident }
+  }, [edges])
+
+  // Focus+context overlay. When a node is hovered (transient) or
+  // pinned (click to toggle), bring its incident edges + neighbours
+  // forward and recede the rest. Render-only: it never rebuilds the
+  // layout or the base edge set. Skipped (base arrays returned as-is)
+  // when there is no focus or while a drag is in progress (a hover
+  // during a drag would otherwise re-map all N nodes per tick); a
+  // focus whose node has left the visible set is already neutralised
+  // upstream by activeFocus's validity check.
+  const displayNodes = useMemo(() => {
+    if (!activeFocus || isDragging) return nodes
+    const nbrs = graphIndex.neighbors.get(activeFocus)
+    return nodes.map((n) => {
+      // Walk-trail nodes and search hits stay lit even outside the
+      // focused node's 1-hop neighbourhood: fading them would blank
+      // the walk (a focused/PPR walk has no edges, only lit nodes)
+      // and hide the note the user just searched for.
+      const lit =
+        nbrs?.has(n.id) ||
+        n.data.walkStep != null ||
+        n.data.isWalkSeed ||
+        n.data.highlighted
+      const focusState: 'focus' | 'neighbor' | 'faded' =
+        n.id === activeFocus ? 'focus' : lit ? 'neighbor' : 'faded'
+      return { ...n, data: { ...n.data, focusState } }
+    })
+  }, [nodes, activeFocus, graphIndex, isDragging])
+
+  const displayEdges = useMemo(() => {
+    if (!activeFocus || isDragging) return edges
+    const inc = graphIndex.incident.get(activeFocus) ?? new Set<string>()
+    return edges.map((e) => {
+      const data = e.data as
+        | {
+            isManual?: boolean
+            isWalk?: boolean
+            kindLabel?: string
+            weightLabel?: string | null
+            tagLabel?: string
+          }
+        | undefined
+      // The walk trail is its own emphasis layer; leave it alone.
+      if (data?.isWalk) return e
+      const base = (e.style ?? {}) as CSSProperties
+      if (inc.has(e.id)) {
+        const label = data?.isManual
+          ? showEdgeWeights && data.weightLabel
+            ? `${data.kindLabel} · ${data.weightLabel}`
+            : data?.kindLabel
+          : data?.tagLabel
+        const bw = typeof base.strokeWidth === 'number' ? base.strokeWidth : 1.5
+        return {
+          ...e,
+          className: 'mm-edge--focus',
+          label,
+          labelStyle: { fontSize: data?.isManual ? 10 : 9, fill: 'var(--text)' },
+          labelBgStyle: { fill: 'var(--surface)', fillOpacity: 0.9 },
+          style: { ...base, opacity: 1, strokeWidth: bw + 0.6 },
+        }
+      }
+      return { ...e, className: 'mm-edge--faded', style: { ...base, opacity: 0.07 } }
+    })
+  }, [edges, activeFocus, graphIndex, isDragging, showEdgeWeights])
+
+  // Re-plant: recompute the deterministic layout from scratch and
+  // clear the persisted drag positions for this workspace (explicit,
+  // confirm-gated) so a canvas that converged badly — or a pile burned
+  // in by an old build — can be recovered. fitView reframes after.
+  const replant = useCallback(() => {
+    if (!window.confirm(t('garden.mindmap.replantConfirm'))) return
+    try {
+      localStorage.removeItem(positionsStorageKey(workspaceId))
+    } catch {
+      // ignore: storage disabled / quota; the recompute still applies
+    }
+    positionsRef.current = {}
+    lastForceSig.current = ''
+    const seeded = forceLayout(notes, weightedLinks, degreeByNode)
+    setNodes((cur) =>
+      cur.map((n) => ({ ...n, position: seeded[n.id] ?? n.position })),
+    )
+    window.setTimeout(() => rf.fitView({ padding: 0.2, maxZoom: 1.4 }), 60)
+  }, [t, workspaceId, notes, weightedLinks, degreeByNode, setNodes, rf])
 
   // ---------------------------------------------------------------
   // Edge creation: drag from a node handle to another node opens a
@@ -1130,6 +1369,10 @@ function GardenMindmapInner({ notes, workspaceId, onOpenNote }: GardenMindmapPro
       // toolbar 'walk' button has a target.
       rf.setCenter(node.position.x, node.position.y, { duration: 200, zoom: 1.1 })
       setWalkSeed(node.id)
+      // Toggle a pinned focus so the node's subgraph stays isolated
+      // after the cursor leaves; click it again (or the canvas) to
+      // release. Transient hover focus is handled separately.
+      setPinnedId((prev) => (prev === node.id ? null : node.id))
     },
     [rf],
   )
@@ -1237,6 +1480,14 @@ function GardenMindmapInner({ notes, workspaceId, onOpenNote }: GardenMindmapPro
         >
           {t('garden.mindmap.walkClear')}
         </button>
+        <button
+          type="button"
+          className="btn--ghost btn--sm"
+          onClick={replant}
+          title={t('garden.mindmap.replantHint')}
+        >
+          {t('garden.mindmap.replant')}
+        </button>
         {walkSeed && (
           <span className="muted">
             {t('garden.mindmap.walkSeed', {
@@ -1262,15 +1513,22 @@ function GardenMindmapInner({ notes, workspaceId, onOpenNote }: GardenMindmapPro
       {isEmpty ? (
         <p className="hint garden__empty">{t('garden.mindmap.empty')}</p>
       ) : (
-        <div className="garden__mindmap-canvas">
+        <div className="garden__mindmap-canvas" data-lod={lod}>
           <ReactFlow
-            nodes={nodes}
-            edges={edges}
+            nodes={displayNodes}
+            edges={displayEdges}
             onNodesChange={handleNodesChange}
             onEdgesChange={onEdgesChange}
             onConnect={onConnect}
             onEdgeClick={onEdgeClick}
             onNodeClick={onNodeClick}
+            onNodeMouseEnter={(_, node) => setHoverId(node.id)}
+            onNodeMouseLeave={() => setHoverId(null)}
+            onPaneClick={() => setPinnedId(null)}
+            onMove={(_, vp) => {
+              const next = vp.zoom < 0.5 ? 'far' : 'near'
+              setLod((cur) => (cur === next ? cur : next))
+            }}
             nodeTypes={NODE_TYPES}
             fitView
             fitViewOptions={{ padding: 0.25, maxZoom: 1.4 }}
