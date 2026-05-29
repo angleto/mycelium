@@ -228,9 +228,9 @@ async def test_note_part_prepend_puts_text_at_front_of_part() -> None:
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://t") as c:
         h = await _signup(c)
-        note_id = (
-            await c.post("/notes", headers=h, json={"kind": "text", "title": "Doc"})
-        ).json()["id"]
+        note_id = (await c.post("/notes", headers=h, json={"kind": "text", "title": "Doc"})).json()[
+            "id"
+        ]
         part = (
             await c.post(f"/notes/{note_id}/parts", headers=h, json={"body": "body text"})
         ).json()

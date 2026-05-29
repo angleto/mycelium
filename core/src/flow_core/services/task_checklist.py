@@ -198,9 +198,7 @@ async def _get_item(
         conds.append(TaskChecklistItem.task_id == task_id)
     if note_id is not None:
         conds.append(TaskChecklistItem.note_id == note_id)
-    item = (
-        await session.execute(select(TaskChecklistItem).where(*conds))
-    ).scalar_one_or_none()
+    item = (await session.execute(select(TaskChecklistItem).where(*conds))).scalar_one_or_none()
     if item is None:
         raise NotFoundError(MessageCode.CHECKLIST_ITEM_NOT_FOUND)
     return item
@@ -368,11 +366,7 @@ async def reorder_items(
     await require_role(session, org_id, actor_id, Role.member)
     await _validate_owner(session, org_id=org_id, task_id=task_id, note_id=note_id)
     current = list(
-        (
-            await session.execute(
-                select(TaskChecklistItem).where(_owner_clause(task_id, note_id))
-            )
-        )
+        (await session.execute(select(TaskChecklistItem).where(_owner_clause(task_id, note_id))))
         .scalars()
         .all()
     )
