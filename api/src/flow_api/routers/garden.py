@@ -3,6 +3,7 @@
 Read-only endpoints over the workspace note-link graph:
 
 - ``GET /garden/graph``: weighted edges + global PageRank.
+- ``GET /garden/clusters``: Leiden communities + global modularity.
 - ``GET /garden/walk``: two graph-walk modes used to feed the
   LLM walk and the mindmap UI:
     * ``focused``: personalised PageRank seeded at one node; the
@@ -27,6 +28,7 @@ from fastapi import APIRouter, Depends, Query
 
 from flow_api.deps import TenantCtx, tenant_ctx
 from flow_api.schemas import (
+    GardenClustersOut,
     GardenGraphEdge,
     GardenGraphOut,
     GardenLinkSuggestion,
@@ -64,6 +66,29 @@ async def garden_graph(
     return GardenGraphOut(
         edges=[GardenGraphEdge(src=e.src, dst=e.dst, weight=e.weight) for e in edges],
         centrality=centrality,
+    )
+
+
+@router.get("/clusters", response_model=GardenClustersOut)
+async def garden_clusters(
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+) -> GardenClustersOut:
+    """Leiden communities over the weighted note graph (task 8c0a8f08).
+
+    Separate from ``/graph`` on purpose: clustering is heavier than the
+    edge/PageRank pass and the SPA only needs it when the user toggles
+    cluster-colouring on, so it is not paid on every mindmap load.
+    Returns ``{note_id: community_index}`` plus the global modularity
+    (ADR-0035 structure thermometer). When the optional ``clustering``
+    extra (python-igraph + leidenalg) is absent the result is an empty
+    map with ``modularity=null`` — the mindmap simply renders no cluster
+    colours rather than erroring.
+    """
+    res = await svc.compute_leiden_clusters(ctx.session, org_id=ctx.org_id)
+    return GardenClustersOut(
+        clusters=res.clusters,
+        modularity=res.modularity,
+        count=len(set(res.clusters.values())),
     )
 
 

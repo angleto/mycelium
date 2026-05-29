@@ -39,6 +39,14 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --python /app/.venv/bin/python "faster-whisper>=1.0"
 
+# Graph clustering (python-igraph + leidenalg): the garden /clusters
+# endpoint runs Leiden in this (API) process. Without it the endpoint
+# degrades to "no clusters" (task 8c0a8f08); shipping it enables
+# cluster-colouring + the ADR-0035 modularity sensor. manylinux wheels,
+# no model download.
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --python /app/.venv/bin/python "python-igraph>=0.11" "leidenalg>=0.10"
+
 # Pre-fetch the embedding + STT checkpoints so a freshly-rolled pod does
 # not pay an HF download (and does not depend on egress to
 # huggingface.co). STT size/quant mirror the LocalSTT defaults
