@@ -122,6 +122,14 @@ export const en = {
     themeAuto: 'Auto',
     themeLight: 'Light',
     themeDark: 'Dark',
+    timezone: {
+      title: 'Timezone',
+      help: 'Reminder times are shown in this timezone. Detected from your browser; change it if you are elsewhere.',
+      label: 'IANA timezone',
+      useDetected: 'Use detected ({{tz}})',
+      save: 'Save',
+      saved: 'Saved.',
+    },
   },
   nav: {
     logout: 'Sign out',

@@ -14,6 +14,7 @@ import datetime as dt
 import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy import delete, or_, select
 from sqlalchemy.exc import IntegrityError
@@ -35,6 +36,7 @@ from flow_core.models.notification import (
 from flow_core.models.task import Task
 from flow_core.models.task_collaborator import TaskCollaborator
 from flow_core.models.task_tag import TaskTag
+from flow_core.models.user import User
 from flow_core.models.workflow import WorkflowState
 from flow_core.notification_channel import NotificationSender, get_sender
 from flow_core.services import audit
@@ -102,6 +104,13 @@ async def list_prefs(
     )
 
 
+# Max dispatch attempts before a ``failed`` notification stops being
+# revived for retry by a later scan. Bounds the retry of a permanently
+# broken target (a bad telegram chat_id, a bouncing address) so it is
+# not re-attempted on every tick forever.
+MAX_NOTIFICATION_ATTEMPTS = 5
+
+
 async def enqueue(
     session: AsyncSession,
     *,
@@ -113,14 +122,45 @@ async def enqueue(
     title: str,
     body: str,
     dedupe_key: str | None = None,
+    fire_at: dt.datetime | None = None,
 ) -> Notification:
-    """Idempotent by (org, dedupe_key): a repeated enqueue with the
-    same key returns the existing notification."""
+    """Idempotent by (org, dedupe_key).
+
+    ``fire_at`` is the moment the notification becomes eligible to send
+    (``None`` = immediately, for non-reminder notifications). It is
+    persisted so ``dispatch_pending`` can HOLD the row until then instead
+    of sending it the instant it is enqueued.
+
+    Dedupe is status-aware: a repeated enqueue with the same key returns
+    the existing row, EXCEPT that a ``failed`` row still under the attempt
+    cap is revived to ``pending`` so a transient send failure is retried
+    on the next dispatch. A ``sent`` row is terminal and never re-sent.
+    The lookup is org-scoped to match the ``(org_id, dedupe_key)`` unique
+    constraint (defence-in-depth on top of RLS)."""
     if dedupe_key is not None:
         existing = (
-            await session.execute(select(Notification).where(Notification.dedupe_key == dedupe_key))
+            await session.execute(
+                select(Notification).where(
+                    Notification.org_id == org_id,
+                    Notification.dedupe_key == dedupe_key,
+                )
+            )
         ).scalar_one_or_none()
         if existing is not None:
+            # Keep the firing moment current (also backfills NULL on rows
+            # enqueued before migration 0018 added the column).
+            existing.fire_at = fire_at
+            if (
+                existing.status is NotificationStatus.failed
+                and existing.attempts < MAX_NOTIFICATION_ATTEMPTS
+            ):
+                existing.status = NotificationStatus.pending
+                existing.last_error = None
+                existing.version += 1
+            # Flush so the revived ``pending`` status is visible to a
+            # dispatch query later in the same unit of work (the session
+            # does not autoflush before reads).
+            await session.flush()
             return existing
     n = Notification(
         org_id=org_id,
@@ -130,6 +170,7 @@ async def enqueue(
         title=title,
         body=body,
         dedupe_key=dedupe_key,
+        fire_at=fire_at,
         status=NotificationStatus.pending,
     )
     try:
@@ -138,7 +179,12 @@ async def enqueue(
             await session.flush()
     except IntegrityError:
         return (
-            await session.execute(select(Notification).where(Notification.dedupe_key == dedupe_key))
+            await session.execute(
+                select(Notification).where(
+                    Notification.org_id == org_id,
+                    Notification.dedupe_key == dedupe_key,
+                )
+            )
         ).scalar_one()
     return n
 
@@ -150,15 +196,26 @@ async def dispatch_pending(
     actor_id: uuid.UUID,
     sender: NotificationSender | None = None,
 ) -> DispatchResult:
-    """Send all pending notifications honouring per-user channel prefs;
-    one failure never aborts the rest (per-item fault isolation)."""
+    """Send DUE pending notifications honouring per-user channel prefs;
+    one failure never aborts the rest (per-item fault isolation).
+
+    The dispatch gate is ``fire_at IS NULL OR fire_at <= now``: a reminder
+    enqueued ahead of time stays pending until its firing moment arrives
+    (``fire_at``), and notifications with no firing moment (``NULL``) send
+    immediately. A transient send failure bumps ``attempts`` and marks the
+    row ``failed``; a later scan revives it for retry under the cap."""
     snd = sender or get_sender()
+    now = dt.datetime.now(tz=dt.UTC)
     rows = list(
         (
             await session.execute(
                 select(Notification).where(
                     Notification.org_id == org_id,
                     Notification.status == NotificationStatus.pending,
+                    or_(
+                        Notification.fire_at.is_(None),
+                        Notification.fire_at <= now,
+                    ),
                 )
             )
         )
@@ -179,16 +236,18 @@ async def dispatch_pending(
         if pref is None or not pref.enabled or not pref.target:
             n.status = NotificationStatus.failed
             n.last_error = "no enabled channel pref"
+            n.attempts += 1
             failed += 1
             continue
         try:
             await snd.send(channel=n.channel, target=pref.target, title=n.title, body=n.body)
             n.status = NotificationStatus.sent
-            n.sent_at = dt.datetime.now(tz=dt.UTC)
+            n.sent_at = now
             sent += 1
         except Exception as exc:  # channel boundary: isolate per-item
             n.status = NotificationStatus.failed
             n.last_error = str(exc)
+            n.attempts += 1
             failed += 1
     await session.flush()
     await audit.log(
@@ -303,7 +362,16 @@ async def spawn_due(
     now: dt.datetime | None = None,
 ) -> int:
     """Deterministically materialize due recurrences as new independent
-    task rows (template's tags + assignees copied), advance next_run."""
+    task rows, advance next_run.
+
+    The occurrence copies the template's tags, assignees AND reminder
+    offsets, and is anchored on the recurrence's scheduled moment
+    (``rec.next_run``): an appointment template (``start_at`` set) spawns
+    an appointment at ``next_run`` carrying the template's duration; a
+    deadline template (``due_date`` set) spawns a task due at
+    ``next_run``. Without this the spawned instance had no firing
+    reference and no reminder rows, so a recurring task never fired any
+    reminder."""
     ref = now or dt.datetime.now(tz=dt.UTC)
     recs = list(
         (
@@ -338,7 +406,12 @@ async def spawn_due(
             .scalars()
             .all()
         )
-        await tasks_svc.create_task(
+        # Anchor the occurrence on its scheduled moment so reminders have
+        # a firing reference: appointment template -> appointment at
+        # next_run (+ duration); deadline template -> due at next_run; a
+        # template with neither stays untimed (unchanged behaviour).
+        is_appointment = tmpl.start_at is not None
+        new_task = await tasks_svc.create_task(
             session,
             org_id=org_id,
             actor_id=actor_id,
@@ -354,9 +427,25 @@ async def spawn_due(
             location=tmpl.location,
             monetary_cost=tmpl.monetary_cost,
             budget_id=tmpl.budget_id,
+            start_at=rec.next_run if is_appointment else None,
+            duration_minutes=tmpl.duration_minutes if is_appointment else None,
+            due_date=rec.next_run if (not is_appointment and tmpl.due_date is not None) else None,
             tag_ids=list(tag_ids),
             assignee_ids=list(assignee_ids),
         )
+        # Copy the template's reminder offsets onto the occurrence so it
+        # fires the same reminders relative to its anchor.
+        offsets = (
+            (
+                await session.execute(
+                    select(TaskReminder.offset_minutes).where(TaskReminder.task_id == rec.task_id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        for off in offsets:
+            session.add(TaskReminder(org_id=org_id, task_id=new_task.id, offset_minutes=off))
         rec.last_spawned_at = ref
         rec.next_run = _advance(rec.next_run, rec.freq, rec.interval)
         if rec.until is not None and rec.next_run > rec.until:
@@ -364,6 +453,38 @@ async def spawn_due(
         spawned += 1
     await session.flush()
     return spawned
+
+
+def _resolve_tz(name: str | None) -> dt.tzinfo:
+    """An IANA timezone name -> tzinfo, falling back to UTC for an unset
+    or unrecognised value (a stored ``users.timezone`` should be valid,
+    but never let a bad string break the reminder sweep)."""
+    if not name:
+        return dt.UTC
+    try:
+        return ZoneInfo(name)
+    except (ZoneInfoNotFoundError, ValueError):
+        return dt.UTC
+
+
+async def _user_tz(
+    session: AsyncSession,
+    *,
+    user_id: uuid.UUID,
+    cache: dict[uuid.UUID, dt.tzinfo],
+) -> dt.tzinfo:
+    """The recipient's timezone (``users.timezone``), memoised per sweep.
+    Used to render reminder labels in local time and to detect the
+    date-only ("no time set") sentinel in the user's own timezone."""
+    cached = cache.get(user_id)
+    if cached is not None:
+        return cached
+    name = (
+        await session.execute(select(User.timezone).where(User.id == user_id))
+    ).scalar_one_or_none()
+    tz = _resolve_tz(name)
+    cache[user_id] = tz
+    return tz
 
 
 async def scan_reminders(
@@ -375,19 +496,26 @@ async def scan_reminders(
     now: dt.datetime | None = None,
 ) -> int:
     """Enqueue (idempotent) reminders for assignees with an enabled
-    channel. Each task fires its configured ``task_reminders`` N
-    minutes before a firing reference:
+    channel. Each task fires its configured ``task_reminders`` N minutes
+    before a firing reference:
 
-      * appointment tasks (``start_at`` set) use ``start_at`` with
-        minute precision;
-      * date-only tasks fall back to ``due_date`` at 00:00 UTC.
+      * appointment tasks (``start_at`` set) use ``start_at`` with minute
+        precision;
+      * date-only tasks fall back to ``due_date`` (end-of-day).
 
-    A deadline without explicit reminders gets one implicit reminder
-    at the reference. Sub-day offsets (``0 < off < 1440``) only have a
-    defined firing minute when the task has a ``start_at``; on
-    date-only tasks they are promoted to ``0`` (at reference) so they
-    fire at a defined moment rather than silently bucketing to one
-    day before the due date (the pre-v2.0.27 behaviour)."""
+    A deadline without explicit reminders gets one implicit reminder at
+    the reference. Sub-day offsets (``0 < off < 1440``) only have a
+    defined firing minute when the task has a ``start_at``; on date-only
+    tasks they are promoted to ``0`` (at reference) so they fire at a
+    defined moment rather than silently bucketing to one day before the
+    due date (the pre-v2.0.27 behaviour).
+
+    The label shown to the user and the date-only detection are done in
+    the RECIPIENT's timezone (``users.timezone``, UTC when unset): the
+    SPA stores an unspecified time as end-of-day LOCAL, which round-trips
+    to 23:59:59 in that user's timezone (only 23:59:59 UTC for a UTC
+    user). The firing moment (``fire_at``) is an absolute instant and is
+    timezone-independent."""
     ref = now or dt.datetime.now(tz=dt.UTC)
     # Horizon is "end of the (ref + within_days) calendar day in UTC":
     # since migration 0005 a date-only ``due_date`` lands at 23:59:59
@@ -417,34 +545,19 @@ async def scan_reminders(
         .unique()
         .all()
     )
+    tz_cache: dict[uuid.UUID, dt.tzinfo] = {}
     enqueued = 0
     for t in candidates:
         if t.start_at is not None:
             reference: dt.datetime = t.start_at
-            if reference.tzinfo is None:
-                reference = reference.replace(tzinfo=dt.UTC)
-            when_label = reference.strftime("%Y-%m-%d %H:%M UTC")
-            date_only = False
+            is_due_date = False
         elif t.due_date is not None:
-            # Migration 0005: due_date is a timestamptz. End-of-day
-            # entries (the historical "no time set" backfill) sit at
-            # 23:59:59 UTC; explicit times round-trip as the user
-            # picked them. ``date_only`` is the SPA presentation hint:
-            # treat anything at second 59 of minute 59 of hour 23 as
-            # "no time was specified" so reminder offsets degrade
-            # gracefully (sub-day offsets get promoted to fire at
-            # reference, same pre-0005 contract).
             reference = t.due_date
-            if reference.tzinfo is None:
-                reference = reference.replace(tzinfo=dt.UTC)
-            date_only = reference.hour == 23 and reference.minute == 59 and reference.second == 59
-            when_label = (
-                reference.date().isoformat()
-                if date_only
-                else reference.strftime("%Y-%m-%d %H:%M UTC")
-            )
+            is_due_date = True
         else:
             continue
+        if reference.tzinfo is None:
+            reference = reference.replace(tzinfo=dt.UTC)
         # Cap how far ahead we look (a 1-week reminder on a task due
         # in 4 months is still in-window once it gets close enough).
         if reference > horizon + dt.timedelta(days=120):
@@ -467,17 +580,35 @@ async def scan_reminders(
             .scalars()
             .all()
         )
-        for raw_off in offsets:
-            off = 0 if date_only and 0 < raw_off < 1440 else raw_off
-            fire_at = reference - dt.timedelta(minutes=off)
-            if fire_at > horizon:
+        for uid in assignees:
+            prefs = [
+                p
+                for p in await list_prefs(session, org_id=org_id, user_id=uid)
+                if p.enabled and p.target
+            ]
+            if not prefs:
                 continue
-            when = "at due" if off == 0 else f"{off} min before"
-            for uid in assignees:
-                prefs = await list_prefs(session, org_id=org_id, user_id=uid)
+            tz = await _user_tz(session, user_id=uid, cache=tz_cache)
+            local = reference.astimezone(tz)
+            # date-only ("no time set") detection in the RECIPIENT's own
+            # timezone: the SPA stores an unspecified time as end-of-day
+            # local, which round-trips to 23:59:59 in that timezone.
+            # Appointment tasks always carry a real time.
+            date_only = (
+                is_due_date and local.hour == 23 and local.minute == 59 and local.second == 59
+            )
+            when_label = (
+                local.date().isoformat() if date_only else local.strftime("%Y-%m-%d %H:%M %Z")
+            )
+            for raw_off in offsets:
+                # Sub-day offsets on a date-only task have no defined
+                # firing minute -> fire at the reference ("at due").
+                off = 0 if date_only and 0 < raw_off < 1440 else raw_off
+                fire_at = reference - dt.timedelta(minutes=off)
+                if fire_at > horizon:
+                    continue
+                when = "at due" if off == 0 else f"{off} min before"
                 for p in prefs:
-                    if not p.enabled or not p.target:
-                        continue
                     await enqueue(
                         session,
                         org_id=org_id,
@@ -490,6 +621,7 @@ async def scan_reminders(
                         dedupe_key=(
                             f"reminder:{t.id}:{uid}:{p.channel.value}:{fire_at.isoformat()}"
                         ),
+                        fire_at=fire_at,
                     )
                     enqueued += 1
     return enqueued

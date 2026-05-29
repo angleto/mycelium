@@ -121,6 +121,14 @@ export const it: Catalog = {
     themeAuto: 'Auto',
     themeLight: 'Chiaro',
     themeDark: 'Scuro',
+    timezone: {
+      title: 'Fuso orario',
+      help: 'Gli orari dei promemoria sono mostrati in questo fuso. Rilevato dal browser; modificalo se ti trovi altrove.',
+      label: 'Fuso orario IANA',
+      useDetected: 'Usa quello rilevato ({{tz}})',
+      save: 'Salva',
+      saved: 'Salvato.',
+    },
   },
   nav: {
     logout: 'Esci',

@@ -97,7 +97,17 @@ class MeOut(BaseModel):
     user_id: uuid.UUID
     email: str
     display_name: str | None = None
+    # IANA timezone (NULL = UTC). Drives local-time reminder labels.
+    timezone: str | None = None
     is_admin: bool
+
+
+class MePatchIn(BaseModel):
+    """Profile update for the caller. Currently the IANA timezone used to
+    render reminder labels in local time; an empty/absent value clears it
+    (-> UTC). Validated server-side against the IANA database."""
+
+    timezone: str | None = Field(default=None, max_length=64)
 
 
 class AdminUserOut(BaseModel):

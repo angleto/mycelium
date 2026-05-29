@@ -61,7 +61,9 @@ from flow_core.errors import (
     NotFoundError,
 )
 from flow_core.i18n import DEFAULT_LOCALE, render
+from flow_core.notification_channel import set_sender_override
 from flow_core.services.mailer import build_system_mailer, set_mailer
+from flow_core.services.notification_sender import build_notification_sender
 
 _STATUS: dict[type[DomainError], int] = {
     AuthError: 401,
@@ -118,6 +120,14 @@ def _make_lifespan(mcp_app: Any) -> Any:
         settings = get_settings()
         if settings.smtp_configured:
             set_mailer(build_system_mailer(settings))
+        # Install the concrete notification sender (telegram over an email
+        # fallback that uses the mailer wired just above). Without this,
+        # get_sender() returns DefaultSender and EVERY reminder dispatch
+        # fails. Unconditional and safe: in a dev/OSS deploy the email half
+        # falls back to LogMailer and the telegram half fails per-item
+        # until the bot is configured. Must run after set_mailer.
+        _sender = build_notification_sender()
+        set_sender_override(lambda: _sender)
         # Drive the mounted MCP app's lifespan (starts the streamable
         # HTTP session manager's task group).
         async with mcp_app.router.lifespan_context(mcp_app):
