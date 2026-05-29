@@ -612,7 +612,6 @@ export function RichEditor({
 
   const fmt = !rawMode && editor != null
 
-  const hasSelection = editor != null && !editor.state.selection.empty
   // Current selection as text + W3C-style prefix/suffix (the chars
   // around it within the same block) for robust annotation anchoring.
   const selectionContext = (): { text: string; prefix: string; suffix: string } | null => {
@@ -754,7 +753,12 @@ export function RichEditor({
               className="btn--ghost btn--sm"
               disabled={!fmt}
               title={t('annotations.comment', { defaultValue: 'Comment' })}
-              onClick={() => {
+              // onMouseDown + preventDefault keeps the editor focused and
+              // the selection intact: a plain onClick first blurs the
+              // editor and collapses the selection, so the handler would
+              // read an empty range and do nothing.
+              onMouseDown={(e) => {
+                e.preventDefault()
                 const c = selectionContext()
                 if (c) onCommentSelection(c)
               }}
@@ -766,11 +770,12 @@ export function RichEditor({
             <button
               type="button"
               className="btn--ghost btn--sm"
-              disabled={!fmt || !hasSelection}
+              disabled={!fmt}
               title={t('annotations.suggestToggle', { defaultValue: 'Suggest an edit' })}
-              onClick={() => {
+              onMouseDown={(e) => {
+                e.preventDefault()
                 const c = selectionContext()
-                if (c && c.text) onSuggestSelection(c)
+                if (c) onSuggestSelection(c)
               }}
             >
               ✎
