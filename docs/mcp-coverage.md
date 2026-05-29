@@ -14,6 +14,53 @@ client-equal channel beside REST per ADR-0001 (`mcp/` is a thin adapter
 over `core/`, co-equal to `api/`), so any GUI-only capability is a
 genuine gap, not an asymmetry by design.
 
+## Addendum 2026-05-29 — surface grew to 186 tools
+
+The body below is the 140-tool snapshot (2026-05-25). Since then the
+note multipart refactor landed and a completeness/efficiency pass added
+the read/traversal and large-document tools that several GAP notes below
+called for. Net registered `@mcp.tool()` symbols: **186**. New tools by
+theme (all thin wrappers over existing service functions, no new domain
+logic except `note_parts.get_part`):
+
+- **Large-document read/write** (notes): `list_note_parts`
+  (outline/TOC, body-free by default), `get_note_part` (random access to
+  one part), `replace_in_note_part` (anchored find/replace inside a part,
+  optimistic-concurrency guarded), `gdpr_erase_note` (note-side GDPR
+  parity with `memory_erase`). `get_note` gained `include_part_bodies`
+  (default True; set False to read a large note as an outline without
+  dumping every body into context).
+- **Navigation / relations** (read side of links that only had
+  create/remove tools): `list_note_links` (note↔note, outgoing +
+  incoming backlinks), `list_note_task_links` (note↔task, by either
+  anchor), `suggest_note_links` (link prediction), `resolve_prefix`
+  (ADR-0038 UUID-prefix → entity), `list_task_relations` /
+  `add_task_relation` / `remove_task_relation` (symmetric "related task"
+  edges, distinct from dependencies).
+- **Memory**: `memory_get_blob`, `memory_attach_tag`,
+  `memory_detach_tag`, `memory_recompute_tiers` (workspace-wide tier
+  recompute; NOT per-blob — the service function is org-scoped).
+- **Gateway efficiency** (`mcp/src/flow_mcp/gateway.py`): `_DOMAIN_RULES`
+  refreshed — added a `navigation` domain (matched first, so link/
+  relation/resolve tools are not swallowed by the note/task rules) and a
+  `notes` domain split out from `memory`; dropped the `recompute` keyword
+  from `calendar` (it was stealing `memory_recompute_tiers`).
+
+Still outstanding (need new service/REST/migration code, tracked
+separately, NOT yet implemented):
+
+- **Chunked append** for bodies above the MCP/JSON-RPC ~100k-char
+  `tools/call` payload cap (task `27f4d6c9`): `POST
+  /notes/{id}/parts/{part_id}:append` + an `append_note_part` MCP tool,
+  idempotent per `(note, part, chunk_index, operation_id)`, re-index on
+  `is_last`. This is the architectural fix for writing very large
+  markdown over MCP; the in-payload tools above cover everything under
+  the cap.
+- The scope-enforcement gate is still advisory (see `mcp_scopes.py`); the
+  new tools follow the same `<domain>:read` / `<domain>:write` mapping
+  used below (navigation reads → `notes:read` / `tasks:read`; task
+  relations → `tasks:read` / `tasks:write`; memory tools → `memory:*`).
+
 ## Convention
 
 - `path:line` columns point at the symbol declaration. The MCP path is

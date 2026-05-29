@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -356,6 +357,85 @@ def parts_add(
     success(
         f"added part {short_id(part['id'])} to note {short_id(full)} "
         f"(ord={part['ord']}, {len(body)} chars)"
+    )
+
+
+@parts_app.command("append")
+def parts_append(
+    note_id: str = typer.Argument(..., autocompletion=complete_note_id),
+    part_id: str | None = typer.Argument(
+        None, help="Existing part to append to. Omit (or use --new) to create one."
+    ),
+    file: Path = typer.Option(
+        ..., "--file", "-f", help="Markdown file to stream in. Use '-' for stdin."
+    ),
+    new: bool = typer.Option(
+        False, "--new", help="Create a new part from the content instead of appending."
+    ),
+    title: str | None = typer.Option(None, "--title", help="Title for the new part (with --new)."),
+    lang: str | None = typer.Option(None, "--lang", "-l", help="ISO 639-1 hint. Optional."),
+    chunk_size: int = typer.Option(
+        32768, "--chunk-size", help="Chars per chunk; keep under the transport payload cap."
+    ),
+) -> None:
+    """Stream a (possibly large) markdown file into a note part in
+    chunks, past the ~100k-char transport payload cap (task 27f4d6c9).
+    Give an existing PART-ID to append to it, or --new to create the
+    part on the fly. Reads from a file or stdin ('-'). Chunks reassemble
+    byte-for-byte; a failed run is safe to re-run (idempotent replay)."""
+    if chunk_size < 1:
+        raise CLIError("--chunk-size must be >= 1.")
+    text = sys.stdin.read() if str(file) == "-" else file.read_text()
+    if not text:
+        raise CLIError("nothing to append (empty input).")
+    chunks = [text[i : i + chunk_size] for i in range(0, len(text), chunk_size)]
+    op_id = uuid.uuid4().hex
+    with client() as c:
+        full = _resolve_note(c, note_id)
+        if new or not part_id:
+            payload: dict[str, Any] = {"body": chunks[0]}
+            if title:
+                payload["title"] = title
+            if lang:
+                payload["lang"] = lang
+            first = get_json(c.post(f"/notes/{full}/parts", json=payload))
+            pid = str(first["id"])
+            version = int(first["version"])
+            start = 1
+            total_appended = len(chunks[0])
+        else:
+            pid = _resolve_part(c, full, part_id)
+            rows = get_json(c.get(f"/notes/{full}/parts"))
+            part = next(p for p in rows if p["id"] == pid)
+            version = int(part["version"])
+            start = 0
+            total_appended = 0
+        indices: Any = range(start, len(chunks))
+        if not json_mode() and len(chunks) - start > 0:
+            from rich.progress import track
+
+            indices = track(indices, description=f"appending {len(chunks)} chunk(s)")
+        for idx in indices:
+            resp = get_json(
+                c.post(
+                    f"/notes/{full}/parts/{pid}/append",
+                    json={
+                        "chunk": chunks[idx],
+                        "expected_version": version,
+                        "chunk_index": idx,
+                        "is_last": idx == len(chunks) - 1,
+                        "operation_id": op_id,
+                    },
+                )
+            )
+            version = int(resp["version"])
+            total_appended += int(resp["appended_chars"])
+    if json_mode():
+        emit_json({"part_id": pid, "version": version, "appended_chars": total_appended})
+        return
+    success(
+        f"appended {total_appended} chars to part {short_id(pid)} "
+        f"on note {short_id(full)} in {len(chunks)} chunk(s) (v{version})"
     )
 
 

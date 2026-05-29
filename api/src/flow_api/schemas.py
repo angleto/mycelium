@@ -1730,6 +1730,24 @@ class AppendOut(BaseModel):
     appended_chars: int
 
 
+class NotePartAppendIn(BaseModel):
+    """Body for POST /notes/{id}/parts/{pid}/append (task 27f4d6c9).
+    Chunked append: stream a large markdown body in N ordered chunks,
+    each asserting ``expected_version`` (the cursor returned by the
+    previous chunk). Chunks concatenate **raw** (no separator) for
+    byte-exact reassembly. Recommended client chunk size ~32k chars to
+    stay under any transport payload cap. ``chunk_index`` is advisory
+    (client-side ordering / progress); idempotency is version-based.
+    Set ``is_last=True`` on the final chunk so the recovery-history
+    revision is sealed once for the whole upload."""
+
+    chunk: str = Field(min_length=1)
+    expected_version: int
+    chunk_index: int = Field(default=0, ge=0)
+    is_last: bool = True
+    operation_id: str | None = None
+
+
 class NotePartOut(BaseModel):
     """One ordered markdown block of a note (task 71c9d670 Phase 2a).
     ``ui_collapsed`` is the caller's current collapse state for this

@@ -34,6 +34,7 @@ from flow_api.schemas import (
     NoteLinkOut,
     NoteMergeIn,
     NoteOut,
+    NotePartAppendIn,
     NotePartCreateIn,
     NotePartOut,
     NotePartPatchIn,
@@ -475,6 +476,42 @@ async def create_note_part(
         ord=body.ord,
     )
     return _part_out(part)
+
+
+@router.post(
+    "/{note_id}/parts/{part_id}/append",
+    response_model=AppendOut,
+    tags=["garden"],
+)
+async def append_note_part(
+    note_id: uuid.UUID,
+    part_id: uuid.UUID,
+    body: NotePartAppendIn,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    edit_session_id: Annotated[str | None, Header(alias="X-Edit-Session-Id")] = None,
+) -> AppendOut:
+    """Append one chunk to a part's body without resending it -- stream a
+    large markdown file in N ordered chunks (task 27f4d6c9). Each call
+    asserts ``expected_version`` (the cursor returned by the previous
+    chunk); chunks concatenate raw for byte-exact reassembly. Idempotent
+    on replay; a different-version writer racing the same part gets
+    ``stale_version``. Create the target part first with POST
+    ``/{note_id}/parts`` (its body becomes chunk 0), then append the
+    rest here. ``X-Edit-Session-Id`` (or ``operation_id`` in the body)
+    coalesces the per-upload recovery revision."""
+    channel = "web" if edit_session_id else "api"
+    v, appended = await parts_svc.append_to_part(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        part_id=part_id,
+        chunk=body.chunk,
+        expected_version=body.expected_version,
+        is_last=body.is_last,
+        operation_id=body.operation_id or edit_session_id,
+        channel=channel,
+    )
+    return AppendOut(id=part_id, version=v, appended_chars=appended)
 
 
 @router.patch(

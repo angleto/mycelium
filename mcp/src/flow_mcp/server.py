@@ -66,12 +66,16 @@ from flow_core.services import email as email_svc
 from flow_core.services import entity_revisions as revisions_svc
 from flow_core.services import executors as executors_svc
 from flow_core.services import invoice as invoice_svc
+from flow_core.services import link_prediction as link_prediction_svc
+from flow_core.services import lookup as lookup_svc
 from flow_core.services import memory as memory_svc
 from flow_core.services import note_links as note_links_svc
+from flow_core.services import note_parts as note_parts_svc
 from flow_core.services import notes as notes_svc
 from flow_core.services import notifications as notif_svc
 from flow_core.services import participants as part_svc
 from flow_core.services import task_checklist as checklist_svc
+from flow_core.services import task_relations as task_relations_svc
 from flow_core.services import task_search as task_search_svc
 from flow_core.services import time_tracking as time_svc
 from flow_core.services import workflow as workflow_svc
@@ -2728,6 +2732,63 @@ async def memory_status(token: str, org_id: str) -> dict[str, Any]:
         return {"semantic": embedder_available()}
 
 
+@mcp.tool()
+async def memory_get_blob(token: str, org_id: str, blob_id: str) -> dict[str, Any]:
+    """Read one memory blob by id (with its tags), when you already hold
+    the id from an earlier ``memory_search`` / ``search`` hit and do not
+    want to re-query. Member-level, RLS-scoped: a foreign/unknown id is
+    memory.not_found."""
+    async with _tenant(token, org_id) as (s, org, _user):
+        blob = await memory_svc.get_blob(s, org_id=org, blob_id=uuid.UUID(blob_id))
+        tagmap = await memory_svc.tags_by_blob(s, blob_ids=[blob.id])
+        return _blob(blob, tagmap.get(blob.id))
+
+
+@mcp.tool()
+async def memory_attach_tag(token: str, org_id: str, blob_id: str, tag_id: str) -> dict[str, Any]:
+    """Curate memory by hand: attach an existing tag to a memory blob
+    (idempotent). Lets the agent re-file a blob into a memory channel or
+    project after it was written. Member-level."""
+    async with _tenant(token, org_id) as (s, org, user):
+        await memory_svc.attach_blob_tag(
+            s, org_id=org, actor_id=user, blob_id=uuid.UUID(blob_id), tag_id=uuid.UUID(tag_id)
+        )
+        return {"blob_id": blob_id, "tag_id": tag_id}
+
+
+@mcp.tool()
+async def memory_detach_tag(token: str, org_id: str, blob_id: str, tag_id: str) -> dict[str, Any]:
+    """Remove a tag from a memory blob (idempotent). Member-level."""
+    async with _tenant(token, org_id) as (s, org, user):
+        await memory_svc.detach_blob_tag(
+            s, org_id=org, actor_id=user, blob_id=uuid.UUID(blob_id), tag_id=uuid.UUID(tag_id)
+        )
+        return {"blob_id": blob_id, "tag_id": tag_id, "removed": True}
+
+
+@mcp.tool()
+async def memory_recompute_tiers(
+    token: str,
+    org_id: str,
+    half_life_days: float = 30.0,
+    hot_threshold: float = 5.0,
+    warm_threshold: float = 1.0,
+) -> dict[str, int]:
+    """Recompute the hot/warm/cold tier of EVERY memory blob in the
+    workspace from a decayed access score + importance (ADR-0016). Never
+    deletes: a rarely-used blob is demoted to cold, still queryable.
+    Returns the per-tier counts. Member-level; normally run by the
+    re-embedding worker, exposed here as an escape hatch."""
+    async with _tenant(token, org_id) as (s, org, _user):
+        return await memory_svc.recompute_tier(
+            s,
+            org_id=org,
+            half_life_days=half_life_days,
+            hot_threshold=hot_threshold,
+            warm_threshold=warm_threshold,
+        )
+
+
 # --- Memory channels (controlled, seeded vocabulary; FR-8) ---------
 #
 # Listing is member-level (the agent needs it to pick a channel);
@@ -2850,6 +2911,26 @@ def _note_part(p: Any) -> dict[str, Any]:
     }
 
 
+def _note_part_outline(p: Any) -> dict[str, Any]:
+    """Body-free projection of a NotePart for the outline / table of
+    contents of a long note: id, ord, title, lang, UTF-8 byte length and
+    the first non-empty line (``head``). Lets an LLM pick which part to
+    read or edit without pulling every body into context (the get_note /
+    list_note_parts payload-economy primitive)."""
+    body = p.body or ""
+    head = next((ln.strip() for ln in body.splitlines() if ln.strip()), "")
+    return {
+        "id": str(p.id),
+        "note_id": str(p.note_id),
+        "ord": p.ord,
+        "title": p.title,
+        "lang": p.lang,
+        "bytes": len(body.encode("utf-8")),
+        "head": head[:120],
+        "version": p.version,
+    }
+
+
 def _note(
     n: Note,
     tags: list[Tag] | None = None,
@@ -2857,6 +2938,7 @@ def _note(
     include_transcript: bool = True,
     parts: list[Any] | None = None,
     transcript: str | None = None,
+    part_bodies: bool = True,
 ) -> dict[str, Any]:
     # docs/adr/0029 P3: ``task_id`` comes from the typed link table.
     # Phase 6 final (task 1cd8bc0a): the ``transcript`` column is
@@ -2882,13 +2964,13 @@ def _note(
         "version": n.version,
         "tags": [_tag_brief(g) for g in (tags or [])],
     }
-    if include_transcript:
+    if include_transcript and part_bodies:
         if parts:
             out["transcript"] = "\n\n".join((p.body or "") for p in parts)
         else:
             out["transcript"] = transcript
     if parts is not None:
-        out["parts"] = [_note_part(p) for p in parts]
+        out["parts"] = [(_note_part(p) if part_bodies else _note_part_outline(p)) for p in parts]
     return out
 
 
@@ -2983,18 +3065,29 @@ async def list_notes(
 
 
 @mcp.tool()
-async def get_note(token: str, org_id: str, note_id: str) -> dict[str, Any]:
-    """Read one note. Includes the ordered ``parts[]`` (markdown
-    blocks) so an LLM gets the structured body in one round-trip;
-    when the note has zero parts the field is an empty list."""
-    from flow_core.services import note_parts as parts_svc_local
-
+async def get_note(
+    token: str, org_id: str, note_id: str, include_part_bodies: bool = True
+) -> dict[str, Any]:
+    """Read one note. Includes the ordered ``parts[]`` (markdown blocks)
+    so an LLM gets the structured body in one round-trip; when the note
+    has zero parts the field is an empty list. Set
+    ``include_part_bodies=False`` to read a LARGE note as an outline
+    (per-part id/ord/title/byte-length/head, no bodies and no derived
+    transcript), then fetch only the parts you need with
+    ``get_note_part`` -- this avoids dumping a multi-hundred-KB note into
+    context."""
     async with _tenant(token, org_id) as (s, org, _user):
         note = await notes_svc.get_note(s, org_id=org, note_id=uuid.UUID(note_id))
         tagmap = await notes_svc.tags_by_note(s, note_ids=[note.id])
         pid = await note_links_svc.primary_task_id_for_note(s, org_id=org, note_id=note.id)
-        parts = await parts_svc_local.list_parts(s, org_id=org, note_id=note.id)
-        return _note(note, tagmap.get(note.id, []), primary_task_id=pid, parts=parts)
+        parts = await note_parts_svc.list_parts(s, org_id=org, note_id=note.id)
+        return _note(
+            note,
+            tagmap.get(note.id, []),
+            primary_task_id=pid,
+            parts=parts,
+            part_bodies=include_part_bodies,
+        )
 
 
 @mcp.tool()
@@ -3094,6 +3187,142 @@ async def delete_note_part(token: str, org_id: str, part_id: str) -> dict[str, A
             part_id=uuid.UUID(part_id),
         )
         return {"part_id": part_id, "deleted": True}
+
+
+@mcp.tool()
+async def list_note_parts(
+    token: str,
+    org_id: str,
+    note_id: str,
+    include_body: bool = False,
+) -> list[dict[str, Any]]:
+    """Outline (table of contents) of a note's markdown parts in ``ord``
+    order, to navigate a LARGE note without pulling every body into
+    context. ``include_body=False`` (default) returns id / ord / title /
+    lang / byte-length / first-line head per part; set True for the full
+    bodies. Pair with ``get_note_part`` for random access to one part."""
+    async with _tenant(token, org_id) as (s, org, _user):
+        parts = await note_parts_svc.list_parts(s, org_id=org, note_id=uuid.UUID(note_id))
+        if include_body:
+            return [_note_part(p) for p in parts]
+        return [_note_part_outline(p) for p in parts]
+
+
+@mcp.tool()
+async def get_note_part(token: str, org_id: str, part_id: str) -> dict[str, Any]:
+    """Read a single note part by id: random access into a long note's
+    body without fetching its other parts. Returns the full part incl.
+    body and version (find the part_id via ``list_note_parts``)."""
+    async with _tenant(token, org_id) as (s, org, _user):
+        part = await note_parts_svc.get_part(s, org_id=org, part_id=uuid.UUID(part_id))
+        return _note_part(part)
+
+
+@mcp.tool()
+async def replace_in_note_part(
+    token: str,
+    org_id: str,
+    part_id: str,
+    find: str,
+    replace: str,
+    expected_version: int,
+    count: int = 0,
+) -> dict[str, Any]:
+    """Anchored edit inside ONE note part: replace occurrences of the
+    literal ``find`` with ``replace`` without resending the whole body --
+    for surgically changing a paragraph of a large note. ``count=0``
+    (default) replaces every occurrence; a positive ``count`` replaces
+    only the first N. ``expected_version`` guards optimistic concurrency
+    (same contract as ``update_note_part``: stale_version on mismatch).
+    Returns ``{part_id, version, replacements}``; a no-op (``find``
+    absent or empty) returns replacements=0 and does not bump the
+    version."""
+    async with _tenant(token, org_id) as (s, org, user):
+        part = await note_parts_svc.get_part(s, org_id=org, part_id=uuid.UUID(part_id))
+        body = part.body or ""
+        occurrences = body.count(find) if find else 0
+        if occurrences == 0:
+            return {"part_id": part_id, "version": part.version, "replacements": 0}
+        n = occurrences if count <= 0 else min(count, occurrences)
+        new_body = body.replace(find, replace) if count <= 0 else body.replace(find, replace, count)
+        version = await note_parts_svc.update_part(
+            s,
+            org_id=org,
+            actor_id=user,
+            part_id=uuid.UUID(part_id),
+            expected_version=expected_version,
+            body=new_body,
+        )
+        return {"part_id": part_id, "version": version, "replacements": n}
+
+
+@mcp.tool()
+async def append_note_part(
+    token: str,
+    org_id: str,
+    chunk: str,
+    note_id: str | None = None,
+    part_id: str | None = None,
+    expected_version: int | None = None,
+    chunk_index: int = 0,
+    is_last: bool = True,
+    operation_id: str | None = None,
+    title: str | None = None,
+    lang: str | None = None,
+) -> dict[str, Any]:
+    """Stream a LARGE markdown body into a note part in chunks, past the
+    MCP ~100k-char per-call payload cap (task 27f4d6c9). Split the source
+    client-side into ordered chunks of ~32k chars and call this in
+    sequence:
+
+    - FIRST chunk: pass ``note_id`` and omit ``part_id`` (optionally
+      ``title`` / ``lang``) to CREATE a new part from the chunk; the
+      result carries the new ``part_id`` and ``version`` for the rest.
+    - EACH next chunk: pass ``part_id`` and ``expected_version`` (the
+      version returned by the previous call -- the cursor). Chunks
+      concatenate RAW (no separator) for byte-exact reassembly.
+
+    Idempotent on replay (same chunk at the same cursor is a no-op); a
+    different-version writer racing the same part gets stale_version.
+    Omit ``expected_version`` to append onto the current version (one
+    extra read; NOT retry-safe -- pass the cursor for idempotency). Set
+    ``is_last=True`` on the final chunk (default) so the recovery-history
+    revision is sealed once for the whole upload. Returns
+    ``{part_id, version, appended_chars}``."""
+    async with _tenant(token, org_id) as (s, org, user):
+        if part_id is None:
+            if note_id is None:
+                raise DomainError(MessageCode.DOMAIN_ERROR)
+            part = await note_parts_svc.create_part(
+                s,
+                org_id=org,
+                actor_id=user,
+                note_id=uuid.UUID(note_id),
+                body=chunk,
+                title=title,
+                lang=lang,
+            )
+            return {
+                "part_id": str(part.id),
+                "version": part.version,
+                "appended_chars": len(chunk),
+            }
+        eff_version = expected_version
+        if eff_version is None:
+            existing = await note_parts_svc.get_part(s, org_id=org, part_id=uuid.UUID(part_id))
+            eff_version = existing.version
+        version, appended = await note_parts_svc.append_to_part(
+            s,
+            org_id=org,
+            actor_id=user,
+            part_id=uuid.UUID(part_id),
+            chunk=chunk,
+            expected_version=eff_version,
+            is_last=is_last,
+            operation_id=operation_id,
+            channel="mcp",
+        )
+        return {"part_id": part_id, "version": version, "appended_chars": appended}
 
 
 @mcp.tool()
@@ -3304,6 +3533,28 @@ async def restore_note(
             expected_version=expected_version,
         )
         return {"note_id": note_id, "version": version}
+
+
+@mcp.tool()
+async def gdpr_erase_note(token: str, org_id: str, note_id: str) -> dict[str, Any]:
+    """GDPR hard-erasure of a note: cascades to its memory blobs (by note
+    provenance) and conversation turns, then deletes the note. Returns
+    the count of memory blobs removed and the S3 ``audio_ref`` (if any)
+    for the caller/worker to delete out-of-band. Distinct from
+    ``delete_note`` (recoverable soft-delete) and from ``memory_erase``
+    (memory-only). Member role."""
+    async with _tenant(token, org_id) as (s, org, user):
+        res = await notes_svc.gdpr_erase_note(
+            s,
+            org_id=org,
+            actor_id=user,
+            note_id=uuid.UUID(note_id),
+        )
+        return {
+            "note_id": note_id,
+            "memory_blobs_deleted": res.memory_blobs_deleted,
+            "audio_ref": res.audio_ref,
+        }
 
 
 @mcp.tool()
@@ -4161,6 +4412,203 @@ async def unlink_note_task(
             kind=kind,
         )
         return {"removed": removed}
+
+
+# ---------------------------------------------------------------------------
+# Garden / graph navigation (read side): traverse the typed links that the
+# operations above create. The create/remove primitives existed without a
+# read counterpart, so an agent could build the graph but not walk it.
+# ---------------------------------------------------------------------------
+
+
+async def _note_titles(s: AsyncSession, note_ids: list[uuid.UUID]) -> dict[uuid.UUID, str | None]:
+    """Batch ``{note_id: title}`` lookup (RLS-scoped) used to enrich the
+    link/suggestion traversals with human-readable titles."""
+    if not note_ids:
+        return {}
+    rows = (await s.execute(select(Note.id, Note.title).where(Note.id.in_(note_ids)))).all()
+    return {nid: title for nid, title in rows}
+
+
+def _nn_link(link: Any) -> dict[str, Any]:
+    return {
+        "link_id": str(link.id),
+        "parent_note_id": str(link.parent_note_id),
+        "child_note_id": str(link.child_note_id),
+        "kind": link.kind,
+    }
+
+
+def _nt_link(link: Any) -> dict[str, Any]:
+    return {
+        "link_id": str(link.id),
+        "note_id": str(link.note_id),
+        "task_id": str(link.task_id),
+        "kind": link.kind,
+    }
+
+
+@mcp.tool()
+async def list_note_links(token: str, org_id: str, note_id: str) -> dict[str, Any]:
+    """Traverse a note's typed note↔note links. Returns
+    ``{outgoing, incoming}``: ``outgoing`` are links where this note is
+    the parent, ``incoming`` are backlinks where it is the child. Each
+    link is ``{link_id, parent_note_id, child_note_id, kind}`` with kind
+    in atom_of | references | replies_to | supersedes. Read counterpart
+    of ``link_notes`` / ``unlink_notes``."""
+    async with _tenant(token, org_id) as (s, org, _user):
+        outgoing, incoming = await note_links_svc.list_note_links(
+            s, org_id=org, note_id=uuid.UUID(note_id)
+        )
+        return {
+            "outgoing": [_nn_link(x) for x in outgoing],
+            "incoming": [_nn_link(x) for x in incoming],
+        }
+
+
+@mcp.tool()
+async def list_note_task_links(
+    token: str,
+    org_id: str,
+    note_id: str | None = None,
+    task_id: str | None = None,
+) -> list[dict[str, Any]]:
+    """Traverse typed note↔task links. Pass ``task_id`` to get every note
+    linked to a task (the "notes of this task" view), or ``note_id`` to
+    get every task linked to a note; at least one is required. Each row
+    is ``{link_id, note_id, task_id, kind}`` with kind in subject |
+    artifact | derived_from | promoted_from. Read counterpart of
+    derive/promote/start_task_on_note/record_task_artifact."""
+    async with _tenant(token, org_id) as (s, org, _user):
+        links = await note_links_svc.list_note_task_links(
+            s,
+            org_id=org,
+            note_id=uuid.UUID(note_id) if note_id else None,
+            task_id=uuid.UUID(task_id) if task_id else None,
+        )
+        return [_nt_link(x) for x in links]
+
+
+@mcp.tool()
+async def suggest_note_links(
+    token: str, org_id: str, note_id: str, k: int = 5
+) -> list[dict[str, Any]]:
+    """Suggest the top-``k`` candidate notes to link from this note
+    (Adamic-Adar over shared tags + personalised-PageRank co-visit, minus
+    already-linked pairs; ADR-0029/0033 garden link prediction). Returns
+    ``{note_id, title, score, signals, rationale}`` ranked; the agent or
+    user confirms a link via ``link_notes`` -- nothing is auto-created.
+    Empty when the workspace has <2 notes or there is no signal."""
+    async with _tenant(token, org_id) as (s, org, _user):
+        suggestions = await link_prediction_svc.suggest_links_for_note(
+            s, org_id=org, note_id=uuid.UUID(note_id), k=k
+        )
+        titles = await _note_titles(s, [sg.note_id for sg in suggestions])
+        return [
+            {
+                "note_id": str(sg.note_id),
+                "title": titles.get(sg.note_id),
+                "score": round(sg.score, 4),
+                "signals": sg.signals,
+                "rationale": sg.rationale,
+            }
+            for sg in suggestions
+        ]
+
+
+@mcp.tool()
+async def resolve_prefix(
+    token: str,
+    org_id: str,
+    prefix: str,
+    kinds: list[str] | None = None,
+    include_archived: bool = False,
+    include_deleted: bool = False,
+    limit: int = 20,
+) -> list[dict[str, Any]]:
+    """Resolve a short UUID prefix (the 8-char id in a roadmap note or a
+    markdown chip, e.g. ``91cf6aaa``) to the task / note it points at
+    (ADR-0038). ``kinds`` defaults to both ['task','note']; tasks rank
+    first, then most-recently-updated. Each match is ``{kind, id, title,
+    state_name, is_terminal, is_archived, is_deleted}``. Use it to jump
+    from a referenced id to the live entity in one round-trip."""
+    async with _tenant(token, org_id) as (s, _org, _user):
+        matches = await lookup_svc.resolve_prefix(
+            s,
+            prefix=prefix,
+            kinds=tuple(kinds) if kinds else ("task", "note"),
+            include_archived=include_archived,
+            include_deleted=include_deleted,
+            limit=limit,
+        )
+        return [
+            {
+                "kind": m.kind,
+                "id": str(m.id),
+                "title": m.title,
+                "state_name": m.state_name,
+                "is_terminal": m.is_terminal,
+                "is_archived": m.is_archived,
+                "is_deleted": m.is_deleted,
+            }
+            for m in matches
+        ]
+
+
+@mcp.tool()
+async def list_task_relations(
+    token: str, org_id: str, task_id: str | None = None
+) -> list[dict[str, Any]]:
+    """List symmetric "related task" links (a pure navigation aid,
+    distinct from dependencies: no direction, no cycle rules). Pass
+    ``task_id`` for that task's relations, omit it for the whole
+    workspace. Each row is ``{relation_id, task_a_id, task_b_id}``; the
+    edge is the same regardless of order."""
+    async with _tenant(token, org_id) as (s, org, _user):
+        rels = await task_relations_svc.list_relations(
+            s, org_id=org, task_id=uuid.UUID(task_id) if task_id else None
+        )
+        return [
+            {
+                "relation_id": str(r.id),
+                "task_a_id": str(r.task_a_id),
+                "task_b_id": str(r.task_b_id),
+            }
+            for r in rels
+        ]
+
+
+@mcp.tool()
+async def add_task_relation(token: str, org_id: str, task_id: str, other_id: str) -> dict[str, Any]:
+    """Link two tasks as "related" (symmetric, bidirectional; NOT a
+    dependency, so no ordering and no cycle check). Idempotent on the
+    unordered pair; both tasks must exist in the workspace. Returns the
+    canonical relation row."""
+    async with _tenant(token, org_id) as (s, org, user):
+        rel = await task_relations_svc.add_relation(
+            s,
+            org_id=org,
+            actor_id=user,
+            task_id=uuid.UUID(task_id),
+            other_id=uuid.UUID(other_id),
+        )
+        return {
+            "relation_id": str(rel.id),
+            "task_a_id": str(rel.task_a_id),
+            "task_b_id": str(rel.task_b_id),
+        }
+
+
+@mcp.tool()
+async def remove_task_relation(token: str, org_id: str, relation_id: str) -> dict[str, Any]:
+    """Remove a symmetric task relation by its id (from
+    ``list_task_relations``). Idempotent-ish: an unknown id raises
+    not_found."""
+    async with _tenant(token, org_id) as (s, org, user):
+        await task_relations_svc.remove_relation(
+            s, org_id=org, actor_id=user, relation_id=uuid.UUID(relation_id)
+        )
+        return {"relation_id": relation_id, "removed": True}
 
 
 # ---------------------------------------------------------------------------

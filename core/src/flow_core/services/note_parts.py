@@ -33,6 +33,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from flow_core.concurrency import optimistic_update
+from flow_core.config import get_settings
 from flow_core.errors import DomainError, NotFoundError
 from flow_core.i18n import MessageCode
 from flow_core.models.membership import Role
@@ -120,6 +121,14 @@ async def _get_part(session: AsyncSession, *, org_id: uuid.UUID, part_id: uuid.U
     if part is None:
         raise NotFoundError(MessageCode.NOTE_NOT_FOUND)
     return part
+
+
+async def get_part(session: AsyncSession, *, org_id: uuid.UUID, part_id: uuid.UUID) -> NotePart:
+    """Read a single part by id: random access into a long note's body
+    without fetching every other part. Member-level; RLS already scopes
+    the SELECT to the tenant. Raises ``NOTE_NOT_FOUND`` for an unknown or
+    foreign part id."""
+    return await _get_part(session, org_id=org_id, part_id=part_id)
 
 
 async def create_part(
@@ -257,6 +266,91 @@ async def update_part(
         diff={k: str(v) for k, v in values.items()},
     )
     return new_version
+
+
+async def append_to_part(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    part_id: uuid.UUID,
+    chunk: str,
+    expected_version: int,
+    is_last: bool = True,
+    operation_id: str | None = None,
+    channel: str = "api",
+) -> tuple[int, int]:
+    """Append ``chunk`` to a part's body WITHOUT resending the existing
+    body. Built for streaming a markdown file past the MCP/JSON-RPC
+    per-``tools/call`` payload cap (~100k chars): the client splits the
+    file into ordered chunks and appends them in sequence, each asserting
+    ``expected_version`` (the cursor). Returns ``(new_version,
+    appended_chars)``.
+
+    Chunks are concatenated **raw** (no separator) so the reassembled
+    body is byte-for-byte identical to the source file.
+
+    Idempotency (retry-safe, no extra storage): a replay of the same
+    chunk at the same cursor -- the part version is exactly one ahead of
+    ``expected_version`` AND the body already ends with ``chunk`` -- is a
+    no-op returning ``(current_version, 0)``.
+
+    Concurrency: any other version mismatch raises ``stale_version`` (no
+    last-write-wins), so two writers racing the same part cannot silently
+    interleave.
+
+    History: the note-level recovery revision is logged once, on the
+    final chunk (``is_last=True``), so a 16-chunk upload seals a single
+    revision capturing the final body rather than 16 growing snapshots.
+    ``operation_id`` flows through as the revision's ``edit_session_id``.
+
+    Refuses with ``body.limit_exceeded`` when the resulting body would
+    exceed ``FLOW_NOTE_BODY_MAX_BYTES``.
+    """
+    await require_role(session, org_id, actor_id, Role.member)
+    part = await _get_part(session, org_id=org_id, part_id=part_id)
+    body = part.body or ""
+    # Idempotent replay: cursor advanced by exactly one and the tail is
+    # already this chunk -> the previous attempt landed; treat as no-op.
+    if part.version == expected_version + 1 and chunk and body.endswith(chunk):
+        return part.version, 0
+    new_body = body + chunk
+    max_bytes = get_settings().note_body_max_bytes
+    if len(new_body.encode("utf-8")) > max_bytes:
+        raise DomainError(MessageCode.BODY_LIMIT_EXCEEDED, max_bytes=str(max_bytes))
+    new_version = await optimistic_update(
+        session,
+        NotePart,
+        pk=part_id,
+        expected_version=expected_version,
+        values={"body": new_body},
+    )
+    if is_last:
+        # Lazy import: avoids the note_parts <-> notes import cycle.
+        from flow_core.services.notes import _log_note_revision
+
+        note = await _get_note_in_org(session, org_id=org_id, note_id=part.note_id)
+        await _log_note_revision(
+            session,
+            org_id=org_id,
+            actor_id=actor_id,
+            note_id=part.note_id,
+            version_from=note.version,
+            version_to=note.version,
+            changed_fields=["parts.body"],
+            channel=channel,
+            edit_session_id=operation_id,
+        )
+    await audit.log(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        entity="note_part",
+        entity_id=part_id,
+        action="append",
+        diff={"appended_chars": str(len(chunk)), "is_last": str(is_last)},
+    )
+    return new_version, len(chunk)
 
 
 async def delete_part(

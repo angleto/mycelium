@@ -47,15 +47,39 @@ _AUTH_PARAMS: tuple[str, ...] = ("token", "org_id")
 # ``search_tools``. Embeddings carry the real semantic match; tags are a
 # cheap, deterministic narrowing (first matching rule wins, else "misc").
 _DOMAIN_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
+    # Navigation/relations must come FIRST: link/relation/resolve tools
+    # also contain "note"/"task" in their names, so they would otherwise
+    # be swallowed by the notes/tasks rules below.
+    (
+        "navigation",
+        ("link", "backlink", "relation", "resolve", "prefix", "suggest", "graph", "dependency"),
+    ),
     ("time", ("timer", "time_entry", "report")),
-    ("calendar", ("event", "calendar", "holiday", "schedule", "recompute")),
+    # "recompute" intentionally dropped from calendar: recompute_schedule
+    # still matches via "schedule", and keeping it here used to steal
+    # memory_recompute_tiers into the calendar domain.
+    ("calendar", ("event", "calendar", "holiday", "schedule")),
     ("orchestration", ("executor", "agent_run", "handoff", "offer", "claim", "dispatch", "tick")),
     ("workflow", ("workflow", "state", "transition")),
-    ("memory", ("memory", "note", "transcribe", "speech", "command")),
+    ("memory", ("memory",)),
+    (
+        "notes",
+        (
+            "note",
+            "part",
+            "transcribe",
+            "speech",
+            "distill",
+            "command",
+            "conversation",
+            "message",
+            "turn",
+        ),
+    ),
     ("billing", ("rate", "credit", "budget", "invoice", "usage", "meter")),
     ("email", ("email",)),
     ("taxonomy", ("tag", "client", "project")),
-    ("tasks", ("task", "comment", "dependency", "graph")),
+    ("tasks", ("task", "comment", "checklist", "item", "revision")),
 )
 
 # Lazily built once: name -> (meta, normalized embedding). The index is
@@ -237,8 +261,8 @@ async def search_tools(
     the entry point of the dynamic-toolset flow: search here, then call
     ``describe_tools`` for the schemas of the ones you want, then
     ``execute_tool`` to run them. ``domain`` optionally narrows to one
-    of: tasks, time, calendar, memory, orchestration, workflow,
-    taxonomy, billing, email, misc.
+    of: tasks, notes, navigation, time, calendar, memory, orchestration,
+    workflow, taxonomy, billing, email, misc.
     """
     cat = {m["name"]: m for m in _catalog()}
     names = [n for n, m in cat.items() if domain is None or m["domain"] == domain]
