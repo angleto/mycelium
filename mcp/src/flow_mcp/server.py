@@ -757,6 +757,44 @@ async def append_to_task_description(
 
 
 @mcp.tool()
+async def prepend_to_task_description(
+    token: str,
+    org_id: str,
+    task_id: str,
+    text: str,
+    separator: str = "\n\n",
+    expected_version: int | None = None,
+    dedupe_if_head_matches: bool = False,
+) -> dict[str, Any]:
+    """Prepend ``text`` to the FRONT of ``task.description`` without
+    first reading the body (task 5662a07f; mirror of
+    ``append_to_task_description``). Lets an LLM add a header / context
+    on top without round-tripping the existing description.
+
+    ``expected_version=None`` prepends onto the current state.
+    ``dedupe_if_head_matches=True`` no-ops when the body already starts
+    with ``text``. Returns ``{task_id, version, prepended_chars}``;
+    refuses with ``body.limit_exceeded`` past the body cap."""
+    async with _tenant(token, org_id) as (s, org, user):
+        new_version, prepended = await tasks.prepend_to_description(
+            s,
+            org_id=org,
+            actor_id=user,
+            task_id=uuid.UUID(task_id),
+            text=text,
+            separator=separator,
+            expected_version=expected_version,
+            dedupe_if_head_matches=dedupe_if_head_matches,
+            channel="mcp",
+        )
+        return {
+            "task_id": task_id,
+            "version": new_version,
+            "prepended_chars": prepended,
+        }
+
+
+@mcp.tool()
 async def update_task(
     token: str,
     org_id: str,
@@ -3325,6 +3363,40 @@ async def append_note_part(
             channel="mcp",
         )
         return {"part_id": part_id, "version": version, "appended_chars": appended}
+
+
+@mcp.tool()
+async def prepend_note_part(
+    token: str,
+    org_id: str,
+    part_id: str,
+    text: str,
+    expected_version: int | None = None,
+    operation_id: str | None = None,
+) -> dict[str, Any]:
+    """Prepend markdown ``text`` to the FRONT of a note part without
+    resending the body (task 5662a07f). Single-shot -- the natural shape
+    for a header / intro on top; for very large front-matter, append a
+    fresh part in chunks and reorder instead. Omit ``expected_version``
+    to prepend onto the current version (one extra read; NOT retry-safe).
+    A different-version writer racing the same part gets stale_version.
+    Returns ``{part_id, version, prepended_chars}``."""
+    async with _tenant(token, org_id) as (s, org, user):
+        eff_version = expected_version
+        if eff_version is None:
+            existing = await note_parts_svc.get_part(s, org_id=org, part_id=uuid.UUID(part_id))
+            eff_version = existing.version
+        version, prepended = await note_parts_svc.prepend_to_part(
+            s,
+            org_id=org,
+            actor_id=user,
+            part_id=uuid.UUID(part_id),
+            text=text,
+            expected_version=eff_version,
+            operation_id=operation_id,
+            channel="mcp",
+        )
+        return {"part_id": part_id, "version": version, "prepended_chars": prepended}
 
 
 @mcp.tool()

@@ -622,6 +622,71 @@ async def append_to_description(
     return new_version, len(text)
 
 
+async def prepend_to_description(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    task_id: uuid.UUID,
+    text: str,
+    separator: str = "\n\n",
+    expected_version: int | None = None,
+    dedupe_if_head_matches: bool = False,
+    channel: str = "api",
+) -> tuple[int, int]:
+    """Prepend ``text`` to the FRONT of ``task.description`` without
+    reading the body first (task 5662a07f; mirror of
+    ``append_to_description``). Returns ``(new_version, prepended_chars)``.
+
+    ``expected_version=None`` -> prepend onto the current version.
+    ``dedupe_if_head_matches=True`` -> no-op when the body already starts
+    with ``text``. ``BODY_LIMIT_EXCEEDED`` past the body cap.
+    """
+    from flow_core.config import get_settings as _get_settings
+    from flow_core.services.notes import _collapsed_concat as _concat
+
+    task = await get_task(session, org_id=org_id, task_id=task_id)
+    current = task.description or ""
+    if dedupe_if_head_matches and current and current.lstrip().startswith(text.lstrip()):
+        return task.version, 0
+    # Swap the concat order vs append: text goes BEFORE the current body.
+    new_value = _concat(text, separator, current)
+    max_bytes = _get_settings().note_body_max_bytes
+    if len(new_value.encode("utf-8")) > max_bytes:
+        raise DomainError(MessageCode.BODY_LIMIT_EXCEEDED, max_bytes=str(max_bytes))
+    eff_version = expected_version if expected_version is not None else task.version
+    new_version = await optimistic_update(
+        session,
+        Task,
+        pk=task_id,
+        expected_version=eff_version,
+        values={"description": new_value},
+    )
+    _task_search.mark_task_dirty(session, task_id)
+    await audit.log(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        entity="task",
+        entity_id=task_id,
+        action="description.prepend",
+        diff={"description_prepended_chars": str(len(text))},
+    )
+    await _log_task_revision(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        task_id=task_id,
+        version_from=eff_version,
+        version_to=new_version,
+        changed_fields=["description"],
+        channel=channel,
+        edit_session_id=None,
+        restored_from=None,
+    )
+    return new_version, len(text)
+
+
 def _coerce_task_restore_values(payload: dict[str, Any]) -> dict[str, Any]:
     """JSON snapshot values come back as strings (Decimal, date,
     datetime, UUID) per ``_json_safe`` in entity_revisions; coerce

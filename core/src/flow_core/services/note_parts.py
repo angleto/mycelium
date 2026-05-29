@@ -354,6 +354,70 @@ async def append_to_part(
     return new_version, len(chunk)
 
 
+async def prepend_to_part(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    part_id: uuid.UUID,
+    text: str,
+    expected_version: int,
+    operation_id: str | None = None,
+    channel: str = "api",
+) -> tuple[int, int]:
+    """Prepend ``text`` to the FRONT of a part's body without resending
+    the existing body (task 5662a07f: partial writes). Single-shot --
+    the natural shape for adding a header / intro on top; for very large
+    front-matter, chunk-append into a fresh part and reorder instead.
+
+    ``text`` is concatenated raw before the current body (no separator),
+    so the caller controls any trailing newline. Concurrency-safe via
+    ``expected_version`` (a mismatch raises ``stale_version``, no
+    last-write-wins). Returns ``(new_version, prepended_chars)``. Refuses
+    with ``body.limit_exceeded`` past ``FLOW_NOTE_BODY_MAX_BYTES``.
+    """
+    await require_role(session, org_id, actor_id, Role.member)
+    part = await _get_part(session, org_id=org_id, part_id=part_id)
+    body = part.body or ""
+    new_body = text + body
+    max_bytes = get_settings().note_body_max_bytes
+    if len(new_body.encode("utf-8")) > max_bytes:
+        raise DomainError(MessageCode.BODY_LIMIT_EXCEEDED, max_bytes=str(max_bytes))
+    new_version = await optimistic_update(
+        session,
+        NotePart,
+        pk=part_id,
+        expected_version=expected_version,
+        values={"body": new_body},
+    )
+    # Single-shot: seal the recovery revision now (unlike chunked append,
+    # which defers to is_last).
+    from flow_core.services.notes import _log_note_revision
+
+    note = await _get_note_in_org(session, org_id=org_id, note_id=part.note_id)
+    await _log_note_revision(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        note_id=part.note_id,
+        version_from=note.version,
+        version_to=note.version,
+        changed_fields=["parts.body"],
+        channel=channel,
+        edit_session_id=operation_id,
+    )
+    await audit.log(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        entity="note_part",
+        entity_id=part_id,
+        action="prepend",
+        diff={"prepended_chars": str(len(text))},
+    )
+    return new_version, len(text)
+
+
 async def delete_part(
     session: AsyncSession,
     *,

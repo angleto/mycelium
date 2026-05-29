@@ -40,6 +40,7 @@ from flow_api.schemas import (
     TaskChecklistReorderIn,
     TaskCreateIn,
     TaskDescriptionAppendIn,
+    TaskDescriptionPrependIn,
     TaskNoteCreateIn,
     TaskNoteLinkIn,
     TaskNoteLinksOut,
@@ -536,6 +537,28 @@ async def append_description(
         dedupe_if_tail_matches=body.dedupe_if_tail_matches,
     )
     return AppendOut(id=task_id, version=new_version, appended_chars=appended)
+
+
+@router.post("/{task_id}/description/prepend", response_model=AppendOut)
+async def prepend_description(
+    task_id: uuid.UUID,
+    body: TaskDescriptionPrependIn,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+) -> AppendOut:
+    """Task 5662a07f: context-blind prepend for ``task.description``
+    (mirror of /description/append). Adds text to the FRONT without
+    re-sending the body. ``appended_chars`` reports the prepended count."""
+    new_version, prepended = await svc.prepend_to_description(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        task_id=task_id,
+        text=body.text,
+        separator=body.separator,
+        expected_version=body.expected_version,
+        dedupe_if_head_matches=body.dedupe_if_head_matches,
+    )
+    return AppendOut(id=task_id, version=new_version, appended_chars=prepended)
 
 
 @router.post("/{task_id}/state", response_model=VersionOut)

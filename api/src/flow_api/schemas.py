@@ -1743,6 +1743,18 @@ class TaskDescriptionAppendIn(BaseModel):
     dedupe_if_tail_matches: bool = False
 
 
+class TaskDescriptionPrependIn(BaseModel):
+    """Body for POST /tasks/{id}/description/prepend (task 5662a07f):
+    prepend ``text`` to the FRONT of ``task.description``. Mirror of
+    TaskDescriptionAppendIn; ``dedupe_if_head_matches`` no-ops when the
+    body already starts with ``text``."""
+
+    text: str = Field(min_length=1)
+    separator: str = Field(default="\n\n", max_length=16)
+    expected_version: int | None = None
+    dedupe_if_head_matches: bool = False
+
+
 class AppendOut(BaseModel):
     """Response for the append endpoints. ``appended_chars`` is 0 when
     ``dedupe_if_tail_matches=True`` triggered a no-op."""
@@ -1767,6 +1779,18 @@ class NotePartAppendIn(BaseModel):
     expected_version: int
     chunk_index: int = Field(default=0, ge=0)
     is_last: bool = True
+    operation_id: str | None = None
+
+
+class NotePartPrependIn(BaseModel):
+    """Body for POST /notes/{id}/parts/{pid}/prepend (task 5662a07f):
+    prepend ``text`` to the FRONT of a part without resending the body.
+    Single-shot (the natural shape for a header / intro); concatenated
+    raw before the current body. ``expected_version`` is the optimistic
+    cursor."""
+
+    text: str = Field(min_length=1)
+    expected_version: int
     operation_id: str | None = None
 
 

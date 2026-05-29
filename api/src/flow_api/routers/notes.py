@@ -38,6 +38,7 @@ from flow_api.schemas import (
     NotePartCreateIn,
     NotePartOut,
     NotePartPatchIn,
+    NotePartPrependIn,
     NotePartReorderIn,
     NotePartUIStateIn,
     NotePatchIn,
@@ -634,6 +635,36 @@ async def append_note_part(
         channel=channel,
     )
     return AppendOut(id=part_id, version=v, appended_chars=appended)
+
+
+@router.post(
+    "/{note_id}/parts/{part_id}/prepend",
+    response_model=AppendOut,
+    tags=["garden"],
+)
+async def prepend_note_part(
+    note_id: uuid.UUID,
+    part_id: uuid.UUID,
+    body: NotePartPrependIn,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    edit_session_id: Annotated[str | None, Header(alias="X-Edit-Session-Id")] = None,
+) -> AppendOut:
+    """Prepend ``text`` to the front of a part's body without resending
+    it (task 5662a07f). Single-shot, concurrency-safe via
+    ``expected_version``. ``appended_chars`` in the response is the count
+    of prepended characters."""
+    channel = "web" if edit_session_id else "api"
+    v, prepended = await parts_svc.prepend_to_part(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        part_id=part_id,
+        text=body.text,
+        expected_version=body.expected_version,
+        operation_id=body.operation_id or edit_session_id,
+        channel=channel,
+    )
+    return AppendOut(id=part_id, version=v, appended_chars=prepended)
 
 
 @router.patch(

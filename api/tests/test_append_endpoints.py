@@ -194,3 +194,64 @@ async def test_task_description_append_concat_and_returns_version() -> None:
 
         got = (await c.get(f"/tasks/{task_id}", headers=h)).json()
         assert got["description"] == ("Repro: rare\n\nFollow-up: collected stacktraces.")
+
+
+async def test_task_description_prepend_puts_text_in_front() -> None:
+    """Prepend mirrors append but on the front: the new text precedes the
+    existing body, joined by the default separator (task 5662a07f)."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as c:
+        h = await _signup(c)
+        task_id = (
+            await c.post(
+                "/tasks",
+                headers=h,
+                json={"title": "Incident", "description": "Timeline so far."},
+            )
+        ).json()["id"]
+
+        r = await c.post(
+            f"/tasks/{task_id}/description/prepend",
+            headers=h,
+            json={"text": "TL;DR: db failover."},
+        )
+        assert r.status_code == 200, r.text
+        assert r.json()["appended_chars"] == len("TL;DR: db failover.")
+
+        got = (await c.get(f"/tasks/{task_id}", headers=h)).json()
+        assert got["description"] == "TL;DR: db failover.\n\nTimeline so far."
+
+
+async def test_note_part_prepend_puts_text_at_front_of_part() -> None:
+    """POST /notes/{id}/parts/{pid}/prepend adds text to the front of a
+    part body raw (no separator), concurrency-safe (task 5662a07f)."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as c:
+        h = await _signup(c)
+        note_id = (
+            await c.post("/notes", headers=h, json={"kind": "text", "title": "Doc"})
+        ).json()["id"]
+        part = (
+            await c.post(f"/notes/{note_id}/parts", headers=h, json={"body": "body text"})
+        ).json()
+        pid = part["id"]
+
+        r = await c.post(
+            f"/notes/{note_id}/parts/{pid}/prepend",
+            headers=h,
+            json={"text": "# Heading\n\n", "expected_version": part["version"]},
+        )
+        assert r.status_code == 200, r.text
+        assert r.json()["appended_chars"] == len("# Heading\n\n")
+
+        got = (await c.get(f"/notes/{note_id}", headers=h)).json()
+        body = next(p["body"] for p in got["parts"] if p["id"] == pid)
+        assert body == "# Heading\n\nbody text"
+
+        # Stale cursor -> stale_version (no last-write-wins).
+        stale = await c.post(
+            f"/notes/{note_id}/parts/{pid}/prepend",
+            headers=h,
+            json={"text": "x", "expected_version": part["version"]},
+        )
+        assert stale.status_code >= 400 and "stale_version" in stale.text
