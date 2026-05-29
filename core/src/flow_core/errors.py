@@ -41,3 +41,21 @@ class ForbiddenError(DomainError):
 class LockedError(DomainError):
     """Account temporarily locked (repeated failed logins): HTTP 423.
     Distinct from AuthError so clients can stop retrying (ADR-0024)."""
+
+
+def jsonable_params(params: dict[str, Any]) -> dict[str, Any]:
+    """Coerce ``DomainError.params`` to JSON-safe values so an adapter
+    can embed them in a structured error envelope without the serializer
+    choking on a UUID/Decimal/datetime. Lists/tuples and dicts are
+    coerced element-wise; anything else falls back to ``str()``."""
+
+    def _coerce(v: Any) -> Any:
+        if v is None or isinstance(v, (str, int, float, bool)):
+            return v
+        if isinstance(v, (list, tuple)):
+            return [_coerce(x) for x in v]
+        if isinstance(v, dict):
+            return {str(k): _coerce(x) for k, x in v.items()}
+        return str(v)
+
+    return {k: _coerce(v) for k, v in params.items()}

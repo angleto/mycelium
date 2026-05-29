@@ -3070,7 +3070,9 @@ async def get_note(
 ) -> dict[str, Any]:
     """Read one note. Includes the ordered ``parts[]`` (markdown blocks)
     so an LLM gets the structured body in one round-trip; when the note
-    has zero parts the field is an empty list. Set
+    has zero parts the field is an empty list. The ``transcript`` field
+    is a convenience aggregate derived by joining the part bodies (it is
+    not stored separately, so it always mirrors ``parts[]``). Set
     ``include_part_bodies=False`` to read a LARGE note as an outline
     (per-part id/ord/title/byte-length/head, no bodies and no derived
     transcript), then fetch only the parts you need with
@@ -3292,7 +3294,7 @@ async def append_note_part(
     async with _tenant(token, org_id) as (s, org, user):
         if part_id is None:
             if note_id is None:
-                raise DomainError(MessageCode.DOMAIN_ERROR)
+                raise DomainError(MessageCode.NOTE_PART_ANCHOR_REQUIRED)
             part = await note_parts_svc.create_part(
                 s,
                 org_id=org,
@@ -4252,9 +4254,13 @@ async def link_notes(
     child_note_id: str,
     kind: str,
 ) -> dict[str, Any]:
-    """Link two notes with a typed relation: ``atom_of`` (atomic child
-    of an index parent), ``references`` (citation backlink),
-    ``replies_to`` (threaded elaboration), ``supersedes``."""
+    """Link two notes with a typed relation. Kinds: atom_of, references, replies_to, supersedes.
+
+    ``atom_of`` = atomic child of an index parent; ``references`` =
+    citation backlink; ``replies_to`` = threaded elaboration;
+    ``supersedes`` = this note replaces the target. "Sibling" is not a
+    relation: link several notes as ``atom_of`` of one shared index note
+    to make them siblings (Zettelkasten)."""
     async with _tenant(token, org_id) as (s, org, user):
         link = await note_links_svc.link_notes(
             s,

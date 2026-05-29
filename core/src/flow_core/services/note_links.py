@@ -117,11 +117,15 @@ async def set_maturity(
     (``promoted_at IS NOT NULL``): a transplanted plant is read-only.
     """
     if maturity not in _VALID_MATURITY:
-        raise DomainError(MessageCode.DOMAIN_ERROR)
+        raise DomainError(
+            MessageCode.NOTE_MATURITY_INVALID,
+            maturity=maturity,
+            valid=", ".join(sorted(_VALID_MATURITY)),
+        )
     await require_role(session, org_id, actor_id, Role.member)
     note = await _get_note(session, org_id=org_id, note_id=note_id)
     if note.promoted_at is not None:
-        raise DomainError(MessageCode.DOMAIN_ERROR)
+        raise DomainError(MessageCode.NOTE_PROMOTED_READONLY)
     if note.maturity == maturity:
         return note
     prior = note.maturity
@@ -154,9 +158,13 @@ async def link_notes(
     kind: str,
 ) -> NoteNoteLink:
     if kind not in NOTE_NOTE_LINK_KINDS:
-        raise DomainError(MessageCode.DOMAIN_ERROR)
+        raise DomainError(
+            MessageCode.NOTE_LINK_KIND_INVALID,
+            kind=kind,
+            valid=", ".join(sorted(NOTE_NOTE_LINK_KINDS)),
+        )
     if parent_note_id == child_note_id:
-        raise DomainError(MessageCode.DOMAIN_ERROR)
+        raise DomainError(MessageCode.NOTE_LINK_SELF)
     await require_role(session, org_id, actor_id, Role.member)
     # Both notes must exist in this org (FK alone does not enforce
     # org match; defence in depth).
@@ -319,7 +327,11 @@ async def _link_note_task(
     kind: str,
 ) -> NoteTaskLink:
     if kind not in NOTE_TASK_LINK_KINDS:
-        raise DomainError(MessageCode.DOMAIN_ERROR)
+        raise DomainError(
+            MessageCode.NOTE_TASK_LINK_KIND_INVALID,
+            kind=kind,
+            valid=", ".join(sorted(NOTE_TASK_LINK_KINDS)),
+        )
     existing = (
         await session.execute(
             select(NoteTaskLink).where(
@@ -614,7 +626,7 @@ async def list_note_task_links(
     """One of ``note_id`` / ``task_id`` must be set. Returns the
     typed links touching that anchor."""
     if note_id is None and task_id is None:
-        raise DomainError(MessageCode.DOMAIN_ERROR)
+        raise DomainError(MessageCode.NOTE_TASK_LINK_ANCHOR_REQUIRED)
     stmt = select(NoteTaskLink).where(NoteTaskLink.org_id == org_id)
     if note_id is not None:
         stmt = stmt.where(NoteTaskLink.note_id == note_id)
@@ -639,7 +651,11 @@ async def unlink_note_task(
     way to mark a note transplanted, and unlinking it would orphan the
     ``promoted_at`` timestamp)."""
     if kind not in NOTE_TASK_LINK_KINDS:
-        raise DomainError(MessageCode.DOMAIN_ERROR)
+        raise DomainError(
+            MessageCode.NOTE_TASK_LINK_KIND_INVALID,
+            kind=kind,
+            valid=", ".join(sorted(NOTE_TASK_LINK_KINDS)),
+        )
     await require_role(session, org_id, actor_id, Role.member)
     row = (
         await session.execute(
@@ -656,7 +672,7 @@ async def unlink_note_task(
     if kind == "promoted_from":
         # The promotion side-effect (note.promoted_at) is set in
         # ``promote_note_to_task`` and there is no symmetric unmake.
-        raise DomainError(MessageCode.DOMAIN_ERROR)
+        raise DomainError(MessageCode.NOTE_TASK_LINK_PROMOTED_IMMUTABLE)
     await session.delete(row)
     await session.flush()
     await audit.log(
@@ -734,7 +750,7 @@ async def promote_note_to_task(
     await require_role(session, org_id, actor_id, Role.member)
     note = await _get_note(session, org_id=org_id, note_id=note_id)
     if note.promoted_at is not None:
-        raise DomainError(MessageCode.DOMAIN_ERROR)
+        raise DomainError(MessageCode.NOTE_PROMOTED_READONLY)
     chosen_title = (title or note.title or "").strip()
     # Phase 6 final: read the body from note_part(ord=0)+ rather than
     # the dropped ``transcript`` column. ``get_body`` joins every

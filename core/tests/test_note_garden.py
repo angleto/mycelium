@@ -26,6 +26,7 @@ from sqlalchemy import select, text
 
 from flow_core.db import admin_session, tenant_session
 from flow_core.errors import DomainError, NotFoundError
+from flow_core.i18n import MessageCode
 from flow_core.models.note import Note, NoteKind, NoteMaturity
 from flow_core.models.note_link import NoteNoteLink, NoteTaskLink
 from flow_core.services import note_links
@@ -88,10 +89,14 @@ async def test_set_maturity_rejects_invalid_value() -> None:
     org, user = await _make_workspace()
     async with tenant_session(str(org), str(user)) as s:
         n = await _make_note(s, org, user)
-        with pytest.raises((DomainError, NotFoundError)):
+        with pytest.raises(DomainError) as ei:
             await note_links.set_maturity(
                 s, org_id=org, actor_id=user, note_id=n.id, maturity="rotten"
             )
+        # Specific code (not the opaque catch-all) and the message names
+        # the valid maturities so the caller can self-correct.
+        assert ei.value.code == MessageCode.NOTE_MATURITY_INVALID
+        assert "growing" in ei.value.params["valid"]
 
 
 # ---------------------------------------------------------------------------
@@ -204,7 +209,7 @@ async def test_link_notes_rejects_self_link_and_unknown_kind() -> None:
     org, user = await _make_workspace()
     async with tenant_session(str(org), str(user)) as s:
         n = await _make_note(s, org, user)
-        with pytest.raises((DomainError, NotFoundError)):
+        with pytest.raises(DomainError) as self_err:
             await note_links.link_notes(
                 s,
                 org_id=org,
@@ -213,8 +218,9 @@ async def test_link_notes_rejects_self_link_and_unknown_kind() -> None:
                 child_note_id=n.id,
                 kind="references",
             )
+        assert self_err.value.code == MessageCode.NOTE_LINK_SELF
         other = await _make_note(s, org, user, "other")
-        with pytest.raises((DomainError, NotFoundError)):
+        with pytest.raises(DomainError) as kind_err:
             await note_links.link_notes(
                 s,
                 org_id=org,
@@ -223,6 +229,10 @@ async def test_link_notes_rejects_self_link_and_unknown_kind() -> None:
                 child_note_id=other.id,
                 kind="unknown_kind",
             )
+        # The kind error names the valid kinds (closes the report's P3:
+        # the client guessed sibling/see_also/derives_from blindly).
+        assert kind_err.value.code == MessageCode.NOTE_LINK_KIND_INVALID
+        assert "atom_of" in kind_err.value.params["valid"]
 
 
 # ---------------------------------------------------------------------------

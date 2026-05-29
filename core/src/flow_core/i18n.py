@@ -150,6 +150,16 @@ class MessageCode(enum.StrEnum):
     AGENT_TOKEN_INVALID = "agent_token.invalid"  # noqa: S105 (message code, not a secret)
     AI_ASSISTANT_NOT_FOUND = "ai_assistant.not_found"
     AI_ASSISTANT_INVALID_SCOPE = "ai_assistant.invalid_scope"
+    NOTE_MATURITY_INVALID = "note.maturity_invalid"
+    NOTE_PROMOTED_READONLY = "note.promoted_readonly"
+    NOTE_LINK_KIND_INVALID = "note.link.kind_invalid"
+    NOTE_LINK_SELF = "note.link.self"
+    NOTE_TASK_LINK_KIND_INVALID = "note.task_link.kind_invalid"
+    NOTE_TASK_LINK_ANCHOR_REQUIRED = "note.task_link.anchor_required"
+    NOTE_TASK_LINK_PROMOTED_IMMUTABLE = "note.task_link.promoted_immutable"
+    NOTE_PART_ANCHOR_REQUIRED = "note.part.anchor_required"
+    IDENTITY_HANDLE_REQUIRED = "identity.handle_required"
+    IDENTITY_NOT_FOUND = "identity.not_found"
     DOMAIN_ERROR = "domain.error"
 
 
@@ -373,6 +383,26 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
         MessageCode.AI_ASSISTANT_NOT_FOUND: "AI assistant not found",
         MessageCode.AI_ASSISTANT_INVALID_SCOPE: ("Unknown scope key: {key}"),
         MessageCode.AGENT_TOKEN_INVALID: "Invalid or revoked agent token",
+        MessageCode.NOTE_MATURITY_INVALID: "Invalid maturity '{maturity}'. Allowed: {valid}.",
+        MessageCode.NOTE_PROMOTED_READONLY: (
+            "This note was transplanted to a task and is read-only."
+        ),
+        MessageCode.NOTE_LINK_KIND_INVALID: "Invalid note link kind '{kind}'. Allowed: {valid}.",
+        MessageCode.NOTE_LINK_SELF: "A note cannot be linked to itself.",
+        MessageCode.NOTE_TASK_LINK_KIND_INVALID: (
+            "Invalid note-task link kind '{kind}'. Allowed: {valid}."
+        ),
+        MessageCode.NOTE_TASK_LINK_ANCHOR_REQUIRED: "Provide one of note_id or task_id.",
+        MessageCode.NOTE_TASK_LINK_PROMOTED_IMMUTABLE: (
+            "A promoted_from link cannot be removed; promotion has no inverse."
+        ),
+        MessageCode.NOTE_PART_ANCHOR_REQUIRED: (
+            "Provide note_id to create a new part, or part_id to append to an existing one."
+        ),
+        MessageCode.IDENTITY_HANDLE_REQUIRED: (
+            "Cannot create an identity for a {kind} without a handle."
+        ),
+        MessageCode.IDENTITY_NOT_FOUND: "Identity not found",
         MessageCode.DOMAIN_ERROR: "Domain error",
     },
 }

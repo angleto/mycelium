@@ -45,7 +45,7 @@ async def ensure_for_user(
     if user is None:
         raise NotFoundError(MessageCode.USER_NOT_FOUND)
     if not user.handle:
-        raise DomainError(MessageCode.DOMAIN_ERROR)
+        raise DomainError(MessageCode.IDENTITY_HANDLE_REQUIRED, kind="user")
 
     existing = (
         await session.execute(
@@ -101,9 +101,9 @@ async def ensure_for_ai_assistant(
         )
     ).scalar_one_or_none()
     if assistant is None:
-        raise NotFoundError(MessageCode.DOMAIN_ERROR)
+        raise NotFoundError(MessageCode.AI_ASSISTANT_NOT_FOUND)
     if not assistant.handle:
-        raise DomainError(MessageCode.DOMAIN_ERROR)
+        raise DomainError(MessageCode.IDENTITY_HANDLE_REQUIRED, kind="ai_assistant")
 
     existing = (
         await session.execute(
@@ -209,5 +209,5 @@ async def get_identity(
         )
     ).scalar_one_or_none()
     if row is None:
-        raise NotFoundError(MessageCode.DOMAIN_ERROR)
+        raise NotFoundError(MessageCode.IDENTITY_NOT_FOUND)
     return row

@@ -27,6 +27,7 @@ no auth args (the HTTP bearer still gates every request).
 from __future__ import annotations
 
 import asyncio
+import inspect
 import math
 from typing import Any
 
@@ -34,6 +35,7 @@ from mcp.server.fastmcp import FastMCP
 
 from flow_core import __version__
 from flow_core.embedder import embed_batch, embedder_available, get_embedder
+from flow_core.errors import DomainError, jsonable_params
 from flow_mcp.server import mcp as _registry
 
 gateway: FastMCP = FastMCP("flow")
@@ -320,9 +322,21 @@ async def describe_tools(names: list[str], minimal: bool = True) -> list[dict[st
 async def execute_tool(name: str, arguments: dict[str, Any] | None = None) -> Any:
     """Run a concrete Flow tool by name with ``arguments`` (the schema
     from ``describe_tools``, minus the auth args). token/org_id are
-    injected from the authenticated principal, so omit them. Unknown
-    names return a structured error; tool-level errors propagate
-    unchanged so the caller sees the real domain/validation message."""
+    injected from the authenticated principal, so omit them.
+
+    Failures come back as a structured ``{"error": {...}}`` envelope, not
+    an opaque string, so the caller can branch on a code instead of
+    pattern-matching prose:
+
+    - unknown tool name -> ``{"error": "unknown tool: ...; call search_tools first"}``
+    - wrong/missing/extra arguments -> ``{"error": {"code": "invalid_arguments",
+      "detail", "tool", "hint"}}`` pointing back at ``describe_tools`` for
+      the schema (args are validated against the signature *before* the
+      tool runs, so a typo never surfaces as a raw Python ``TypeError``)
+    - a domain/validation failure -> ``{"error": {"code", "detail", "params"}}``
+      mirroring the HTTP adapter's envelope: ``code`` is the stable
+      ``MessageCode`` (e.g. ``note.link.kind_invalid``) and ``params``
+      carries the constraint context (valid values, limits)."""
     tool = _registry._tool_manager.get_tool(name)
     if tool is None:
         return {"error": f"unknown tool: {name}; call search_tools first"}
@@ -331,10 +345,40 @@ async def execute_tool(name: str, arguments: dict[str, Any] | None = None) -> An
     for p in _AUTH_PARAMS:
         if p in props:
             args.setdefault(p, "")
-    result = tool.fn(**args)
-    if tool.is_async:
-        result = await result
-    return result
+    # Validate the call shape against the real signature BEFORE running:
+    # a wrong/missing/extra argument otherwise leaks as a raw Python
+    # ``TypeError`` from ``fn(**args)``. Point the caller at describe_tools
+    # (the schema), not at search_tools (names only). ``signature`` can
+    # fail on exotic callables -> skip the precheck rather than block.
+    try:
+        sig: inspect.Signature | None = inspect.signature(tool.fn)
+    except (TypeError, ValueError):
+        sig = None
+    if sig is not None:
+        try:
+            sig.bind(**args)
+        except TypeError as exc:
+            return {
+                "error": {
+                    "code": "invalid_arguments",
+                    "detail": str(exc),
+                    "tool": name,
+                    "hint": f"call describe_tools(['{name}']) for the input schema",
+                }
+            }
+    try:
+        result = tool.fn(**args)
+        if tool.is_async:
+            result = await result
+        return result
+    except DomainError as exc:
+        return {
+            "error": {
+                "code": exc.code.value,
+                "detail": str(exc),
+                "params": jsonable_params(exc.params),
+            }
+        }
 
 
 __all__ = ["describe_tools", "execute_tool", "gateway", "ping", "prewarm", "search_tools"]

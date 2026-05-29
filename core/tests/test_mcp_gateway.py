@@ -115,6 +115,37 @@ async def test_execute_unknown_tool_is_soft_error() -> None:
     assert "error" in res
 
 
+async def test_execute_bad_arguments_point_to_describe_tools() -> None:
+    # A wrong/missing/extra argument must come back as a structured
+    # invalid_arguments error pointing at describe_tools (the schema),
+    # not as a raw Python TypeError leaked from fn(**args). Validated
+    # before the tool runs, so it needs no principal/DB.
+    res = await execute_tool(name="create_tag", arguments={"bogus": 1})
+    assert isinstance(res, dict) and isinstance(res.get("error"), dict)
+    assert res["error"]["code"] == "invalid_arguments"
+    assert "describe_tools" in res["error"]["hint"]
+
+
+async def test_execute_domain_error_is_structured_with_code_and_params() -> None:
+    # A domain/validation failure surfaces {code, detail, params} so the
+    # caller can branch on the stable code and read the valid values,
+    # instead of pattern-matching an opaque "Domain error" string
+    # (the report's P4 keystone).
+    user_id, org_id = await _signup_principal()
+    tok = _PRINCIPAL.set((user_id, org_id, None))
+    try:
+        a = await execute_tool(name="create_note", arguments={"kind": "text", "text": "a"})
+        b = await execute_tool(name="create_note", arguments={"kind": "text", "text": "b"})
+        res = await execute_tool(
+            name="link_notes",
+            arguments={"parent_note_id": a["id"], "child_note_id": b["id"], "kind": "sibling"},
+        )
+        assert res["error"]["code"] == "note.link.kind_invalid"
+        assert "atom_of" in res["error"]["params"]["valid"]
+    finally:
+        _PRINCIPAL.reset(tok)
+
+
 async def test_http_app_builds_and_serves_the_gateway() -> None:
     # Guards the wiring: the HTTP transport must serve the 3-meta-tool
     # gateway, not regress to the full registry.
