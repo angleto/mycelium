@@ -3519,6 +3519,19 @@ button.btn--danger:hover {
   background: var(--surface);
   color: var(--accent);
 }
+/* Level-of-detail: zoomed far out, chips collapse to just their
+   maturity glyph so the overview reads as a field of plants ("the
+   forest from above") rather than a smudge of unreadable text. Driven
+   by a single data-lod attribute flipped on a zoom-threshold crossing;
+   pure CSS, no per-node React work. */
+.garden__mindmap-canvas[data-lod='far'] .mm-node__title,
+.garden__mindmap-canvas[data-lod='far'] .mm-node__tags,
+.garden__mindmap-canvas[data-lod='far'] .mm-node__centrality {
+  display: none;
+}
+.garden__mindmap-canvas[data-lod='far'] .mm-node {
+  padding: 0.3rem 0.4rem;
+}
 
 .mm-node {
   position: relative;
@@ -3547,6 +3560,31 @@ button.btn--danger:hover {
 .mm-node--highlighted {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 30%, transparent);
+}
+/* Focus+context: hovering or pinning a node lights it and its direct
+   neighbours and recedes the rest, so a single node's links read out
+   of the field. Declared after --dimmed so the stronger focus fade
+   wins when a faded node is also maturity-dimmed. The .mm-node
+   transition (border/opacity) already animates the change. */
+.mm-node--neighbor {
+  opacity: 1;
+}
+.mm-node--faded {
+  opacity: 0.2;
+  filter: grayscale(0.4);
+}
+.mm-node--focus {
+  border-color: var(--moss);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--moss) 35%, transparent);
+  z-index: 5;
+}
+/* Edge opacity for focus/fade is written inline by the displayEdges
+   overlay onto the <path> (inline style beats CSS there); React Flow
+   puts the mm-edge--* class on the wrapper <g>, so the transition has
+   to target the inner path or it never fires. */
+.react-flow__edge.mm-edge--faded .react-flow__edge-path,
+.react-flow__edge.mm-edge--focus .react-flow__edge-path {
+  transition: opacity 140ms ease;
 }
 .mm-node__glyph {
   font-size: 1.05rem;

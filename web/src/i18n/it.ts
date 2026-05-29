@@ -715,6 +715,10 @@ export const it: Catalog = {
       tagEdges: 'Mostra collegamenti per tag in comune',
       showCentrality: 'Mostra centralità',
       showEdgeWeights: 'Mostra peso archi',
+      replant: 'Ridisponi',
+      replantHint: 'Ricalcola la disposizione e riquadra la vista',
+      replantConfirm:
+        'Ricalcolare la disposizione da zero? Le posizioni spostate a mano in questa vista andranno perse.',
       centralityLegend: 'PageRank',
       walkMode: 'Modalità walk',
       walkFocused: 'Focused (PPR)',
