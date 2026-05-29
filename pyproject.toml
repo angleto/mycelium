@@ -21,6 +21,14 @@ dev = [
     "httpx>=0.27",
     "anyio>=4",
     "respx>=0.21",
+    # Graph clustering (Leiden) is the garden mindmap's real "glades"
+    # source (ADR-0040 / ADR-0031). Production opts in via flow-core's
+    # ``clustering`` extra (heavy C deps, graceful degrade when absent),
+    # but dev and CI install it by default here so the mindmap renders
+    # real communities and the cluster tests exercise the live Leiden
+    # path instead of the tag-glade fallback.
+    "python-igraph>=0.11",
+    "leidenalg>=0.10",
 ]
 
 [tool.ruff]
