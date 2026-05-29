@@ -7,6 +7,17 @@ import type { AnnotationAnchor } from './annotationDecorations'
 export type Annotation = components['schemas']['AnnotationOut']
 export type DocKind = 'note_part' | 'task_description'
 
+/** One-shot form prefill produced by an editor-selection action and
+ * consumed by AnnotationsPanel. ``nonce`` re-triggers the panel effect
+ * on repeated selections of the same text. */
+export interface AnnotationPrefill {
+  mode: 'comment' | 'suggest'
+  quote: string
+  prefix: string
+  suffix: string
+  nonce: number
+}
+
 /** Single source of truth for a markdown document's annotations: the
  * panel and the inline editor decorations share one fetch + reload, so
  * a mutation in the panel (resolve/accept/edit) refreshes the inline

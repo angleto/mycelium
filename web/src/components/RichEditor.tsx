@@ -350,6 +350,8 @@ export function RichEditor({
   imageUploadParent,
   filename,
   annotations,
+  onCommentSelection,
+  onSuggestSelection,
 }: {
   value: string
   onChange: (v: string) => void
@@ -364,6 +366,12 @@ export function RichEditor({
   // Inline annotation anchors (comments + suggestions) rendered as
   // decorations over the live prose. Purely presentational.
   annotations?: AnnotationAnchor[]
+  // Selection-driven authoring: when provided, the toolbar shows
+  // "Comment" / "Suggest edit" actions that hand the current selection
+  // (text + W3C prefix/suffix context) to the host to prefill the
+  // annotation form.
+  onCommentSelection?: (sel: { text: string; prefix: string; suffix: string }) => void
+  onSuggestSelection?: (sel: { text: string; prefix: string; suffix: string }) => void
 }) {
   const { t } = useTranslation()
   // Drop to a plain markdown textarea (paste long blocks, fix a bad
@@ -603,6 +611,20 @@ export function RichEditor({
   }, [value, editor])
 
   const fmt = !rawMode && editor != null
+
+  const hasSelection = editor != null && !editor.state.selection.empty
+  // Current selection as text + W3C-style prefix/suffix (the chars
+  // around it within the same block) for robust annotation anchoring.
+  const selectionContext = (): { text: string; prefix: string; suffix: string } | null => {
+    if (!editor) return null
+    const { from, to } = editor.state.selection
+    const doc = editor.state.doc
+    return {
+      text: doc.textBetween(from, to, ' '),
+      prefix: doc.textBetween(doc.resolve(from).start(), from, ' ').slice(-24),
+      suffix: doc.textBetween(to, doc.resolve(to).end(), ' ').slice(0, 24),
+    }
+  }
   const tb = (
     label: string,
     titleKey: string,
@@ -726,6 +748,34 @@ export function RichEditor({
             editor?.chain().focus().redo().run())}
         </span>
         <span className="rte__actions">
+          {onCommentSelection && (
+            <button
+              type="button"
+              className="btn--ghost btn--sm"
+              disabled={!fmt}
+              title={t('annotations.comment', { defaultValue: 'Comment' })}
+              onClick={() => {
+                const c = selectionContext()
+                if (c) onCommentSelection(c)
+              }}
+            >
+              💬
+            </button>
+          )}
+          {onSuggestSelection && (
+            <button
+              type="button"
+              className="btn--ghost btn--sm"
+              disabled={!fmt || !hasSelection}
+              title={t('annotations.suggestToggle', { defaultValue: 'Suggest an edit' })}
+              onClick={() => {
+                const c = selectionContext()
+                if (c && c.text) onSuggestSelection(c)
+              }}
+            >
+              ✎
+            </button>
+          )}
           <button
             type="button"
             className="btn--ghost btn--sm"

@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
-import { toAnchors, useAnnotations } from '../lib/useAnnotations'
+import { toAnchors, useAnnotations, type AnnotationPrefill } from '../lib/useAnnotations'
 import { AnnotationsPanel } from './AnnotationsPanel'
 import { RichEditor } from './RichEditor'
 
@@ -33,6 +33,7 @@ export function PartAnnotated({
   const { t } = useTranslation()
   const { rows, reload, error } = useAnnotations('note_part', partId)
   const [open, setOpen] = useState(false)
+  const [prefill, setPrefill] = useState<AnnotationPrefill | null>(null)
   const anchors = useMemo(() => toAnchors(rows), [rows])
 
   return (
@@ -43,6 +44,26 @@ export function PartAnnotated({
         placeholder={placeholder}
         filename={filename}
         annotations={anchors}
+        onCommentSelection={(s) => {
+          setOpen(true)
+          setPrefill({
+            mode: 'comment',
+            quote: s.text,
+            prefix: s.prefix,
+            suffix: s.suffix,
+            nonce: Date.now(),
+          })
+        }}
+        onSuggestSelection={(s) => {
+          setOpen(true)
+          setPrefill({
+            mode: 'suggest',
+            quote: s.text,
+            prefix: s.prefix,
+            suffix: s.suffix,
+            nonce: Date.now(),
+          })
+        }}
       />
       <div className="parts-editor__comments">
         <button
@@ -61,6 +82,7 @@ export function PartAnnotated({
             reload={reload}
             loadError={error}
             onDocMutated={onDocMutated}
+            prefill={prefill ?? undefined}
           />
         )}
       </div>

@@ -1,8 +1,8 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { authFetch, errMessage } from '../api/client'
-import type { Annotation, DocKind } from '../lib/useAnnotations'
+import type { Annotation, AnnotationPrefill, DocKind } from '../lib/useAnnotations'
 
 // The inline annotation layer (comments + suggestions) for a single
 // markdown document, addressed by the generic (docKind, docId) handle.
@@ -22,6 +22,9 @@ interface Props {
   /** Called after a mutation that changes the document body (accepting a
    * suggestion) so the host can refetch the prose. */
   onDocMutated?: () => void | Promise<void>
+  /** One-shot prefill from an editor selection (the Comment / Suggest
+   * edit toolbar actions): opens + fills the matching form. */
+  prefill?: AnnotationPrefill
   /** Heading; e.g. "Work diary" for a task description. */
   title?: string
   /** Whether the suggestion composer is offered (only where the document
@@ -40,6 +43,7 @@ export function AnnotationsPanel({
   reload,
   loadError,
   onDocMutated,
+  prefill,
   title,
   allowSuggest = true,
 }: Props) {
@@ -58,6 +62,25 @@ export function AnnotationsPanel({
   const [replyBody, setReplyBody] = useState('')
   const [editId, setEditId] = useState<string | null>(null)
   const [editBody, setEditBody] = useState('')
+  // Carried from an editor-selection prefill onto the next create.
+  const [anchorPrefix, setAnchorPrefix] = useState('')
+  const [anchorSuffix, setAnchorSuffix] = useState('')
+
+  // Prefill + open the matching form when the host hands us an editor
+  // selection (the Comment / Suggest edit toolbar actions).
+  useEffect(() => {
+    if (!prefill) return
+    // Deriving form state from a one-shot prop trigger; intentional.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setAnchorPrefix(prefill.prefix)
+    setAnchorSuffix(prefill.suffix)
+    if (prefill.mode === 'suggest') {
+      setShowSuggest(true)
+      setSugOrig(prefill.quote)
+    } else {
+      setQuote(prefill.quote)
+    }
+  }, [prefill])
 
   const send = useCallback(
     async (
@@ -87,10 +110,14 @@ export function AnnotationsPanel({
       doc_id: docId,
       body,
       anchor_quote: quote || null,
+      anchor_prefix: anchorPrefix || null,
+      anchor_suffix: anchorSuffix || null,
     })
     if (ok) {
       setBody('')
       setQuote('')
+      setAnchorPrefix('')
+      setAnchorSuffix('')
       await reload()
     }
   }
@@ -103,11 +130,15 @@ export function AnnotationsPanel({
       original_text: sugOrig,
       proposed_text: sugProp,
       rationale: sugWhy,
+      anchor_prefix: anchorPrefix || null,
+      anchor_suffix: anchorSuffix || null,
     })
     if (ok) {
       setSugOrig('')
       setSugProp('')
       setSugWhy('')
+      setAnchorPrefix('')
+      setAnchorSuffix('')
       setShowSuggest(false)
       await reload()
     }
