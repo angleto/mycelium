@@ -5,7 +5,7 @@ from __future__ import annotations
 import datetime
 import uuid
 from decimal import Decimal
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -973,6 +973,79 @@ class GardenLinkSuggestion(BaseModel):
 class GardenLinkSuggestionsOut(BaseModel):
     source_note_id: uuid.UUID
     suggestions: list[GardenLinkSuggestion]
+
+
+# --- garden_classify proposal engine (ADR-0032) ----------------------
+# classify is read-only: it proposes {tags, links, maturity, cluster}
+# each with a confidence + rationale; ``signals_used`` names the signals
+# that fired (transparency). ``apply`` is the mutating, reversible
+# counterpart that records a classification_feedback event (ADR-0037).
+
+
+class GardenTagSuggestionOut(BaseModel):
+    tag_id: uuid.UUID
+    confidence: float
+    rationale: str
+
+
+class GardenLinkCandidateOut(BaseModel):
+    target_id: uuid.UUID
+    link_kind: str
+    confidence: float
+    rationale: str
+
+
+class GardenMaturitySuggestionOut(BaseModel):
+    value: str  # "mature" in v1 (the value axis only proposes upward)
+    confidence: float
+    rationale: str
+    auto_apply: bool
+
+
+class GardenClusterSuggestionOut(BaseModel):
+    leiden_id: int | None
+    modularity: float | None
+    confidence: float
+
+
+class GardenClassifyOut(BaseModel):
+    """Response of GET /garden/classify/{node_id} (ADR-0032). A block is
+    null/empty when its signal was not requested or produced nothing;
+    ``signals_used`` names the signals that actually fired (and records
+    ``leiden_extra_absent`` when clustering degraded gracefully)."""
+
+    node_id: uuid.UUID
+    node_kind: str
+    tags: list[GardenTagSuggestionOut]
+    links: list[GardenLinkCandidateOut]
+    maturity: GardenMaturitySuggestionOut | None
+    cluster: GardenClusterSuggestionOut | None
+    signals_used: list[str]
+    model_version: str
+    generated_at: datetime.datetime
+
+
+class GardenApplyIn(BaseModel):
+    """Apply (or decline) one suggestion. ``accept``/``override`` mutate
+    via the existing services; ``reject``/``ignore`` only record the
+    decision. ``auto`` is reserved for the worker and is not accepted on
+    this surface (a client cannot forge a system promotion)."""
+
+    node_id: uuid.UUID
+    suggestion_type: Literal["tag", "link", "maturity", "cluster"]
+    suggestion_value: dict[str, Any]
+    action: Literal["accept", "reject", "override", "ignore"]
+    override_value: dict[str, Any] | None = None
+    model_version: str | None = None
+    signals_snapshot: dict[str, Any] | None = None
+
+
+class GardenApplyOut(BaseModel):
+    feedback_id: uuid.UUID
+    node_id: uuid.UUID
+    suggestion_type: str
+    action: str
+    applied: bool  # True when the action mutated (accept / override)
 
 
 # --- F3: calendars, events, schedule (FR-4, docs/adr/0004, 0008) ---

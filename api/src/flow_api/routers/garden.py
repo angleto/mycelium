@@ -28,14 +28,22 @@ from fastapi import APIRouter, Depends, Query
 
 from flow_api.deps import TenantCtx, tenant_ctx
 from flow_api.schemas import (
+    GardenApplyIn,
+    GardenApplyOut,
+    GardenClassifyOut,
     GardenClustersOut,
+    GardenClusterSuggestionOut,
     GardenGraphEdge,
     GardenGraphOut,
+    GardenLinkCandidateOut,
     GardenLinkSuggestion,
     GardenLinkSuggestionsOut,
+    GardenMaturitySuggestionOut,
+    GardenTagSuggestionOut,
     GardenWalkOut,
     GardenWalkStep,
 )
+from flow_core.services import garden_classify as classify_svc
 from flow_core.services import graph as svc
 from flow_core.services import link_prediction as linkpred_svc
 
@@ -89,6 +97,100 @@ async def garden_clusters(
         clusters=res.clusters,
         modularity=res.modularity,
         count=len(set(res.clusters.values())),
+    )
+
+
+@router.get("/classify/{node_id}", response_model=GardenClassifyOut)
+async def garden_classify(
+    node_id: uuid.UUID,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    kinds: Annotated[
+        str | None,
+        Query(description="CSV subset of tags,links,maturity,cluster (default: all)"),
+    ] = None,
+) -> GardenClassifyOut:
+    """The proposal engine (ADR-0032): a structured enrichment proposal
+    ``{tags, links, maturity, cluster}`` for a note, each with confidence
+    + rationale, plus ``signals_used`` for transparency. **Read-only** —
+    nothing is mutated; the user (or an agent) applies a suggestion via
+    ``POST /garden/apply``. v1 classifies notes (404 otherwise). Unknown
+    ``kinds`` tokens are dropped; an all-unknown set falls back to all."""
+    wanted: frozenset[str] | None = None
+    if kinds is not None:
+        requested = {k.strip() for k in kinds.split(",") if k.strip()}
+        wanted = frozenset(requested & classify_svc.ALL_KINDS) or classify_svc.ALL_KINDS
+    res = await classify_svc.classify_node(
+        ctx.session, org_id=ctx.org_id, node_id=node_id, kinds=wanted
+    )
+    return GardenClassifyOut(
+        node_id=res.node_id,
+        node_kind=res.node_kind,
+        tags=[
+            GardenTagSuggestionOut(tag_id=t.tag_id, confidence=t.confidence, rationale=t.rationale)
+            for t in res.tags
+        ],
+        links=[
+            GardenLinkCandidateOut(
+                target_id=lc.target_id,
+                link_kind=lc.link_kind,
+                confidence=lc.confidence,
+                rationale=lc.rationale,
+            )
+            for lc in res.links
+        ],
+        maturity=(
+            GardenMaturitySuggestionOut(
+                value=res.maturity.value,
+                confidence=res.maturity.confidence,
+                rationale=res.maturity.rationale,
+                auto_apply=res.maturity.auto_apply,
+            )
+            if res.maturity is not None
+            else None
+        ),
+        cluster=(
+            GardenClusterSuggestionOut(
+                leiden_id=res.cluster.leiden_id,
+                modularity=res.cluster.modularity,
+                confidence=res.cluster.confidence,
+            )
+            if res.cluster is not None
+            else None
+        ),
+        signals_used=res.signals_used,
+        model_version=res.model_version,
+        generated_at=res.generated_at,
+    )
+
+
+@router.post("/apply", response_model=GardenApplyOut)
+async def garden_apply(
+    body: GardenApplyIn,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+) -> GardenApplyOut:
+    """Apply or decline a ``garden_classify`` suggestion (ADR-0032 /
+    ADR-0037). ``accept``/``override`` perform the mutation via the
+    existing idempotent services; ``reject``/``ignore`` mutate nothing.
+    Either way an append-only ``classification_feedback`` event is
+    written — the audit trail behind the learning loop and rollback."""
+    feedback = await classify_svc.apply_suggestion(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        node_id=body.node_id,
+        suggestion_type=body.suggestion_type,
+        suggestion_value=body.suggestion_value,
+        action=body.action,
+        override_value=body.override_value,
+        model_version=body.model_version or classify_svc.MODEL_VERSION,
+        signals_snapshot=body.signals_snapshot,
+    )
+    return GardenApplyOut(
+        feedback_id=feedback.id,
+        node_id=body.node_id,
+        suggestion_type=body.suggestion_type,
+        action=body.action,
+        applied=body.action in ("accept", "override"),
     )
 
 

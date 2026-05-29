@@ -737,6 +737,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/tasks/{task_id}/description/prepend": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Prepend Description
+         * @description Task 5662a07f: context-blind prepend for ``task.description``
+         *     (mirror of /description/append). Adds text to the FRONT without
+         *     re-sending the body. ``appended_chars`` reports the prepended count.
+         */
+        post: operations["prepend_description_tasks__task_id__description_prepend_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/tasks/{task_id}/state": {
         parameters: {
             query?: never;
@@ -3192,6 +3214,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/notes/{note_id}/parts/{part_id}/prepend": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Prepend Note Part
+         * @description Prepend ``text`` to the front of a part's body without resending
+         *     it (task 5662a07f). Single-shot, concurrency-safe via
+         *     ``expected_version``. ``appended_chars`` in the response is the count
+         *     of prepended characters.
+         */
+        post: operations["prepend_note_part_notes__note_id__parts__part_id__prepend_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/notes/{note_id}/parts/{part_id}": {
         parameters: {
             query?: never;
@@ -3763,6 +3808,55 @@ export interface paths {
         get: operations["garden_clusters_garden_clusters_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/garden/classify/{node_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Garden Classify
+         * @description The proposal engine (ADR-0032): a structured enrichment proposal
+         *     ``{tags, links, maturity, cluster}`` for a note, each with confidence
+         *     + rationale, plus ``signals_used`` for transparency. **Read-only** —
+         *     nothing is mutated; the user (or an agent) applies a suggestion via
+         *     ``POST /garden/apply``. v1 classifies notes (404 otherwise). Unknown
+         *     ``kinds`` tokens are dropped; an all-unknown set falls back to all.
+         */
+        get: operations["garden_classify_garden_classify__node_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/garden/apply": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Garden Apply
+         * @description Apply or decline a ``garden_classify`` suggestion (ADR-0032 /
+         *     ADR-0037). ``accept``/``override`` perform the mutation via the
+         *     existing idempotent services; ``reject``/``ignore`` mutate nothing.
+         *     Either way an append-only ``classification_feedback`` event is
+         *     written — the audit trail behind the learning loop and rollback.
+         */
+        post: operations["garden_apply_garden_apply_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -5748,6 +5842,103 @@ export interface components {
             remaining_minutes: number;
         };
         /**
+         * GardenApplyIn
+         * @description Apply (or decline) one suggestion. ``accept``/``override`` mutate
+         *     via the existing services; ``reject``/``ignore`` only record the
+         *     decision. ``auto`` is reserved for the worker and is not accepted on
+         *     this surface (a client cannot forge a system promotion).
+         */
+        GardenApplyIn: {
+            /**
+             * Node Id
+             * Format: uuid
+             */
+            node_id: string;
+            /**
+             * Suggestion Type
+             * @enum {string}
+             */
+            suggestion_type: "tag" | "link" | "maturity" | "cluster";
+            /** Suggestion Value */
+            suggestion_value: {
+                [key: string]: unknown;
+            };
+            /**
+             * Action
+             * @enum {string}
+             */
+            action: "accept" | "reject" | "override" | "ignore";
+            /** Override Value */
+            override_value?: {
+                [key: string]: unknown;
+            } | null;
+            /** Model Version */
+            model_version?: string | null;
+            /** Signals Snapshot */
+            signals_snapshot?: {
+                [key: string]: unknown;
+            } | null;
+        };
+        /** GardenApplyOut */
+        GardenApplyOut: {
+            /**
+             * Feedback Id
+             * Format: uuid
+             */
+            feedback_id: string;
+            /**
+             * Node Id
+             * Format: uuid
+             */
+            node_id: string;
+            /** Suggestion Type */
+            suggestion_type: string;
+            /** Action */
+            action: string;
+            /** Applied */
+            applied: boolean;
+        };
+        /**
+         * GardenClassifyOut
+         * @description Response of GET /garden/classify/{node_id} (ADR-0032). A block is
+         *     null/empty when its signal was not requested or produced nothing;
+         *     ``signals_used`` names the signals that actually fired (and records
+         *     ``leiden_extra_absent`` when clustering degraded gracefully).
+         */
+        GardenClassifyOut: {
+            /**
+             * Node Id
+             * Format: uuid
+             */
+            node_id: string;
+            /** Node Kind */
+            node_kind: string;
+            /** Tags */
+            tags: components["schemas"]["GardenTagSuggestionOut"][];
+            /** Links */
+            links: components["schemas"]["GardenLinkCandidateOut"][];
+            maturity: components["schemas"]["GardenMaturitySuggestionOut"] | null;
+            cluster: components["schemas"]["GardenClusterSuggestionOut"] | null;
+            /** Signals Used */
+            signals_used: string[];
+            /** Model Version */
+            model_version: string;
+            /**
+             * Generated At
+             * Format: date-time
+             */
+            generated_at: string;
+        };
+        /** GardenClusterSuggestionOut */
+        GardenClusterSuggestionOut: {
+            /** Leiden Id */
+            leiden_id: number | null;
+            /** Modularity */
+            modularity: number | null;
+            /** Confidence */
+            confidence: number;
+        };
+        /**
          * GardenClustersOut
          * @description Response of GET /garden/clusters (task 8c0a8f08): the Leiden
          *     community index per note plus the partition's global modularity.
@@ -5805,6 +5996,20 @@ export interface components {
                 [key: string]: number;
             };
         };
+        /** GardenLinkCandidateOut */
+        GardenLinkCandidateOut: {
+            /**
+             * Target Id
+             * Format: uuid
+             */
+            target_id: string;
+            /** Link Kind */
+            link_kind: string;
+            /** Confidence */
+            confidence: number;
+            /** Rationale */
+            rationale: string;
+        };
         /** GardenLinkSuggestion */
         GardenLinkSuggestion: {
             /**
@@ -5830,6 +6035,29 @@ export interface components {
             source_note_id: string;
             /** Suggestions */
             suggestions: components["schemas"]["GardenLinkSuggestion"][];
+        };
+        /** GardenMaturitySuggestionOut */
+        GardenMaturitySuggestionOut: {
+            /** Value */
+            value: string;
+            /** Confidence */
+            confidence: number;
+            /** Rationale */
+            rationale: string;
+            /** Auto Apply */
+            auto_apply: boolean;
+        };
+        /** GardenTagSuggestionOut */
+        GardenTagSuggestionOut: {
+            /**
+             * Tag Id
+             * Format: uuid
+             */
+            tag_id: string;
+            /** Confidence */
+            confidence: number;
+            /** Rationale */
+            rationale: string;
         };
         /** GardenWalkOut */
         GardenWalkOut: {
@@ -7055,6 +7283,22 @@ export interface components {
             lang?: string | null;
         };
         /**
+         * NotePartPrependIn
+         * @description Body for POST /notes/{id}/parts/{pid}/prepend (task 5662a07f):
+         *     prepend ``text`` to the FRONT of a part without resending the body.
+         *     Single-shot (the natural shape for a header / intro); concatenated
+         *     raw before the current body. ``expected_version`` is the optimistic
+         *     cursor.
+         */
+        NotePartPrependIn: {
+            /** Text */
+            text: string;
+            /** Expected Version */
+            expected_version: number;
+            /** Operation Id */
+            operation_id?: string | null;
+        };
+        /**
          * NotePartReorderIn
          * @description Body for PUT /notes/{id}/parts/order. ``part_ids`` must be the
          *     complete set of the note's parts in the desired order; a missing
@@ -8233,6 +8477,29 @@ export interface components {
              * @default false
              */
             dedupe_if_tail_matches?: boolean;
+        };
+        /**
+         * TaskDescriptionPrependIn
+         * @description Body for POST /tasks/{id}/description/prepend (task 5662a07f):
+         *     prepend ``text`` to the FRONT of ``task.description``. Mirror of
+         *     TaskDescriptionAppendIn; ``dedupe_if_head_matches`` no-ops when the
+         *     body already starts with ``text``.
+         */
+        TaskDescriptionPrependIn: {
+            /** Text */
+            text: string;
+            /**
+             * Separator
+             * @default
+             */
+            separator?: string;
+            /** Expected Version */
+            expected_version?: number | null;
+            /**
+             * Dedupe If Head Matches
+             * @default false
+             */
+            dedupe_if_head_matches?: boolean;
         };
         /** TaskIdOut */
         TaskIdOut: {
@@ -10595,6 +10862,46 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["TaskDescriptionAppendIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AppendOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    prepend_description_tasks__task_id__description_prepend_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TaskDescriptionPrependIn"];
             };
         };
         responses: {
@@ -16917,6 +17224,48 @@ export interface operations {
             };
         };
     };
+    prepend_note_part_notes__note_id__parts__part_id__prepend_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-Edit-Session-Id"?: string | null;
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                note_id: string;
+                part_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NotePartPrependIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AppendOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     delete_note_part_notes__note_id__parts__part_id__delete: {
         parameters: {
             query?: never;
@@ -18177,6 +18526,83 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["GardenClustersOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    garden_classify_garden_classify__node_id__get: {
+        parameters: {
+            query?: {
+                /** @description CSV subset of tags,links,maturity,cluster (default: all) */
+                kinds?: string | null;
+            };
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                node_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GardenClassifyOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    garden_apply_garden_apply_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GardenApplyIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GardenApplyOut"];
                 };
             };
             /** @description Validation Error */

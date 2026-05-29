@@ -65,6 +65,7 @@ from flow_core.services import dispatch_loop as dispatch_loop_svc
 from flow_core.services import email as email_svc
 from flow_core.services import entity_revisions as revisions_svc
 from flow_core.services import executors as executors_svc
+from flow_core.services import garden_classify as garden_classify_svc
 from flow_core.services import invoice as invoice_svc
 from flow_core.services import link_prediction as link_prediction_svc
 from flow_core.services import lookup as lookup_svc
@@ -3650,6 +3651,108 @@ async def distill_note(token: str, org_id: str, note_id: str) -> dict[str, Any]:
             "distilled_note_id": str(res.distilled_note_id),
             "model_id": res.model_id,
             "created": res.created,
+        }
+
+
+@mcp.tool()
+async def garden_classify(
+    token: str, org_id: str, node_id: str, kinds: str | None = None
+) -> dict[str, Any]:
+    """Proposal engine (ADR-0032): for a note, propose {tags, links,
+    maturity, cluster}, each with a confidence + rationale, plus
+    ``signals_used`` for transparency. **Read-only** — never mutates; act
+    on a suggestion with ``garden_apply``. ``kinds`` is an optional CSV
+    subset of tags,links,maturity,cluster (default all; unknown tokens
+    dropped). Member-level, RLS-scoped."""
+    wanted = None
+    if kinds:
+        requested = {k.strip() for k in kinds.split(",") if k.strip()}
+        wanted = (
+            frozenset(requested & garden_classify_svc.ALL_KINDS) or garden_classify_svc.ALL_KINDS
+        )
+    async with _tenant(token, org_id) as (s, org, _user):
+        res = await garden_classify_svc.classify_node(
+            s, org_id=org, node_id=uuid.UUID(node_id), kinds=wanted
+        )
+        return {
+            "node_id": str(res.node_id),
+            "node_kind": res.node_kind,
+            "tags": [
+                {"tag_id": str(t.tag_id), "confidence": t.confidence, "rationale": t.rationale}
+                for t in res.tags
+            ],
+            "links": [
+                {
+                    "target_id": str(lc.target_id),
+                    "link_kind": lc.link_kind,
+                    "confidence": lc.confidence,
+                    "rationale": lc.rationale,
+                }
+                for lc in res.links
+            ],
+            "maturity": (
+                {
+                    "value": res.maturity.value,
+                    "confidence": res.maturity.confidence,
+                    "rationale": res.maturity.rationale,
+                    "auto_apply": res.maturity.auto_apply,
+                }
+                if res.maturity is not None
+                else None
+            ),
+            "cluster": (
+                {
+                    "leiden_id": res.cluster.leiden_id,
+                    "modularity": res.cluster.modularity,
+                    "confidence": res.cluster.confidence,
+                }
+                if res.cluster is not None
+                else None
+            ),
+            "signals_used": res.signals_used,
+            "model_version": res.model_version,
+        }
+
+
+@mcp.tool()
+async def garden_apply(
+    token: str,
+    org_id: str,
+    node_id: str,
+    suggestion_type: str,
+    suggestion_value: dict[str, Any],
+    action: str,
+    override_value: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Apply or decline a ``garden_classify`` suggestion (ADR-0032 /
+    ADR-0037). ``accept``/``override`` mutate via the existing idempotent
+    services; ``reject``/``ignore`` only record the decision. Always
+    writes a ``classification_feedback`` event. Member role. ``action`` is
+    one of accept|reject|override|ignore (``auto`` is worker-only and is
+    rejected here so a client cannot forge a system promotion)."""
+    if action not in ("accept", "reject", "override", "ignore"):
+        raise DomainError(
+            MessageCode.GARDEN_ACTION_INVALID,
+            action=action,
+            valid="accept, ignore, override, reject",
+        )
+    async with _tenant(token, org_id) as (s, org, user):
+        feedback = await garden_classify_svc.apply_suggestion(
+            s,
+            org_id=org,
+            actor_id=user,
+            node_id=uuid.UUID(node_id),
+            suggestion_type=suggestion_type,
+            suggestion_value=suggestion_value,
+            action=action,
+            override_value=override_value,
+        )
+        return {
+            "feedback_id": str(feedback.id),
+            "node_id": node_id,
+            "suggestion_type": suggestion_type,
+            "action": action,
+            "applied": action in ("accept", "override"),
         }
 
 
