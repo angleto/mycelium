@@ -542,7 +542,7 @@ async def _multi_chunk_source_ids(
         params[f"k{i}"] = k
         params[f"s{i}"] = s
     sql = sa_text(
-        f"SELECT source_kind, source_id"
+        f"SELECT source_kind, source_id"  # noqa: S608 (placeholders are generated bind-param names)
         f"  FROM blob_sources"
         f" WHERE (source_kind, source_id) IN ({placeholders})"
         f" GROUP BY source_kind, source_id"

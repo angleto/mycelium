@@ -410,8 +410,8 @@ async def handle_webhook_update(payload: dict[str, object]) -> UpdateOutcome:
                 # body (no transcript -> empty task description).
                 from flow_core.services import note_parts as parts_svc
 
-                parts = await parts_svc.list_parts(ts, org_id=org_id, note_id=tr_note.id)
-                transcript_text = (parts[0].body if parts else "") or ""
+                tr_parts = await parts_svc.list_parts(ts, org_id=org_id, note_id=tr_note.id)
+                transcript_text = (tr_parts[0].body if tr_parts else "") or ""
                 transcribed_ok = True
             except Exception:
                 # Best-effort: an unconfigured STT (faster-whisper extra

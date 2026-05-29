@@ -455,14 +455,14 @@ async def _run_tool(
         )
         if not hits:
             return "search: (no results)"
-        lines: list[str] = []
+        search_lines: list[str] = []
         for h in hits:
             ident = f"task:{h.task_id}" if h.kind == "task" and h.task_id else f"blob:{h.blob_id}"
             title = _short(h.title or "", 60)
             snippet = _short(h.snippet or "", 120) if h.snippet else ""
             tail = f" -- {snippet}" if snippet else ""
-            lines.append(f"- {ident} | {title}{tail}")
-        return "search:\n" + "\n".join(lines)
+            search_lines.append(f"- {ident} | {title}{tail}")
+        return "search:\n" + "\n".join(search_lines)
 
     return f"error: tool {tool} is not available"
 

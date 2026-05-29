@@ -276,7 +276,7 @@ async def _run_tool(
         except (ValueError, TypeError):
             limit = 10
         limit = max(1, min(10, limit))
-        hits = await task_search_svc.search_unified(
+        search_hits = await task_search_svc.search_unified(
             session,
             org_id=org_id,
             actor_id=actor_id,
@@ -290,7 +290,7 @@ async def _run_tool(
             include_deleted=False,
             operation_id=f"agentrun:{run.id}:{run.steps}:search",
         )
-        return f"search:{len(hits)}"
+        return f"search:{len(search_hits)}"
     if tool == "append_work_note":
         note = await notes_svc.create_note_for_task(
             session,

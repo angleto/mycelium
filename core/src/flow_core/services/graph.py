@@ -34,6 +34,7 @@ volume.
 from __future__ import annotations
 
 import math
+import random
 import uuid
 from collections import defaultdict
 from collections.abc import Iterable
@@ -213,7 +214,7 @@ async def compute_note_edge_weights(
         for t in note_tags[nid]:
             by_tag_to_notes[t].append(nid)
     # Enumerate co-tagged note pairs only (much smaller than O(N²)).
-    for tag_id, nids in by_tag_to_notes.items():
+    for _tag_id, nids in by_tag_to_notes.items():
         if len(nids) < 2:
             continue
         for i in range(len(nids)):
@@ -479,9 +480,10 @@ async def biased_random_walk(
     workspaces with <10k edges). When a node has no neighbours the
     walk terminates early.
     """
-    import random
-
-    rng = random.Random(seed_rng) if seed_rng is not None else random.Random()
+    # Seedable, non-cryptographic PRNG: the walk must be reproducible for
+    # tests/telemetry given a seed, so stdlib ``random`` (not ``secrets``)
+    # is the correct choice here.
+    rng = random.Random(seed_rng) if seed_rng is not None else random.Random()  # noqa: S311
     # Pull the weighted edge list once.
     edges = await compute_note_edge_weights(session, org_id=org_id)
     # Undirected adjacency: {node_id: [(neighbour, weight)]}
@@ -527,13 +529,13 @@ async def biased_random_walk(
     return walk
 
 
-def _weighted_pick(rng: object, ids: list[uuid.UUID], weights: list[float]) -> uuid.UUID | None:
+def _weighted_pick(
+    rng: random.Random, ids: list[uuid.UUID], weights: list[float]
+) -> uuid.UUID | None:
     total = sum(w for w in weights if w > 0)
     if total <= 0 or not ids:
         return None
-    # rng is typed as object to keep the import inside biased_random_walk
-    # local; cast via getattr for the .random() call.
-    r = rng.random() * total  # type: ignore[no-any-return]
+    r = rng.random() * total
     acc = 0.0
     for i, w in zip(ids, weights, strict=True):
         if w <= 0:

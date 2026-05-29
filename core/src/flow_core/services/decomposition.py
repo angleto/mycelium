@@ -27,7 +27,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from flow_core.ai_providers import LLMProvider, get_llm
-from flow_core.errors import DomainError, MessageCode
+from flow_core.errors import DomainError
+from flow_core.i18n import MessageCode
 from flow_core.models.identity import Identity
 from flow_core.models.membership import Role
 from flow_core.models.note import Note, NoteKind

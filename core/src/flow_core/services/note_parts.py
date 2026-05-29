@@ -28,7 +28,7 @@ import uuid
 from collections.abc import Sequence
 from typing import Any
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -161,13 +161,14 @@ async def create_part(
         # Shift everyone at >= target_ord up by one (deferred unique
         # constraint tolerates the transient collision until COMMIT).
         await session.execute(
-            NotePart.__table__.update()
+            update(NotePart)
             .where(
                 NotePart.note_id == note_id,
                 NotePart.org_id == org_id,
                 NotePart.ord >= target_ord,
             )
             .values(ord=NotePart.ord + 1)
+            .execution_options(synchronize_session=False)
         )
     part = NotePart(
         org_id=org_id,
@@ -413,15 +414,17 @@ async def reorder_parts(
     HIGH = 1_000_000
     for i, pid in enumerate(part_ids):
         await session.execute(
-            NotePart.__table__.update()
+            update(NotePart)
             .where(NotePart.id == pid, NotePart.org_id == org_id)
             .values(ord=HIGH + i)
+            .execution_options(synchronize_session=False)
         )
     for i, pid in enumerate(part_ids):
         await session.execute(
-            NotePart.__table__.update()
+            update(NotePart)
             .where(NotePart.id == pid, NotePart.org_id == org_id)
             .values(ord=i)
+            .execution_options(synchronize_session=False)
         )
     await session.flush()
     await audit.log(
@@ -534,20 +537,22 @@ async def merge_notes(
     # ``ord`` to land at the tail, stamp ``merged_from_note_id``.
     for offset, sp in enumerate(source_parts):
         await session.execute(
-            NotePart.__table__.update()
+            update(NotePart)
             .where(NotePart.id == sp.id, NotePart.org_id == org_id)
             .values(
                 note_id=target_note_id,
                 ord=next_ord + offset,
                 merged_from_note_id=source_note_id,
             )
+            .execution_options(synchronize_session=False)
         )
     # Soft-delete the source (matches services.notes.soft_delete_note
     # semantics: deleted_at = now(), maturity untouched, FK rows kept).
     await session.execute(
-        Note.__table__.update()
+        update(Note)
         .where(Note.id == source_note_id, Note.org_id == org_id)
         .values(deleted_at=func.now())
+        .execution_options(synchronize_session=False)
     )
     # Lineage: target supersedes source. Idempotent on the unique
     # (parent, child, kind) triplet.

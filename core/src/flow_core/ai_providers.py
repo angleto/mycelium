@@ -159,7 +159,9 @@ class LocalSTT:
 
             text = await asyncio.to_thread(_run)
         finally:
-            Path(tmp_path).unlink(missing_ok=True)
+            # Offload the blocking unlink too (same thread-pool pattern as
+            # the transcription above) so the event loop is never blocked.
+            await asyncio.to_thread(Path(tmp_path).unlink, missing_ok=True)
         return TranscriptResult(
             text=text,
             model_id=self.model_id,
