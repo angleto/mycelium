@@ -19,6 +19,7 @@ import Suggestion, {
   type SuggestionProps,
 } from '@tiptap/suggestion'
 import { InlineMath, BlockMath } from './MarkdownMath'
+import { EntityPrefix } from '../lib/entityPrefixExtension'
 import { api, authFetch, workspaceHeader } from '../api/client'
 import { formatMentionHref, type MentionKind } from '../lib/mentions'
 import { useAuthBlobUrl } from '../lib/useAuthBlobUrl'
@@ -531,6 +532,10 @@ export function RichEditor({
       // bytes for live preview.
       ImageExt,
       MentionExt,
+      // Clickable UUID-prefix chips for backticked codes (ADR-0038
+      // convention) read inside the editor. Decoration-only; routing
+      // is the global AppShell interceptor (data-entity-prefix).
+      EntityPrefix,
     ],
     content: value,
     editorProps,

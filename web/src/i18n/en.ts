@@ -4,6 +4,12 @@
 // (string values, not literals) so other locales must mirror it.
 export const en = {
   app: { title: 'Flow' },
+  cmdk: {
+    title: 'Go to / search',
+    placeholder: 'Search by title or paste a code (e.g. 66c5d15d)…',
+    noResults: 'No results',
+    hint: 'Type to search, or paste a task / note code',
+  },
   common: {
     on: 'on',
     off: 'off',
@@ -750,11 +756,22 @@ export const en = {
       walkSeed: 'Seed: {{title}}',
       createLink: 'Create link',
       confirmDelete: 'Remove this link?',
+      swapDirection: 'Swap direction',
       linkKind: {
-        atom_of: 'atom of',
+        hypha_of: 'hypha of',
         references: 'references',
         replies_to: 'replies to',
         supersedes: 'supersedes',
+        humus_of: 'humus of',
+      },
+      linkKindHint: {
+        hypha_of:
+          'This note is a hypha (filament) of the other: a strand composing the larger idea (the parent is the whole / index note).',
+        references: 'A citation backlink: this note points at the other.',
+        replies_to: 'A threaded reply or elaboration on the other note.',
+        supersedes: 'This note replaces the other (the older, superseded one).',
+        humus_of:
+          'System-generated: the distilled humus of the other note (fungal decomposition). Not user-editable.',
       },
     },
     maturity: {
@@ -778,6 +795,20 @@ export const en = {
     fruits: 'Tasks (fruits)',
     none: 'None.',
     unlink: 'Unlink',
+  },
+  noteLinks: {
+    title: 'Linked ideas',
+    headHint: 'typed note-to-note links',
+    add: 'Link an idea',
+    remove: 'Remove link',
+    empty: 'No links of this kind.',
+    pickerPh: 'Search a note…',
+    direction: 'Direction',
+    asParent: 'this note → target',
+    asChild: 'target → this note',
+    swap: 'Swap direction',
+    systemReadonly: 'system-generated (decomposition), read-only',
+    unknownNote: '(unknown note)',
   },
   estpre: {
     title: 'Estimate presets',

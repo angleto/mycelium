@@ -1675,6 +1675,111 @@ button.btn--danger:hover {
   gap: 0.4rem;
   margin-top: 0.8rem;
 }
+/* In-editor UUID-prefix chips (entityPrefix decoration). The note body
+   is read/written in the WYSIWYG RichEditor, so backticked prefixes get
+   the same clickable affordance the read-only MarkdownView chips have.
+   It only decorates the existing inline <code>; navigation is the
+   global click interceptor in AppShell (data-entity-prefix). */
+.entity-ref {
+  cursor: pointer;
+  border-radius: 4px;
+  border-bottom: 1px dotted var(--accent);
+}
+.entity-ref:hover {
+  background: var(--accent-weak);
+}
+.entity-ref--unresolved {
+  cursor: text;
+  border-bottom: none;
+}
+.entity-ref--unresolved:hover {
+  background: none;
+}
+.entity-ref--closed {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+.entity-ref--loading {
+  opacity: 0.85;
+}
+
+/* Cmd/Ctrl+K command palette: title search + UUID-code resolver. */
+.cmdk {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 12vh;
+}
+.cmdk__box {
+  width: min(680px, 92vw);
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.35);
+  overflow: hidden;
+}
+.cmdk__input {
+  width: 100%;
+  box-sizing: border-box;
+  border: none;
+  outline: none;
+  padding: 0.9rem 1rem;
+  font-size: 1rem;
+  background: transparent;
+  color: var(--text-h);
+  border-bottom: 1px solid var(--border);
+}
+.cmdk__list {
+  list-style: none;
+  margin: 0;
+  padding: 0.3rem;
+  max-height: 50vh;
+  overflow-y: auto;
+}
+.cmdk__row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.6rem;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.cmdk__row--sel {
+  background: var(--surface-2);
+}
+.cmdk__glyph {
+  opacity: 0.7;
+  width: 1rem;
+  text-align: center;
+}
+.cmdk__title {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cmdk__badge {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0 0.3rem;
+}
+.cmdk__sub {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+.cmdk__empty {
+  padding: 0.8rem;
+  color: var(--muted);
+}
 /* GFM tables: render them as readable tables with subtle borders.
    ``.md`` is the wrapper produced by MarkdownView (the single
    markdown renderer in the codebase). */

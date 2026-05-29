@@ -22,6 +22,12 @@ import { PomodoroTimer } from './PomodoroTimer'
 import { hms, elapsedSec } from '../lib/time'
 import { useRunningTimers } from '../lib/useRunningTimer'
 import { parseMentionHref, routeForMention } from '../lib/mentions'
+import {
+  getCachedLookup,
+  lookupPrefix,
+  type LookupOut,
+} from '../lib/prefixLookup'
+import { CommandPalette } from './CommandPalette'
 import { useFocus } from '../lib/focus'
 import { useMediaQuery, MOBILE_QUERY } from '../lib/useMediaQuery'
 import type { components } from '../api/schema'
@@ -300,14 +306,39 @@ export function AppShell() {
   // platform admin is a separate axis (handled by the same chip).
   const canSwitchRole = (ws?.my_role ?? 'member') === 'owner'
 
-  // Mention links (@kind:id) are stored as plain markdown. MarkdownView
-  // renders them as router Links, but the tiptap editor renders a raw
-  // <a href="@note:id"> which the browser would resolve to a broken
-  // /tasks/@note:... URL. One capture-phase interceptor routes ANY such
-  // anchor app-side — no per-view duplication.
+  // One capture-phase interceptor routes two app-side click targets
+  // that the browser would otherwise mishandle:
+  //
+  //   1. UUID-prefix chips (entityPrefix decoration) rendered inside
+  //      the WYSIWYG editor carry a ``data-entity-prefix`` attribute.
+  //      Resolve it (cache is warmed by the editor's resolver loop, so
+  //      this is usually synchronous) and route to the entity, falling
+  //      back to the /t/:prefix resolver route (which shows a friendly
+  //      404 / disambiguator) when nothing is cached yet.
+  //   2. Mention links (@kind:id) are stored as plain markdown. The
+  //      tiptap editor renders a raw <a href="@note:id"> the browser
+  //      would resolve to a broken /tasks/@note:... URL; route it
+  //      app-side instead. No per-view duplication.
   useEffect(() => {
     const onClick = (e: MouseEvent) => {
-      const a = (e.target as HTMLElement | null)?.closest('a')
+      const target = e.target as HTMLElement | null
+      const chip = target?.closest('[data-entity-prefix]') as HTMLElement | null
+      if (chip) {
+        const prefix = chip.getAttribute('data-entity-prefix') ?? ''
+        if (prefix) {
+          e.preventDefault()
+          const go = (res: LookupOut | null) => {
+            const m =
+              res?.matches.find((x) => x.kind === 'task') ?? res?.matches?.[0]
+            navigate(m ? m.route_url : `/t/${prefix}`)
+          }
+          const cached = getCachedLookup(prefix)
+          if (cached) go(cached)
+          else void lookupPrefix(prefix).then(go).catch(() => navigate(`/t/${prefix}`))
+          return
+        }
+      }
+      const a = target?.closest('a')
       const href = a?.getAttribute('href')
       if (!href) return
       const m = parseMentionHref(href)
@@ -451,6 +482,7 @@ export function AppShell() {
 
   return (
     <div className={'app' + (sidebarOpen ? ' app--sidebar-open' : '')}>
+      <CommandPalette />
       <header className="topbar">
         <button
           type="button"

@@ -3,6 +3,12 @@ import type { Catalog } from './en'
 // Italian catalog. Same key shape as en (typed via Catalog).
 export const it: Catalog = {
   app: { title: 'Flow' },
+  cmdk: {
+    title: 'Vai a / cerca',
+    placeholder: 'Cerca per titolo o incolla un codice (es. 66c5d15d)…',
+    noResults: 'Nessun risultato',
+    hint: 'Digita per cercare, o incolla un codice task/nota',
+  },
   common: {
     on: 'sì',
     off: 'no',
@@ -749,11 +755,22 @@ export const it: Catalog = {
       walkSeed: 'Seed: {{title}}',
       createLink: 'Crea collegamento',
       confirmDelete: 'Rimuovere questo collegamento?',
+      swapDirection: 'Inverti direzione',
       linkKind: {
-        atom_of: 'atomo di',
+        hypha_of: 'ifa di',
         references: 'riferimento',
         replies_to: 'risposta a',
         supersedes: 'sostituisce',
+        humus_of: 'humus di',
+      },
+      linkKindHint: {
+        hypha_of:
+          'Questa nota è un’ifa (filamento) dell’altra: un filamento che compone l’idea più grande (il genitore è l’insieme / nota-indice).',
+        references: 'Un backlink di citazione: questa nota rimanda all’altra.',
+        replies_to: 'Una risposta o elaborazione a thread sull’altra nota.',
+        supersedes: 'Questa nota sostituisce l’altra (la precedente, superata).',
+        humus_of:
+          'Generato dal sistema: l’humus distillato dall’altra nota (decomposizione fungina). Non modificabile a mano.',
       },
     },
     maturity: {
@@ -777,6 +794,20 @@ export const it: Catalog = {
     fruits: 'Task (frutti)',
     none: 'Nessuno.',
     unlink: 'Scollega',
+  },
+  noteLinks: {
+    title: 'Idee collegate',
+    headHint: 'collegamenti tipizzati nota-nota',
+    add: 'Collega un’idea',
+    remove: 'Rimuovi collegamento',
+    empty: 'Nessun collegamento di questo tipo.',
+    pickerPh: 'Cerca una nota…',
+    direction: 'Direzione',
+    asParent: 'questa nota → destinazione',
+    asChild: 'destinazione → questa nota',
+    swap: 'Inverti direzione',
+    systemReadonly: 'generato dal sistema (decomposizione), sola lettura',
+    unknownNote: '(nota sconosciuta)',
   },
   estpre: {
     title: 'Preset di stima',
