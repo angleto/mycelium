@@ -479,6 +479,9 @@ export const it: Catalog = {
     checklistMoveUp: 'Sposta su',
     checklistMoveDown: 'Sposta giu',
     checklistCount: '{{done}}/{{total}}',
+    checklistNoteToggle: 'Nota (markdown)',
+    checklistNotePlaceholder: 'Scrivi una nota markdown per questo elemento…',
+    checklistNoteSave: 'Salva nota',
     create: 'Aggiungi',
     createAndOpen: 'Aggiungi e apri',
     createAndOpenHint: "Crea il task e vai subito alla pagina di dettaglio per modificarlo",
@@ -1292,6 +1295,7 @@ export const it: Catalog = {
   notes: {
     nav: 'Note',
     title: 'Note e conversazione',
+    checklistHeading: 'Checklist',
     kind: 'Tipo',
     noteTitle: 'Titolo (opzionale)',
     text: 'Testo',

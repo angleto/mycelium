@@ -3728,12 +3728,36 @@ button.btn--danger:hover {
 }
 .checklist__row {
   display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+.checklist__row-main {
+  display: flex;
   align-items: center;
   gap: 0.4rem;
 }
 .checklist__row.is-done .checklist__text {
   text-decoration: line-through;
   opacity: 0.6;
+}
+.checklist .ghost.icon.is-active {
+  opacity: 1;
+}
+.checklist__note {
+  padding-left: 1.6rem;
+}
+.checklist__note-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.3rem;
+}
+.note-checklist {
+  margin-top: 1rem;
+}
+.note-checklist__heading {
+  font-size: 0.95rem;
+  margin: 0 0 0.4rem;
 }
 .checklist__text {
   flex: 1;

@@ -478,6 +478,9 @@ export const en = {
     checklistMoveUp: 'Move up',
     checklistMoveDown: 'Move down',
     checklistCount: '{{done}}/{{total}}',
+    checklistNoteToggle: 'Note (markdown)',
+    checklistNotePlaceholder: 'Write a markdown note for this item…',
+    checklistNoteSave: 'Save note',
     create: 'Add',
     createAndOpen: 'Add & open',
     createAndOpenHint: 'Create the task and jump to its detail page for inline editing',
@@ -1292,6 +1295,7 @@ export const en = {
   notes: {
     nav: 'Notes',
     title: 'Notes & conversation',
+    checklistHeading: 'Checklist',
     kind: 'Kind',
     noteTitle: 'Title (optional)',
     text: 'Text',

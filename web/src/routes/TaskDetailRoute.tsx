@@ -943,7 +943,7 @@ export function TaskDetailRoute() {
           </div>
           <div role="tabpanel" hidden={activeTab !== 'checklist'}>
             <ChecklistPanel
-              taskId={task.id}
+              owner={{ kind: 'task', id: task.id }}
               initial={task.checklist ?? []}
               onCountChange={(done, total) =>
                 setChecklistCount({ done, total })

@@ -23,6 +23,7 @@ import { TaskTimer } from '../components/TaskTimer'
 import { Attachments } from '../components/Attachments'
 import { VoicePlayer } from '../components/VoicePlayer'
 import { LinkedTasksPanel } from '../components/LinkedTasksPanel'
+import { ChecklistPanel } from '../components/ChecklistPanel'
 import { RevisionsPanel } from '../components/RevisionsPanel'
 import { useFocus } from '../lib/focus'
 import { useEditSession } from '../lib/useEditSession'
@@ -970,6 +971,15 @@ export function NotesRoute() {
                   onDirtyChange={setPartsDirty}
                 />
                 <Attachments noteId={sel.id} />
+                <section className="note-checklist">
+                  <h3 className="note-checklist__heading">
+                    {t('notes.checklistHeading')}
+                  </h3>
+                  <ChecklistPanel
+                    owner={{ kind: 'note', id: sel.id }}
+                    disabled={sel.deleted_at != null || sel.is_archived}
+                  />
+                </section>
                 <LinkedTasksPanel noteId={sel.id} />
                 <RevisionsPanel
                   kind="note"

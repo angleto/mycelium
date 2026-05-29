@@ -2,20 +2,24 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { api, errMessage, workspaceHeader } from '../api/client'
 import type { components } from '../api/schema'
+import { RichEditor } from './RichEditor'
 
 type ChecklistItem = components['schemas']['TaskChecklistItemOut']
+type ChecklistOwner = { kind: 'task' | 'note'; id: string }
 
-// Second tab next to the markdown description in the task view. Items
-// are lightweight (text + done + position), never sub-tasks. The panel
-// owns its own state and bubbles up the (done, total) count so the
-// parent tab label can show "1/3" without re-fetching the task.
+// Lightweight ticked items inside a task OR a note (task bae178d2):
+// one shared widget over the polymorphic owner. Items are not
+// sub-tasks (text + done + position); each may carry an optional
+// markdown ``body`` (the "articulate comment"), opened / edited as
+// markdown inline. The panel owns its state and bubbles up the
+// (done, total) count so the parent tab label can show "1/3".
 export function ChecklistPanel({
-  taskId,
+  owner,
   initial,
   onCountChange,
   disabled = false,
 }: {
-  taskId: string
+  owner: ChecklistOwner
   initial?: ChecklistItem[]
   onCountChange?: (done: number, total: number) => void
   disabled?: boolean
@@ -28,12 +32,8 @@ export function ChecklistPanel({
 
   // Report counts to the parent (tab badge) whenever items change.
   // The callback is read through a ref so the effect never depends on
-  // its identity: TaskDetailRoute passes an inline arrow (new reference
-  // each render) and ``setChecklistCount({ done, total })`` builds a
-  // fresh object every call (Object.is fails -> re-render is never
-  // bailed out), so depending on the callback would loop forever
-  // (open-task freeze with no console error, since this is not a
-  // nested-during-render setState the runtime guards against).
+  // its identity (the parent passes a fresh inline arrow each render),
+  // which would otherwise loop forever.
   const onCountChangeRef = useRef(onCountChange)
   useEffect(() => {
     onCountChangeRef.current = onCountChange
@@ -45,35 +45,101 @@ export function ChecklistPanel({
     cb(done, items.length)
   }, [items])
 
-  // The parent passes ``initial`` (embedded in TaskOut) so the panel
-  // doesn't need a round-trip on first render. After that we own the
-  // state autonomously: mutations go through the dedicated
-  // /checklist endpoints and we never re-derive from a refreshed
-  // parent payload. If the parent needs to force a hard reset (e.g.
-  // after a 409 on the task itself), it should remount us with a
-  // ``key={task.id + task.version}`` — cleaner than an effect that
-  // races with our optimistic UI.
+  // ---- owner-aware typed requests --------------------------------
+  // openapi-fetch needs a literal path; the task and note checklist
+  // sub-resources share the same request / response shape, so we
+  // branch the path here and keep one code path for the handlers.
+  // The task surface is byte-for-byte the previous behaviour.
+  const ownerId = owner.id
+  const ownerKind = owner.kind
+  const listReq = useCallback(
+    () =>
+      ownerKind === 'task'
+        ? api.GET('/tasks/{task_id}/checklist', {
+            params: { header: workspaceHeader(), path: { task_id: ownerId } },
+          })
+        : api.GET('/notes/{note_id}/checklist', {
+            params: { header: workspaceHeader(), path: { note_id: ownerId } },
+          }),
+    [ownerKind, ownerId],
+  )
+  const addReq = useCallback(
+    (text: string) =>
+      ownerKind === 'task'
+        ? api.POST('/tasks/{task_id}/checklist', {
+            params: { header: workspaceHeader(), path: { task_id: ownerId } },
+            body: { text },
+          })
+        : api.POST('/notes/{note_id}/checklist', {
+            params: { header: workspaceHeader(), path: { note_id: ownerId } },
+            body: { text },
+          }),
+    [ownerKind, ownerId],
+  )
+  const patchReq = useCallback(
+    (itemId: string, body: components['schemas']['TaskChecklistItemPatchIn']) =>
+      ownerKind === 'task'
+        ? api.PATCH('/tasks/{task_id}/checklist/{item_id}', {
+            params: { header: workspaceHeader(), path: { task_id: ownerId, item_id: itemId } },
+            body,
+          })
+        : api.PATCH('/notes/{note_id}/checklist/{item_id}', {
+            params: { header: workspaceHeader(), path: { note_id: ownerId, item_id: itemId } },
+            body,
+          }),
+    [ownerKind, ownerId],
+  )
+  const deleteReq = useCallback(
+    (itemId: string) =>
+      ownerKind === 'task'
+        ? api.DELETE('/tasks/{task_id}/checklist/{item_id}', {
+            params: { header: workspaceHeader(), path: { task_id: ownerId, item_id: itemId } },
+          })
+        : api.DELETE('/notes/{note_id}/checklist/{item_id}', {
+            params: { header: workspaceHeader(), path: { note_id: ownerId, item_id: itemId } },
+          }),
+    [ownerKind, ownerId],
+  )
+  const reorderReq = useCallback(
+    (ids: string[]) =>
+      ownerKind === 'task'
+        ? api.POST('/tasks/{task_id}/checklist:reorder', {
+            params: { header: workspaceHeader(), path: { task_id: ownerId } },
+            body: { ids },
+          })
+        : api.POST('/notes/{note_id}/checklist:reorder', {
+            params: { header: workspaceHeader(), path: { note_id: ownerId } },
+            body: { ids },
+          }),
+    [ownerKind, ownerId],
+  )
+  const clearDoneReq = useCallback(
+    () =>
+      ownerKind === 'task'
+        ? api.POST('/tasks/{task_id}/checklist:clear_done', {
+            params: { header: workspaceHeader(), path: { task_id: ownerId } },
+          })
+        : api.POST('/notes/{note_id}/checklist:clear_done', {
+            params: { header: workspaceHeader(), path: { note_id: ownerId } },
+          }),
+    [ownerKind, ownerId],
+  )
 
   const reload = useCallback(async (): Promise<void> => {
-    const { data, error } = await api.GET('/tasks/{task_id}/checklist', {
-      params: { header: workspaceHeader(), path: { task_id: taskId } },
-    })
+    const { data, error } = await listReq()
     if (error) {
       setErr(errMessage(error))
       return
     }
     setItems(data ?? [])
-  }, [taskId])
+  }, [listReq])
 
   const onAdd = useCallback(async (): Promise<void> => {
     const text = draft.trim()
     if (!text || disabled) return
     setBusy(true)
     setErr(null)
-    const { data, error } = await api.POST('/tasks/{task_id}/checklist', {
-      params: { header: workspaceHeader(), path: { task_id: taskId } },
-      body: { text },
-    })
+    const { data, error } = await addReq(text)
     setBusy(false)
     if (error || !data) {
       setErr(errMessage(error))
@@ -81,23 +147,17 @@ export function ChecklistPanel({
     }
     setItems((prev) => [...prev, data])
     setDraft('')
-  }, [draft, disabled, taskId])
+  }, [draft, disabled, addReq])
 
   const onToggle = useCallback(
     async (item: ChecklistItem): Promise<void> => {
       if (disabled) return
       setBusy(true)
       setErr(null)
-      const { data, error } = await api.PATCH(
-        '/tasks/{task_id}/checklist/{item_id}',
-        {
-          params: {
-            header: workspaceHeader(),
-            path: { task_id: taskId, item_id: item.id },
-          },
-          body: { expected_version: item.version, done: !item.done },
-        },
-      )
+      const { data, error } = await patchReq(item.id, {
+        expected_version: item.version,
+        done: !item.done,
+      })
       setBusy(false)
       if (error || !data) {
         // On 409 (stale version) reload the canonical list so the user
@@ -108,7 +168,7 @@ export function ChecklistPanel({
       }
       setItems((prev) => prev.map((it) => (it.id === data.id ? data : it)))
     },
-    [disabled, taskId, reload],
+    [disabled, patchReq, reload],
   )
 
   const onEditText = useCallback(
@@ -117,16 +177,10 @@ export function ChecklistPanel({
       if (!clean || clean === item.text || disabled) return
       setBusy(true)
       setErr(null)
-      const { data, error } = await api.PATCH(
-        '/tasks/{task_id}/checklist/{item_id}',
-        {
-          params: {
-            header: workspaceHeader(),
-            path: { task_id: taskId, item_id: item.id },
-          },
-          body: { expected_version: item.version, text: clean },
-        },
-      )
+      const { data, error } = await patchReq(item.id, {
+        expected_version: item.version,
+        text: clean,
+      })
       setBusy(false)
       if (error || !data) {
         setErr(errMessage(error))
@@ -135,7 +189,29 @@ export function ChecklistPanel({
       }
       setItems((prev) => prev.map((it) => (it.id === data.id ? data : it)))
     },
-    [disabled, taskId, reload],
+    [disabled, patchReq, reload],
+  )
+
+  const onEditBody = useCallback(
+    async (item: ChecklistItem, nextBody: string): Promise<void> => {
+      if (disabled) return
+      const normalised = nextBody.trim()
+      if (normalised === (item.body ?? '').trim()) return
+      setBusy(true)
+      setErr(null)
+      const { data, error } = await patchReq(item.id, {
+        expected_version: item.version,
+        body: normalised,
+      })
+      setBusy(false)
+      if (error || !data) {
+        setErr(errMessage(error))
+        void reload()
+        return
+      }
+      setItems((prev) => prev.map((it) => (it.id === data.id ? data : it)))
+    },
+    [disabled, patchReq, reload],
   )
 
   const onRemove = useCallback(
@@ -143,15 +219,7 @@ export function ChecklistPanel({
       if (disabled) return
       setBusy(true)
       setErr(null)
-      const { error } = await api.DELETE(
-        '/tasks/{task_id}/checklist/{item_id}',
-        {
-          params: {
-            header: workspaceHeader(),
-            path: { task_id: taskId, item_id: item.id },
-          },
-        },
-      )
+      const { error } = await deleteReq(item.id)
       setBusy(false)
       if (error) {
         setErr(errMessage(error))
@@ -160,7 +228,7 @@ export function ChecklistPanel({
       }
       setItems((prev) => prev.filter((it) => it.id !== item.id))
     },
-    [disabled, taskId, reload],
+    [disabled, deleteReq, reload],
   )
 
   const onMove = useCallback(
@@ -178,13 +246,7 @@ export function ChecklistPanel({
       setItems(reordered)
       setBusy(true)
       setErr(null)
-      const { data, error } = await api.POST(
-        '/tasks/{task_id}/checklist:reorder',
-        {
-          params: { header: workspaceHeader(), path: { task_id: taskId } },
-          body: { ids: reordered.map((it) => it.id) },
-        },
-      )
+      const { data, error } = await reorderReq(reordered.map((it) => it.id))
       setBusy(false)
       if (error || !data) {
         setErr(errMessage(error))
@@ -193,7 +255,7 @@ export function ChecklistPanel({
       }
       setItems(data)
     },
-    [disabled, items, taskId, reload],
+    [disabled, items, reorderReq, reload],
   )
 
   const onClearDone = useCallback(async (): Promise<void> => {
@@ -201,12 +263,7 @@ export function ChecklistPanel({
     if (!window.confirm(t('tasks.checklistClearDoneConfirm'))) return
     setBusy(true)
     setErr(null)
-    const { data, error } = await api.POST(
-      '/tasks/{task_id}/checklist:clear_done',
-      {
-        params: { header: workspaceHeader(), path: { task_id: taskId } },
-      },
-    )
+    const { data, error } = await clearDoneReq()
     setBusy(false)
     if (error || !data) {
       setErr(errMessage(error))
@@ -215,10 +272,8 @@ export function ChecklistPanel({
     if (data.removed > 0) {
       setItems((prev) => prev.filter((it) => !it.done))
     }
-    window.alert(
-      t('tasks.checklistClearDoneResult', { n: data.removed }),
-    )
-  }, [disabled, t, taskId])
+    window.alert(t('tasks.checklistClearDoneResult', { n: data.removed }))
+  }, [disabled, t, clearDoneReq])
 
   const doneCount = items.filter((it) => it.done).length
   const hasDone = doneCount > 0
@@ -239,6 +294,7 @@ export function ChecklistPanel({
               canMoveDown={idx < items.length - 1}
               onToggle={() => void onToggle(it)}
               onEditText={(next) => void onEditText(it, next)}
+              onEditBody={(next) => void onEditBody(it, next)}
               onRemove={() => void onRemove(it)}
               onMoveUp={() => void onMove(it, -1)}
               onMoveDown={() => void onMove(it, 1)}
@@ -291,6 +347,7 @@ function ChecklistRow({
   canMoveDown,
   onToggle,
   onEditText,
+  onEditBody,
   onRemove,
   onMoveUp,
   onMoveDown,
@@ -301,81 +358,121 @@ function ChecklistRow({
   canMoveDown: boolean
   onToggle: () => void
   onEditText: (next: string) => void
+  onEditBody: (next: string) => void
   onRemove: () => void
   onMoveUp: () => void
   onMoveDown: () => void
 }): React.ReactElement {
   const { t } = useTranslation()
   // Local draft for inline-edit so per-keystroke we don't fire a PATCH;
-  // the commit happens on blur or Enter. We follow the React "adjust
-  // state during render" pattern (https://react.dev/learn/you-might-not-need-an-effect):
-  // when the canonical text changes from outside (server-side update,
-  // PATCH from another tab) we resync the draft inline instead of
-  // through an effect that would cascade an extra render.
+  // the commit happens on blur or Enter. Resync the draft inline when
+  // the canonical text changes from outside (server update / other tab).
   const [draft, setDraft] = useState(item.text)
   const [lastSeenText, setLastSeenText] = useState(item.text)
   if (item.text !== lastSeenText) {
     setLastSeenText(item.text)
     setDraft(item.text)
   }
+  // The articulate markdown comment is opt-in: an item with a body
+  // starts expanded so it's not hidden; otherwise the leaf toggle
+  // reveals the editor ("open as markdown"). Local draft committed on
+  // explicit Save (the body editor is heavier than the one-line text).
+  const hasBody = Boolean(item.body && item.body.trim())
+  const [open, setOpen] = useState(hasBody)
+  const [bodyDraft, setBodyDraft] = useState(item.body ?? '')
+  const [lastSeenBody, setLastSeenBody] = useState(item.body ?? '')
+  if ((item.body ?? '') !== lastSeenBody) {
+    setLastSeenBody(item.body ?? '')
+    setBodyDraft(item.body ?? '')
+  }
+  const bodyDirty = bodyDraft.trim() !== (item.body ?? '').trim()
   return (
     <li className={`checklist__row${item.done ? ' is-done' : ''}`}>
-      <label className="checklist__check">
+      <div className="checklist__row-main">
+        <label className="checklist__check">
+          <input type="checkbox" checked={item.done} disabled={disabled} onChange={onToggle} />
+        </label>
         <input
-          type="checkbox"
-          checked={item.done}
+          type="text"
+          className="checklist__text"
+          value={draft}
           disabled={disabled}
-          onChange={onToggle}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={() => onEditText(draft)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault()
+              ;(e.target as HTMLInputElement).blur()
+            }
+            if (e.key === 'Escape') {
+              setDraft(item.text)
+              ;(e.target as HTMLInputElement).blur()
+            }
+          }}
         />
-      </label>
-      <input
-        type="text"
-        className="checklist__text"
-        value={draft}
-        disabled={disabled}
-        onChange={(e) => setDraft(e.target.value)}
-        onBlur={() => onEditText(draft)}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter') {
-            e.preventDefault()
-            ;(e.target as HTMLInputElement).blur()
-          }
-          if (e.key === 'Escape') {
-            setDraft(item.text)
-            ;(e.target as HTMLInputElement).blur()
-          }
-        }}
-      />
-      <button
-        type="button"
-        className="ghost icon"
-        title={t('tasks.checklistMoveUp')}
-        aria-label={t('tasks.checklistMoveUp')}
-        disabled={disabled || !canMoveUp}
-        onClick={onMoveUp}
-      >
-        ↑
-      </button>
-      <button
-        type="button"
-        className="ghost icon"
-        title={t('tasks.checklistMoveDown')}
-        aria-label={t('tasks.checklistMoveDown')}
-        disabled={disabled || !canMoveDown}
-        onClick={onMoveDown}
-      >
-        ↓
-      </button>
-      <button
-        type="button"
-        className="ghost icon"
-        title={t('tasks.checklistRemove')}
-        aria-label={t('tasks.checklistRemove')}
-        disabled={disabled}
-        onClick={onRemove}
-      >
-        ×
-      </button>
+        <button
+          type="button"
+          className={`ghost icon${hasBody ? ' is-active' : ''}`}
+          title={t('tasks.checklistNoteToggle')}
+          aria-label={t('tasks.checklistNoteToggle')}
+          aria-pressed={open}
+          disabled={disabled}
+          onClick={() => setOpen((v) => !v)}
+        >
+          {hasBody ? '📝' : '🗒'}
+        </button>
+        <button
+          type="button"
+          className="ghost icon"
+          title={t('tasks.checklistMoveUp')}
+          aria-label={t('tasks.checklistMoveUp')}
+          disabled={disabled || !canMoveUp}
+          onClick={onMoveUp}
+        >
+          ↑
+        </button>
+        <button
+          type="button"
+          className="ghost icon"
+          title={t('tasks.checklistMoveDown')}
+          aria-label={t('tasks.checklistMoveDown')}
+          disabled={disabled || !canMoveDown}
+          onClick={onMoveDown}
+        >
+          ↓
+        </button>
+        <button
+          type="button"
+          className="ghost icon"
+          title={t('tasks.checklistRemove')}
+          aria-label={t('tasks.checklistRemove')}
+          disabled={disabled}
+          onClick={onRemove}
+        >
+          ×
+        </button>
+      </div>
+      {open && (
+        <div className="checklist__note">
+          <RichEditor
+            value={bodyDraft}
+            onChange={setBodyDraft}
+            placeholder={t('tasks.checklistNotePlaceholder')}
+            filename={item.text}
+          />
+          <div className="checklist__note-actions">
+            <button
+              type="button"
+              className="btn--sm"
+              disabled={disabled || !bodyDirty}
+              onClick={() => onEditBody(bodyDraft)}
+            >
+              {t('tasks.checklistNoteSave')}
+            </button>
+            {bodyDirty && <span className="muted">{t('tasks.unsaved')}</span>}
+          </div>
+        </div>
+      )}
     </li>
   )
 }
