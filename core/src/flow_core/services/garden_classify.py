@@ -1,0 +1,346 @@
+"""``garden_classify(node_id)`` — the proposal engine (ADR-0032).
+
+Read-only. Composes the shipped graph + link-prediction + Leiden
+substrate into a single structured proposal ``{tags, links, maturity,
+cluster}`` for a node, each item carrying a confidence and a rationale
+(the *transparency* constraint). It **never mutates**; the mutating,
+reversible counterpart is ``garden_apply`` (a separate surface, ADR-0032).
+
+v1 signals (heuristic, on today's substrate):
+
+- **tags** — tag↔tag co-occurrence over the workspace, discounted by tag
+  rarity (Adamic-Adar denominator ``1 / log(2 + deg(c))``: a candidate
+  that already covers half the garden contributes less to its own
+  confidence than a rare one would — ADR-0033 M1, native here).
+- **links** — wraps ``link_prediction.suggest_links_for_note`` (Adamic-
+  Adar + PPR + hub damping). v1 leaves ``link_kind`` at the conservative
+  default ``references``; the kind-predicting MLP is v2.
+- **maturity** — the *value* axis of the garden lifecycle: a note becomes
+  a ``mature`` candidate from global PageRank percentile (centrality) AND
+  manual-link degree (human curation). The *freshness* axis
+  (``seed→growing→dormant``) stays in the worker tick; this answers a
+  different question (see ADR-0032 "Relation to structural humus").
+- **cluster** — ``graph.compute_leiden_clusters``; degrades to ``None``
+  (recorded in ``signals_used`` as ``leiden_extra_absent``) when the
+  optional ``clustering`` extra is not installed, never a silent empty.
+
+Deferred to v2 (ADR-0032): bge-m3 embed-NN tags, the learned link-kind
+model, structural Node2Vec, calibrated personal priors (ADR-0037) and the
+anti-monoculture post-processing wrapper (ADR-0033). The confidence here
+is a fixed, documented transform of the raw signal, not yet learned.
+"""
+
+from __future__ import annotations
+
+import datetime as dt
+import math
+import uuid
+from collections import defaultdict
+from dataclasses import dataclass, field
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from flow_core.errors import NotFoundError
+from flow_core.i18n import MessageCode
+from flow_core.models.note import Note
+from flow_core.models.note_link import NoteNoteLink
+from flow_core.models.note_tag import NoteTag
+from flow_core.models.tag import Tag, TagKind
+from flow_core.services import graph as graph_svc
+from flow_core.services import link_prediction as linkpred_svc
+
+MODEL_VERSION = "garden-classify-v1"
+
+# Confidence floors / tiers (ADR-0032). Conservative by design: the safe
+# failure mode for a system that can promote maturity automatically is to
+# under-suggest. Tunable per workspace later; constants for v1.
+TAG_FLOOR = 0.55
+LINK_FLOOR = 0.45
+MATURE_SUGGEST = 0.65  # surface a one-tap proposal at/above this
+MATURE_AUTO = 0.85  # auto-promote (reversible, label-only) at/above this
+DEG_SATURATION = 3  # ADR-0029 manual-link threshold for "mature"
+DEFAULT_K = 5
+
+# The set of suggestion kinds the engine can produce.
+ALL_KINDS: frozenset[str] = frozenset({"tags", "links", "maturity", "cluster"})
+
+
+@dataclass(frozen=True)
+class TagSuggestion:
+    tag_id: uuid.UUID
+    confidence: float
+    rationale: str
+
+
+@dataclass(frozen=True)
+class LinkCandidate:
+    target_id: uuid.UUID
+    link_kind: str
+    confidence: float
+    rationale: str
+
+
+@dataclass(frozen=True)
+class MaturitySuggestion:
+    value: str  # "mature" in v1 (the value axis only proposes upward)
+    confidence: float
+    rationale: str
+    auto_apply: bool
+
+
+@dataclass(frozen=True)
+class ClusterSuggestion:
+    leiden_id: int | None
+    modularity: float | None
+    confidence: float
+
+
+@dataclass(frozen=True)
+class ClassifyResult:
+    node_id: uuid.UUID
+    node_kind: str
+    tags: list[TagSuggestion]
+    links: list[LinkCandidate]
+    maturity: MaturitySuggestion | None
+    cluster: ClusterSuggestion | None
+    signals_used: list[str]
+    model_version: str
+    generated_at: dt.datetime
+    # Diagnostics never surfaced to the user but useful in tests / audit.
+    raw: dict[str, float] = field(default_factory=dict)
+
+
+async def _note_generic_tags(
+    session: AsyncSession, *, org_id: uuid.UUID
+) -> tuple[dict[uuid.UUID, set[uuid.UUID]], dict[uuid.UUID, int]]:
+    """``({note_id: {generic_tag_id}}, {generic_tag_id: degree})`` in one
+    batched pass. Restricted to ``kind='generic'`` for the same reason as
+    ``graph._generic_tag_degrees``: project/client tags are coarse buckets
+    that every note shares, so they carry no discriminative signal."""
+    rows = (
+        await session.execute(
+            select(NoteTag.note_id, NoteTag.tag_id, Tag.kind)
+            .join(Tag, Tag.id == NoteTag.tag_id)
+            .where(NoteTag.org_id == org_id)
+        )
+    ).all()
+    by_note: dict[uuid.UUID, set[uuid.UUID]] = defaultdict(set)
+    deg: dict[uuid.UUID, int] = defaultdict(int)
+    for note_id, tag_id, kind in rows:
+        if kind is TagKind.generic:
+            by_note[note_id].add(tag_id)
+            deg[tag_id] += 1
+    return by_note, deg
+
+
+def _suggest_tags(
+    *,
+    node_id: uuid.UUID,
+    by_note: dict[uuid.UUID, set[uuid.UUID]],
+    tag_deg: dict[uuid.UUID, int],
+    k: int,
+) -> list[TagSuggestion]:
+    """Candidate generic tags ranked by rarity-discounted co-occurrence
+    with the node's existing generic tags. A tag found on many notes that
+    share a (rare) tag with the node scores high; a near-ubiquitous tag is
+    damped by ``1 / log(2 + deg)``."""
+    node_tags = by_note.get(node_id, set())
+    if not node_tags:
+        return []
+    support: dict[uuid.UUID, int] = defaultdict(int)
+    for other_id, other_tags in by_note.items():
+        if other_id == node_id or not (other_tags & node_tags):
+            continue
+        for t in other_tags:
+            if t not in node_tags:
+                support[t] += 1
+    out: list[TagSuggestion] = []
+    for c, n in support.items():
+        raw = n / math.log(2.0 + tag_deg.get(c, 0))
+        conf = 1.0 - 1.0 / (1.0 + raw)  # squash to [0, 1)
+        if conf < TAG_FLOOR:
+            continue
+        out.append(
+            TagSuggestion(
+                tag_id=c,
+                confidence=conf,
+                rationale=f"co-occurs on {n} related note(s); rarity 1/log(2+{tag_deg.get(c, 0)})",
+            )
+        )
+    out.sort(key=lambda s: (-s.confidence, str(s.tag_id)))
+    return out[: max(0, k)]
+
+
+async def _suggest_links(
+    session: AsyncSession, *, org_id: uuid.UUID, node_id: uuid.UUID, k: int
+) -> list[LinkCandidate]:
+    rows = await linkpred_svc.suggest_links_for_note(session, org_id=org_id, note_id=node_id, k=k)
+    return [
+        LinkCandidate(
+            target_id=r.note_id,
+            link_kind="references",  # v1 default; the kind MLP is v2 (ADR-0032)
+            confidence=r.score,
+            rationale=r.rationale,
+        )
+        for r in rows
+        if r.score >= LINK_FLOOR
+    ]
+
+
+async def _suggest_maturity(
+    session: AsyncSession, *, org_id: uuid.UUID, note: Note
+) -> tuple[MaturitySuggestion | None, dict[str, float]]:
+    """The value-axis promotion ``growing → mature``.
+
+    ``conf_mature = min(pr_pct, deg_term)`` — the ``min`` is the AND
+    semantics of ADR-0032: a note must be *both* central (top of the
+    PageRank distribution) *and* humanly curated (≥3 manual links) to be
+    auto-matured. A hub with no manual links, or a heavily linked private
+    silo, lands in the proposal tier at most, never auto.
+    """
+    diag: dict[str, float] = {}
+    # Only the value-axis promotion from ``growing`` is in scope; the
+    # worker owns seed→growing→dormant, and a transplanted note is
+    # read-only (ADR-0029 D2).
+    if note.promoted_at is not None or note.maturity != "growing":
+        return None, diag
+
+    pageranks = await graph_svc.compute_pagerank(session, org_id=org_id)
+    n = len(pageranks)
+    node_pr = pageranks.get(note.id, 0.0)
+    if n > 1:
+        rank = sum(1 for v in pageranks.values() if v <= node_pr)
+        pr_pct = (rank - 1) / (n - 1)
+    else:
+        pr_pct = 0.0
+
+    degree = await _manual_link_degree(session, org_id=org_id, note_id=note.id)
+    deg_term = min(1.0, degree / DEG_SATURATION)
+    conf = min(pr_pct, deg_term)
+    diag.update(pr_pct=pr_pct, manual_degree=float(degree), conf_mature=conf)
+
+    if conf < MATURE_SUGGEST:
+        return None, diag
+    return (
+        MaturitySuggestion(
+            value="mature",
+            confidence=conf,
+            rationale=(
+                f"PageRank p{round(pr_pct * 100)}, {degree} manual link(s) "
+                f"(needs both: central AND curated)"
+            ),
+            auto_apply=conf >= MATURE_AUTO,
+        ),
+        diag,
+    )
+
+
+async def _manual_link_degree(
+    session: AsyncSession, *, org_id: uuid.UUID, note_id: uuid.UUID
+) -> int:
+    """Undirected manual-link degree: the number of typed note↔note link
+    rows touching the note (either endpoint)."""
+    rows = (
+        await session.execute(
+            select(NoteNoteLink.parent_note_id, NoteNoteLink.child_note_id).where(
+                NoteNoteLink.org_id == org_id
+            )
+        )
+    ).all()
+    return sum(1 for p, c in rows if note_id in (p, c))
+
+
+async def _suggest_cluster(
+    session: AsyncSession, *, org_id: uuid.UUID, node_id: uuid.UUID
+) -> tuple[ClusterSuggestion | None, str]:
+    res = await graph_svc.compute_leiden_clusters(session, org_id=org_id)
+    if res.modularity is None:
+        # The optional ``clustering`` extra is absent; degrade explicitly.
+        return None, "leiden_extra_absent"
+    return (
+        ClusterSuggestion(
+            leiden_id=res.clusters.get(node_id),
+            modularity=res.modularity,
+            # Modularity is the confidence proxy: a well-separated
+            # partition means the community assignment is trustworthy.
+            confidence=max(0.0, res.modularity),
+        ),
+        "leiden_cluster",
+    )
+
+
+async def classify_node(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    node_id: uuid.UUID,
+    kinds: frozenset[str] | None = None,
+    k: int = DEFAULT_K,
+) -> ClassifyResult:
+    """Return the structured enrichment proposal for ``node_id``.
+
+    Read-only. RLS-scoped (every underlying query filters ``org_id`` and
+    runs on the caller's tenant session). v1 classifies **notes**; tasks
+    (tags-only per ADR-0032) and note_part/blob are a follow-up.
+    """
+    wanted = kinds if kinds is not None else ALL_KINDS
+    note = (
+        await session.execute(
+            select(Note).where(Note.id == node_id, Note.org_id == org_id, Note.deleted_at.is_(None))
+        )
+    ).scalar_one_or_none()
+    if note is None:
+        # v1 supports notes; a non-note id is "not found" for this surface.
+        raise NotFoundError(MessageCode.NOTE_NOT_FOUND)
+
+    signals: list[str] = []
+    raw: dict[str, float] = {}
+
+    tags: list[TagSuggestion] = []
+    if "tags" in wanted:
+        by_note, tag_deg = await _note_generic_tags(session, org_id=org_id)
+        tags = _suggest_tags(node_id=node_id, by_note=by_note, tag_deg=tag_deg, k=k)
+        if tags:
+            signals.append("tag_cooccur_adamic_adar")
+
+    links: list[LinkCandidate] = []
+    if "links" in wanted:
+        links = await _suggest_links(session, org_id=org_id, node_id=node_id, k=k)
+        if links:
+            signals.append("linkpred_ppr")
+
+    maturity: MaturitySuggestion | None = None
+    if "maturity" in wanted:
+        maturity, mat_diag = await _suggest_maturity(session, org_id=org_id, note=note)
+        raw.update(mat_diag)
+        if maturity is not None:
+            signals.extend(["pagerank_pct", "manual_degree"])
+
+    cluster: ClusterSuggestion | None = None
+    if "cluster" in wanted:
+        cluster, cluster_signal = await _suggest_cluster(session, org_id=org_id, node_id=node_id)
+        signals.append(cluster_signal)
+
+    return ClassifyResult(
+        node_id=node_id,
+        node_kind="note",
+        tags=tags,
+        links=links,
+        maturity=maturity,
+        cluster=cluster,
+        signals_used=signals,
+        model_version=MODEL_VERSION,
+        generated_at=dt.datetime.now(dt.UTC),
+        raw=raw,
+    )
+
+
+__all__ = [
+    "ClassifyResult",
+    "ClusterSuggestion",
+    "LinkCandidate",
+    "MaturitySuggestion",
+    "TagSuggestion",
+    "classify_node",
+]

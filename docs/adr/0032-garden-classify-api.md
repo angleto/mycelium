@@ -4,9 +4,12 @@ Status: Proposed
 Date: 2026-05-29 (rewrites the 2026-05-27 contract sketch; grounds it in
 shipped Phase-1 code and decides the maturity-automation policy)
 Tracks: task `3f11faca` (spec), parent `f6c9977f` (Fase 3)
-Depends on: ADR-0029 (note garden), ADR-0031 (edge weights / centrality)
+Depends on: ADR-0029 (note garden), ADR-0031 (edge weights / centrality /
+Leiden clusters — the v2 clustering is now **shipped**:
+`compute_leiden_clusters`, `GET /garden/clusters`)
 Informs / informed by: ADR-0030 (bge-m3), ADR-0033 (anti-monoculture),
-ADR-0034 (humus), ADR-0036 (event bus), ADR-0037 (online learning)
+ADR-0034 (humus), ADR-0036 (event bus), ADR-0037 (online learning),
+ADR-0039 (fungal decomposition / humus producer)
 
 ## Context
 
@@ -28,6 +31,11 @@ it is, not as a future ideal:
   tags. Co-activity (Proposal A) is not yet a contributor.
 - `graph.compute_pagerank` / `compute_personalized_pagerank` — global +
   seeded centrality, on-demand, deterministic power iteration.
+- `graph.compute_leiden_clusters` — Leiden communities + global
+  modularity over the same weighted graph, on-demand, deterministic given
+  a seed; the `clustering` extra (`python-igraph` + `leidenalg`) is
+  optional and the helper degrades to an empty map when it is absent.
+  `GET /garden/clusters` is shipped.
 - `link_prediction.suggest_links_for_note` — returns ranked
   `LinkSuggestion{note_id, score, signals, rationale}`, already
   excludes the already-linked set, already damps hubs.
@@ -37,17 +45,17 @@ it is, not as a future ideal:
 
 And what is **not** there yet, which v1 must therefore not assume:
 
-- Leiden clusters: no schema, no worker, no column. Cluster suggestion
-  is dark until ADR-0031 Phase 2 materialises it.
 - bge-m3 embeddings: scaffolded but off (`embed_model_v2` empty); the
   corpus is still e5-small (384d). Embedding-NN signals work but at
   legacy quality.
 - A learned link-kind / link-prediction model: the mix is heuristic.
 - The event bus (ADR-0036) and personal priors (ADR-0037): spec-only.
 
-The earlier sketch of this ADR assumed all four existed. This revision
-phases the contract so v1 ships on today's substrate and degrades
-gracefully, and v2 lights up signals as the substrate fills in.
+The earlier sketch of this ADR assumed all of these existed (Leiden has
+since shipped; the rest has not). This revision phases the contract so v1
+ships on today's substrate — now including Leiden — and degrades
+gracefully, while v2 lights up the remaining signals as the substrate
+fills in.
 
 ## Decision
 
@@ -88,7 +96,7 @@ POST /garden/apply               # the mutating, reversible counterpart
                    "confidence": 0.0, "rationale": "..." }],
     "maturity": { "value": "growing|mature", "confidence": 0.0,
                   "rationale": "...", "auto_apply": false },
-    "cluster":  null                   // v2; null + reason in signals_used
+    "cluster":  { "leiden_id": 7, "modularity": 0.62, "confidence": 0.0 }
   },
   "signals_used": ["tag_adamic_adar", "linkpred_ppr", "pagerank_pct",
                    "manual_degree"],   // only signals actually active
@@ -126,9 +134,14 @@ suggestion_value)` and never crosses the (org, project) boundary.
   `link_kind` as the conservative default `references`; the MLP that
   predicts the *kind* from `(edge_weight, shared_tags, embedding)` is v2.
 - **maturity** — see the dedicated decision below.
-- **cluster** — **null in v1**, with `"cluster": "leiden_not_materialised"`
-  recorded in `signals_used` so the reader knows it is dark, not empty.
-  Lights up in v2.
+- **cluster** — **active in v1** via `graph.compute_leiden_clusters`
+  (on-demand, over the same weighted graph as the edges). Returns the
+  node's Leiden community id and the partition modularity (the
+  confidence proxy: a high-modularity partition means the community
+  assignment is trustworthy; a magma-like graph means it is not).
+  Degrades to `null`, recorded in `signals_used` as
+  `leiden_extra_absent`, only when the optional `clustering` extra is not
+  installed — never a silent empty.
 
 ### Maturity: from suggestion to *automatic* promotion
 
@@ -205,6 +218,18 @@ hand, or the next promotion cycle simply does not re-assert it.
 daily prior snapshot plus the per-note maturity audit make
 `POST /garden/learning/rollback {to}` restore a prior maturity landscape
 deterministically.
+
+**Relation to structural humus (ADR-0039).** Maturity and humus share the
+PageRank-percentile signal but are deliberately different axes and must
+not be conflated. `mature` recognises *active* thinking that has become
+central and humanly curated (top-decile PageRank AND ≥3 manual links).
+ADR-0039's *structural humus* predicate marks *archived* material ready to
+fertilise the walk (archived > 30 d AND ≥3 incoming `references` AND
+PageRank top 20%). A note can be mature and not humus (active, central,
+never archived) or humus and not mature (archived, referenced, never
+hand-linked). `garden_classify` owns the first; the decomposition worker
+(ADR-0039) owns the second; they read the same centrality and answer
+different questions.
 
 ### Confidence calibration
 
@@ -302,9 +327,12 @@ v1 transparency and rollback.
 - **Make classify mutate directly** (no separate `apply`). Collapses the
   proposal/imposition boundary and loses the clean place to write the
   feedback event. Rejected.
-- **Block v1 on Leiden + bge-m3 + the learning loop** (the old sketch).
-  Couples the keystone to three unshipped systems and stalls all of
-  Fase 3 behind them. Rejected in favour of phased degradation.
+- **Block v1 on bge-m3 + the learning loop** (the old sketch also blocked
+  on Leiden, since shipped). Coupling the keystone to unshipped systems
+  stalls all of Fase 3 behind them. Rejected in favour of phased
+  degradation: v1 ships on the live substrate (graph + Leiden +
+  link-prediction) and v2 swaps in bge-m3 embeddings, the learned
+  link-kind model and calibrated personal priors.
 - **No audit log.** Without `signals_used` we cannot explain a
   suggestion, cannot drive the learning loop, and cannot roll back an
   auto-promotion. Rejected as a violation of transparency and
