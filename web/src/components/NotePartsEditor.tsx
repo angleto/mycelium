@@ -260,31 +260,31 @@ export const NotePartsEditor = forwardRef<NotePartsEditorHandle, Props>(
             setErr(errMessage(await res.json().catch(() => ({}))))
             return false
           }
-          // Sync the canonical part row from the server response *before*
-          // clearing the local draft. Without this, the next render falls
-          // back to ``parts[pid].body`` (the pre-PATCH copy) for one
-          // frame, RichEditor sees a stale ``value`` prop, and its
-          // value-sync effect runs ``setContent`` — which resets the
-          // ProseMirror selection to the end of the document. That was
-          // the "cursor jumps to end of page on autosave" regression.
+          // The editor (and the title input) are the source of truth
+          // while the user is typing. Take ONLY the authoritative
+          // ``version`` from the server response and store the body /
+          // title we actually SENT, not the server's re-serialised
+          // echo. Feeding that echo back into ``parts[pid]`` and
+          // clearing the local draft reverted the RichEditor ``value``
+          // to a re-normalised string for a frame, which moved the
+          // caret on every save and dropped any character typed while
+          // the PATCH was in flight (the "cursor jumps / can't type"
+          // bug). The drafts are intentionally KEPT: they are the live
+          // mirror of the editor. They simply stop being "dirty"
+          // because the stored body/title now equals what we sent (so
+          // autosave does not re-fire on an idempotent round-trip),
+          // while a keystroke that landed mid-flight leaves the draft
+          // dirty and schedules the next autosave — no lost input.
           const updated = (await res.json()) as NotePart
           setParts((cur) =>
-            cur.map((p) => (p.id === part.id ? updated : p)),
+            cur.map((p) => {
+              if (p.id !== part.id) return p
+              const next: NotePart = { ...p, version: updated.version }
+              if (hasBody) next.body = patch.body ?? ''
+              if (hasTitle) next.title = patch.title === '' ? null : patch.title ?? null
+              return next
+            }),
           )
-          if (hasBody) {
-            setEditingBody((cur) => {
-              const out = { ...cur }
-              delete out[part.id]
-              return out
-            })
-          }
-          if (hasTitle) {
-            setEditingTitle((cur) => {
-              const out = { ...cur }
-              delete out[part.id]
-              return out
-            })
-          }
           return true
         } finally {
           setBusyPid(null)
@@ -328,9 +328,11 @@ export const NotePartsEditor = forwardRef<NotePartsEditorHandle, Props>(
           if (timers[k]) window.clearTimeout(timers[k])
           timers[k] = window.setTimeout(() => {
             delete timers[k]
-            void saveBody(part, bDraft).then((ok) => {
-              if (ok) void reload()
-            })
+            // No reload() on success: patchPart already syncs the
+            // canonical ``version`` synchronously, and re-fetching the
+            // server's re-normalised body here is exactly what used to
+            // overwrite the live draft and jump the caret.
+            void saveBody(part, bDraft)
           }, 1200)
         }
         const tDraft = editingTitle[part.id]
@@ -339,9 +341,7 @@ export const NotePartsEditor = forwardRef<NotePartsEditorHandle, Props>(
           if (timers[k]) window.clearTimeout(timers[k])
           timers[k] = window.setTimeout(() => {
             delete timers[k]
-            void saveTitle(part, tDraft).then((ok) => {
-              if (ok) void reload()
-            })
+            void saveTitle(part, tDraft)
           }, 1200)
         }
       }
@@ -356,7 +356,7 @@ export const NotePartsEditor = forwardRef<NotePartsEditorHandle, Props>(
           }
         }
       }
-    }, [editingBody, editingTitle, parts, saveBody, saveTitle, reload])
+    }, [editingBody, editingTitle, parts, saveBody, saveTitle])
 
     useImperativeHandle(
       ref,
@@ -389,13 +389,16 @@ export const NotePartsEditor = forwardRef<NotePartsEditorHandle, Props>(
               break
             }
           }
-          // Reload once at the end so the SPA sees fresh versions
-          // for every saved part in a single round-trip.
-          await reload()
+          // No reload() here: patchPart already synced each saved
+          // part's ``version`` and stored what we sent, and the local
+          // drafts are the live editor content. Re-fetching the
+          // server's re-normalised bodies would only risk reverting
+          // the caret or re-dirtying clean parts. The modal remounts
+          // (fresh fetch) the next time the note is opened.
           return allOk
         },
       }),
-      [patchPart, reload],
+      [patchPart],
     )
 
     return (

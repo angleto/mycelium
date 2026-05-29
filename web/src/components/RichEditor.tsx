@@ -431,6 +431,15 @@ export function RichEditor({
   // at editor-build time and must not capture a stale editor instance).
   const editorRef = useRef<CoreEditor | null>(null)
 
+  // Markdown the editor currently holds. Updated on every emit
+  // (onUpdate) and after an external setContent, so the value-sync
+  // effect can tell an *external* value change (a different part/note
+  // loaded, a raw-mode edit, a conflict reload) from the editor's own
+  // content echoing back through the parent. Re-running setContent on
+  // our own echo is what rebuilt the document on every keystroke and
+  // moved the caret on every autosave.
+  const lastEmittedRef = useRef(value)
+
   const editorProps = useMemo(
     () => ({
       handlePaste: (_view: unknown, event: ClipboardEvent) => {
@@ -526,7 +535,9 @@ export function RichEditor({
     content: value,
     editorProps,
     onUpdate: ({ editor }: { editor: CoreEditor }) => {
-      onChange(getMd(editor))
+      const md = getMd(editor)
+      lastEmittedRef.current = md
+      onChange(md)
     },
   })
 
@@ -534,27 +545,29 @@ export function RichEditor({
     editorRef.current = editor
   }, [editor])
 
-  // Reflect external value changes (loaded task, or raw-mode edits)
-  // without looping and without clobbering the caret. Comparing the
-  // prop against ``getMd(editor)`` (the original implementation) was
-  // wrong: the Markdown↔ProseMirror round-trip is not idempotent at
-  // the character level (trailing newlines, escape ordering), so the
-  // prop and the re-serialised editor content could diverge even
-  // when the editor *was* the source. The diverged comparison fired
-  // ``setContent`` on every autosave, which in turn resets the
-  // selection to the end of the document — surfacing as the
-  // "cursor jumps to end of page after save" regression.
+  // Reflect *external* value changes (a different part/note loaded, a
+  // raw-mode edit, a conflict reload) onto the editor, while leaving
+  // the editor untouched when the incoming ``value`` is just its own
+  // content echoing back through the parent.
   //
-  // The fix is twofold: (a) compare against the last prop we have
-  // seen (``lastPropRef``), so a redundant same-prop re-render is a
-  // no-op, and (b) when setContent really is needed (initial load,
-  // raw-mode flip, switching note), preserve and clamp the prior
-  // selection so the caret stays where the user left it.
-  const lastPropRef = useRef(value)
+  // The previous implementation compared ``value`` against the last
+  // prop it had seen, but it still ran ``setContent`` on every
+  // keystroke (each keystroke emits a new markdown string, so the prop
+  // genuinely changed) — rebuilding the document every time. Because
+  // the Markdown↔ProseMirror round-trip is not idempotent at the
+  // character level (trailing newlines, escape ordering), and because
+  // NotePartsEditor used to feed the server's re-normalised body back
+  // into ``value`` on save, that rebuild moved the caret to a wrong
+  // position on autosave / manual save.
+  //
+  // The fix: skip the rebuild whenever ``value`` equals the markdown
+  // the editor itself last produced (``lastEmittedRef``). Only a
+  // genuinely external value triggers ``setContent``, and there we
+  // preserve and clamp the prior selection so the caret stays put.
   useEffect(() => {
     if (!editor) return
-    if (value === lastPropRef.current) return
-    lastPropRef.current = value
+    if (value === lastEmittedRef.current) return
+    lastEmittedRef.current = value
     const { from, to } = editor.state.selection
     editor.commands.setContent(value, { emitUpdate: false })
     const max = editor.state.doc.content.size
