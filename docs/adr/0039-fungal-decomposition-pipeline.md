@@ -1,6 +1,6 @@
 # ADR-0039 — Fungal decomposition pipeline (humus producer)
 
-Status: Proposed
+Status: Accepted (Phase 1 shipped; ratified 2026-05-29)
 Date: 2026-05-28
 Tracks: task `4a718dc4-b220-40f5-9057-a009674d8143`
 Depends on: ADR-0029 (note garden ecosystem), ADR-0012 (LLM abstraction)

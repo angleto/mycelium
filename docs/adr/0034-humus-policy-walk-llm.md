@@ -1,6 +1,6 @@
 # ADR-0034 — Humus policy in the LLM walk
 
-Status: Proposed
+Status: Accepted (ratified 2026-05-29)
 Date: 2026-05-27
 Tracks: task `e980e5f9-6028-4ae0-9850-9564c1e8a602`
 Depends on: ADR-0029 (note garden), ADR-0030 (bge-m3), ADR-0032 (`garden_classify`), ADR-0039 (decomposition pipeline — the humus producer)
