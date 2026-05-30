@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { api, errMessage, workspaceHeader } from '../api/client'
 import { AnnotationsPanel } from '../components/AnnotationsPanel'
 import { RichEditor } from '../components/RichEditor'
-import { toAnchors, useAnnotations, type AnnotationPrefill } from '../lib/useAnnotations'
+import { toAnchors, useAnnotations } from '../lib/useAnnotations'
 import { AssigneePicker } from '../components/AssigneePicker'
 import { OwnerPicker } from '../components/OwnerPicker'
 import { ParticipantsSection } from '../components/ParticipantsSection'
@@ -45,7 +45,6 @@ export function TaskDetailRoute() {
     error: descAnnoError,
   } = useAnnotations('task_description', id)
   const descAnchors = useMemo(() => toAnchors(descAnnotations), [descAnnotations])
-  const [descPrefill, setDescPrefill] = useState<AnnotationPrefill | null>(null)
   // "Add & Open" from TasksRoute hands us the freshly-created TaskOut
   // via router state. We hydrate from it on the very first render so
   // the user lands on the editable surface without a GET round-trip
@@ -951,24 +950,13 @@ export function TaskDetailRoute() {
               imageUploadParent={{ kind: 'task', id: task.id }}
               filename={task.title}
               annotations={descAnchors}
-              onCommentSelection={(s) =>
-                setDescPrefill({
-                  mode: 'comment',
-                  quote: s.text,
-                  prefix: s.prefix,
-                  suffix: s.suffix,
-                  nonce: Date.now(),
-                })
-              }
-              onSuggestSelection={(s) =>
-                setDescPrefill({
-                  mode: 'suggest',
-                  quote: s.text,
-                  prefix: s.prefix,
-                  suffix: s.suffix,
-                  nonce: Date.now(),
-                })
-              }
+              inlineAnnotations={{
+                docKind: 'task_description',
+                docId: id,
+                rows: descAnnotations,
+                reload: reloadDescAnnotations,
+                onDocMutated: reload,
+              }}
             />
             <AnnotationsPanel
               docKind="task_description"
@@ -977,7 +965,6 @@ export function TaskDetailRoute() {
               reload={reloadDescAnnotations}
               loadError={descAnnoError}
               onDocMutated={reload}
-              prefill={descPrefill ?? undefined}
               title={t('annotations.diaryTitle', {
                 defaultValue: 'Work diary, comments & suggestions',
               })}

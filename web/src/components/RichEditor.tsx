@@ -24,6 +24,8 @@ import {
   annotationKey,
   type AnnotationAnchor,
 } from '../lib/annotationDecorations'
+import { InlineAnnotator } from './InlineAnnotator'
+import type { Annotation, DocKind } from '../lib/useAnnotations'
 import { EntityPrefix } from '../lib/entityPrefixExtension'
 import { api, authFetch, workspaceHeader } from '../api/client'
 import { formatMentionHref, type MentionKind } from '../lib/mentions'
@@ -350,8 +352,7 @@ export function RichEditor({
   imageUploadParent,
   filename,
   annotations,
-  onCommentSelection,
-  onSuggestSelection,
+  inlineAnnotations,
 }: {
   value: string
   onChange: (v: string) => void
@@ -366,12 +367,19 @@ export function RichEditor({
   // Inline annotation anchors (comments + suggestions) rendered as
   // decorations over the live prose. Purely presentational.
   annotations?: AnnotationAnchor[]
-  // Selection-driven authoring: when provided, the toolbar shows
-  // "Comment" / "Suggest edit" actions that hand the current selection
-  // (text + W3C prefix/suffix context) to the host to prefill the
-  // annotation form.
-  onCommentSelection?: (sel: { text: string; prefix: string; suffix: string }) => void
-  onSuggestSelection?: (sel: { text: string; prefix: string; suffix: string }) => void
+  // When provided, the editor gains the inline annotation UX: a floating
+  // 💬/✎ toolbar on the live selection (create) and a click-on-mark
+  // action popover (accept/reject/resolve/edit/reply/delete). The host
+  // supplies the shared useAnnotations rows + reload so the panel, the
+  // decorations and this layer stay in sync.
+  inlineAnnotations?: {
+    docKind: DocKind
+    docId: string
+    rows: Annotation[]
+    reload: () => Promise<void>
+    onDocMutated?: () => void | Promise<void>
+    allowSuggest?: boolean
+  }
 }) {
   const { t } = useTranslation()
   // Drop to a plain markdown textarea (paste long blocks, fix a bad
@@ -612,18 +620,6 @@ export function RichEditor({
 
   const fmt = !rawMode && editor != null
 
-  // Current selection as text + W3C-style prefix/suffix (the chars
-  // around it within the same block) for robust annotation anchoring.
-  const selectionContext = (): { text: string; prefix: string; suffix: string } | null => {
-    if (!editor) return null
-    const { from, to } = editor.state.selection
-    const doc = editor.state.doc
-    return {
-      text: doc.textBetween(from, to, ' '),
-      prefix: doc.textBetween(doc.resolve(from).start(), from, ' ').slice(-24),
-      suffix: doc.textBetween(to, doc.resolve(to).end(), ' ').slice(0, 24),
-    }
-  }
   const tb = (
     label: string,
     titleKey: string,
@@ -747,40 +743,6 @@ export function RichEditor({
             editor?.chain().focus().redo().run())}
         </span>
         <span className="rte__actions">
-          {onCommentSelection && (
-            <button
-              type="button"
-              className="btn--ghost btn--sm"
-              disabled={!fmt}
-              title={t('annotations.comment', { defaultValue: 'Comment' })}
-              // onMouseDown + preventDefault keeps the editor focused and
-              // the selection intact: a plain onClick first blurs the
-              // editor and collapses the selection, so the handler would
-              // read an empty range and do nothing.
-              onMouseDown={(e) => {
-                e.preventDefault()
-                const c = selectionContext()
-                if (c) onCommentSelection(c)
-              }}
-            >
-              💬
-            </button>
-          )}
-          {onSuggestSelection && (
-            <button
-              type="button"
-              className="btn--ghost btn--sm"
-              disabled={!fmt}
-              title={t('annotations.suggestToggle', { defaultValue: 'Suggest an edit' })}
-              onMouseDown={(e) => {
-                e.preventDefault()
-                const c = selectionContext()
-                if (c) onSuggestSelection(c)
-              }}
-            >
-              ✎
-            </button>
-          )}
           <button
             type="button"
             className="btn--ghost btn--sm"
@@ -885,6 +847,17 @@ export function RichEditor({
         />
       ) : (
         <EditorContent editor={editor} />
+      )}
+      {editor && !rawMode && inlineAnnotations && (
+        <InlineAnnotator
+          editor={editor}
+          docKind={inlineAnnotations.docKind}
+          docId={inlineAnnotations.docId}
+          rows={inlineAnnotations.rows}
+          reload={inlineAnnotations.reload}
+          onDocMutated={inlineAnnotations.onDocMutated}
+          allowSuggest={inlineAnnotations.allowSuggest}
+        />
       )}
     </div>
   )

@@ -1,0 +1,520 @@
+import { useCallback, useEffect, useState } from 'react'
+import { createPortal } from 'react-dom'
+import { useTranslation } from 'react-i18next'
+import type { Editor } from '@tiptap/core'
+
+import * as annoApi from '../lib/annotationsApi'
+import type { Annotation, DocKind } from '../lib/useAnnotations'
+
+// The Google-Docs-style inline annotation UX, layered over a RichEditor:
+//
+//  - select text  → a floating toolbar (💬 / ✎) appears right above the
+//    selection; clicking opens a compose popover anchored there. No
+//    scrolling to a panel at the bottom.
+//  - click an inline mark (a struck suggestion or a highlighted comment)
+//    → an action popover opens on the spot with Accept / Reject /
+//    Resolve / Edit / Reply / Delete.
+//
+// All popovers carry an explicit Cancel/Close, and Escape dismisses
+// them, so a half-written comment or suggestion can always be abandoned.
+//
+// The toolbar reads the live editor selection (via the editor's own
+// state, not a detached DOM read), so the selection can never be
+// collapsed by a blur before the handler runs — the defect that made
+// the old toolbar buttons do nothing.
+
+interface Sel {
+  from: number
+  to: number
+  text: string
+  prefix: string
+  suffix: string
+  // Viewport coordinates of the selection, for fixed-position popovers.
+  left: number
+  top: number
+  bottom: number
+}
+
+interface ActiveAt {
+  id: string
+  left: number
+  top: number
+}
+
+interface Props {
+  editor: Editor
+  docKind: DocKind
+  docId: string
+  rows: Annotation[]
+  reload: () => Promise<void>
+  /** Called after accepting a suggestion (the body changed server-side)
+   * so the host can refresh the prose. */
+  onDocMutated?: () => void | Promise<void>
+  /** Suggestions only make sense where there is editable prose to splice
+   * into; comments are always allowed. */
+  allowSuggest?: boolean
+}
+
+// Keep a popover within the viewport horizontally.
+function clampLeft(left: number, width = 320): number {
+  const margin = 8
+  const max = window.innerWidth - width - margin
+  return Math.max(margin, Math.min(left, max))
+}
+
+export function InlineAnnotator({
+  editor,
+  docKind,
+  docId,
+  rows,
+  reload,
+  onDocMutated,
+  allowSuggest = true,
+}: Props) {
+  const { t } = useTranslation()
+  const [sel, setSel] = useState<Sel | null>(null)
+  const [compose, setCompose] = useState<{ kind: 'comment' | 'suggest'; sel: Sel } | null>(null)
+  const [active, setActive] = useState<ActiveAt | null>(null)
+  const [err, setErr] = useState('')
+
+  // Compose form fields.
+  const [cBody, setCBody] = useState('')
+  const [cProposed, setCProposed] = useState('')
+  const [cWhy, setCWhy] = useState('')
+
+  // Inline edit / reply within the action popover.
+  const [editing, setEditing] = useState(false)
+  const [editText, setEditText] = useState('')
+  const [replying, setReplying] = useState(false)
+  const [replyText, setReplyText] = useState('')
+
+  const closeAll = useCallback(() => {
+    setCompose(null)
+    setActive(null)
+    setSel(null)
+    setEditing(false)
+    setReplying(false)
+    setErr('')
+  }, [])
+
+  // Read the current editor selection as text + W3C prefix/suffix +
+  // viewport coordinates. Returns null for an empty/whitespace
+  // selection.
+  const readSelection = useCallback((): Sel | null => {
+    const { state, view } = editor
+    const { from, to, empty } = state.selection
+    if (empty || to <= from) return null
+    const doc = state.doc
+    const text = doc.textBetween(from, to, ' ')
+    if (!text.trim()) return null
+    const prefix = doc.textBetween(doc.resolve(from).start(), from, ' ').slice(-24)
+    const suffix = doc.textBetween(to, doc.resolve(to).end(), ' ').slice(0, 24)
+    try {
+      const a = view.coordsAtPos(from)
+      const b = view.coordsAtPos(to)
+      return {
+        from,
+        to,
+        text,
+        prefix,
+        suffix,
+        left: (a.left + b.left) / 2,
+        top: Math.min(a.top, b.top),
+        bottom: Math.max(a.bottom, b.bottom),
+      }
+    } catch {
+      return null
+    }
+  }, [editor])
+
+  // Track the selection so the floating toolbar can anchor to it. The
+  // render gates the toolbar off while a popover is open.
+  useEffect(() => {
+    const update = () => setSel(readSelection())
+    editor.on('selectionUpdate', update)
+    return () => {
+      editor.off('selectionUpdate', update)
+    }
+  }, [editor, readSelection])
+
+  // Click an inline mark → open the action popover on it.
+  useEffect(() => {
+    const dom = editor.view.dom as HTMLElement
+    const onClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement | null
+      const el = target?.closest('[data-annotation-id]') as HTMLElement | null
+      if (!el) return
+      const id = el.getAttribute('data-annotation-id')
+      if (!id) return
+      const rect = el.getBoundingClientRect()
+      setCompose(null)
+      setSel(null)
+      setEditing(false)
+      setReplying(false)
+      setErr('')
+      setActive({ id, left: rect.left, top: rect.bottom })
+    }
+    dom.addEventListener('click', onClick)
+    return () => dom.removeEventListener('click', onClick)
+  }, [editor])
+
+  // Escape closes whatever is open.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && (compose || active)) {
+        e.preventDefault()
+        closeAll()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [compose, active, closeAll])
+
+  const openCompose = (kind: 'comment' | 'suggest') => {
+    const s = sel
+    if (!s) return
+    setCBody('')
+    setCProposed('')
+    setCWhy('')
+    setErr('')
+    setActive(null)
+    setCompose({ kind, sel: s })
+  }
+
+  const submitCompose = async () => {
+    if (!compose) return
+    const s = compose.sel
+    const r =
+      compose.kind === 'comment'
+        ? await annoApi.createComment({
+            docKind,
+            docId,
+            body: cBody,
+            anchorQuote: s.text,
+            anchorPrefix: s.prefix,
+            anchorSuffix: s.suffix,
+          })
+        : await annoApi.createSuggestion({
+            docKind,
+            docId,
+            originalText: s.text,
+            proposedText: cProposed,
+            rationale: cWhy,
+            anchorPrefix: s.prefix,
+            anchorSuffix: s.suffix,
+          })
+    if (!r.ok) {
+      setErr(r.error ?? 'Error')
+      return
+    }
+    closeAll()
+    await reload()
+  }
+
+  const current = active ? rows.find((r) => r.id === active.id) ?? null : null
+
+  const doAct = async (a: Annotation, verb: string) => {
+    const r = await annoApi.act(a.id, verb, a.version)
+    if (!r.ok) {
+      setErr(r.error ?? 'Error')
+      return
+    }
+    setErr('')
+    await reload()
+    if (verb === 'accept') await onDocMutated?.()
+    if (verb === 'accept' || verb === 'reject') setActive(null)
+  }
+
+  const doDelete = async (a: Annotation) => {
+    if (!confirm(t('annotations.confirmDelete', { defaultValue: 'Remove this annotation?' })))
+      return
+    const r = await annoApi.remove(a.id, a.version)
+    if (!r.ok) {
+      setErr(r.error ?? 'Error')
+      return
+    }
+    closeAll()
+    await reload()
+  }
+
+  const doSaveEdit = async (a: Annotation) => {
+    if (!editText.trim()) return
+    const r = await annoApi.editBody(a.id, editText, a.version)
+    if (!r.ok) {
+      setErr(r.error ?? 'Error')
+      return
+    }
+    setEditing(false)
+    await reload()
+  }
+
+  const doReply = async (a: Annotation) => {
+    if (!replyText.trim()) return
+    const r = await annoApi.createComment({
+      docKind,
+      docId,
+      body: replyText,
+      parentId: a.id,
+    })
+    if (!r.ok) {
+      setErr(r.error ?? 'Error')
+      return
+    }
+    setReplying(false)
+    setReplyText('')
+    await reload()
+  }
+
+  const repliesOf = (id: string) => rows.filter((r) => r.parent_id === id && !r.deleted_at)
+
+  // Render the floating overlay through a portal on <body> so the
+  // fixed-position coordinates (computed from the editor selection in
+  // viewport space) are immune to a transformed / overflow-clipped
+  // ancestor — e.g. the note modal, which otherwise traps position:fixed
+  // and clips the bubble out of view.
+  return createPortal(
+    <>
+      {/* Floating selection toolbar */}
+      {sel && !compose && !active && (
+        <div
+          className="anno-bubble"
+          style={{ position: 'fixed', left: clampLeft(sel.left, 120), top: sel.top - 40 }}
+          // Keep the editor selection intact: a plain click would blur the
+          // editor and collapse it before the handler reads ``sel``.
+          onMouseDown={(e) => e.preventDefault()}
+        >
+          <button
+            type="button"
+            className="anno-bubble__btn"
+            title={t('annotations.comment', { defaultValue: 'Comment' })}
+            onClick={() => openCompose('comment')}
+          >
+            💬
+          </button>
+          {allowSuggest && (
+            <button
+              type="button"
+              className="anno-bubble__btn"
+              title={t('annotations.suggestToggle', { defaultValue: 'Suggest an edit' })}
+              onClick={() => openCompose('suggest')}
+            >
+              ✎
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Compose popover */}
+      {compose && (
+        <div
+          className="anno-pop"
+          style={{
+            position: 'fixed',
+            left: clampLeft(compose.sel.left - 160),
+            top: compose.sel.bottom + 8,
+          }}
+          onMouseDown={(e) => e.stopPropagation()}
+        >
+          <div className="anno-pop__quote" title={compose.sel.text}>
+            “{compose.sel.text.slice(0, 80)}”
+          </div>
+          {compose.kind === 'comment' ? (
+            <textarea
+              className="anno-pop__input"
+              autoFocus
+              rows={3}
+              value={cBody}
+              onChange={(e) => setCBody(e.target.value)}
+              placeholder={t('annotations.commentPlaceholder', { defaultValue: 'Add a comment…' })}
+            />
+          ) : (
+            <>
+              <textarea
+                className="anno-pop__input"
+                autoFocus
+                rows={2}
+                value={cProposed}
+                onChange={(e) => setCProposed(e.target.value)}
+                placeholder={t('annotations.proposed', {
+                  defaultValue: 'Proposed replacement (empty = delete)',
+                })}
+              />
+              <input
+                className="anno-pop__input"
+                type="text"
+                value={cWhy}
+                onChange={(e) => setCWhy(e.target.value)}
+                placeholder={t('annotations.why', { defaultValue: 'Why (optional)' })}
+              />
+            </>
+          )}
+          {err && <p className="err anno-pop__err">{err}</p>}
+          <div className="anno-pop__actions">
+            <button type="button" className="btn--sm" onClick={() => void submitCompose()}>
+              {compose.kind === 'comment'
+                ? t('annotations.comment', { defaultValue: 'Comment' })
+                : t('annotations.propose', { defaultValue: 'Propose' })}
+            </button>
+            <button type="button" className="btn--sm btn--ghost" onClick={closeAll}>
+              {t('common.cancel', { defaultValue: 'Cancel' })}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Action popover on an existing annotation */}
+      {active && current && (
+        <div
+          className="anno-pop"
+          style={{ position: 'fixed', left: clampLeft(active.left - 80), top: active.top + 6 }}
+          onMouseDown={(e) => e.stopPropagation()}
+        >
+          {current.kind === 'suggestion' ? (
+            <div className="anno-pop__diff">
+              {current.original_text && <del className="anno-del">{current.original_text}</del>}{' '}
+              {current.proposed_text && <ins className="anno-ins">{current.proposed_text}</ins>}
+            </div>
+          ) : (
+            current.anchor_quote && (
+              <div className="anno-pop__quote" title={current.anchor_quote}>
+                “{current.anchor_quote.slice(0, 80)}”
+              </div>
+            )
+          )}
+
+          {editing ? (
+            <>
+              <textarea
+                className="anno-pop__input"
+                autoFocus
+                rows={3}
+                value={editText}
+                onChange={(e) => setEditText(e.target.value)}
+              />
+              <div className="anno-pop__actions">
+                <button type="button" className="btn--sm" onClick={() => void doSaveEdit(current)}>
+                  {t('common.save', { defaultValue: 'Save' })}
+                </button>
+                <button
+                  type="button"
+                  className="btn--sm btn--ghost"
+                  onClick={() => setEditing(false)}
+                >
+                  {t('common.cancel', { defaultValue: 'Cancel' })}
+                </button>
+              </div>
+            </>
+          ) : (
+            current.body && <div className="anno-pop__body">{current.body}</div>
+          )}
+
+          {/* Existing replies (read-only here; full thread in the panel). */}
+          {repliesOf(current.id).length > 0 && (
+            <ul className="anno-pop__replies">
+              {repliesOf(current.id).map((r) => (
+                <li key={r.id}>{r.body}</li>
+              ))}
+            </ul>
+          )}
+
+          {replying && (
+            <>
+              <textarea
+                className="anno-pop__input"
+                autoFocus
+                rows={2}
+                value={replyText}
+                onChange={(e) => setReplyText(e.target.value)}
+                placeholder={t('annotations.replyPlaceholder', { defaultValue: 'Reply…' })}
+              />
+              <div className="anno-pop__actions">
+                <button type="button" className="btn--sm" onClick={() => void doReply(current)}>
+                  {t('annotations.send', { defaultValue: 'Send' })}
+                </button>
+                <button
+                  type="button"
+                  className="btn--sm btn--ghost"
+                  onClick={() => setReplying(false)}
+                >
+                  {t('common.cancel', { defaultValue: 'Cancel' })}
+                </button>
+              </div>
+            </>
+          )}
+
+          {err && <p className="err anno-pop__err">{err}</p>}
+
+          {!editing && !replying && (
+            <div className="anno-pop__actions">
+              {current.kind === 'suggestion' && current.status === 'open' && (
+                <>
+                  <button type="button" className="btn--sm" onClick={() => void doAct(current, 'accept')}>
+                    {t('annotations.accept', { defaultValue: 'Accept' })}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn--sm btn--ghost"
+                    onClick={() => void doAct(current, 'reject')}
+                  >
+                    {t('annotations.reject', { defaultValue: 'Reject' })}
+                  </button>
+                </>
+              )}
+              {current.kind === 'comment' && current.status === 'open' && (
+                <button
+                  type="button"
+                  className="btn--sm btn--ghost"
+                  onClick={() => void doAct(current, 'resolve')}
+                >
+                  {t('annotations.resolve', { defaultValue: 'Resolve' })}
+                </button>
+              )}
+              {current.kind === 'comment' && current.status !== 'open' && (
+                <button
+                  type="button"
+                  className="btn--sm btn--ghost"
+                  onClick={() => void doAct(current, 'reopen')}
+                >
+                  {t('annotations.reopen', { defaultValue: 'Reopen' })}
+                </button>
+              )}
+              {current.kind === 'comment' && (
+                <button
+                  type="button"
+                  className="btn--sm btn--ghost"
+                  onClick={() => {
+                    setReplyText('')
+                    setReplying(true)
+                  }}
+                >
+                  {t('annotations.reply', { defaultValue: 'Reply' })}
+                </button>
+              )}
+              <button
+                type="button"
+                className="btn--sm btn--ghost"
+                onClick={() => {
+                  setEditText(current.body ?? '')
+                  setEditing(true)
+                }}
+              >
+                {t('common.edit', { defaultValue: 'Edit' })}
+              </button>
+              <button
+                type="button"
+                className="btn--sm btn--danger"
+                onClick={() => void doDelete(current)}
+              >
+                ×
+              </button>
+              <button type="button" className="btn--sm btn--ghost" onClick={closeAll}>
+                {t('common.close', { defaultValue: 'Close' })}
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+    </>,
+    document.body,
+  )
+}

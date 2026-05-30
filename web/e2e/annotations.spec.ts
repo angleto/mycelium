@@ -1,15 +1,20 @@
 import { test, expect, type Page, request as pwRequest } from '@playwright/test'
 import { E2E_EMAIL as EMAIL, E2E_PASSWORD as PASSWORD } from './global-setup'
 
-// Regression: the task-description annotation editor (RichEditor +
-// AnnotationDecorations + the ✎/💬 toolbar actions + AnnotationsPanel)
-// must mount without a render loop, and the suggesting flow must work
-// end to end — select → ✎ opens the form → Propose renders the struck
-// original + coloured proposal inline → Accept splices it into the body.
-// A React infinite loop prints "Maximum update depth exceeded"
-// (captured below); a CPU-pegging loop makes the actions time out.
-// Covers the v2.0.57 regression (toolbar onClick blurred the editor and
-// collapsed the selection; the buttons did nothing).
+// Regression for the inline annotation UX (InlineAnnotator over the
+// task-description RichEditor):
+//   - select text → a floating 💬/✎ toolbar appears on the selection;
+//   - ✎ → a compose popover (NOT a panel at the bottom of the page);
+//   - Propose → struck original + coloured proposal render inline;
+//   - click the struck text → an action popover opens on the spot;
+//   - Accept → the proposed text is SPLICED into the body and the editor
+//     shows it.
+// Covers the bugs the user hit:
+//   * the toolbar buttons did nothing (selection lost on blur) — gone,
+//     the bubble reads the live editor selection;
+//   * Accept did not replace the word — asserted below;
+//   * having to scroll to the bottom panel — interaction is inline.
+// A React render loop prints "Maximum update depth exceeded" (captured).
 
 const BENIGN = [
   /favicon/i,
@@ -37,7 +42,7 @@ async function login(page: Page) {
   await page.waitForURL('**/notes', { timeout: 15_000 })
 }
 
-async function createTask(): Promise<string> {
+async function createTask(description: string): Promise<string> {
   const ctx = await pwRequest.newContext({ baseURL: 'http://localhost:8000' })
   const auth = await (
     await ctx.post('/auth/login', { data: { email: EMAIL, password: PASSWORD } })
@@ -48,56 +53,147 @@ async function createTask(): Promise<string> {
   ).json()
   const headers = { Authorization: `Bearer ${token}`, 'X-Workspace-Id': ws[0].id }
   const task = await (
-    await ctx.post('/tasks', {
-      headers,
-      data: { title: `e2e anno ${Date.now()}`, description: 'The quick brown fox jumps.' },
-    })
+    await ctx.post('/tasks', { headers, data: { title: `e2e anno ${Date.now()}`, description } })
   ).json()
   await ctx.dispose()
   return task.id as string
 }
 
-test('task annotation editor mounts cleanly and ✎ opens the suggest form', async ({
+async function createNoteWithPart(body: string): Promise<string> {
+  const ctx = await pwRequest.newContext({ baseURL: 'http://localhost:8000' })
+  const auth = await (
+    await ctx.post('/auth/login', { data: { email: EMAIL, password: PASSWORD } })
+  ).json()
+  const token = auth.token as string
+  const ws = await (
+    await ctx.get('/workspaces', { headers: { Authorization: `Bearer ${token}` } })
+  ).json()
+  const headers = { Authorization: `Bearer ${token}`, 'X-Workspace-Id': ws[0].id }
+  const note = await (
+    await ctx.post('/notes', { headers, data: { kind: 'text', title: `e2e anno note ${Date.now()}` } })
+  ).json()
+  await ctx.post(`/notes/${note.id}/parts`, {
+    headers: { ...headers, 'Content-Type': 'application/json' },
+    data: { body },
+  })
+  await ctx.dispose()
+  return note.id as string
+}
+
+test('inline suggest: bubble → propose → inline diff → click mark → accept splices', async ({
   page,
 }) => {
   const errors: string[] = []
   watch(page, errors)
-  const taskId = await createTask()
+  const taskId = await createTask('alpha beta gamma delta')
   await login(page)
   await page.goto(`/tasks/${taskId}`)
 
   const editor = page.locator('.ProseMirror').first()
   await expect(editor).toBeVisible({ timeout: 15_000 })
-  await expect(editor).toContainText('quick', { timeout: 10_000 })
-  // A render loop would flood the console during this settle window.
-  await page.waitForTimeout(2500)
+  await expect(editor).toContainText('beta', { timeout: 10_000 })
+  await page.waitForTimeout(2000)
   expect(errors, `errors after mount:\n${errors.join('\n')}`).toEqual([])
 
-  // Select all text in the description editor, then click ✎ (suggest).
+  // Select the first word ("alpha") with the keyboard → floating toolbar.
   await editor.click()
-  await page.keyboard.press('ControlOrMeta+a')
-  const suggestBtn = page.locator('.rte__actions button', { hasText: '✎' }).first()
-  await expect(suggestBtn).toBeVisible()
-  await suggestBtn.click()
-  await page.waitForTimeout(1000)
+  await page.keyboard.press('Home')
+  for (let i = 0; i < 5; i += 1) await page.keyboard.press('Shift+ArrowRight')
 
-  expect(errors, `errors after ✎ click:\n${errors.join('\n')}`).toEqual([])
-  const sug = page.locator('.anno-panel__suggest').first()
-  await expect(sug).toBeVisible({ timeout: 5000 })
+  const bubble = page.locator('.anno-bubble')
+  await expect(bubble).toBeVisible({ timeout: 5000 })
+  await bubble.locator('.anno-bubble__btn', { hasText: '✎' }).click()
 
-  // Propose a replacement (input order: original[0], proposed[1], why[2]).
-  await sug.locator('input').nth(1).fill('A lazy dog rests.')
-  await sug.getByRole('button', { name: /Propose|Proponi/i }).click()
-  await page.waitForTimeout(1000)
+  // Compose popover (inline, not at page bottom).
+  const pop = page.locator('.anno-pop').first()
+  await expect(pop).toBeVisible({ timeout: 5000 })
+  await pop.locator('textarea').first().fill('alphaX')
+  await pop.getByRole('button', { name: /Propose|Proponi/i }).click()
+  await page.waitForTimeout(800)
   expect(errors, `errors after propose:\n${errors.join('\n')}`).toEqual([])
 
-  // The suggestion renders inline: struck original + coloured proposed.
-  await expect(page.locator('.anno-mark--del').first()).toBeVisible({ timeout: 5000 })
+  // Inline diff renders over the prose.
+  const del = page.locator('.anno-mark--del').first()
+  await expect(del).toBeVisible({ timeout: 5000 })
   await expect(page.locator('.anno-mark--ins').first()).toBeVisible()
 
-  // Accept it: the proposed text is spliced into the description.
-  await page.locator('.anno button', { hasText: /Accept|Accetta/i }).first().click()
-  await page.waitForTimeout(1500)
+  // Click the struck original → action popover → Accept.
+  await del.click()
+  const actPop = page.locator('.anno-pop').first()
+  await expect(actPop).toBeVisible({ timeout: 5000 })
+  await actPop.getByRole('button', { name: /Accept|Accetta/i }).click()
+  await page.waitForTimeout(1800)
   expect(errors, `errors after accept:\n${errors.join('\n')}`).toEqual([])
-  await expect(editor).toContainText('lazy dog', { timeout: 8000 })
+
+  // The proposed text replaced the original in the editor.
+  await expect(editor).toContainText('alphaX', { timeout: 8000 })
+  await expect(editor).toContainText('beta gamma delta')
+})
+
+test('cancel discards a half-written suggestion', async ({ page }) => {
+  const errors: string[] = []
+  watch(page, errors)
+  const taskId = await createTask('one two three four')
+  await login(page)
+  await page.goto(`/tasks/${taskId}`)
+
+  const editor = page.locator('.ProseMirror').first()
+  await expect(editor).toBeVisible({ timeout: 15_000 })
+  await expect(editor).toContainText('two', { timeout: 10_000 })
+
+  await editor.click()
+  await page.keyboard.press('Home')
+  for (let i = 0; i < 3; i += 1) await page.keyboard.press('Shift+ArrowRight')
+  await page.locator('.anno-bubble .anno-bubble__btn', { hasText: '✎' }).click()
+
+  const pop = page.locator('.anno-pop').first()
+  await expect(pop).toBeVisible({ timeout: 5000 })
+  await pop.locator('textarea').first().fill('changed my mind')
+  await pop.getByRole('button', { name: /Cancel|Annulla/i }).click()
+
+  // Popover gone, no suggestion created (no inline diff marks).
+  await expect(page.locator('.anno-pop')).toHaveCount(0)
+  await expect(page.locator('.anno-mark--del')).toHaveCount(0)
+  expect(errors, `errors:\n${errors.join('\n')}`).toEqual([])
+})
+
+test('inline suggest on a NOTE part: accept replaces the part text', async ({ page }) => {
+  const errors: string[] = []
+  watch(page, errors)
+  const noteId = await createNoteWithPart('alpha beta gamma delta')
+  await login(page)
+  await page.goto(`/notes/${noteId}`)
+
+  // The note opens in a modal; the part body is a RichEditor inside the
+  // parts editor. This is the surface where #2 used to fail: after Accept
+  // the local ``editingBody`` draft shadowed the freshly spliced body.
+  const editor = page.locator('.parts-editor .ProseMirror').first()
+  await expect(editor).toBeVisible({ timeout: 15_000 })
+  await expect(editor).toContainText('beta', { timeout: 10_000 })
+  await page.waitForTimeout(1500)
+
+  // Select the whole part body (robust regardless of where the click
+  // lands in a tall editor) → floating toolbar.
+  await editor.click()
+  await page.keyboard.press('ControlOrMeta+a')
+  await page.locator('.anno-bubble .anno-bubble__btn', { hasText: '✎' }).click()
+
+  const pop = page.locator('.anno-pop').first()
+  await expect(pop).toBeVisible({ timeout: 5000 })
+  await pop.locator('textarea').first().fill('REPLACED text')
+  await pop.getByRole('button', { name: /Propose|Proponi/i }).click()
+  await page.waitForTimeout(800)
+
+  const del = page.locator('.anno-mark--del').first()
+  await expect(del).toBeVisible({ timeout: 5000 })
+  await del.click()
+  const actPop = page.locator('.anno-pop').first()
+  await expect(actPop).toBeVisible({ timeout: 5000 })
+  await actPop.getByRole('button', { name: /Accept|Accetta/i }).click()
+  await page.waitForTimeout(2200)
+
+  // The spliced text must show in the part editor: the local draft no
+  // longer shadows the reloaded body (the #2 note-path bug).
+  await expect(editor).toContainText('REPLACED text', { timeout: 8000 })
+  await expect(editor).not.toContainText('beta gamma delta')
 })

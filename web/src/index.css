@@ -4168,10 +4168,89 @@ button.btn--danger:hover {
   color: #b00020;
   text-decoration: line-through;
   text-decoration-color: #b00020;
+  cursor: pointer;
 }
 .anno-mark--ins {
   color: #176f2c;
   background: #e3f7e3;
   border-radius: 2px;
   padding: 0 1px;
+  cursor: pointer;
+}
+
+/* Inline annotation UX: floating selection toolbar + popovers
+   (InlineAnnotator). Both are position:fixed, anchored to viewport
+   coordinates computed from the editor selection / clicked mark. */
+.anno-bubble {
+  z-index: 2000;
+  display: flex;
+  gap: 0.15rem;
+  padding: 0.15rem;
+  background: var(--surface, #fff);
+  border: 1px solid var(--border, #ccc);
+  border-radius: 6px;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.18);
+}
+.anno-bubble__btn {
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  font-size: 0.95rem;
+  line-height: 1;
+  padding: 0.25rem 0.4rem;
+  border-radius: 4px;
+}
+.anno-bubble__btn:hover {
+  background: var(--hover, rgba(0, 0, 0, 0.07));
+}
+.anno-pop {
+  z-index: 2001;
+  width: 320px;
+  max-width: calc(100vw - 16px);
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.5rem;
+  background: var(--surface, #fff);
+  border: 1px solid var(--border, #ccc);
+  border-radius: 8px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.22);
+}
+.anno-pop__input {
+  width: 100%;
+  font: inherit;
+  padding: 0.35rem;
+  border: 1px solid var(--border, #ccc);
+  border-radius: 4px;
+  box-sizing: border-box;
+}
+.anno-pop__quote {
+  font-size: 0.8rem;
+  font-style: italic;
+  opacity: 0.75;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.anno-pop__diff {
+  font-size: 0.9rem;
+}
+.anno-pop__body {
+  font-size: 0.9rem;
+  white-space: pre-wrap;
+}
+.anno-pop__replies {
+  margin: 0;
+  padding-left: 1rem;
+  font-size: 0.8rem;
+  opacity: 0.85;
+}
+.anno-pop__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+.anno-pop__err {
+  margin: 0;
+  font-size: 0.8rem;
 }

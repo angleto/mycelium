@@ -536,7 +536,20 @@ export const NotePartsEditor = forwardRef<NotePartsEditorHandle, Props>(
                     <PartAnnotated
                       partId={p.id}
                       value={draft}
-                      onDocMutated={reload}
+                      onDocMutated={async () => {
+                        // Accepting a suggestion splices the proposed
+                        // text into this part's body server-side. Refetch
+                        // the parts AND drop any local draft for this
+                        // part, otherwise ``draft = editingBody[p.id] ??
+                        // p.body`` would keep showing the pre-accept text.
+                        await reload()
+                        setEditingBody((cur) => {
+                          if (!(p.id in cur)) return cur
+                          const next = { ...cur }
+                          delete next[p.id]
+                          return next
+                        })
+                      }}
                       onChange={(v) =>
                         setEditingBody((cur) => ({ ...cur, [p.id]: v }))
                       }
