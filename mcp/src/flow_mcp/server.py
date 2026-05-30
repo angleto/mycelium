@@ -225,7 +225,29 @@ def _project_fields(d: dict[str, Any], fields: list[str] | None) -> dict[str, An
     return {k: v for k, v in d.items() if k in keep}
 
 
+def _compact(d: dict[str, Any]) -> dict[str, Any]:
+    """Drop keys whose value is ``None`` from a serialized record.
+
+    Used by the read serializers (``_task_full`` / ``_client`` /
+    ``_project``) so an unset nullable column costs zero tokens instead
+    of an explicit ``"key": null``. Only ``None`` is dropped: ``False``,
+    ``0``, ``""`` and ``[]`` are real values and are kept. An absent key
+    in these shapes therefore reads as "not set", which matches the
+    column semantics; a caller that needs the exhaustive key set (e.g. to
+    diff against a write) reads it from the typed REST ``*Out`` schema,
+    which is unaffected by this projection."""
+    return {k: v for k, v in d.items() if v is not None}
+
+
 def _task(t: Task, tags: list[Tag] | None = None) -> dict[str, Any]:
+    # Lean index shape for ``list_tasks`` / ``create_task`` returns: just
+    # the fields an LLM needs to pick a row, plus ``version`` for a
+    # follow-up optimistic-concurrency update. Full detail (description,
+    # dates, estimates, capabilities, ...) is on ``get_task`` (_task_full);
+    # widen a list row with the ``fields`` projection when needed. Task
+    # authorship (``created_by_*``) lives on the REST ``TaskOut`` serializer
+    # (the SPA's source, used for the AI badge), not here: it is debug-only
+    # over MCP and was dropped from the list shape for payload economy.
     return {
         "id": str(t.id),
         "title": t.title,
@@ -233,17 +255,6 @@ def _task(t: Task, tags: list[Tag] | None = None) -> dict[str, Any]:
         "priority": t.priority,
         "version": t.version,
         "tags": [_tag_brief(g) for g in (tags or [])],
-        # docs/adr/0028 + migrations 0091/0093: who actually created
-        # the task. Polymorphic via ``created_by_identity_id``;
-        # ``created_by_token_id`` is the bare-MCP-token fallback.
-        # Identities/token are uuid-or-None; the SPA-side richer
-        # serializer (REST TaskOut) joins the rows to render kind +
-        # handle + label. MCP exposes raw ids so a debug caller can
-        # cross-check without a follow-up tool.
-        "created_by_identity_id": (
-            str(t.created_by_identity_id) if t.created_by_identity_id else None
-        ),
-        "created_by_token_id": (str(t.created_by_token_id) if t.created_by_token_id else None),
         "assignee_id": str(t.assignee_id) if t.assignee_id else None,
     }
 
@@ -319,41 +330,48 @@ async def list_tags(token: str, org_id: str, kind: str | None = None) -> list[di
 
 
 def _client(t: Tag, p: ClientProfile) -> dict[str, Any]:
-    return {
-        "id": str(t.id),
-        "name": t.name,
-        "status": t.status,
-        "version": t.version,
-        "ragione_sociale": p.ragione_sociale,
-        "id_paese": p.id_paese,
-        "id_codice": p.id_codice,
-        "codice_fiscale": p.codice_fiscale,
-        "indirizzo": p.indirizzo,
-        "cap": p.cap,
-        "comune": p.comune,
-        "provincia": p.provincia,
-        "nazione": p.nazione,
-        "codice_destinatario": p.codice_destinatario,
-        "pec": p.pec,
-        "description": p.description,
-        "default_billable": p.default_billable,
-        "tariffa": str(p.tariffa) if p.tariffa is not None else None,
-        "valuta": p.valuta,
-    }
+    # Unset invoicing-card fields (codice_fiscale, pec, ...) are dropped
+    # rather than emitted as null: a sparsely-filled client carries only
+    # its real columns. The exhaustive key set lives on the REST schema.
+    return _compact(
+        {
+            "id": str(t.id),
+            "name": t.name,
+            "status": t.status,
+            "version": t.version,
+            "ragione_sociale": p.ragione_sociale,
+            "id_paese": p.id_paese,
+            "id_codice": p.id_codice,
+            "codice_fiscale": p.codice_fiscale,
+            "indirizzo": p.indirizzo,
+            "cap": p.cap,
+            "comune": p.comune,
+            "provincia": p.provincia,
+            "nazione": p.nazione,
+            "codice_destinatario": p.codice_destinatario,
+            "pec": p.pec,
+            "description": p.description,
+            "default_billable": p.default_billable,
+            "tariffa": str(p.tariffa) if p.tariffa is not None else None,
+            "valuta": p.valuta,
+        }
+    )
 
 
 def _project(t: Tag, p: ProjectProfile) -> dict[str, Any]:
-    return {
-        "id": str(t.id),
-        "name": t.name,
-        "status": t.status,
-        "version": t.version,
-        "client_tag_id": str(p.client_tag_id) if p.client_tag_id else None,
-        "budget": str(p.budget) if p.budget is not None else None,
-        "color": t.color,
-        "description": p.description,
-        "workflow_id": str(p.workflow_id) if p.workflow_id else None,
-    }
+    return _compact(
+        {
+            "id": str(t.id),
+            "name": t.name,
+            "status": t.status,
+            "version": t.version,
+            "client_tag_id": str(p.client_tag_id) if p.client_tag_id else None,
+            "budget": str(p.budget) if p.budget is not None else None,
+            "color": t.color,
+            "description": p.description,
+            "workflow_id": str(p.workflow_id) if p.workflow_id else None,
+        }
+    )
 
 
 @mcp.tool()
@@ -584,11 +602,13 @@ async def list_tasks(
     assignee_handles: list[str] | None = None,
     owner_handles: list[str] | None = None,
     fields: list[str] | None = None,
-    limit: int = 100,
+    limit: int = 50,
 ) -> list[dict[str, Any]]:
-    """List tasks, optionally filtered by workflow state id. ``fields``
-    opt-in keeps only the named columns (``id`` always kept);
-    ``limit`` caps rows (default 100)."""
+    """List tasks, optionally filtered by workflow state id. Rows are
+    ordered most-prioritary-first (Eisenhower priority, 1 = top), so the
+    default keeps the top tasks; raise ``limit`` to page further (default
+    50). ``fields`` opt-in keeps only the named columns (``id`` always
+    kept) for a lean picker; full per-task detail is on ``get_task``."""
     # docs/adr/0028 Punto 4: identity-axis filters. ``assignee_kind``
     # accepts ``user`` or ``ai_assistant``; ``assignee_handles`` /
     # ``owner_handles`` are multi-select on the respective handles.
@@ -684,32 +704,38 @@ async def set_task_state(
 
 
 def _task_full(t: Task, tags: list[Tag] | None = None) -> dict[str, Any]:
-    return {
-        "id": str(t.id),
-        "title": t.title,
-        "description": t.description,
-        "state_id": str(t.state_id),
-        "priority": t.priority,
-        "importance": t.importance,
-        "urgency": t.urgency,
-        "start_date": t.start_date.isoformat() if t.start_date else None,
-        "due_date": t.due_date.isoformat() if t.due_date else None,
-        "billable": t.billable,
-        "parent_task_id": (str(t.parent_task_id) if t.parent_task_id else None),
-        "estimate_effort_h": (
-            str(t.estimate_effort_h) if t.estimate_effort_h is not None else None
-        ),
-        "required_capabilities": list(t.required_capabilities or []),
-        "monetary_cost": (str(t.monetary_cost) if t.monetary_cost is not None else None),
-        "location": t.location,
-        "necessity": t.necessity.value,
-        "budget_id": str(t.budget_id) if t.budget_id else None,
-        "is_archived": t.is_archived,
-        "offered": t.offered,
-        "deleted_at": t.deleted_at.isoformat() if t.deleted_at else None,
-        "version": t.version,
-        "tags": [_tag_brief(g) for g in (tags or [])],
-    }
+    # Full attribute set for editing one task. Unset nullable columns
+    # (dates, estimate, cost, location, budget, parent, deleted_at) are
+    # dropped via _compact: a typical task leaves most of these empty, so
+    # emitting them as null is pure token overhead. Booleans/empties stay.
+    return _compact(
+        {
+            "id": str(t.id),
+            "title": t.title,
+            "description": t.description,
+            "state_id": str(t.state_id),
+            "priority": t.priority,
+            "importance": t.importance,
+            "urgency": t.urgency,
+            "start_date": t.start_date.isoformat() if t.start_date else None,
+            "due_date": t.due_date.isoformat() if t.due_date else None,
+            "billable": t.billable,
+            "parent_task_id": (str(t.parent_task_id) if t.parent_task_id else None),
+            "estimate_effort_h": (
+                str(t.estimate_effort_h) if t.estimate_effort_h is not None else None
+            ),
+            "required_capabilities": list(t.required_capabilities or []),
+            "monetary_cost": (str(t.monetary_cost) if t.monetary_cost is not None else None),
+            "location": t.location,
+            "necessity": t.necessity.value,
+            "budget_id": str(t.budget_id) if t.budget_id else None,
+            "is_archived": t.is_archived,
+            "offered": t.offered,
+            "deleted_at": t.deleted_at.isoformat() if t.deleted_at else None,
+            "version": t.version,
+            "tags": [_tag_brief(g) for g in (tags or [])],
+        }
+    )
 
 
 @mcp.tool()
@@ -3270,13 +3296,13 @@ async def list_notes(
     include_deleted: bool = False,
     include_transcript: bool = False,
     fields: list[str] | None = None,
-    limit: int = 100,
+    limit: int = 50,
 ) -> list[dict[str, Any]]:
     """List notes (newest first); for the @note picker. Optional
     project/tag focus and archive/trash views. ``include_transcript``
     opt-in (default False) keeps picker payloads small; ``fields``
     keeps only the named columns (``id`` always kept); ``limit`` caps
-    rows at the DB level (default 100)."""
+    rows at the DB level (default 50; raise it to page further)."""
     async with _tenant(token, org_id) as (s, org, _user):
         rows = await notes_svc.list_notes(
             s,

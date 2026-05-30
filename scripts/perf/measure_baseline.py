@@ -153,7 +153,15 @@ def collect_serializer_samples() -> dict[str, Any]:
     ``list_tasks`` / ``list_notes`` etc. so we can extrapolate against
     realistic list sizes without a live database.
     """
-    from flow_mcp.server import _note, _project_fields, _tag_brief, _task, _task_full
+    from flow_mcp.server import (
+        _client,
+        _note,
+        _project,
+        _project_fields,
+        _tag_brief,
+        _task,
+        _task_full,
+    )
 
     def make_tag(name: str, kind: str = "generic") -> Any:
         return SimpleNamespace(
@@ -161,7 +169,37 @@ def collect_serializer_samples() -> dict[str, Any]:
             kind=SimpleNamespace(value=kind),
             name=name,
             color="#3b82f6",
+            status="active",
             version=1,
+        )
+
+    def make_client_profile() -> Any:
+        # A typically sparse invoicing card: half the optional columns are
+        # unset, so _compact's null-dropping shows its effect.
+        return SimpleNamespace(
+            ragione_sociale="ACME S.p.A.",
+            id_paese="IT",
+            id_codice="12345678901",
+            codice_fiscale=None,
+            indirizzo="Via Roma 1",
+            cap="00100",
+            comune="Roma",
+            provincia="RM",
+            nazione=None,
+            codice_destinatario="ABCDEF1",
+            pec=None,
+            description=None,
+            default_billable=True,
+            tariffa=None,
+            valuta="EUR",
+        )
+
+    def make_project_profile() -> Any:
+        return SimpleNamespace(
+            client_tag_id="88888888-8888-8888-8888-888888888888",
+            budget=None,
+            description=None,
+            workflow_id=None,
         )
 
     def make_task() -> Any:
@@ -222,6 +260,9 @@ def collect_serializer_samples() -> dict[str, Any]:
     task_picker = _project_fields(task_one, ["title"])
     note_picker = _project_fields(note_no_transcript, ["title", "kind"])
 
+    client_one = _client(make_tag("ACME", "client"), make_client_profile())
+    project_one = _project(make_tag("Website", "project"), make_project_profile())
+
     samples = {
         "task_brief_bytes": _jsize(task_one),
         "task_full_bytes": _jsize(task_full_one),
@@ -230,6 +271,10 @@ def collect_serializer_samples() -> dict[str, Any]:
         "note_without_transcript_bytes": _jsize(note_no_transcript),
         "note_picker_projected_bytes": _jsize(note_picker),
         "tag_brief_bytes": _jsize(_tag_brief(make_tag("perf"))),
+        # Read serializers with _compact null-dropping (a sparse record
+        # drops its unset nullable columns instead of emitting them null).
+        "client_compact_bytes": _jsize(client_one),
+        "project_compact_bytes": _jsize(project_one),
     }
     n = 50
     samples[f"list_tasks_{n}_brief_bytes"] = samples["task_brief_bytes"] * n

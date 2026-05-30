@@ -6,6 +6,7 @@ loading with auth stripped, and dispatch with the principal injected.
 
 from __future__ import annotations
 
+import json
 import uuid
 from collections.abc import Iterator
 
@@ -56,8 +57,11 @@ async def test_search_semantic_ranks_relevant_tool() -> None:
         set_embedder_override(None)
     names = [h["name"] for h in hits]
     assert "list_tasks" in names
-    # results carry a one-line summary + domain for the LLM to choose
-    assert all({"name", "summary", "domain", "score"} <= set(h) for h in hits)
+    # results carry a one-line summary + domain for the LLM to choose;
+    # hits are pre-sorted most-relevant-first, so no numeric score is
+    # emitted in the payload (the LLM acts on order + summary).
+    assert all({"name", "summary", "domain"} <= set(h) for h in hits)
+    assert all("score" not in h for h in hits)
 
 
 async def test_search_lexical_fallback_without_embedder() -> None:
@@ -191,3 +195,38 @@ def test_get_embedder_returns_singleton_in_prod_path() -> None:
         assert first is second
     finally:
         emb_mod._singleton = None
+
+
+async def test_telemetry_records_meta_tool_calls(tmp_path, monkeypatch) -> None:
+    # With FLOW_MCP_TELEMETRY set, each meta-tool call appends one JSONL
+    # row carrying only {ts, kind, tool, result_bytes} -- enough for the
+    # usage_report aggregation, but never arguments or payloads.
+    telem = tmp_path / "telem.jsonl"
+    monkeypatch.setenv("FLOW_MCP_TELEMETRY", str(telem))
+    user_id, org_id = await _signup_principal()
+    tok = _PRINCIPAL.set((user_id, org_id, None))
+    try:
+        await execute_tool(name="create_tag", arguments={"kind": "generic", "name": "telem-tag"})
+        set_embedder_override(FakeEmbedder)
+        try:
+            await search_tools(query="tags", limit=3)
+        finally:
+            set_embedder_override(None)
+    finally:
+        _PRINCIPAL.reset(tok)
+
+    rows = [json.loads(line) for line in telem.read_text().splitlines() if line.strip()]
+    pairs = {(r["kind"], r["tool"]) for r in rows}
+    assert ("execute", "create_tag") in pairs
+    assert ("search", "search_tools") in pairs
+    assert all(r["result_bytes"] > 0 for r in rows)
+    # The row schema is fixed and payload-free: no leak of args/results.
+    assert all(set(r) == {"ts", "kind", "tool", "result_bytes"} for r in rows)
+
+
+async def test_telemetry_is_noop_when_unset(tmp_path, monkeypatch) -> None:
+    # Default (env unset): _record must not write and must not raise, so
+    # production pays only a single env lookup per call.
+    monkeypatch.delenv("FLOW_MCP_TELEMETRY", raising=False)
+    gw._record("execute", "create_tag", {"id": "x"})  # no-op, no exception
+    assert not list(tmp_path.iterdir())

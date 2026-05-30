@@ -1,0 +1,293 @@
+{
+  "ts": "2026-05-30",
+  "python": "3.12.13",
+  "env": {
+    "FLOW_EMBEDDER": ""
+  },
+  "registry": {
+    "n_http_tools": 4,
+    "n_stdio_tools": 200,
+    "tools_list_http_bytes": 3246,
+    "tools_list_stdio_full_bytes": 125961,
+    "tools_list_stdio_stripped_bytes": 105515,
+    "per_tool_total_full_bytes": 125760,
+    "per_tool_total_stripped_bytes": 105314,
+    "per_tool_total_desc_bytes": 33681,
+    "per_tool_avg_full_bytes": 628,
+    "per_tool_avg_stripped_bytes": 526,
+    "top10_heaviest_full": [
+      {
+        "name": "create_task",
+        "full_bytes": 2235,
+        "stripped_bytes": 2132,
+        "schema_props": 18
+      },
+      {
+        "name": "update_task",
+        "full_bytes": 2124,
+        "stripped_bytes": 2021,
+        "schema_props": 18
+      },
+      {
+        "name": "append_note_part",
+        "full_bytes": 2084,
+        "stripped_bytes": 1981,
+        "schema_props": 11
+      },
+      {
+        "name": "search",
+        "full_bytes": 1585,
+        "stripped_bytes": 1482,
+        "schema_props": 12
+      },
+      {
+        "name": "update_client",
+        "full_bytes": 1579,
+        "stripped_bytes": 1476,
+        "schema_props": 16
+      },
+      {
+        "name": "append_to_note",
+        "full_bytes": 1510,
+        "stripped_bytes": 1407,
+        "schema_props": 8
+      },
+      {
+        "name": "executor_update",
+        "full_bytes": 1456,
+        "stripped_bytes": 1353,
+        "schema_props": 13
+      },
+      {
+        "name": "executor_create",
+        "full_bytes": 1421,
+        "stripped_bytes": 1318,
+        "schema_props": 13
+      },
+      {
+        "name": "memory_write",
+        "full_bytes": 1415,
+        "stripped_bytes": 1312,
+        "schema_props": 11
+      },
+      {
+        "name": "update_time_entry",
+        "full_bytes": 1375,
+        "stripped_bytes": 1272,
+        "schema_props": 11
+      }
+    ],
+    "top10_verbose_descriptions": [
+      {
+        "name": "append_note_part",
+        "desc_bytes": 1091
+      },
+      {
+        "name": "append_to_note",
+        "desc_bytes": 822
+      },
+      {
+        "name": "link_notes",
+        "desc_bytes": 750
+      },
+      {
+        "name": "append_to_task_description",
+        "desc_bytes": 644
+      },
+      {
+        "name": "get_note",
+        "desc_bytes": 631
+      },
+      {
+        "name": "replace_in_note_part",
+        "desc_bytes": 568
+      },
+      {
+        "name": "search",
+        "desc_bytes": 518
+      },
+      {
+        "name": "prepend_to_task_description",
+        "desc_bytes": 510
+      },
+      {
+        "name": "list_note_links",
+        "desc_bytes": 490
+      },
+      {
+        "name": "upload_attachment",
+        "desc_bytes": 487
+      }
+    ]
+  },
+  "search_tools": {
+    "create a task": {
+      "results": 8,
+      "bytes": 936
+    },
+    "list my notes": {
+      "results": 8,
+      "bytes": 881
+    },
+    "stop the running timer": {
+      "results": 8,
+      "bytes": 916
+    },
+    "send invoice for this client": {
+      "results": 8,
+      "bytes": 897
+    },
+    "find appointments today": {
+      "results": 8,
+      "bytes": 816
+    },
+    "embed a memory blob": {
+      "results": 8,
+      "bytes": 946
+    },
+    "assign tag to project": {
+      "results": 8,
+      "bytes": 921
+    }
+  },
+  "serializers": {
+    "task_brief_bytes": 522,
+    "task_full_bytes": 784,
+    "task_picker_projected_bytes": 98,
+    "note_with_transcript_1500_bytes": 480,
+    "note_without_transcript_bytes": 462,
+    "note_picker_projected_bytes": 103,
+    "tag_brief_bytes": 94,
+    "client_compact_bytes": 306,
+    "project_compact_bytes": 165,
+    "list_tasks_50_brief_bytes": 26100,
+    "list_tasks_50_full_bytes": 39200,
+    "list_tasks_50_picker_bytes": 4900,
+    "list_notes_50_with_transcript_bytes": 24000,
+    "list_notes_50_without_transcript_bytes": 23100,
+    "list_notes_50_picker_bytes": 5150
+  },
+  "corpus": {
+    "plans_user": {
+      "exists": true,
+      "root": "/Users/angelo/.claude/plans",
+      "files": 29,
+      "bytes": 587375,
+      "lines": 8815,
+      "top5": [
+        {
+          "path": "voglio-che-sia-presente-polished-music.md",
+          "bytes": 61295,
+          "lines": 884
+        },
+        {
+          "path": "voglio-che-fai-questa-zippy-moonbeam.md",
+          "bytes": 31107,
+          "lines": 382
+        },
+        {
+          "path": "leggi-l-analisi-specifica-modulo-remedia-imperative-eclipse.md",
+          "bytes": 30949,
+          "lines": 421
+        },
+        {
+          "path": "abbiamo-il-tempo-per-wiggly-horizon.md",
+          "bytes": 30149,
+          "lines": 436
+        },
+        {
+          "path": "happy-juggling-otter.md",
+          "bytes": 29786,
+          "lines": 533
+        }
+      ]
+    },
+    "memory_project": {
+      "exists": true,
+      "root": "/Users/angelo/.claude/projects/-Users-angelo-data-WORK-flow/memory",
+      "files": 25,
+      "bytes": 112744,
+      "lines": 1121,
+      "top5": [
+        {
+          "path": "flow-sdi-accreditation.md",
+          "bytes": 10419,
+          "lines": 61
+        },
+        {
+          "path": "flow-deploy.md",
+          "bytes": 9652,
+          "lines": 78
+        },
+        {
+          "path": "flow-dev-gotchas.md",
+          "bytes": 8243,
+          "lines": 111
+        },
+        {
+          "path": "flow-sdi.md",
+          "bytes": 6920,
+          "lines": 63
+        },
+        {
+          "path": "flow-locked-rules.md",
+          "bytes": 6908,
+          "lines": 83
+        }
+      ]
+    },
+    "docs_repo": {
+      "exists": true,
+      "root": "/Users/angelo/data/WORK/flow/docs",
+      "files": 57,
+      "bytes": 327483,
+      "lines": 6838,
+      "top5": [
+        {
+          "path": "mcp-coverage.md",
+          "bytes": 46912,
+          "lines": 839
+        },
+        {
+          "path": "functional-requirements.md",
+          "bytes": 18964,
+          "lines": 363
+        },
+        {
+          "path": "adr/0032-garden-classify-api.md",
+          "bytes": 17427,
+          "lines": 349
+        },
+        {
+          "path": "adr/0029-note-garden-ecosystem.md",
+          "bytes": 17200,
+          "lines": 393
+        },
+        {
+          "path": "adr/0027-adjudication-framework.md",
+          "bytes": 15539,
+          "lines": 330
+        }
+      ]
+    },
+    "claude_md_user": {
+      "exists": true,
+      "bytes": 4667
+    },
+    "claude_md_repo": {
+      "exists": false,
+      "bytes": 0
+    },
+    "settings_local_repo": {
+      "exists": true,
+      "bytes": 67
+    }
+  },
+  "summary": {
+    "tools_list_http_tokens_est": 811,
+    "tools_list_stdio_full_tokens_est": 31490,
+    "tools_list_stdio_stripped_tokens_est": 26378,
+    "stripping_savings_bytes": 20446,
+    "corpus_total_bytes": 1032336
+  }
+}

@@ -27,8 +27,11 @@ no auth args (the HTTP bearer still gates every request).
 from __future__ import annotations
 
 import asyncio
+import datetime as dt
 import inspect
+import json
 import math
+import os
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
@@ -39,6 +42,46 @@ from flow_core.errors import DomainError, jsonable_params
 from flow_mcp.server import mcp as _registry
 
 gateway: FastMCP = FastMCP("flow")
+
+# Opt-in usage telemetry. When ``FLOW_MCP_TELEMETRY`` names a writable
+# path, every meta-tool call appends one JSONL row recording only the
+# tool name and the serialized result size — never arguments or payloads,
+# so the trace carries no tenant data. Unset (the default, incl. prod and
+# the test suite) it is a single env lookup per call: zero overhead. The
+# companion ``scripts/perf/usage_report.py`` aggregates the file into a
+# per-tool frequency x response-cost report, which is what turns the
+# "~12% of tokens" attribution into a measured per-tool breakdown.
+_TELEMETRY_ENV = "FLOW_MCP_TELEMETRY"
+
+
+def _result_bytes(result: Any) -> int:
+    """UTF-8 byte size of a tool result as the MCP client will read it
+    (compact JSON, ``default=str`` for uuid/Decimal/datetime)."""
+    return len(json.dumps(result, separators=(",", ":"), default=str).encode("utf-8"))
+
+
+def _record(kind: str, tool: str, result: Any) -> None:
+    """Append one telemetry row ``{ts, kind, tool, result_bytes}`` when
+    ``FLOW_MCP_TELEMETRY`` is set; otherwise a no-op. Best-effort: any
+    I/O or serialization failure is swallowed so telemetry can never
+    break a real call. ``kind`` is one of ``search`` / ``describe`` /
+    ``execute``; for ``execute`` the ``tool`` is the concrete tool name."""
+    path = os.environ.get(_TELEMETRY_ENV)
+    if not path:
+        return
+    try:
+        row = {
+            "ts": dt.datetime.now(dt.UTC).isoformat(),
+            "kind": kind,
+            "tool": tool,
+            "result_bytes": _result_bytes(result),
+        }
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(row) + "\n")
+    except (OSError, TypeError, ValueError):
+        # Telemetry is observational; never surface its failures.
+        return
+
 
 # Tool args carried only for the legacy stdio flow; under HTTP/OAuth the
 # principal comes from the bearer, so these are injected as empties at
@@ -259,7 +302,8 @@ async def search_tools(
 ) -> list[dict[str, Any]]:
     """Find the concrete Flow tools relevant to a natural-language goal.
 
-    Returns ranked ``{name, summary, domain, score}`` entries. This is
+    Returns ranked ``{name, summary, domain}`` entries (most relevant
+    first). This is
     the entry point of the dynamic-toolset flow: search here, then call
     ``describe_tools`` for the schemas of the ones you want, then
     ``execute_tool`` to run them. ``domain`` optionally narrows to one
@@ -278,11 +322,13 @@ async def search_tools(
         scored = [(_lexical(qtok, cat[n]["text"]), n) for n in names]
     scored.sort(key=lambda s: s[0], reverse=True)
     out: list[dict[str, Any]] = []
-    for score, name in scored[: max(1, limit)]:
+    # Emit in rank order (most relevant first); the numeric ``score`` is
+    # dropped from the payload — the LLM acts on the ordering and the
+    # summary, never on the float, so it was pure token overhead.
+    for _score, name in scored[: max(1, limit)]:
         m = cat[name]
-        out.append(
-            {"name": name, "summary": m["summary"], "domain": m["domain"], "score": round(score, 4)}
-        )
+        out.append({"name": name, "summary": m["summary"], "domain": m["domain"]})
+    _record("search", "search_tools", out)
     return out
 
 
@@ -315,6 +361,7 @@ async def describe_tools(names: list[str], minimal: bool = True) -> list[dict[st
                 "inputSchema": schema,
             }
         )
+    _record("describe", "describe_tools", out)
     return out
 
 
@@ -370,6 +417,7 @@ async def execute_tool(name: str, arguments: dict[str, Any] | None = None) -> An
         result = tool.fn(**args)
         if tool.is_async:
             result = await result
+        _record("execute", name, result)
         return result
     except DomainError as exc:
         return {
