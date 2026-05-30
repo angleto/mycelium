@@ -6,29 +6,42 @@ client certificate). The envelope build + response parse are pure and
 unit-tested; the live POST is config-gated and never exercised in CI (it
 needs accreditation + real certificates).
 
-VERIFY against the AdE test environment before going live: the exact
-service ``targetNamespace`` / operation name and whether the SOAP body must
-be WS-Security signed for your accreditation profile. Mutual TLS (client
-cert) is always required; the host/path is environment-specific
-(``FLOW_SDI_ENDPOINT_URL``). The request/response *shape* below follows the
-long-standing SdICoop ``RiceviFile`` contract (NomeFile + base64 File ->
-IdentificativoSdI); the parser is namespace-agnostic so a namespace revision
-does not silently break correlation.
+The service contract was VERIFIED against the live AdE test WSDL on
+2026-05-30 (``SdIRiceviFile_v1.0.wsdl`` at testservizi.fatturapa.it,
+target/types namespace ``.../sdi/ws/trasmissione/v1.0[/types]``, binding
+document/literal, no WS-Security policy: only mutual TLS is required). The
+canonical SOAP endpoint advertised by the WSDL is
+``https://<host>/SdI2AccoglienzaWeb/SdIRiceviFile_service`` (the historical
+``/ricevi_file`` alias resolves to the same Axis2 service). Mutual TLS
+(client cert) is always required; the host is environment-specific
+(``FLOW_SDI_ENDPOINT_URL``: testservizi for accreditation, servizi for
+prod). The request/response shape is the SdICoop ``RiceviFile`` contract
+(NomeFile + base64 File -> IdentificativoSdI [+ optional Errore]); the parser
+is namespace-agnostic so a future namespace revision does not silently break
+correlation.
 """
 
 from __future__ import annotations
 
 import base64
+import re
 import ssl
 import string
 
 import httpx
 import lxml.etree as ET
 
-# SdICoop "Trasmissione" (RiceviFile) service namespace. Confirm against the
-# WSDL handed over at accreditation; kept in one place so a revision is a
-# one-line change.
-_RICEVI_NS = "http://www.fatturapa.it/sdi/ws/ricezione/v1.0/types"
+# SdICoop "Trasmissione" (SdIRiceviFile) service. The request/response
+# elements (fileSdIAccoglienza / rispostaSdIRiceviFile) live in the *types*
+# namespace below; the operation's SOAPAction is a fixed URI. Both were read
+# off the live WSDL at testservizi.fatturapa.it on 2026-05-30
+# (SdIRiceviFile_v1.0.wsdl + TrasmissioneTypes_v1.0.xsd), so they are exact,
+# not guessed. Note the deliberate host mismatch AdE ships: the schema
+# namespace uses ``fatturapa.gov.it`` while the SOAPAction uses
+# ``fatturapa.it`` -- both verbatim from the WSDL. Kept in one place so a
+# future revision is a one-line change.
+_RICEVI_NS = "http://www.fatturapa.gov.it/sdi/ws/trasmissione/v1.0/types"
+_RICEVI_SOAP_ACTION = "http://www.fatturapa.it/SdIRiceviFile/RiceviFile"
 _SOAP_NS = "http://schemas.xmlsoap.org/soap/envelope/"
 _SEND_TIMEOUT_S = 30.0
 
@@ -96,18 +109,69 @@ def build_ricevifile_envelope(*, filename: str, xml: str) -> bytes:
     return bytes(ET.tostring(env, xml_declaration=True, encoding="UTF-8"))
 
 
+def _decode_soap_response(content: bytes, content_type: str | None) -> bytes:
+    """Return the SOAP-envelope XML out of a RiceviFile/RiceviNotifica reply.
+
+    SdI's Axis2 stack answers with an MTOM/XOP ``multipart/related`` body --
+    the SOAP envelope is the root ``application/xop+xml`` part, framed by a
+    MIME boundary, NOT bare XML -- so feeding the raw bytes to an XML parser
+    fails on the leading boundary. We pull the first XML part out of the
+    multipart when a boundary is advertised, then slice from the first ``<``
+    to the last ``>`` to drop any MIME preamble/epilogue. A plain
+    ``text/xml`` response (or a bare envelope) passes through unchanged."""
+    ct = content_type or ""
+    boundary: bytes | None = None
+    m = re.search(r'boundary="?([^";\r\n]+)"?', ct)
+    if m:
+        boundary = ("--" + m.group(1)).encode()
+    elif content.lstrip().startswith(b"--"):
+        # No usable Content-Type, but the body self-describes as a MIME
+        # multipart: take the boundary delimiter from its first line.
+        boundary = content.lstrip().split(b"\r\n", 1)[0].rstrip()
+    if boundary:
+        for part in content.split(boundary):
+            _, sep, part_body = part.partition(b"\r\n\r\n")
+            if sep and b"<" in part_body:
+                content = part_body
+                break
+    start = content.find(b"<")
+    end = content.rfind(b">")
+    if start != -1 and end != -1 and start <= end:
+        return content[start : end + 1]
+    return content
+
+
 def parse_ricevifile_response(body: bytes) -> str:
     """Extract ``IdentificativoSdI`` from a RiceviFile SOAP response.
+
     Namespace-agnostic (matches by local element name) so a namespace
-    revision in the WSDL does not break correlation. Raises ValueError if
-    the element is absent (an unexpected/fault response)."""
+    revision in the WSDL does not break correlation. The response type
+    (``rispostaSdIRiceviFile_Type``) always carries an ``IdentificativoSdI``
+    plus, on a transport-level rejection, an optional ``Errore`` (EI01 file
+    vuoto / EI02 servizio non disponibile / EI03 utente non abilitato). A
+    present, non-empty ``Errore`` means the file was NOT accepted, so we
+    raise rather than hand back an ``IdentificativoSdI`` that would be
+    mistaken for a successful submission. Raises ValueError when no
+    ``IdentificativoSdI`` is present at all (a SOAP fault / unexpected
+    shape), including a short body excerpt for diagnosis."""
+    body = _decode_soap_response(body, None)
     root = ET.fromstring(body)
+    identificativo: str | None = None
+    errore: str | None = None
     for el in root.iter():
-        if isinstance(el.tag, str) and ET.QName(el).localname == "IdentificativoSdI":
-            text = (el.text or "").strip()
-            if text:
-                return text
-    raise ValueError("RiceviFile response has no IdentificativoSdI")
+        if not isinstance(el.tag, str):
+            continue
+        local = ET.QName(el).localname
+        if local == "IdentificativoSdI" and (el.text or "").strip():
+            identificativo = el.text.strip()
+        elif local == "Errore" and (el.text or "").strip():
+            errore = el.text.strip()
+    if errore:
+        raise ValueError(f"RiceviFile rejected the file: Errore={errore}")
+    if identificativo:
+        return identificativo
+    excerpt = body[:400].decode("utf-8", "replace")
+    raise ValueError(f"RiceviFile response has no IdentificativoSdI: {excerpt}")
 
 
 async def send_via_sdicoop(
@@ -129,10 +193,15 @@ async def send_via_sdicoop(
         resp = await client.post(
             endpoint_url,
             content=envelope,
-            headers={"Content-Type": "text/xml; charset=utf-8", "SOAPAction": '"RiceviFile"'},
+            headers={
+                "Content-Type": "text/xml; charset=utf-8",
+                "SOAPAction": f'"{_RICEVI_SOAP_ACTION}"',
+            },
         )
     resp.raise_for_status()
-    return parse_ricevifile_response(resp.content)
+    return parse_ricevifile_response(
+        _decode_soap_response(resp.content, resp.headers.get("content-type"))
+    )
 
 
 # --- EsitoCommittente outbound (SdIRiceviNotifica) -----------------------------
@@ -171,6 +240,7 @@ def parse_notificaesito_response(body: bytes) -> str:
     ``ER01`` on success; on a content rejection a SOAP fault carries the
     error detail. Namespace-agnostic match by local name keeps a WSDL
     namespace revision from silently breaking the integration."""
+    body = _decode_soap_response(body, None)
     root = ET.fromstring(body)
     for el in root.iter():
         if not isinstance(el.tag, str):
@@ -212,4 +282,6 @@ async def send_esito_via_sdicoop(
             headers={"Content-Type": "text/xml; charset=utf-8", "SOAPAction": '"NotificaEsito"'},
         )
     resp.raise_for_status()
-    return parse_notificaesito_response(resp.content)
+    return parse_notificaesito_response(
+        _decode_soap_response(resp.content, resp.headers.get("content-type"))
+    )
