@@ -59,6 +59,7 @@ from flow_core.services import audit
 from flow_core.services.invoice_format import (
     FORFETTARIO_CAUSALE,
     Totals,
+    _bare_id_codice,
     _build_xml,
     _compute_totals,
     _effective_iban,
@@ -1132,6 +1133,17 @@ async def transmit(
     assert fiscal is not None  # _validate raised otherwise  # noqa: S101
     ch = channel or get_channel()
     intermediary = ch.intermediary
+    # Self-transmission: the accredited-channel holder sending its OWN invoice
+    # (cedente VAT == channel id). This is NOT third-party intermediation, so
+    # the FatturaPA payload must NOT carry a TerzoIntermediarioOSoggettoEmittente
+    # block / SoggettoEmittente=TZ -- SdI scarts an invoice that declares a
+    # third-party emitter coinciding with the cedente. We still transmit over
+    # the accredited channel; only the payload identity changes (IdTrasmittente
+    # becomes the cedente). When Flow transmits for a *different* tenant, the
+    # intermediary block is stamped as before (ADR-0011).
+    cedente_vat = _bare_id_codice(fiscal.piva, fiscal.paese) if fiscal.piva else None
+    is_self_transmission = intermediary is not None and cedente_vat == intermediary.id_codice
+    payload_intermediary = None if is_self_transmission else intermediary
     if intermediary is not None:
         # Transmitting via the accredited channel = Flow acts as intermediary
         # for this VAT subject; an active SdiMandate is required (ADR-0011).
@@ -1185,7 +1197,7 @@ async def transmit(
         lines,
         progressivo_str,
         collegata=collegata,
-        intermediary=intermediary,
+        intermediary=payload_intermediary,
     )
     # Validate against the official FatturaPA XSD before emission: SdI
     # scarta anything non-conformant, so an invalid document must never

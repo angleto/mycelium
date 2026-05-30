@@ -24,6 +24,9 @@ clean).
 
 from __future__ import annotations
 
+import base64
+import logging
+
 import lxml.etree as ET
 from fastapi import FastAPI, Request, Response
 
@@ -34,6 +37,9 @@ from flow_core.services.sdi_passive import (
     is_passive_delivery,
     is_receiver_notification,
 )
+from flow_core.services.sdi_transport import _decode_soap_response
+
+_log = logging.getLogger("flow_sdi_inbound")
 
 
 def create_app() -> FastAPI:
@@ -46,22 +52,35 @@ def create_app() -> FastAPI:
     @app.post("/sdi/notification", tags=["sdi"])
     async def notification(request: Request) -> Response:
         raw = await request.body()
+        ct = request.headers.get("content-type")
+        # SdI delivers notifications as a SOAP call that its Axis2 stack wraps
+        # in an MTOM/XOP multipart body (same shape as the RiceviFile
+        # responses); the bare parsers below do ET.fromstring and choke on the
+        # leading MIME boundary -> 400 -> SdI marks delivery failed. Strip to
+        # the SOAP envelope first with the shared decoder. The base64 line is
+        # temporary instrumentation to lock SdI's exact wire format from a real
+        # delivery (TODO: drop once the format is confirmed).
+        _log.warning(
+            "SDI-INBOUND ct=%s len=%d b64=%s", ct, len(raw), base64.b64encode(raw).decode()
+        )
+        payload = _decode_soap_response(raw, ct)
         try:
-            if is_passive_delivery(raw):
-                await ingest_passive_invoice(raw)
-            elif is_receiver_notification(raw):
+            if is_passive_delivery(payload):
+                await ingest_passive_invoice(payload)
+            elif is_receiver_notification(payload):
                 # MT / SE: notifications on an invoice WE received.
-                await ingest_receiver_notification(raw)
+                await ingest_receiver_notification(payload)
             else:
                 # Active-cycle: RC/MC/NS/AT/NE/DT (DT transmitter-side).
-                await ingest_notification(raw)
-        except (ValueError, ET.XMLSyntaxError):
+                await ingest_notification(payload)
+        except (ValueError, ET.XMLSyntaxError) as exc:
             # Unrecognized / not-well-formed payload: 400 so SdI / logs
             # surface it, not a 500 (ADR-0011: never 500 on the SdI push
             # path or its retry/log behaviour gets noisy). lxml raises
             # XMLSyntaxError on malformed XML; the service-layer parsers
             # raise ValueError on a structurally unknown notification or
             # FatturaElettronica.
+            _log.warning("SDI-INBOUND parse failed: %s", exc)
             return Response(status_code=400)
         return Response(status_code=200)
 
