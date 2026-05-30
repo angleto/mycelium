@@ -4294,9 +4294,17 @@ async def add_invoice_line(
     description: str,
     unit_price: float,
     quantity: float = 1.0,
-    vat_rate: float = 22.0,
+    vat_rate: float | None = None,
+    natura: str | None = None,
 ) -> dict[str, Any]:
-    """Add a line to a draft invoice."""
+    """Add a line to a draft invoice.
+
+    ``vat_rate``/``natura`` left unset: the service resolves them from the
+    issuer's regime -- forfettario (RF19) -> 0% + Natura N2.2, ordinary
+    regime -> 22%. Pass them explicitly to override (e.g. an exempt or
+    reverse-charge line carries its own Natura). The previous hard 22%
+    default silently produced regime-inconsistent lines for forfettario
+    issuers, which SdI rejects."""
     async with _tenant(token, org_id) as (s, org, user):
         ln = await invoice_svc.add_line(
             s,
@@ -4306,7 +4314,8 @@ async def add_invoice_line(
             description=description,
             unit_price=Decimal(str(unit_price)),
             quantity=Decimal(str(quantity)),
-            vat_rate=Decimal(str(vat_rate)),
+            vat_rate=Decimal(str(vat_rate)) if vat_rate is not None else None,
+            natura=natura,
         )
         return {"id": str(ln.id), "line_no": ln.line_no}
 

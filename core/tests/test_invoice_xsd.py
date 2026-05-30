@@ -13,7 +13,11 @@ from decimal import Decimal
 
 from flow_core.models.client_profile import ClientProfile
 from flow_core.models.invoice import DocumentType, Invoice, InvoiceLine, IssuerProfile
-from flow_core.services.invoice_format import FORFETTARIO_RIFERIMENTO_NORMATIVO, _build_xml
+from flow_core.services.invoice_format import (
+    FORFETTARIO_RIFERIMENTO_NORMATIVO,
+    _bare_id_codice,
+    _build_xml,
+)
 from flow_core.services.invoice_xsd import validate_fatturapa
 
 
@@ -71,6 +75,75 @@ def _valid_xml() -> str:
 
 def test_valid_fatturapa_passes_xsd() -> None:
     assert validate_fatturapa(_valid_xml()) == []
+
+
+def test_bare_id_codice_strips_redundant_country_prefix() -> None:
+    # A VAT stored with a leading country prefix matching IdPaese is emitted
+    # bare; a clean VAT and a codice fiscale (3rd char is a letter) are left
+    # untouched.
+    assert _bare_id_codice("IT13438810015", "IT") == "13438810015"
+    assert _bare_id_codice("13438810015", "IT") == "13438810015"
+    assert _bare_id_codice("LTENGL79M31I356X", "IT") == "LTENGL79M31I356X"
+    assert _bare_id_codice("IT13438810015", "it") == "13438810015"
+
+
+def test_country_prefixed_piva_emits_bare_idcodice_and_validates() -> None:
+    # Regression: an issuer/client whose stored VAT carries the IdPaese prefix
+    # (e.g. "IT13438810015") must still emit an 11-digit IdCodice -- the
+    # backend never assembles country+number, so SdI accepts the cedente.
+    issuer = IssuerProfile(
+        paese="IT",
+        piva="IT13438810015",
+        codice_fiscale="LTENGL79M31I356X",
+        denominazione="Angelo Leto",
+        regime_fiscale="RF19",
+        indirizzo="Via Roma 1",
+        cap="00100",
+        comune="Roma",
+        provincia="RM",
+        nazione="IT",
+    )
+    client = ClientProfile(
+        ragione_sociale="Client SpA",
+        id_paese="IT",
+        id_codice="IT09876543210",
+        codice_fiscale=None,
+        codice_destinatario="ABCDEFG",
+        pec=None,
+        indirizzo="Via Milano 2",
+        cap="20100",
+        comune="Milano",
+        provincia="MI",
+        nazione="IT",
+    )
+    invoice = Invoice(
+        document_type=DocumentType.TD01,
+        currency="EUR",
+        issued_at=dt.datetime(2026, 3, 1, tzinfo=dt.UTC),
+        series="A",
+        number=1,
+        taxable=Decimal("100.00"),
+        vat=Decimal("0.00"),
+        bollo=Decimal("0.00"),
+        total=Decimal("100.00"),
+        causale=None,
+        notes=None,
+        payment_iban=None,
+        payment_due_date=None,
+    )
+    line = InvoiceLine(
+        line_no=1,
+        description="consulting",
+        quantity=Decimal(1),
+        unit_price=Decimal("100.00"),
+        vat_rate=Decimal(0),
+        natura="N2.2",
+    )
+    xml = _build_xml(invoice, issuer, client, [line], "202600001")
+    assert "<IdCodice>13438810015</IdCodice>" in xml
+    assert "<IdCodice>09876543210</IdCodice>" in xml
+    assert "IT13438810015" not in xml
+    assert validate_fatturapa(xml) == []
 
 
 def test_malformed_xml_is_reported() -> None:

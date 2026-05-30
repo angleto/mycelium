@@ -161,6 +161,22 @@ def _sub(parent: ET.Element, tag: str, text: str | None = None) -> ET.Element:
     return el
 
 
+def _bare_id_codice(id_codice: str, id_paese: str | None) -> str:
+    """Never assemble the country code into IdCodice. FatturaPA keeps the
+    country (IdPaese) and the VAT number (IdCodice) in separate elements, so a
+    value carrying a redundant leading country prefix matching IdPaese (e.g.
+    ``IT13438810015`` with IdPaese ``IT``) must be emitted bare
+    (``13438810015``) -- SdI rejects a country-prefixed IdCodice as malformed.
+    The digit guard leaves a codice fiscale (3rd char is a letter) untouched,
+    so we only strip a true country+VAT concatenation. This is the single
+    backend chokepoint; callers/interfaces pass the stored value as-is."""
+    code = (id_codice or "").strip()
+    paese = (id_paese or "").upper()
+    if len(paese) == 2 and len(code) > 2 and code[:2].upper() == paese and code[2:3].isdigit():
+        return code[2:]
+    return code
+
+
 def _emit_anagrafica(
     parent: ET.Element, *, denominazione: str, nome: str | None, cognome: str | None
 ) -> None:
@@ -193,10 +209,14 @@ def _build_xml(
         # Flow transmits as intermediary: the trasmittente is the accredited
         # channel holder, not the cedente (ADR-0011).
         _sub(idt, "IdPaese", intermediary.id_paese)
-        _sub(idt, "IdCodice", intermediary.id_codice)
+        _sub(idt, "IdCodice", _bare_id_codice(intermediary.id_codice, intermediary.id_paese))
     else:
         _sub(idt, "IdPaese", fiscal.paese)
-        _sub(idt, "IdCodice", fiscal.piva or fiscal.codice_fiscale or "")
+        _sub(
+            idt,
+            "IdCodice",
+            _bare_id_codice(fiscal.piva or fiscal.codice_fiscale or "", fiscal.paese),
+        )
     _sub(dt_, "ProgressivoInvio", progressivo)
     _sub(dt_, "FormatoTrasmissione", "FPR12")
     _sub(dt_, "CodiceDestinatario", client.codice_destinatario or "0000000")
@@ -211,7 +231,7 @@ def _build_xml(
     if fiscal.piva:
         iva = _sub(anag, "IdFiscaleIVA")
         _sub(iva, "IdPaese", fiscal.paese)
-        _sub(iva, "IdCodice", fiscal.piva)
+        _sub(iva, "IdCodice", _bare_id_codice(fiscal.piva, fiscal.paese))
     if fiscal.codice_fiscale:
         _sub(anag, "CodiceFiscale", fiscal.codice_fiscale)
     _emit_anagrafica(
@@ -241,7 +261,7 @@ def _build_xml(
     if client.id_codice:
         civa = _sub(canag, "IdFiscaleIVA")
         _sub(civa, "IdPaese", client.id_paese or "IT")
-        _sub(civa, "IdCodice", client.id_codice)
+        _sub(civa, "IdCodice", _bare_id_codice(client.id_codice, client.id_paese or "IT"))
     if client.codice_fiscale:
         _sub(canag, "CodiceFiscale", client.codice_fiscale)
     _emit_anagrafica(
@@ -261,7 +281,7 @@ def _build_xml(
         tanag = _sub(terzo, "DatiAnagrafici")
         tiva = _sub(tanag, "IdFiscaleIVA")
         _sub(tiva, "IdPaese", intermediary.id_paese)
-        _sub(tiva, "IdCodice", intermediary.id_codice)
+        _sub(tiva, "IdCodice", _bare_id_codice(intermediary.id_codice, intermediary.id_paese))
         tan = _sub(tanag, "Anagrafica")
         _sub(tan, "Denominazione", intermediary.denominazione)
         # TZ = document transmitted by a third party on the cedente's behalf.
