@@ -382,18 +382,18 @@ class TagBrief(BaseModel):
 
 class ClientCreateIn(BaseModel):
     name: str = Field(min_length=1, max_length=120)
-    ragione_sociale: str = Field(min_length=1, max_length=200)
-    nome: str | None = Field(default=None, max_length=60)
-    cognome: str | None = Field(default=None, max_length=60)
-    id_paese: str | None = Field(default=None, max_length=2)
-    id_codice: str | None = Field(default=None, max_length=30)
-    codice_fiscale: str | None = Field(default=None, max_length=30)
-    indirizzo: str | None = Field(default=None, max_length=200)
-    cap: str | None = Field(default=None, max_length=10)
-    comune: str | None = Field(default=None, max_length=120)
-    provincia: str | None = Field(default=None, max_length=4)
-    nazione: str | None = Field(default=None, max_length=2)
-    codice_destinatario: str | None = Field(default=None, max_length=7)
+    legal_name: str = Field(min_length=1, max_length=200)
+    first_name: str | None = Field(default=None, max_length=60)
+    last_name: str | None = Field(default=None, max_length=60)
+    country_code: str | None = Field(default=None, max_length=2)
+    vat_number: str | None = Field(default=None, max_length=30)
+    tax_code: str | None = Field(default=None, max_length=30)
+    address: str | None = Field(default=None, max_length=200)
+    postal_code: str | None = Field(default=None, max_length=10)
+    city: str | None = Field(default=None, max_length=120)
+    province: str | None = Field(default=None, max_length=4)
+    country: str | None = Field(default=None, max_length=2)
+    sdi_code: str | None = Field(default=None, max_length=7)
     pec: str | None = Field(default=None, max_length=320)
     # Per-client invoice sezionale (series prefix). None -> auto-derived from
     # the name on the first invoice. Optional override here.
@@ -403,18 +403,18 @@ class ClientCreateIn(BaseModel):
     payment_iban: str | None = Field(default=None, max_length=34)
     description: str | None = None
     default_billable: bool = True
-    tariffa: Decimal | None = None
-    valuta: str = Field(default="EUR", max_length=3)
+    hourly_rate: Decimal | None = None
+    currency: str = Field(default="EUR", max_length=3)
     # IANA timezone name (e.g. "Europe/Rome"); optional.
     timezone: str | None = Field(default=None, max_length=64)
     # Per-client payment defaults (FatturaPA TPxx / MPxx). NULL = inherit
     # from the issuer (then system default TP02 / MP05).
-    default_condizioni_pagamento: str | None = Field(default=None, max_length=4)
-    default_modalita_pagamento: str | None = Field(default=None, max_length=4)
+    default_payment_conditions_code: str | None = Field(default=None, max_length=4)
+    default_payment_method_code: str | None = Field(default=None, max_length=4)
     default_payment_terms_days: int | None = Field(default=None, ge=0, le=365)
     # Locale for the courtesy PDF when the client is foreign (BCP47 tag,
     # e.g. "it", "en", "de"). NULL -> "it". The FatturaPA XML stays
-    # untouched (SdI ignores this field; legal causale/dicitura remain
+    # untouched (SdI ignores this field; legal purpose/dicitura remain
     # in Italian regardless).
     invoice_language: str | None = Field(default=None, max_length=8)
 
@@ -429,28 +429,28 @@ class ProjectCreateIn(BaseModel):
 
 class ClientPatchIn(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=120)
-    ragione_sociale: str | None = Field(default=None, min_length=1, max_length=200)
-    nome: str | None = Field(default=None, max_length=60)
-    cognome: str | None = Field(default=None, max_length=60)
-    id_paese: str | None = Field(default=None, max_length=2)
-    id_codice: str | None = Field(default=None, max_length=30)
-    codice_fiscale: str | None = Field(default=None, max_length=30)
-    indirizzo: str | None = Field(default=None, max_length=200)
-    cap: str | None = Field(default=None, max_length=10)
-    comune: str | None = Field(default=None, max_length=120)
-    provincia: str | None = Field(default=None, max_length=4)
-    nazione: str | None = Field(default=None, max_length=2)
-    codice_destinatario: str | None = Field(default=None, max_length=7)
+    legal_name: str | None = Field(default=None, min_length=1, max_length=200)
+    first_name: str | None = Field(default=None, max_length=60)
+    last_name: str | None = Field(default=None, max_length=60)
+    country_code: str | None = Field(default=None, max_length=2)
+    vat_number: str | None = Field(default=None, max_length=30)
+    tax_code: str | None = Field(default=None, max_length=30)
+    address: str | None = Field(default=None, max_length=200)
+    postal_code: str | None = Field(default=None, max_length=10)
+    city: str | None = Field(default=None, max_length=120)
+    province: str | None = Field(default=None, max_length=4)
+    country: str | None = Field(default=None, max_length=2)
+    sdi_code: str | None = Field(default=None, max_length=7)
     pec: str | None = Field(default=None, max_length=320)
     invoice_series: str | None = Field(default=None, max_length=20)
     payment_iban: str | None = Field(default=None, max_length=34)
     description: str | None = None
     default_billable: bool | None = None
-    tariffa: Decimal | None = None
-    valuta: str | None = Field(default=None, max_length=3)
+    hourly_rate: Decimal | None = None
+    currency: str | None = Field(default=None, max_length=3)
     timezone: str | None = Field(default=None, max_length=64)
-    default_condizioni_pagamento: str | None = Field(default=None, max_length=4)
-    default_modalita_pagamento: str | None = Field(default=None, max_length=4)
+    default_payment_conditions_code: str | None = Field(default=None, max_length=4)
+    default_payment_method_code: str | None = Field(default=None, max_length=4)
     default_payment_terms_days: int | None = Field(default=None, ge=0, le=365)
     invoice_language: str | None = Field(default=None, max_length=8)
 
@@ -460,28 +460,28 @@ class ClientOut(BaseModel):
     name: str
     status: str
     version: int
-    ragione_sociale: str
-    nome: str | None
-    cognome: str | None
-    id_paese: str | None
-    id_codice: str | None
-    codice_fiscale: str | None
-    indirizzo: str | None
-    cap: str | None
-    comune: str | None
-    provincia: str | None
-    nazione: str | None
-    codice_destinatario: str | None
+    legal_name: str
+    first_name: str | None
+    last_name: str | None
+    country_code: str | None
+    vat_number: str | None
+    tax_code: str | None
+    address: str | None
+    postal_code: str | None
+    city: str | None
+    province: str | None
+    country: str | None
+    sdi_code: str | None
     pec: str | None
     invoice_series: str | None
     payment_iban: str | None
     description: str | None
     default_billable: bool
-    tariffa: Decimal | None
-    valuta: str
+    hourly_rate: Decimal | None
+    currency: str
     timezone: str | None
-    default_condizioni_pagamento: str | None
-    default_modalita_pagamento: str | None
+    default_payment_conditions_code: str | None
+    default_payment_method_code: str | None
     default_payment_terms_days: int | None
     invoice_language: str | None
 
@@ -1898,7 +1898,7 @@ class NotePartAppendIn(BaseModel):
     each asserting ``expected_version`` (the cursor returned by the
     previous chunk). Chunks concatenate **raw** (no separator) for
     byte-exact reassembly. Recommended client chunk size ~32k chars to
-    stay under any transport payload cap. ``chunk_index`` is advisory
+    stay under any transport payload postal_code. ``chunk_index`` is advisory
     (client-side ordering / progress); idempotency is version-based.
     Set ``is_last=True`` on the final chunk so the recovery-history
     revision is sealed once for the whole upload."""
@@ -2224,60 +2224,64 @@ class AttachmentOut(BaseModel):
 
 class IssuerProfileIn(BaseModel):
     label: str = Field(min_length=1, max_length=120)
-    denominazione: str = Field(min_length=1, max_length=200)
-    piva: str | None = Field(default=None, max_length=28)
-    codice_fiscale: str | None = Field(default=None, max_length=16)
-    regime_fiscale: str = Field(default="RF01", max_length=4)
-    paese: str = Field(default="IT", max_length=2)
-    indirizzo: str = Field(default="", max_length=200)
-    cap: str = Field(default="", max_length=10)
-    comune: str = Field(default="", max_length=120)
-    provincia: str | None = Field(default=None, max_length=4)
-    nazione: str = Field(default="IT", max_length=2)
+    legal_name: str = Field(min_length=1, max_length=200)
+    vat_number: str | None = Field(default=None, max_length=28)
+    tax_code: str | None = Field(default=None, max_length=16)
+    tax_regime: str = Field(default="RF01", max_length=4)
+    country_code: str = Field(default="IT", max_length=2)
+    address: str = Field(default="", max_length=200)
+    postal_code: str = Field(default="", max_length=10)
+    city: str = Field(default="", max_length=120)
+    province: str | None = Field(default=None, max_length=4)
+    country: str = Field(default="IT", max_length=2)
+    # CodiceDestinatario of this issuer's own reception channel (passive
+    # SdI cycle): suppliers addressing it route invoices to our inbound.
+    sdi_code: str | None = Field(default=None, max_length=7)
     rea: str | None = Field(default=None, max_length=40)
     # Fallback payment IBAN (precedence: invoice > client > issuer).
     default_iban: str | None = Field(default=None, max_length=34)
-    riferimento_normativo: str | None = Field(default=None, max_length=100)
-    nome: str | None = Field(default=None, max_length=60)
-    cognome: str | None = Field(default=None, max_length=60)
+    legal_reference: str | None = Field(default=None, max_length=100)
+    first_name: str | None = Field(default=None, max_length=60)
+    last_name: str | None = Field(default=None, max_length=60)
     # Optional contact channels. PEC prints on the PDF; the rest go in
     # CedentePrestatore/Contatti (Telefono/Fax/Email).
     pec: str | None = Field(default=None, max_length=320)
     email: str | None = Field(default=None, max_length=320)
-    telefono: str | None = Field(default=None, max_length=20)
+    phone: str | None = Field(default=None, max_length=20)
     fax: str | None = Field(default=None, max_length=20)
     # Issuer-level fallbacks for payment metadata (used only when the
     # client carries no own default). Closed-enum codes (TPxx / MPxx);
     # validated server-side.
-    default_condizioni_pagamento: str | None = Field(default=None, max_length=4)
-    default_modalita_pagamento: str | None = Field(default=None, max_length=4)
+    default_payment_conditions_code: str | None = Field(default=None, max_length=4)
+    default_payment_method_code: str | None = Field(default=None, max_length=4)
     default_payment_terms_days: int | None = Field(default=None, ge=0, le=365)
     is_default: bool = False
 
 
 class IssuerProfilePatchIn(BaseModel):
     label: str | None = Field(default=None, min_length=1, max_length=120)
-    denominazione: str | None = Field(default=None, min_length=1, max_length=200)
-    piva: str | None = Field(default=None, max_length=28)
-    codice_fiscale: str | None = Field(default=None, max_length=16)
-    regime_fiscale: str | None = Field(default=None, max_length=4)
-    paese: str | None = Field(default=None, max_length=2)
-    indirizzo: str | None = Field(default=None, max_length=200)
-    cap: str | None = Field(default=None, max_length=10)
-    comune: str | None = Field(default=None, max_length=120)
-    provincia: str | None = Field(default=None, max_length=4)
-    nazione: str | None = Field(default=None, max_length=2)
+    legal_name: str | None = Field(default=None, min_length=1, max_length=200)
+    vat_number: str | None = Field(default=None, max_length=28)
+    tax_code: str | None = Field(default=None, max_length=16)
+    tax_regime: str | None = Field(default=None, max_length=4)
+    country_code: str | None = Field(default=None, max_length=2)
+    address: str | None = Field(default=None, max_length=200)
+    postal_code: str | None = Field(default=None, max_length=10)
+    city: str | None = Field(default=None, max_length=120)
+    province: str | None = Field(default=None, max_length=4)
+    country: str | None = Field(default=None, max_length=2)
+    sdi_code: str | None = Field(default=None, max_length=7)
     rea: str | None = Field(default=None, max_length=40)
     default_iban: str | None = Field(default=None, max_length=34)
-    riferimento_normativo: str | None = Field(default=None, max_length=100)
-    nome: str | None = Field(default=None, max_length=60)
-    cognome: str | None = Field(default=None, max_length=60)
+    legal_reference: str | None = Field(default=None, max_length=100)
+    first_name: str | None = Field(default=None, max_length=60)
+    last_name: str | None = Field(default=None, max_length=60)
     pec: str | None = Field(default=None, max_length=320)
     email: str | None = Field(default=None, max_length=320)
-    telefono: str | None = Field(default=None, max_length=20)
+    phone: str | None = Field(default=None, max_length=20)
     fax: str | None = Field(default=None, max_length=20)
-    default_condizioni_pagamento: str | None = Field(default=None, max_length=4)
-    default_modalita_pagamento: str | None = Field(default=None, max_length=4)
+    default_payment_conditions_code: str | None = Field(default=None, max_length=4)
+    default_payment_method_code: str | None = Field(default=None, max_length=4)
     default_payment_terms_days: int | None = Field(default=None, ge=0, le=365)
     is_default: bool | None = None
 
@@ -2285,27 +2289,28 @@ class IssuerProfilePatchIn(BaseModel):
 class IssuerProfileOut(BaseModel):
     id: uuid.UUID
     label: str
-    denominazione: str
-    piva: str | None
-    codice_fiscale: str | None
-    regime_fiscale: str
-    paese: str
-    indirizzo: str
-    cap: str
-    comune: str
-    provincia: str | None
-    nazione: str
+    legal_name: str
+    vat_number: str | None
+    tax_code: str | None
+    tax_regime: str
+    country_code: str
+    address: str
+    postal_code: str
+    city: str
+    province: str | None
+    country: str
+    sdi_code: str | None
     rea: str | None
     default_iban: str | None
-    riferimento_normativo: str | None
-    nome: str | None
-    cognome: str | None
+    legal_reference: str | None
+    first_name: str | None
+    last_name: str | None
     pec: str | None
     email: str | None
-    telefono: str | None
+    phone: str | None
     fax: str | None
-    default_condizioni_pagamento: str | None
-    default_modalita_pagamento: str | None
+    default_payment_conditions_code: str | None
+    default_payment_method_code: str | None
     default_payment_terms_days: int | None
     is_default: bool
     conservation_adhesion: str
@@ -2355,7 +2360,7 @@ class InvoiceCreateIn(BaseModel):
     # None -> the service defaults to the client's own sezionale (per-client
     # numbering). An explicit value pins a custom series.
     series: str | None = Field(default=None, max_length=20)
-    causale: str | None = Field(default=None, max_length=200)
+    purpose: str | None = Field(default=None, max_length=200)
 
 
 class InvoicePatchIn(BaseModel):
@@ -2363,15 +2368,15 @@ class InvoicePatchIn(BaseModel):
     issuer_profile_id: uuid.UUID | None = None
     series: str | None = Field(default=None, max_length=20)
     currency: str | None = Field(default=None, max_length=3)
-    causale: str | None = Field(default=None, max_length=200)
+    purpose: str | None = Field(default=None, max_length=200)
     notes: str | None = None
     payment_iban: str | None = Field(default=None, max_length=34)
     payment_due_date: datetime.date | None = None
     # Per-document overrides of the client/issuer payment defaults
     # (FatturaPA TPxx / MPxx + net days). NULL = inherit (and the XML
     # falls through to the client, then issuer, then TP02 / MP05).
-    condizioni_pagamento: str | None = Field(default=None, max_length=4)
-    modalita_pagamento: str | None = Field(default=None, max_length=4)
+    payment_conditions_code: str | None = Field(default=None, max_length=4)
+    payment_method_code: str | None = Field(default=None, max_length=4)
     payment_terms_days: int | None = Field(default=None, ge=0, le=365)
 
 
@@ -2383,7 +2388,7 @@ class InvoiceLineIn(BaseModel):
     # (forfettario RF19 -> 0% + Natura N2.2; ordinary regime -> 22%).
     # An explicit value is always honoured.
     vat_rate: Decimal | None = None
-    natura: str | None = Field(default=None, max_length=4)
+    vat_nature: str | None = Field(default=None, max_length=4)
 
 
 class InvoiceLineOut(BaseModel):
@@ -2393,7 +2398,7 @@ class InvoiceLineOut(BaseModel):
     quantity: Decimal
     unit_price: Decimal
     vat_rate: Decimal
-    natura: str | None
+    vat_nature: str | None
 
 
 class InvoiceOut(BaseModel):
@@ -2408,16 +2413,16 @@ class InvoiceOut(BaseModel):
     number: int | None
     state: InvoiceState
     currency: str
-    causale: str | None
+    purpose: str | None
     notes: str | None
     payment_iban: str | None
     payment_due_date: datetime.date | None
-    condizioni_pagamento: str | None
-    modalita_pagamento: str | None
+    payment_conditions_code: str | None
+    payment_method_code: str | None
     payment_terms_days: int | None
     taxable: Decimal
     vat: Decimal
-    bollo: Decimal
+    stamp_duty: Decimal
     total: Decimal
     identificativo_sdi: str | None
     sdi_status: SdiStatus
@@ -2432,7 +2437,7 @@ class TransmitIn(BaseModel):
 
 class CreditNoteIn(BaseModel):
     parent_invoice_id: uuid.UUID
-    causale: str | None = Field(default=None, max_length=200)
+    purpose: str | None = Field(default=None, max_length=200)
 
 
 class ReceiptIn(BaseModel):
@@ -2465,17 +2470,17 @@ class InvoicePreviewParty(BaseModel):
     """Resolved issuer or client identity for the preview. None when the
     draft has no profile resolved yet."""
 
-    denominazione: str
-    piva: str | None = None
-    codice_fiscale: str | None = None
-    regime_fiscale: str | None = None
-    indirizzo: str | None = None
-    cap: str | None = None
-    comune: str | None = None
-    provincia: str | None = None
-    nazione: str | None = None
+    legal_name: str
+    vat_number: str | None = None
+    tax_code: str | None = None
+    tax_regime: str | None = None
+    address: str | None = None
+    postal_code: str | None = None
+    city: str | None = None
+    province: str | None = None
+    country: str | None = None
     # Client only (the SdI recipient address); None on the issuer side.
-    codice_destinatario: str | None = None
+    sdi_code: str | None = None
     pec: str | None = None
 
 
@@ -2486,13 +2491,13 @@ class InvoicePreviewLine(BaseModel):
     unit_price: Decimal
     line_total: Decimal
     vat_rate: Decimal
-    natura: str | None = None
+    vat_nature: str | None = None
 
 
 class InvoicePreviewTotals(BaseModel):
     taxable: Decimal
     vat: Decimal
-    bollo: Decimal
+    stamp_duty: Decimal
     total: Decimal
 
 
@@ -2514,7 +2519,7 @@ class InvoicePreviewOut(BaseModel):
     effective_iban: str | None
     # "invoice" | "client" | "issuer" | None.
     iban_source: str | None
-    causale: str | None
+    purpose: str | None
     notes: str | None
     is_forfettario: bool
     state: InvoiceState

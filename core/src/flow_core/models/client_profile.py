@@ -26,20 +26,20 @@ class ClientProfile(OrgScopedMixin, TimestampMixin, VersionMixin, Base):
         ForeignKey("tags.id", ondelete="CASCADE"),
         primary_key=True,
     )
-    ragione_sociale: Mapped[str] = mapped_column(String(200), nullable=False)
+    legal_name: Mapped[str] = mapped_column(String(200), nullable=False)
     # Persona fisica: when both set, FatturaPA emits Anagrafica/Nome+Cognome
     # instead of Denominazione (max 60 latin, AnagraficaType choice).
-    nome: Mapped[str | None] = mapped_column(String(60), nullable=True)
-    cognome: Mapped[str | None] = mapped_column(String(60), nullable=True)
-    id_paese: Mapped[str | None] = mapped_column(String(2), nullable=True)
-    id_codice: Mapped[str | None] = mapped_column(String(30), nullable=True)
-    codice_fiscale: Mapped[str | None] = mapped_column(String(30), nullable=True)
-    indirizzo: Mapped[str | None] = mapped_column(String(200), nullable=True)
-    cap: Mapped[str | None] = mapped_column(String(10), nullable=True)
-    comune: Mapped[str | None] = mapped_column(String(120), nullable=True)
-    provincia: Mapped[str | None] = mapped_column(String(4), nullable=True)
-    nazione: Mapped[str | None] = mapped_column(String(2), nullable=True)
-    codice_destinatario: Mapped[str | None] = mapped_column(String(7), nullable=True)
+    first_name: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    last_name: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    country_code: Mapped[str | None] = mapped_column(String(2), nullable=True)
+    vat_number: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    tax_code: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    address: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    postal_code: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    city: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    province: Mapped[str | None] = mapped_column(String(4), nullable=True)
+    country: Mapped[str | None] = mapped_column(String(2), nullable=True)
+    sdi_code: Mapped[str | None] = mapped_column(String(7), nullable=True)
     pec: Mapped[str | None] = mapped_column(String(320), nullable=True)
     # Per-client invoice sezionale: the series prefix used for this client's
     # invoices (e.g. "ACME" -> ACME/2026/1). Gives each client an independent
@@ -58,9 +58,9 @@ class ClientProfile(OrgScopedMixin, TimestampMixin, VersionMixin, Base):
     # is a client relationship, not a per-project trait.
     default_billable: Mapped[bool] = mapped_column(nullable=False, server_default="true")
     # Hourly rate is also a client relationship (billed amount =
-    # duration_seconds / 3600 * tariffa; see time_tracking._rate).
-    tariffa: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
-    valuta: Mapped[str] = mapped_column(String(3), nullable=False, server_default="EUR")
+    # duration_seconds / 3600 * hourly_rate; see time_tracking._rate).
+    hourly_rate: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
+    currency: Mapped[str] = mapped_column(String(3), nullable=False, server_default="EUR")
     # Preferred IANA timezone name (e.g. "Europe/Rome"); lets the SPA
     # render this client's time entries / report in its local time.
     timezone: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -68,13 +68,13 @@ class ClientProfile(OrgScopedMixin, TimestampMixin, VersionMixin, Base):
     # resolver falls back to the issuer, then to system defaults
     # (TP02 / MP05). Values are SdI enum codes (TPxx / MPxx) validated
     # at the service layer before they reach the XML build.
-    default_condizioni_pagamento: Mapped[str | None] = mapped_column(String(4), nullable=True)
-    default_modalita_pagamento: Mapped[str | None] = mapped_column(String(4), nullable=True)
+    default_payment_conditions_code: Mapped[str | None] = mapped_column(String(4), nullable=True)
+    default_payment_method_code: Mapped[str | None] = mapped_column(String(4), nullable=True)
     # Net payment days. NULL = inherit (issuer default or none). When set
     # and an invoice carries no explicit due date, the draft service
     # computes payment_due_date = issued_or_today + days.
     default_payment_terms_days: Mapped[int | None] = mapped_column(nullable=True)
     # Locale for the courtesy PDF (BCP47 tag, e.g. "it", "en"). NULL ->
     # "it". The FatturaPA XML is not translated: SdI ignores the field
-    # and the legally mandated causale/dicitura stay verbatim Italian.
+    # and the legally mandated purpose/dicitura stay verbatim Italian.
     invoice_language: Mapped[str | None] = mapped_column(String(8), nullable=True)

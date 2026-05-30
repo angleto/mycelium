@@ -77,14 +77,14 @@ async def test_report_aggregation_billable_and_rate_snapshot() -> None:
         a = await signup(s, email=_email(), password="pw-strong-123", org_name="RPT")
     org, user = a.org_id, a.user_id
     async with tenant_session(str(org), str(user)) as s:
-        # Rate is client-level: a client carries the tariffa, the
+        # Rate is client-level: a client carries the hourly_rate, the
         # project just links to it.
         cli = await taxonomy.create_client(
             s,
             org_id=org,
             actor_id=user,
             name="Cli",
-            profile=taxonomy.ClientInput(ragione_sociale="Cli", tariffa=Decimal(100)),
+            profile=taxonomy.ClientInput(legal_name="Cli", hourly_rate=Decimal(100)),
         )
         proj = await taxonomy.create_project(
             s, org_id=org, actor_id=user, name="Proj", client_tag_id=cli.id
@@ -112,7 +112,9 @@ async def test_report_aggregation_billable_and_rate_snapshot() -> None:
         )
         # Rate edited after the fact must not rewrite history.
         await s.execute(
-            update(ClientProfile).where(ClientProfile.tag_id == cli.id).values(tariffa=Decimal(999))
+            update(ClientProfile)
+            .where(ClientProfile.tag_id == cli.id)
+            .values(hourly_rate=Decimal(999))
         )
         rows = await tt.report(s, org_id=org, actor_id=user, group_by=tt.ReportGroup.project)
         row = next(r for r in rows if r.key == str(proj.id))
@@ -170,7 +172,7 @@ async def test_update_entry_resnapshots_billing_on_task_move() -> None:
             actor_id=user,
             name="Wrong",
             profile=taxonomy.ClientInput(
-                ragione_sociale="Wrong", tariffa=Decimal(50), default_billable=False
+                legal_name="Wrong", hourly_rate=Decimal(50), default_billable=False
             ),
         )
         right = await taxonomy.create_client(
@@ -179,7 +181,7 @@ async def test_update_entry_resnapshots_billing_on_task_move() -> None:
             actor_id=user,
             name="Right",
             profile=taxonomy.ClientInput(
-                ragione_sociale="Right", tariffa=Decimal(200), default_billable=True
+                legal_name="Right", hourly_rate=Decimal(200), default_billable=True
             ),
         )
         wrong_proj = await taxonomy.create_project(

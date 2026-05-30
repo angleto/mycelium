@@ -214,21 +214,24 @@ function IssuerCounters({ profileId }: { profileId: string }) {
 
 const EMPTY = {
   label: '',
-  denominazione: '',
-  piva: '',
-  codice_fiscale: '',
-  indirizzo: '',
-  cap: '',
-  comune: '',
-  provincia: '',
-  regime_fiscale: 'RF01',
+  legal_name: '',
+  country_code: 'IT',
+  vat_number: '',
+  tax_code: '',
+  address: '',
+  postal_code: '',
+  city: '',
+  province: '',
+  country: 'IT',
+  sdi_code: '',
+  tax_regime: 'RF01',
   default_iban: '',
   pec: '',
   email: '',
-  telefono: '',
+  phone: '',
   fax: '',
-  default_condizioni_pagamento: '',
-  default_modalita_pagamento: '',
+  default_payment_conditions_code: '',
+  default_payment_method_code: '',
   default_payment_terms_days: '',
   is_default: false,
 }
@@ -296,21 +299,24 @@ export function IssuerProfiles() {
       setEdit(p.id)
       setForm({
         label: p.label,
-        denominazione: p.denominazione,
-        piva: p.piva ?? '',
-        codice_fiscale: p.codice_fiscale ?? '',
-        indirizzo: p.indirizzo,
-        cap: p.cap,
-        comune: p.comune,
-        provincia: p.provincia ?? '',
-        regime_fiscale: p.regime_fiscale ?? 'RF01',
+        legal_name: p.legal_name,
+        country_code: p.country_code ?? 'IT',
+        vat_number: p.vat_number ?? '',
+        tax_code: p.tax_code ?? '',
+        address: p.address,
+        postal_code: p.postal_code,
+        city: p.city,
+        province: p.province ?? '',
+        country: p.country ?? 'IT',
+        sdi_code: p.sdi_code ?? '',
+        tax_regime: p.tax_regime ?? 'RF01',
         default_iban: p.default_iban ?? '',
         pec: p.pec ?? '',
         email: p.email ?? '',
-        telefono: p.telefono ?? '',
+        phone: p.phone ?? '',
         fax: p.fax ?? '',
-        default_condizioni_pagamento: p.default_condizioni_pagamento ?? '',
-        default_modalita_pagamento: p.default_modalita_pagamento ?? '',
+        default_payment_conditions_code: p.default_payment_conditions_code ?? '',
+        default_payment_method_code: p.default_payment_method_code ?? '',
         default_payment_terms_days:
           p.default_payment_terms_days != null
             ? String(p.default_payment_terms_days)
@@ -330,32 +336,34 @@ export function IssuerProfiles() {
     const termsDays = form.default_payment_terms_days.trim()
     const common = {
       label: form.label,
-      denominazione: form.denominazione,
-      piva: form.piva || null,
-      codice_fiscale: form.codice_fiscale || null,
-      indirizzo: form.indirizzo,
-      cap: form.cap,
-      comune: form.comune,
-      provincia: form.provincia || null,
+      legal_name: form.legal_name,
+      vat_number: form.vat_number || null,
+      tax_code: form.tax_code || null,
+      address: form.address,
+      postal_code: form.postal_code,
+      city: form.city,
+      province: form.province || null,
+      sdi_code: form.sdi_code || null,
       default_iban: form.default_iban || null,
       pec: form.pec || null,
       email: form.email || null,
-      telefono: form.telefono || null,
+      phone: form.phone || null,
       fax: form.fax || null,
-      default_condizioni_pagamento: form.default_condizioni_pagamento || null,
-      default_modalita_pagamento: form.default_modalita_pagamento || null,
+      default_payment_conditions_code: form.default_payment_conditions_code || null,
+      default_payment_method_code: form.default_payment_method_code || null,
       default_payment_terms_days: termsDays ? Number(termsDays) : null,
       is_default: form.is_default,
     }
-    // regime_fiscale drives forfettario (RF19) invoicing — it is a
-    // hard fiscal/legal fact, NOT a constant: a flat-rate (forfettario)
+    // tax_regime drives forfettario (RF19) invoicing — it is a hard
+    // fiscal/legal fact, NOT a constant: a flat-rate (forfettario)
     // issuer MUST be RF19 or the invoice is non-compliant (no L.190
-    // causale, wrong VAT). paese/nazione stay IT constants; all are
+    // purpose, wrong VAT). country_code/country default IT but are
+    // editable (VAT country, symmetric with the client); all are
     // required by IssuerProfileIn and must ride PATCH too (else 422).
     const body = {
-      regime_fiscale: form.regime_fiscale,
-      paese: 'IT',
-      nazione: 'IT',
+      tax_regime: form.tax_regime,
+      country_code: form.country_code || 'IT',
+      country: form.country || 'IT',
       ...common,
     }
     const res =
@@ -414,8 +422,8 @@ export function IssuerProfiles() {
         <ul className="list">
           {profiles.map((p) => (
             <li key={p.id}>
-              <strong>{p.label}</strong> · {p.denominazione}
-              {p.piva ? ` · ${p.piva}` : ''}{' '}
+              <strong>{p.label}</strong> · {p.legal_name}
+              {p.vat_number ? ` · ${p.vat_number}` : ''}{' '}
               {p.is_default && (
                 <span className="muted">[{t('invoices.isDefault')}]</span>
               )}
@@ -470,77 +478,130 @@ export function IssuerProfiles() {
               : t('invoices.editProfile')}
           </h3>
           <div className="row">
-            <input
-              required
-              placeholder={t('invoices.label')}
-              value={form.label}
-              onChange={(e) => setForm({ ...form, label: e.target.value })}
-            />
-            <input
-              required
-              placeholder={t('invoices.denom')}
-              value={form.denominazione}
-              onChange={(e) =>
-                setForm({ ...form, denominazione: e.target.value })
-              }
-            />
-            <input
-              placeholder={t('invoices.piva')}
-              value={form.piva}
-              onChange={(e) => setForm({ ...form, piva: e.target.value })}
-            />
-            <input
-              placeholder={t('invoices.cf')}
-              value={form.codice_fiscale}
-              onChange={(e) =>
-                setForm({ ...form, codice_fiscale: e.target.value })
-              }
-            />
+            <label>
+              {t('invoices.label')}
+              <input
+                required
+                value={form.label}
+                onChange={(e) => setForm({ ...form, label: e.target.value })}
+              />
+            </label>
+            <label>
+              {t('cp.f.legal_name')}
+              <input
+                required
+                value={form.legal_name}
+                onChange={(e) =>
+                  setForm({ ...form, legal_name: e.target.value })
+                }
+              />
+            </label>
           </div>
+          {/* Identity, symmetric with the client: Country (VAT) + VAT
+              number split, plus tax code. */}
           <div className="row">
-            <input
-              placeholder={t('invoices.address')}
-              value={form.indirizzo}
-              onChange={(e) => setForm({ ...form, indirizzo: e.target.value })}
-            />
-            <input
-              placeholder={t('invoices.cap')}
-              value={form.cap}
-              onChange={(e) => setForm({ ...form, cap: e.target.value })}
-            />
-            <input
-              placeholder={t('invoices.comune')}
-              value={form.comune}
-              onChange={(e) => setForm({ ...form, comune: e.target.value })}
-            />
-            <input
-              placeholder={t('invoices.provincia')}
-              value={form.provincia}
-              onChange={(e) => setForm({ ...form, provincia: e.target.value })}
-            />
+            <label>
+              {t('cp.f.country_code')}
+              <input
+                value={form.country_code}
+                onChange={(e) =>
+                  setForm({ ...form, country_code: e.target.value })
+                }
+              />
+            </label>
+            <label>
+              {t('cp.f.vat_number')}
+              <input
+                value={form.vat_number}
+                onChange={(e) =>
+                  setForm({ ...form, vat_number: e.target.value })
+                }
+              />
+            </label>
+            <label>
+              {t('cp.f.tax_code')}
+              <input
+                value={form.tax_code}
+                onChange={(e) =>
+                  setForm({ ...form, tax_code: e.target.value })
+                }
+              />
+            </label>
           </div>
           <div className="row">
             <label>
+              {t('cp.f.address')}
+              <input
+                value={form.address}
+                onChange={(e) => setForm({ ...form, address: e.target.value })}
+              />
+            </label>
+            <label>
+              {t('cp.f.postal_code')}
+              <input
+                value={form.postal_code}
+                onChange={(e) =>
+                  setForm({ ...form, postal_code: e.target.value })
+                }
+              />
+            </label>
+            <label>
+              {t('cp.f.city')}
+              <input
+                value={form.city}
+                onChange={(e) => setForm({ ...form, city: e.target.value })}
+              />
+            </label>
+            <label>
+              {t('cp.f.province')}
+              <input
+                value={form.province}
+                onChange={(e) =>
+                  setForm({ ...form, province: e.target.value })
+                }
+              />
+            </label>
+            <label>
+              {t('cp.f.country')}
+              <input
+                value={form.country}
+                onChange={(e) => setForm({ ...form, country: e.target.value })}
+              />
+            </label>
+          </div>
+          <div className="row">
+            <label>
+              {t('cp.f.sdi_code')}
+              <input
+                value={form.sdi_code}
+                onChange={(e) =>
+                  setForm({ ...form, sdi_code: e.target.value })
+                }
+              />
+            </label>
+            <label>
               {t('invoices.regime')}
               <select
-                value={form.regime_fiscale}
+                value={form.tax_regime}
                 onChange={(e) =>
-                  setForm({ ...form, regime_fiscale: e.target.value })
+                  setForm({ ...form, tax_regime: e.target.value })
                 }
               >
                 <option value="RF01">{t('invoices.regimeRF01')}</option>
                 <option value="RF19">{t('invoices.regimeRF19')}</option>
               </select>
             </label>
-            <input
-              placeholder={t('invoices.defaultIban')}
-              value={form.default_iban}
-              onChange={(e) =>
-                setForm({ ...form, default_iban: e.target.value })
-              }
-            />
+            <label>
+              {t('invoices.defaultIban')}
+              <input
+                value={form.default_iban}
+                onChange={(e) =>
+                  setForm({ ...form, default_iban: e.target.value })
+                }
+              />
+            </label>
           </div>
-          {form.regime_fiscale === 'RF19' && (
+          {form.tax_regime === 'RF19' && (
             <p className="hint">{t('invoices.regimeRF19Hint')}</p>
           )}
           <div className="row">
@@ -558,8 +619,8 @@ export function IssuerProfiles() {
             />
             <input
               placeholder={t('invoices.phone')}
-              value={form.telefono}
-              onChange={(e) => setForm({ ...form, telefono: e.target.value })}
+              value={form.phone}
+              onChange={(e) => setForm({ ...form, phone: e.target.value })}
             />
             <input
               placeholder={t('invoices.fax')}
@@ -573,11 +634,11 @@ export function IssuerProfiles() {
             <label>
               {t('invoices.defaultCondizioni')}
               <select
-                value={form.default_condizioni_pagamento}
+                value={form.default_payment_conditions_code}
                 onChange={(e) =>
                   setForm({
                     ...form,
-                    default_condizioni_pagamento: e.target.value,
+                    default_payment_conditions_code: e.target.value,
                   })
                 }
               >
@@ -592,11 +653,11 @@ export function IssuerProfiles() {
             <label>
               {t('invoices.defaultModalita')}
               <select
-                value={form.default_modalita_pagamento}
+                value={form.default_payment_method_code}
                 onChange={(e) =>
                   setForm({
                     ...form,
-                    default_modalita_pagamento: e.target.value,
+                    default_payment_method_code: e.target.value,
                   })
                 }
               >

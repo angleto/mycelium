@@ -52,23 +52,23 @@ const CP_LANGUAGES: ReadonlyArray<readonly [string, string]> = [
 ]
 
 const CLIENT_FIELDS: ClientFieldDef[] = [
-  { name: 'ragione_sociale' },
-  { name: 'codice_fiscale' },
-  { name: 'id_paese' },
-  { name: 'id_codice' },
-  { name: 'indirizzo' },
-  { name: 'cap' },
-  { name: 'comune' },
-  { name: 'provincia' },
-  { name: 'nazione' },
-  { name: 'codice_destinatario' },
+  { name: 'legal_name' },
+  { name: 'tax_code' },
+  { name: 'country_code' },
+  { name: 'vat_number' },
+  { name: 'address' },
+  { name: 'postal_code' },
+  { name: 'city' },
+  { name: 'province' },
+  { name: 'country' },
+  { name: 'sdi_code' },
   { name: 'pec' },
   { name: 'invoice_series' },
   { name: 'description' },
   // Payment defaults: NULL means "inherit from the issuer (then system
   // default)". A blank selection in the UI sends NULL.
-  { name: 'default_condizioni_pagamento', kind: 'select-condizioni' },
-  { name: 'default_modalita_pagamento', kind: 'select-modalita' },
+  { name: 'default_payment_conditions_code', kind: 'select-condizioni' },
+  { name: 'default_payment_method_code', kind: 'select-modalita' },
   { name: 'default_payment_terms_days', kind: 'number' },
   // Locale for the PDF only; XML is always Italian.
   { name: 'invoice_language', kind: 'select-language' },
@@ -155,16 +155,16 @@ export function ClientsProjectsRoute() {
     const form = e.currentTarget
     const fd = new FormData(form)
     const name = (fd.get('name') as string).trim()
-    const rag = (fd.get('ragione_sociale') as string).trim()
+    const rag = (fd.get('legal_name') as string).trim()
     if (!name || !rag) return
     setErr(null)
     const { error } = await api.POST('/clients', {
       params: { header: workspaceHeader() },
       body: {
         name,
-        ragione_sociale: rag,
-        tariffa: (fd.get('tariffa') as string) || null,
-        valuta: (fd.get('valuta') as string) || 'EUR',
+        legal_name: rag,
+        hourly_rate: (fd.get('hourly_rate') as string) || null,
+        currency: (fd.get('currency') as string) || 'EUR',
         default_billable: fd.get('default_billable') === 'on',
       },
     })
@@ -408,15 +408,15 @@ export function ClientsProjectsRoute() {
           </label>
           <label>
             {t('cp.ragioneSociale')}
-            <input name="ragione_sociale" required />
+            <input name="legal_name" required />
           </label>
           <label>
             {t('cp.rate')}
-            <input name="tariffa" type="number" step="0.01" />
+            <input name="hourly_rate" type="number" step="0.01" />
           </label>
           <label>
             {t('cp.currency')}
-            <input name="valuta" defaultValue="EUR" />
+            <input name="currency" defaultValue="EUR" />
           </label>
           <label className="cpform__chk">
             <input type="checkbox" name="default_billable" defaultChecked />
@@ -485,8 +485,8 @@ export function ClientsProjectsRoute() {
                     </button>
                     <span className="cpmeta">
                       <span className="tag">
-                        {c.tariffa
-                          ? `${c.tariffa} ${c.valuta}/h`
+                        {c.hourly_rate
+                          ? `${c.hourly_rate} ${c.currency}/h`
                           : t('cp.noRate')}
                       </span>
                       <span
@@ -552,8 +552,8 @@ export function ClientsProjectsRoute() {
                           name: fd.get('name'),
                           default_billable:
                             fd.get('default_billable') === 'on',
-                          tariffa: (fd.get('tariffa') as string) || null,
-                          valuta: (fd.get('valuta') as string) || 'EUR',
+                          hourly_rate: (fd.get('hourly_rate') as string) || null,
+                          currency: (fd.get('currency') as string) || 'EUR',
                         }
                         for (const f of CLIENT_FIELDS) {
                           const raw = (fd.get(f.name) as string) || null
@@ -575,15 +575,15 @@ export function ClientsProjectsRoute() {
                       <label>
                         {t('cp.rate')}
                         <input
-                          name="tariffa"
+                          name="hourly_rate"
                           type="number"
                           step="0.01"
-                          defaultValue={c.tariffa ?? ''}
+                          defaultValue={c.hourly_rate ?? ''}
                         />
                       </label>
                       <label>
                         {t('cp.currency')}
-                        <input name="valuta" defaultValue={c.valuta} />
+                        <input name="currency" defaultValue={c.currency} />
                       </label>
                       <label className="cpform__chk">
                         <input

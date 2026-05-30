@@ -45,7 +45,7 @@ async def test_time_edit_reassign_interval_context_and_report() -> None:
                 headers=h,
                 json={
                     "name": "Client A",
-                    "ragione_sociale": "Client A srl",
+                    "legal_name": "Client A srl",
                     "timezone": "Europe/Rome",
                 },
             )
@@ -54,7 +54,7 @@ async def test_time_edit_reassign_interval_context_and_report() -> None:
             await c.post(
                 "/clients",
                 headers=h,
-                json={"name": "Client B", "ragione_sociale": "Client B srl"},
+                json={"name": "Client B", "legal_name": "Client B srl"},
             )
         ).json()
         # Client create echoes nothing of the profile (TagOut); read it

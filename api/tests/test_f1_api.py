@@ -42,7 +42,7 @@ async def test_f1_api_flow() -> None:
             await c.post(
                 "/clients",
                 headers=h,
-                json={"name": "Acme", "ragione_sociale": "Acme SRL"},
+                json={"name": "Acme", "legal_name": "Acme SRL"},
             )
         ).json()
         pr = (

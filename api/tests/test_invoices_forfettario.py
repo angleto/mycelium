@@ -3,9 +3,9 @@
 Mirrors the two real reference invoices the product owner provided
 (IT13438810015_UQ6IZ.xml pre-send / _X3RtZ.xml signed): a forfettario
 issuer emits 0%-IVA + Natura N2.2 lines, the mandatory L.190/2014
-causale, virtual stamp duty (DatiBollo / BolloVirtuale SI) of EUR 2.00
+purpose, virtual stamp duty (DatiBollo / BolloVirtuale SI) of EUR 2.00
 when the taxable reaches the legal threshold, and
-ImportoTotaleDocumento = taxable + bollo. Also covers IBAN precedence
+ImportoTotaleDocumento = taxable + stamp_duty. Also covers IBAN precedence
 (invoice > client > issuer), the live XML/PDF/JSON previews of a draft
 (no transmit), and a non-forfettario (RF01) regression that ordinary
 behaviour is untouched.
@@ -57,19 +57,19 @@ async def test_forfettario_draft_lines_causale_bollo_and_xml_preview() -> None:
                 headers=h,
                 json={
                     "label": "Ditta individuale",
-                    "denominazione": "Angelo Leto",
-                    "codice_fiscale": "LTENGL79M31I356X",
-                    "piva": "13438810015",
-                    "regime_fiscale": "RF19",
-                    "indirizzo": "Via Sandro Botticelli 77",
-                    "cap": "10154",
-                    "comune": "Torino",
-                    "provincia": "TO",
+                    "legal_name": "Angelo Leto",
+                    "tax_code": "LTENGL79M31I356X",
+                    "vat_number": "13438810015",
+                    "tax_regime": "RF19",
+                    "address": "Via Sandro Botticelli 77",
+                    "postal_code": "10154",
+                    "city": "Torino",
+                    "province": "TO",
                     "default_iban": "IT92O0301503200000003396368",
                 },
             )
         ).json()
-        assert prof["regime_fiscale"] == "RF19"
+        assert prof["tax_regime"] == "RF19"
         assert prof["default_iban"] == "IT92O0301503200000003396368"
 
         client = (
@@ -78,20 +78,20 @@ async def test_forfettario_draft_lines_causale_bollo_and_xml_preview() -> None:
                 headers=h,
                 json={
                     "name": "Cylock",
-                    "ragione_sociale": "CYLOCK S.R.L.",
-                    "id_paese": "IT",
-                    "id_codice": "16639311006",
-                    "codice_fiscale": "16639311006",
-                    "indirizzo": "Via Fonte Buono 19/B",
-                    "cap": "00142",
-                    "comune": "Roma",
-                    "provincia": "RM",
-                    "codice_destinatario": "KRRH6B9",
+                    "legal_name": "CYLOCK S.R.L.",
+                    "country_code": "IT",
+                    "vat_number": "16639311006",
+                    "tax_code": "16639311006",
+                    "address": "Via Fonte Buono 19/B",
+                    "postal_code": "00142",
+                    "city": "Roma",
+                    "province": "RM",
+                    "sdi_code": "KRRH6B9",
                 },
             )
         ).json()
 
-        # No causale passed -> defaulted to the L.190/2014 string.
+        # No purpose passed -> defaulted to the L.190/2014 string.
         inv = (
             await c.post(
                 "/invoices",
@@ -101,12 +101,12 @@ async def test_forfettario_draft_lines_causale_bollo_and_xml_preview() -> None:
                 json={"client_tag_id": client["id"], "year": 2026, "series": "A"},
             )
         ).json()
-        assert inv["causale"] == _FORFETTARIO_CAUSALE
+        assert inv["purpose"] == _FORFETTARIO_CAUSALE
         assert inv["issuer_profile_id"] == prof["id"]
         # IBAN precedence: only issuer.default_iban set -> invoice gets it.
         assert inv["payment_iban"] == "IT92O0301503200000003396368"
 
-        # Line with NO vat_rate / natura passed -> forfettario defaults.
+        # Line with NO vat_rate / vat_nature passed -> forfettario defaults.
         ln = (
             await c.post(
                 f"/invoices/{inv['id']}/lines",
@@ -119,14 +119,14 @@ async def test_forfettario_draft_lines_causale_bollo_and_xml_preview() -> None:
             )
         ).json()
         assert ln["vat_rate"] == "0.00"
-        assert ln["natura"] == "N2.2"
+        assert ln["vat_nature"] == "N2.2"
 
-        # Totals: taxable 3731, vat 0, bollo 2.00 (>= 77.47), total 3733.
+        # Totals: taxable 3731, vat 0, stamp_duty 2.00 (>= 77.47), total 3733.
         got = (await c.get(f"/invoices/{inv['id']}", headers=h)).json()
         assert got["taxable"] == "3731.00"
         assert got["vat"] == "0.00"
-        assert got["bollo"] == "2.00"
-        assert got["total"] == "3733.00"  # taxable + bollo
+        assert got["stamp_duty"] == "2.00"
+        assert got["total"] == "3733.00"  # taxable + stamp_duty
 
         # XML preview BEFORE transmit (never 404 for a valid draft).
         xml = (await c.get(f"/invoices/{inv['id']}/xml", headers=h)).json()["xml"]
@@ -157,11 +157,11 @@ async def test_forfettario_draft_lines_causale_bollo_and_xml_preview() -> None:
         # JSON preview exposes the SdI address + effective IBAN + regime.
         prev = (await c.get(f"/invoices/{inv['id']}/preview", headers=h)).json()
         assert prev["is_forfettario"] is True
-        assert prev["client"]["codice_destinatario"] == "KRRH6B9"
+        assert prev["client"]["sdi_code"] == "KRRH6B9"
         assert prev["client"]["pec"] is None
         assert prev["effective_iban"] == "IT92O0301503200000003396368"
         assert prev["iban_source"] == "issuer"
-        assert prev["totals"]["bollo"] == "2.00"
+        assert prev["totals"]["stamp_duty"] == "2.00"
         assert prev["totals"]["total"] == "3733.00"
         assert prev["number"] == "A-1"
 
@@ -170,7 +170,7 @@ async def test_forfettario_draft_lines_causale_bollo_and_xml_preview() -> None:
         assert tx.status_code == 200
         body = tx.json()
         assert body["state"] == "transmitted"
-        assert body["bollo"] == "2.00"
+        assert body["stamp_duty"] == "2.00"
         assert body["total"] == "3733.00"
         sent = (await c.get(f"/invoices/{inv['id']}/xml", headers=h)).json()["xml"]
         assert "<Numero>A-1</Numero>" in sent
@@ -187,37 +187,37 @@ async def test_forfettario_bollo_below_threshold_is_zero() -> None:
                 headers=h,
                 json={
                     "label": "DI",
-                    "denominazione": "Angelo Leto",
-                    "codice_fiscale": "LTENGL79M31I356X",
-                    "piva": "13438810015",
-                    "regime_fiscale": "RF19",
-                    "indirizzo": "Via X 1",
-                    "cap": "10100",
-                    "comune": "Torino",
+                    "legal_name": "Angelo Leto",
+                    "tax_code": "LTENGL79M31I356X",
+                    "vat_number": "13438810015",
+                    "tax_regime": "RF19",
+                    "address": "Via X 1",
+                    "postal_code": "10100",
+                    "city": "Torino",
                 },
             )
         ).json()
-        assert prof["regime_fiscale"] == "RF19"
+        assert prof["tax_regime"] == "RF19"
         client = (
             await c.post(
                 "/clients",
                 headers=h,
                 json={
                     "name": "C",
-                    "ragione_sociale": "C SRL",
-                    "id_paese": "IT",
-                    "id_codice": "16639311006",
-                    "codice_destinatario": "KRRH6B9",
-                    "indirizzo": "Via Cliente 5",
-                    "cap": "20100",
-                    "comune": "Milano",
+                    "legal_name": "C SRL",
+                    "country_code": "IT",
+                    "vat_number": "16639311006",
+                    "sdi_code": "KRRH6B9",
+                    "address": "Via Cliente 5",
+                    "postal_code": "20100",
+                    "city": "Milano",
                 },
             )
         ).json()
         inv = (
             await c.post("/invoices", headers=h, json={"client_tag_id": client["id"], "year": 2026})
         ).json()
-        # 50.00 < 77.47 threshold -> no bollo.
+        # 50.00 < 77.47 threshold -> no stamp_duty.
         await c.post(
             f"/invoices/{inv['id']}/lines",
             headers=h,
@@ -225,8 +225,8 @@ async def test_forfettario_bollo_below_threshold_is_zero() -> None:
         )
         got = (await c.get(f"/invoices/{inv['id']}", headers=h)).json()
         assert got["taxable"] == "50.00"
-        assert got["bollo"] == "0.00"
-        assert got["total"] == "50.00"  # taxable + bollo(0)
+        assert got["stamp_duty"] == "0.00"
+        assert got["total"] == "50.00"  # taxable + stamp_duty(0)
         xml = (await c.get(f"/invoices/{inv['id']}/xml", headers=h)).json()["xml"]
         assert "<DatiBollo>" not in xml
         assert "<Natura>N2.2</Natura>" in xml  # still 0% + Natura
@@ -243,13 +243,13 @@ async def test_iban_precedence_invoice_over_client_over_issuer() -> None:
                 headers=h,
                 json={
                     "label": "DI",
-                    "denominazione": "Angelo Leto",
-                    "codice_fiscale": "LTENGL79M31I356X",
-                    "piva": "13438810015",
-                    "regime_fiscale": "RF19",
-                    "indirizzo": "Via X 1",
-                    "cap": "10100",
-                    "comune": "Torino",
+                    "legal_name": "Angelo Leto",
+                    "tax_code": "LTENGL79M31I356X",
+                    "vat_number": "13438810015",
+                    "tax_regime": "RF19",
+                    "address": "Via X 1",
+                    "postal_code": "10100",
+                    "city": "Torino",
                     "default_iban": "IT00ISSUER000000000000000000000",
                 },
             )
@@ -263,10 +263,10 @@ async def test_iban_precedence_invoice_over_client_over_issuer() -> None:
                 headers=h,
                 json={
                     "name": "NoIban",
-                    "ragione_sociale": "No Iban SRL",
-                    "id_paese": "IT",
-                    "id_codice": "16639311006",
-                    "codice_destinatario": "KRRH6B9",
+                    "legal_name": "No Iban SRL",
+                    "country_code": "IT",
+                    "vat_number": "16639311006",
+                    "sdi_code": "KRRH6B9",
                 },
             )
         ).json()
@@ -284,10 +284,10 @@ async def test_iban_precedence_invoice_over_client_over_issuer() -> None:
                 headers=h,
                 json={
                     "name": "CliIban",
-                    "ragione_sociale": "Cli Iban SRL",
-                    "id_paese": "IT",
-                    "id_codice": "16639311006",
-                    "codice_destinatario": "KRRH6B9",
+                    "legal_name": "Cli Iban SRL",
+                    "country_code": "IT",
+                    "vat_number": "16639311006",
+                    "sdi_code": "KRRH6B9",
                     "payment_iban": "IT11CLIENT000000000000000000000",
                 },
             )
@@ -328,36 +328,36 @@ async def test_ordinary_regime_rf01_is_untouched() -> None:
                 headers=h,
                 json={
                     "label": "Srl",
-                    "denominazione": "Acme Srl",
-                    "piva": "01234567890",
-                    "indirizzo": "Via Roma 1",
-                    "cap": "00100",
-                    "comune": "Roma",
+                    "legal_name": "Acme Srl",
+                    "vat_number": "01234567890",
+                    "address": "Via Roma 1",
+                    "postal_code": "00100",
+                    "city": "Roma",
                 },
             )
         ).json()
-        assert prof["regime_fiscale"] == "RF01"
+        assert prof["tax_regime"] == "RF01"
         client = (
             await c.post(
                 "/clients",
                 headers=h,
                 json={
                     "name": "Cli",
-                    "ragione_sociale": "Cli SpA",
-                    "id_paese": "IT",
-                    "id_codice": "09876543210",
-                    "codice_destinatario": "ABCDEFG",
-                    "indirizzo": "Via Cliente 5",
-                    "cap": "20100",
-                    "comune": "Milano",
+                    "legal_name": "Cli SpA",
+                    "country_code": "IT",
+                    "vat_number": "09876543210",
+                    "sdi_code": "ABCDEFG",
+                    "address": "Via Cliente 5",
+                    "postal_code": "20100",
+                    "city": "Milano",
                 },
             )
         ).json()
         inv = (
             await c.post("/invoices", headers=h, json={"client_tag_id": client["id"], "year": 2026})
         ).json()
-        # No forfettario causale defaulted for an ordinary issuer.
-        assert inv["causale"] is None
+        # No forfettario purpose defaulted for an ordinary issuer.
+        assert inv["purpose"] is None
         # No vat_rate passed -> ordinary default 22%, no Natura.
         ln = (
             await c.post(
@@ -367,12 +367,12 @@ async def test_ordinary_regime_rf01_is_untouched() -> None:
             )
         ).json()
         assert ln["vat_rate"] == "22.00"
-        assert ln["natura"] is None
+        assert ln["vat_nature"] is None
         got = (await c.get(f"/invoices/{inv['id']}", headers=h)).json()
         assert got["taxable"] == "200.00"
         assert got["vat"] == "44.00"
-        assert got["bollo"] == "0.00"
-        assert got["total"] == "244.00"  # 200 + 22%, no bollo
+        assert got["stamp_duty"] == "0.00"
+        assert got["total"] == "244.00"  # 200 + 22%, no stamp_duty
         xml = (await c.get(f"/invoices/{inv['id']}/xml", headers=h)).json()["xml"]
         assert "<DatiBollo>" not in xml
         assert "<Natura>" not in xml

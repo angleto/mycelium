@@ -5,7 +5,7 @@ When the cedente lists our channel's CodiceDestinatario, SdI delivers the
 XML + structured metadata for each received invoice. Org resolution
 mirrors the active cycle (sdi_resolve_invoice_org / 0074): a SECURITY
 DEFINER ``sdi_resolve_recipient_org`` returns the org_id from the
-``IssuerProfile.codice_destinatario_ricezione`` -> the insert runs under a
+``IssuerProfile.sdi_code`` -> the insert runs under a
 normal tenant_session so the write stays RLS-scoped.
 
 Status machine is intentionally minimal (``new`` only) -- downstream is
@@ -17,7 +17,6 @@ EsitoCommittente if PA, ...).
 from __future__ import annotations
 
 import datetime
-import enum
 import uuid
 
 from sqlalchemy import DateTime, ForeignKey, Index, LargeBinary, String, text
@@ -33,12 +32,10 @@ from flow_core.models.base import (
     VersionMixin,
 )
 
-
-class CommittenteVerdict(enum.StrEnum):
-    none = "none"
-    accepted = "accepted"
-    rejected = "rejected"
-    deemed_accepted = "deemed_accepted"  # DT timeout on receiver side
+# The receiver-cycle verdict (our accept/reject outcome as the buyer on a
+# received invoice) is the same accept/reject/deemed enum as the
+# active-cycle invoices.buyer_verdict; reuse it rather than duplicate.
+from flow_core.models.invoice import BuyerVerdict
 
 
 class ReceivedInvoice(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, Base):
@@ -65,22 +62,22 @@ class ReceivedInvoice(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin,
         index=True,
     )
     identificativo_sdi: Mapped[str] = mapped_column(String(64), nullable=False)
-    nome_file: Mapped[str] = mapped_column(String(120), nullable=False)
-    formato_trasmissione: Mapped[str] = mapped_column(String(8), nullable=False)
-    sender_id_paese: Mapped[str] = mapped_column(String(2), nullable=False)
-    sender_id_codice: Mapped[str] = mapped_column(String(28), nullable=False)
-    sender_denominazione: Mapped[str | None] = mapped_column(String(200), nullable=True)
-    codice_destinatario: Mapped[str] = mapped_column(String(7), nullable=False)
+    file_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    transmission_format: Mapped[str] = mapped_column(String(8), nullable=False)
+    sender_country_code: Mapped[str] = mapped_column(String(2), nullable=False)
+    sender_vat_number: Mapped[str] = mapped_column(String(28), nullable=False)
+    sender_legal_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    sdi_code: Mapped[str] = mapped_column(String(7), nullable=False)
     raw_xml: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
     processing_status: Mapped[str] = mapped_column(
         String(20), nullable=False, server_default=text("'new'")
     )
     # Denormalized committente outcome (EC sent / SE / DT receiver-side).
     # Full audit log lives in ``received_invoice_notifications``.
-    committente_verdict: Mapped[CommittenteVerdict] = mapped_column(
+    buyer_verdict: Mapped[BuyerVerdict] = mapped_column(
         SAEnum(
-            CommittenteVerdict,
-            name="committente_verdict",
+            BuyerVerdict,
+            name="buyer_verdict",
             native_enum=False,
             create_constraint=False,
             length=20,
@@ -88,7 +85,7 @@ class ReceivedInvoice(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin,
         nullable=False,
         server_default="none",
     )
-    committente_verdict_at: Mapped[datetime.datetime | None] = mapped_column(
+    buyer_verdict_at: Mapped[datetime.datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
     dt_received_at: Mapped[datetime.datetime | None] = mapped_column(

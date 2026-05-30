@@ -145,10 +145,10 @@ async def test_for_client_and_for_project_scoping() -> None:
         oh = _owner(h)
 
         client_a = (
-            await c.post("/clients", headers=oh, json={"name": "A", "ragione_sociale": "A srl"})
+            await c.post("/clients", headers=oh, json={"name": "A", "legal_name": "A srl"})
         ).json()
         client_b = (
-            await c.post("/clients", headers=oh, json={"name": "B", "ragione_sociale": "B srl"})
+            await c.post("/clients", headers=oh, json={"name": "B", "legal_name": "B srl"})
         ).json()
         proj_a = (
             await c.post(

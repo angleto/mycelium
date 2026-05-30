@@ -77,7 +77,7 @@ class ParsedNotification:
     outcome: str
     identificativo_sdi: str
     message_id: str | None
-    nome_file: str | None
+    file_name: str | None
     esito: str | None
     raw_xml: bytes
 
@@ -145,7 +145,7 @@ def parse_notification(raw: bytes) -> ParsedNotification:
         outcome=outcome,
         identificativo_sdi=ident,
         message_id=_text(_find_local(root, "MessageId")),
-        nome_file=_text(_find_local(root, "NomeFile")),
+        file_name=_text(_find_local(root, "NomeFile")),
         esito=esito,
         raw_xml=unwrapped_bytes,
     )

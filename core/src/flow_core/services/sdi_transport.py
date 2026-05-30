@@ -74,10 +74,10 @@ def _mtls_ssl_context(
     return ctx
 
 
-def fatturapa_filename(id_paese: str, id_codice: str, progressivo: str) -> str:
+def fatturapa_filename(country_code: str, vat_number: str, progressivo: str) -> str:
     """SdI transmission file name: ``IT{idfiscale}_{progressivo}.xml`` for an
     unsigned B2B/B2C file (a signed one would be ``.xml.p7m``)."""
-    return f"{id_paese}{id_codice}_{progressivo}.xml"
+    return f"{country_code}{vat_number}_{progressivo}.xml"
 
 
 _B36 = string.digits + string.ascii_uppercase
@@ -253,11 +253,11 @@ def parse_notificaesito_response(body: bytes) -> str:
     raise ValueError("RiceviNotifica response has no EsitoRicezione/Esito/Ack")
 
 
-def esito_filename(id_paese: str, id_codice: str, progressivo: str, esito_seq: str) -> str:
+def esito_filename(country_code: str, vat_number: str, progressivo: str, esito_seq: str) -> str:
     """AdE convention for the EC file name: the FatturaPA file name with an
     ``_EC_<progressivo-esito>`` suffix. Both progressivi are caller-managed
     so this stays a pure formatter."""
-    return f"{id_paese}{id_codice}_{progressivo}_EC_{esito_seq}.xml"
+    return f"{country_code}{vat_number}_{progressivo}_EC_{esito_seq}.xml"
 
 
 async def send_esito_via_sdicoop(

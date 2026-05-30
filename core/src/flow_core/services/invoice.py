@@ -82,27 +82,28 @@ from flow_core.vat import is_valid_vat_code, normalize_vat
 _PROFILE_FIELDS = frozenset(
     {
         "label",
-        "denominazione",
-        "piva",
-        "codice_fiscale",
-        "regime_fiscale",
-        "paese",
-        "indirizzo",
-        "cap",
-        "comune",
-        "provincia",
-        "nazione",
+        "legal_name",
+        "vat_number",
+        "tax_code",
+        "tax_regime",
+        "country_code",
+        "address",
+        "postal_code",
+        "city",
+        "province",
+        "country",
+        "sdi_code",
         "rea",
         "default_iban",
-        "riferimento_normativo",
-        "nome",
-        "cognome",
+        "legal_reference",
+        "first_name",
+        "last_name",
         "pec",
         "email",
-        "telefono",
+        "phone",
         "fax",
-        "default_condizioni_pagamento",
-        "default_modalita_pagamento",
+        "default_payment_conditions_code",
+        "default_payment_method_code",
         "default_payment_terms_days",
     }
 )
@@ -157,27 +158,28 @@ async def create_issuer_profile(
     org_id: uuid.UUID,
     actor_id: uuid.UUID,
     label: str,
-    denominazione: str,
-    piva: str | None = None,
-    codice_fiscale: str | None = None,
-    regime_fiscale: str = "RF01",
-    paese: str = "IT",
-    indirizzo: str = "",
-    cap: str = "",
-    comune: str = "",
-    provincia: str | None = None,
-    nazione: str = "IT",
+    legal_name: str,
+    vat_number: str | None = None,
+    tax_code: str | None = None,
+    tax_regime: str = "RF01",
+    country_code: str = "IT",
+    address: str = "",
+    postal_code: str = "",
+    city: str = "",
+    province: str | None = None,
+    country: str = "IT",
+    sdi_code: str | None = None,
     rea: str | None = None,
     default_iban: str | None = None,
-    riferimento_normativo: str | None = None,
-    nome: str | None = None,
-    cognome: str | None = None,
+    legal_reference: str | None = None,
+    first_name: str | None = None,
+    last_name: str | None = None,
     pec: str | None = None,
     email: str | None = None,
-    telefono: str | None = None,
+    phone: str | None = None,
     fax: str | None = None,
-    default_condizioni_pagamento: str | None = None,
-    default_modalita_pagamento: str | None = None,
+    default_payment_conditions_code: str | None = None,
+    default_payment_method_code: str | None = None,
     default_payment_terms_days: int | None = None,
     is_default: bool = False,
 ) -> IssuerProfile:
@@ -191,39 +193,40 @@ async def create_issuer_profile(
     # Normalize a VIES-form P.IVA ("IT13438810015") into IdPaese + bare
     # IdCodice; reject a malformed code (FatturaPA IdCodice is the number
     # only, no country prefix).
-    new_paese, piva = normalize_vat(piva, paese)
-    paese = new_paese or paese
-    if not is_valid_vat_code(piva, paese):
-        raise DomainError(MessageCode.FISCAL_PROFILE_REQUIRED, detail=f"piva '{piva}'")
+    new_paese, vat_number = normalize_vat(vat_number, country_code)
+    country_code = new_paese or country_code
+    if not is_valid_vat_code(vat_number, country_code):
+        raise DomainError(MessageCode.FISCAL_PROFILE_REQUIRED, detail=f"vat_number '{vat_number}'")
     # Closed enums (FatturaPA tables TPxx/MPxx) and a sane integer range
     # for the net-days default: catch typos here before they reach SdI.
-    default_condizioni_pagamento = validate_condizioni(default_condizioni_pagamento)
-    default_modalita_pagamento = validate_modalita(default_modalita_pagamento)
+    default_payment_conditions_code = validate_condizioni(default_payment_conditions_code)
+    default_payment_method_code = validate_modalita(default_payment_method_code)
     default_payment_terms_days = validate_terms_days(default_payment_terms_days)
     p = IssuerProfile(
         org_id=org_id,
         label=label,
-        denominazione=denominazione,
-        piva=piva,
-        codice_fiscale=codice_fiscale,
-        regime_fiscale=regime_fiscale,
-        paese=paese,
-        indirizzo=indirizzo,
-        cap=cap,
-        comune=comune,
-        provincia=provincia,
-        nazione=nazione,
+        legal_name=legal_name,
+        vat_number=vat_number,
+        tax_code=tax_code,
+        tax_regime=tax_regime,
+        country_code=country_code,
+        address=address,
+        postal_code=postal_code,
+        city=city,
+        province=province,
+        country=country,
+        sdi_code=sdi_code,
         rea=rea,
         default_iban=default_iban,
-        riferimento_normativo=riferimento_normativo,
-        nome=nome,
-        cognome=cognome,
+        legal_reference=legal_reference,
+        first_name=first_name,
+        last_name=last_name,
         pec=pec,
         email=email,
-        telefono=telefono,
+        phone=phone,
         fax=fax,
-        default_condizioni_pagamento=default_condizioni_pagamento,
-        default_modalita_pagamento=default_modalita_pagamento,
+        default_payment_conditions_code=default_payment_conditions_code,
+        default_payment_method_code=default_payment_method_code,
         default_payment_terms_days=default_payment_terms_days,
         is_default=make_default,
     )
@@ -257,13 +260,13 @@ async def update_issuer_profile(
     # Closed-enum validation BEFORE we apply the update: SdI rejects an
     # unknown TPxx/MPxx so we never let one land in the row. ``None``
     # passes through (clearing the override).
-    if "default_condizioni_pagamento" in values:
-        values["default_condizioni_pagamento"] = validate_condizioni(
-            values["default_condizioni_pagamento"]  # type: ignore[arg-type]
+    if "default_payment_conditions_code" in values:
+        values["default_payment_conditions_code"] = validate_condizioni(
+            values["default_payment_conditions_code"]  # type: ignore[arg-type]
         )
-    if "default_modalita_pagamento" in values:
-        values["default_modalita_pagamento"] = validate_modalita(
-            values["default_modalita_pagamento"]  # type: ignore[arg-type]
+    if "default_payment_method_code" in values:
+        values["default_payment_method_code"] = validate_modalita(
+            values["default_payment_method_code"]  # type: ignore[arg-type]
         )
     if "default_payment_terms_days" in values:
         values["default_payment_terms_days"] = validate_terms_days(
@@ -271,12 +274,14 @@ async def update_issuer_profile(
         )
     for field, value in values.items():
         setattr(p, field, value)
-    if "piva" in values or "paese" in values:
-        new_paese, p.piva = normalize_vat(p.piva, p.paese)
+    if "vat_number" in values or "country_code" in values:
+        new_paese, p.vat_number = normalize_vat(p.vat_number, p.country_code)
         if new_paese is not None:
-            p.paese = new_paese
-        if not is_valid_vat_code(p.piva, p.paese):
-            raise DomainError(MessageCode.FISCAL_PROFILE_REQUIRED, detail=f"piva '{p.piva}'")
+            p.country_code = new_paese
+        if not is_valid_vat_code(p.vat_number, p.country_code):
+            raise DomainError(
+                MessageCode.FISCAL_PROFILE_REQUIRED, detail=f"vat_number '{p.vat_number}'"
+            )
     # Promoting to default demotes the rest; the default is moved away
     # only via set_default_issuer_profile (an org keeps exactly one).
     if is_default is True and not p.is_default:
@@ -574,7 +579,7 @@ async def _ensure_client_series(
         .scalars()
         .all()
     )
-    base = _derive_series_base(client.ragione_sociale)
+    base = _derive_series_base(client.legal_name)
     code = base
     n = 2
     while code in taken:
@@ -593,7 +598,7 @@ async def create_draft(
     client_tag_id: uuid.UUID,
     year: int | None = None,
     series: str | None = None,
-    causale: str | None = None,
+    purpose: str | None = None,
     issuer_profile_id: uuid.UUID | None = None,
     document_type: DocumentType = DocumentType.TD01,
     kind: InvoiceKind = InvoiceKind.invoice,
@@ -619,10 +624,10 @@ async def create_draft(
             if cp is not None
             else "A"
         )
-    # Forfettario (RF19): default the mandatory L.190/2014 causale when
-    # the caller gave none (an explicit causale is always honoured).
-    if causale is None and _is_forfettario(issuer):
-        causale = FORFETTARIO_CAUSALE
+    # Forfettario (RF19): default the mandatory L.190/2014 purpose when
+    # the caller gave none (an explicit purpose is always honoured).
+    if purpose is None and _is_forfettario(issuer):
+        purpose = FORFETTARIO_CAUSALE
     inv = Invoice(
         org_id=org_id,
         client_tag_id=client_tag_id,
@@ -633,7 +638,7 @@ async def create_draft(
         series=series,
         year=year or dt.datetime.now(tz=dt.UTC).year,
         state=InvoiceState.draft,
-        causale=causale,
+        purpose=purpose,
     )
     session.add(inv)
     await session.flush()
@@ -668,12 +673,12 @@ _DRAFT_UPDATABLE = frozenset(
         # delete the draft and create a fresh one.
         "series",
         "currency",
-        "causale",
+        "purpose",
         "notes",
         "payment_iban",
         "payment_due_date",
-        "condizioni_pagamento",
-        "modalita_pagamento",
+        "payment_conditions_code",
+        "payment_method_code",
         "payment_terms_days",
     }
 )
@@ -700,13 +705,13 @@ async def update_draft(
     if unknown:
         raise DomainError(MessageCode.DOMAIN_ERROR, detail=", ".join(sorted(unknown)))
     # Validate the closed-enum / range fields before we touch the row.
-    if "condizioni_pagamento" in values:
-        values["condizioni_pagamento"] = validate_condizioni(
-            values["condizioni_pagamento"]  # type: ignore[arg-type]
+    if "payment_conditions_code" in values:
+        values["payment_conditions_code"] = validate_condizioni(
+            values["payment_conditions_code"]  # type: ignore[arg-type]
         )
-    if "modalita_pagamento" in values:
-        values["modalita_pagamento"] = validate_modalita(
-            values["modalita_pagamento"]  # type: ignore[arg-type]
+    if "payment_method_code" in values:
+        values["payment_method_code"] = validate_modalita(
+            values["payment_method_code"]  # type: ignore[arg-type]
         )
     if "payment_terms_days" in values:
         values["payment_terms_days"] = validate_terms_days(
@@ -739,8 +744,8 @@ async def update_draft(
         if resolved.terms_days is not None:
             base = (inv.issued_at or dt.datetime.now(tz=dt.UTC)).date()
             inv.payment_due_date = base + dt.timedelta(days=resolved.terms_days)
-    # The issuer (hence regime, bollo and forfettario-ness) may have
-    # changed: keep taxable/vat/bollo/total consistent.
+    # The issuer (hence regime, stamp_duty and forfettario-ness) may have
+    # changed: keep taxable/vat/stamp_duty/total consistent.
     await _persist_totals(session, org_id=org_id, inv=inv)
     inv.version += 1
     await session.flush()
@@ -765,13 +770,13 @@ async def add_line(
     unit_price: Decimal,
     quantity: Decimal = Decimal(1),
     vat_rate: Decimal | None = None,
-    natura: str | None = None,
+    vat_nature: str | None = None,
 ) -> InvoiceLine:
     inv = await get_invoice(session, org_id=org_id, invoice_id=invoice_id)
     _require_draft(inv)
     await require_role(session, org_id, actor_id, Role.member)
     issuer = await _resolve_issuer(session, org_id=org_id, inv=inv)
-    vat_rate, natura = _resolve_line_tax(issuer, vat_rate, natura)
+    vat_rate, vat_nature = _resolve_line_tax(issuer, vat_rate, vat_nature)
     # max(line_no)+1, not count+1: deletions leave gaps and count+1
     # would collide with the uq_invoice_lines (invoice_id, line_no).
     next_no = (
@@ -789,7 +794,7 @@ async def add_line(
         quantity=quantity,
         unit_price=unit_price,
         vat_rate=vat_rate,
-        natura=natura,
+        vat_nature=vat_nature,
     )
     session.add(line)
     await session.flush()
@@ -808,7 +813,7 @@ async def update_line(
     unit_price: Decimal,
     quantity: Decimal,
     vat_rate: Decimal | None = None,
-    natura: str | None = None,
+    vat_nature: str | None = None,
 ) -> InvoiceLine:
     inv = await get_invoice(session, org_id=org_id, invoice_id=invoice_id)
     _require_draft(inv)
@@ -823,12 +828,12 @@ async def update_line(
     if line is None:
         raise NotFoundError(MessageCode.INVOICE_NOT_FOUND, detail="line")
     issuer = await _resolve_issuer(session, org_id=org_id, inv=inv)
-    vat_rate, natura = _resolve_line_tax(issuer, vat_rate, natura)
+    vat_rate, vat_nature = _resolve_line_tax(issuer, vat_rate, vat_nature)
     line.description = description
     line.unit_price = unit_price
     line.quantity = quantity
     line.vat_rate = vat_rate
-    line.natura = natura
+    line.vat_nature = vat_nature
     await session.flush()
     await _persist_totals(session, org_id=org_id, inv=inv)
     return line
@@ -926,7 +931,7 @@ async def _resolve_issuer(
 
 
 async def _persist_totals(session: AsyncSession, *, org_id: uuid.UUID, inv: Invoice) -> Totals:
-    """Recompute and store taxable/vat/bollo/total on the draft so they
+    """Recompute and store taxable/vat/stamp_duty/total on the draft so they
     stay consistent with the lines and the issuer's regime. Called from
     every mutation that changes lines or the issuer."""
     issuer = await _resolve_issuer(session, org_id=org_id, inv=inv)
@@ -934,7 +939,7 @@ async def _persist_totals(session: AsyncSession, *, org_id: uuid.UUID, inv: Invo
     totals = _compute_totals(lines, issuer)
     inv.taxable = totals.taxable
     inv.vat = totals.vat
-    inv.bollo = totals.bollo
+    inv.stamp_duty = totals.stamp_duty
     inv.total = totals.total
     await session.flush()
     return totals
@@ -959,18 +964,18 @@ def _validate(
     missing = [
         f
         for f, v in (
-            ("denominazione", fiscal.denominazione),
-            ("indirizzo", fiscal.indirizzo),
-            ("cap", fiscal.cap),
-            ("comune", fiscal.comune),
+            ("legal_name", fiscal.legal_name),
+            ("address", fiscal.address),
+            ("postal_code", fiscal.postal_code),
+            ("city", fiscal.city),
         )
         if not v
     ]
     # The cedente's IdFiscaleIVA (P.IVA) is mandatory in FatturaPA (the
     # CodiceFiscale alone is not enough for the issuer; the cessionario may
     # have just a CodiceFiscale, the cedente may not).
-    if not fiscal.piva:
-        missing.append("piva")
+    if not fiscal.vat_number:
+        missing.append("vat_number")
     if missing:
         raise DomainError(MessageCode.FISCAL_PROFILE_REQUIRED, detail=", ".join(missing))
     # The cessionario's Sede (Indirizzo/CAP/Comune) is mandatory in
@@ -979,30 +984,30 @@ def _validate(
     client_missing = [
         f
         for f, v in (
-            ("ragione_sociale", client.ragione_sociale),
-            ("indirizzo", client.indirizzo),
-            ("cap", client.cap),
-            ("comune", client.comune),
+            ("legal_name", client.legal_name),
+            ("address", client.address),
+            ("postal_code", client.postal_code),
+            ("city", client.city),
         )
         if not v
     ]
-    if not (client.id_codice or client.codice_fiscale):
-        client_missing.append("piva|codice_fiscale")
-    if not (client.codice_destinatario or client.pec):
-        client_missing.append("codice_destinatario|pec")
+    if not (client.vat_number or client.tax_code):
+        client_missing.append("vat_number|tax_code")
+    if not (client.sdi_code or client.pec):
+        client_missing.append("sdi_code|pec")
     if client_missing:
         raise DomainError(
             MessageCode.INVOICE_INVALID, detail="client: " + ", ".join(client_missing)
         )
     # Provincia: the XSD only checks the [A-Z]{2} shape; reject a well-formed
     # but nonexistent Italian province before SdI does (scarto).
-    if not is_valid_provincia(fiscal.provincia, fiscal.nazione):
+    if not is_valid_provincia(fiscal.province, fiscal.country):
         raise DomainError(
-            MessageCode.INVOICE_INVALID, detail=f"issuer provincia '{fiscal.provincia}'"
+            MessageCode.INVOICE_INVALID, detail=f"issuer province '{fiscal.province}'"
         )
-    if not is_valid_provincia(client.provincia, client.nazione):
+    if not is_valid_provincia(client.province, client.country):
         raise DomainError(
-            MessageCode.INVOICE_INVALID, detail=f"client provincia '{client.provincia}'"
+            MessageCode.INVOICE_INVALID, detail=f"client province '{client.province}'"
         )
     if not lines:
         raise DomainError(MessageCode.INVOICE_INVALID, detail="no lines")
@@ -1141,8 +1146,10 @@ async def transmit(
     # the accredited channel; only the payload identity changes (IdTrasmittente
     # becomes the cedente). When Flow transmits for a *different* tenant, the
     # intermediary block is stamped as before (ADR-0011).
-    cedente_vat = _bare_id_codice(fiscal.piva, fiscal.paese) if fiscal.piva else None
-    is_self_transmission = intermediary is not None and cedente_vat == intermediary.id_codice
+    cedente_vat = (
+        _bare_id_codice(fiscal.vat_number, fiscal.country_code) if fiscal.vat_number else None
+    )
+    is_self_transmission = intermediary is not None and cedente_vat == intermediary.vat_number
     payload_intermediary = None if is_self_transmission else intermediary
     if intermediary is not None:
         # Transmitting via the accredited channel = Flow acts as intermediary
@@ -1157,10 +1164,10 @@ async def transmit(
         if mandate is None:
             raise ConflictError(MessageCode.MANDATE_REQUIRED)
     totals = _compute_totals(lines, fiscal)
-    inv.taxable, inv.vat, inv.bollo, inv.total = (
+    inv.taxable, inv.vat, inv.stamp_duty, inv.total = (
         totals.taxable,
         totals.vat,
-        totals.bollo,
+        totals.stamp_duty,
         totals.total,
     )
     number = await _allocate_number(
@@ -1176,19 +1183,19 @@ async def transmit(
     # (``transmission_progressivo``); the trasmittente is the accredited
     # channel holder when Flow acts as intermediary, else the cedente itself.
     if intermediary is not None:
-        seq = await _allocate_transmission_seq(session, intermediary_id=intermediary.id_codice)
+        seq = await _allocate_transmission_seq(session, intermediary_id=intermediary.vat_number)
         progressivo_str = transmission_progressivo(seq)
         filename = fatturapa_filename(
-            intermediary.id_paese, intermediary.id_codice, progressivo_str
+            intermediary.country_code, intermediary.vat_number, progressivo_str
         )
     else:
-        cedente_id = fiscal.piva or fiscal.codice_fiscale or ""
+        cedente_id = fiscal.vat_number or fiscal.tax_code or ""
         if progressivo is not None:
             progressivo_str = progressivo
         else:
             seq = await _allocate_transmission_seq(session, intermediary_id=cedente_id)
             progressivo_str = transmission_progressivo(seq)
-        filename = fatturapa_filename(fiscal.paese, cedente_id, progressivo_str)
+        filename = fatturapa_filename(fiscal.country_code, cedente_id, progressivo_str)
     collegata = await _resolve_collegata(session, org_id=org_id, inv=inv)
     xml = _build_xml(
         inv,
@@ -1230,7 +1237,7 @@ async def create_credit_note(
     org_id: uuid.UUID,
     actor_id: uuid.UUID,
     parent_invoice_id: uuid.UUID,
-    causale: str | None = None,
+    purpose: str | None = None,
 ) -> Invoice:
     """TD04 credit note linked to a transmitted invoice (ADR-0009: the
     only post-emission correction). Copies the parent's lines."""
@@ -1249,7 +1256,7 @@ async def create_credit_note(
         # default, which may have changed) so the document is fiscally coherent
         # and shares the parent's (issuer, series, year) numbering sequence.
         issuer_profile_id=parent.issuer_profile_id,
-        causale=causale,
+        purpose=purpose,
         document_type=DocumentType.TD04,
         kind=InvoiceKind.credit_note,
         parent_invoice_id=parent.id,
@@ -1264,7 +1271,7 @@ async def create_credit_note(
             unit_price=ln.unit_price,
             quantity=ln.quantity,
             vat_rate=ln.vat_rate,
-            natura=ln.natura,
+            vat_nature=ln.vat_nature,
         )
     return note
 
@@ -1372,7 +1379,7 @@ async def ingest_active_notification(
         org_id=org_id,
         invoice_id=inv.id,
         kind=parsed.outcome,
-        nome_file=parsed.nome_file,
+        file_name=parsed.file_name,
         message_id=parsed.message_id,
         raw_xml=parsed.raw_xml,
         payload=payload,
@@ -1455,7 +1462,7 @@ class ParsedNotificationLike(Protocol):
     @property
     def message_id(self) -> str | None: ...
     @property
-    def nome_file(self) -> str | None: ...
+    def file_name(self) -> str | None: ...
     @property
     def esito(self) -> str | None: ...
     @property
@@ -1583,10 +1590,10 @@ async def get_xml_preview(
     assert p.issuer is not None and p.client is not None  # _validate raised  # noqa: S101
     # Use the persisted (consistent) totals; ANTEPRIMA progressivo +
     # the would-be number make it a faithful, non-allocating preview.
-    inv.taxable, inv.vat, inv.bollo, inv.total = (
+    inv.taxable, inv.vat, inv.stamp_duty, inv.total = (
         p.totals.taxable,
         p.totals.vat,
-        p.totals.bollo,
+        p.totals.stamp_duty,
         p.totals.total,
     )
     collegata = await _resolve_collegata(session, org_id=org_id, inv=inv)

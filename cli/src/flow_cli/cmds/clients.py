@@ -29,8 +29,8 @@ def client_list() -> None:
             (
                 short_id(r.get("id") or r.get("tag_id")),
                 r.get("name"),
-                r.get("tariffa") or "",
-                r.get("valuta") or "",
+                r.get("hourly_rate") or "",
+                r.get("currency") or "",
                 r.get("default_billable"),
             )
             for r in rows
@@ -63,21 +63,21 @@ def show(name_or_id: str = typer.Argument(...)) -> None:
         f"[bold]{match.get('name')}[/bold]  ({short_id(match.get('id') or match.get('tag_id'))})"
     )
     for k in (
-        "ragione_sociale",
-        "codice_fiscale",
-        "indirizzo",
-        "comune",
-        "provincia",
-        "cap",
-        "nazione",
+        "legal_name",
+        "tax_code",
+        "address",
+        "city",
+        "province",
+        "postal_code",
+        "country",
         "pec",
-        "codice_destinatario",
-        "tariffa",
-        "valuta",
+        "sdi_code",
+        "hourly_rate",
+        "currency",
         "default_billable",
         "default_payment_terms_days",
-        "default_condizioni_pagamento",
-        "default_modalita_pagamento",
+        "default_payment_conditions_code",
+        "default_payment_method_code",
         "invoice_language",
     ):
         v = match.get(k)

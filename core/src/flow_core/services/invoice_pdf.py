@@ -2,8 +2,8 @@
 document: the legal document is the FatturaPA XML transited via SdI).
 
 Pure-Python (reportlab built-in fonts only, no external font files).
-The forfettario diciture (L.190/2014 causale, and the virtual-stamp
-note when bollo applies) are printed verbatim in Italian and followed
+The forfettario diciture (L.190/2014 purpose, and the virtual-stamp
+note when stamp_duty applies) are printed verbatim in Italian and followed
 by a parenthetical English-language description when the client's
 locale is non-Italian: the legal value is in the original wording,
 the parenthetical is descriptive only, mirroring how AdE itself
@@ -60,18 +60,18 @@ _LABELS: dict[str, dict[str, str]] = {
         "number": "Numero",
         "date": "Data",
         "doc_type": "Tipo documento",
-        "regime_fiscale": "Regime fiscale",
-        "codice_destinatario": "Codice Destinatario",
+        "tax_regime": "Regime fiscale",
+        "sdi_code": "Codice Destinatario",
         "pec": "PEC",
         "description": "Descrizione",
         "quantity": "Quantità",
         "unit_price": "Prezzo unitario",
         "vat_rate": "Aliquota IVA %",
-        "natura": "Natura",
+        "vat_nature": "Natura",
         "total": "Totale",
         "taxable": "Imponibile",
         "vat": "IVA",
-        "stamp_duty": "Imposta di bollo",
+        "stamp_duty": "Imposta di stamp_duty",
         "doc_total": "Totale documento",
         "payment": "Pagamento",
         "method": "Modalità",
@@ -87,14 +87,14 @@ _LABELS: dict[str, dict[str, str]] = {
         "number": "Number",
         "date": "Date",
         "doc_type": "Document type",
-        "regime_fiscale": "Tax regime",
-        "codice_destinatario": "SdI recipient code",
+        "tax_regime": "Tax regime",
+        "sdi_code": "SdI recipient code",
         "pec": "PEC",
         "description": "Description",
         "quantity": "Quantity",
         "unit_price": "Unit price",
         "vat_rate": "VAT rate %",
-        "natura": "Nature",
+        "vat_nature": "Nature",
         "total": "Total",
         "taxable": "Taxable",
         "vat": "VAT",
@@ -114,14 +114,14 @@ _LABELS: dict[str, dict[str, str]] = {
         "number": "Nummer",
         "date": "Datum",
         "doc_type": "Belegart",
-        "regime_fiscale": "Steuerregime",
-        "codice_destinatario": "SdI-Empfängercode",
+        "tax_regime": "Steuerregime",
+        "sdi_code": "SdI-Empfängercode",
         "pec": "PEC",
         "description": "Beschreibung",
         "quantity": "Menge",
         "unit_price": "Einzelpreis",
         "vat_rate": "MwSt.-Satz %",
-        "natura": "Art",
+        "vat_nature": "Art",
         "total": "Summe",
         "taxable": "Steuerbasis",
         "vat": "MwSt.",
@@ -141,14 +141,14 @@ _LABELS: dict[str, dict[str, str]] = {
         "number": "Numéro",
         "date": "Date",
         "doc_type": "Type de document",
-        "regime_fiscale": "Régime fiscal",
-        "codice_destinatario": "Code destinataire SdI",
+        "tax_regime": "Régime fiscal",
+        "sdi_code": "Code destinataire SdI",
         "pec": "PEC",
         "description": "Description",
         "quantity": "Quantité",
         "unit_price": "Prix unitaire",
         "vat_rate": "Taux TVA %",
-        "natura": "Nature",
+        "vat_nature": "Nature",
         "total": "Total",
         "taxable": "Base imposable",
         "vat": "TVA",
@@ -168,14 +168,14 @@ _LABELS: dict[str, dict[str, str]] = {
         "number": "Número",
         "date": "Fecha",
         "doc_type": "Tipo de documento",
-        "regime_fiscale": "Régimen fiscal",
-        "codice_destinatario": "Código destinatario SdI",
+        "tax_regime": "Régimen fiscal",
+        "sdi_code": "Código destinatario SdI",
         "pec": "PEC",
         "description": "Descripción",
         "quantity": "Cantidad",
         "unit_price": "Precio unitario",
         "vat_rate": "Tipo IVA %",
-        "natura": "Naturaleza",
+        "vat_nature": "Naturaleza",
         "total": "Total",
         "taxable": "Base imponible",
         "vat": "IVA",
@@ -255,16 +255,16 @@ def _it_qty(d: Decimal) -> str:
 
 
 def _addr(
-    indirizzo: str | None,
-    cap: str | None,
-    comune: str | None,
-    provincia: str | None,
-    nazione: str | None,
+    address: str | None,
+    postal_code: str | None,
+    city: str | None,
+    province: str | None,
+    country: str | None,
 ) -> str:
     line2 = " ".join(
-        x for x in (cap or "", comune or "", f"({provincia})" if provincia else "") if x
+        x for x in (postal_code or "", city or "", f"({province})" if province else "") if x
     ).strip()
-    parts = [indirizzo or "", line2, nazione or ""]
+    parts = [address or "", line2, country or ""]
     return "<br/>".join(p for p in parts if p)
 
 
@@ -349,7 +349,7 @@ def build_pdf(
     def _party(
         title: str,
         denom: str,
-        piva: str | None,
+        vat_number: str | None,
         cf: str | None,
         addr_html: str,
         extra: list[str],
@@ -358,8 +358,8 @@ def build_pdf(
             [Paragraph(title, h_sec)],
             [Paragraph(denom or "", base)],
         ]
-        if piva:
-            rows.append([Paragraph(f"P.IVA {piva}", small)])
+        if vat_number:
+            rows.append([Paragraph(f"P.IVA {vat_number}", small)])
         if cf:
             rows.append([Paragraph(f"C.F. {cf}", small)])
         if addr_html:
@@ -380,38 +380,38 @@ def build_pdf(
         return t
 
     issuer_extra: list[str] = []
-    if issuer is not None and issuer.regime_fiscale:
-        issuer_extra.append(f"{_L(loc, 'regime_fiscale')}: {issuer.regime_fiscale}")
+    if issuer is not None and issuer.tax_regime:
+        issuer_extra.append(f"{_L(loc, 'tax_regime')}: {issuer.tax_regime}")
     cedente = _party(
         _L(loc, "issuer"),
-        issuer.denominazione if issuer is not None else "",
-        issuer.piva if issuer is not None else None,
-        issuer.codice_fiscale if issuer is not None else None,
+        issuer.legal_name if issuer is not None else "",
+        issuer.vat_number if issuer is not None else None,
+        issuer.tax_code if issuer is not None else None,
         _addr(
-            issuer.indirizzo if issuer else None,
-            issuer.cap if issuer else None,
-            issuer.comune if issuer else None,
-            issuer.provincia if issuer else None,
-            issuer.nazione if issuer else None,
+            issuer.address if issuer else None,
+            issuer.postal_code if issuer else None,
+            issuer.city if issuer else None,
+            issuer.province if issuer else None,
+            issuer.country if issuer else None,
         ),
         issuer_extra,
     )
     client_extra = []
-    if client is not None and client.codice_destinatario:
-        client_extra.append(f"{_L(loc, 'codice_destinatario')}: {client.codice_destinatario}")
+    if client is not None and client.sdi_code:
+        client_extra.append(f"{_L(loc, 'sdi_code')}: {client.sdi_code}")
     if client is not None and client.pec:
         client_extra.append(f"{_L(loc, 'pec')}: {client.pec}")
     cessionario = _party(
         _L(loc, "client"),
-        client.ragione_sociale if client is not None else "",
-        client.id_codice if client is not None else None,
-        client.codice_fiscale if client is not None else None,
+        client.legal_name if client is not None else "",
+        client.vat_number if client is not None else None,
+        client.tax_code if client is not None else None,
         _addr(
-            client.indirizzo if client else None,
-            client.cap if client else None,
-            client.comune if client else None,
-            client.provincia if client else None,
-            client.nazione if client else None,
+            client.address if client else None,
+            client.postal_code if client else None,
+            client.city if client else None,
+            client.province if client else None,
+            client.country if client else None,
         ),
         client_extra,
     )
@@ -442,7 +442,7 @@ def build_pdf(
         Paragraph(f"<b>{_L(loc, 'quantity')}</b>", right),
         Paragraph(f"<b>{_L(loc, 'unit_price')}</b>", right),
         Paragraph(f"<b>{_L(loc, 'vat_rate')}</b>", right),
-        Paragraph(f"<b>{_L(loc, 'natura')}</b>", small),
+        Paragraph(f"<b>{_L(loc, 'vat_nature')}</b>", small),
         Paragraph(f"<b>{_L(loc, 'total')}</b>", right),
     ]
     data: list[list[object]] = [header]
@@ -454,7 +454,7 @@ def build_pdf(
                 Paragraph(_it_qty(ln.quantity), right),
                 Paragraph(_it_money(ln.unit_price), right),
                 Paragraph(f"{ln.vat_rate:.2f}".replace(".", ","), right),
-                Paragraph(ln.natura or "", small),
+                Paragraph(ln.vat_nature or "", small),
                 Paragraph(_it_money(line_total), right),
             ]
         )
@@ -485,11 +485,11 @@ def build_pdf(
         [Paragraph(_L(loc, "taxable"), small), Paragraph(_it_money(totals.taxable), right)],
         [Paragraph(_L(loc, "vat"), small), Paragraph(_it_money(totals.vat), right)],
     ]
-    if totals.bollo and totals.bollo > 0:
+    if totals.stamp_duty and totals.stamp_duty > 0:
         rie_rows.append(
             [
                 Paragraph(_L(loc, "stamp_duty"), small),
-                Paragraph(_it_money(totals.bollo), right),
+                Paragraph(_it_money(totals.stamp_duty), right),
             ]
         )
     rie_rows.append(
@@ -521,8 +521,8 @@ def build_pdf(
         invoice.payment_iban
         or invoice.payment_due_date
         or invoice.payment_terms_days is not None
-        or invoice.condizioni_pagamento
-        or invoice.modalita_pagamento
+        or invoice.payment_conditions_code
+        or invoice.payment_method_code
     ):
         pay_rows: list[list[object]] = [[Paragraph(_L(loc, "payment"), h_sec), Paragraph("", base)]]
         # Modalità: code + SdI short description (always Italian: the
@@ -572,13 +572,13 @@ def build_pdf(
     # specific Italian statute); the parenthetical gloss is a courtesy
     # explanation for a non-Italian reader and is never relied upon
     # legally. When locale == "it" no gloss is printed.
-    if invoice.causale:
-        flow.append(Paragraph(invoice.causale, small))
-        if loc != "it" and invoice.causale.strip() == FORFETTARIO_CAUSALE:
+    if invoice.purpose:
+        flow.append(Paragraph(invoice.purpose, small))
+        if loc != "it" and invoice.purpose.strip() == FORFETTARIO_CAUSALE:
             gloss = _FORFETTARIO_GLOSS.get(loc)
             if gloss:
                 flow.append(Paragraph(f"<i>({gloss})</i>", small))
-    if is_forf and totals.bollo and totals.bollo > 0:
+    if is_forf and totals.stamp_duty and totals.stamp_duty > 0:
         flow.append(Spacer(1, 1 * mm))
         flow.append(Paragraph(BOLLO_DICITURA, small))
         if loc != "it":

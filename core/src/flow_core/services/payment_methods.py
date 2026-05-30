@@ -70,7 +70,7 @@ def validate_condizioni(code: str | None) -> str | None:
     if code is None or code == "":
         return None
     if code not in CONDIZIONI_PAGAMENTO:
-        raise DomainError(MessageCode.DOMAIN_ERROR, detail=f"condizioni_pagamento '{code}'")
+        raise DomainError(MessageCode.DOMAIN_ERROR, detail=f"payment_conditions_code '{code}'")
     return code
 
 
@@ -78,7 +78,7 @@ def validate_modalita(code: str | None) -> str | None:
     if code is None or code == "":
         return None
     if code not in MODALITA_PAGAMENTO:
-        raise DomainError(MessageCode.DOMAIN_ERROR, detail=f"modalita_pagamento '{code}'")
+        raise DomainError(MessageCode.DOMAIN_ERROR, detail=f"payment_method_code '{code}'")
     return code
 
 
@@ -122,15 +122,15 @@ def resolve_payment(
         return default
 
     condizioni = _pick(
-        inv.condizioni_pagamento,
-        client.default_condizioni_pagamento if client is not None else None,
-        issuer.default_condizioni_pagamento if issuer is not None else None,
+        inv.payment_conditions_code,
+        client.default_payment_conditions_code if client is not None else None,
+        issuer.default_payment_conditions_code if issuer is not None else None,
         default=DEFAULT_CONDIZIONI,
     )
     modalita = _pick(
-        inv.modalita_pagamento,
-        client.default_modalita_pagamento if client is not None else None,
-        issuer.default_modalita_pagamento if issuer is not None else None,
+        inv.payment_method_code,
+        client.default_payment_method_code if client is not None else None,
+        issuer.default_payment_method_code if issuer is not None else None,
         default=DEFAULT_MODALITA,
     )
     terms_days: int | None = (

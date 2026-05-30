@@ -281,7 +281,7 @@ class Settings(BaseSettings):
     # TerzoIntermediarioOSoggettoEmittente (requires a per-issuer
     # SdiMandate). The intermediary identity + the mutual-TLS SOAP
     # transport below are required only when "sdicoop" is selected
-    # (validated fail-closed, same spirit as smtp/s3). id_codice is the
+    # (validated fail-closed, same spirit as smtp/s3). vat_number is the
     # accredited channel holder's P.IVA; cert/key/ca are PEM file paths
     # (deploy secrets).
     sdi_channel: Literal["manual_export", "sdicoop"] = "manual_export"

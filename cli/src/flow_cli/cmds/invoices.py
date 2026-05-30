@@ -50,7 +50,7 @@ def _show_invoice(inv: dict) -> None:
         "sdi_status",
         "conservation_status",
         "payment_status",
-        "causale",
+        "purpose",
     ):
         v = inv.get(k)
         if v not in (None, ""):
@@ -97,7 +97,7 @@ def show(invoice_id: str = typer.Argument(..., help="Invoice id (full or short p
 def create(
     client_ref: str = typer.Option(..., "--client", "-c", help="Client name or UUID."),
     series: str | None = typer.Option(None, "--series", help="Override the per-client sezionale."),
-    causale: str | None = typer.Option(None, "--causale", help="Document causale."),
+    purpose: str | None = typer.Option(None, "--purpose", help="Document purpose."),
 ) -> None:
     """Create a draft invoice for a client."""
     with client() as c:
@@ -105,8 +105,8 @@ def create(
         body: dict[str, object] = {"client_tag_id": tag}
         if series:
             body["series"] = series
-        if causale:
-            body["causale"] = causale
+        if purpose:
+            body["purpose"] = purpose
         _show_invoice(get_json(c.post("/invoices", json=body)))
 
 
@@ -119,7 +119,9 @@ def line(
     vat: float | None = typer.Option(
         None, "--vat", help="VAT rate %% (default: resolved from issuer regime)."
     ),
-    natura: str | None = typer.Option(None, "--natura", help="FatturaPA Natura (e.g. N2.2)."),
+    vat_nature: str | None = typer.Option(
+        None, "--vat_nature", help="FatturaPA Natura (e.g. N2.2)."
+    ),
 ) -> None:
     """Add a line to a draft invoice."""
     with client() as c:
@@ -127,8 +129,8 @@ def line(
         body: dict[str, object] = {"description": description, "unit_price": price, "quantity": qty}
         if vat is not None:
             body["vat_rate"] = vat
-        if natura:
-            body["natura"] = natura
+        if vat_nature:
+            body["vat_nature"] = vat_nature
         row = get_json(c.post(f"/invoices/{iid}/lines", json=body))
     if json_mode():
         emit_json(row)

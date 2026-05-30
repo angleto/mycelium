@@ -41,7 +41,7 @@ async def test_delete_project_endpoint() -> None:
             await c.post(
                 "/clients",
                 headers=h,
-                json={"name": "Cli", "ragione_sociale": "Cli SRL"},
+                json={"name": "Cli", "legal_name": "Cli SRL"},
             )
         ).json()
         pr = (
@@ -92,7 +92,7 @@ async def test_delete_client_recurses_projects() -> None:
             await c.post(
                 "/clients",
                 headers=h,
-                json={"name": "DoomedCo", "ragione_sociale": "DoomedCo SRL"},
+                json={"name": "DoomedCo", "legal_name": "DoomedCo SRL"},
             )
         ).json()
         p1 = (

@@ -29,7 +29,7 @@ const EMPTY_LINE = {
   unit_price: 0,
   quantity: 1,
   vat_rate: 22,
-  natura: '',
+  vat_nature: '',
 }
 
 // FatturaPA 1.2 closed enums for the per-invoice payment overrides.
@@ -61,7 +61,7 @@ type LineForm = typeof EMPTY_LINE
 // SHOW the compliant values, not a misleading 22%).
 function blankLine(forfettario: boolean): LineForm {
   return forfettario
-    ? { ...EMPTY_LINE, vat_rate: 0, natura: 'N2.2' }
+    ? { ...EMPTY_LINE, vat_rate: 0, vat_nature: 'N2.2' }
     : EMPTY_LINE
 }
 
@@ -209,12 +209,12 @@ export function InvoicesRoute() {
     setDIssuer(inv.issuer_profile_id ?? '')
     setDClient(inv.client_tag_id)
     setDSeries(inv.series)
-    setDCausale(inv.causale ?? '')
+    setDCausale(inv.purpose ?? '')
     setDNotes(inv.notes ?? '')
     setDIban(inv.payment_iban ?? '')
     setDDue(inv.payment_due_date ?? '')
-    setDCondizioni(inv.condizioni_pagamento ?? '')
-    setDModalita(inv.modalita_pagamento ?? '')
+    setDCondizioni(inv.payment_conditions_code ?? '')
+    setDModalita(inv.payment_method_code ?? '')
     setDTermsDays(
       inv.payment_terms_days != null ? String(inv.payment_terms_days) : '',
     )
@@ -302,12 +302,12 @@ export function InvoicesRoute() {
       params: { header: workspaceHeader(), path: { invoice_id: sel.id } },
       body: {
         series: dSeries,
-        causale: dCausale || null,
+        purpose: dCausale || null,
         notes: dNotes || null,
         payment_iban: dIban || null,
         payment_due_date: dDue || null,
-        condizioni_pagamento: dCondizioni || null,
-        modalita_pagamento: dModalita || null,
+        payment_conditions_code: dCondizioni || null,
+        payment_method_code: dModalita || null,
         payment_terms_days:
           dTermsDays.trim() === '' ? null : Number(dTermsDays),
       },
@@ -332,7 +332,7 @@ export function InvoicesRoute() {
         unit_price: lAdd.unit_price,
         quantity: lAdd.quantity,
         vat_rate: lAdd.vat_rate,
-        natura: lAdd.natura || null,
+        vat_nature: lAdd.vat_nature || null,
       },
     })
     if (error) {
@@ -353,7 +353,7 @@ export function InvoicesRoute() {
         unit_price: lEdit.unit_price,
         quantity: lEdit.quantity,
         vat_rate: lEdit.vat_rate,
-        natura: lEdit.natura || null,
+        vat_nature: lEdit.vat_nature || null,
       },
     })
     if (error) {
@@ -429,7 +429,7 @@ export function InvoicesRoute() {
     // precision (4 decimals = 0.36 s).
     const client = clients.find((c) => c.id === dClient)
     const clientRate =
-      client?.tariffa != null ? Number(client.tariffa) : null
+      client?.hourly_rate != null ? Number(client.hourly_rate) : null
     const picked = triRows.filter((r) => r.key && triSel.has(r.key))
     for (const r of picked) {
       // Time is rounded to the nearest minute before billing: the timer
@@ -456,7 +456,7 @@ export function InvoicesRoute() {
           quantity: hours,
           unit_price: rate,
           vat_rate: forfettario ? 0 : 22,
-          ...(forfettario ? { natura: 'N2.2' } : {}),
+          ...(forfettario ? { vat_nature: 'N2.2' } : {}),
         },
       })
       if (error) {
@@ -668,24 +668,24 @@ export function InvoicesRoute() {
                   <div className="muted">{t('invoices.doc.cedente')}</div>
                   {preview.issuer ? (
                     <>
-                      <div>{preview.issuer.denominazione}</div>
+                      <div>{preview.issuer.legal_name}</div>
                       <div className="muted">
-                        {preview.issuer.piva
-                          ? `P.IVA ${preview.issuer.piva}`
+                        {preview.issuer.vat_number
+                          ? `P.IVA ${preview.issuer.vat_number}`
                           : ''}
-                        {preview.issuer.codice_fiscale
-                          ? ` · CF ${preview.issuer.codice_fiscale}`
+                        {preview.issuer.tax_code
+                          ? ` · CF ${preview.issuer.tax_code}`
                           : ''}
-                        {preview.issuer.regime_fiscale
-                          ? ` · ${preview.issuer.regime_fiscale}`
+                        {preview.issuer.tax_regime
+                          ? ` · ${preview.issuer.tax_regime}`
                           : ''}
                       </div>
                       <div className="muted">
                         {[
-                          preview.issuer.indirizzo,
-                          preview.issuer.cap,
-                          preview.issuer.comune,
-                          preview.issuer.provincia,
+                          preview.issuer.address,
+                          preview.issuer.postal_code,
+                          preview.issuer.city,
+                          preview.issuer.province,
                         ]
                           .filter(Boolean)
                           .join(' ')}
@@ -699,28 +699,28 @@ export function InvoicesRoute() {
                   <div className="muted">{t('invoices.doc.cessionario')}</div>
                   {preview.client ? (
                     <>
-                      <div>{preview.client.denominazione}</div>
+                      <div>{preview.client.legal_name}</div>
                       <div className="muted">
-                        {preview.client.piva
-                          ? `P.IVA ${preview.client.piva}`
+                        {preview.client.vat_number
+                          ? `P.IVA ${preview.client.vat_number}`
                           : ''}
-                        {preview.client.codice_fiscale
-                          ? ` · CF ${preview.client.codice_fiscale}`
+                        {preview.client.tax_code
+                          ? ` · CF ${preview.client.tax_code}`
                           : ''}
                       </div>
                       <div className="muted">
                         {[
-                          preview.client.indirizzo,
-                          preview.client.cap,
-                          preview.client.comune,
-                          preview.client.provincia,
+                          preview.client.address,
+                          preview.client.postal_code,
+                          preview.client.city,
+                          preview.client.province,
                         ]
                           .filter(Boolean)
                           .join(' ')}
                       </div>
                       <div className="muted">
                         {t('invoices.doc.sdi')}:{' '}
-                        {preview.client.codice_destinatario ||
+                        {preview.client.sdi_code ||
                           preview.client.pec ||
                           t('invoices.doc.none')}
                       </div>
@@ -737,9 +737,9 @@ export function InvoicesRoute() {
                   <div>
                     {t('invoices.doc.vat')}: {preview.totals.vat} €
                   </div>
-                  {Number(preview.totals.bollo) > 0 && (
+                  {Number(preview.totals.stamp_duty) > 0 && (
                     <div>
-                      {t('invoices.doc.bollo')}: {preview.totals.bollo} €
+                      {t('invoices.doc.bollo')}: {preview.totals.stamp_duty} €
                     </div>
                   )}
                   <div>
@@ -771,8 +771,8 @@ export function InvoicesRoute() {
                   </div>
                 </div>
               </div>
-              {preview.is_forfettario && preview.causale && (
-                <p className="hint docpanel__causale">{preview.causale}</p>
+              {preview.is_forfettario && preview.purpose && (
+                <p className="hint docpanel__causale">{preview.purpose}</p>
               )}
             </div>
           )}
@@ -933,11 +933,11 @@ export function InvoicesRoute() {
                       </td>
                       <td>
                         <input
-                          value={lEdit.natura}
+                          value={lEdit.vat_nature}
                           placeholder="N2.2"
                           style={{ width: '4.5rem' }}
                           onChange={(e) =>
-                            setLEdit({ ...lEdit, natura: e.target.value })
+                            setLEdit({ ...lEdit, vat_nature: e.target.value })
                           }
                         />
                       </td>
@@ -968,7 +968,7 @@ export function InvoicesRoute() {
                       <td>{Number(ln.quantity)}</td>
                       <td>{Number(ln.unit_price).toFixed(2)}</td>
                       <td>{Number(ln.vat_rate)}%</td>
-                      <td>{ln.natura ?? '—'}</td>
+                      <td>{ln.vat_nature ?? '—'}</td>
                       <td>
                         {(Number(ln.quantity) * Number(ln.unit_price)).toFixed(2)}
                       </td>
@@ -985,7 +985,7 @@ export function InvoicesRoute() {
                                   unit_price: Number(ln.unit_price),
                                   quantity: Number(ln.quantity),
                                   vat_rate: Number(ln.vat_rate),
-                                  natura: ln.natura ?? '',
+                                  vat_nature: ln.vat_nature ?? '',
                                 })
                               }}
                             >
@@ -1057,10 +1057,10 @@ export function InvoicesRoute() {
                 {t('invoices.natura')}
                 <input
                   placeholder="N2.2"
-                  value={lAdd.natura}
+                  value={lAdd.vat_nature}
                   style={{ width: '5rem' }}
                   onChange={(e) =>
-                    setLAdd({ ...lAdd, natura: e.target.value })
+                    setLAdd({ ...lAdd, vat_nature: e.target.value })
                   }
                 />
               </label>
@@ -1211,12 +1211,12 @@ export function InvoicesRoute() {
             const c = clients.find((x) => x.id === dClient)
             const isr = profiles.find((p) => p.id === dIssuer)
             const effCondizioni =
-              c?.default_condizioni_pagamento ||
-              isr?.default_condizioni_pagamento ||
+              c?.default_payment_conditions_code ||
+              isr?.default_payment_conditions_code ||
               'TP02'
             const effModalita =
-              c?.default_modalita_pagamento ||
-              isr?.default_modalita_pagamento ||
+              c?.default_payment_method_code ||
+              isr?.default_payment_method_code ||
               'MP05'
             const effTerms =
               c?.default_payment_terms_days ??

@@ -54,7 +54,7 @@ class InvoiceNotification(UUIDPKMixin, OrgScopedMixin, Base):
     received_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()")
     )
-    nome_file: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    file_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
     message_id: Mapped[str | None] = mapped_column(String(14), nullable=True)
     raw_xml: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
     payload: Mapped[dict[str, Any]] = mapped_column(
@@ -96,7 +96,7 @@ class ReceivedInvoiceNotification(UUIDPKMixin, OrgScopedMixin, Base):
     received_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()")
     )
-    nome_file: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    file_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
     message_id: Mapped[str | None] = mapped_column(String(14), nullable=True)
     raw_xml: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
     payload: Mapped[dict[str, Any]] = mapped_column(

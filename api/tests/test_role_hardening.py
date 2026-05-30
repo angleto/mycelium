@@ -196,8 +196,8 @@ _WF_BODY = {
     "states": [{"name": "open", "ord": 1, "is_initial": True}],
     "transitions": [],
 }
-_CLIENT_BODY = {"name": "Acme", "ragione_sociale": "Acme SRL"}
-_IP_BODY = {"label": "Me", "denominazione": "Me SRL"}
+_CLIENT_BODY = {"name": "Acme", "legal_name": "Acme SRL"}
+_IP_BODY = {"label": "Me", "legal_name": "Me SRL"}
 
 
 async def test_privileged_writes_require_owner() -> None:
@@ -288,7 +288,7 @@ async def test_namespace_isolation_no_leakage() -> None:
         secret = await c.post(
             "/clients",
             headers=a_owner,
-            json={"name": "SECRET-A", "ragione_sociale": "Secret A SRL"},
+            json={"name": "SECRET-A", "legal_name": "Secret A SRL"},
         )
         assert secret.status_code == 200
         b_in_wb = {**_bearer(b["token"]), "X-Workspace-Id": wb}

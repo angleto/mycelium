@@ -39,11 +39,11 @@ async def _issuer_and_client(s, org: uuid.UUID, user: uuid.UUID) -> tuple[uuid.U
         org_id=org,
         actor_id=user,
         label="P",
-        denominazione="Acme Srl",
-        piva="01234567890",
-        indirizzo="Via Roma 1",
-        cap="00100",
-        comune="Roma",
+        legal_name="Acme Srl",
+        vat_number="01234567890",
+        address="Via Roma 1",
+        postal_code="00100",
+        city="Roma",
         is_default=True,
     )
     c = await create_client(
@@ -52,14 +52,14 @@ async def _issuer_and_client(s, org: uuid.UUID, user: uuid.UUID) -> tuple[uuid.U
         actor_id=user,
         name="C",
         profile=ClientInput(
-            ragione_sociale="Client SpA",
-            id_paese="IT",
-            id_codice="09876543210",
-            codice_destinatario="ABCDEFG",
-            indirizzo="Via Milano 2",
-            cap="20100",
-            comune="Milano",
-            provincia="MI",
+            legal_name="Client SpA",
+            country_code="IT",
+            vat_number="09876543210",
+            sdi_code="ABCDEFG",
+            address="Via Milano 2",
+            postal_code="20100",
+            city="Milano",
+            province="MI",
         ),
     )
     return p.id, c.id
@@ -95,7 +95,7 @@ def _intermediary_channel() -> Iterator[None]:
         @property
         def intermediary(self) -> IntermediaryIdentity | None:
             return IntermediaryIdentity(
-                id_paese="IT", id_codice="11122233344", denominazione="Flow Intermediary Srl"
+                country_code="IT", vat_number="11122233344", legal_name="Flow Intermediary Srl"
             )
 
         async def transmit(self, *, xml: str, invoice_id: str, filename: str) -> TransmitResult:

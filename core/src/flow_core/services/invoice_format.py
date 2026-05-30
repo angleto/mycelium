@@ -40,19 +40,19 @@ def _money(d: Decimal) -> str:
 class Totals:
     taxable: Decimal
     vat: Decimal
-    bollo: Decimal
+    stamp_duty: Decimal
     total: Decimal
 
 
 # --- forfettario (regime RF19) ---
 
 # Virtual stamp duty (DM 17/06/2014): EUR 2.00 once the document's
-# bollo-relevant amount exceeds EUR 77.47. For a forfettario invoice the
-# whole taxable is bollo-relevant (no VAT line).
+# stamp_duty-relevant amount exceeds EUR 77.47. For a forfettario invoice the
+# whole taxable is stamp_duty-relevant (no VAT line).
 _BOLLO_THRESHOLD = Decimal("77.47")
 _BOLLO_AMOUNT = Decimal("2.00")
 _FORFETTARIO_NATURA = "N2.2"
-# L. 190/2014 art. 1 commi 54-89: the mandatory causale that identifies
+# L. 190/2014 art. 1 commi 54-89: the mandatory purpose that identifies
 # the forfettario regime on the invoice (verbatim, no trailing period).
 FORFETTARIO_CAUSALE = (
     "Operazione effettuata in regime forfettario ai sensi dell'articolo 1, "
@@ -71,9 +71,9 @@ FORFETTARIO_RIFERIMENTO_NORMATIVO = (
 
 
 def _is_forfettario(issuer: IssuerProfile | None) -> bool:
-    """Forfettario is regime RF19. Drives the line/causale/bollo
+    """Forfettario is regime RF19. Drives the line/purpose/stamp_duty
     defaults; every effect is overridable by an explicit caller value."""
-    return issuer is not None and issuer.regime_fiscale == "RF19"
+    return issuer is not None and issuer.tax_regime == "RF19"
 
 
 def _bollo_for(issuer: IssuerProfile | None, taxable: Decimal) -> Decimal:
@@ -87,27 +87,27 @@ def _bollo_for(issuer: IssuerProfile | None, taxable: Decimal) -> Decimal:
 def _resolve_line_tax(
     issuer: IssuerProfile | None,
     vat_rate: Decimal | None,
-    natura: str | None,
+    vat_nature: str | None,
 ) -> tuple[Decimal, str | None]:
-    """Resolve a line's (vat_rate, natura). ``vat_rate=None`` means the
+    """Resolve a line's (vat_rate, vat_nature). ``vat_rate=None`` means the
     caller did not specify one: forfettario -> 0% + Natura N2.2,
-    ordinary regime -> the 22% default. An explicit vat_rate/natura is
+    ordinary regime -> the 22% default. An explicit vat_rate/vat_nature is
     always honoured (auto is only the default when unset)."""
     if vat_rate is None:
         if _is_forfettario(issuer):
-            return _q2(Decimal(0)), natura if natura is not None else _FORFETTARIO_NATURA
-        return _q2(Decimal(22)), natura
-    return _q2(vat_rate), natura
+            return _q2(Decimal(0)), vat_nature if vat_nature is not None else _FORFETTARIO_NATURA
+        return _q2(Decimal(22)), vat_nature
+    return _q2(vat_rate), vat_nature
 
 
 def _riepilogo_groups(lines: Sequence[InvoiceLine]) -> dict[tuple[Decimal, str | None], Decimal]:
-    """Group line totals by (vat_rate, natura). Forfettario lines carry
+    """Group line totals by (vat_rate, vat_nature). Forfettario lines carry
     a Natura (N2.2) that the riepilogo must echo, so the key is the
     pair, not the rate alone (a 0% line with no Natura must not merge
     with a 0% N2.2 line)."""
     groups: dict[tuple[Decimal, str | None], Decimal] = {}
     for ln in lines:
-        key = (ln.vat_rate, ln.natura)
+        key = (ln.vat_rate, ln.vat_nature)
         groups[key] = groups.get(key, Decimal(0)) + _q2(ln.quantity * ln.unit_price)
     return groups
 
@@ -122,8 +122,10 @@ def _compute_totals(lines: Sequence[InvoiceLine], issuer: IssuerProfile | None =
         vat += imposta
     taxable = _q2(taxable)
     vat = _q2(vat)
-    bollo = _bollo_for(issuer, taxable)
-    return Totals(taxable=taxable, vat=vat, bollo=bollo, total=_q2(taxable + vat + bollo))
+    stamp_duty = _bollo_for(issuer, taxable)
+    return Totals(
+        taxable=taxable, vat=vat, stamp_duty=stamp_duty, total=_q2(taxable + vat + stamp_duty)
+    )
 
 
 def _effective_iban(
@@ -161,7 +163,7 @@ def _sub(parent: ET.Element, tag: str, text: str | None = None) -> ET.Element:
     return el
 
 
-def _bare_id_codice(id_codice: str, id_paese: str | None) -> str:
+def _bare_id_codice(vat_number: str, country_code: str | None) -> str:
     """Never assemble the country code into IdCodice. FatturaPA keeps the
     country (IdPaese) and the VAT number (IdCodice) in separate elements, so a
     value carrying a redundant leading country prefix matching IdPaese (e.g.
@@ -170,24 +172,29 @@ def _bare_id_codice(id_codice: str, id_paese: str | None) -> str:
     The digit guard leaves a codice fiscale (3rd char is a letter) untouched,
     so we only strip a true country+VAT concatenation. This is the single
     backend chokepoint; callers/interfaces pass the stored value as-is."""
-    code = (id_codice or "").strip()
-    paese = (id_paese or "").upper()
-    if len(paese) == 2 and len(code) > 2 and code[:2].upper() == paese and code[2:3].isdigit():
+    code = (vat_number or "").strip()
+    country_code = (country_code or "").upper()
+    if (
+        len(country_code) == 2
+        and len(code) > 2
+        and code[:2].upper() == country_code
+        and code[2:3].isdigit()
+    ):
         return code[2:]
     return code
 
 
 def _emit_anagrafica(
-    parent: ET.Element, *, denominazione: str, nome: str | None, cognome: str | None
+    parent: ET.Element, *, legal_name: str, first_name: str | None, last_name: str | None
 ) -> None:
     """FatturaPA Anagrafica is a choice: Denominazione OR Nome+Cognome. Emit
     Nome+Cognome for a persona fisica when BOTH are set, else Denominazione."""
     an = _sub(parent, "Anagrafica")
-    if nome and cognome:
-        _sub(an, "Nome", nome)
-        _sub(an, "Cognome", cognome)
+    if first_name and last_name:
+        _sub(an, "Nome", first_name)
+        _sub(an, "Cognome", last_name)
     else:
-        _sub(an, "Denominazione", denominazione)
+        _sub(an, "Denominazione", legal_name)
 
 
 def _build_xml(
@@ -207,7 +214,7 @@ def _build_xml(
     # ``FormatoTrasmissione`` and is the only structural difference for SdI
     # acceptance (CIG/CUP/split-payment are PA-side rifiuto concerns, not SdI
     # scarto, and the interop test does not validate file content).
-    codice_dest = client.codice_destinatario or "0000000"
+    codice_dest = client.sdi_code or "0000000"
     fmt = "FPA12" if len(codice_dest) == 6 else "FPR12"
     root = ET.Element(f"{{{_NS}}}FatturaElettronica", versione=fmt)
     header = _sub(root, "FatturaElettronicaHeader")
@@ -216,10 +223,10 @@ def _build_xml(
     if intermediary is not None:
         # Flow transmits as intermediary: the trasmittente is the accredited
         # channel holder, not the cedente (ADR-0011).
-        _sub(idt, "IdPaese", intermediary.id_paese)
-        _sub(idt, "IdCodice", _bare_id_codice(intermediary.id_codice, intermediary.id_paese))
+        _sub(idt, "IdPaese", intermediary.country_code)
+        _sub(idt, "IdCodice", _bare_id_codice(intermediary.vat_number, intermediary.country_code))
     else:
-        _sub(idt, "IdPaese", fiscal.paese)
+        _sub(idt, "IdPaese", fiscal.country_code)
         # IdTrasmittente/IdCodice is validated by SdI as a CODICE FISCALE
         # (against the Anagrafe Tributaria), NOT as a P.IVA. For a company the
         # CF equals the P.IVA so either works; for a physical-person channel
@@ -230,12 +237,12 @@ def _build_xml(
         _sub(
             idt,
             "IdCodice",
-            _bare_id_codice(fiscal.codice_fiscale or fiscal.piva or "", fiscal.paese),
+            _bare_id_codice(fiscal.tax_code or fiscal.vat_number or "", fiscal.country_code),
         )
     _sub(dt_, "ProgressivoInvio", progressivo)
     _sub(dt_, "FormatoTrasmissione", fmt)
     _sub(dt_, "CodiceDestinatario", codice_dest)
-    if not client.codice_destinatario and client.pec:
+    if not client.sdi_code and client.pec:
         # CodiceDestinatario "0000000" + recipient PEC: the cessionario's PEC
         # is its electronic address, so it goes in PECDestinatario (SdI routes
         # delivery to it). NOT ContattiTrasmittente/Email, which is the
@@ -243,62 +250,65 @@ def _build_xml(
         _sub(dt_, "PECDestinatario", client.pec)
     cedente = _sub(header, "CedentePrestatore")
     anag = _sub(cedente, "DatiAnagrafici")
-    if fiscal.piva:
+    if fiscal.vat_number:
         iva = _sub(anag, "IdFiscaleIVA")
-        _sub(iva, "IdPaese", fiscal.paese)
-        _sub(iva, "IdCodice", _bare_id_codice(fiscal.piva, fiscal.paese))
-    if fiscal.codice_fiscale:
-        _sub(anag, "CodiceFiscale", fiscal.codice_fiscale)
+        _sub(iva, "IdPaese", fiscal.country_code)
+        _sub(iva, "IdCodice", _bare_id_codice(fiscal.vat_number, fiscal.country_code))
+    if fiscal.tax_code:
+        _sub(anag, "CodiceFiscale", fiscal.tax_code)
     _emit_anagrafica(
-        anag, denominazione=fiscal.denominazione, nome=fiscal.nome, cognome=fiscal.cognome
+        anag, legal_name=fiscal.legal_name, first_name=fiscal.first_name, last_name=fiscal.last_name
     )
-    _sub(anag, "RegimeFiscale", fiscal.regime_fiscale)
+    _sub(anag, "RegimeFiscale", fiscal.tax_regime)
     sede = _sub(cedente, "Sede")
-    _sub(sede, "Indirizzo", fiscal.indirizzo)
-    _sub(sede, "CAP", fiscal.cap)
-    _sub(sede, "Comune", fiscal.comune)
-    if fiscal.provincia:
-        _sub(sede, "Provincia", fiscal.provincia)
-    _sub(sede, "Nazione", fiscal.nazione)
+    _sub(sede, "Indirizzo", fiscal.address)
+    _sub(sede, "CAP", fiscal.postal_code)
+    _sub(sede, "Comune", fiscal.city)
+    if fiscal.province:
+        _sub(sede, "Provincia", fiscal.province)
+    _sub(sede, "Nazione", fiscal.country)
     # Optional Contatti (XSD: Telefono, Fax, Email, in that order). Emitted
     # only when at least one channel is set; SdI ignores them, but they are
     # standard FatturaPA and show up in viewers / on a printed PDF.
-    if fiscal.telefono or fiscal.fax or fiscal.email:
+    if fiscal.phone or fiscal.fax or fiscal.email:
         contatti = _sub(cedente, "Contatti")
-        if fiscal.telefono:
-            _sub(contatti, "Telefono", fiscal.telefono)
+        if fiscal.phone:
+            _sub(contatti, "Telefono", fiscal.phone)
         if fiscal.fax:
             _sub(contatti, "Fax", fiscal.fax)
         if fiscal.email:
             _sub(contatti, "Email", fiscal.email)
     cess = _sub(header, "CessionarioCommittente")
     canag = _sub(cess, "DatiAnagrafici")
-    if client.id_codice:
+    if client.vat_number:
         civa = _sub(canag, "IdFiscaleIVA")
-        _sub(civa, "IdPaese", client.id_paese or "IT")
-        _sub(civa, "IdCodice", _bare_id_codice(client.id_codice, client.id_paese or "IT"))
-    if client.codice_fiscale:
-        _sub(canag, "CodiceFiscale", client.codice_fiscale)
+        _sub(civa, "IdPaese", client.country_code or "IT")
+        _sub(civa, "IdCodice", _bare_id_codice(client.vat_number, client.country_code or "IT"))
+    if client.tax_code:
+        _sub(canag, "CodiceFiscale", client.tax_code)
     _emit_anagrafica(
-        canag, denominazione=client.ragione_sociale, nome=client.nome, cognome=client.cognome
+        canag,
+        legal_name=client.legal_name,
+        first_name=client.first_name,
+        last_name=client.last_name,
     )
     csede = _sub(cess, "Sede")
-    _sub(csede, "Indirizzo", client.indirizzo or "")
-    _sub(csede, "CAP", client.cap or "")
-    _sub(csede, "Comune", client.comune or "")
-    if client.provincia:
-        _sub(csede, "Provincia", client.provincia)
-    _sub(csede, "Nazione", client.nazione or "IT")
+    _sub(csede, "Indirizzo", client.address or "")
+    _sub(csede, "CAP", client.postal_code or "")
+    _sub(csede, "Comune", client.city or "")
+    if client.province:
+        _sub(csede, "Provincia", client.province)
+    _sub(csede, "Nazione", client.country or "IT")
     if intermediary is not None:
         # Flow as terzo intermediario / soggetto emittente. Header order:
         # after CessionarioCommittente, then SoggettoEmittente.
         terzo = _sub(header, "TerzoIntermediarioOSoggettoEmittente")
         tanag = _sub(terzo, "DatiAnagrafici")
         tiva = _sub(tanag, "IdFiscaleIVA")
-        _sub(tiva, "IdPaese", intermediary.id_paese)
-        _sub(tiva, "IdCodice", _bare_id_codice(intermediary.id_codice, intermediary.id_paese))
+        _sub(tiva, "IdPaese", intermediary.country_code)
+        _sub(tiva, "IdCodice", _bare_id_codice(intermediary.vat_number, intermediary.country_code))
         tan = _sub(tanag, "Anagrafica")
-        _sub(tan, "Denominazione", intermediary.denominazione)
+        _sub(tan, "Denominazione", intermediary.legal_name)
         # TZ = document transmitted by a third party on the cedente's behalf.
         _sub(header, "SoggettoEmittente", "TZ")
 
@@ -313,14 +323,14 @@ def _build_xml(
     # ImportoTotaleDocumento (FatturaPA 1.2 element order). Only when it
     # applies (forfettario with taxable >= threshold); ordinary regime
     # never emits it.
-    if inv.bollo and inv.bollo > 0:
+    if inv.stamp_duty and inv.stamp_duty > 0:
         db = _sub(dgd, "DatiBollo")
         _sub(db, "BolloVirtuale", "SI")
-        _sub(db, "ImportoBollo", _money(inv.bollo))
-    # taxable + vat + bollo (the bollo is part of the document total).
+        _sub(db, "ImportoBollo", _money(inv.stamp_duty))
+    # taxable + vat + stamp_duty (the stamp_duty is part of the document total).
     _sub(dgd, "ImportoTotaleDocumento", _money(inv.total))
-    if inv.causale:
-        _sub(dgd, "Causale", inv.causale)
+    if inv.purpose:
+        _sub(dgd, "Causale", inv.purpose)
     # Free notes ride along as additional Causale lines (FatturaPA
     # Causale is repeatable, max 200 chars each).
     if inv.notes:
@@ -336,27 +346,27 @@ def _build_xml(
         line_total = _q2(ln.quantity * ln.unit_price)
         _sub(dl, "PrezzoTotale", _money(line_total))
         _sub(dl, "AliquotaIVA", f"{ln.vat_rate:.2f}")
-        if ln.natura:
-            _sub(dl, "Natura", ln.natura)
-    # Group by (rate, natura): a forfettario riepilogo MUST echo the
+        if ln.vat_nature:
+            _sub(dl, "Natura", ln.vat_nature)
+    # Group by (rate, vat_nature): a forfettario riepilogo MUST echo the
     # line Natura (e.g. N2.2) right after AliquotaIVA and before
     # ImponibileImporto, or SdI rejects the document. Deterministic
-    # order: by rate, then natura ("" sorts before any code).
+    # order: by rate, then vat_nature ("" sorts before any code).
     groups = _riepilogo_groups(lines)
     # RiferimentoNormativo: the issuer's text, else the forfettario default;
     # emitted only for groups carrying a Natura, after Imposta (XSD order).
-    rif_normativo = fiscal.riferimento_normativo or (
+    rif_normativo = fiscal.legal_reference or (
         FORFETTARIO_RIFERIMENTO_NORMATIVO if _is_forfettario(fiscal) else None
     )
-    for rate, natura in sorted(groups, key=lambda k: (k[0], k[1] or "")):
-        imp = _q2(groups[(rate, natura)])
+    for rate, vat_nature in sorted(groups, key=lambda k: (k[0], k[1] or "")):
+        imp = _q2(groups[(rate, vat_nature)])
         rie = _sub(dbs, "DatiRiepilogo")
         _sub(rie, "AliquotaIVA", f"{rate:.2f}")
-        if natura:
-            _sub(rie, "Natura", natura)
+        if vat_nature:
+            _sub(rie, "Natura", vat_nature)
         _sub(rie, "ImponibileImporto", _money(imp))
         _sub(rie, "Imposta", _money(_q2(imp * rate / Decimal(100))))
-        if natura and rif_normativo:
+        if vat_nature and rif_normativo:
             _sub(rie, "RiferimentoNormativo", rif_normativo)
     # DatiPagamento is emitted whenever ANY payment metadata is present
     # (IBAN, due date, terms days, or an explicit override of
@@ -368,8 +378,8 @@ def _build_xml(
         inv.payment_iban
         or inv.payment_due_date
         or inv.payment_terms_days is not None
-        or inv.condizioni_pagamento
-        or inv.modalita_pagamento
+        or inv.payment_conditions_code
+        or inv.payment_method_code
     ):
         resolved = resolve_payment(inv, client, fiscal)
         pay = _sub(body, "DatiPagamento")

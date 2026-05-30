@@ -38,28 +38,28 @@ from flow_core.vat import is_valid_vat_code, normalize_vat
 
 @dataclass(frozen=True, slots=True)
 class ClientInput:
-    ragione_sociale: str
-    nome: str | None = None
-    cognome: str | None = None
-    id_paese: str | None = None
-    id_codice: str | None = None
-    codice_fiscale: str | None = None
-    indirizzo: str | None = None
-    cap: str | None = None
-    comune: str | None = None
-    provincia: str | None = None
-    nazione: str | None = None
-    codice_destinatario: str | None = None
+    legal_name: str
+    first_name: str | None = None
+    last_name: str | None = None
+    country_code: str | None = None
+    vat_number: str | None = None
+    tax_code: str | None = None
+    address: str | None = None
+    postal_code: str | None = None
+    city: str | None = None
+    province: str | None = None
+    country: str | None = None
+    sdi_code: str | None = None
     pec: str | None = None
     invoice_series: str | None = None
     payment_iban: str | None = None
     description: str | None = None
     default_billable: bool = True
-    tariffa: Decimal | None = None
-    valuta: str = "EUR"
+    hourly_rate: Decimal | None = None
+    currency: str = "EUR"
     timezone: str | None = None
-    default_condizioni_pagamento: str | None = None
-    default_modalita_pagamento: str | None = None
+    default_payment_conditions_code: str | None = None
+    default_payment_method_code: str | None = None
     default_payment_terms_days: int | None = None
     invoice_language: str | None = None
 
@@ -129,35 +129,35 @@ async def create_client(
     tag = await _insert_tag(session, org_id, TagKind.client, name, None)
     # Normalize a VIES-form VAT id ("IT09876543210") into IdPaese + bare
     # IdCodice (FatturaPA IdCodice carries no country prefix).
-    id_paese, id_codice = normalize_vat(profile.id_codice, profile.id_paese)
-    if not is_valid_vat_code(id_codice, id_paese):
-        raise DomainError(MessageCode.INVOICE_INVALID, detail=f"client piva '{id_codice}'")
+    country_code, vat_number = normalize_vat(profile.vat_number, profile.country_code)
+    if not is_valid_vat_code(vat_number, country_code):
+        raise DomainError(MessageCode.INVOICE_INVALID, detail=f"client vat_number '{vat_number}'")
     session.add(
         ClientProfile(
             tag_id=tag.id,
             org_id=org_id,
-            ragione_sociale=profile.ragione_sociale,
-            nome=profile.nome,
-            cognome=profile.cognome,
-            id_paese=id_paese,
-            id_codice=id_codice,
-            codice_fiscale=profile.codice_fiscale,
-            indirizzo=profile.indirizzo,
-            cap=profile.cap,
-            comune=profile.comune,
-            provincia=profile.provincia,
-            nazione=profile.nazione,
-            codice_destinatario=profile.codice_destinatario,
+            legal_name=profile.legal_name,
+            first_name=profile.first_name,
+            last_name=profile.last_name,
+            country_code=country_code,
+            vat_number=vat_number,
+            tax_code=profile.tax_code,
+            address=profile.address,
+            postal_code=profile.postal_code,
+            city=profile.city,
+            province=profile.province,
+            country=profile.country,
+            sdi_code=profile.sdi_code,
             pec=profile.pec,
             invoice_series=profile.invoice_series,
             payment_iban=profile.payment_iban,
             description=profile.description,
             default_billable=profile.default_billable,
-            tariffa=profile.tariffa,
-            valuta=profile.valuta,
+            hourly_rate=profile.hourly_rate,
+            currency=profile.currency,
             timezone=profile.timezone,
-            default_condizioni_pagamento=profile.default_condizioni_pagamento,
-            default_modalita_pagamento=profile.default_modalita_pagamento,
+            default_payment_conditions_code=profile.default_payment_conditions_code,
+            default_payment_method_code=profile.default_payment_method_code,
             default_payment_terms_days=profile.default_payment_terms_days,
             invoice_language=profile.invoice_language,
         )
@@ -265,7 +265,7 @@ async def ensure_default_client(
     )
     if not created:
         return tag_id
-    session.add(ClientProfile(tag_id=tag_id, org_id=org_id, ragione_sociale=_DEFAULT_CLIENT_NAME))
+    session.add(ClientProfile(tag_id=tag_id, org_id=org_id, legal_name=_DEFAULT_CLIENT_NAME))
     await session.flush()
     await audit.log(
         session,
@@ -604,24 +604,26 @@ async def update_client(
     # Payment-method enums (FatturaPA TPxx/MPxx) and net-days range are
     # validated before they touch the row; the XML build never sees a
     # value outside the SdI table.
-    if "default_condizioni_pagamento" in flds:
+    if "default_payment_conditions_code" in flds:
         from flow_core.services.payment_methods import validate_condizioni as _vc
 
-        flds["default_condizioni_pagamento"] = _vc(flds["default_condizioni_pagamento"])  # type: ignore[arg-type]
-    if "default_modalita_pagamento" in flds:
+        flds["default_payment_conditions_code"] = _vc(flds["default_payment_conditions_code"])  # type: ignore[arg-type]
+    if "default_payment_method_code" in flds:
         from flow_core.services.payment_methods import validate_modalita as _vm
 
-        flds["default_modalita_pagamento"] = _vm(flds["default_modalita_pagamento"])  # type: ignore[arg-type]
+        flds["default_payment_method_code"] = _vm(flds["default_payment_method_code"])  # type: ignore[arg-type]
     if "default_payment_terms_days" in flds:
         from flow_core.services.payment_methods import validate_terms_days as _vt
 
         flds["default_payment_terms_days"] = _vt(flds["default_payment_terms_days"])  # type: ignore[arg-type]
     for k, v in flds.items():
         setattr(prof, k, v)
-    if "id_codice" in flds or "id_paese" in flds:
-        prof.id_paese, prof.id_codice = normalize_vat(prof.id_codice, prof.id_paese)
-        if not is_valid_vat_code(prof.id_codice, prof.id_paese):
-            raise DomainError(MessageCode.INVOICE_INVALID, detail=f"client piva '{prof.id_codice}'")
+    if "vat_number" in flds or "country_code" in flds:
+        prof.country_code, prof.vat_number = normalize_vat(prof.vat_number, prof.country_code)
+        if not is_valid_vat_code(prof.vat_number, prof.country_code):
+            raise DomainError(
+                MessageCode.INVOICE_INVALID, detail=f"client vat_number '{prof.vat_number}'"
+            )
     await session.flush()
     await audit.log(
         session,

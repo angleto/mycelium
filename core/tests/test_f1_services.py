@@ -36,7 +36,7 @@ async def test_taxonomy_and_duplicate() -> None:
             org_id=org,
             actor_id=user,
             name="Acme",
-            profile=ClientInput(ragione_sociale="Acme SRL", id_paese="IT"),
+            profile=ClientInput(legal_name="Acme SRL", country_code="IT"),
         )
         pr = await taxonomy.create_project(
             s, org_id=org, actor_id=user, name="Site", client_tag_id=cl.id

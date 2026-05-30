@@ -47,16 +47,16 @@ async def test_f7_api_flow() -> None:
             headers=h,
             json={
                 "label": "Ditta individuale",
-                "denominazione": "Acme Srl",
-                "piva": "01234567890",
-                "indirizzo": "Via Roma 1",
-                "cap": "00100",
-                "comune": "Roma",
+                "legal_name": "Acme Srl",
+                "vat_number": "01234567890",
+                "address": "Via Roma 1",
+                "postal_code": "00100",
+                "city": "Roma",
             },
         )
         assert p1.status_code == 200
         prof1 = p1.json()
-        assert prof1["denominazione"] == "Acme Srl" and prof1["is_default"]
+        assert prof1["legal_name"] == "Acme Srl" and prof1["is_default"]
 
         # A second profile; explicitly promote it to default.
         p2 = await c.post(
@@ -64,11 +64,11 @@ async def test_f7_api_flow() -> None:
             headers=h,
             json={
                 "label": "SRL",
-                "denominazione": "Acme Holding Srl",
-                "piva": "01234567890",
-                "indirizzo": "Via Milano 2",
-                "cap": "20100",
-                "comune": "Milano",
+                "legal_name": "Acme Holding Srl",
+                "vat_number": "01234567890",
+                "address": "Via Milano 2",
+                "postal_code": "20100",
+                "city": "Milano",
                 "is_default": True,
             },
         )
@@ -84,13 +84,13 @@ async def test_f7_api_flow() -> None:
                 headers=h,
                 json={
                     "name": "Client SpA",
-                    "ragione_sociale": "Client SpA",
-                    "id_paese": "IT",
-                    "id_codice": "09876543210",
-                    "codice_destinatario": "ABCDEFG",
-                    "indirizzo": "Via Milano 2",
-                    "cap": "20100",
-                    "comune": "Milano",
+                    "legal_name": "Client SpA",
+                    "country_code": "IT",
+                    "vat_number": "09876543210",
+                    "sdi_code": "ABCDEFG",
+                    "address": "Via Milano 2",
+                    "postal_code": "20100",
+                    "city": "Milano",
                 },
             )
         ).json()

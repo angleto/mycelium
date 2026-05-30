@@ -127,10 +127,10 @@ IT_PROVINCES: frozenset[str] = frozenset(
 )
 
 
-def is_valid_provincia(sigla: str | None, nazione: str | None) -> bool:
+def is_valid_provincia(sigla: str | None, country: str | None) -> bool:
     """True unless ``sigla`` is a non-empty code that is not a real Italian
     province while the country is IT. Empty/absent (the field is optional) and
     foreign-country values are accepted here (validated elsewhere/not emitted)."""
-    if not sigla or (nazione or "IT").upper() != "IT":
+    if not sigla or (country or "IT").upper() != "IT":
         return True
     return sigla.upper() in IT_PROVINCES

@@ -129,7 +129,7 @@ async def test_purge_client_recurses_across_projects() -> None:
             org_id=org,
             actor_id=user,
             name="DoomedCo",
-            profile=ClientInput(ragione_sociale="DoomedCo SRL"),
+            profile=ClientInput(legal_name="DoomedCo SRL"),
         )
         p1 = await taxonomy.create_project(
             s, org_id=org, actor_id=user, name="P1", client_tag_id=cl.id
@@ -156,7 +156,7 @@ async def test_purge_client_blocks_on_invoices() -> None:
             org_id=org,
             actor_id=user,
             name="HasInvoice",
-            profile=ClientInput(ragione_sociale="HasInvoice SRL"),
+            profile=ClientInput(legal_name="HasInvoice SRL"),
         )
         # Minimal invoice row tied to the client. The block is a row-
         # count test in purge_client, so only client_tag_id matters here.

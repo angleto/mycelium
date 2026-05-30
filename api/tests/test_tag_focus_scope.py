@@ -39,14 +39,10 @@ async def test_client_focus_hides_other_clients_tags() -> None:
         }
 
         ca = (
-            await c.post(
-                "/clients", headers=h, json={"name": "ClientA", "ragione_sociale": "A srl"}
-            )
+            await c.post("/clients", headers=h, json={"name": "ClientA", "legal_name": "A srl"})
         ).json()
         cb = (
-            await c.post(
-                "/clients", headers=h, json={"name": "ClientB", "ragione_sociale": "B srl"}
-            )
+            await c.post("/clients", headers=h, json={"name": "ClientB", "legal_name": "B srl"})
         ).json()
         pa = (
             await c.post(

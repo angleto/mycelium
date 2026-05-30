@@ -43,14 +43,14 @@ async def _owner(c: AsyncClient) -> dict[str, str]:
 async def _make_issuer(c: AsyncClient, h: dict[str, str], **overrides: object) -> dict:
     body: dict[str, object] = {
         "label": "Issuer",
-        "denominazione": "Angelo Leto",
-        "codice_fiscale": "LTENGL79M31I356X",
-        "piva": "13438810015",
-        "regime_fiscale": "RF01",
-        "indirizzo": "Via Roma 1",
-        "cap": "10100",
-        "comune": "Torino",
-        "provincia": "TO",
+        "legal_name": "Angelo Leto",
+        "tax_code": "LTENGL79M31I356X",
+        "vat_number": "13438810015",
+        "tax_regime": "RF01",
+        "address": "Via Roma 1",
+        "postal_code": "10100",
+        "city": "Torino",
+        "province": "TO",
     }
     body.update(overrides)
     return (await c.post("/issuer-profiles", headers=h, json=body)).json()
@@ -59,15 +59,15 @@ async def _make_issuer(c: AsyncClient, h: dict[str, str], **overrides: object) -
 async def _make_client(c: AsyncClient, h: dict[str, str], **overrides: object) -> dict:
     body: dict[str, object] = {
         "name": "Acme",
-        "ragione_sociale": "ACME S.R.L.",
-        "id_paese": "IT",
-        "id_codice": "16639311006",
-        "codice_fiscale": "16639311006",
-        "indirizzo": "Via Fonte 1",
-        "cap": "00142",
-        "comune": "Roma",
-        "provincia": "RM",
-        "codice_destinatario": "KRRH6B9",
+        "legal_name": "ACME S.R.L.",
+        "country_code": "IT",
+        "vat_number": "16639311006",
+        "tax_code": "16639311006",
+        "address": "Via Fonte 1",
+        "postal_code": "00142",
+        "city": "Roma",
+        "province": "RM",
+        "sdi_code": "KRRH6B9",
     }
     body.update(overrides)
     return (await c.post("/clients", headers=h, json=body)).json()
@@ -82,15 +82,15 @@ async def test_payment_method_precedence_invoice_over_client_over_issuer() -> No
         await _make_issuer(
             c,
             h,
-            default_condizioni_pagamento="TP01",
-            default_modalita_pagamento="MP07",
+            default_payment_conditions_code="TP01",
+            default_payment_method_code="MP07",
             default_payment_terms_days=15,
         )
         client = await _make_client(
             c,
             h,
-            default_condizioni_pagamento="TP03",
-            default_modalita_pagamento="MP19",
+            default_payment_conditions_code="TP03",
+            default_payment_method_code="MP19",
             default_payment_terms_days=30,
         )
         # 1. invoice override wins on both fields + terms days
@@ -105,8 +105,8 @@ async def test_payment_method_precedence_invoice_over_client_over_issuer() -> No
             f"/invoices/{inv['id']}",
             headers=h,
             json={
-                "condizioni_pagamento": "TP02",
-                "modalita_pagamento": "MP05",
+                "payment_conditions_code": "TP02",
+                "payment_method_code": "MP05",
                 "payment_terms_days": 7,
                 "payment_iban": "IT92O0301503200000003396368",
             },
@@ -250,14 +250,14 @@ async def test_unknown_payment_method_codes_are_rejected() -> None:
             headers=h,
             json={
                 "label": "X",
-                "denominazione": "X",
-                "codice_fiscale": "LTENGL79M31I356X",
-                "piva": "13438810015",
-                "indirizzo": "v",
-                "cap": "10100",
-                "comune": "T",
-                "provincia": "TO",
-                "default_modalita_pagamento": "MP99",
+                "legal_name": "X",
+                "tax_code": "LTENGL79M31I356X",
+                "vat_number": "13438810015",
+                "address": "v",
+                "postal_code": "10100",
+                "city": "T",
+                "province": "TO",
+                "default_payment_method_code": "MP99",
             },
         )
         assert bad.status_code == 400
@@ -271,8 +271,8 @@ async def test_pdf_locale_en_xml_stays_italian() -> None:
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://t") as c:
         h = await _owner(c)
-        issuer = await _make_issuer(c, h, regime_fiscale="RF19")
-        assert issuer["regime_fiscale"] == "RF19"
+        issuer = await _make_issuer(c, h, tax_regime="RF19")
+        assert issuer["tax_regime"] == "RF19"
         # POST /clients returns a TagOut (not the full ClientOut); the
         # language is verified end-to-end via the XML/PDF below.
         client = await _make_client(c, h, invoice_language="en")
@@ -319,6 +319,6 @@ def test_bollo_dicitura_uses_mef_decree_wording() -> None:
 
     assert "decreto MEF 17 GIUGNO 2014" in BOLLO_DICITURA
     assert "ART. 6" in BOLLO_DICITURA
-    # The old "Imposta di bollo assolta in modo virtuale" wording is
+    # The old "Imposta di stamp_duty assolta in modo virtuale" wording is
     # gone (a regression to it would mean we lost the AdE-style update).
-    assert "Imposta di bollo assolta in modo virtuale" != BOLLO_DICITURA
+    assert "Imposta di stamp_duty assolta in modo virtuale" != BOLLO_DICITURA

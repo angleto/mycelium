@@ -46,8 +46,8 @@ async def test_f4_api_flow() -> None:
                 headers=h,
                 json={
                     "name": "C",
-                    "ragione_sociale": "C",
-                    "tariffa": "120",
+                    "legal_name": "C",
+                    "hourly_rate": "120",
                     "default_billable": True,
                 },
             )

@@ -61,13 +61,13 @@ def _fattura_xml(codice: str = "ABCDEFG") -> bytes:
     return _FATTURA_XML_TEMPLATE.format(codice=codice).encode("utf-8")
 
 
-def _wrap_riceve_fatture(fattura_xml: bytes, ident: str, nome: str) -> bytes:
+def _wrap_riceve_fatture(fattura_xml: bytes, ident: str, first_name: str) -> bytes:
     """Build the minimal SOAP-style envelope SdI uses for RiceviFatture."""
     b64 = base64.b64encode(fattura_xml).decode("ascii")
     return (
         f'<?xml version="1.0"?><RiceviFattureRequest>'
         f"<IdentificativoSdI>{ident}</IdentificativoSdI>"
-        f"<NomeFile>{nome}</NomeFile>"
+        f"<NomeFile>{first_name}</NomeFile>"
         f"<File>{b64}</File>"
         f"</RiceviFattureRequest>"
     ).encode()
@@ -99,7 +99,7 @@ def test_unwrap_passive_delivery_ok() -> None:
     d = unwrap_passive_delivery(raw)
     assert isinstance(d, PassiveDelivery)
     assert d.identificativo_sdi == "SDI00000042"
-    assert d.nome_file == "IT09876543210_00042.xml"
+    assert d.file_name == "IT09876543210_00042.xml"
     assert d.fattura_xml == fxml
 
 
@@ -110,11 +110,11 @@ def test_unwrap_rejects_missing_fields() -> None:
 
 def test_parse_fattura_header_ok() -> None:
     h = parse_fattura_header(_fattura_xml("ABCDEFG"))
-    assert h.formato_trasmissione == "FPR12"
-    assert h.sender_id_paese == "IT"
-    assert h.sender_id_codice == "09876543210"
-    assert h.sender_denominazione == "Fornitore SpA"
-    assert h.codice_destinatario == "ABCDEFG"
+    assert h.transmission_format == "FPR12"
+    assert h.sender_country_code == "IT"
+    assert h.sender_vat_number == "09876543210"
+    assert h.sender_legal_name == "Fornitore SpA"
+    assert h.sdi_code == "ABCDEFG"
 
 
 def test_parse_fattura_rejects_non_fattura_root() -> None:
@@ -158,29 +158,29 @@ async def test_ingest_passive_invoice_resolves_recipient_and_stores(
             org_id=org,
             actor_id=user,
             label="Recipient",
-            denominazione="Recipient SRL",
-            piva="13438810015",
-            indirizzo="Via Test 1",
-            cap="10100",
-            comune="Torino",
+            legal_name="Recipient SRL",
+            vat_number="13438810015",
+            address="Via Test 1",
+            postal_code="10100",
+            city="Torino",
             is_default=True,
         )
         # Seed the codice destinatario (column added in migration 0102).
-        issuer.codice_destinatario_ricezione = codice
+        issuer.sdi_code = codice
         await s.flush()
 
     raw = _wrap_riceve_fatture(
         _fattura_xml(codice),
         ident=f"PSV{uuid.uuid4().hex[:8].upper()}",
-        nome=f"IT09876543210_{uuid.uuid4().hex[:5].upper()}.xml",
+        first_name=f"IT09876543210_{uuid.uuid4().hex[:5].upper()}.xml",
     )
     stored = await ingest_passive_invoice(raw)
     assert stored is not None
     assert stored.org_id == org
     assert stored.issuer_profile_id == issuer.id
-    assert stored.codice_destinatario == codice
+    assert stored.sdi_code == codice
     assert stored.processing_status == "new"
-    assert stored.sender_id_codice == "09876543210"
+    assert stored.sender_vat_number == "09876543210"
     # Idempotency: a second push with the same IdentificativoSdI does not
     # double-insert.
     again = await ingest_passive_invoice(raw)
@@ -207,7 +207,7 @@ async def test_ingest_passive_invoice_orphan_returns_none() -> None:
     raw = _wrap_riceve_fatture(
         _fattura_xml("ZZZ0000"),
         ident=f"PSV{uuid.uuid4().hex[:8].upper()}",
-        nome="IT09876543210_ZZZ.xml",
+        first_name="IT09876543210_ZZZ.xml",
     )
     assert await ingest_passive_invoice(raw) is None
 
@@ -279,14 +279,14 @@ async def test_ingest_receiver_notification_appends_audit_row(
             org_id=org,
             actor_id=user,
             label="R",
-            denominazione="Recipient SRL",
-            piva="13438810015",
-            indirizzo="Via Test 1",
-            cap="10100",
-            comune="Torino",
+            legal_name="Recipient SRL",
+            vat_number="13438810015",
+            address="Via Test 1",
+            postal_code="10100",
+            city="Torino",
             is_default=True,
         )
-        issuer.codice_destinatario_ricezione = codice
+        issuer.sdi_code = codice
         await s.flush()
 
     # The receiver-cycle XSD restricts IdentificativoSdI to xsd:integer
@@ -296,7 +296,7 @@ async def test_ingest_receiver_notification_appends_audit_row(
     delivery = _wrap_riceve_fatture(
         _fattura_xml(codice),
         ident=ident,
-        nome=f"IT09876543210_{uuid.uuid4().hex[:5].upper()}.xml",
+        first_name=f"IT09876543210_{uuid.uuid4().hex[:5].upper()}.xml",
     )
     ri = await ingest_passive_invoice(delivery)
     assert ri is not None

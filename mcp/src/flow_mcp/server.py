@@ -281,9 +281,9 @@ async def create_client(
     token: str,
     org_id: str,
     name: str,
-    ragione_sociale: str,
-    id_paese: str | None = None,
-    id_codice: str | None = None,
+    legal_name: str,
+    country_code: str | None = None,
+    vat_number: str | None = None,
 ) -> dict[str, Any]:
     """Create a client tag with its typed profile."""
     async with _tenant(token, org_id) as (s, org, user):
@@ -293,9 +293,9 @@ async def create_client(
             actor_id=user,
             name=name,
             profile=ClientInput(
-                ragione_sociale=ragione_sociale,
-                id_paese=id_paese,
-                id_codice=id_codice,
+                legal_name=legal_name,
+                country_code=country_code,
+                vat_number=vat_number,
             ),
         )
         return _tag(tag)
@@ -330,7 +330,7 @@ async def list_tags(token: str, org_id: str, kind: str | None = None) -> list[di
 
 
 def _client(t: Tag, p: ClientProfile) -> dict[str, Any]:
-    # Unset invoicing-card fields (codice_fiscale, pec, ...) are dropped
+    # Unset invoicing-card fields (tax_code, pec, ...) are dropped
     # rather than emitted as null: a sparsely-filled client carries only
     # its real columns. The exhaustive key set lives on the REST schema.
     return _compact(
@@ -339,21 +339,21 @@ def _client(t: Tag, p: ClientProfile) -> dict[str, Any]:
             "name": t.name,
             "status": t.status,
             "version": t.version,
-            "ragione_sociale": p.ragione_sociale,
-            "id_paese": p.id_paese,
-            "id_codice": p.id_codice,
-            "codice_fiscale": p.codice_fiscale,
-            "indirizzo": p.indirizzo,
-            "cap": p.cap,
-            "comune": p.comune,
-            "provincia": p.provincia,
-            "nazione": p.nazione,
-            "codice_destinatario": p.codice_destinatario,
+            "legal_name": p.legal_name,
+            "country_code": p.country_code,
+            "vat_number": p.vat_number,
+            "tax_code": p.tax_code,
+            "address": p.address,
+            "postal_code": p.postal_code,
+            "city": p.city,
+            "province": p.province,
+            "country": p.country,
+            "sdi_code": p.sdi_code,
             "pec": p.pec,
             "description": p.description,
             "default_billable": p.default_billable,
-            "tariffa": str(p.tariffa) if p.tariffa is not None else None,
-            "valuta": p.valuta,
+            "hourly_rate": str(p.hourly_rate) if p.hourly_rate is not None else None,
+            "currency": p.currency,
         }
     )
 
@@ -429,16 +429,16 @@ async def update_client(
     org_id: str,
     tag_id: str,
     name: str | None = None,
-    ragione_sociale: str | None = None,
-    id_paese: str | None = None,
-    id_codice: str | None = None,
-    codice_fiscale: str | None = None,
-    indirizzo: str | None = None,
-    cap: str | None = None,
-    comune: str | None = None,
-    provincia: str | None = None,
-    nazione: str | None = None,
-    codice_destinatario: str | None = None,
+    legal_name: str | None = None,
+    country_code: str | None = None,
+    vat_number: str | None = None,
+    tax_code: str | None = None,
+    address: str | None = None,
+    postal_code: str | None = None,
+    city: str | None = None,
+    province: str | None = None,
+    country: str | None = None,
+    sdi_code: str | None = None,
     pec: str | None = None,
     description: str | None = None,
 ) -> dict[str, Any]:
@@ -450,16 +450,16 @@ async def update_client(
     # widened type is over-permissive in this caller — that's fine.
     fields: dict[str, object] = {}
     for key, val in (
-        ("ragione_sociale", ragione_sociale),
-        ("id_paese", id_paese),
-        ("id_codice", id_codice),
-        ("codice_fiscale", codice_fiscale),
-        ("indirizzo", indirizzo),
-        ("cap", cap),
-        ("comune", comune),
-        ("provincia", provincia),
-        ("nazione", nazione),
-        ("codice_destinatario", codice_destinatario),
+        ("legal_name", legal_name),
+        ("country_code", country_code),
+        ("vat_number", vat_number),
+        ("tax_code", tax_code),
+        ("address", address),
+        ("postal_code", postal_code),
+        ("city", city),
+        ("province", province),
+        ("country", country),
+        ("sdi_code", sdi_code),
         ("pec", pec),
         ("description", description),
     ):
@@ -806,7 +806,7 @@ async def prepend_to_task_description(
     ``expected_version=None`` prepends onto the current state.
     ``dedupe_if_head_matches=True`` no-ops when the body already starts
     with ``text``. Returns ``{task_id, version, prepended_chars}``;
-    refuses with ``body.limit_exceeded`` past the body cap."""
+    refuses with ``body.limit_exceeded`` past the body postal_code."""
     async with _tenant(token, org_id) as (s, org, user):
         new_version, prepended = await tasks.prepend_to_description(
             s,
@@ -3544,7 +3544,7 @@ async def append_note_part(
     lang: str | None = None,
 ) -> dict[str, Any]:
     """Stream a LARGE markdown body into a note part in chunks, past the
-    MCP ~100k-char per-call payload cap (task 27f4d6c9). Split the source
+    MCP ~100k-char per-call payload postal_code (task 27f4d6c9). Split the source
     client-side into ordered chunks of ~32k chars and call this in
     sequence:
 
@@ -4244,17 +4244,19 @@ def _invoice(i: Invoice) -> dict[str, Any]:
 async def set_issuer_profile(
     token: str,
     org_id: str,
-    denominazione: str,
+    legal_name: str,
     label: str = "Principale",
-    piva: str | None = None,
-    codice_fiscale: str | None = None,
-    indirizzo: str = "",
-    cap: str = "",
-    comune: str = "",
+    vat_number: str | None = None,
+    tax_code: str | None = None,
+    address: str = "",
+    postal_code: str = "",
+    city: str = "",
+    sdi_code: str | None = None,
 ) -> dict[str, Any]:
     """Create-or-update the default issuer profile, the invoice
     "intestazione" (admin). Idempotent on the org default: updates it if
-    one exists, else creates it (and flags it default)."""
+    one exists, else creates it (and flags it default). ``sdi_code`` is
+    this issuer's own reception CodiceDestinatario (passive SdI cycle)."""
     async with _tenant(token, org_id) as (s, org, user):
         current = await invoice_svc.get_default_issuer_profile(s, org_id=org)
         if current is None:
@@ -4263,34 +4265,38 @@ async def set_issuer_profile(
                 org_id=org,
                 actor_id=user,
                 label=label,
-                denominazione=denominazione,
-                piva=piva,
-                codice_fiscale=codice_fiscale,
-                indirizzo=indirizzo,
-                cap=cap,
-                comune=comune,
+                legal_name=legal_name,
+                vat_number=vat_number,
+                tax_code=tax_code,
+                address=address,
+                postal_code=postal_code,
+                city=city,
+                sdi_code=sdi_code,
                 is_default=True,
             )
         else:
+            values: dict[str, Any] = {
+                "label": label,
+                "legal_name": legal_name,
+                "vat_number": vat_number,
+                "tax_code": tax_code,
+                "address": address,
+                "postal_code": postal_code,
+                "city": city,
+            }
+            if sdi_code is not None:
+                values["sdi_code"] = sdi_code
             p = await invoice_svc.update_issuer_profile(
                 s,
                 org_id=org,
                 actor_id=user,
                 profile_id=current.id,
-                values={
-                    "label": label,
-                    "denominazione": denominazione,
-                    "piva": piva,
-                    "codice_fiscale": codice_fiscale,
-                    "indirizzo": indirizzo,
-                    "cap": cap,
-                    "comune": comune,
-                },
+                values=values,
             )
         return {
             "id": str(p.id),
             "label": p.label,
-            "denominazione": p.denominazione,
+            "legal_name": p.legal_name,
             "is_default": p.is_default,
             "version": p.version,
         }
@@ -4321,11 +4327,11 @@ async def add_invoice_line(
     unit_price: float,
     quantity: float = 1.0,
     vat_rate: float | None = None,
-    natura: str | None = None,
+    vat_nature: str | None = None,
 ) -> dict[str, Any]:
     """Add a line to a draft invoice.
 
-    ``vat_rate``/``natura`` left unset: the service resolves them from the
+    ``vat_rate``/``vat_nature`` left unset: the service resolves them from the
     issuer's regime -- forfettario (RF19) -> 0% + Natura N2.2, ordinary
     regime -> 22%. Pass them explicitly to override (e.g. an exempt or
     reverse-charge line carries its own Natura). The previous hard 22%
@@ -4341,7 +4347,7 @@ async def add_invoice_line(
             unit_price=Decimal(str(unit_price)),
             quantity=Decimal(str(quantity)),
             vat_rate=Decimal(str(vat_rate)) if vat_rate is not None else None,
-            natura=natura,
+            vat_nature=vat_nature,
         )
         return {"id": str(ln.id), "line_no": ln.line_no}
 
@@ -4359,7 +4365,7 @@ async def transmit_invoice(token: str, org_id: str, invoice_id: str) -> dict[str
 
 @mcp.tool()
 async def invoice_credit_note(
-    token: str, org_id: str, parent_invoice_id: str, causale: str | None = None
+    token: str, org_id: str, parent_invoice_id: str, purpose: str | None = None
 ) -> dict[str, Any]:
     """Create a TD04 credit note linked to a transmitted invoice."""
     async with _tenant(token, org_id) as (s, org, user):
@@ -4368,7 +4374,7 @@ async def invoice_credit_note(
             org_id=org,
             actor_id=user,
             parent_invoice_id=uuid.UUID(parent_invoice_id),
-            causale=causale,
+            purpose=purpose,
         )
         return _invoice(inv)
 

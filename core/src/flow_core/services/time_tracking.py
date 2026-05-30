@@ -142,7 +142,7 @@ async def _rate(session: AsyncSession, task_id: uuid.UUID) -> tuple[Decimal | No
     ).scalar_one_or_none()
     if cp is None:
         return (None, "EUR", True)
-    return (cp.tariffa, cp.valuta, cp.default_billable)
+    return (cp.hourly_rate, cp.currency, cp.default_billable)
 
 
 def _effective_billable(explicit: bool | None, task: Task, client_default: bool) -> bool:
@@ -644,7 +644,7 @@ async def report(
         entries = [e for e in entries if e.task_id in keep]
 
     # rate_snapshot is set when the entry is created/edited; entries
-    # created when the client had no ``tariffa`` (or no client) have
+    # created when the client had no ``hourly_rate`` (or no client) have
     # NULL or ZERO snapshots that historically rendered as 0 EUR even
     # after the rate was later configured. Backfill the missing rates
     # LIVE from the current task -> project -> client lookup, without

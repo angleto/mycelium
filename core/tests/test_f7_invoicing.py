@@ -42,11 +42,11 @@ async def _setup(s, org: uuid.UUID, user: uuid.UUID) -> uuid.UUID:
         org_id=org,
         actor_id=user,
         label="Principale",
-        denominazione="Acme Srl",
-        piva="01234567890",
-        indirizzo="Via Roma 1",
-        cap="00100",
-        comune="Roma",
+        legal_name="Acme Srl",
+        vat_number="01234567890",
+        address="Via Roma 1",
+        postal_code="00100",
+        city="Roma",
         is_default=True,
     )
     client = await create_client(
@@ -55,14 +55,14 @@ async def _setup(s, org: uuid.UUID, user: uuid.UUID) -> uuid.UUID:
         actor_id=user,
         name="Client SpA",
         profile=ClientInput(
-            ragione_sociale="Client SpA",
-            id_paese="IT",
-            id_codice="09876543210",
-            codice_destinatario="ABCDEFG",
-            indirizzo="Via Milano 2",
-            cap="20100",
-            comune="Milano",
-            provincia="MI",
+            legal_name="Client SpA",
+            country_code="IT",
+            vat_number="09876543210",
+            sdi_code="ABCDEFG",
+            address="Via Milano 2",
+            postal_code="20100",
+            city="Milano",
+            province="MI",
         ),
     )
     return client.id
@@ -137,7 +137,7 @@ async def test_series_defaults_to_per_client_sezionale() -> None:
             actor_id=user,
             name="Other",
             profile=ClientInput(
-                ragione_sociale="Beta Group", id_paese="IT", id_codice="09876543210"
+                legal_name="Beta Group", country_code="IT", vat_number="09876543210"
             ),
         )
         d1 = await inv.create_draft(
@@ -296,7 +296,7 @@ def _sdicoop() -> Iterator[None]:
         @property
         def intermediary(self) -> IntermediaryIdentity | None:
             return IntermediaryIdentity(
-                id_paese="IT", id_codice="11122233344", denominazione="Flow Intermediary Srl"
+                country_code="IT", vat_number="11122233344", legal_name="Flow Intermediary Srl"
             )
 
         async def transmit(self, *, xml: str, invoice_id: str, filename: str) -> TransmitResult:
@@ -362,10 +362,10 @@ async def test_validation_and_isolation() -> None:
             actor_id=user,
             name="C",
             profile=ClientInput(
-                ragione_sociale="C",
-                id_paese="IT",
-                id_codice="11111111111",
-                codice_destinatario="0000000",
+                legal_name="C",
+                country_code="IT",
+                vat_number="11111111111",
+                sdi_code="0000000",
             ),
         )
         d = await inv.create_draft(s, org_id=org, actor_id=user, client_tag_id=client.id, year=2026)
@@ -421,16 +421,16 @@ async def test_issuer_piva_country_prefix_is_normalized() -> None:
             org_id=org,
             actor_id=user,
             label="P",
-            denominazione="Acme",
-            piva="IT13438810015",  # VIES form: prefix glued to the number
-            indirizzo="Via Roma 1",
-            cap="00100",
-            comune="Roma",
+            legal_name="Acme",
+            vat_number="IT13438810015",  # VIES form: prefix glued to the number
+            address="Via Roma 1",
+            postal_code="00100",
+            city="Roma",
             is_default=True,
         )
         # Split into IdPaese + bare IdCodice (no prefix in the number).
-        assert p.paese == "IT"
-        assert p.piva == "13438810015"
+        assert p.country_code == "IT"
+        assert p.vat_number == "13438810015"
         # A malformed code (not 11 digits after the prefix) is rejected.
         with pytest.raises(DomainError):
             await inv.create_issuer_profile(
@@ -438,9 +438,9 @@ async def test_issuer_piva_country_prefix_is_normalized() -> None:
                 org_id=org,
                 actor_id=user,
                 label="Bad",
-                denominazione="Bad",
-                piva="IT123",
-                indirizzo="Via Roma 1",
-                cap="00100",
-                comune="Roma",
+                legal_name="Bad",
+                vat_number="IT123",
+                address="Via Roma 1",
+                postal_code="00100",
+                city="Roma",
             )

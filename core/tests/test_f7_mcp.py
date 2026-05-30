@@ -32,13 +32,13 @@ async def test_mcp_invoicing() -> None:
             actor_id=r.user_id,
             name="Cli",
             profile=ClientInput(
-                ragione_sociale="Cli",
-                id_paese="IT",
-                id_codice="01234567890",
-                codice_destinatario="0000000",
-                indirizzo="Via Milano 2",
-                cap="20100",
-                comune="Milano",
+                legal_name="Cli",
+                country_code="IT",
+                vat_number="01234567890",
+                sdi_code="0000000",
+                address="Via Milano 2",
+                postal_code="20100",
+                city="Milano",
             ),
         )
         client_id = client.id
@@ -47,11 +47,11 @@ async def test_mcp_invoicing() -> None:
     await set_issuer_profile(
         token=token,
         org_id=org,
-        denominazione="Acme",
-        piva="09876543210",
-        indirizzo="Via X 1",
-        cap="00100",
-        comune="Roma",
+        legal_name="Acme",
+        vat_number="09876543210",
+        address="Via X 1",
+        postal_code="00100",
+        city="Roma",
     )
     d = await create_invoice(token=token, org_id=org, client_tag_id=str(client_id))
     await add_invoice_line(

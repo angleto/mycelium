@@ -26,7 +26,7 @@ from httpx import ASGITransport, AsyncClient
 from flow_api.main import app
 from flow_core.config import get_settings
 from flow_core.db import tenant_session
-from flow_core.models.sdi_received import CommittenteVerdict, ReceivedInvoice
+from flow_core.models.sdi_received import BuyerVerdict, ReceivedInvoice
 from flow_core.services.sdi_passive import ingest_passive_invoice
 
 
@@ -96,12 +96,12 @@ _FATTURA_TPL = (
 )
 
 
-def _wrap_riceve_fatture(fattura: bytes, ident: str, nome: str) -> bytes:
+def _wrap_riceve_fatture(fattura: bytes, ident: str, first_name: str) -> bytes:
     b64 = base64.b64encode(fattura).decode("ascii")
     return (
         f'<?xml version="1.0"?><RiceviFattureRequest>'
         f"<IdentificativoSdI>{ident}</IdentificativoSdI>"
-        f"<NomeFile>{nome}</NomeFile>"
+        f"<NomeFile>{first_name}</NomeFile>"
         f"<File>{b64}</File>"
         f"</RiceviFattureRequest>"
     ).encode()
@@ -131,11 +131,11 @@ async def test_post_esito_committente_endpoint(_ec_signing: None) -> None:
                 headers=h,
                 json={
                     "label": "R",
-                    "denominazione": "Recipient SRL",
-                    "piva": "13438810015",
-                    "indirizzo": "Via Test 1",
-                    "cap": "10100",
-                    "comune": "Torino",
+                    "legal_name": "Recipient SRL",
+                    "vat_number": "13438810015",
+                    "address": "Via Test 1",
+                    "postal_code": "10100",
+                    "city": "Torino",
                 },
             )
         ).json()
@@ -152,7 +152,7 @@ async def test_post_esito_committente_endpoint(_ec_signing: None) -> None:
                     select(IssuerProfile).where(IssuerProfile.id == uuid.UUID(prof["id"]))
                 )
             ).scalar_one()
-            ip.codice_destinatario_ricezione = codice
+            ip.sdi_code = codice
             await s.flush()
 
         # Deliver a passive invoice as SdI would.
@@ -161,7 +161,7 @@ async def test_post_esito_committente_endpoint(_ec_signing: None) -> None:
             _wrap_riceve_fatture(
                 _FATTURA_TPL.format(codice=codice).encode(),
                 ident=ident,
-                nome=f"IT09876543210_{uuid.uuid4().hex[:5].upper()}.xml",
+                first_name=f"IT09876543210_{uuid.uuid4().hex[:5].upper()}.xml",
             )
         )
         async with tenant_session(str(org_id), str(user_id)) as s:
@@ -189,7 +189,7 @@ async def test_post_esito_committente_endpoint(_ec_signing: None) -> None:
             updated = (
                 await s.execute(select(ReceivedInvoice).where(ReceivedInvoice.id == ri.id))
             ).scalar_one()
-        assert updated.committente_verdict is CommittenteVerdict.accepted
+        assert updated.buyer_verdict is BuyerVerdict.accepted
 
         # Bad esito: schema rejection (422 from FastAPI validation).
         r_bad = await c.post(

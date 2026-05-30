@@ -101,27 +101,27 @@ def test_client_drops_unset_card_fields_keeps_falsy() -> None:
         version=1,
     )
     prof = SimpleNamespace(
-        ragione_sociale="ACME S.p.A.",
-        id_paese="IT",
-        id_codice="12345678901",
-        codice_fiscale=None,
-        indirizzo=None,
-        cap=None,
-        comune=None,
-        provincia=None,
-        nazione=None,
-        codice_destinatario=None,
+        legal_name="ACME S.p.A.",
+        country_code="IT",
+        vat_number="12345678901",
+        tax_code=None,
+        address=None,
+        postal_code=None,
+        city=None,
+        province=None,
+        country=None,
+        sdi_code=None,
         pec=None,
         description=None,
         default_billable=False,  # a real value, must survive
-        tariffa=None,
-        valuta="EUR",
+        hourly_rate=None,
+        currency="EUR",
     )
     out = _client(tag, prof)
-    for k in ("codice_fiscale", "indirizzo", "pec", "description", "tariffa", "nazione"):
+    for k in ("tax_code", "address", "pec", "description", "hourly_rate", "country"):
         assert k not in out, f"{k} should be dropped when None"
-    assert out["ragione_sociale"] == "ACME S.p.A."
-    assert out["valuta"] == "EUR"
+    assert out["legal_name"] == "ACME S.p.A."
+    assert out["currency"] == "EUR"
     assert out["default_billable"] is False  # falsy but real → kept
 
 

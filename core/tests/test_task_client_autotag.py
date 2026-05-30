@@ -39,7 +39,7 @@ async def test_create_task_auto_attaches_client_tag() -> None:
             org_id=org,
             actor_id=user,
             name="Acme",
-            profile=ClientInput(ragione_sociale="Acme SRL"),
+            profile=ClientInput(legal_name="Acme SRL"),
         )
         proj = await taxonomy.create_project(
             s, org_id=org, actor_id=user, name="Site", client_tag_id=cli.id
@@ -66,7 +66,7 @@ async def test_attach_tag_with_project_pulls_client_tag() -> None:
             org_id=org,
             actor_id=user,
             name="Bee",
-            profile=ClientInput(ragione_sociale="Bee SRL"),
+            profile=ClientInput(legal_name="Bee SRL"),
         )
         proj = await taxonomy.create_project(
             s, org_id=org, actor_id=user, name="Hive", client_tag_id=cli.id

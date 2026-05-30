@@ -153,7 +153,7 @@ async def test_effective_role_clamp() -> None:
         base = {**_bearer(owner["token"]), "X-Workspace-Id": ws}
         as_owner = {**base, "X-Workspace-Role": "owner"}
 
-        client_body = {"name": "Acme", "ragione_sociale": "Acme SRL"}
+        client_body = {"name": "Acme", "legal_name": "Acme SRL"}
 
         # OWNER without X-Workspace-Role => effective member => a
         # client/workflow/issuer WRITE is 403.
@@ -173,7 +173,7 @@ async def test_effective_role_clamp() -> None:
             await c.post(
                 "/issuer-profiles",
                 headers=base,
-                json={"label": "Me", "denominazione": "Me SRL"},
+                json={"label": "Me", "legal_name": "Me SRL"},
             )
         ).status_code == 403
 

@@ -36,9 +36,9 @@ class IntermediaryIdentity:
     """Flow's accredited-channel identity, stamped into the FatturaPA
     payload when Flow transmits on a tenant's behalf (ADR-0011)."""
 
-    id_paese: str
-    id_codice: str
-    denominazione: str
+    country_code: str
+    vat_number: str
+    legal_name: str
 
 
 @dataclass(frozen=True)
@@ -144,9 +144,9 @@ def get_channel() -> SdiChannel:
     if s.sdicoop_active:
         return SdICoopChannel(
             intermediary=IntermediaryIdentity(
-                id_paese=s.sdi_intermediary_id_paese,
-                id_codice=s.sdi_intermediary_id_codice,
-                denominazione=s.sdi_intermediary_denominazione,
+                country_code=s.sdi_intermediary_id_paese,
+                vat_number=s.sdi_intermediary_id_codice,
+                legal_name=s.sdi_intermediary_denominazione,
             ),
             endpoint_url=s.sdi_endpoint_url,
             client_cert=s.sdi_client_cert,

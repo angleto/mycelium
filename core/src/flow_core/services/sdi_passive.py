@@ -46,7 +46,7 @@ class PassiveDelivery:
     """Structured view of a SdI delivery wrapper (the SOAP body)."""
 
     identificativo_sdi: str
-    nome_file: str
+    file_name: str
     fattura_xml: bytes
 
 
@@ -56,11 +56,11 @@ class FatturaHeader:
     persist the delivery. Everything else stays in the raw XML; this is a
     deliberately narrow projection."""
 
-    formato_trasmissione: str
-    sender_id_paese: str
-    sender_id_codice: str
-    sender_denominazione: str | None
-    codice_destinatario: str
+    transmission_format: str
+    sender_country_code: str
+    sender_vat_number: str
+    sender_legal_name: str | None
+    sdi_code: str
 
 
 def _find_local(root: ET._Element, localname: str) -> ET._Element | None:
@@ -88,15 +88,15 @@ def unwrap_passive_delivery(raw: bytes) -> PassiveDelivery:
     except ET.XMLSyntaxError as exc:
         raise ValueError(f"not well-formed: {exc}") from exc
     ident = _find_local_text(root, "IdentificativoSdI")
-    nome = _find_local_text(root, "NomeFile")
+    first_name = _find_local_text(root, "NomeFile")
     file_el = _find_local(root, "File")
-    if not ident or not nome or file_el is None or not file_el.text:
+    if not ident or not first_name or file_el is None or not file_el.text:
         raise ValueError("not a SdI RiceviFatture delivery (missing IdSdI/NomeFile/File)")
     try:
         inner = base64.b64decode(file_el.text)
     except (ValueError, TypeError) as exc:
         raise ValueError(f"File element is not valid base64: {exc}") from exc
-    return PassiveDelivery(identificativo_sdi=ident, nome_file=nome, fattura_xml=inner)
+    return PassiveDelivery(identificativo_sdi=ident, file_name=first_name, fattura_xml=inner)
 
 
 def parse_fattura_header(fattura_xml: bytes) -> FatturaHeader:
@@ -124,24 +124,24 @@ def parse_fattura_header(fattura_xml: bytes) -> FatturaHeader:
     sender_id = _find_local(cedente, "IdFiscaleIVA")
     if sender_id is None:
         raise ValueError("FatturaElettronica missing CedentePrestatore/IdFiscaleIVA")
-    paese = _find_local_text(sender_id, "IdPaese")
+    country_code = _find_local_text(sender_id, "IdPaese")
     sender_codice = _find_local_text(sender_id, "IdCodice")
-    if not paese or not sender_codice:
+    if not country_code or not sender_codice:
         raise ValueError("FatturaElettronica missing CedentePrestatore IdPaese/IdCodice")
     # Denominazione is optional in the standard (persona fisica uses
     # Nome+Cognome); we record whichever is present for triage purposes.
     den = _find_local_text(cedente, "Denominazione")
     if den is None:
-        nome = _find_local_text(cedente, "Nome") or ""
+        first_name = _find_local_text(cedente, "Nome") or ""
         cogn = _find_local_text(cedente, "Cognome") or ""
-        joined = f"{nome} {cogn}".strip()
+        joined = f"{first_name} {cogn}".strip()
         den = joined or None
     return FatturaHeader(
-        formato_trasmissione=formato,
-        sender_id_paese=paese,
-        sender_id_codice=sender_codice,
-        sender_denominazione=den,
-        codice_destinatario=codice,
+        transmission_format=formato,
+        sender_country_code=country_code,
+        sender_vat_number=sender_codice,
+        sender_legal_name=den,
+        sdi_code=codice,
     )
 
 
@@ -176,7 +176,7 @@ async def ingest_passive_invoice(raw: bytes) -> ReceivedInvoice | None:
     existing row is returned untouched."""
     delivery = unwrap_passive_delivery(raw)
     header = parse_fattura_header(delivery.fattura_xml)
-    resolved = await _resolve_recipient_org(header.codice_destinatario)
+    resolved = await _resolve_recipient_org(header.sdi_code)
     if resolved is None:
         return None
     org_id, issuer_id = resolved
@@ -188,12 +188,12 @@ async def ingest_passive_invoice(raw: bytes) -> ReceivedInvoice | None:
                 org_id=org_id,
                 issuer_profile_id=issuer_id,
                 identificativo_sdi=delivery.identificativo_sdi,
-                nome_file=delivery.nome_file,
-                formato_trasmissione=header.formato_trasmissione,
-                sender_id_paese=header.sender_id_paese,
-                sender_id_codice=header.sender_id_codice,
-                sender_denominazione=header.sender_denominazione,
-                codice_destinatario=header.codice_destinatario,
+                file_name=delivery.file_name,
+                transmission_format=header.transmission_format,
+                sender_country_code=header.sender_country_code,
+                sender_vat_number=header.sender_vat_number,
+                sender_legal_name=header.sender_legal_name,
+                sdi_code=header.sdi_code,
                 raw_xml=delivery.fattura_xml,
             )
             .on_conflict_do_nothing(index_elements=["identificativo_sdi"])
@@ -293,7 +293,7 @@ async def ingest_receiver_dt(parsed) -> ReceivedInvoice | None:  # type: ignore[
     window for us to send EsitoCommittente expired, so the invoice is
     deemed accepted. The XSD validation + parse already ran upstream
     (sdi_inbound.parse_notification); here we only carry the structured
-    fields and update committente_verdict + dt_received_at on the
+    fields and update buyer_verdict + dt_received_at on the
     received invoice + append the audit row."""
     # Local imports to avoid an import cycle with sdi_inbound.
     import datetime as _dt
@@ -301,7 +301,7 @@ async def ingest_receiver_dt(parsed) -> ReceivedInvoice | None:  # type: ignore[
     from sqlalchemy.exc import IntegrityError
     from sqlalchemy.future import select
 
-    from flow_core.models.sdi_received import CommittenteVerdict
+    from flow_core.models.sdi_received import BuyerVerdict
 
     ident = parsed.identificativo_sdi
     org_id = await _resolve_received_invoice_org(ident)
@@ -317,9 +317,9 @@ async def ingest_receiver_dt(parsed) -> ReceivedInvoice | None:  # type: ignore[
             return None
         now = _dt.datetime.now(tz=_dt.UTC)
         ri.dt_received_at = now
-        if ri.committente_verdict is CommittenteVerdict.none:
-            ri.committente_verdict = CommittenteVerdict.deemed_accepted
-            ri.committente_verdict_at = now
+        if ri.buyer_verdict is BuyerVerdict.none:
+            ri.buyer_verdict = BuyerVerdict.deemed_accepted
+            ri.buyer_verdict_at = now
         ri.version += 1
 
         notif = ReceivedInvoiceNotification(
@@ -327,7 +327,7 @@ async def ingest_receiver_dt(parsed) -> ReceivedInvoice | None:  # type: ignore[
             received_invoice_id=ri.id,
             kind="DT",
             direction="in",
-            nome_file=parsed.nome_file,
+            file_name=parsed.file_name,
             message_id=parsed.message_id,
             raw_xml=parsed.raw_xml,
             payload={"outcome": "DT"},
@@ -368,7 +368,7 @@ async def ingest_receiver_notification(raw: bytes) -> ReceivedInvoice | None:
     if not ident:
         raise ValueError("receiver notification has empty IdentificativoSdI")
     kind = _RECEIVER_ROOT_KIND[localname]
-    nome_file = _find_local_text(root, "NomeFile")
+    file_name = _find_local_text(root, "NomeFile")
     message_id = _find_local_text(root, "MessageId")
 
     org_id = await _resolve_received_invoice_org(ident)
@@ -390,7 +390,7 @@ async def ingest_receiver_notification(raw: bytes) -> ReceivedInvoice | None:
             received_invoice_id=ri.id,
             kind=kind,
             direction="in",
-            nome_file=nome_file,
+            file_name=file_name,
             message_id=message_id,
             raw_xml=raw,
             payload={"outcome": kind},

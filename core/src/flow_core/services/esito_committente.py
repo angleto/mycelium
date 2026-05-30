@@ -47,7 +47,7 @@ from flow_core.config import get_settings
 from flow_core.errors import DomainError, NotFoundError
 from flow_core.i18n import MessageCode
 from flow_core.models.sdi_notification import ReceivedInvoiceNotification
-from flow_core.models.sdi_received import CommittenteVerdict, ReceivedInvoice
+from flow_core.models.sdi_received import BuyerVerdict, ReceivedInvoice
 from flow_core.services import audit
 from flow_core.services.sdi_notification_xsd import NS_MESSAGGI, validate_sdi_notification
 from flow_core.services.sdi_transport import esito_filename, send_esito_via_sdicoop
@@ -57,9 +57,9 @@ _log = logging.getLogger(__name__)
 # EC esito codes -> committente verdict mapping. The XSD restricts the
 # Esito element to exactly these two values (EC01 ACCETTAZIONE, EC02
 # RIFIUTO); see MessaggiTypes_v1.1.xsd.
-_ESITO_VERDICT: dict[str, CommittenteVerdict] = {
-    "EC01": CommittenteVerdict.accepted,
-    "EC02": CommittenteVerdict.rejected,
+_ESITO_VERDICT: dict[str, BuyerVerdict] = {
+    "EC01": BuyerVerdict.accepted,
+    "EC02": BuyerVerdict.rejected,
 }
 
 
@@ -170,7 +170,7 @@ async def send_esito_committente(
         received_invoice_id=ri.id,
         kind="EC",
         direction="out",
-        nome_file=None,
+        file_name=None,
         message_id=message_id,
         raw_xml=signed_xml,
         payload={"esito": esito, "descrizione": descrizione},
@@ -178,8 +178,8 @@ async def send_esito_committente(
     session.add(notif)
 
     verdict = _ESITO_VERDICT[esito]
-    ri.committente_verdict = verdict
-    ri.committente_verdict_at = datetime.datetime.now(tz=datetime.UTC)
+    ri.buyer_verdict = verdict
+    ri.buyer_verdict_at = datetime.datetime.now(tz=datetime.UTC)
     ri.version += 1
 
     try:
@@ -201,8 +201,8 @@ async def send_esito_committente(
     s = get_settings()
     if s.sdicoop_active and s.sdi_endpoint_url and s.sdi_client_cert and s.sdi_client_key:
         filename = esito_filename(
-            id_paese=s.sdi_intermediary_id_paese,
-            id_codice=s.sdi_intermediary_id_codice or "0",
+            country_code=s.sdi_intermediary_id_paese,
+            vat_number=s.sdi_intermediary_id_codice or "0",
             progressivo=message_id[:5].upper(),
             esito_seq="001",
         )

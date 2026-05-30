@@ -5301,30 +5301,30 @@ export interface components {
         ClientCreateIn: {
             /** Name */
             name: string;
-            /** Ragione Sociale */
-            ragione_sociale: string;
-            /** Nome */
-            nome?: string | null;
-            /** Cognome */
-            cognome?: string | null;
-            /** Id Paese */
-            id_paese?: string | null;
-            /** Id Codice */
-            id_codice?: string | null;
-            /** Codice Fiscale */
-            codice_fiscale?: string | null;
-            /** Indirizzo */
-            indirizzo?: string | null;
-            /** Cap */
-            cap?: string | null;
-            /** Comune */
-            comune?: string | null;
-            /** Provincia */
-            provincia?: string | null;
-            /** Nazione */
-            nazione?: string | null;
-            /** Codice Destinatario */
-            codice_destinatario?: string | null;
+            /** Legal Name */
+            legal_name: string;
+            /** First Name */
+            first_name?: string | null;
+            /** Last Name */
+            last_name?: string | null;
+            /** Country Code */
+            country_code?: string | null;
+            /** Vat Number */
+            vat_number?: string | null;
+            /** Tax Code */
+            tax_code?: string | null;
+            /** Address */
+            address?: string | null;
+            /** Postal Code */
+            postal_code?: string | null;
+            /** City */
+            city?: string | null;
+            /** Province */
+            province?: string | null;
+            /** Country */
+            country?: string | null;
+            /** Sdi Code */
+            sdi_code?: string | null;
             /** Pec */
             pec?: string | null;
             /** Invoice Series */
@@ -5338,19 +5338,19 @@ export interface components {
              * @default true
              */
             default_billable?: boolean;
-            /** Tariffa */
-            tariffa?: number | string | null;
+            /** Hourly Rate */
+            hourly_rate?: number | string | null;
             /**
-             * Valuta
+             * Currency
              * @default EUR
              */
-            valuta?: string;
+            currency?: string;
             /** Timezone */
             timezone?: string | null;
-            /** Default Condizioni Pagamento */
-            default_condizioni_pagamento?: string | null;
-            /** Default Modalita Pagamento */
-            default_modalita_pagamento?: string | null;
+            /** Default Payment Conditions Code */
+            default_payment_conditions_code?: string | null;
+            /** Default Payment Method Code */
+            default_payment_method_code?: string | null;
             /** Default Payment Terms Days */
             default_payment_terms_days?: number | null;
             /** Invoice Language */
@@ -5369,30 +5369,30 @@ export interface components {
             status: string;
             /** Version */
             version: number;
-            /** Ragione Sociale */
-            ragione_sociale: string;
-            /** Nome */
-            nome: string | null;
-            /** Cognome */
-            cognome: string | null;
-            /** Id Paese */
-            id_paese: string | null;
-            /** Id Codice */
-            id_codice: string | null;
-            /** Codice Fiscale */
-            codice_fiscale: string | null;
-            /** Indirizzo */
-            indirizzo: string | null;
-            /** Cap */
-            cap: string | null;
-            /** Comune */
-            comune: string | null;
-            /** Provincia */
-            provincia: string | null;
-            /** Nazione */
-            nazione: string | null;
-            /** Codice Destinatario */
-            codice_destinatario: string | null;
+            /** Legal Name */
+            legal_name: string;
+            /** First Name */
+            first_name: string | null;
+            /** Last Name */
+            last_name: string | null;
+            /** Country Code */
+            country_code: string | null;
+            /** Vat Number */
+            vat_number: string | null;
+            /** Tax Code */
+            tax_code: string | null;
+            /** Address */
+            address: string | null;
+            /** Postal Code */
+            postal_code: string | null;
+            /** City */
+            city: string | null;
+            /** Province */
+            province: string | null;
+            /** Country */
+            country: string | null;
+            /** Sdi Code */
+            sdi_code: string | null;
             /** Pec */
             pec: string | null;
             /** Invoice Series */
@@ -5403,16 +5403,16 @@ export interface components {
             description: string | null;
             /** Default Billable */
             default_billable: boolean;
-            /** Tariffa */
-            tariffa: string | null;
-            /** Valuta */
-            valuta: string;
+            /** Hourly Rate */
+            hourly_rate: string | null;
+            /** Currency */
+            currency: string;
             /** Timezone */
             timezone: string | null;
-            /** Default Condizioni Pagamento */
-            default_condizioni_pagamento: string | null;
-            /** Default Modalita Pagamento */
-            default_modalita_pagamento: string | null;
+            /** Default Payment Conditions Code */
+            default_payment_conditions_code: string | null;
+            /** Default Payment Method Code */
+            default_payment_method_code: string | null;
             /** Default Payment Terms Days */
             default_payment_terms_days: number | null;
             /** Invoice Language */
@@ -5422,30 +5422,30 @@ export interface components {
         ClientPatchIn: {
             /** Name */
             name?: string | null;
-            /** Ragione Sociale */
-            ragione_sociale?: string | null;
-            /** Nome */
-            nome?: string | null;
-            /** Cognome */
-            cognome?: string | null;
-            /** Id Paese */
-            id_paese?: string | null;
-            /** Id Codice */
-            id_codice?: string | null;
-            /** Codice Fiscale */
-            codice_fiscale?: string | null;
-            /** Indirizzo */
-            indirizzo?: string | null;
-            /** Cap */
-            cap?: string | null;
-            /** Comune */
-            comune?: string | null;
-            /** Provincia */
-            provincia?: string | null;
-            /** Nazione */
-            nazione?: string | null;
-            /** Codice Destinatario */
-            codice_destinatario?: string | null;
+            /** Legal Name */
+            legal_name?: string | null;
+            /** First Name */
+            first_name?: string | null;
+            /** Last Name */
+            last_name?: string | null;
+            /** Country Code */
+            country_code?: string | null;
+            /** Vat Number */
+            vat_number?: string | null;
+            /** Tax Code */
+            tax_code?: string | null;
+            /** Address */
+            address?: string | null;
+            /** Postal Code */
+            postal_code?: string | null;
+            /** City */
+            city?: string | null;
+            /** Province */
+            province?: string | null;
+            /** Country */
+            country?: string | null;
+            /** Sdi Code */
+            sdi_code?: string | null;
             /** Pec */
             pec?: string | null;
             /** Invoice Series */
@@ -5456,16 +5456,16 @@ export interface components {
             description?: string | null;
             /** Default Billable */
             default_billable?: boolean | null;
-            /** Tariffa */
-            tariffa?: number | string | null;
-            /** Valuta */
-            valuta?: string | null;
+            /** Hourly Rate */
+            hourly_rate?: number | string | null;
+            /** Currency */
+            currency?: string | null;
             /** Timezone */
             timezone?: string | null;
-            /** Default Condizioni Pagamento */
-            default_condizioni_pagamento?: string | null;
-            /** Default Modalita Pagamento */
-            default_modalita_pagamento?: string | null;
+            /** Default Payment Conditions Code */
+            default_payment_conditions_code?: string | null;
+            /** Default Payment Method Code */
+            default_payment_method_code?: string | null;
             /** Default Payment Terms Days */
             default_payment_terms_days?: number | null;
             /** Invoice Language */
@@ -5549,8 +5549,8 @@ export interface components {
              * Format: uuid
              */
             parent_invoice_id: string;
-            /** Causale */
-            causale?: string | null;
+            /** Purpose */
+            purpose?: string | null;
         };
         /** DependencyCreateIn */
         DependencyCreateIn: {
@@ -6457,8 +6457,8 @@ export interface components {
             year?: number | null;
             /** Series */
             series?: string | null;
-            /** Causale */
-            causale?: string | null;
+            /** Purpose */
+            purpose?: string | null;
         };
         /**
          * InvoiceKind
@@ -6478,8 +6478,8 @@ export interface components {
             quantity?: number | string;
             /** Vat Rate */
             vat_rate?: number | string | null;
-            /** Natura */
-            natura?: string | null;
+            /** Vat Nature */
+            vat_nature?: string | null;
         };
         /** InvoiceLineOut */
         InvoiceLineOut: {
@@ -6498,8 +6498,8 @@ export interface components {
             unit_price: string;
             /** Vat Rate */
             vat_rate: string;
-            /** Natura */
-            natura: string | null;
+            /** Vat Nature */
+            vat_nature: string | null;
         };
         /** InvoiceOut */
         InvoiceOut: {
@@ -6528,26 +6528,26 @@ export interface components {
             state: components["schemas"]["InvoiceState"];
             /** Currency */
             currency: string;
-            /** Causale */
-            causale: string | null;
+            /** Purpose */
+            purpose: string | null;
             /** Notes */
             notes: string | null;
             /** Payment Iban */
             payment_iban: string | null;
             /** Payment Due Date */
             payment_due_date: string | null;
-            /** Condizioni Pagamento */
-            condizioni_pagamento: string | null;
-            /** Modalita Pagamento */
-            modalita_pagamento: string | null;
+            /** Payment Conditions Code */
+            payment_conditions_code: string | null;
+            /** Payment Method Code */
+            payment_method_code: string | null;
             /** Payment Terms Days */
             payment_terms_days: number | null;
             /** Taxable */
             taxable: string;
             /** Vat */
             vat: string;
-            /** Bollo */
-            bollo: string;
+            /** Stamp Duty */
+            stamp_duty: string;
             /** Total */
             total: string;
             /** Identificativo Sdi */
@@ -6568,18 +6568,18 @@ export interface components {
             series?: string | null;
             /** Currency */
             currency?: string | null;
-            /** Causale */
-            causale?: string | null;
+            /** Purpose */
+            purpose?: string | null;
             /** Notes */
             notes?: string | null;
             /** Payment Iban */
             payment_iban?: string | null;
             /** Payment Due Date */
             payment_due_date?: string | null;
-            /** Condizioni Pagamento */
-            condizioni_pagamento?: string | null;
-            /** Modalita Pagamento */
-            modalita_pagamento?: string | null;
+            /** Payment Conditions Code */
+            payment_conditions_code?: string | null;
+            /** Payment Method Code */
+            payment_method_code?: string | null;
             /** Payment Terms Days */
             payment_terms_days?: number | null;
         };
@@ -6597,8 +6597,8 @@ export interface components {
             line_total: string;
             /** Vat Rate */
             vat_rate: string;
-            /** Natura */
-            natura?: string | null;
+            /** Vat Nature */
+            vat_nature?: string | null;
         };
         /**
          * InvoicePreviewOut
@@ -6630,8 +6630,8 @@ export interface components {
             effective_iban: string | null;
             /** Iban Source */
             iban_source: string | null;
-            /** Causale */
-            causale: string | null;
+            /** Purpose */
+            purpose: string | null;
             /** Notes */
             notes: string | null;
             /** Is Forfettario */
@@ -6648,26 +6648,26 @@ export interface components {
          *     draft has no profile resolved yet.
          */
         InvoicePreviewParty: {
-            /** Denominazione */
-            denominazione: string;
-            /** Piva */
-            piva?: string | null;
-            /** Codice Fiscale */
-            codice_fiscale?: string | null;
-            /** Regime Fiscale */
-            regime_fiscale?: string | null;
-            /** Indirizzo */
-            indirizzo?: string | null;
-            /** Cap */
-            cap?: string | null;
-            /** Comune */
-            comune?: string | null;
-            /** Provincia */
-            provincia?: string | null;
-            /** Nazione */
-            nazione?: string | null;
-            /** Codice Destinatario */
-            codice_destinatario?: string | null;
+            /** Legal Name */
+            legal_name: string;
+            /** Vat Number */
+            vat_number?: string | null;
+            /** Tax Code */
+            tax_code?: string | null;
+            /** Tax Regime */
+            tax_regime?: string | null;
+            /** Address */
+            address?: string | null;
+            /** Postal Code */
+            postal_code?: string | null;
+            /** City */
+            city?: string | null;
+            /** Province */
+            province?: string | null;
+            /** Country */
+            country?: string | null;
+            /** Sdi Code */
+            sdi_code?: string | null;
             /** Pec */
             pec?: string | null;
         };
@@ -6677,8 +6677,8 @@ export interface components {
             taxable: string;
             /** Vat */
             vat: string;
-            /** Bollo */
-            bollo: string;
+            /** Stamp Duty */
+            stamp_duty: string;
             /** Total */
             total: string;
         };
@@ -6696,66 +6696,68 @@ export interface components {
         IssuerProfileIn: {
             /** Label */
             label: string;
-            /** Denominazione */
-            denominazione: string;
-            /** Piva */
-            piva?: string | null;
-            /** Codice Fiscale */
-            codice_fiscale?: string | null;
+            /** Legal Name */
+            legal_name: string;
+            /** Vat Number */
+            vat_number?: string | null;
+            /** Tax Code */
+            tax_code?: string | null;
             /**
-             * Regime Fiscale
+             * Tax Regime
              * @default RF01
              */
-            regime_fiscale?: string;
+            tax_regime?: string;
             /**
-             * Paese
+             * Country Code
              * @default IT
              */
-            paese?: string;
+            country_code?: string;
             /**
-             * Indirizzo
+             * Address
              * @default
              */
-            indirizzo?: string;
+            address?: string;
             /**
-             * Cap
+             * Postal Code
              * @default
              */
-            cap?: string;
+            postal_code?: string;
             /**
-             * Comune
+             * City
              * @default
              */
-            comune?: string;
-            /** Provincia */
-            provincia?: string | null;
+            city?: string;
+            /** Province */
+            province?: string | null;
             /**
-             * Nazione
+             * Country
              * @default IT
              */
-            nazione?: string;
+            country?: string;
+            /** Sdi Code */
+            sdi_code?: string | null;
             /** Rea */
             rea?: string | null;
             /** Default Iban */
             default_iban?: string | null;
-            /** Riferimento Normativo */
-            riferimento_normativo?: string | null;
-            /** Nome */
-            nome?: string | null;
-            /** Cognome */
-            cognome?: string | null;
+            /** Legal Reference */
+            legal_reference?: string | null;
+            /** First Name */
+            first_name?: string | null;
+            /** Last Name */
+            last_name?: string | null;
             /** Pec */
             pec?: string | null;
             /** Email */
             email?: string | null;
-            /** Telefono */
-            telefono?: string | null;
+            /** Phone */
+            phone?: string | null;
             /** Fax */
             fax?: string | null;
-            /** Default Condizioni Pagamento */
-            default_condizioni_pagamento?: string | null;
-            /** Default Modalita Pagamento */
-            default_modalita_pagamento?: string | null;
+            /** Default Payment Conditions Code */
+            default_payment_conditions_code?: string | null;
+            /** Default Payment Method Code */
+            default_payment_method_code?: string | null;
             /** Default Payment Terms Days */
             default_payment_terms_days?: number | null;
             /**
@@ -6773,48 +6775,50 @@ export interface components {
             id: string;
             /** Label */
             label: string;
-            /** Denominazione */
-            denominazione: string;
-            /** Piva */
-            piva: string | null;
-            /** Codice Fiscale */
-            codice_fiscale: string | null;
-            /** Regime Fiscale */
-            regime_fiscale: string;
-            /** Paese */
-            paese: string;
-            /** Indirizzo */
-            indirizzo: string;
-            /** Cap */
-            cap: string;
-            /** Comune */
-            comune: string;
-            /** Provincia */
-            provincia: string | null;
-            /** Nazione */
-            nazione: string;
+            /** Legal Name */
+            legal_name: string;
+            /** Vat Number */
+            vat_number: string | null;
+            /** Tax Code */
+            tax_code: string | null;
+            /** Tax Regime */
+            tax_regime: string;
+            /** Country Code */
+            country_code: string;
+            /** Address */
+            address: string;
+            /** Postal Code */
+            postal_code: string;
+            /** City */
+            city: string;
+            /** Province */
+            province: string | null;
+            /** Country */
+            country: string;
+            /** Sdi Code */
+            sdi_code: string | null;
             /** Rea */
             rea: string | null;
             /** Default Iban */
             default_iban: string | null;
-            /** Riferimento Normativo */
-            riferimento_normativo: string | null;
-            /** Nome */
-            nome: string | null;
-            /** Cognome */
-            cognome: string | null;
+            /** Legal Reference */
+            legal_reference: string | null;
+            /** First Name */
+            first_name: string | null;
+            /** Last Name */
+            last_name: string | null;
             /** Pec */
             pec: string | null;
             /** Email */
             email: string | null;
-            /** Telefono */
-            telefono: string | null;
+            /** Phone */
+            phone: string | null;
             /** Fax */
             fax: string | null;
-            /** Default Condizioni Pagamento */
-            default_condizioni_pagamento: string | null;
-            /** Default Modalita Pagamento */
-            default_modalita_pagamento: string | null;
+            /** Default Payment Conditions Code */
+            default_payment_conditions_code: string | null;
+            /** Default Payment Method Code */
+            default_payment_method_code: string | null;
             /** Default Payment Terms Days */
             default_payment_terms_days: number | null;
             /** Is Default */
@@ -6828,48 +6832,50 @@ export interface components {
         IssuerProfilePatchIn: {
             /** Label */
             label?: string | null;
-            /** Denominazione */
-            denominazione?: string | null;
-            /** Piva */
-            piva?: string | null;
-            /** Codice Fiscale */
-            codice_fiscale?: string | null;
-            /** Regime Fiscale */
-            regime_fiscale?: string | null;
-            /** Paese */
-            paese?: string | null;
-            /** Indirizzo */
-            indirizzo?: string | null;
-            /** Cap */
-            cap?: string | null;
-            /** Comune */
-            comune?: string | null;
-            /** Provincia */
-            provincia?: string | null;
-            /** Nazione */
-            nazione?: string | null;
+            /** Legal Name */
+            legal_name?: string | null;
+            /** Vat Number */
+            vat_number?: string | null;
+            /** Tax Code */
+            tax_code?: string | null;
+            /** Tax Regime */
+            tax_regime?: string | null;
+            /** Country Code */
+            country_code?: string | null;
+            /** Address */
+            address?: string | null;
+            /** Postal Code */
+            postal_code?: string | null;
+            /** City */
+            city?: string | null;
+            /** Province */
+            province?: string | null;
+            /** Country */
+            country?: string | null;
+            /** Sdi Code */
+            sdi_code?: string | null;
             /** Rea */
             rea?: string | null;
             /** Default Iban */
             default_iban?: string | null;
-            /** Riferimento Normativo */
-            riferimento_normativo?: string | null;
-            /** Nome */
-            nome?: string | null;
-            /** Cognome */
-            cognome?: string | null;
+            /** Legal Reference */
+            legal_reference?: string | null;
+            /** First Name */
+            first_name?: string | null;
+            /** Last Name */
+            last_name?: string | null;
             /** Pec */
             pec?: string | null;
             /** Email */
             email?: string | null;
-            /** Telefono */
-            telefono?: string | null;
+            /** Phone */
+            phone?: string | null;
             /** Fax */
             fax?: string | null;
-            /** Default Condizioni Pagamento */
-            default_condizioni_pagamento?: string | null;
-            /** Default Modalita Pagamento */
-            default_modalita_pagamento?: string | null;
+            /** Default Payment Conditions Code */
+            default_payment_conditions_code?: string | null;
+            /** Default Payment Method Code */
+            default_payment_method_code?: string | null;
             /** Default Payment Terms Days */
             default_payment_terms_days?: number | null;
             /** Is Default */
@@ -7422,7 +7428,7 @@ export interface components {
          *     each asserting ``expected_version`` (the cursor returned by the
          *     previous chunk). Chunks concatenate **raw** (no separator) for
          *     byte-exact reassembly. Recommended client chunk size ~32k chars to
-         *     stay under any transport payload cap. ``chunk_index`` is advisory
+         *     stay under any transport payload postal_code. ``chunk_index`` is advisory
          *     (client-side ordering / progress); idempotency is version-based.
          *     Set ``is_last=True`` on the final chunk so the recovery-history
          *     revision is sealed once for the whole upload.

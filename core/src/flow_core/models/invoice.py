@@ -107,20 +107,20 @@ class IssuerProfile(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, B
     __tablename__ = "issuer_profiles"
 
     label: Mapped[str] = mapped_column(String(120), nullable=False, server_default="Principale")
-    regime_fiscale: Mapped[str] = mapped_column(String(4), nullable=False, server_default="RF01")
-    paese: Mapped[str] = mapped_column(String(2), nullable=False, server_default="IT")
-    piva: Mapped[str | None] = mapped_column(String(28), nullable=True)
-    codice_fiscale: Mapped[str | None] = mapped_column(String(16), nullable=True)
-    denominazione: Mapped[str] = mapped_column(String(200), nullable=False)
+    tax_regime: Mapped[str] = mapped_column(String(4), nullable=False, server_default="RF01")
+    country_code: Mapped[str] = mapped_column(String(2), nullable=False, server_default="IT")
+    vat_number: Mapped[str | None] = mapped_column(String(28), nullable=True)
+    tax_code: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    legal_name: Mapped[str] = mapped_column(String(200), nullable=False)
     # Persona fisica: when both set, FatturaPA emits Anagrafica/Nome+Cognome
     # instead of Denominazione (AnagraficaType is a choice; max 60 latin).
-    nome: Mapped[str | None] = mapped_column(String(60), nullable=True)
-    cognome: Mapped[str | None] = mapped_column(String(60), nullable=True)
-    indirizzo: Mapped[str] = mapped_column(String(200), nullable=False, server_default="")
-    cap: Mapped[str] = mapped_column(String(10), nullable=False, server_default="")
-    comune: Mapped[str] = mapped_column(String(120), nullable=False, server_default="")
-    provincia: Mapped[str | None] = mapped_column(String(4), nullable=True)
-    nazione: Mapped[str] = mapped_column(String(2), nullable=False, server_default="IT")
+    first_name: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    last_name: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    address: Mapped[str] = mapped_column(String(200), nullable=False, server_default="")
+    postal_code: Mapped[str] = mapped_column(String(10), nullable=False, server_default="")
+    city: Mapped[str] = mapped_column(String(120), nullable=False, server_default="")
+    province: Mapped[str | None] = mapped_column(String(4), nullable=True)
+    country: Mapped[str] = mapped_column(String(2), nullable=False, server_default="IT")
     rea: Mapped[str | None] = mapped_column(String(40), nullable=True)
     # Fallback payment IBAN, used by an invoice when neither the invoice
     # nor the client carries one (IBAN precedence: invoice > client >
@@ -129,20 +129,20 @@ class IssuerProfile(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, B
     # Free-text legal reference for the VAT exemption, emitted in
     # DatiRiepilogo/RiferimentoNormativo for lines carrying a Natura (max 100
     # latin chars, XSD String100LatinType). NULL -> a default for RF19.
-    riferimento_normativo: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    legal_reference: Mapped[str | None] = mapped_column(String(100), nullable=True)
     # Contact channels. PEC is printed on the courtesy PDF; the others go
     # in optional CedentePrestatore/Contatti (XSD: Telefono/Fax/Email).
     # All facoltative; none are emitted when NULL.
     pec: Mapped[str | None] = mapped_column(String(320), nullable=True)
     email: Mapped[str | None] = mapped_column(String(320), nullable=True)
-    telefono: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    phone: Mapped[str | None] = mapped_column(String(20), nullable=True)
     fax: Mapped[str | None] = mapped_column(String(20), nullable=True)
     # Issuer-level defaults for payment metadata; the resolver falls back
     # to these only when the client (and the invoice itself) carry none.
     # Resolution precedence: invoice > client > issuer > system default
     # (TP02 for CondizioniPagamento, MP05 for ModalitaPagamento).
-    default_condizioni_pagamento: Mapped[str | None] = mapped_column(String(4), nullable=True)
-    default_modalita_pagamento: Mapped[str | None] = mapped_column(String(4), nullable=True)
+    default_payment_conditions_code: Mapped[str | None] = mapped_column(String(4), nullable=True)
+    default_payment_method_code: Mapped[str | None] = mapped_column(String(4), nullable=True)
     default_payment_terms_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
     is_default: Mapped[bool] = mapped_column(nullable=False, server_default="false")
     # Recipient CodiceDestinatario AdE assigns at accreditamento Ricezione
@@ -150,9 +150,7 @@ class IssuerProfile(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, B
     # SdI delivers any incoming FatturaElettronica with this codice to our
     # /sdi/notification endpoint (services/sdi_passive.ingest_passive_invoice).
     # NULL = the issuer is accredited only as transmitter (active cycle).
-    codice_destinatario_ricezione: Mapped[str | None] = mapped_column(
-        String(7), nullable=True, unique=True
-    )
+    sdi_code: Mapped[str | None] = mapped_column(String(7), nullable=True, unique=True)
     conservation_adhesion: Mapped[ConservationAdhesion] = mapped_column(
         SAEnum(
             ConservationAdhesion,
@@ -234,7 +232,7 @@ class Invoice(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, Base):
         server_default="draft",
     )
     currency: Mapped[str] = mapped_column(String(3), nullable=False, server_default="EUR")
-    causale: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    purpose: Mapped[str | None] = mapped_column(String(200), nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     payment_iban: Mapped[str | None] = mapped_column(String(34), nullable=True)
     payment_due_date: Mapped[datetime.date | None] = mapped_column(Date, nullable=True)
@@ -242,15 +240,15 @@ class Invoice(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, Base):
     # GiorniTerminiPagamento. NULL = inherit from the client (then issuer,
     # then system default). Whitelisted to the SdI enums at the service
     # layer; the XML build never sees a value outside the FatturaPA tables.
-    condizioni_pagamento: Mapped[str | None] = mapped_column(String(4), nullable=True)
-    modalita_pagamento: Mapped[str | None] = mapped_column(String(4), nullable=True)
+    payment_conditions_code: Mapped[str | None] = mapped_column(String(4), nullable=True)
+    payment_method_code: Mapped[str | None] = mapped_column(String(4), nullable=True)
     payment_terms_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
     taxable: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False, server_default="0")
     vat: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False, server_default="0")
-    # Virtual stamp duty (imposta di bollo): EUR 2.00 on a forfettario
+    # Virtual stamp duty (imposta di stamp_duty): EUR 2.00 on a forfettario
     # invoice whose taxable >= 77.47, else 0. Persisted with the totals;
     # included in ``total`` and in ImportoTotaleDocumento.
-    bollo: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False, server_default="0")
+    stamp_duty: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False, server_default="0")
     total: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False, server_default="0")
     identificativo_sdi: Mapped[str | None] = mapped_column(String(40), nullable=True)
     sdi_status: Mapped[SdiStatus] = mapped_column(
@@ -318,7 +316,7 @@ class InvoiceLine(UUIDPKMixin, OrgScopedMixin, Base):
     quantity: Mapped[Decimal] = mapped_column(Numeric(12, 4), nullable=False, server_default="1")
     unit_price: Mapped[Decimal] = mapped_column(Numeric(14, 4), nullable=False)
     vat_rate: Mapped[Decimal] = mapped_column(Numeric(5, 2), nullable=False, server_default="22")
-    natura: Mapped[str | None] = mapped_column(String(4), nullable=True)
+    vat_nature: Mapped[str | None] = mapped_column(String(4), nullable=True)
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

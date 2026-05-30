@@ -3,7 +3,7 @@ NotificaEsitoCommittente.
 
 Tests cover the builder (XSD-valid output, signature element present, esito
 + verdict mapping) and the persistence wrapper (audit row written with
-``direction='out'``, denormalized committente_verdict updated, retry of the
+``direction='out'``, denormalized buyer_verdict updated, retry of the
 same ``message_id`` is refused as a domain error).
 
 Self-signed RSA material is generated once per module so signxml has
@@ -28,7 +28,7 @@ from cryptography.x509.oid import NameOID
 from flow_core.config import get_settings
 from flow_core.db import tenant_session
 from flow_core.errors import DomainError
-from flow_core.models.sdi_received import CommittenteVerdict, ReceivedInvoice
+from flow_core.models.sdi_received import BuyerVerdict, ReceivedInvoice
 from flow_core.services import invoice as inv
 from flow_core.services.auth import signup
 from flow_core.services.esito_committente import (
@@ -173,14 +173,14 @@ _FATTURA_XML_TEMPLATE = (
 )
 
 
-def _wrap_riceve_fatture(fattura_xml: bytes, ident: str, nome: str) -> bytes:
+def _wrap_riceve_fatture(fattura_xml: bytes, ident: str, first_name: str) -> bytes:
     import base64
 
     b64 = base64.b64encode(fattura_xml).decode("ascii")
     return (
         f'<?xml version="1.0"?><RiceviFattureRequest>'
         f"<IdentificativoSdI>{ident}</IdentificativoSdI>"
-        f"<NomeFile>{nome}</NomeFile>"
+        f"<NomeFile>{first_name}</NomeFile>"
         f"<File>{b64}</File>"
         f"</RiceviFattureRequest>"
     ).encode()
@@ -206,21 +206,21 @@ async def _make_org_with_received_invoice() -> tuple[uuid.UUID, uuid.UUID, uuid.
             org_id=org,
             actor_id=user,
             label="R",
-            denominazione="Recipient SRL",
-            piva="13438810015",
-            indirizzo="Via Test 1",
-            cap="10100",
-            comune="Torino",
+            legal_name="Recipient SRL",
+            vat_number="13438810015",
+            address="Via Test 1",
+            postal_code="10100",
+            city="Torino",
             is_default=True,
         )
-        issuer.codice_destinatario_ricezione = codice
+        issuer.sdi_code = codice
         await s.flush()
 
     ident = str(int(uuid.uuid4().hex[:9], 16) % 10**12)
     raw = _wrap_riceve_fatture(
         _FATTURA_XML_TEMPLATE.format(codice=codice).encode(),
         ident=ident,
-        nome=f"IT09876543210_{uuid.uuid4().hex[:5].upper()}.xml",
+        first_name=f"IT09876543210_{uuid.uuid4().hex[:5].upper()}.xml",
     )
     ri = await ingest_passive_invoice(raw)
     assert ri is not None
@@ -251,8 +251,8 @@ async def test_send_ec_persists_audit_and_updates_verdict(_ec_signing: None) -> 
         ri = (
             await s.execute(select(ReceivedInvoice).where(ReceivedInvoice.id == ri_id))
         ).scalar_one()
-    assert ri.committente_verdict is CommittenteVerdict.accepted
-    assert ri.committente_verdict_at is not None
+    assert ri.buyer_verdict is BuyerVerdict.accepted
+    assert ri.buyer_verdict_at is not None
 
 
 async def test_dt_receiver_side_marks_deemed_accepted(_ec_signing: None) -> None:
@@ -288,7 +288,7 @@ async def test_dt_receiver_side_marks_deemed_accepted(_ec_signing: None) -> None
         updated = (
             await s.execute(select(ReceivedInvoice).where(ReceivedInvoice.id == ri_id))
         ).scalar_one()
-    assert updated.committente_verdict is CommittenteVerdict.deemed_accepted
+    assert updated.buyer_verdict is BuyerVerdict.deemed_accepted
     assert updated.dt_received_at is not None
 
 
@@ -311,7 +311,7 @@ async def test_send_ec_rejection_marks_rejected_verdict(_ec_signing: None) -> No
         ri = (
             await s.execute(select(ReceivedInvoice).where(ReceivedInvoice.id == ri_id))
         ).scalar_one()
-    assert ri.committente_verdict is CommittenteVerdict.rejected
+    assert ri.buyer_verdict is BuyerVerdict.rejected
 
 
 # --- Live transport wiring (sdicoop channel) ----------------------------------
@@ -399,7 +399,7 @@ async def test_send_ec_with_sdicoop_transport_error_persists_anyway(
         ri = (
             await s.execute(_sel(ReceivedInvoice).where(ReceivedInvoice.id == ri_id))
         ).scalar_one()
-    assert ri.committente_verdict is CommittenteVerdict.rejected
+    assert ri.buyer_verdict is BuyerVerdict.rejected
 
 
 async def test_send_ec_without_channel_does_not_call_transport(_ec_signing: None) -> None:
