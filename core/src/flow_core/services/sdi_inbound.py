@@ -49,6 +49,10 @@ _ROOT_OUTCOME: dict[str, str] = {
     "AttestazioneTrasmissioneFattura": "AT",
     "NotificaEsito": "NE",
     "NotificaDecorrenzaTermini": "DT",
+    # B2B/B2C "privati" roots: a scarto is RicevutaScarto (NS), an undeliverable
+    # is RicevutaImpossibilitaRecapito (MC). RicevutaConsegna (RC) is shared.
+    "RicevutaScarto": "NS",
+    "RicevutaImpossibilitaRecapito": "MC",
 }
 # Notifications the active-cycle parser handles. DT is dual-cycle: the same
 # root is delivered to transmitter and receiver; here we accept it and treat

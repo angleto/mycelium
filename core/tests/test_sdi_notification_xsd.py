@@ -16,6 +16,7 @@ from flow_core.services.sdi_notification_xsd import (
     ALL_NOTIFICATION_ROOTS,
     DUAL_CYCLE_ROOTS,
     NS_MESSAGGI,
+    NS_MESSAGGI_PRIVATI,
     RECEIVER_CYCLE_ROOTS,
     validate_sdi_notification,
 )
@@ -132,6 +133,30 @@ def _mt(ident: str = "888") -> str:
     )
 
 
+def _rs(ident: str = "999") -> str:
+    # B2B/B2C scarto in the privati namespace; validated structurally (we do
+    # not vendor that schema), so a well-formed instance passes.
+    return (
+        f'<m:RicevutaScarto xmlns:m="{NS_MESSAGGI_PRIVATI}" versione="1.0">'
+        f"<IdentificativoSdI>{ident}</IdentificativoSdI>"
+        f"<NomeFile>x.xml</NomeFile>"
+        f"<DataOraRicezione>2026-05-30T10:00:00</DataOraRicezione>"
+        f"<ListaErrori><Errore><Codice>00300</Codice>"
+        f"<Descrizione>boom</Descrizione></Errore></ListaErrori>"
+        f"</m:RicevutaScarto>"
+    )
+
+
+def _rir(ident: str = "1010") -> str:
+    return (
+        f'<m:RicevutaImpossibilitaRecapito xmlns:m="{NS_MESSAGGI_PRIVATI}" versione="1.0">'
+        f"<IdentificativoSdI>{ident}</IdentificativoSdI>"
+        f"<NomeFile>x.xml</NomeFile>"
+        f"<DataOraRicezione>2026-05-30T10:00:00</DataOraRicezione>"
+        f"</m:RicevutaImpossibilitaRecapito>"
+    )
+
+
 _BUILDERS = {
     "RicevutaConsegna": _rc,
     "NotificaScarto": _ns,
@@ -142,6 +167,8 @@ _BUILDERS = {
     "NotificaEsitoCommittente": _ec,
     "ScartoEsitoCommittente": _se,
     "MetadatiInvioFile": _mt,
+    "RicevutaScarto": _rs,
+    "RicevutaImpossibilitaRecapito": _rir,
 }
 
 
@@ -171,6 +198,9 @@ def test_known_root_membership_is_explicit() -> None:
         "NotificaEsitoCommittente",
         "ScartoEsitoCommittente",
         "MetadatiInvioFile",
+        # B2B/B2C privati roots (ivaservizi namespace, structural-only check):
+        "RicevutaScarto",
+        "RicevutaImpossibilitaRecapito",
     }
 
 
@@ -180,13 +210,13 @@ def test_wrong_namespace_is_rejected() -> None:
         "<IdentificativoSdI>1</IdentificativoSdI></m:RicevutaConsegna>"
     )
     errors = validate_sdi_notification(bad)
-    assert errors and "not the official SdI messaggi namespace" in errors[0]
+    assert errors and "is neither the PA messaggi namespace" in errors[0]
 
 
 def test_missing_namespace_is_rejected() -> None:
     bare = "<RicevutaConsegna><IdentificativoSdI>1</IdentificativoSdI></RicevutaConsegna>"
     errors = validate_sdi_notification(bare)
-    assert errors and "not the official SdI messaggi namespace" in errors[0]
+    assert errors and "is neither the PA messaggi namespace" in errors[0]
 
 
 def test_unknown_root_is_rejected_with_namespace() -> None:

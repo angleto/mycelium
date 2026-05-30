@@ -30,18 +30,30 @@ import lxml.etree as ET
 _XSD_FILE = pathlib.Path(__file__).parent / "fatturapa_xsd" / "MessaggiTypes_v1.1.xsd"
 
 NS_MESSAGGI = "http://www.fatturapa.gov.it/sdi/messaggi/v1.0"
+# B2B/B2C ("privati") notification namespace. SdI delivers FPR12-cycle
+# notifications here (verified live 2026-05-30), NOT in the PA NS_MESSAGGI; we
+# do not vendor this schema, so its payloads pass on the structural root check.
+NS_MESSAGGI_PRIVATI = "http://ivaservizi.agenziaentrate.gov.it/docs/xsd/fattura/messaggi/v1.0"
 
-# All notification root elements declared by MessaggiTypes_v1.1. Semantic
-# subsets (active vs receiver cycle) are routing concerns, see ``sdi_inbound``
-# and ``sdi_passive``; here we just enumerate what the schema knows.
+# Notification roots we recognise. The PA/B2G subset is declared by the
+# vendored MessaggiTypes_v1.1; the B2B/B2C "privati" subset (Ricevuta*) lives
+# in a separate ivaservizi namespace we do not vendor. Semantic routing
+# (active vs receiver) is in ``sdi_inbound`` / ``sdi_passive``; here we
+# enumerate every known kind across both schemas.
 ACTIVE_CYCLE_ROOTS: frozenset[str] = frozenset(
     {
         # Trasmittente receives these after pushing a FatturaElettronica to SdI.
+        # PA / B2G roots (MessaggiTypes_v1.1):
         "RicevutaConsegna",
         "NotificaScarto",
         "NotificaMancataConsegna",
         "AttestazioneTrasmissioneFattura",
         "NotificaEsito",
+        # B2B/B2C "privati" roots (ivaservizi messaggi namespace), verified
+        # live 2026-05-30: a scarto is a RicevutaScarto, an undeliverable is a
+        # RicevutaImpossibilitaRecapito (RicevutaConsegna is shared above).
+        "RicevutaScarto",
+        "RicevutaImpossibilitaRecapito",
     }
 )
 RECEIVER_CYCLE_ROOTS: frozenset[str] = frozenset(
@@ -98,12 +110,18 @@ def validate_sdi_notification(xml: bytes | str) -> list[str]:
             f"line {doc.sourceline}: root '{qname.localname}' is not a known "
             f"SdI notification (expected one of {sorted(ALL_NOTIFICATION_ROOTS)})"
         ]
-    if qname.namespace != NS_MESSAGGI:
+    if qname.namespace not in (NS_MESSAGGI, NS_MESSAGGI_PRIVATI):
         return [
-            f"line {doc.sourceline}: namespace "
-            f"'{qname.namespace}' is not the official SdI messaggi namespace "
-            f"'{NS_MESSAGGI}'"
+            f"line {doc.sourceline}: namespace '{qname.namespace}' is neither the "
+            f"PA messaggi namespace '{NS_MESSAGGI}' nor the B2B/B2C privati "
+            f"namespace '{NS_MESSAGGI_PRIVATI}'"
         ]
+    if qname.namespace == NS_MESSAGGI_PRIVATI:
+        # The vendored MessaggiTypes_v1.1 schema is the PA one; we do not vendor
+        # the privati schema, so a recognised privati root + namespace is
+        # accepted on structure alone (the field extractor is namespace-agnostic
+        # and the inbound app still ACKs receipt). Strict XSD runs for PA only.
+        return []
     schema = _schema()
     if schema.validate(doc):
         return []

@@ -42,6 +42,23 @@ from flow_core.services.sdi_transport import _decode_soap_response
 _log = logging.getLogger("flow_sdi_inbound")
 
 
+def _carries_identificativo_sdi(payload: bytes) -> bool:
+    """True if the (SOAP-envelope) payload carries a non-empty IdentificativoSdI
+    element -- i.e. it is recognisably an SdI outcome notification even if we
+    cannot classify its exact root. Lets the endpoint ACK receipt (200) instead
+    of 400ing, so SdI's delivery succeeds (required to pass accreditation)."""
+    try:
+        root = ET.fromstring(payload)
+    except ET.XMLSyntaxError:
+        return False
+    return any(
+        isinstance(el.tag, str)
+        and ET.QName(el).localname == "IdentificativoSdI"
+        and (el.text or "").strip()
+        for el in root.iter()
+    )
+
+
 def create_app() -> FastAPI:
     app = FastAPI(title="Flow SDI inbound", version="0.1.0")
 
@@ -74,13 +91,17 @@ def create_app() -> FastAPI:
                 # Active-cycle: RC/MC/NS/AT/NE/DT (DT transmitter-side).
                 await ingest_notification(payload)
         except (ValueError, ET.XMLSyntaxError) as exc:
-            # Unrecognized / not-well-formed payload: 400 so SdI / logs
-            # surface it, not a 500 (ADR-0011: never 500 on the SdI push
-            # path or its retry/log behaviour gets noisy). lxml raises
-            # XMLSyntaxError on malformed XML; the service-layer parsers
-            # raise ValueError on a structurally unknown notification or
-            # FatturaElettronica.
-            _log.warning("SDI-INBOUND parse failed: %s", exc)
+            # SdI's delivery must be ACKed (200) for the channel to pass
+            # accreditation. If the payload IS an SdI notification (carries an
+            # IdentificativoSdI) but we could not fully classify/apply it,
+            # acknowledge receipt and log for follow-up -- a 400 makes SdI
+            # retry forever and the portal test stays KO. Only a payload that
+            # is not a recognisable notification at all gets 400 (never a 500,
+            # ADR-0011: keep SdI's retry/log path clean).
+            if _carries_identificativo_sdi(payload):
+                _log.warning("SDI-INBOUND received but not applied: %s", exc)
+                return Response(status_code=200)
+            _log.warning("SDI-INBOUND rejected (not a notification): %s", exc)
             return Response(status_code=400)
         return Response(status_code=200)
 
