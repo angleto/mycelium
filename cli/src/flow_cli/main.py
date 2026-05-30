@@ -17,6 +17,7 @@ from flow_cli import __version__
 from flow_cli.cmds import annotations as annotations_cmd
 from flow_cli.cmds import auth as auth_cmd
 from flow_cli.cmds import clients as clients_cmd
+from flow_cli.cmds import invoices as invoices_cmd
 from flow_cli.cmds import notes as notes_cmd
 from flow_cli.cmds import notifications as notif_cmd
 from flow_cli.cmds import open_url as open_cmd
@@ -80,6 +81,7 @@ app.add_typer(timer_cmd.app, name="timer")
 app.add_typer(tags_cmd.app, name="tag")
 app.add_typer(clients_cmd.clients_app, name="client")
 app.add_typer(clients_cmd.projects_app, name="project")
+app.add_typer(invoices_cmd.app, name="invoice")
 app.add_typer(workspace_cmd.app, name="workspace")
 app.add_typer(notif_cmd.app, name="notif")
 app.add_typer(schedule_cmd.app, name="schedule")
