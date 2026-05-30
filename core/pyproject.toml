@@ -20,6 +20,11 @@ dependencies = [
     "httpx>=0.27",
     "lxml>=5",
     "signxml>=4",
+    # Markdown anchor resolution for inline suggestions (services/md_anchor):
+    # mirrors the editor's markdown-it so accept resolves rendered-text
+    # anchors against the markdown source. Already resolved transitively
+    # (via rich); pinned here as a direct dependency of the owning package.
+    "markdown-it-py>=3",
 ]
 
 # Opt-in local embedder (ADR-0012): the privacy-first default runs a

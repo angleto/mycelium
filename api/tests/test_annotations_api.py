@@ -175,6 +175,73 @@ async def test_suggestion_goes_stale_when_target_gone() -> None:
         assert body == "Alpha beta gamma."
 
 
+async def _accept_suggestion(
+    c: AsyncClient, h: dict[str, str], pid: str, original: str, proposed: str
+):
+    sug = (
+        await c.post(
+            "/annotations/suggestion",
+            headers=h,
+            json={
+                "doc_kind": "note_part",
+                "doc_id": pid,
+                "original_text": original,
+                "proposed_text": proposed,
+            },
+        )
+    ).json()
+    return await c.post(
+        f"/annotations/{sug['id']}/accept", headers=h, json={"expected_version": sug["version"]}
+    )
+
+
+async def test_accept_is_markdown_aware() -> None:
+    """End-to-end through the real stack: a suggestion whose rendered
+    ``original_text`` (what the SPA captures) sits inside inline markup or
+    spans blocks now splices faithfully into the markdown source — the old
+    raw str.find would have gone stale."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as c:
+        h = await _signup(c)
+
+        # inline mark: 'quick' is the rendered text inside **...**; accept
+        # must keep the bold delimiters and replace only the word.
+        nid, pid = await _note_with_part(c, h, "The **quick** brown fox.")
+        acc = await _accept_suggestion(c, h, pid, "quick", "lazy")
+        assert acc.status_code == 200, acc.text
+        assert (await c.get(f"/notes/{nid}", headers=h)).json()["parts"][0][
+            "body"
+        ] == "The **lazy** brown fox."
+
+        # link text: the URL is preserved, only the link label changes.
+        nid, pid = await _note_with_part(c, h, "see [docs](http://x) now")
+        acc = await _accept_suggestion(c, h, pid, "docs", "HERE")
+        assert acc.status_code == 200, acc.text
+        assert (await c.get(f"/notes/{nid}", headers=h)).json()["parts"][0][
+            "body"
+        ] == "see [HERE](http://x) now"
+
+        # multi-block selection (rendered text joins blocks with a space).
+        nid, pid = await _note_with_part(c, h, "Para one here.\n\nPara two there.")
+        acc = await _accept_suggestion(c, h, pid, "here. Para two", "X")
+        assert acc.status_code == 200, acc.text
+        assert (await c.get(f"/notes/{nid}", headers=h)).json()["parts"][0][
+            "body"
+        ] == "Para one X there."
+
+
+async def test_accept_refuses_corrupting_straddle() -> None:
+    """A selection that straddles a mark boundary would orphan a delimiter;
+    accept declines (stale) and leaves the body byte-for-byte unchanged."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as c:
+        h = await _signup(c)
+        nid, pid = await _note_with_part(c, h, "a **b** c")
+        acc = await _accept_suggestion(c, h, pid, "b c", "X Y")
+        assert acc.status_code >= 400
+        assert (await c.get(f"/notes/{nid}", headers=h)).json()["parts"][0]["body"] == "a **b** c"
+
+
 async def test_lifecycle_resolve_reopen_edit_delete() -> None:
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://t") as c:

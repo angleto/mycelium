@@ -43,55 +43,92 @@ function overlaps(r: Range, used: Range[]): boolean {
   return used.some((u) => r.from < u.to && u.from < r.to)
 }
 
-// Locate ``needle`` within a single text node, preferring the occurrence
-// bounded by the W3C-style ``prefix``/``suffix`` when supplied, and
-// skipping ranges already consumed by an earlier anchor so two
-// annotations quoting the same text land on successive occurrences
-// rather than stacking on the first. Returns null when nothing
-// matches (the mark is simply not drawn — it still shows in the panel).
-// Quotes that span multiple nodes (formatting inside the run) don't
-// decorate; this never throws.
+// Rendered-text projection of the document with a per-character map back
+// to live ProseMirror positions, MIRRORING ``doc.textBetween(0, size,
+// ' ')`` (the exact domain InlineAnnotator.readSelection captures an
+// anchor in, and the exact domain the server's md_anchor resolves the
+// splice in). So "what is struck" == "what accept will splice". Marks
+// contribute only their text, links only their link-text, atoms (image,
+// inline math) and hard breaks nothing, and text runs of different
+// blocks are joined by a single space. ``pmPos[i]`` is the live PM
+// position of rendered char ``i``.
+interface DocMap {
+  text: string
+  pmPos: number[]
+}
+
+function renderDocWithMap(doc: PMNode): DocMap {
+  let text = ''
+  const pmPos: number[] = []
+  // Mirrors prosemirror-model Fragment.textBetween: a block separator is
+  // emitted on entering a block only when text has been produced since
+  // the last one (``separated`` tracks that).
+  let separated = true
+  doc.nodesBetween(0, doc.content.size, (node, pos) => {
+    if (node.isText && node.text) {
+      const t = node.text
+      for (let i = 0; i < t.length; i += 1) {
+        text += t[i]
+        pmPos.push(pos + i)
+      }
+      separated = false
+    } else if (node.isLeaf) {
+      // image / inlineMath / hardBreak: no text, no separator change.
+    } else if (!separated && node.isBlock) {
+      text += ' '
+      pmPos.push(pos)
+      separated = true
+    }
+    return true
+  })
+  return { text, pmPos }
+}
+
+// Locate ``needle`` in the rendered projection, preferring the occurrence
+// bounded by the W3C ``prefix``/``suffix`` when supplied, skipping ranges
+// already consumed by an earlier anchor so two annotations quoting the
+// same text land on successive occurrences. Maps the rendered span back
+// to a (possibly multi-node / multi-block / inside-mark) PM range. Returns
+// null when nothing matches (the mark is simply not drawn — it still shows
+// in the panel). Never throws.
 function findRange(
-  doc: PMNode,
+  map: DocMap,
   needle: string,
   prefix: string | null,
   suffix: string | null,
   used: Range[],
 ): Range | null {
   if (!needle) return null
+  const { text, pmPos } = map
   const pfx = prefix ?? ''
   const sfx = suffix ?? ''
-  let hit: Range | null = null
-  doc.descendants((node, pos) => {
-    if (hit) return false
-    if (!node.isText || !node.text) return undefined
-    const text = node.text
-    let from = 0
-    for (;;) {
-      const idx = text.indexOf(needle, from)
-      if (idx < 0) break
-      const cand: Range = { from: pos + idx, to: pos + idx + needle.length }
-      const pOk = !pfx || text.slice(Math.max(0, idx - pfx.length), idx) === pfx
-      const sOk = !sfx || text.slice(idx + needle.length, idx + needle.length + sfx.length) === sfx
-      if (pOk && sOk && !overlaps(cand, used)) {
-        hit = cand
-        return false
-      }
-      from = idx + 1
+  const anchored = pfx + needle + sfx
+  const useAnchored = anchored !== needle
+  const target = useAnchored ? anchored : needle
+  let from = 0
+  for (;;) {
+    const idx = text.indexOf(target, from)
+    if (idx < 0) break
+    const s = idx + (useAnchored ? pfx.length : 0)
+    const e = s + needle.length
+    if (s >= 0 && e <= pmPos.length && e > s) {
+      const cand: Range = { from: pmPos[s], to: pmPos[e - 1] + 1 }
+      if (!overlaps(cand, used)) return cand
     }
-    return undefined
-  })
-  return hit
+    from = idx + 1
+  }
+  return null
 }
 
 function buildDeco(doc: PMNode, anchors: AnnotationAnchor[]): DecorationSet {
   const decos: Decoration[] = []
   const used: Range[] = []
+  const map = renderDocWithMap(doc)
   for (const a of anchors) {
     if (a.status !== 'open') continue
     if (a.kind === 'comment') {
       if (!a.anchorQuote) continue
-      const r = findRange(doc, a.anchorQuote, a.anchorPrefix, a.anchorSuffix, used)
+      const r = findRange(map, a.anchorQuote, a.anchorPrefix, a.anchorSuffix, used)
       if (r) {
         used.push(r)
         decos.push(
@@ -105,7 +142,7 @@ function buildDeco(doc: PMNode, anchors: AnnotationAnchor[]): DecorationSet {
     }
     // suggestion: strike the original, show the proposed replacement after it
     if (!a.originalText) continue
-    const r = findRange(doc, a.originalText, a.anchorPrefix, a.anchorSuffix, used)
+    const r = findRange(map, a.originalText, a.anchorPrefix, a.anchorSuffix, used)
     if (!r) continue
     used.push(r)
     decos.push(

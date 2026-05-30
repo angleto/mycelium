@@ -37,7 +37,7 @@ from flow_core.models.identity import Identity, IdentityKind
 from flow_core.models.membership import Role
 from flow_core.models.note_part import NotePart
 from flow_core.models.task import Task
-from flow_core.services import audit
+from flow_core.services import audit, md_anchor
 from flow_core.services.rbac import require_role
 
 
@@ -144,21 +144,22 @@ def _splice(
     prefix: str | None,
     suffix: str | None,
 ) -> str | None:
-    """Apply ``original -> proposed`` to ``body`` at the location pinned
-    by the (optional) prefix/suffix. Returns the new body, or None when
-    the target text no longer occurs unambiguously (the suggestion is
-    stale). Pure text search: there is no character-offset model, so
-    this survives the non-idempotent markdown round-trip."""
-    if not original:
-        return None
-    needle = (prefix or "") + original + (suffix or "")
-    if needle != original and body.count(needle) >= 1:
-        idx = body.find(needle) + len(prefix or "")
-        return body[:idx] + proposed + body[idx + len(original) :]
-    if body.count(original) == 1:
-        idx = body.find(original)
-        return body[:idx] + proposed + body[idx + len(original) :]
-    return None
+    """Apply ``original -> proposed`` to the markdown ``body`` at the
+    anchor pinned by the (rendered-domain) original + optional
+    prefix/suffix. Returns the new body, or None when the anchor can no
+    longer be located faithfully (the suggestion is stale).
+
+    Delegates to ``md_anchor``: the quote/prefix/suffix the SPA captured
+    are *rendered* text (markdown stripped, links->text, blocks joined by
+    a space), so they are resolved in that same rendered domain and mapped
+    back to the markdown source. This is what makes accept faithful across
+    inline formatting (``**bold**``, links, code, math) and multi-block
+    selections; a non-locatable or structure-changing splice declines to
+    None rather than corrupt the body. No persisted offsets: the map is
+    recomputed from the live body, so the anchor survives prior edits."""
+    return md_anchor.splice(
+        body, original=original, proposed=proposed, prefix=prefix, suffix=suffix
+    )
 
 
 # --------------------------------------------------------------------------

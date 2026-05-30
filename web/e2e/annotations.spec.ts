@@ -80,6 +80,24 @@ async function createNoteWithPart(body: string): Promise<string> {
   return note.id as string
 }
 
+async function fetchTaskDescription(taskId: string): Promise<string> {
+  const ctx = await pwRequest.newContext({ baseURL: 'http://localhost:8000' })
+  const auth = await (
+    await ctx.post('/auth/login', { data: { email: EMAIL, password: PASSWORD } })
+  ).json()
+  const token = auth.token as string
+  const ws = await (
+    await ctx.get('/workspaces', { headers: { Authorization: `Bearer ${token}` } })
+  ).json()
+  const task = await (
+    await ctx.get(`/tasks/${taskId}`, {
+      headers: { Authorization: `Bearer ${token}`, 'X-Workspace-Id': ws[0].id },
+    })
+  ).json()
+  await ctx.dispose()
+  return (task.description ?? '') as string
+}
+
 test('inline suggest: bubble → propose → inline diff → click mark → accept splices', async ({
   page,
 }) => {
@@ -155,6 +173,48 @@ test('cancel discards a half-written suggestion', async ({ page }) => {
   await expect(page.locator('.anno-pop')).toHaveCount(0)
   await expect(page.locator('.anno-mark--del')).toHaveCount(0)
   expect(errors, `errors:\n${errors.join('\n')}`).toEqual([])
+})
+
+test('inline-mark suggestion: decoration spans the mark and accept keeps the markdown', async ({
+  page,
+}) => {
+  const errors: string[] = []
+  watch(page, errors)
+  // 'beta' is rendered text INSIDE bold; the old single-text-node finder
+  // could decorate it, but the old accept spliced the rendered quote into
+  // the markdown and would corrupt/stale the **. md_anchor fixes accept;
+  // renderDocWithMap keeps the decoration consistent.
+  const taskId = await createTask('alpha **beta** gamma')
+  await login(page)
+  await page.goto(`/tasks/${taskId}`)
+
+  const editor = page.locator('.ProseMirror').first()
+  await expect(editor).toBeVisible({ timeout: 15_000 })
+  await expect(editor).toContainText('beta', { timeout: 10_000 })
+  await page.waitForTimeout(1500)
+
+  // Select the bold word by double-clicking the <strong>.
+  await editor.locator('strong').first().dblclick()
+  await page.locator('.anno-bubble .anno-bubble__btn', { hasText: '✎' }).click()
+  const pop = page.locator('.anno-pop').first()
+  await expect(pop).toBeVisible({ timeout: 5000 })
+  await pop.locator('textarea').first().fill('DELTA')
+  await pop.getByRole('button', { name: /Propose|Proponi/i }).click()
+  await page.waitForTimeout(800)
+
+  // The decoration draws over the bold word (multi-node rendered domain).
+  const del = page.locator('.anno-mark--del').first()
+  await expect(del).toBeVisible({ timeout: 5000 })
+  await del.click()
+  const actPop = page.locator('.anno-pop').first()
+  await expect(actPop).toBeVisible({ timeout: 5000 })
+  await actPop.getByRole('button', { name: /Accept|Accetta/i }).click()
+  await page.waitForTimeout(1800)
+  expect(errors, `errors:\n${errors.join('\n')}`).toEqual([])
+
+  await expect(editor).toContainText('DELTA', { timeout: 8000 })
+  // The crucial assertion: the stored markdown kept the bold delimiters.
+  expect(await fetchTaskDescription(taskId)).toBe('alpha **DELTA** gamma')
 })
 
 test('inline suggest on a NOTE part: accept replaces the part text', async ({ page }) => {
