@@ -77,6 +77,66 @@ def test_valid_fatturapa_passes_xsd() -> None:
     assert validate_fatturapa(_valid_xml()) == []
 
 
+def test_fpa12_for_six_char_codice_validates() -> None:
+    # A 6-char CodiceDestinatario (PA codice univoco ufficio) makes the document
+    # a B2G FPA12 (versione + FormatoTrasmissione); a 7-char one stays FPR12.
+    # The minimal FPA12 is XSD-valid -- CIG/CUP/split-payment are PA-side rifiuto
+    # concerns, not SdI scarto, and the interop test does not validate content.
+    issuer = IssuerProfile(
+        paese="IT",
+        piva="13438810015",
+        codice_fiscale="LTENGL79M31I356X",
+        denominazione="Angelo Leto",
+        regime_fiscale="RF19",
+        indirizzo="Via Roma 1",
+        cap="00100",
+        comune="Roma",
+        provincia="RM",
+        nazione="IT",
+    )
+    client = ClientProfile(
+        ragione_sociale="Ufficio Test PA",
+        id_paese="IT",
+        id_codice="03535510048",
+        codice_fiscale="03535510048",
+        codice_destinatario="VRGXZS",
+        pec=None,
+        indirizzo="Via PA 1",
+        cap="00100",
+        comune="Roma",
+        provincia="RM",
+        nazione="IT",
+    )
+    invoice = Invoice(
+        document_type=DocumentType.TD01,
+        currency="EUR",
+        issued_at=dt.datetime(2026, 3, 1, tzinfo=dt.UTC),
+        series="A",
+        number=1,
+        taxable=Decimal("100.00"),
+        vat=Decimal("0.00"),
+        bollo=Decimal("0.00"),
+        total=Decimal("100.00"),
+        causale=None,
+        notes=None,
+        payment_iban=None,
+        payment_due_date=None,
+    )
+    line = InvoiceLine(
+        line_no=1,
+        description="x",
+        quantity=Decimal(1),
+        unit_price=Decimal("100.00"),
+        vat_rate=Decimal(0),
+        natura="N2.2",
+    )
+    xml = _build_xml(invoice, issuer, client, [line], "202600001")
+    assert 'versione="FPA12"' in xml
+    assert "<FormatoTrasmissione>FPA12</FormatoTrasmissione>" in xml
+    assert "<CodiceDestinatario>VRGXZS</CodiceDestinatario>" in xml
+    assert validate_fatturapa(xml) == []
+
+
 def test_bare_id_codice_strips_redundant_country_prefix() -> None:
     # A VAT stored with a leading country prefix matching IdPaese is emitted
     # bare; a clean VAT and a codice fiscale (3rd char is a letter) are left

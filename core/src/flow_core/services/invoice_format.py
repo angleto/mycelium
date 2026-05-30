@@ -201,7 +201,15 @@ def _build_xml(
     intermediary: IntermediaryIdentity | None = None,
 ) -> str:
     ET.register_namespace("p", _NS)
-    root = ET.Element(f"{{{_NS}}}FatturaElettronica", versione="FPR12")
+    # FatturaPA transmission format: a 6-char CodiceDestinatario is a PA codice
+    # univoco ufficio (B2G -> FPA12); a 7-char one (or the 0000000 default) is
+    # B2B/B2C (FPR12). The format drives both ``versione`` and
+    # ``FormatoTrasmissione`` and is the only structural difference for SdI
+    # acceptance (CIG/CUP/split-payment are PA-side rifiuto concerns, not SdI
+    # scarto, and the interop test does not validate file content).
+    codice_dest = client.codice_destinatario or "0000000"
+    fmt = "FPA12" if len(codice_dest) == 6 else "FPR12"
+    root = ET.Element(f"{{{_NS}}}FatturaElettronica", versione=fmt)
     header = _sub(root, "FatturaElettronicaHeader")
     dt_ = _sub(header, "DatiTrasmissione")
     idt = _sub(dt_, "IdTrasmittente")
@@ -225,8 +233,8 @@ def _build_xml(
             _bare_id_codice(fiscal.codice_fiscale or fiscal.piva or "", fiscal.paese),
         )
     _sub(dt_, "ProgressivoInvio", progressivo)
-    _sub(dt_, "FormatoTrasmissione", "FPR12")
-    _sub(dt_, "CodiceDestinatario", client.codice_destinatario or "0000000")
+    _sub(dt_, "FormatoTrasmissione", fmt)
+    _sub(dt_, "CodiceDestinatario", codice_dest)
     if not client.codice_destinatario and client.pec:
         # CodiceDestinatario "0000000" + recipient PEC: the cessionario's PEC
         # is its electronic address, so it goes in PECDestinatario (SdI routes
