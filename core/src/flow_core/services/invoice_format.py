@@ -212,10 +212,17 @@ def _build_xml(
         _sub(idt, "IdCodice", _bare_id_codice(intermediary.id_codice, intermediary.id_paese))
     else:
         _sub(idt, "IdPaese", fiscal.paese)
+        # IdTrasmittente/IdCodice is validated by SdI as a CODICE FISCALE
+        # (against the Anagrafe Tributaria), NOT as a P.IVA. For a company the
+        # CF equals the P.IVA so either works; for a physical-person channel
+        # holder (professionista/ditta individuale) the 16-char CF differs from
+        # the 11-digit P.IVA and only the CF is accepted -- a P.IVA here is
+        # scartata 00300 ("IdTrasmittente non valido"). So prefer the codice
+        # fiscale, falling back to the P.IVA only when no CF is set.
         _sub(
             idt,
             "IdCodice",
-            _bare_id_codice(fiscal.piva or fiscal.codice_fiscale or "", fiscal.paese),
+            _bare_id_codice(fiscal.codice_fiscale or fiscal.piva or "", fiscal.paese),
         )
     _sub(dt_, "ProgressivoInvio", progressivo)
     _sub(dt_, "FormatoTrasmissione", "FPR12")

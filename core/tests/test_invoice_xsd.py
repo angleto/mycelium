@@ -143,6 +143,14 @@ def test_country_prefixed_piva_emits_bare_idcodice_and_validates() -> None:
     assert "<IdCodice>13438810015</IdCodice>" in xml
     assert "<IdCodice>09876543210</IdCodice>" in xml
     assert "IT13438810015" not in xml
+    # IdTrasmittente/IdCodice is a CODICE FISCALE for SdI: a physical-person
+    # channel holder must transmit under the 16-char CF, not the P.IVA (a P.IVA
+    # there is scartata 00300). The cedente IdFiscaleIVA above still carries the
+    # P.IVA (13438810015).
+    assert (
+        "<IdTrasmittente><IdPaese>IT</IdPaese>"
+        "<IdCodice>LTENGL79M31I356X</IdCodice></IdTrasmittente>" in xml
+    )
     assert validate_fatturapa(xml) == []
 
 
