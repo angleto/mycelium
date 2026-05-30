@@ -73,7 +73,9 @@ def test_envelope_uses_verified_trasmissione_namespace() -> None:
     assert body is not None
     wrapper = next(iter(body))
     assert ET.QName(wrapper).localname == "fileSdIAccoglienza"
-    assert ET.QName(wrapper).namespace == "http://www.fatturapa.gov.it/sdi/ws/trasmissione/v1.0/types"
+    assert (
+        ET.QName(wrapper).namespace == "http://www.fatturapa.gov.it/sdi/ws/trasmissione/v1.0/types"
+    )
     assert _RICEVI_NS == "http://www.fatturapa.gov.it/sdi/ws/trasmissione/v1.0/types"
     # The NomeFile/File children are unqualified (elementFormDefault is the
     # XSD default "unqualified"): they must carry no namespace.
