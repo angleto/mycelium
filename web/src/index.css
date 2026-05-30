@@ -4194,6 +4194,12 @@ button.btn--danger:hover {
 .anno-bubble__btn {
   border: 0;
   background: transparent;
+  /* The bubble sits on --surface, so its icons need a foreground that
+     contrasts with the surface. Without this, the button inherits
+     --accent-fg from the base rule (white in light mode, near-black in
+     dark mode), which is tuned for the accent fill and renders the icon
+     white-on-white / black-on-black here: invisible in both themes. */
+  color: var(--text);
   cursor: pointer;
   font-size: 0.95rem;
   line-height: 1;
@@ -4201,7 +4207,10 @@ button.btn--danger:hover {
   border-radius: 4px;
 }
 .anno-bubble__btn:hover {
-  background: var(--hover, rgba(0, 0, 0, 0.07));
+  /* Theme-aware hover: derive from --text so it reads on both surfaces
+     (--hover is undefined, so the old rgba(0,0,0,.07) vanished on dark). */
+  background: color-mix(in srgb, var(--text) 12%, transparent);
+  color: var(--accent);
 }
 .anno-pop {
   z-index: 2001;
