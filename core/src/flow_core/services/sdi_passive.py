@@ -301,7 +301,7 @@ async def ingest_receiver_dt(parsed) -> ReceivedInvoice | None:  # type: ignore[
     from sqlalchemy.exc import IntegrityError
     from sqlalchemy.future import select
 
-    from flow_core.models.sdi_received import BuyerVerdict
+    from flow_core.models.invoice import BuyerVerdict
 
     ident = parsed.identificativo_sdi
     org_id = await _resolve_received_invoice_org(ident)

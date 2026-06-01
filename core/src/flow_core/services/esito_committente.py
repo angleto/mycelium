@@ -46,8 +46,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from flow_core.config import get_settings
 from flow_core.errors import DomainError, NotFoundError
 from flow_core.i18n import MessageCode
+from flow_core.models.invoice import BuyerVerdict
 from flow_core.models.sdi_notification import ReceivedInvoiceNotification
-from flow_core.models.sdi_received import BuyerVerdict, ReceivedInvoice
+from flow_core.models.sdi_received import ReceivedInvoice
 from flow_core.services import audit
 from flow_core.services.sdi_notification_xsd import NS_MESSAGGI, validate_sdi_notification
 from flow_core.services.sdi_transport import esito_filename, send_esito_via_sdicoop
