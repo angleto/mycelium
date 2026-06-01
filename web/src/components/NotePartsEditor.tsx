@@ -535,6 +535,7 @@ export const NotePartsEditor = forwardRef<NotePartsEditorHandle, Props>(
                     />
                     <PartAnnotated
                       partId={p.id}
+                      imageUploadParent={{ kind: 'note', id: noteId }}
                       value={draft}
                       onDocMutated={async () => {
                         // Accepting a suggestion splices the proposed

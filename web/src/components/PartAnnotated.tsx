@@ -18,6 +18,9 @@ interface Props {
   onChange: (v: string) => void
   placeholder?: string
   filename?: string
+  /** Owning note, forwarded to the editor so image/attachment upload is
+   * enabled and `![alt](filename)` references resolve. */
+  imageUploadParent?: import('../lib/imageUpload').ImageUploadParent
   /** Refresh the part body after a suggestion is accepted (its body
    * changed server-side, and any local draft must be dropped so the
    * editor adopts the spliced text). Wired to NotePartsEditor. */
@@ -30,6 +33,7 @@ export function PartAnnotated({
   onChange,
   placeholder,
   filename,
+  imageUploadParent,
   onDocMutated,
 }: Props) {
   const { t } = useTranslation()
@@ -44,6 +48,7 @@ export function PartAnnotated({
         onChange={onChange}
         placeholder={placeholder}
         filename={filename}
+        imageUploadParent={imageUploadParent}
         annotations={anchors}
         inlineAnnotations={{ docKind: 'note_part', docId: partId, rows, reload, onDocMutated }}
       />

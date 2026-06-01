@@ -7,6 +7,7 @@ import {
   type ImageUploadParent,
   type UploadedAttachment,
 } from '../lib/imageUpload'
+import { invalidateAttachmentManifest } from '../lib/attachmentManifest'
 
 // Picker invoked from the editor toolbar to link an attachment in the
 // body. It lists the parent note/task's existing attachments and can
@@ -89,6 +90,7 @@ export function AttachmentPicker({
     setErr(null)
     try {
       const up = await uploadAttachment(parent, file)
+      invalidateAttachmentManifest(parent)
       onPick(up)
       onClose()
     } catch (e) {

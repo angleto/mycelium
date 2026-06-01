@@ -29,7 +29,8 @@ import type { Annotation, DocKind } from '../lib/useAnnotations'
 import { EntityPrefix } from '../lib/entityPrefixExtension'
 import { api, authFetch, workspaceHeader } from '../api/client'
 import { formatMentionHref, type MentionKind } from '../lib/mentions'
-import { useAuthBlobUrl } from '../lib/useAuthBlobUrl'
+import { useAttachmentImage } from '../lib/useAuthBlobUrl'
+import { invalidateAttachmentManifest } from '../lib/attachmentManifest'
 import {
   ACCEPTED_IMAGE_MIME,
   isAcceptedImage,
@@ -297,23 +298,35 @@ const MentionExt = Extension.create({
   },
 })
 
-// Live preview of an embedded image inside the editor. The src in the
-// markdown is "/attachments/<id>/download" (bearer-auth route); the
-// node view auth-fetches it and shows the resulting object URL, with
-// the same lifecycle behaviour as the read-side <img>.
-function ImageNodeView({ node }: NodeViewProps) {
+// Live preview of an embedded image inside the editor. The src is either
+// "/attachments/<id>/download" (bearer-auth route, inserted by the
+// picker/upload) or a bare filename the author typed for a file uploaded
+// to this note/task; useAttachmentImage resolves the latter against the
+// parent's attachments (read from the extension storage set by the host
+// editor) and auth-fetches either way. An unresolvable reference shows a
+// broken-image placeholder instead of spinning forever.
+function ImageNodeView({ node, extension }: NodeViewProps) {
   const src = typeof node.attrs.src === 'string' ? node.attrs.src : ''
   const alt = typeof node.attrs.alt === 'string' ? node.attrs.alt : ''
   const title = typeof node.attrs.title === 'string' ? node.attrs.title : undefined
-  const resolved = useAuthBlobUrl(src)
-  if (!resolved) {
+  const getParent = extension.options.getParent as
+    | (() => ImageUploadParent | undefined)
+    | undefined
+  const parent = getParent?.()
+  const { url, loading } = useAttachmentImage(src, parent)
+  if (loading) {
+    return <NodeViewWrapper as="span" className="md-img md-img--loading" />
+  }
+  if (!url) {
     return (
-      <NodeViewWrapper as="span" className="md-img md-img--loading" />
+      <NodeViewWrapper as="span" className="md-img md-img--broken">
+        {alt || src || '?'}
+      </NodeViewWrapper>
     )
   }
   return (
     <NodeViewWrapper as="span" className="md-img-wrap">
-      <img src={resolved} alt={alt} title={title} className="md-img" />
+      <img src={url} alt={alt} title={title} className="md-img" />
     </NodeViewWrapper>
   )
 }
@@ -329,6 +342,13 @@ const ImageExt = Node.create({
   draggable: true,
   selectable: true,
   atom: true,
+  // The host editor injects a getter for the owning note/task so the
+  // node view can resolve `![alt](filename.png)` references against its
+  // attachments. A getter (not a static value) keeps it current as the
+  // parent id arrives after a first save.
+  addOptions() {
+    return { getParent: () => undefined as ImageUploadParent | undefined }
+  },
   addAttributes() {
     return {
       src: { default: '' },
@@ -476,6 +496,9 @@ export function RichEditor({
     setUploading(true)
     try {
       const up = await uploadImage(parent, file)
+      // A new file exists now; drop the cached name->id map so a later
+      // `![alt](filename)` reference to it resolves.
+      invalidateAttachmentManifest(parent)
       if (rawMode) {
         insertRawSnippet(`![${up.filename}](${up.url})`)
       } else if (editorRef.current) {
@@ -600,8 +623,11 @@ export function RichEditor({
       BlockMath,
       // Embedded images via /attachments uploads. Round-trips to the
       // standard `![alt](src)` markdown; the node view auth-fetches the
-      // bytes for live preview.
-      ImageExt,
+      // bytes for live preview and resolves bare-filename refs against
+      // the parent's attachments (read live through parentRef). The
+      // getter is invoked later from the node view, never during render.
+      // eslint-disable-next-line react-hooks/refs
+      ImageExt.configure({ getParent: () => parentRef.current }),
       MentionExt,
       // Clickable UUID-prefix chips for backticked codes (ADR-0038
       // convention) read inside the editor. Decoration-only; routing

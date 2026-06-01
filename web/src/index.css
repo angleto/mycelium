@@ -1889,6 +1889,29 @@ button.btn--danger:hover {
   border: 1px dashed var(--border);
   vertical-align: middle;
 }
+/* Unresolvable image reference (unknown filename, or the auth fetch
+   failed): a visible, bounded placeholder showing the alt/filename so it
+   reads as a broken image rather than spinning forever. */
+.md-img--broken {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3em;
+  max-width: 100%;
+  padding: 0.15em 0.45em;
+  border-radius: 4px;
+  background: var(--surface-sunken, var(--surface));
+  border: 1px dashed var(--danger, var(--border));
+  color: var(--text-muted, inherit);
+  font-size: 0.85em;
+  vertical-align: middle;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.md-img--broken::before {
+  content: '🖼';
+  opacity: 0.6;
+}
 /* Non-image attachment linked in the body: filename with a leading
    paperclip. The icon is CSS-only so the link's text content stays the
    bare filename (the click-interceptor reads it to name the download). */

@@ -1072,7 +1072,10 @@ export function NotesRoute() {
                   {turns.map((tr) => (
                     <li key={tr.id}>
                       <strong>{tr.role}:</strong>{' '}
-                      <MarkdownView text={tr.content} />
+                      <MarkdownView
+                        text={tr.content}
+                        parent={{ kind: 'note', id: sel.id }}
+                      />
                     </li>
                   ))}
                 </ul>

@@ -4,11 +4,12 @@ import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
 import rehypeKatex from 'rehype-katex'
 import { Link } from 'react-router-dom'
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import 'katex/dist/katex.min.css'
 import { parseMentionHref, routeForMention, type MentionKind } from '../lib/mentions'
-import { useAuthBlobUrl } from '../lib/useAuthBlobUrl'
+import { useAttachmentImage } from '../lib/useAuthBlobUrl'
 import { isAttachmentHref, openAttachment } from '../lib/attachmentRef'
+import type { ImageUploadParent } from '../lib/imageUpload'
 import {
   fetchTaskMention,
   getCachedTaskMention,
@@ -24,25 +25,38 @@ import { PrefixMentionChip } from './PrefixMentionChip'
 // remark-math + rehype-katex: ``$inline$``, ``$$block$$``, and the
 // `math` / `inlineMath` AST nodes from remark.
 //
-// Embedded images: the editor inserts `![filename](/attachments/<id>/download)`
-// for files uploaded via drop/paste/picker. The attachment route is
-// bearer-authenticated, so a naked <img src> would 401; AuthImg routes
-// the src through useAuthBlobUrl so the browser sees a one-shot object
-// URL. Non-attachment URLs (http(s), data:, blob:) pass through.
+// Embedded images. The editor inserts `![filename](/attachments/<id>/download)`
+// for files uploaded via drop/paste/picker, and an author may also write
+// `![alt](filename.png)` referencing a file uploaded to the same
+// note/task. The attachment route is bearer-authenticated, so a naked
+// <img src> would 401 (and a bare filename would 404); useAttachmentImage
+// resolves the filename against the parent's attachments and routes the
+// src through authFetch so the browser sees a one-shot object URL.
+// Non-attachment URLs (http(s), data:, blob:) pass through. An
+// unresolvable reference shows a broken-image placeholder, not a spinner.
 function AuthImg({
   src,
   alt,
   title,
+  parent,
 }: {
   src: string | undefined
   alt: string | undefined
   title: string | undefined
+  parent?: ImageUploadParent
 }) {
-  const resolved = useAuthBlobUrl(src)
-  if (!resolved) {
+  const { url, loading } = useAttachmentImage(src, parent)
+  if (loading) {
     return <span className="md-img md-img--loading" aria-label={alt ?? ''} />
   }
-  return <img src={resolved} alt={alt ?? ''} title={title} className="md-img" />
+  if (!url) {
+    return (
+      <span className="md-img md-img--broken" role="img" aria-label={alt ?? ''}>
+        {alt || src || '?'}
+      </span>
+    )
+  }
+  return <img src={url} alt={alt ?? ''} title={title} className="md-img" />
 }
 
 function strOrUndef(v: unknown): string | undefined {
@@ -132,7 +146,8 @@ function TaskMentionChip({
   )
 }
 
-const components: Components = {
+function makeComponents(parent?: ImageUploadParent): Components {
+  return {
   a({ href, children }) {
     const m = href ? parseMentionHref(href) : null
     if (m) {
@@ -164,6 +179,7 @@ const components: Components = {
         src={strOrUndef(src)}
         alt={strOrUndef(alt)}
         title={strOrUndef(title)}
+        parent={parent}
       />
     )
   },
@@ -184,9 +200,25 @@ const components: Components = {
       </code>
     )
   },
+  }
 }
 
-export function MarkdownView({ text }: { text: string }) {
+export function MarkdownView({
+  text,
+  parent,
+}: {
+  text: string
+  // Owning note/task, when known: lets `![alt](filename.png)` references
+  // resolve against that parent's attachments. Omit where there is no
+  // single owning entity.
+  parent?: ImageUploadParent
+}) {
+  const components = useMemo(
+    () => makeComponents(parent),
+    // parent depended on via kind/id (a fresh object each render).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [parent?.kind, parent?.id],
+  )
   if (!text.trim()) return null
   return (
     <div className="md">

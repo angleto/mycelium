@@ -525,7 +525,7 @@ function PlantDetail({
       </div>
       {n.transcript && (
         <div className="plant-detail__body md">
-          <MarkdownView text={n.transcript} />
+          <MarkdownView text={n.transcript} parent={{ kind: 'note', id: n.id }} />
         </div>
       )}
       <section className="plant-detail__section">
