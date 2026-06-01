@@ -40,6 +40,23 @@ def short_id(uid: str | None) -> str:
     return str(uid).split("-")[0]
 
 
+def attachment_markdown_ref(att: dict[str, Any]) -> str:
+    """A paste-ready markdown reference to an uploaded attachment.
+
+    Images become an inline embed (``![name](...)``), everything else a
+    download link (``[name](...)``). The url is the bearer-auth
+    ``/attachments/<id>/download`` route the SPA renderer and editor
+    resolve through authFetch; it is never public. Same convention the
+    web editor inserts, so a body written from the CLI/MCP renders
+    identically in the app."""
+    att_id = att.get("id", "")
+    name = att.get("filename") or "file"
+    mime = att.get("mime_type") or ""
+    url = f"/attachments/{att_id}/download"
+    bang = "!" if mime.startswith("image/") else ""
+    return f"{bang}[{name}]({url})"
+
+
 def get_json(resp: httpx.Response) -> Any:
     raise_for_response(resp)
     return resp.json()

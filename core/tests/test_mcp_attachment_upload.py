@@ -51,6 +51,9 @@ async def test_upload_attachment_to_task() -> None:
     assert out["filename"] == "report.pdf"
     assert out["size_bytes"] == len(payload)
     assert "application/pdf" in (out["mime_type"] or "") or out["mime_type"]
+    # Paste-ready link (non-image -> no leading bang), pointing at the
+    # bearer-auth download route the SPA resolves through authFetch.
+    assert out["markdown_ref"] == f"[report.pdf](/attachments/{out['id']}/download)"
 
 
 async def test_upload_attachment_to_note() -> None:
@@ -69,6 +72,30 @@ async def test_upload_attachment_to_note() -> None:
     assert out["note_id"] == str(n.id)
     assert out["task_id"] is None
     assert out["size_bytes"] == 11
+
+
+async def test_upload_attachment_image_markdown_ref_is_embed() -> None:
+    """An image attachment yields an inline-embed reference (leading
+    bang), so it renders inline in the body rather than as a link."""
+    org, user, token = await _signup()
+    async with tenant_session(str(org), str(user)) as s:
+        n = await notes_svc.create_note(
+            s, org_id=org, actor_id=user, kind=NoteKind.text, title="Img host"
+        )
+    # 1x1 transparent PNG.
+    png = base64.b64decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk"
+        "+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+    )
+    out = await mcp_server.upload_attachment(
+        token=token,
+        org_id=str(org),
+        filename="pixel.png",
+        data_b64=base64.b64encode(png).decode("ascii"),
+        note_id=str(n.id),
+    )
+    assert (out["mime_type"] or "").startswith("image/")
+    assert out["markdown_ref"] == f"![pixel.png](/attachments/{out['id']}/download)"
 
 
 async def test_upload_attachment_rejects_both_parents() -> None:

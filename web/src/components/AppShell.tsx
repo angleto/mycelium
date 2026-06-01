@@ -22,6 +22,7 @@ import { PomodoroTimer } from './PomodoroTimer'
 import { hms, elapsedSec } from '../lib/time'
 import { useRunningTimers } from '../lib/useRunningTimer'
 import { parseMentionHref, routeForMention } from '../lib/mentions'
+import { isAttachmentHref, openAttachment } from '../lib/attachmentRef'
 import {
   getCachedLookup,
   lookupPrefix,
@@ -342,9 +343,21 @@ export function AppShell() {
       const href = a?.getAttribute('href')
       if (!href) return
       const m = parseMentionHref(href)
-      if (!m) return
-      e.preventDefault()
-      navigate(routeForMention(m.kind, m.id))
+      if (m) {
+        e.preventDefault()
+        navigate(routeForMention(m.kind, m.id))
+        return
+      }
+      // Attachment links typed/inserted in the editor are plain <a>
+      // marks (no React handler), so route them here: authFetch the
+      // bytes and open/download via an object URL — never a bare
+      // navigation, which would 401 on the bearer-auth route. Read-side
+      // links carry the ``md-att`` class and handle their own click in
+      // React (MarkdownView), so skip those to avoid a double open.
+      if (isAttachmentHref(href) && !a?.classList.contains('md-att')) {
+        e.preventDefault()
+        void openAttachment(href, a?.textContent?.trim() || undefined)
+      }
     }
     document.addEventListener('click', onClick, true)
     return () => document.removeEventListener('click', onClick, true)

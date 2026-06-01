@@ -1889,6 +1889,86 @@ button.btn--danger:hover {
   border: 1px dashed var(--border);
   vertical-align: middle;
 }
+/* Non-image attachment linked in the body: filename with a leading
+   paperclip. The icon is CSS-only so the link's text content stays the
+   bare filename (the click-interceptor reads it to name the download). */
+.md-att {
+  cursor: pointer;
+}
+.md-att::before {
+  content: '📎';
+  margin-right: 0.25em;
+  font-size: 0.9em;
+}
+
+/* Attachment picker (editor toolbar → link an attachment). */
+.attref__backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 60;
+}
+.attref {
+  width: min(420px, 92vw);
+  max-height: 70vh;
+  overflow: auto;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 14px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.25);
+}
+.attref__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.attref__title {
+  font-weight: 600;
+}
+.attref__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.attref__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border: none;
+  background: none;
+  border-radius: 6px;
+  cursor: pointer;
+  text-align: left;
+  color: inherit;
+}
+.attref__item:hover {
+  background: var(--surface-sunken, var(--border));
+}
+.attref__name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.attref__size {
+  color: var(--text-muted, var(--border));
+  font-size: 0.85em;
+}
+.attref__foot {
+  margin-top: 10px;
+  display: flex;
+  justify-content: flex-end;
+}
 .rte__raw:focus {
   border-color: var(--accent);
 }

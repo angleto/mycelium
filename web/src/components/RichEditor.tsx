@@ -33,9 +33,12 @@ import { useAuthBlobUrl } from '../lib/useAuthBlobUrl'
 import {
   ACCEPTED_IMAGE_MIME,
   isAcceptedImage,
+  isImageMime,
   uploadImage,
   type ImageUploadParent,
+  type UploadedAttachment,
 } from '../lib/imageUpload'
+import { AttachmentPicker } from './AttachmentPicker'
 
 // tiptap-markdown augments editor.storage at runtime; type the access.
 type MdStorage = { markdown: { getMarkdown: () => string } }
@@ -388,6 +391,7 @@ export function RichEditor({
   const [rawMode, setRawMode] = useState(false)
   const [uploadErr, setUploadErr] = useState<string | null>(null)
   const [uploading, setUploading] = useState(false)
+  const [pickerOpen, setPickerOpen] = useState(false)
   const [pdfBusy, setPdfBusy] = useState(false)
   const [pdfErr, setPdfErr] = useState<string | null>(null)
   const imgInput = useRef<HTMLInputElement>(null)
@@ -402,11 +406,10 @@ export function RichEditor({
     parentRef.current = imageUploadParent
   }, [imageUploadParent])
 
-  // Insert markdown image syntax at the raw-mode caret (or append on
-  // the end if not focused). The WYSIWYG branch goes through the
-  // editor's insertContent below.
-  const insertRawImage = (url: string, alt: string) => {
-    const md = `![${alt}](${url})`
+  // Insert a markdown snippet at the raw-mode caret (or append at the
+  // end if not focused). The WYSIWYG branch goes through the editor's
+  // insertContent below.
+  const insertRawSnippet = (md: string) => {
     const ta = rawRef.current
     if (!ta) {
       onChange(value + (value.endsWith('\n') || !value ? '' : '\n') + md + '\n')
@@ -423,6 +426,45 @@ export function RichEditor({
     })
   }
 
+  // Insert a reference to an attachment in the body: image mimes become
+  // an inline embed, everything else a download link. Both point at the
+  // same bearer-auth /attachments route (resolved through authFetch at
+  // render time); neither exposes a public URL.
+  const insertRef = (att: UploadedAttachment) => {
+    const image = isImageMime(att.mimeType)
+    if (rawMode) {
+      insertRawSnippet(
+        image ? `![${att.filename}](${att.url})` : `[${att.filename}](${att.url})`,
+      )
+      return
+    }
+    const ed = editorRef.current
+    if (!ed) return
+    if (image) {
+      ed.chain()
+        .focus()
+        .insertContent({
+          type: 'image',
+          attrs: { src: att.url, alt: att.filename, title: null },
+        })
+        .run()
+      return
+    }
+    // Text node carrying a link mark, plus a trailing unmarked space so
+    // the caret lands outside the link and typing does not extend it.
+    ed.chain()
+      .focus()
+      .insertContent([
+        {
+          type: 'text',
+          text: att.filename,
+          marks: [{ type: 'link', attrs: { href: att.url } }],
+        },
+        { type: 'text', text: ' ' },
+      ])
+      .run()
+  }
+
   const doUpload = async (file: File): Promise<void> => {
     const parent = parentRef.current
     if (!parent) {
@@ -435,7 +477,7 @@ export function RichEditor({
     try {
       const up = await uploadImage(parent, file)
       if (rawMode) {
-        insertRawImage(up.url, up.filename)
+        insertRawSnippet(`![${up.filename}](${up.url})`)
       } else if (editorRef.current) {
         editorRef.current
           .chain()
@@ -526,12 +568,16 @@ export function RichEditor({
       Link.configure({
         openOnClick: false,
         autolink: false,
-        // Accept the @kind:uuid mention DSL hrefs in addition to
-        // regular links so [label](@note:uuid) survives the markdown
-        // round-trip as a clickable link (bitvision pattern).
+        // Accept the @kind:uuid mention DSL hrefs AND the relative
+        // /attachments/<id>/download route in addition to regular links,
+        // so [label](@note:uuid) and [file.pdf](/attachments/<id>/download)
+        // survive the markdown round-trip as a clickable link. Without
+        // the /attachments arm the Link mark is silently stripped to bare
+        // text on parse-back — the link would vanish on save/reload.
         validate: (url: string) => {
           if (!url) return false
           if (/^@(?:task|note|tag):/.test(url)) return true
+          if (/^\/attachments\//.test(url)) return true
           return /^(https?:|mailto:|tel:)/i.test(url)
         },
       }),
@@ -710,6 +756,19 @@ export function RichEditor({
           >
             {uploading ? '⏳' : '🖼'}
           </button>
+          <button
+            type="button"
+            className="btn--ghost btn--sm rte__fmt"
+            title={
+              imageUploadParent
+                ? t('editor.attach')
+                : t('editor.attachNeedsSave')
+            }
+            disabled={!imageUploadParent}
+            onClick={() => setPickerOpen(true)}
+          >
+            📎
+          </button>
           {tb('―', 'editor.hr', () =>
             editor?.chain().focus().setHorizontalRule().run())}
           <button
@@ -800,6 +859,13 @@ export function RichEditor({
           if (f) void doUpload(f)
         }}
       />
+      {pickerOpen && imageUploadParent && (
+        <AttachmentPicker
+          parent={imageUploadParent}
+          onPick={insertRef}
+          onClose={() => setPickerOpen(false)}
+        />
+      )}
       {uploadErr && <p className="err rte__err">{uploadErr}</p>}
       {pdfErr && (
         <p className="err rte__err">

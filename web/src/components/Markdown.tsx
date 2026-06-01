@@ -8,6 +8,7 @@ import { useEffect, useState, type ReactNode } from 'react'
 import 'katex/dist/katex.min.css'
 import { parseMentionHref, routeForMention, type MentionKind } from '../lib/mentions'
 import { useAuthBlobUrl } from '../lib/useAuthBlobUrl'
+import { isAttachmentHref, openAttachment } from '../lib/attachmentRef'
 import {
   fetchTaskMention,
   getCachedTaskMention,
@@ -46,6 +47,45 @@ function AuthImg({
 
 function strOrUndef(v: unknown): string | undefined {
   return typeof v === 'string' ? v : undefined
+}
+
+// Flatten a link's children to its plain text (the filename) so the
+// click handler can name the download and pick inline-vs-download.
+function nodeText(children: ReactNode): string | undefined {
+  if (typeof children === 'string') return children
+  if (Array.isArray(children)) {
+    const s = children.map((c) => (typeof c === 'string' ? c : '')).join('')
+    return s || undefined
+  }
+  return undefined
+}
+
+// A non-image attachment linked in the body: `[filename](/attachments/<id>/download)`.
+// The route is bearer-authenticated, so this is NOT a plain navigation —
+// the click authFetches the bytes and opens/downloads them via an
+// ephemeral object URL (openAttachment). The `md-att` class both styles
+// the link (leading icon) and tells the global editor click-interceptor
+// to leave this one to React (no double handling).
+function AttachmentLink({
+  href,
+  children,
+}: {
+  href: string
+  children: ReactNode
+}) {
+  const name = nodeText(children)
+  return (
+    <a
+      href={href}
+      className="md-att"
+      onClick={(e) => {
+        e.preventDefault()
+        void openAttachment(href, name)
+      }}
+    >
+      {children}
+    </a>
+  )
 }
 
 // Task mention chip: looks the task up so the label can carry the
@@ -108,6 +148,9 @@ const components: Components = {
           {children}
         </Link>
       )
+    }
+    if (isAttachmentHref(href)) {
+      return <AttachmentLink href={href}>{children}</AttachmentLink>
     }
     return (
       <a href={href} target="_blank" rel="noopener noreferrer">

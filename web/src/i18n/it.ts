@@ -223,6 +223,15 @@ export const it: Catalog = {
     pdfOpenInNewTab: 'Apri in nuova scheda',
     close: 'Chiudi',
   },
+  attref: {
+    title: 'Collega un allegato',
+    loading: 'Caricamento…',
+    none: 'Nessun allegato — caricane uno qui sotto.',
+    insert: 'Inserisci link',
+    uploadNew: 'Carica nuovo…',
+    uploading: 'Caricamento…',
+    close: 'Chiudi',
+  },
   exec: {
     title: 'Executor',
     intro:
@@ -840,6 +849,8 @@ export const it: Catalog = {
     tableDel: 'Elimina tabella',
     image: 'Inserisci immagine',
     imageNeedsSave: 'Salva la nota prima di aggiungere immagini.',
+    attach: 'Allega / collega un file',
+    attachNeedsSave: 'Salva prima di allegare file.',
     toRaw: 'Modifica come Markdown',
     toWysiwyg: 'Editor ricco',
     downloadMd: 'Scarica markdown (.md)',

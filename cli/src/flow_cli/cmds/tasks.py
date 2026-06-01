@@ -8,7 +8,13 @@ from typing import Any
 
 import typer
 
-from flow_cli.cmds._common import client, get_json, resolve_id, short_id
+from flow_cli.cmds._common import (
+    attachment_markdown_ref,
+    client,
+    get_json,
+    resolve_id,
+    short_id,
+)
 from flow_cli.completion import complete_task_id
 from flow_cli.http import CLIError
 from flow_cli.ui import (
@@ -481,10 +487,14 @@ def attach_add(
         with path.open("rb") as fh:
             files = {"file": (path.name, fh, _guess_mime(path))}
             res = get_json(c.post(f"/tasks/{full}/attachments", files=files))
+    ref = attachment_markdown_ref(res)
+    if isinstance(res, dict):
+        res["markdown_ref"] = ref
     if json_mode():
         emit_json(res)
         return
     success(f"uploaded '{path.name}' to task {short_id(full)}")
+    typer.echo(f"markdown: {ref}")
 
 
 @attach_app.command("list")

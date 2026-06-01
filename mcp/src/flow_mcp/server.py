@@ -4139,7 +4139,11 @@ async def upload_attachment(
     sniffer disagrees with a misleading client hint.
 
     Returns the attachment metadata (id, filename, mime_type,
-    size_bytes); the binary is never echoed back."""
+    size_bytes) plus ``markdown_ref`` — a paste-ready reference to drop
+    into a note body / task description (``![name](...)`` for images,
+    ``[name](...)`` otherwise). The url is the bearer-auth
+    /attachments/<id>/download route the app resolves through authFetch;
+    it is never public. The binary is never echoed back."""
     import base64
     import binascii
 
@@ -4160,6 +4164,8 @@ async def upload_attachment(
             mime_type=mime_type,
             data=raw,
         )
+        bang = "!" if att.mime_type.startswith("image/") else ""
+        markdown_ref = f"{bang}[{att.filename}](/attachments/{att.id}/download)"
         return {
             "id": str(att.id),
             "note_id": str(att.note_id) if att.note_id else None,
@@ -4168,6 +4174,7 @@ async def upload_attachment(
             "mime_type": att.mime_type,
             "size_bytes": att.size_bytes,
             "created_at": att.created_at.isoformat(),
+            "markdown_ref": markdown_ref,
         }
 
 

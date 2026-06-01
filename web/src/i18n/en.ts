@@ -223,6 +223,15 @@ export const en = {
     pdfOpenInNewTab: 'Open in new tab',
     close: 'Close',
   },
+  attref: {
+    title: 'Link an attachment',
+    loading: 'Loading…',
+    none: 'No attachments yet — upload one below.',
+    insert: 'Insert link',
+    uploadNew: 'Upload new…',
+    uploading: 'Uploading…',
+    close: 'Close',
+  },
   exec: {
     title: 'Executors',
     intro:
@@ -841,6 +850,8 @@ export const en = {
     tableDel: 'Delete table',
     image: 'Insert image',
     imageNeedsSave: 'Save the note before adding images.',
+    attach: 'Attach / link a file',
+    attachNeedsSave: 'Save first to attach files.',
     toRaw: 'Edit as Markdown',
     toWysiwyg: 'Rich editor',
     downloadMd: 'Download markdown (.md)',

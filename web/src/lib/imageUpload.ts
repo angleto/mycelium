@@ -24,37 +24,58 @@ export function isAcceptedImage(file: File): boolean {
   return EXT_RE.test(file.name)
 }
 
-export type UploadedImage = {
+export type UploadedAttachment = {
   id: string
   filename: string
+  mimeType: string
+  // Auth-protected markdown url (`/attachments/<id>/download`) — the same
+  // route the Attachments panel and embedded images use. The Markdown
+  // renderer / editor resolve it through authFetch; it is never public.
   url: string
 }
 
+export type UploadedImage = UploadedAttachment
+
+export function isImageMime(mime: string | undefined | null): boolean {
+  return !!mime && mime.startsWith('image/')
+}
+
+function attachmentsBase(parent: ImageUploadParent): string {
+  return parent.kind === 'note'
+    ? `/notes/${parent.id}/attachments`
+    : `/tasks/${parent.id}/attachments`
+}
+
 /**
- * Upload `file` as an attachment of the parent note/task and return a
- * markdown-friendly url (`/attachments/<id>/download`). The url is the
- * same auth-protected route the Attachments panel uses; the Markdown
- * renderer recognises it and resolves it through useAuthBlobUrl.
+ * Upload `file` as an attachment of the parent note/task. Accepts ANY
+ * mime — an upload is always just an attachment (the backend gates on
+ * size only); whether it later renders inline or as a link is decided by
+ * the returned `mimeType`, not at upload time. Returns the auth-protected
+ * markdown url; nothing is exposed without the session token.
  */
-export async function uploadImage(
+export async function uploadAttachment(
   parent: ImageUploadParent,
   file: File,
-): Promise<UploadedImage> {
-  const base =
-    parent.kind === 'note'
-      ? `/notes/${parent.id}/attachments`
-      : `/tasks/${parent.id}/attachments`
+): Promise<UploadedAttachment> {
   const body = new FormData()
   body.append('file', file)
-  const res = await authFetch(base, { method: 'POST', body })
+  const res = await authFetch(attachmentsBase(parent), { method: 'POST', body })
   if (!res.ok) {
     const err = await res.json().catch(() => null)
     throw new Error(errMessage(err))
   }
-  const data = (await res.json()) as { id: string; filename: string }
+  const data = (await res.json()) as {
+    id: string
+    filename: string
+    mime_type: string
+  }
   return {
     id: data.id,
     filename: data.filename,
+    mimeType: data.mime_type,
     url: `/attachments/${data.id}/download`,
   }
 }
+
+/** Back-compat alias: the image drop/paste path still calls this. */
+export const uploadImage = uploadAttachment
