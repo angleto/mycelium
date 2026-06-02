@@ -19,6 +19,7 @@ const SENSORS = [
   'accept_rate_classify_7d',
   'accept_rate_classify_30d',
   'time_to_first_link',
+  'recall_at_k',
   'tag_entropy_local',
   'leiden_modularity',
   'fungal_lag',

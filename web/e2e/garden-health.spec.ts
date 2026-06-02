@@ -18,7 +18,7 @@ test('health dashboard renders the seven sensor cards', async ({ page }) => {
   await page.goto('/garden/health')
 
   await expect(page.locator('.ghealth h1')).toBeVisible()
-  await expect(page.locator('.ghealth__card')).toHaveCount(7)
+  await expect(page.locator('.ghealth__card')).toHaveCount(8)
 
   // Headline sensor declares its health floor (always shown).
   const accept = page.locator('.ghealth__card', { hasText: 'Accept rate (7d)' })

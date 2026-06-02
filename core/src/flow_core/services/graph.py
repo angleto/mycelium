@@ -244,6 +244,49 @@ async def compute_note_edge_weights(
     return out
 
 
+async def compute_tag_neighborhood_entropy(
+    session: AsyncSession, *, org_id: uuid.UUID
+) -> float | None:
+    """Mean Shannon entropy (bits) of the generic-tag distribution in each
+    note's neighbourhood -- the notes it is directly linked to -- over the
+    notes whose neighbourhood carries at least one generic tag. ADR-0035's
+    ``tag_entropy_local`` biodiversity sensor: higher = more varied (a
+    forest, not a monoculture). None when no neighbourhood carries a
+    generic tag yet.
+
+    The neighbourhood is the manual note<->note link graph (undirected);
+    tag-overlap edges are deliberately excluded -- we measure the variety
+    a node is *linked to*, not its own tag similarity.
+    """
+    link_rows = (
+        await session.execute(
+            select(NoteNoteLink.parent_note_id, NoteNoteLink.child_note_id).where(
+                NoteNoteLink.org_id == org_id
+            )
+        )
+    ).all()
+    if not link_rows:
+        return None
+    adj: dict[uuid.UUID, set[uuid.UUID]] = defaultdict(set)
+    for parent_id, child_id in link_rows:
+        adj[parent_id].add(child_id)
+        adj[child_id].add(parent_id)
+    note_tags = await _note_generic_tags(session, org_id=org_id)
+    entropies: list[float] = []
+    for neighbours in adj.values():
+        counts: dict[uuid.UUID, int] = defaultdict(int)
+        for nb in neighbours:
+            for tag_id in note_tags.get(nb, set()):
+                counts[tag_id] += 1
+        total = sum(counts.values())
+        if total == 0:
+            continue
+        entropies.append(-sum((c / total) * math.log2(c / total) for c in counts.values()))
+    if not entropies:
+        return None
+    return round(sum(entropies) / len(entropies), 4)
+
+
 async def compute_pagerank(
     session: AsyncSession,
     *,

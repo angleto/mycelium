@@ -36,6 +36,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from flow_core.models.classification_feedback import ClassificationFeedback
 from flow_core.models.garden_health import GardenHealthDaily
+from flow_core.models.note import Note
+from flow_core.models.note_link import NoteNoteLink
+from flow_core.services import graph as graph_svc
 
 ACCEPT_RATE_FLOOR = 0.40
 TAG_ENTROPY_FLOOR = 1.2
@@ -46,7 +49,11 @@ _DECIDED: tuple[str, ...] = ("accept", "override", "reject", "ignore")
 _ACCEPTED: tuple[str, ...] = ("accept", "override")
 
 _NO_DECISIONS = "no classification decisions in window yet"
-_TODO = "not yet implemented (follow-up)"
+_NO_LINKS = "no note-to-note links yet"
+_NO_TAGGED_NEIGHBOURHOOD = "no linked neighbourhood carries a generic tag yet"
+_NO_CLUSTERS = "clustering unavailable (needs the optional extra, or >=1 community)"
+_NO_NOTES = "no notes yet"
+_RECALL_BLOCKED = "blocked: search-click logs (the is_probe flag) not captured yet"
 _FUNGAL_BLOCKED = "blocked: decomposition pipeline (ADR-0039) not emitting distillation notes yet"
 
 
@@ -63,6 +70,7 @@ class GardenHealth:
     accept_rate_classify_7d: Metric
     accept_rate_classify_30d: Metric
     time_to_first_link: Metric
+    recall_at_k: Metric
     tag_entropy_local: Metric
     leiden_modularity: Metric
     fungal_lag: Metric
@@ -107,6 +115,93 @@ async def _accept_rate(
     return round(accepted / total, 4)
 
 
+async def _time_to_first_link(session: AsyncSession, *, org_id: uuid.UUID) -> float | None:
+    """Median seconds from a note's creation to its first note<->note link
+    (incoming or outgoing). None when no note has a link yet. Lower means
+    the mycelium absorbs new notes faster."""
+    links = (
+        await session.execute(
+            select(
+                NoteNoteLink.parent_note_id,
+                NoteNoteLink.child_note_id,
+                NoteNoteLink.created_at,
+            ).where(NoteNoteLink.org_id == org_id)
+        )
+    ).all()
+    if not links:
+        return None
+    created_rows = (
+        await session.execute(
+            select(Note.id, Note.created_at).where(Note.org_id == org_id, Note.deleted_at.is_(None))
+        )
+    ).all()
+    created: dict[uuid.UUID, datetime.datetime] = {nid: ts for nid, ts in created_rows}
+    first: dict[uuid.UUID, datetime.datetime] = {}
+    for parent_id, child_id, ts in links:
+        for nid in (parent_id, child_id):
+            cur = first.get(nid)
+            if cur is None or ts < cur:
+                first[nid] = ts
+    deltas = sorted(
+        (link_ts - created[nid]).total_seconds() for nid, link_ts in first.items() if nid in created
+    )
+    if not deltas:
+        return None
+    mid = len(deltas) // 2
+    median = deltas[mid] if len(deltas) % 2 else (deltas[mid - 1] + deltas[mid]) / 2
+    return round(median, 1)
+
+
+async def _density_delta_7d(
+    session: AsyncSession, *, org_id: uuid.UUID, now: datetime.datetime
+) -> float | None:
+    """Change in links-per-note over the last 7 days: current density minus
+    the density as of 7 days ago (by row creation time). Positive means the
+    mycelium is thickening. None until there were notes 7 days ago."""
+    cutoff = now - datetime.timedelta(days=7)
+    notes_now = int(
+        (
+            await session.execute(
+                select(func.count())
+                .select_from(Note)
+                .where(Note.org_id == org_id, Note.deleted_at.is_(None))
+            )
+        ).scalar_one()
+    )
+    notes_then = int(
+        (
+            await session.execute(
+                select(func.count())
+                .select_from(Note)
+                .where(
+                    Note.org_id == org_id,
+                    Note.deleted_at.is_(None),
+                    Note.created_at <= cutoff,
+                )
+            )
+        ).scalar_one()
+    )
+    if not notes_now or not notes_then:
+        return None
+    links_now = int(
+        (
+            await session.execute(
+                select(func.count()).select_from(NoteNoteLink).where(NoteNoteLink.org_id == org_id)
+            )
+        ).scalar_one()
+    )
+    links_then = int(
+        (
+            await session.execute(
+                select(func.count())
+                .select_from(NoteNoteLink)
+                .where(NoteNoteLink.org_id == org_id, NoteNoteLink.created_at <= cutoff)
+            )
+        ).scalar_one()
+    )
+    return round(links_now / notes_now - links_then / notes_then, 4)
+
+
 async def compute_health(
     session: AsyncSession,
     *,
@@ -117,6 +212,10 @@ async def compute_health(
     now = now or _utcnow()
     r7 = await _accept_rate(session, org_id=org_id, window_days=7, now=now)
     r30 = await _accept_rate(session, org_id=org_id, window_days=30, now=now)
+    ttl = await _time_to_first_link(session, org_id=org_id)
+    entropy = await graph_svc.compute_tag_neighborhood_entropy(session, org_id=org_id)
+    modularity = (await graph_svc.compute_leiden_clusters(session, org_id=org_id)).modularity
+    density = await _density_delta_7d(session, org_id=org_id, now=now)
     return GardenHealth(
         accept_rate_classify_7d=Metric(
             r7, ACCEPT_RATE_FLOOR, None if r7 is not None else _NO_DECISIONS
@@ -124,11 +223,18 @@ async def compute_health(
         accept_rate_classify_30d=Metric(
             r30, ACCEPT_RATE_FLOOR, None if r30 is not None else _NO_DECISIONS
         ),
-        time_to_first_link=Metric(None, None, _TODO),
-        tag_entropy_local=Metric(None, TAG_ENTROPY_FLOOR, _TODO),
-        leiden_modularity=Metric(None, None, _TODO),
+        time_to_first_link=Metric(ttl, None, None if ttl is not None else _NO_LINKS),
+        recall_at_k=Metric(None, None, _RECALL_BLOCKED),
+        tag_entropy_local=Metric(
+            entropy,
+            TAG_ENTROPY_FLOOR,
+            None if entropy is not None else _NO_TAGGED_NEIGHBOURHOOD,
+        ),
+        leiden_modularity=Metric(
+            modularity, None, None if modularity is not None else _NO_CLUSTERS
+        ),
         fungal_lag=Metric(None, None, _FUNGAL_BLOCKED),
-        density_delta_7d=Metric(None, None, _TODO),
+        density_delta_7d=Metric(density, None, None if density is not None else _NO_NOTES),
     )
 
 

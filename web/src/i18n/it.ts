@@ -37,6 +37,11 @@ export const it: Catalog = {
         explain:
           'Tempo mediano dalla cattura di una nota al suo primo link. Più basso = il micelio assorbe le nuove note più in fretta.',
       },
+      recall_at_k: {
+        label: 'Recall@K',
+        explain:
+          'Quota di ricerche reali il cui risultato cliccato era la prima predizione. Richiede i log di click, non ancora raccolti.',
+      },
       tag_entropy_local: {
         label: 'Biodiversità dei tag',
         explain:

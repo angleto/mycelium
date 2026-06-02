@@ -38,6 +38,11 @@ export const en = {
         explain:
           'Median time from capturing a note to its first link. Lower means the mycelium absorbs new notes faster.',
       },
+      recall_at_k: {
+        label: 'Recall@K',
+        explain:
+          'Share of real searches whose clicked result was the top prediction. Needs search-click logs, not captured yet.',
+      },
       tag_entropy_local: {
         label: 'Tag biodiversity',
         explain:

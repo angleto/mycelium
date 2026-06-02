@@ -8,11 +8,19 @@ daily-snapshot persistence the nightly worker tick uses.
 
 from __future__ import annotations
 
+import datetime
 import uuid
+
+from sqlalchemy import update
 
 from flow_core.db import admin_session, tenant_session
 from flow_core.models.classification_feedback import ClassificationFeedback
+from flow_core.models.note import Note, NoteKind
+from flow_core.models.note_tag import NoteTag
+from flow_core.models.tag import TagKind
 from flow_core.services import garden_health as health_svc
+from flow_core.services import note_links, taxonomy
+from flow_core.services import notes as notes_svc
 from flow_core.services.auth import signup
 
 
@@ -109,3 +117,92 @@ async def test_persist_snapshot_idempotent_per_day() -> None:
         await health_svc.persist_snapshot(s, org_id=org)  # upsert on (org, day)
         snaps = await health_svc.recent_snapshots(s, org_id=org)
     assert len(snaps) == 1
+
+
+async def _make_note(s: object, org: uuid.UUID, user: uuid.UUID, title: str) -> Note:
+    return await notes_svc.create_note(
+        s,  # type: ignore[arg-type]
+        org_id=org,
+        actor_id=user,
+        kind=NoteKind.text,
+        title=title,
+        text=f"body {title}",
+    )
+
+
+async def _generic_tag(s: object, org: uuid.UUID, user: uuid.UUID, name: str) -> uuid.UUID:
+    tag = await taxonomy.create_tag(
+        s,  # type: ignore[arg-type]
+        org_id=org,
+        actor_id=user,
+        kind=TagKind.generic,
+        name=name,
+    )
+    return tag.id
+
+
+async def test_time_to_first_link_present_when_linked_none_otherwise() -> None:
+    org, user = await _org_user()
+    async with tenant_session(str(org), str(user)) as s:
+        # No links yet -> no reading (not a faked 0).
+        empty = await health_svc.compute_health(s, org_id=org)
+        assert empty.time_to_first_link.value is None
+        assert empty.time_to_first_link.reason
+        a = await _make_note(s, org, user, "a")
+        b = await _make_note(s, org, user, "b")
+        await note_links.link_notes(
+            s, org_id=org, actor_id=user, parent_note_id=a.id, child_note_id=b.id, kind="related"
+        )
+        health = await health_svc.compute_health(s, org_id=org)
+    m = health.time_to_first_link
+    assert m.value is not None and m.value >= 0  # link created after the notes
+
+
+async def test_tag_entropy_of_two_distinct_neighbour_tags_is_one_bit() -> None:
+    org, user = await _org_user()
+    async with tenant_session(str(org), str(user)) as s:
+        center = await _make_note(s, org, user, "center")
+        n1 = await _make_note(s, org, user, "n1")
+        n2 = await _make_note(s, org, user, "n2")
+        s.add(NoteTag(org_id=org, note_id=n1.id, tag_id=await _generic_tag(s, org, user, "alpha")))
+        s.add(NoteTag(org_id=org, note_id=n2.id, tag_id=await _generic_tag(s, org, user, "beta")))
+        await s.flush()
+        for child in (n1, n2):
+            await note_links.link_notes(
+                s,
+                org_id=org,
+                actor_id=user,
+                parent_note_id=center.id,
+                child_note_id=child.id,
+                kind="related",
+            )
+        health = await health_svc.compute_health(s, org_id=org)
+    # center's neighbourhood holds two distinct tags, each once -> H = 1 bit
+    # (n1/n2 only see the center, which carries no generic tag).
+    assert health.tag_entropy_local.value == 1.0
+    assert health.tag_entropy_local.floor == health_svc.TAG_ENTROPY_FLOOR
+
+
+async def test_density_delta_positive_when_links_added_after_old_notes() -> None:
+    org, user = await _org_user()
+    async with tenant_session(str(org), str(user)) as s:
+        a = await _make_note(s, org, user, "old-a")
+        b = await _make_note(s, org, user, "new-b")
+        # Backdate note A past the 7d cutoff so it counts in "then"; the
+        # link is created now, so links_then = 0.
+        old = datetime.datetime.now(datetime.UTC) - datetime.timedelta(days=10)
+        await s.execute(update(Note).where(Note.id == a.id).values(created_at=old))
+        await note_links.link_notes(
+            s, org_id=org, actor_id=user, parent_note_id=a.id, child_note_id=b.id, kind="related"
+        )
+        health = await health_svc.compute_health(s, org_id=org)
+    # now: 2 notes / 1 link = 0.5 ; then: 1 note / 0 links = 0.0 ; delta 0.5.
+    assert health.density_delta_7d.value == 0.5
+
+
+async def test_recall_at_k_is_blocked_with_reason() -> None:
+    org, user = await _org_user()
+    async with tenant_session(str(org), str(user)) as s:
+        health = await health_svc.compute_health(s, org_id=org)
+    assert health.recall_at_k.value is None
+    assert health.recall_at_k.reason
