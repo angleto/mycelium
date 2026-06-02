@@ -1799,6 +1799,95 @@ button.btn--danger:hover {
   border-radius: 2px;
   padding: 0 1px;
 }
+/* ---- Garden health dashboard (ADR-0035) ---- */
+.ghealth {
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 1rem;
+}
+.ghealth__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+}
+.ghealth__back {
+  color: var(--muted);
+  text-decoration: none;
+  font-size: 0.9rem;
+}
+.ghealth__back:hover {
+  color: var(--text-h);
+}
+.ghealth__intro {
+  color: var(--muted);
+  margin: 0.2rem 0 1rem;
+}
+.ghealth__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 0.8rem;
+}
+.ghealth__card {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  padding: 0.8rem 0.9rem;
+}
+.ghealth__label {
+  font-size: 0.85rem;
+  font-weight: 600;
+  margin: 0 0 0.3rem;
+  color: var(--text-h);
+}
+.ghealth__value {
+  font-size: 1.8rem;
+  font-variant-numeric: tabular-nums;
+  margin: 0;
+  color: var(--text-h);
+}
+/* "Show, never judge": below the floor the reading renders in muted
+   red -- a reading, not a verdict (no warning icon, no red banner). */
+.ghealth__value--below {
+  color: #b3534b;
+}
+.ghealth__value--empty {
+  font-size: 1rem;
+  color: var(--muted);
+}
+.ghealth__floor {
+  font-size: 0.75rem;
+  color: var(--muted);
+  margin: 0.1rem 0 0.4rem;
+}
+.ghealth__spark {
+  display: block;
+  color: var(--accent);
+  margin: 0.2rem 0 0.4rem;
+}
+.ghealth__explain {
+  font-size: 0.8rem;
+  color: var(--muted);
+  margin: 0.3rem 0 0;
+  line-height: 1.35;
+}
+.ghealth__reason {
+  font-size: 0.75rem;
+  color: var(--muted);
+  font-style: italic;
+  margin: 0.3rem 0 0;
+}
+/* Link to the health dashboard from the garden tab bar (pushed right). */
+.garden__health-link {
+  margin-left: auto;
+  align-self: center;
+  color: var(--muted);
+  text-decoration: none;
+  font-size: 0.85rem;
+}
+.garden__health-link:hover {
+  color: var(--text-h);
+}
 /* GFM tables: render them as readable tables with subtle borders.
    ``.md`` is the wrapper produced by MarkdownView (the single
    markdown renderer in the codebase). */

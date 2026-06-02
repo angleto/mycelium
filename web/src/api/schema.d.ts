@@ -3914,6 +3914,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/garden/health": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Garden Health
+         * @description Structural symbiosis sensors (ADR-0035): the current live readings
+         *     plus the recent daily snapshots (newest first) for the sparkline.
+         *     "Show, never judge" -- values + floors, never a verdict.
+         */
+        get: operations["garden_health_garden_health_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/garden/graph": {
         parameters: {
             query?: never;
@@ -6228,6 +6250,51 @@ export interface components {
             /** Centrality */
             centrality: {
                 [key: string]: number;
+            };
+        };
+        /**
+         * GardenHealthMetricOut
+         * @description One sensor reading (ADR-0035, "show, never judge"): the value, its
+         *     health floor when it has one, and -- only when ``value`` is null --
+         *     the reason there is no reading yet (data source not built / blocked
+         *     upstream), never a faked number.
+         */
+        GardenHealthMetricOut: {
+            /** Value */
+            value?: number | null;
+            /** Floor */
+            floor?: number | null;
+            /** Reason */
+            reason?: string | null;
+        };
+        /**
+         * GardenHealthOut
+         * @description Response of GET /garden/health: current sensor readings plus the
+         *     recent daily snapshots (newest first) for the sparkline.
+         */
+        GardenHealthOut: {
+            /**
+             * Generated At
+             * Format: date-time
+             */
+            generated_at: string;
+            /** Metrics */
+            metrics: {
+                [key: string]: components["schemas"]["GardenHealthMetricOut"];
+            };
+            /** Trend */
+            trend: components["schemas"]["GardenHealthSnapshotOut"][];
+        };
+        /** GardenHealthSnapshotOut */
+        GardenHealthSnapshotOut: {
+            /**
+             * Day
+             * Format: date
+             */
+            day: string;
+            /** Metrics */
+            metrics: {
+                [key: string]: components["schemas"]["GardenHealthMetricOut"];
             };
         };
         /** GardenLinkCandidateOut */
@@ -19195,6 +19262,40 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["EditSessionSealOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    garden_health_garden_health_get: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GardenHealthOut"];
                 };
             };
             /** @description Validation Error */

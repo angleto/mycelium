@@ -293,6 +293,9 @@ export function GardenRoute() {
             <span className="garden__tab-count">{buckets[x.id].length}</span>
           </button>
         ))}
+        <Link to="/garden/health" className="garden__health-link">
+          {t('gardenHealth.title')} →
+        </Link>
       </div>
 
       {err && <p className="err">{err}</p>}

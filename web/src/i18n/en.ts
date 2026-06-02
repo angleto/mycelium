@@ -15,6 +15,51 @@ export const en = {
       note: 'Notes',
     },
   },
+  gardenHealth: {
+    title: 'Garden health',
+    back: '← Garden',
+    intro:
+      'Structural sensors of the memory–mycelium symbiosis: readings and their health floors, shown, never judged.',
+    noReading: 'No reading yet',
+    floor: 'floor',
+    loadError: 'Could not load the health sensors.',
+    sensor: {
+      accept_rate_classify_7d: {
+        label: 'Accept rate (7d)',
+        explain:
+          'Share of garden suggestions you accepted in the last 7 days, over all you decided on.',
+      },
+      accept_rate_classify_30d: {
+        label: 'Accept rate (30d)',
+        explain: 'The same acceptance, over a 30-day window: the steadier trend.',
+      },
+      time_to_first_link: {
+        label: 'Time to first link',
+        explain:
+          'Median time from capturing a note to its first link. Lower means the mycelium absorbs new notes faster.',
+      },
+      tag_entropy_local: {
+        label: 'Tag biodiversity',
+        explain:
+          'Shannon entropy of generic tags in a node’s neighbourhood. Higher is more varied: a forest, not a monoculture.',
+      },
+      leiden_modularity: {
+        label: 'Cluster modularity',
+        explain:
+          'Leiden modularity on the weighted graph. High means structured zones; the direction over time matters more than the value.',
+      },
+      fungal_lag: {
+        label: 'Fungal lag',
+        explain:
+          'Median time from archiving a note to its first distillation: the health of the asynchronous decomposition.',
+      },
+      density_delta_7d: {
+        label: 'Density delta (7d)',
+        explain:
+          'Change in links-per-node over 7 days. Positive means the mycelium is thickening.',
+      },
+    },
+  },
   common: {
     on: 'on',
     off: 'off',

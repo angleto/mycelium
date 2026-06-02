@@ -14,6 +14,51 @@ export const it: Catalog = {
       note: 'Note',
     },
   },
+  gardenHealth: {
+    title: 'Salute del giardino',
+    back: '← Giardino',
+    intro:
+      'Sensori strutturali della simbiosi memoria–micelio: letture e relative soglie di salute, mostrate, mai giudicate.',
+    noReading: 'Nessuna lettura ancora',
+    floor: 'soglia',
+    loadError: 'Impossibile caricare i sensori di salute.',
+    sensor: {
+      accept_rate_classify_7d: {
+        label: 'Tasso di accettazione (7g)',
+        explain:
+          'Quota di suggerimenti del giardino accettati negli ultimi 7 giorni, sul totale su cui hai deciso.',
+      },
+      accept_rate_classify_30d: {
+        label: 'Tasso di accettazione (30g)',
+        explain: 'La stessa accettazione su una finestra di 30 giorni: il trend più stabile.',
+      },
+      time_to_first_link: {
+        label: 'Tempo al primo link',
+        explain:
+          'Tempo mediano dalla cattura di una nota al suo primo link. Più basso = il micelio assorbe le nuove note più in fretta.',
+      },
+      tag_entropy_local: {
+        label: 'Biodiversità dei tag',
+        explain:
+          'Entropia di Shannon dei tag generici nel vicinato di un nodo. Più alta = più varia: una foresta, non una monocultura.',
+      },
+      leiden_modularity: {
+        label: 'Modularità dei cluster',
+        explain:
+          'Modularità Leiden sul grafo pesato. Alta = zone strutturate; la direzione nel tempo conta più del valore assoluto.',
+      },
+      fungal_lag: {
+        label: 'Lag dei funghi',
+        explain:
+          'Tempo mediano dall’archiviazione di una nota alla sua prima distillazione: la salute della decomposizione asincrona.',
+      },
+      density_delta_7d: {
+        label: 'Delta di densità (7g)',
+        explain:
+          'Variazione dei link per nodo in 7 giorni. Positivo = il micelio si sta infittendo.',
+      },
+    },
+  },
   common: {
     on: 'sì',
     off: 'no',
