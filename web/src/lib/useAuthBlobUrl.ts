@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { authFetch } from '../api/client'
 import type { ImageUploadParent } from './imageUpload'
 import {
+  classifyAttachmentRef,
   ensureAttachmentManifest,
   isAttachmentManifestLoaded,
   resolveAttachmentName,
@@ -119,19 +120,6 @@ export type AttachmentImageState = {
   loading: boolean
 }
 
-type SrcKind = 'empty' | 'auth' | 'absolute' | 'name'
-
-function classifySrc(src: string | undefined | null): SrcKind {
-  if (!src) return 'empty'
-  if (src.startsWith('/attachments/')) return 'auth'
-  // A URI scheme (http:, https:, data:, blob:, mailto:…), an absolute
-  // path, or a fragment is used as-is. Everything else is treated as a
-  // bare filename to resolve against the parent's attachments.
-  if (/^[a-zA-Z][a-zA-Z\d+.-]*:/.test(src)) return 'absolute'
-  if (src.startsWith('/') || src.startsWith('#')) return 'absolute'
-  return 'name'
-}
-
 /**
  * Resolve a markdown image src into something an <img> can render,
  * reporting an explicit loading-vs-broken state.
@@ -152,7 +140,7 @@ export function useAttachmentImage(
   src: string | undefined | null,
   parent?: ImageUploadParent,
 ): AttachmentImageState {
-  const kind = useMemo(() => classifySrc(src), [src])
+  const kind = useMemo(() => classifyAttachmentRef(src), [src])
 
   // Bump when an async manifest load or blob fetch settles, so the
   // synchronous derivations below re-read the module caches. setState

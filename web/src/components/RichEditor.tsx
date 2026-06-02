@@ -601,6 +601,11 @@ export function RichEditor({
           if (!url) return false
           if (/^@(?:task|note|tag):/.test(url)) return true
           if (/^\/attachments\//.test(url)) return true
+          // A bare filename ref to an attachment of this note/task, e.g.
+          // [report.pdf](report.pdf): no scheme/leading slash, no spaces,
+          // ending in an extension. Kept so the link survives the
+          // markdown round-trip; the click-interceptor resolves it.
+          if (/^[^\s:/][^\s:]*\.[A-Za-z0-9]{1,12}$/.test(url)) return true
           return /^(https?:|mailto:|tel:)/i.test(url)
         },
       }),
@@ -742,6 +747,13 @@ export function RichEditor({
     <div
       className={'rte' + (large ? ' rte--lg' : '')}
       data-placeholder={placeholder}
+      // Lets the global click-interceptor resolve a bare-filename
+      // attachment link typed in this editor against the right note/task.
+      data-attachment-parent={
+        imageUploadParent
+          ? `${imageUploadParent.kind}:${imageUploadParent.id}`
+          : undefined
+      }
     >
       <div className="rte__bar">
         <span className="rte__tools">

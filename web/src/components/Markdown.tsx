@@ -8,7 +8,7 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import 'katex/dist/katex.min.css'
 import { parseMentionHref, routeForMention, type MentionKind } from '../lib/mentions'
 import { useAttachmentImage } from '../lib/useAuthBlobUrl'
-import { isAttachmentHref, openAttachment } from '../lib/attachmentRef'
+import { isAttachmentRef, openAttachmentByRef } from '../lib/attachmentRef'
 import type { ImageUploadParent } from '../lib/imageUpload'
 import {
   fetchTaskMention,
@@ -74,17 +74,22 @@ function nodeText(children: ReactNode): string | undefined {
   return undefined
 }
 
-// A non-image attachment linked in the body: `[filename](/attachments/<id>/download)`.
-// The route is bearer-authenticated, so this is NOT a plain navigation —
-// the click authFetches the bytes and opens/downloads them via an
-// ephemeral object URL (openAttachment). The `md-att` class both styles
-// the link (leading icon) and tells the global editor click-interceptor
-// to leave this one to React (no double handling).
+// A non-image attachment linked in the body, either by its canonical
+// `[filename](/attachments/<id>/download)` href or by a bare filename
+// `[label](report.pdf)` referencing a file uploaded to the same
+// note/task. The route is bearer-authenticated, so this is NOT a plain
+// navigation — the click resolves the ref (filename → id via the
+// parent's manifest when needed) then authFetches the bytes and
+// opens/downloads them via an ephemeral object URL. The `md-att` class
+// both styles the link (leading icon) and tells the global editor
+// click-interceptor to leave this one to React (no double handling).
 function AttachmentLink({
   href,
+  parent,
   children,
 }: {
   href: string
+  parent?: ImageUploadParent
   children: ReactNode
 }) {
   const name = nodeText(children)
@@ -94,7 +99,7 @@ function AttachmentLink({
       className="md-att"
       onClick={(e) => {
         e.preventDefault()
-        void openAttachment(href, name)
+        void openAttachmentByRef(href, parent, name)
       }}
     >
       {children}
@@ -164,8 +169,12 @@ function makeComponents(parent?: ImageUploadParent): Components {
         </Link>
       )
     }
-    if (isAttachmentHref(href)) {
-      return <AttachmentLink href={href}>{children}</AttachmentLink>
+    if (isAttachmentRef(href, parent)) {
+      return (
+        <AttachmentLink href={href} parent={parent}>
+          {children}
+        </AttachmentLink>
+      )
     }
     return (
       <a href={href} target="_blank" rel="noopener noreferrer">

@@ -57,6 +57,26 @@ test('attachment link survives the markdown round-trip (keystone)', async ({
   expect(back).toContain(`[doc.pdf](${href})`)
 })
 
+test('a bare-filename attachment link survives the round-trip', async ({
+  page,
+}) => {
+  await login(page)
+  await openFreshNoteEditor(page)
+  await enterMarkdownMode(page)
+  // A link whose href is a plain filename (an attachment of this note
+  // referenced by name). Link.validate must keep the mark so it is not
+  // demoted to bare text on parse-back.
+  await page.locator('textarea.rte__raw').fill('[the figure](Fig02_donne.png)')
+  await toggleBtn(page).click()
+  await expect(
+    page.locator('.ProseMirror a[href="Fig02_donne.png"]'),
+  ).toBeVisible()
+  await toggleBtn(page).click()
+  await expect(page.locator('textarea.rte__raw')).toBeVisible()
+  const back = await page.locator('textarea.rte__raw').inputValue()
+  expect(back).toContain('[the figure](Fig02_donne.png)')
+})
+
 test('the attach/link toolbar button opens the attachment picker', async ({
   page,
 }) => {

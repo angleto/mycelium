@@ -1,4 +1,10 @@
 import { authFetch } from '../api/client'
+import type { ImageUploadParent } from './imageUpload'
+import {
+  classifyAttachmentRef,
+  ensureAttachmentManifest,
+  resolveAttachmentName,
+} from './attachmentManifest'
 
 // Markdown references to attachments.
 //
@@ -56,6 +62,48 @@ function triggerDownload(url: string, filename: string | undefined): void {
  * before the await — so the preview tab is opened synchronously and
  * navigated once the blob is ready.
  */
+/**
+ * Whether a markdown link href should be handled as an attachment in the
+ * context of `parent`: either the canonical /attachments route, or a
+ * bare filename (resolved against the parent's files on click). Used to
+ * decide styling/handling at render time; the actual id lookup happens in
+ * openAttachmentByRef, which can await the manifest.
+ */
+export function isAttachmentRef(
+  href: string | null | undefined,
+  parent?: ImageUploadParent,
+): href is string {
+  if (!href) return false
+  if (isAttachmentHref(href)) return true
+  return !!parent && classifyAttachmentRef(href) === 'name'
+}
+
+/**
+ * Open an attachment referenced either by its canonical
+ * /attachments/<id>/download href or by a bare filename. A filename is
+ * resolved against `parent`'s attachment manifest (fetched on demand)
+ * before opening; an unknown filename is a no-op (the caller has already
+ * suppressed the default navigation). Delegates to openAttachment for the
+ * actual bearer-auth fetch + inline-open/download.
+ */
+export async function openAttachmentByRef(
+  rawHref: string,
+  parent: ImageUploadParent | undefined,
+  filename?: string,
+): Promise<void> {
+  if (isAttachmentHref(rawHref)) {
+    await openAttachment(rawHref, filename)
+    return
+  }
+  if (!parent || classifyAttachmentRef(rawHref) !== 'name') return
+  let resolved = resolveAttachmentName(parent, rawHref)
+  if (!resolved) {
+    await ensureAttachmentManifest(parent)
+    resolved = resolveAttachmentName(parent, rawHref)
+  }
+  if (resolved) await openAttachment(resolved, filename ?? rawHref)
+}
+
 export async function openAttachment(
   href: string,
   filename?: string,

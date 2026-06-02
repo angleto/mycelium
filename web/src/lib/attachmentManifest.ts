@@ -50,6 +50,26 @@ export function attachmentBasename(ref: string): string {
   return decoded.trim().toLowerCase()
 }
 
+// How a markdown image src / link href relates to an attachment:
+//  - 'auth'     already the canonical /attachments/<id>/download route
+//  - 'absolute' a URL (scheme:…), an absolute path, or a #fragment — used
+//               verbatim, never an attachment
+//  - 'name'     a bare filename to resolve against the parent's files
+//  - 'empty'    nothing
+export type AttachmentRefKind = 'empty' | 'auth' | 'absolute' | 'name'
+
+export function classifyAttachmentRef(
+  ref: string | undefined | null,
+): AttachmentRefKind {
+  if (!ref) return 'empty'
+  if (ref.startsWith('/attachments/')) return 'auth'
+  // A URI scheme (http:, https:, data:, blob:, mailto:…), an absolute
+  // path, or a fragment is taken as-is.
+  if (/^[a-zA-Z][a-zA-Z\d+.-]*:/.test(ref)) return 'absolute'
+  if (ref.startsWith('/') || ref.startsWith('#')) return 'absolute'
+  return 'name'
+}
+
 // Whether the parent's manifest has finished loading (so a null from
 // resolveAttachmentName means "no such filename" rather than "not yet
 // fetched").

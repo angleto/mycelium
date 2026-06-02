@@ -22,7 +22,13 @@ import { PomodoroTimer } from './PomodoroTimer'
 import { hms, elapsedSec } from '../lib/time'
 import { useRunningTimers } from '../lib/useRunningTimer'
 import { parseMentionHref, routeForMention } from '../lib/mentions'
-import { isAttachmentHref, openAttachment } from '../lib/attachmentRef'
+import {
+  isAttachmentHref,
+  openAttachment,
+  openAttachmentByRef,
+} from '../lib/attachmentRef'
+import { classifyAttachmentRef } from '../lib/attachmentManifest'
+import type { ImageUploadParent } from '../lib/imageUpload'
 import {
   getCachedLookup,
   lookupPrefix,
@@ -357,6 +363,28 @@ export function AppShell() {
       if (isAttachmentHref(href) && !a?.classList.contains('md-att')) {
         e.preventDefault()
         void openAttachment(href, a?.textContent?.trim() || undefined)
+        return
+      }
+      // A bare-filename attachment link typed in an editor (plain <a>
+      // mark, no md-att React handler): resolve it against the note/task
+      // that owns the editor, read from the nearest data-attachment-parent
+      // ancestor, then open it.
+      if (
+        a &&
+        !a.classList.contains('md-att') &&
+        classifyAttachmentRef(href) === 'name'
+      ) {
+        const host = a.closest('[data-attachment-parent]')
+        const tag = host?.getAttribute('data-attachment-parent') ?? ''
+        const [kind, id] = tag.split(':')
+        if ((kind === 'note' || kind === 'task') && id) {
+          e.preventDefault()
+          void openAttachmentByRef(
+            href,
+            { kind, id } as ImageUploadParent,
+            a.textContent?.trim() || undefined,
+          )
+        }
       }
     }
     document.addEventListener('click', onClick, true)
