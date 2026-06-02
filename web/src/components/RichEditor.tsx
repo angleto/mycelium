@@ -18,6 +18,7 @@ import Suggestion, {
   type SuggestionKeyDownProps,
   type SuggestionProps,
 } from '@tiptap/suggestion'
+import { PluginKey } from '@tiptap/pm/state'
 import { InlineMath, BlockMath } from './MarkdownMath'
 import {
   AnnotationDecorations,
@@ -27,6 +28,7 @@ import {
 import { InlineAnnotator } from './InlineAnnotator'
 import type { Annotation, DocKind } from '../lib/useAnnotations'
 import { EntityPrefix } from '../lib/entityPrefixExtension'
+import { isPrefixCandidate, lookupPrefix } from '../lib/prefixLookup'
 import { api, authFetch, workspaceHeader } from '../api/client'
 import { formatMentionHref, type MentionKind } from '../lib/mentions'
 import { useAttachmentImage } from '../lib/useAuthBlobUrl'
@@ -293,6 +295,169 @@ const MentionExt = Extension.create({
             },
           }
         },
+      }),
+    ]
+  },
+})
+
+// EntityAutocomplete (ADR-0038 layer E): type ``[[`` then a title or a
+// UUID prefix -> autocomplete of matching tasks / notes -> inserts the
+// backtick-prefix code span (the pervasive roadmap convention). The
+// EntityPrefix decoration then renders it as a live chip and the
+// markdown round-trip serializes it as `` `91cf6aaa` ``. This is the
+// authoring counterpart of that read-side chip: it prevents wrong
+// references at the source. Distinct from the @-mention above, which
+// inserts a title-baked link; a backtick-prefix resolves its title
+// live, so it never goes stale.
+
+type EntityCand = { kind: 'task' | 'note'; id: string; label: string }
+
+async function searchEntities(query: string): Promise<EntityCand[]> {
+  const q = query.trim()
+  const out: EntityCand[] = []
+  const seen = new Set<string>()
+  const take = (kind: 'task' | 'note', id: string, label: string) => {
+    const key = `${kind}:${id}`
+    if (seen.has(key)) return
+    seen.add(key)
+    out.push({ kind, id, label })
+  }
+  // A hex prefix resolves deterministically via /lookup, shown first.
+  if (isPrefixCandidate(q)) {
+    const res = await lookupPrefix(q.toLowerCase(), { kinds: ['task', 'note'] })
+    for (const m of res?.matches ?? []) take(m.kind, m.id, m.title ?? m.id)
+  }
+  // Title substring over the workspace's tasks + notes (same instant
+  // client-side filter the @-mention and the Cmd+K palette use).
+  const h = workspaceHeader()
+  const [tk, nt] = await Promise.all([
+    api.GET('/tasks', { params: { header: h } }),
+    api.GET('/notes', { params: { header: h } }),
+  ])
+  const lc = q.toLowerCase()
+  for (const t of tk.data ?? []) {
+    if (!lc || t.title.toLowerCase().includes(lc)) take('task', t.id, t.title)
+  }
+  for (const n of nt.data ?? []) {
+    const label = n.title ?? n.kind
+    if (!lc || label.toLowerCase().includes(lc)) take('note', n.id, label)
+  }
+  return out.slice(0, 8)
+}
+
+// Imperative floating listbox for the [[ suggestion. Mirrors the
+// inline render MentionExt uses (same .mention-pop styling + keyboard
+// model); kept separate so the working @-mention render is untouched.
+function entitySuggestionRender() {
+  let box: HTMLDivElement | null = null
+  let list: EntityCand[] = []
+  let sel = 0
+  let pick: ((c: EntityCand) => void) | null = null
+
+  const draw = () => {
+    const el = box
+    if (!el) return
+    el.innerHTML = ''
+    list.forEach((c, i) => {
+      const row = document.createElement('div')
+      row.className =
+        'mention-pop__row' + (i === sel ? ' mention-pop__row--sel' : '')
+      row.id = `entity-opt-${i}`
+      row.setAttribute('role', 'option')
+      row.setAttribute('aria-selected', i === sel ? 'true' : 'false')
+      row.textContent = `${c.kind === 'task' ? '✓' : '◆'} ${c.label}`
+      row.addEventListener('mousedown', (e) => {
+        e.preventDefault()
+        pick?.(c)
+      })
+      el.append(row)
+    })
+    if (list.length > 0)
+      el.setAttribute('aria-activedescendant', `entity-opt-${sel}`)
+    else {
+      el.removeAttribute('aria-activedescendant')
+      el.textContent = '...'
+    }
+  }
+  const place = (rect: DOMRect | null | undefined) => {
+    if (!box || !rect) return
+    box.style.left = `${rect.left}px`
+    box.style.top = `${rect.bottom + 4}px`
+  }
+
+  return {
+    onStart: (p: SuggestionProps<EntityCand>) => {
+      box = document.createElement('div')
+      box.className = 'mention-pop'
+      box.setAttribute('role', 'listbox')
+      document.body.append(box)
+      list = p.items
+      sel = 0
+      pick = (c) => p.command(c)
+      place(p.clientRect?.())
+      draw()
+    },
+    onUpdate: (p: SuggestionProps<EntityCand>) => {
+      list = p.items
+      sel = 0
+      pick = (c) => p.command(c)
+      place(p.clientRect?.())
+      draw()
+    },
+    onKeyDown: (p: SuggestionKeyDownProps) => {
+      if (p.event.key === 'ArrowDown') {
+        sel = list.length ? (sel + 1) % list.length : 0
+        draw()
+        return true
+      }
+      if (p.event.key === 'ArrowUp') {
+        sel = list.length ? (sel - 1 + list.length) % list.length : 0
+        draw()
+        return true
+      }
+      if (p.event.key === 'Enter') {
+        if (list[sel] && pick) pick(list[sel])
+        return true
+      }
+      if (p.event.key === 'Escape') return true
+      return false
+    },
+    onExit: () => {
+      box?.remove()
+      box = null
+    },
+  }
+}
+
+const EntityAutocompleteExt = Extension.create({
+  name: 'flowEntityAutocomplete',
+  addProseMirrorPlugins() {
+    return [
+      Suggestion<EntityCand>({
+        editor: this.editor,
+        // Distinct key: @tiptap/suggestion defaults every instance to the
+        // 'suggestion' PluginKey, so without this the @-mention plugin and
+        // this one collide ("Adding different instances of a keyed plugin").
+        pluginKey: new PluginKey('flowEntityAutocompleteSuggestion'),
+        char: '[[',
+        allowSpaces: false,
+        startOfLine: false,
+        items: ({ query }) => searchEntities(query),
+        command: ({ editor, range, props }) => {
+          // Insert the 8-char id prefix as inline code (the backtick
+          // convention), then a trailing unmarked space so typing
+          // continues outside the code mark.
+          const code = props.id.replace(/-/g, '').slice(0, 8)
+          editor
+            .chain()
+            .focus()
+            .insertContentAt(range, [
+              { type: 'text', text: code, marks: [{ type: 'code' }] },
+              { type: 'text', text: ' ' },
+            ])
+            .run()
+        },
+        render: entitySuggestionRender,
       }),
     ]
   },
@@ -634,6 +799,7 @@ export function RichEditor({
       // eslint-disable-next-line react-hooks/refs
       ImageExt.configure({ getParent: () => parentRef.current }),
       MentionExt,
+      EntityAutocompleteExt,
       // Clickable UUID-prefix chips for backticked codes (ADR-0038
       // convention) read inside the editor. Decoration-only; routing
       // is the global AppShell interceptor (data-entity-prefix).
