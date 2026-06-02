@@ -53,6 +53,8 @@ def _mock_task(**over: Any) -> Any:
         budget_id=None,
         is_archived=False,
         offered=False,
+        assignee_id=None,
+        owner_id=None,
         deleted_at=None,
         version=1,
     )
@@ -72,6 +74,8 @@ def test_task_full_drops_unset_nullables_keeps_falsy() -> None:
         "monetary_cost",
         "location",
         "budget_id",
+        "assignee_id",
+        "owner_id",
         "deleted_at",
     ):
         assert k not in out, f"{k} should be dropped when None"
@@ -87,10 +91,22 @@ def test_task_full_drops_unset_nullables_keeps_falsy() -> None:
 
 
 def test_task_full_keeps_set_values() -> None:
-    out = _task_full(_mock_task(description="real", location="Rome", due_date=None), [])
+    out = _task_full(
+        _mock_task(
+            description="real",
+            location="Rome",
+            due_date=None,
+            assignee_id="44444444-4444-4444-4444-444444444444",
+            owner_id="55555555-5555-5555-5555-555555555555",
+        ),
+        [],
+    )
     assert out["description"] == "real"
     assert out["location"] == "Rome"
     assert "due_date" not in out  # still dropped, it stayed None
+    # Assignment/accountability ids are surfaced for read-back (901f0f9f).
+    assert out["assignee_id"] == "44444444-4444-4444-4444-444444444444"
+    assert out["owner_id"] == "55555555-5555-5555-5555-555555555555"
 
 
 def test_client_drops_unset_card_fields_keeps_falsy() -> None:
