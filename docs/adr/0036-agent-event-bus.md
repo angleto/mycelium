@@ -76,6 +76,61 @@ adjudicator's verdict is itself an event.
 - The adjudicator emits a `commit` or `reject` event referencing the
   original `propose` via `parent_event_id`.
 
+### Mapping: `garden_classify` ⇄ bus
+
+`garden_classify` (ADR-0032) is the first concrete producer/consumer
+on the bus. The rule is: **a classification proposal is an event, not
+a direct API mutation.** `GET /garden/classify/{node_id}` stays a pure
+read (no event), but every *actionable* suggestion and every user (or
+worker) decision on it round-trips through the outbox.
+
+- **Proposal → `propose` event.** When an agent (or the worker)
+  surfaces a suggestion above the ADR-0032 floors (`TAG_FLOOR=0.55`,
+  `LINK_FLOOR=0.45`, `MATURE_SUGGEST=0.65`), it writes a `propose`
+  event. `payload` (with `payload_schema_version=1`) is the suggestion
+  in `garden_classify` shape:
+
+  ```jsonc
+  {
+    "suggestion_type": "tag",            // tag | link | maturity | cluster
+    "suggestion_value": { "tag_id": "…" },
+    "confidence": 0.71,
+    "rationale": "Adamic-Adar over co-tagged neighbours",
+    "signals_snapshot": { "…": "…" },    // same blob ADR-0037 persists
+    "model_version": "garden-classify-v1"
+  }
+  ```
+
+  `node_kind`/`node_id` identify the classified node; `actor_id` is the
+  proposing agent.
+
+- **User accept → `commit` event.** `POST /garden/apply` with
+  `action ∈ {accept, override}` emits a `commit` event whose
+  `parent_event_id` points at the originating `propose` (or, for a
+  human-initiated apply with no prior proposal, a synthetic
+  self-parented `propose`+`commit` pair so the audit chain is never
+  broken). The same handler writes the `classification_feedback` row
+  (ADR-0037); the bus event and the feedback row are written in **one
+  transaction** so the learning loop and the audit stream can never
+  disagree.
+
+- **User reject/ignore → `reject` event.** `action ∈ {reject, ignore}`
+  emits a `reject` event referencing the `propose`. `ignore` carries
+  `applied_state='rejected'` with a `soft=true` payload flag so the
+  learning loop can weigh a passive dismissal differently from an
+  explicit reject.
+
+- **Worker auto-promotion → system `commit`.** `auto_promote_mature`
+  (config-gated `garden_auto_mature_enabled`) emits a `commit` event
+  with `actor_kind='system'` and the `auto` action; the MCP boundary
+  keeps rejecting client-supplied `auto` (ADR-0032), so a forged
+  system promotion cannot enter the bus from an external agent.
+
+This makes the two ADR-0037 inputs explicit: the learning loop
+subscribes to `commit`/`reject` events (see Subscribers §1) and reads
+`confidence`/`signals_snapshot` from their `payload` to update priors.
+No accept/reject can reach the learning loop except as a bus event.
+
 ### Agent registry & quotas
 
 - The executor registry (ADR-0025) already lists authorised agents.
