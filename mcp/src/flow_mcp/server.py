@@ -731,6 +731,13 @@ def _task_full(t: Task, tags: list[Tag] | None = None) -> dict[str, Any]:
             "budget_id": str(t.budget_id) if t.budget_id else None,
             "is_archived": t.is_archived,
             "offered": t.offered,
+            # Read-back of accountability/assignment (task 901f0f9f): the
+            # write tools take a handle, but the stored values are ids
+            # (``assignee_id`` -> identities, ``owner_id`` -> users), so
+            # without these you cannot confirm what you set. Resolve to
+            # handles + the full collaborator set is a follow-up.
+            "assignee_id": str(t.assignee_id) if t.assignee_id else None,
+            "owner_id": str(t.owner_id) if t.owner_id else None,
             "deleted_at": t.deleted_at.isoformat() if t.deleted_at else None,
             "version": t.version,
             "tags": [_tag_brief(g) for g in (tags or [])],
@@ -5071,25 +5078,29 @@ async def set_task_owner(
     owner_handle: str | None = None,
 ) -> dict[str, Any]:
     """Reassign accountability for a task (docs/adr/0028 D2). Owner
-    is always a real user. Pass either ``owner_id`` (uuid) or
-    ``owner_handle`` (resolved against ``identities`` under the
-    current org; the identity must be ``kind=user``)."""
+    is always a real user. Pass either ``owner_id`` (uuid into
+    ``identities``) or ``owner_handle``, which accepts a bare handle
+    (``angelo``), a leading-@ handle (``@angelo``), or the member's
+    login email (``angelo@leto.blue``); all resolve under the current
+    org and the identity must be ``kind=user``.
+
+    Note the id-space split (task 901f0f9f): owner/assignee tools take
+    an *identity* id or handle here, while ``assign_task`` /
+    ``unassign_task`` take a *user* id. When unsure, pass a handle or
+    email and let the server resolve it."""
     async with _tenant(token, org_id) as (s, org, user):
         if owner_id is None and owner_handle:
-            from flow_core.models.identity import Identity, IdentityKind
+            from flow_core.models.identity import IdentityKind
+            from flow_core.services import identities as identities_svc
 
-            row = (
-                await s.execute(
-                    select(Identity).where(
-                        Identity.org_id == org,
-                        Identity.handle == owner_handle,
-                        Identity.kind == IdentityKind.user,
-                    )
-                )
-            ).scalar_one_or_none()
-            if row is None or row.user_id is None:
+            # Resolve via the shared resolver so ``owner_handle`` accepts a
+            # bare handle, a leading-@ handle, or a login email (task
+            # 901f0f9f) -- same rules as the assignee path, and it
+            # self-heals drifted identity rows. Owner must be a real user.
+            ident = await identities_svc.lookup_by_handle(s, org_id=org, handle=owner_handle)
+            if ident is None or ident.kind != IdentityKind.user or ident.user_id is None:
                 raise NotFoundError(MessageCode.USER_NOT_FOUND)
-            resolved = row.user_id
+            resolved = ident.user_id
         elif owner_id is not None:
             resolved = uuid.UUID(owner_id)
         else:
@@ -5116,10 +5127,12 @@ async def set_task_assignee(
     clear: bool = False,
 ) -> dict[str, Any]:
     """Set or clear who should work on the task (docs/adr/0028 D2).
-    Pass ``assignee_id`` (uuid into identities) or ``assignee_handle``
-    (resolved under the current org). ``clear=True`` unassigns the
-    task; the routing kind then falls back to ``task.executor_kind``
-    (ADR-0028)."""
+    Pass ``assignee_id`` (uuid into ``identities``) or
+    ``assignee_handle``, which accepts a bare handle (``angelo``), a
+    leading-@ handle (``@angelo``), or the member's login email
+    (``angelo@leto.blue``); all resolve under the current org.
+    ``clear=True`` unassigns the task; the routing kind then falls back
+    to ``task.executor_kind`` (ADR-0028)."""
     async with _tenant(token, org_id) as (s, org, user):
         values: dict[str, Any] = {}
         if clear:

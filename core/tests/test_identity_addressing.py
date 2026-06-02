@@ -24,6 +24,7 @@ from flow_core.db import admin_session, tenant_session
 from flow_core.models.ai_assistant import AiAssistant
 from flow_core.models.identity import Identity, IdentityKind
 from flow_core.models.task import ExecKind, Task
+from flow_core.services import identities as identities_svc
 from flow_core.services import tasks as tasks_svc
 from flow_core.services.auth import signup
 
@@ -330,3 +331,69 @@ async def test_list_tasks_filters_by_assignee_kind_and_handles() -> None:
     assert unassigned_task.id not in human_ids
     assert handle_ids == {bot_task.id}
     assert {bot_task.id, human_task.id, unassigned_task.id}.issubset(all_ids)
+
+
+async def _signup_capturing_email() -> tuple[uuid.UUID, uuid.UUID, str]:
+    """Like ``_signup_with_handle`` but returns the login email too, so
+    the email-as-handle resolution (task 901f0f9f) can be exercised."""
+    email = _email()
+    async with admin_session() as s:
+        a = await signup(s, email=email, password="pw-strong-123", org_name="ID-EMAIL")
+    return a.org_id, a.user_id, email
+
+
+async def test_lookup_by_handle_resolves_login_email() -> None:
+    """DX (901f0f9f): a login email resolves to the member's identity,
+    so assigning by the address a user actually knows works -- and it is
+    case-insensitive on the email."""
+    org, user, email = await _signup_capturing_email()
+    async with tenant_session(str(org), str(user)) as s:
+        ident = await identities_svc.lookup_by_handle(s, org_id=org, handle=email)
+        assert ident is not None
+        assert ident.kind == IdentityKind.user
+        assert ident.user_id == user
+        upper = await identities_svc.lookup_by_handle(s, org_id=org, handle=email.upper())
+    assert upper is not None and upper.id == ident.id
+
+
+async def test_lookup_by_handle_tolerates_leading_at() -> None:
+    """A handle pasted with a leading ``@`` (``@angelo``) resolves to
+    the same identity as the bare handle."""
+    org, user, email = await _signup_capturing_email()
+    async with tenant_session(str(org), str(user)) as s:
+        by_email = await identities_svc.lookup_by_handle(s, org_id=org, handle=email)
+        assert by_email is not None
+        bare = await identities_svc.lookup_by_handle(s, org_id=org, handle=by_email.handle)
+        at = await identities_svc.lookup_by_handle(s, org_id=org, handle=f"@{by_email.handle}")
+    assert bare is not None and at is not None
+    assert bare.id == at.id == by_email.id
+
+
+async def test_lookup_by_handle_unknown_email_returns_none() -> None:
+    """An email with no matching org member resolves to None (not an
+    accidental cross-org leak)."""
+    org, user, _ = await _signup_capturing_email()
+    async with tenant_session(str(org), str(user)) as s:
+        miss = await identities_svc.lookup_by_handle(
+            s, org_id=org, handle="nobody-here@example.test"
+        )
+    assert miss is None
+
+
+async def test_create_task_accepts_assignee_by_email() -> None:
+    """End-to-end: ``create_task`` resolves an email ``assignee_handle``
+    to the member's identity via the central ``lookup_by_handle``."""
+    org, user, email = await _signup_capturing_email()
+    async with tenant_session(str(org), str(user)) as s:
+        ident = await identities_svc.lookup_by_handle(s, org_id=org, handle=email)
+        assert ident is not None
+        task = await tasks_svc.create_task(
+            s,
+            org_id=org,
+            actor_id=user,
+            title="assign-by-email",
+            estimate_effort_h=Decimal(1),
+            assignee_handle=email,
+        )
+        reloaded = (await s.execute(select(Task).where(Task.id == task.id))).scalar_one()
+    assert reloaded.assignee_id == ident.id

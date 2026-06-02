@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -144,9 +144,22 @@ async def lookup_by_handle(
     org_id: uuid.UUID,
     handle: str,
 ) -> Identity | None:
-    """Resolve ``@handle`` to an Identity row in the current org, or
-    None when not found. Empty handle returns None defensively (the
-    caller should not pass an empty string).
+    """Resolve a handle to an Identity row in the current org, or None.
+
+    Accepts three forms (DX: task 901f0f9f -- assigning by what the
+    user actually knows, not an opaque id space):
+
+      * a bare handle (``angelo``) -- the canonical stored form;
+      * a handle with a leading ``@`` (``@angelo``) -- tolerated, the
+        ``@`` is stripped before matching;
+      * a login email (``angelo@leto.blue``) -- resolved to the org
+        member whose ``users.email`` matches (case-insensitively), then
+        to their identity. ``users.email`` is globally unique, but we
+        still scope the join to org membership so a non-member's email
+        never materialises an identity in this org.
+
+    Empty handle returns None defensively (the caller should not pass an
+    empty string).
 
     Self-heals legacy/drifted state: ``list_actors`` sources from the
     user/ai_assistant tables directly, but ``identities`` is the
@@ -158,7 +171,24 @@ async def lookup_by_handle(
     to the source tables and ``ensure_*`` the identity so the next
     call hits the fast path.
     """
+    handle = handle.strip().lstrip("@")
     if not handle:
+        return None
+    # Email form: resolve via the org member's login email. An ``@``
+    # after the leading-strip means the caller passed ``local@domain``.
+    if "@" in handle:
+        user_id = (
+            await session.execute(
+                select(User.id)
+                .join(Membership, Membership.user_id == User.id)
+                .where(
+                    Membership.org_id == org_id,
+                    func.lower(User.email) == handle.lower(),
+                )
+            )
+        ).scalar_one_or_none()
+        if user_id is not None:
+            return await ensure_for_user(session, org_id=org_id, user_id=user_id)
         return None
     row = (
         await session.execute(
