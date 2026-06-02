@@ -45,6 +45,7 @@ from flow_core.models.calendar import (
 )
 from flow_core.models.classification_feedback import ClassificationFeedback
 from flow_core.models.client_profile import ClientProfile
+from flow_core.models.garden_health import GardenHealthDaily
 from flow_core.models.dependency import DependencyType, TaskDependency
 from flow_core.models.dispatch_request import (
     ACTIVE_DISPATCH_STATUSES,
@@ -165,6 +166,7 @@ __all__ = [
     "CalendarHoliday",
     "CalendarSubscription",
     "ClassificationFeedback",
+    "GardenHealthDaily",
     "ClientProfile",
     "ConservationAdhesion",
     "ConservationStatus",

@@ -21,6 +21,7 @@ underlying service queries are RLS-scoped.
 
 from __future__ import annotations
 
+import datetime
 import uuid
 from typing import Annotated, Literal
 
@@ -35,6 +36,9 @@ from flow_api.schemas import (
     GardenClusterSuggestionOut,
     GardenGraphEdge,
     GardenGraphOut,
+    GardenHealthMetricOut,
+    GardenHealthOut,
+    GardenHealthSnapshotOut,
     GardenLinkCandidateOut,
     GardenLinkSuggestion,
     GardenLinkSuggestionsOut,
@@ -44,10 +48,33 @@ from flow_api.schemas import (
     GardenWalkStep,
 )
 from flow_core.services import garden_classify as classify_svc
+from flow_core.services import garden_health as health_svc
 from flow_core.services import graph as svc
 from flow_core.services import link_prediction as linkpred_svc
 
 router = APIRouter(prefix="/garden", tags=["garden"])
+
+
+@router.get("/health", response_model=GardenHealthOut)
+async def garden_health(
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+) -> GardenHealthOut:
+    """Structural symbiosis sensors (ADR-0035): the current live readings
+    plus the recent daily snapshots (newest first) for the sparkline.
+    "Show, never judge" -- values + floors, never a verdict."""
+    health = await health_svc.compute_health(ctx.session, org_id=ctx.org_id)
+    snaps = await health_svc.recent_snapshots(ctx.session, org_id=ctx.org_id, days=30)
+    return GardenHealthOut(
+        generated_at=datetime.datetime.now(datetime.UTC),
+        metrics={k: GardenHealthMetricOut(**v) for k, v in health.as_dict().items()},
+        trend=[
+            GardenHealthSnapshotOut(
+                day=s.day,
+                metrics={k: GardenHealthMetricOut(**v) for k, v in s.metrics.items()},
+            )
+            for s in snaps
+        ],
+    )
 
 
 @router.get("/graph", response_model=GardenGraphOut)

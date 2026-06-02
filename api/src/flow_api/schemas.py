@@ -1070,6 +1070,31 @@ class GardenClassifyOut(BaseModel):
     generated_at: datetime.datetime
 
 
+class GardenHealthMetricOut(BaseModel):
+    """One sensor reading (ADR-0035, "show, never judge"): the value, its
+    health floor when it has one, and -- only when ``value`` is null --
+    the reason there is no reading yet (data source not built / blocked
+    upstream), never a faked number."""
+
+    value: float | None = None
+    floor: float | None = None
+    reason: str | None = None
+
+
+class GardenHealthSnapshotOut(BaseModel):
+    day: datetime.date
+    metrics: dict[str, GardenHealthMetricOut]
+
+
+class GardenHealthOut(BaseModel):
+    """Response of GET /garden/health: current sensor readings plus the
+    recent daily snapshots (newest first) for the sparkline."""
+
+    generated_at: datetime.datetime
+    metrics: dict[str, GardenHealthMetricOut]
+    trend: list[GardenHealthSnapshotOut]
+
+
 class GardenApplyIn(BaseModel):
     """Apply (or decline) one suggestion. ``accept``/``override`` mutate
     via the existing services; ``reject``/``ignore`` only record the

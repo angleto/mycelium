@@ -29,7 +29,7 @@ from flow_core.config import get_settings
 from flow_core.db import admin_session, tenant_session
 from flow_core.models.membership import Membership, Role
 from flow_core.models.organization import Organization
-from flow_core.services import garden_classify, note_links
+from flow_core.services import garden_classify, garden_health, note_links
 
 _log = logging.getLogger("flow.worker.garden")
 
@@ -85,6 +85,14 @@ async def run_once() -> int:
                     auto_matured = await garden_classify.auto_promote_mature(
                         s, org_id=org_id, actor_id=owner
                     )
+            # Garden-health daily snapshot (ADR-0035), in its OWN session
+            # so a sensor-query failure can never roll back the maturity
+            # transitions committed above. Idempotent per (org, day).
+            try:
+                async with tenant_session(str(org_id), str(owner), actor_kind="system") as hs:
+                    await garden_health.persist_snapshot(hs, org_id=org_id)
+            except Exception:
+                _log.exception("garden health snapshot failed for org=%s", org_id)
             n = sum(counters.values()) + auto_matured
             if n > 0:
                 _log.info(
