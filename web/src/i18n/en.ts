@@ -864,6 +864,10 @@ export const en = {
     exportPdf: 'Export PDF',
     exportPdfShort: '.pdf',
     exportPdfErr: 'Export PDF: ',
+    toolbarHide: 'Hide toolbar',
+    toolbarShow: 'Show toolbar',
+    annotateComment: 'Comment on the selected text',
+    annotateSuggest: 'Suggest an edit to the selected text',
   },
   pomodoro: {
     title: 'Pomodoro',

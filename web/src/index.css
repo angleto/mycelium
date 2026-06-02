@@ -1850,7 +1850,11 @@ button.btn--danger:hover {
    scrolls underneath. */
 .rte__bar {
   position: sticky;
-  top: 0;
+  /* On a route page the window scrolls under the sticky topbar, so the
+     toolbar must pin just below it (not at 0, where the topbar — higher
+     z-index — would cover it). Inside the notes modal the scroll
+     container is .modal__body, so it is reset to 0 below. */
+  top: var(--topbar-h);
   z-index: 5;
   display: flex;
   justify-content: space-between;
@@ -1861,10 +1865,40 @@ button.btn--danger:hover {
   background: var(--surface);
   border-bottom: 1px solid var(--border);
 }
+/* Left cluster: the collapse toggle + (when shown) the formatting
+   buttons. Kept together so the toggle stays put while the buttons wrap
+   beside it; the actions cluster floats to the right via the bar's
+   space-between. */
+.rte__bar-left {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.2rem;
+  min-width: 0;
+}
 .rte__tools {
   display: flex;
   flex-wrap: wrap;
   gap: 0.2rem;
+}
+/* The show/hide switch is always present, even when the buttons are
+   collapsed, so the bar can be reopened with one tap. */
+.rte__collapse {
+  min-width: 1.9rem;
+  font-weight: 600;
+}
+/* Thin divider between the annotation triggers and the formatting set. */
+.rte__sep {
+  align-self: stretch;
+  width: 1px;
+  margin: 0.15rem 0.25rem;
+  background: var(--border);
+}
+/* In the notes modal the editor scrolls inside .modal__body, whose top
+   edge is the right anchor for the sticky toolbar (no topbar in the
+   overlay). */
+.modal__body .rte__bar {
+  top: 0;
 }
 .rte__fmt {
   min-width: 1.9rem;
@@ -4255,8 +4289,9 @@ button.btn--danger:hover {
   background: #e3f7e3;
 }
 .anno__body {
+  /* Holds a rendered MarkdownView (its `.md` owns spacing); no pre-wrap,
+     which would otherwise inject stray whitespace into the rendered HTML. */
   margin: 0.25rem 0;
-  white-space: pre-wrap;
 }
 .anno__actions {
   display: flex;
@@ -4312,40 +4347,11 @@ button.btn--danger:hover {
   cursor: pointer;
 }
 
-/* Inline annotation UX: floating selection toolbar + popovers
-   (InlineAnnotator). Both are position:fixed, anchored to viewport
-   coordinates computed from the editor selection / clicked mark. */
-.anno-bubble {
-  z-index: 2000;
-  display: flex;
-  gap: 0.15rem;
-  padding: 0.15rem;
-  background: var(--surface, #fff);
-  border: 1px solid var(--border, #ccc);
-  border-radius: 6px;
-  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.18);
-}
-.anno-bubble__btn {
-  border: 0;
-  background: transparent;
-  /* The bubble sits on --surface, so its icons need a foreground that
-     contrasts with the surface. Without this, the button inherits
-     --accent-fg from the base rule (white in light mode, near-black in
-     dark mode), which is tuned for the accent fill and renders the icon
-     white-on-white / black-on-black here: invisible in both themes. */
-  color: var(--text);
-  cursor: pointer;
-  font-size: 0.95rem;
-  line-height: 1;
-  padding: 0.25rem 0.4rem;
-  border-radius: 4px;
-}
-.anno-bubble__btn:hover {
-  /* Theme-aware hover: derive from --text so it reads on both surfaces
-     (--hover is undefined, so the old rgba(0,0,0,.07) vanished on dark). */
-  background: color-mix(in srgb, var(--text) 12%, transparent);
-  color: var(--accent);
-}
+/* Inline annotation UX: compose + action popovers (InlineAnnotator).
+   Both are position:fixed, anchored to viewport coordinates computed
+   from the editor selection / clicked mark. The Comment / Suggest
+   triggers no longer float on the selection — they live in the editor's
+   sticky toolbar (.rte__annotate). */
 .anno-pop {
   z-index: 2001;
   width: 320px;

@@ -979,6 +979,7 @@ export function TaskDetailRoute() {
               reload={reloadDescAnnotations}
               loadError={descAnnoError}
               onDocMutated={reload}
+              imageUploadParent={{ kind: 'task', id: task.id }}
               title={t('annotations.diaryTitle', {
                 defaultValue: 'Work diary, comments & suggestions',
               })}

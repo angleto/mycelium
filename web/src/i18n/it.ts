@@ -863,6 +863,10 @@ export const it: Catalog = {
     exportPdf: 'Esporta PDF',
     exportPdfShort: '.pdf',
     exportPdfErr: 'Export PDF: ',
+    toolbarHide: 'Nascondi barra',
+    toolbarShow: 'Mostra barra',
+    annotateComment: 'Commenta il testo selezionato',
+    annotateSuggest: 'Suggerisci una modifica al testo selezionato',
   },
   pomodoro: {
     title: 'Pomodoro',

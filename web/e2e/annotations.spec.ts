@@ -3,7 +3,7 @@ import { E2E_EMAIL as EMAIL, E2E_PASSWORD as PASSWORD } from './global-setup'
 
 // Regression for the inline annotation UX (InlineAnnotator over the
 // task-description RichEditor):
-//   - select text → a floating 💬/✎ toolbar appears on the selection;
+//   - select text → the editor's (sticky) toolbar 💬/✎ buttons enable;
 //   - ✎ → a compose popover (NOT a panel at the bottom of the page);
 //   - Propose → struck original + coloured proposal render inline;
 //   - click the struck text → an action popover opens on the spot;
@@ -11,7 +11,7 @@ import { E2E_EMAIL as EMAIL, E2E_PASSWORD as PASSWORD } from './global-setup'
 //     shows it.
 // Covers the bugs the user hit:
 //   * the toolbar buttons did nothing (selection lost on blur) — gone,
-//     the bubble reads the live editor selection;
+//     the handler reads the live editor selection;
 //   * Accept did not replace the word — asserted below;
 //   * having to scroll to the bottom panel — interaction is inline.
 // A React render loop prints "Maximum update depth exceeded" (captured).
@@ -98,7 +98,7 @@ async function fetchTaskDescription(taskId: string): Promise<string> {
   return (task.description ?? '') as string
 }
 
-test('inline suggest: bubble → propose → inline diff → click mark → accept splices', async ({
+test('inline suggest: toolbar → propose → inline diff → click mark → accept splices', async ({
   page,
 }) => {
   const errors: string[] = []
@@ -113,14 +113,15 @@ test('inline suggest: bubble → propose → inline diff → click mark → acce
   await page.waitForTimeout(2000)
   expect(errors, `errors after mount:\n${errors.join('\n')}`).toEqual([])
 
-  // Select the first word ("alpha") with the keyboard → floating toolbar.
+  // Select the first word ("alpha") with the keyboard → the toolbar's
+  // Suggest button enables; click it.
   await editor.click()
   await page.keyboard.press('Home')
   for (let i = 0; i < 5; i += 1) await page.keyboard.press('Shift+ArrowRight')
 
-  const bubble = page.locator('.anno-bubble')
-  await expect(bubble).toBeVisible({ timeout: 5000 })
-  await bubble.locator('.anno-bubble__btn', { hasText: '✎' }).click()
+  const suggestBtn = page.locator('.rte__annotate--suggest').first()
+  await expect(suggestBtn).toBeEnabled({ timeout: 5000 })
+  await suggestBtn.click()
 
   // Compose popover (inline, not at page bottom).
   const pop = page.locator('.anno-pop').first()
@@ -162,7 +163,9 @@ test('cancel discards a half-written suggestion', async ({ page }) => {
   await editor.click()
   await page.keyboard.press('Home')
   for (let i = 0; i < 3; i += 1) await page.keyboard.press('Shift+ArrowRight')
-  await page.locator('.anno-bubble .anno-bubble__btn', { hasText: '✎' }).click()
+  const suggestBtn = page.locator('.rte__annotate--suggest').first()
+  await expect(suggestBtn).toBeEnabled({ timeout: 5000 })
+  await suggestBtn.click()
 
   const pop = page.locator('.anno-pop').first()
   await expect(pop).toBeVisible({ timeout: 5000 })
@@ -195,7 +198,9 @@ test('inline-mark suggestion: decoration spans the mark and accept keeps the mar
 
   // Select the bold word by double-clicking the <strong>.
   await editor.locator('strong').first().dblclick()
-  await page.locator('.anno-bubble .anno-bubble__btn', { hasText: '✎' }).click()
+  const suggestBtn = page.locator('.rte__annotate--suggest').first()
+  await expect(suggestBtn).toBeEnabled({ timeout: 5000 })
+  await suggestBtn.click()
   const pop = page.locator('.anno-pop').first()
   await expect(pop).toBeVisible({ timeout: 5000 })
   await pop.locator('textarea').first().fill('DELTA')
@@ -233,10 +238,12 @@ test('inline suggest on a NOTE part: accept replaces the part text', async ({ pa
   await page.waitForTimeout(1500)
 
   // Select the whole part body (robust regardless of where the click
-  // lands in a tall editor) → floating toolbar.
+  // lands in a tall editor) → the toolbar's Suggest button enables.
   await editor.click()
   await page.keyboard.press('ControlOrMeta+a')
-  await page.locator('.anno-bubble .anno-bubble__btn', { hasText: '✎' }).click()
+  const suggestBtn = page.locator('.rte__annotate--suggest').first()
+  await expect(suggestBtn).toBeEnabled({ timeout: 5000 })
+  await suggestBtn.click()
 
   const pop = page.locator('.anno-pop').first()
   await expect(pop).toBeVisible({ timeout: 5000 })

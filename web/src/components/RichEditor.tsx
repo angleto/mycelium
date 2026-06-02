@@ -25,7 +25,7 @@ import {
   annotationKey,
   type AnnotationAnchor,
 } from '../lib/annotationDecorations'
-import { InlineAnnotator } from './InlineAnnotator'
+import { InlineAnnotator, type InlineAnnotatorHandle } from './InlineAnnotator'
 import type { Annotation, DocKind } from '../lib/useAnnotations'
 import { EntityPrefix } from '../lib/entityPrefixExtension'
 import { isPrefixCandidate, lookupPrefix } from '../lib/prefixLookup'
@@ -42,6 +42,18 @@ import {
   type UploadedAttachment,
 } from '../lib/imageUpload'
 import { AttachmentPicker } from './AttachmentPicker'
+
+// Remembered show/hide state of the formatting toolbar (one switch for
+// all editors). Defaults to shown; collapsing is the opt-in for a
+// roomier writing surface, notably on a phone.
+const TOOLBAR_PREF_KEY = 'flow.rte.toolbar'
+function readToolbarPref(): boolean {
+  try {
+    return localStorage.getItem(TOOLBAR_PREF_KEY) !== '0'
+  } catch {
+    return true
+  }
+}
 
 // tiptap-markdown augments editor.storage at runtime; type the access.
 type MdStorage = { markdown: { getMarkdown: () => string } }
@@ -574,6 +586,23 @@ export function RichEditor({
   // round-trip). Both modes read/write the same `value` markdown
   // string (bitvision EvidenceEditor pattern).
   const [rawMode, setRawMode] = useState(false)
+  // Collapse the formatting buttons to reclaim writing space (a single
+  // tap on a phone, where the wrapped bar otherwise eats several rows).
+  // Persisted so the choice sticks across editors and sessions.
+  const [showTools, setShowTools] = useState(readToolbarPref)
+  useEffect(() => {
+    try {
+      localStorage.setItem(TOOLBAR_PREF_KEY, showTools ? '1' : '0')
+    } catch {
+      // Private mode / storage disabled: the toggle still works for the
+      // session, it just won't be remembered.
+    }
+  }, [showTools])
+  // The inline-annotation layer reports whether the editor has a
+  // non-empty selection, so the toolbar's Comment / Suggest buttons
+  // enable only when there is something to annotate.
+  const [canAnnotate, setCanAnnotate] = useState(false)
+  const annoRef = useRef<InlineAnnotatorHandle>(null)
   const [uploadErr, setUploadErr] = useState<string | null>(null)
   const [uploading, setUploading] = useState(false)
   const [pickerOpen, setPickerOpen] = useState(false)
@@ -922,7 +951,60 @@ export function RichEditor({
       }
     >
       <div className="rte__bar">
-        <span className="rte__tools">
+        <div className="rte__bar-left">
+          <button
+            type="button"
+            className="btn--ghost btn--sm rte__collapse"
+            aria-expanded={showTools}
+            title={
+              showTools
+                ? t('editor.toolbarHide', { defaultValue: 'Hide toolbar' })
+                : t('editor.toolbarShow', { defaultValue: 'Show toolbar' })
+            }
+            onClick={() => setShowTools((v) => !v)}
+          >
+            {showTools ? '⌄' : 'Aa'}
+          </button>
+          {showTools && (
+          <span className="rte__tools">
+          {/* Annotation triggers, when this editor carries the inline
+              comment/suggestion layer. They drive the InlineAnnotator
+              through its imperative handle on the current selection, so
+              they replace the old floating-on-selection bubble: always in
+              the (sticky) bar, never hunting for a transient popover. */}
+          {inlineAnnotations && (
+            <>
+              <button
+                type="button"
+                className="btn--ghost btn--sm rte__fmt rte__annotate rte__annotate--comment"
+                title={t('editor.annotateComment', {
+                  defaultValue: 'Comment on the selected text',
+                })}
+                disabled={!canAnnotate}
+                // Keep the editor selection: a plain click would blur and
+                // collapse it before the handler reads it.
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => annoRef.current?.openComment()}
+              >
+                💬
+              </button>
+              {inlineAnnotations.allowSuggest !== false && (
+                <button
+                  type="button"
+                  className="btn--ghost btn--sm rte__fmt rte__annotate rte__annotate--suggest"
+                  title={t('editor.annotateSuggest', {
+                    defaultValue: 'Suggest an edit to the selected text',
+                  })}
+                  disabled={!canAnnotate}
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => annoRef.current?.openSuggest()}
+                >
+                  ✎
+                </button>
+              )}
+              <span className="rte__sep" aria-hidden="true" />
+            </>
+          )}
           {tb('B', 'editor.bold', () =>
             editor?.chain().focus().toggleBold().run(), 'bold')}
           {tb('I', 'editor.italic', () =>
@@ -1004,7 +1086,9 @@ export function RichEditor({
             editor?.chain().focus().undo().run())}
           {tb('↷', 'editor.redo', () =>
             editor?.chain().focus().redo().run())}
-        </span>
+          </span>
+          )}
+        </div>
         <span className="rte__actions">
           <button
             type="button"
@@ -1120,6 +1204,7 @@ export function RichEditor({
       )}
       {editor && !rawMode && inlineAnnotations && (
         <InlineAnnotator
+          ref={annoRef}
           editor={editor}
           docKind={inlineAnnotations.docKind}
           docId={inlineAnnotations.docId}
@@ -1127,6 +1212,8 @@ export function RichEditor({
           reload={inlineAnnotations.reload}
           onDocMutated={inlineAnnotations.onDocMutated}
           allowSuggest={inlineAnnotations.allowSuggest}
+          onSelectableChange={setCanAnnotate}
+          parent={imageUploadParent}
         />
       )}
     </div>

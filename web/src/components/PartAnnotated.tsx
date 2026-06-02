@@ -69,6 +69,7 @@ export function PartAnnotated({
             reload={reload}
             loadError={error}
             onDocMutated={onDocMutated}
+            imageUploadParent={imageUploadParent}
           />
         )}
       </div>

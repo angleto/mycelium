@@ -2,6 +2,9 @@ import { useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { authFetch, errMessage } from '../api/client'
+import { RichEditor } from './RichEditor'
+import { MarkdownView } from './Markdown'
+import type { ImageUploadParent } from '../lib/imageUpload'
 import type { Annotation, AnnotationPrefill, DocKind } from '../lib/useAnnotations'
 
 // The inline annotation layer (comments + suggestions) for a single
@@ -30,6 +33,11 @@ interface Props {
   /** Whether the suggestion composer is offered (only where the document
    * has editable prose to splice into). Defaults to true. */
   allowSuggest?: boolean
+  /** Owning note/task. Threaded into the comment/reply/edit RichEditor so
+   * an image pasted/uploaded into a comment lands on the right entity,
+   * and into MarkdownView so a comment's `![alt](file)` reference resolves
+   * against that entity's attachments. */
+  imageUploadParent?: ImageUploadParent
 }
 
 function shortId(id: string | null | undefined): string {
@@ -46,6 +54,7 @@ export function AnnotationsPanel({
   prefill,
   title,
   allowSuggest = true,
+  imageUploadParent,
 }: Props) {
   const { t } = useTranslation()
   const [err, setErr] = useState('')
@@ -234,10 +243,10 @@ export function AnnotationsPanel({
 
         {editId === a.id ? (
           <div className="anno__edit">
-            <textarea
+            <RichEditor
               value={editBody}
-              onChange={(e) => setEditBody(e.target.value)}
-              rows={2}
+              onChange={setEditBody}
+              imageUploadParent={imageUploadParent}
             />
             <button type="button" className="btn--sm" onClick={() => void saveEdit(a)}>
               {t('common.save', { defaultValue: 'Save' })}
@@ -251,7 +260,11 @@ export function AnnotationsPanel({
             </button>
           </div>
         ) : (
-          a.body && <div className="anno__body">{a.body}</div>
+          a.body && (
+            <div className="anno__body">
+              <MarkdownView text={a.body} parent={imageUploadParent} />
+            </div>
+          )
         )}
 
         <div className="anno__actions">
@@ -326,10 +339,10 @@ export function AnnotationsPanel({
 
         {replyTo === a.id && (
           <div className="anno__reply-box">
-            <textarea
+            <RichEditor
               value={replyBody}
-              onChange={(e) => setReplyBody(e.target.value)}
-              rows={2}
+              onChange={setReplyBody}
+              imageUploadParent={imageUploadParent}
               placeholder={t('annotations.replyPlaceholder', { defaultValue: 'Reply…' })}
             />
             <button type="button" className="btn--sm" onClick={() => void sendReply(a)}>
@@ -366,10 +379,10 @@ export function AnnotationsPanel({
       <ul className="anno-panel__list">{roots.map((a) => renderCard(a, false))}</ul>
 
       <div className="anno-panel__composer">
-        <textarea
+        <RichEditor
           value={body}
-          onChange={(e) => setBody(e.target.value)}
-          rows={2}
+          onChange={setBody}
+          imageUploadParent={imageUploadParent}
           placeholder={t('annotations.commentPlaceholder', {
             defaultValue: 'Add a comment…',
           })}

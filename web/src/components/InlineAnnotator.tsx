@@ -1,9 +1,17 @@
-import { useCallback, useEffect, useState } from 'react'
+import {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useState,
+} from 'react'
 import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 import type { Editor } from '@tiptap/core'
 
 import * as annoApi from '../lib/annotationsApi'
+import { MarkdownView } from './Markdown'
+import type { ImageUploadParent } from '../lib/imageUpload'
 import type { Annotation, DocKind } from '../lib/useAnnotations'
 
 // The Google-Docs-style inline annotation UX, layered over a RichEditor:
@@ -53,6 +61,22 @@ interface Props {
   /** Suggestions only make sense where there is editable prose to splice
    * into; comments are always allowed. */
   allowSuggest?: boolean
+  /** Reported whenever the editor has (or loses) a non-empty selection,
+   * so the host toolbar can enable/disable its Comment / Suggest
+   * buttons (which drive this annotator through the imperative handle). */
+  onSelectableChange?: (canAnnotate: boolean) => void
+  /** Owning note/task: lets a saved comment body render `![alt](file)`
+   * attachment references in the action popover. */
+  parent?: ImageUploadParent
+}
+
+// Imperative surface the host editor's toolbar drives: the Comment /
+// Suggest buttons live in the (always-visible, sticky) RichEditor
+// toolbar, not only in a floating bubble, so they call these to open the
+// compose popover on the current selection.
+export interface InlineAnnotatorHandle {
+  openComment: () => void
+  openSuggest: () => void
 }
 
 // Keep a popover within the viewport horizontally.
@@ -62,15 +86,21 @@ function clampLeft(left: number, width = 320): number {
   return Math.max(margin, Math.min(left, max))
 }
 
-export function InlineAnnotator({
-  editor,
-  docKind,
-  docId,
-  rows,
-  reload,
-  onDocMutated,
-  allowSuggest = true,
-}: Props) {
+export const InlineAnnotator = forwardRef<InlineAnnotatorHandle, Props>(
+  function InlineAnnotator(
+    {
+      editor,
+      docKind,
+      docId,
+      rows,
+      reload,
+      onDocMutated,
+      allowSuggest = true,
+      onSelectableChange,
+      parent,
+    }: Props,
+    ref,
+  ) {
   const { t } = useTranslation()
   const [sel, setSel] = useState<Sel | null>(null)
   const [compose, setCompose] = useState<{ kind: 'comment' | 'suggest'; sel: Sel } | null>(null)
@@ -127,15 +157,22 @@ export function InlineAnnotator({
     }
   }, [editor])
 
-  // Track the selection so the floating toolbar can anchor to it. The
-  // render gates the toolbar off while a popover is open.
+  // Track the selection so a compose popover can anchor to it and so the
+  // host toolbar's Comment / Suggest buttons enable only when there is
+  // something to annotate.
   useEffect(() => {
-    const update = () => setSel(readSelection())
+    const update = () => {
+      const s = readSelection()
+      setSel(s)
+      onSelectableChange?.(s != null)
+    }
+    update()
     editor.on('selectionUpdate', update)
     return () => {
       editor.off('selectionUpdate', update)
+      onSelectableChange?.(false)
     }
-  }, [editor, readSelection])
+  }, [editor, readSelection, onSelectableChange])
 
   // Click an inline mark → open the action popover on it.
   useEffect(() => {
@@ -170,16 +207,35 @@ export function InlineAnnotator({
     return () => window.removeEventListener('keydown', onKey)
   }, [compose, active, closeAll])
 
-  const openCompose = (kind: 'comment' | 'suggest') => {
-    const s = sel
-    if (!s) return
-    setCBody('')
-    setCProposed('')
-    setCWhy('')
-    setErr('')
-    setActive(null)
-    setCompose({ kind, sel: s })
-  }
+  const openCompose = useCallback(
+    (kind: 'comment' | 'suggest') => {
+      // Re-read the live selection rather than trust the tracked ``sel``:
+      // when the trigger is a toolbar button, no fresh selectionUpdate
+      // fired, but ProseMirror keeps state.selection across the blur.
+      const s = readSelection() ?? sel
+      if (!s) return
+      setCBody('')
+      setCProposed('')
+      setCWhy('')
+      setErr('')
+      setActive(null)
+      setCompose({ kind, sel: s })
+    },
+    [readSelection, sel],
+  )
+
+  // The host toolbar's Comment / Suggest buttons drive the same compose
+  // flow as the (removed) floating bubble used to.
+  useImperativeHandle(
+    ref,
+    () => ({
+      openComment: () => openCompose('comment'),
+      openSuggest: () => {
+        if (allowSuggest) openCompose('suggest')
+      },
+    }),
+    [openCompose, allowSuggest],
+  )
 
   const submitCompose = async () => {
     if (!compose) return
@@ -274,35 +330,10 @@ export function InlineAnnotator({
   // and clips the bubble out of view.
   return createPortal(
     <>
-      {/* Floating selection toolbar */}
-      {sel && !compose && !active && (
-        <div
-          className="anno-bubble"
-          style={{ position: 'fixed', left: clampLeft(sel.left, 120), top: sel.top - 40 }}
-          // Keep the editor selection intact: a plain click would blur the
-          // editor and collapse it before the handler reads ``sel``.
-          onMouseDown={(e) => e.preventDefault()}
-        >
-          <button
-            type="button"
-            className="anno-bubble__btn"
-            title={t('annotations.comment', { defaultValue: 'Comment' })}
-            onClick={() => openCompose('comment')}
-          >
-            💬
-          </button>
-          {allowSuggest && (
-            <button
-              type="button"
-              className="anno-bubble__btn"
-              title={t('annotations.suggestToggle', { defaultValue: 'Suggest an edit' })}
-              onClick={() => openCompose('suggest')}
-            >
-              ✎
-            </button>
-          )}
-        </div>
-      )}
+      {/* The Comment / Suggest triggers now live in the host RichEditor's
+          sticky toolbar (driven via the imperative handle above), so the
+          old floating selection bubble is gone — the toolbar is always in
+          reach and the bubble no longer competes with it. */}
 
       {/* Compose popover */}
       {compose && (
@@ -405,7 +436,11 @@ export function InlineAnnotator({
               </div>
             </>
           ) : (
-            current.body && <div className="anno-pop__body">{current.body}</div>
+            current.body && (
+              <div className="anno-pop__body">
+                <MarkdownView text={current.body} parent={parent} />
+              </div>
+            )
           )}
 
           {/* Existing replies (read-only here; full thread in the panel). */}
@@ -517,4 +552,4 @@ export function InlineAnnotator({
     </>,
     document.body,
   )
-}
+})
