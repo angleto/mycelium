@@ -17,23 +17,37 @@ async function openFreshNoteEditor(page: Page) {
   await page.getByRole('button', { name: 'New note' }).click()
   await page.locator('.modal__panel input').first().fill(`e2e editor ${Date.now()}`)
   await page.locator('.modal__foot button:not(.btn--ghost)').first().click()
-  // The create modal closes and the edit modal (with Attachments) opens;
-  // give the autosave/remount a beat to settle before driving the editor.
-  await expect(page.locator('.rte').first()).toBeVisible()
+  // The edit modal opens with the multi-part editor. New notes start with
+  // zero parts (notes are split into markdown blocks), so add one to get a
+  // rich-text body editor (.rte) to drive.
+  await expect(page.locator('.parts-editor')).toBeVisible({ timeout: 10_000 })
+  await page.getByRole('button', { name: 'Add part' }).click()
+  await expect(page.locator('.rte').first()).toBeVisible({ timeout: 10_000 })
+  // Give the autosave/remount a beat to settle before driving the editor.
   await page.waitForTimeout(1000)
 }
 
-// The mode toggle is the only direct-child <button> of .rte__bar (the
-// rest live in .rte__tools): robust to the label flipping between
-// "Edit as Markdown" and "Rich editor".
-const toggleBtn = (page: Page) => page.locator('.rte__bar > button').first()
+// The WYSIWYG<->Markdown mode toggle lives in the collapsible toolbar;
+// its label flips between "Edit as Markdown" and "Rich editor".
+const toggleBtn = (page: Page) =>
+  page.getByRole('button', { name: /Edit as Markdown|Rich editor/ }).first()
+
+// The toolbar tools (incl. the mode toggle) collapse behind the "Aa"
+// button per a saved preference; expand them if the toggle is hidden.
+async function ensureToolbar(page: Page) {
+  if (!(await toggleBtn(page).isVisible().catch(() => false))) {
+    await page.locator('.rte__collapse').first().click()
+    await expect(toggleBtn(page)).toBeVisible()
+  }
+}
 
 async function enterMarkdownMode(page: Page) {
-  if (!(await page.locator('textarea.rte__raw').isVisible())) {
+  await ensureToolbar(page)
+  if (!(await page.locator('textarea.rte__raw').first().isVisible().catch(() => false))) {
     await toggleBtn(page).click()
     await page.waitForTimeout(300)
   }
-  await expect(page.locator('textarea.rte__raw')).toBeVisible()
+  await expect(page.locator('textarea.rte__raw').first()).toBeVisible()
 }
 
 test('rich editor is not wrapped in a <label> (double-click must not bold)', async ({
@@ -54,15 +68,15 @@ test('markdown table round-trips through the editor', async ({ page }) => {
   await openFreshNoteEditor(page)
   await enterMarkdownMode(page)
   const md = ['| Name | Age |', '| --- | --- |', '| Alice | 30 |'].join('\n')
-  await page.locator('textarea.rte__raw').fill(md)
+  await page.locator('textarea.rte__raw').first().fill(md)
   await toggleBtn(page).click() // -> WYSIWYG
   // WYSIWYG renders a real table.
-  await expect(page.locator('.ProseMirror table')).toBeVisible()
+  await expect(page.locator('.ProseMirror table').first()).toBeVisible()
   expect(await page.locator('.ProseMirror th').count()).toBe(2)
   // Back to markdown: serializes to a pipe table again.
   await toggleBtn(page).click()
-  await expect(page.locator('textarea.rte__raw')).toBeVisible()
-  const back = await page.locator('textarea.rte__raw').inputValue()
+  await expect(page.locator('textarea.rte__raw').first()).toBeVisible()
+  const back = await page.locator('textarea.rte__raw').first().inputValue()
   expect(back).toContain('| Name')
   expect(back).toContain('| Alice')
 })
@@ -75,6 +89,7 @@ test('in markdown mode the Attach-file block does not overlap the editor', async
   await enterMarkdownMode(page)
   await page
     .locator('textarea.rte__raw')
+    .first()
     .fill(Array.from({ length: 60 }, (_, i) => `line ${i + 1}`).join('\n'))
   const box = await page.evaluate(() => {
     const ta = document.querySelector('textarea.rte__raw')!.getBoundingClientRect()
