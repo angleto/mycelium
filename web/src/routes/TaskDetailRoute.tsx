@@ -22,6 +22,7 @@ import { TaskTimer } from '../components/TaskTimer'
 import { formatHours } from '../lib/estimate'
 import { TASKS_LASTSEARCH_KEY } from '../lib/taskFilter'
 import { useEditSession } from '../lib/useEditSession'
+import { pushRecent } from '../lib/recents'
 
 import type { components } from '../api/schema'
 
@@ -142,6 +143,19 @@ export function TaskDetailRoute() {
       /* ignore */
     }
   }, [tabKey, activeTab])
+  // Feed the Cmd+K palette's "Recent" section. Write-only side effect:
+  // it touches localStorage, never the render, so it cannot regress the
+  // task view. Records once the task (and its title) have loaded.
+  useEffect(() => {
+    if (task) {
+      pushRecent({
+        kind: 'task',
+        id: task.id,
+        title: task.title,
+        route: `/tasks/${task.id}`,
+      })
+    }
+  }, [task])
   const [checklistCount, setChecklistCount] = useState<{
     done: number
     total: number

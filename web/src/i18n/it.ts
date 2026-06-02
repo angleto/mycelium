@@ -8,6 +8,11 @@ export const it: Catalog = {
     placeholder: 'Cerca per titolo o incolla un codice (es. 66c5d15d)…',
     noResults: 'Nessun risultato',
     hint: 'Digita per cercare, o incolla un codice task/nota',
+    section: {
+      recent: 'Recenti',
+      task: 'Task',
+      note: 'Note',
+    },
   },
   common: {
     on: 'sì',

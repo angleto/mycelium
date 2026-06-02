@@ -9,6 +9,11 @@ export const en = {
     placeholder: 'Search by title or paste a code (e.g. 66c5d15d)…',
     noResults: 'No results',
     hint: 'Type to search, or paste a task / note code',
+    section: {
+      recent: 'Recent',
+      task: 'Tasks',
+      note: 'Notes',
+    },
   },
   common: {
     on: 'on',

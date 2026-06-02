@@ -1780,6 +1780,25 @@ button.btn--danger:hover {
   padding: 0.8rem;
   color: var(--muted);
 }
+.cmdk__section {
+  padding: 0.45rem 0.6rem 0.2rem;
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+}
+.cmdk__code {
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+.cmdk__hl {
+  background: var(--accent-weak);
+  color: inherit;
+  border-radius: 2px;
+  padding: 0 1px;
+}
 /* GFM tables: render them as readable tables with subtle borders.
    ``.md`` is the wrapper produced by MarkdownView (the single
    markdown renderer in the codebase). */
