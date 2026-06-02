@@ -1842,12 +1842,24 @@ button.btn--danger:hover {
 }
 
 /* ---- WYSIWYG (TipTap) ---- */
+/* The toolbar stays in reach while writing a long note/document: it
+   pins to the top of whatever scrolls (the modal body for notes, the
+   window for the task description) so you never have to scroll back up
+   to toggle WYSIWYG/markdown, format, or insert an image. An opaque
+   background + bottom border keep the prose from showing through as it
+   scrolls underneath. */
 .rte__bar {
+  position: sticky;
+  top: 0;
+  z-index: 5;
   display: flex;
   justify-content: space-between;
   align-items: center;
   gap: 0.4rem;
+  padding: 0.35rem 0;
   margin-bottom: 0.3rem;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
 }
 .rte__tools {
   display: flex;
