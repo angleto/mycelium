@@ -77,6 +77,9 @@ export function AdvisoryRoute() {
   const [ctx, setCtx] = useState('')
   const [eLoc, setELoc] = useState('')
   const [errands, setErrands] = useState<Errand[] | null>(null)
+  // (T10) errands is a secondary planning tool, collapsed by default so it
+  // does not compete with the primary 'what can I do now' answer.
+  const [showOther, setShowOther] = useState(false)
   const [err, setErr] = useState<string | null>(null)
 
   useEffect(() => {
@@ -332,33 +335,46 @@ export function AdvisoryRoute() {
         </>
       )}
 
-      <h2>{t('advisory.errandsTitle')}</h2>
-      <form onSubmit={(e) => void onErrands(e)} className="row">
-        <label>
-          {t('advisory.location')}
-          <input value={eLoc} onChange={(e) => setELoc(e.target.value)} />
-        </label>
-        <label>
-          {t('advisory.context')}
-          <input value={ctx} onChange={(e) => setCtx(e.target.value)} />
-        </label>
-        <button type="submit">{t('advisory.bundle')}</button>
-      </form>
-      {errands && (
-        <ul className="list">
-          {errands.length === 0 ? (
-            <li className="hint">{t('advisory.errNone')}</li>
-          ) : (
-            errands.map((x) => (
-              <li key={x.task_id}>
-                {x.title}{' '}
-                <span className="muted">
-                  · {x.location ?? '-'} · {x.necessity} · P{x.priority}
-                </span>
-              </li>
-            ))
+      <hr className="sep" />
+      <button
+        type="button"
+        className="btn--ghost btn--sm"
+        aria-expanded={showOther}
+        onClick={() => setShowOther((v) => !v)}
+      >
+        {t('advisory.otherTools')}
+      </button>
+      {showOther && (
+        <>
+          <h2>{t('advisory.errandsTitle')}</h2>
+          <form onSubmit={(e) => void onErrands(e)} className="row">
+            <label>
+              {t('advisory.location')}
+              <input value={eLoc} onChange={(e) => setELoc(e.target.value)} />
+            </label>
+            <label>
+              {t('advisory.context')}
+              <input value={ctx} onChange={(e) => setCtx(e.target.value)} />
+            </label>
+            <button type="submit">{t('advisory.bundle')}</button>
+          </form>
+          {errands && (
+            <ul className="list">
+              {errands.length === 0 ? (
+                <li className="hint">{t('advisory.errNone')}</li>
+              ) : (
+                errands.map((x) => (
+                  <li key={x.task_id}>
+                    {x.title}{' '}
+                    <span className="muted">
+                      · {x.location ?? '-'} · {x.necessity} · P{x.priority}
+                    </span>
+                  </li>
+                ))
+              )}
+            </ul>
           )}
-        </ul>
+        </>
       )}
     </section>
   )

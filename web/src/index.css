@@ -2691,6 +2691,14 @@ button.btn--danger:hover {
   white-space: pre-wrap;
 }
 
+/* Divider between the primary 'what now' answer and the secondary
+   'Other planning tools' disclosure (T10). */
+.sep {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 1rem 0 0.6rem;
+}
+
 .badge {
   display: inline-flex;
   align-items: center;
