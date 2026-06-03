@@ -45,7 +45,6 @@ from flow_core.models.calendar import (
 )
 from flow_core.models.classification_feedback import ClassificationFeedback
 from flow_core.models.client_profile import ClientProfile
-from flow_core.models.garden_health import GardenHealthDaily
 from flow_core.models.dependency import DependencyType, TaskDependency
 from flow_core.models.dispatch_request import (
     ACTIVE_DISPATCH_STATUSES,
@@ -62,6 +61,7 @@ from flow_core.models.email import (
 )
 from flow_core.models.entity_revision import EntityRevision
 from flow_core.models.executor import Executor, ExecutorKind
+from flow_core.models.garden_health import GardenHealthDaily
 from flow_core.models.google_calendar import (
     CalendarSubscription,
     GoogleCalendarStatus,
@@ -166,7 +166,6 @@ __all__ = [
     "CalendarHoliday",
     "CalendarSubscription",
     "ClassificationFeedback",
-    "GardenHealthDaily",
     "ClientProfile",
     "ConservationAdhesion",
     "ConservationStatus",
@@ -186,6 +185,7 @@ __all__ = [
     "ExecKind",
     "Executor",
     "ExecutorKind",
+    "GardenHealthDaily",
     "GoogleCalendarStatus",
     "HandoffStatus",
     "Identity",
