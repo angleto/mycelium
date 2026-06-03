@@ -6096,6 +6096,10 @@ export interface components {
             due_date: string | null;
             /** Remaining Minutes */
             remaining_minutes: number;
+            /** Slack Minutes */
+            slack_minutes: number | null;
+            /** Deadline Bucket */
+            deadline_bucket: string;
         };
         /**
          * GardenApplyIn
@@ -7299,6 +7303,26 @@ export interface components {
             enabled_at: string | null;
             /** Backup Codes Remaining */
             backup_codes_remaining: number;
+        };
+        /**
+         * NarratedPlanOut
+         * @description what-now envelope: the deterministic ranked plan plus an optional
+         *     LLM narration. ``narrated`` is false (and narration null) unless the
+         *     metered narrate layer (T3) ran and succeeded; the ranked plan is
+         *     always present and authoritative regardless.
+         */
+        NarratedPlanOut: {
+            /** Ranked */
+            ranked: components["schemas"]["FeasibleTaskOut"][];
+            /** Narration */
+            narration?: string | null;
+            /** Narration Model */
+            narration_model?: string | null;
+            /**
+             * Narrated
+             * @default false
+             */
+            narrated?: boolean;
         };
         /**
          * Necessity
@@ -9431,17 +9455,26 @@ export interface components {
         };
         /** WhatNowIn */
         WhatNowIn: {
-            /**
-             * Window Start
-             * Format: date-time
-             */
-            window_start: string;
+            /** Window Start */
+            window_start?: string | null;
             /** Duration Minutes */
             duration_minutes: number;
             /** Location */
             location?: string | null;
             /** Context Tags */
             context_tags?: string[];
+            /** Focus Tag Ids */
+            focus_tag_ids?: string[];
+            /** Any Tag Ids */
+            any_tag_ids?: string[];
+            /** Max Priority */
+            max_priority?: number | null;
+            min_necessity?: components["schemas"]["Necessity"] | null;
+            /**
+             * Narrate
+             * @default false
+             */
+            narrate?: boolean;
         };
         /** WorkflowCreateIn */
         WorkflowCreateIn: {
@@ -15655,7 +15688,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["FeasibleTaskOut"][];
+                    "application/json": components["schemas"]["NarratedPlanOut"];
                 };
             };
             /** @description Validation Error */
