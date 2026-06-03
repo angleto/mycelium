@@ -85,12 +85,24 @@ async def test_mcp_what_now_envelope_default_now_and_selection() -> None:
     token, org, me = r.token, str(r.org_id), str(r.user_id)
 
     hi = await create_task(
-        token=token, org_id=org, title="hi-must", importance=1, urgency=1,
-        necessity="must", estimate_effort_h=0.5, assignee_ids=[me],
+        token=token,
+        org_id=org,
+        title="hi-must",
+        importance=1,
+        urgency=1,
+        necessity="must",
+        estimate_effort_h=0.5,
+        assignee_ids=[me],
     )  # priority 1, must
     lo = await create_task(
-        token=token, org_id=org, title="lo-could", importance=3, urgency=3,
-        necessity="could", estimate_effort_h=0.5, assignee_ids=[me],
+        token=token,
+        org_id=org,
+        title="lo-could",
+        importance=3,
+        urgency=3,
+        necessity="could",
+        estimate_effort_h=0.5,
+        assignee_ids=[me],
     )  # priority 9, could
 
     # window_start omitted -> server now(); full deterministic envelope.
