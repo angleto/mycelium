@@ -2629,6 +2629,68 @@ button.btn--danger:hover {
   gap: 0.35rem;
   white-space: nowrap;
 }
+/* Advisory deadline urgency badges (ADR-0013): the deterministic signal
+   that explains WHY a task ranks where it does. Colour escalates with the
+   deadline_bucket; comfortable is muted, none renders no badge at all. */
+.urg {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.05rem 0.45rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  border: 1px solid var(--border);
+  margin-left: 0.35rem;
+  white-space: nowrap;
+}
+.urg--overdue {
+  color: var(--err);
+  border-color: color-mix(in srgb, var(--err) 45%, transparent);
+  background: color-mix(in srgb, var(--err) 12%, transparent);
+}
+.urg--at_risk {
+  color: #b45309;
+  border-color: #fcd34d;
+  background: #fef3c7;
+}
+.urg--tight {
+  color: #92710b;
+  border-color: color-mix(in srgb, #b45309 30%, transparent);
+  background: color-mix(in srgb, #fcd34d 18%, transparent);
+}
+.urg--comfortable {
+  color: var(--muted);
+  background: var(--surface-2);
+}
+:root[data-theme='dark'] .urg--at_risk {
+  color: #fbbf24;
+  border-color: #6b4e0f;
+  background: #3a2c08;
+}
+:root[data-theme='dark'] .urg--tight {
+  color: #e0b341;
+  border-color: #5a430d;
+  background: #2c2207;
+}
+
+/* Opt-in 'Help me decide' narration panel (req #4b). The deterministic
+   ranking above is authoritative; this only summarises it. */
+.aiadvice {
+  margin-top: 0.5rem;
+  padding: 0.7rem 0.9rem;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+}
+.aiadvice h3 {
+  margin: 0 0 0.3rem;
+  font-size: 0.95rem;
+}
+.aiadvice p {
+  margin: 0.2rem 0;
+  white-space: pre-wrap;
+}
+
 .badge {
   display: inline-flex;
   align-items: center;

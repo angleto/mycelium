@@ -13,15 +13,43 @@ type WhatNowIn = components['schemas']['WhatNowIn']
 const NECESSITIES = ['must', 'should', 'could'] as const
 type Necessity = (typeof NECESSITIES)[number]
 
+const BUCKET_LABEL: Record<string, string> = {
+  overdue: 'bucketOverdue',
+  at_risk: 'bucketAtRisk',
+  tight: 'bucketTight',
+  comfortable: 'bucketComfortable',
+  none: 'bucketNone',
+}
+
 // Local wall-clock formatted for <input type="datetime-local"> (no tz).
 function toLocalInput(d: Date): string {
   const pad = (n: number) => String(n).padStart(2, '0')
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
+function sameDay(a: Date, b: Date): boolean {
+  return (
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate()
+  )
+}
+
+function bucketClass(b: string): string {
+  return b === 'overdue'
+    ? 'urg--overdue'
+    : b === 'at_risk'
+      ? 'urg--at_risk'
+      : b === 'tight'
+        ? 'urg--tight'
+        : b === 'comfortable'
+          ? 'urg--comfortable'
+          : ''
+}
+
 // Deterministic advisory layer (FR-13/14): explainable ranking, same
-// input -> same result. The UI is a thin form over /advisory/*; the core
-// decides (deadline urgency + selection), the page only scopes + shows.
+// input -> same result. The core decides (deadline urgency + selection);
+// the page scopes, shows WHY (badges), and only narrates on demand.
 export function AdvisoryRoute() {
   const { t } = useTranslation()
   const { focusIds, active: focusActive } = useFocus()
@@ -36,6 +64,16 @@ export function AdvisoryRoute() {
   const [minNec, setMinNec] = useState<Necessity | ''>('')
   const [tags, setTags] = useState<Tag[]>([])
   const [feasible, setFeasible] = useState<Feasible[] | null>(null)
+  // The window_start actually POSTed, so relative-due labels use the SAME
+  // clock the core ranked against (no server-substituted now() drift).
+  const [postedWindow, setPostedWindow] = useState<Date | null>(null)
+  // Opt-in AI narration state (req #4b). Degrades gracefully: until T3
+  // wires the metered narrator, the API returns narrated=false.
+  const [asked, setAsked] = useState(false)
+  const [narrating, setNarrating] = useState(false)
+  const [narration, setNarration] = useState<string | null>(null)
+  const [narrationModel, setNarrationModel] = useState<string | null>(null)
+  const [narrated, setNarrated] = useState(false)
   const [ctx, setCtx] = useState('')
   const [eLoc, setELoc] = useState('')
   const [errands, setErrands] = useState<Errand[] | null>(null)
@@ -52,27 +90,35 @@ export function AdvisoryRoute() {
     setAnyTags((cur) => (cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]))
   }
 
-  async function onWhatNow(e: FormEvent) {
-    e.preventDefault()
-    setErr(null)
+  // Build the request from the current form. narrate is opt-in; the same
+  // selection params drive both the deterministic plan and its narration.
+  function buildBody(narrate: boolean): { body: WhatNowIn; ws: Date } {
+    const ws = start ? new Date(start) : new Date()
     const body: WhatNowIn = {
-      // tz-AWARE: a datetime-local is naive; toISOString() yields an
-      // offset-aware UTC value so the core never mixes naive+aware.
-      window_start: start ? new Date(start).toISOString() : null,
+      // tz-AWARE: datetime-local is naive; toISOString() is offset-aware
+      // so the core never mixes naive+aware in the slack subtraction.
+      window_start: ws.toISOString(),
       duration_minutes: dur,
       location: loc || null,
       context_tags: ctxTags
         .split(',')
         .map((s) => s.trim())
         .filter(Boolean),
+      narrate,
     }
-    // (#3) selection: send each selector only when active. Focus that is
-    // active-but-empty (a client with no pushed projects) must NOT zero
-    // out results, so guard on focusIds.length (not just `active`).
+    // (#3) send each selector only when active. Focus that is active-but-
+    // empty (a client with no pushed projects) must NOT zero out results.
     if (focusActive && focusIds.length > 0) body.focus_tag_ids = focusIds
     if (anyTags.length > 0) body.any_tag_ids = anyTags
     if (maxPriority) body.max_priority = Number(maxPriority)
     if (minNec) body.min_necessity = minNec
+    return { body, ws }
+  }
+
+  async function onWhatNow(e: FormEvent) {
+    e.preventDefault()
+    setErr(null)
+    const { body, ws } = buildBody(false)
     const { data, error } = await api.POST('/advisory/what-now', {
       params: { header: workspaceHeader() },
       body,
@@ -81,7 +127,36 @@ export function AdvisoryRoute() {
       setErr(errMessage(error))
       return
     }
+    setPostedWindow(ws)
     setFeasible(data.ranked)
+    // Fresh ranking resets any prior narration.
+    setAsked(false)
+    setNarrating(false)
+    setNarration(null)
+    setNarrationModel(null)
+    setNarrated(false)
+  }
+
+  async function onHelpDecide() {
+    setErr(null)
+    setAsked(true)
+    setNarrating(true)
+    const { body, ws } = buildBody(true)
+    const { data, error } = await api.POST('/advisory/what-now', {
+      params: { header: workspaceHeader() },
+      body,
+    })
+    setNarrating(false)
+    if (error || !data) {
+      // Keep the ranked list intact; surface the error only.
+      setErr(errMessage(error))
+      return
+    }
+    setPostedWindow(ws)
+    setFeasible(data.ranked)
+    setNarrated(!!data.narrated)
+    setNarration(data.narration ?? null)
+    setNarrationModel(data.narration_model ?? null)
   }
 
   async function onErrands(e: FormEvent) {
@@ -98,6 +173,21 @@ export function AdvisoryRoute() {
     setErrands(data)
   }
 
+  // Relative due label against the POSTed window (client/server clock
+  // agreement): 'overdue' / 'due today' / 'due in Nd|Nh' / 'no deadline'.
+  function relativeDue(due: string | null): string {
+    const base = postedWindow ?? new Date()
+    if (!due) return t('advisory.bucketNone')
+    const d = new Date(due)
+    const ms = d.getTime() - base.getTime()
+    if (ms < 0) return t('advisory.dueOverdue')
+    if (sameDay(d, base)) return t('advisory.dueToday')
+    const days = Math.round(ms / 86_400_000)
+    if (days >= 1) return t('advisory.dueIn', { n: days, unit: 'd' })
+    const hours = Math.max(1, Math.round(ms / 3_600_000))
+    return t('advisory.dueIn', { n: hours, unit: 'h' })
+  }
+
   return (
     <section className="card">
       <h1>{t('advisory.title')}</h1>
@@ -106,11 +196,7 @@ export function AdvisoryRoute() {
       <form onSubmit={(e) => void onWhatNow(e)} className="row">
         <label>
           {t('advisory.duration')}
-          <input
-            type="number"
-            value={dur}
-            onChange={(e) => setDur(Number(e.target.value))}
-          />
+          <input type="number" value={dur} onChange={(e) => setDur(Number(e.target.value))} />
           <span className="hint">{t('advisory.durationHint')}</span>
         </label>
         <label>
@@ -139,11 +225,7 @@ export function AdvisoryRoute() {
           />
           <span className="hint">{t('advisory.maxPriorityHint')}</span>
         </label>
-        <div
-          className="viewtabs"
-          role="radiogroup"
-          aria-label={t('advisory.necessityFloor')}
-        >
+        <div className="viewtabs" role="radiogroup" aria-label={t('advisory.necessityFloor')}>
           {(['', ...NECESSITIES] as const).map((n) => (
             <button
               type="button"
@@ -164,12 +246,7 @@ export function AdvisoryRoute() {
       {tags.length > 0 && (
         <div className="row">
           <span className="muted">{t('advisory.tagsHeading')}</span>
-          <TagPickerGrid
-            tags={tags}
-            selected={anyTags}
-            onToggle={toggleTag}
-            searchable={false}
-          />
+          <TagPickerGrid tags={tags} selected={anyTags} onToggle={toggleTag} searchable={false} />
         </div>
       )}
 
@@ -208,11 +285,49 @@ export function AdvisoryRoute() {
                   {f.title}{' '}
                   <span className="muted">
                     · {f.necessity} · P{f.priority} · {f.remaining_minutes}{' '}
-                    {t('advisory.remaining')}
+                    {t('advisory.remaining')} · {relativeDue(f.due_date)}
+                    {f.slack_minutes != null && (
+                      <>
+                        {' '}
+                        · {t('advisory.slack')} {f.slack_minutes}m
+                      </>
+                    )}
                   </span>
+                  {f.deadline_bucket !== 'none' && (
+                    <span className={`urg ${bucketClass(f.deadline_bucket)}`}>
+                      {t(`advisory.${BUCKET_LABEL[f.deadline_bucket]}` as const)}
+                    </span>
+                  )}
                 </li>
               ))}
             </ul>
+          )}
+
+          <div className="row">
+            <button
+              type="button"
+              className="btn--ghost btn--sm"
+              disabled={narrating}
+              onClick={() => void onHelpDecide()}
+            >
+              {narrating ? t('advisory.aiThinking') : t('advisory.helpDecide')}
+            </button>
+          </div>
+          {asked && !narrating && (
+            <div className="aiadvice">
+              {narrated && narration ? (
+                <>
+                  <h3>{t('advisory.aiHeading')}</h3>
+                  <p>{narration}</p>
+                  <p className="hint">
+                    {t('advisory.aiDeterministic')}
+                    {narrationModel ? ` · ${narrationModel}` : ''}
+                  </p>
+                </>
+              ) : (
+                <p className="muted">{t('advisory.aiUnavailable')}</p>
+              )}
+            </div>
           )}
         </>
       )}
