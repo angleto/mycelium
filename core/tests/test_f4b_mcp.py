@@ -67,4 +67,45 @@ async def test_mcp_budget_and_advisory() -> None:
         window_start="2026-01-12T09:00:00+00:00",
         duration_minutes=60,
     )
-    assert must["id"] in {x["task_id"] for x in feasible}
+    # T6: bare list -> NarratedPlanOut envelope (REST parity).
+    assert feasible["narrated"] is False and feasible["narration"] is None
+    assert must["id"] in {x["task_id"] for x in feasible["ranked"]}
+
+
+async def test_mcp_what_now_envelope_default_now_and_selection() -> None:
+    """T6: MCP mirrors REST -- optional window_start (default now()),
+    selection params, slack/bucket on rows, NarratedPlanOut envelope."""
+    async with admin_session() as s:
+        r = await signup(
+            s,
+            email=f"{uuid.uuid4().hex[:10]}@example.test",
+            password="pw-strong-123",
+            org_name="MCP4B-SEL",
+        )
+    token, org, me = r.token, str(r.org_id), str(r.user_id)
+
+    hi = await create_task(
+        token=token, org_id=org, title="hi-must", importance=1, urgency=1,
+        necessity="must", estimate_effort_h=0.5, assignee_ids=[me],
+    )  # priority 1, must
+    lo = await create_task(
+        token=token, org_id=org, title="lo-could", importance=3, urgency=3,
+        necessity="could", estimate_effort_h=0.5, assignee_ids=[me],
+    )  # priority 9, could
+
+    # window_start omitted -> server now(); full deterministic envelope.
+    env = await what_can_i_do_now(token=token, org_id=org, duration_minutes=60)
+    assert env["narrated"] is False and env["narration"] is None
+    assert {x["task_id"] for x in env["ranked"]} == {hi["id"], lo["id"]}
+    row = next(x for x in env["ranked"] if x["task_id"] == hi["id"])
+    assert "slack_minutes" in row and "deadline_bucket" in row
+
+    # max_priority selection narrows to the priority<=5 task.
+    sel = await what_can_i_do_now(token=token, org_id=org, duration_minutes=60, max_priority=5)
+    assert {x["task_id"] for x in sel["ranked"]} == {hi["id"]}
+
+    # min_necessity coercion (str -> Necessity): the 'could' task drops.
+    nec = await what_can_i_do_now(
+        token=token, org_id=org, duration_minutes=60, min_necessity="should"
+    )
+    assert {x["task_id"] for x in nec["ranked"]} == {hi["id"]}

@@ -2441,23 +2441,48 @@ async def delete_budget(token: str, org_id: str, budget_id: str) -> dict[str, An
 async def what_can_i_do_now(
     token: str,
     org_id: str,
-    window_start: str,
     duration_minutes: int,
+    window_start: str | None = None,
     location: str | None = None,
     context_tags: list[str] | None = None,
-) -> list[dict[str, Any]]:
-    """Deterministic: feasible tasks for a free window, ranked."""
+    focus_tag_ids: list[str] | None = None,
+    any_tag_ids: list[str] | None = None,
+    max_priority: int | None = None,
+    min_necessity: str | None = None,
+    narrate: bool = False,
+) -> dict[str, Any]:
+    """Deterministic: feasible tasks for a free window, urgency-first ranked.
+
+    window_start (ISO 8601) defaults to UTC now() when omitted; a naive
+    value is coerced to UTC. Selection filters narrow by UNION:
+    focus_tag_ids (project/client tag ids), any_tag_ids (generic tag
+    ids), max_priority (keep priority<=ceiling), min_necessity
+    (must|should|could floor). Returns the NarratedPlanOut envelope
+    {ranked, narration, narration_model, narrated}; ``narrate`` is
+    accepted for REST parity but narration is wired later (T3), so this
+    deterministic path always reports narrated=false.
+    """
     async with _tenant(token, org_id) as (s, org, user):
+        if window_start is not None:
+            ws = dt.datetime.fromisoformat(window_start)
+            if ws.tzinfo is None:
+                ws = ws.replace(tzinfo=dt.UTC)
+        else:
+            ws = dt.datetime.now(dt.UTC)
         rows = await advisory_svc.what_can_i_do_now(
             s,
             org_id=org,
             actor_id=user,
-            window_start=dt.datetime.fromisoformat(window_start),
+            window_start=ws,
             duration_minutes=duration_minutes,
             location=location,
             context_tags=context_tags,
+            focus_tag_ids=[uuid.UUID(x) for x in focus_tag_ids] if focus_tag_ids else None,
+            any_tag_ids=[uuid.UUID(x) for x in any_tag_ids] if any_tag_ids else None,
+            max_priority=max_priority,
+            min_necessity=Necessity(min_necessity) if min_necessity else None,
         )
-        return [
+        ranked = [
             {
                 "task_id": str(r.task_id),
                 "title": r.title,
@@ -2465,9 +2490,17 @@ async def what_can_i_do_now(
                 "priority": r.priority,
                 "due_date": r.due_date.isoformat() if r.due_date else None,
                 "remaining_minutes": r.remaining_minutes,
+                "slack_minutes": r.slack_minutes,
+                "deadline_bucket": r.deadline_bucket,
             }
             for r in rows
         ]
+        return {
+            "ranked": ranked,
+            "narration": None,
+            "narration_model": None,
+            "narrated": False,
+        }
 
 
 @mcp.tool()
