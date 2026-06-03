@@ -84,3 +84,79 @@ jobs:
         run: pnpm exec eslint . --no-cache
       - name: Build
         run: pnpm build
+
+  # End-to-end browser suite (Playwright). Runs the real stack: Postgres
+  # service + migrated schema + uvicorn(:8000) + the Vite dev server
+  # (:5173, which proxies /api -> :8000; `vite preview` would not). The
+  # spec's globalSetup bootstraps a neutral admin via the same service
+  # path production uses. Same tag-push/dispatch trigger as the rest of
+  # CI, so it gates releases, not every branch commit.
+  e2e:
+    runs-on: ubuntu-latest
+    services:
+      db:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: flow
+          POSTGRES_PASSWORD: flow
+          POSTGRES_DB: flow
+        ports:
+          - "5432:5432"
+        options: >-
+          --health-cmd "pg_isready -U flow -d flow"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      FLOW_JWT_SECRET: ci-only-secret-minimum-32-bytes-xxxxxxxx
+      FLOW_SECRET_KEY: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+      FLOW_DATABASE_URL_SYNC: postgresql+psycopg://flow:flow@localhost:5432/flow
+      FLOW_DATABASE_URL: postgresql+asyncpg://flow_app:flow_app@localhost:5432/flow
+      FLOW_DB_APP_PASSWORD: flow_app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync --all-packages
+      - name: Bootstrap runtime role (flow_app)
+        run: |
+          PGPASSWORD=flow psql -h localhost -U flow -d flow \
+            -v ON_ERROR_STOP=1 -v app_pw="$FLOW_DB_APP_PASSWORD" \
+            -f deploy/local/bootstrap_roles.sql
+      - name: Apply migrations
+        run: uv run alembic -c core/alembic.ini upgrade head
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - name: Install web deps
+        working-directory: web
+        run: pnpm install --frozen-lockfile
+      - name: Install Playwright browser
+        working-directory: web
+        run: pnpm exec playwright install --with-deps chromium
+      - name: Run e2e against the live stack
+        working-directory: web
+        run: |
+          set -euo pipefail
+          # Start the API and the Vite dev server, tear both down on exit.
+          ( cd .. && uv run uvicorn flow_api.main:app --host 0.0.0.0 --port 8000 ) &
+          api_pid=$!
+          pnpm dev --host 0.0.0.0 --port 5173 --strictPort &
+          web_pid=$!
+          trap 'kill $api_pid $web_pid 2>/dev/null || true' EXIT
+          # Wait for both to answer before the browser suite starts.
+          for i in $(seq 1 60); do
+            curl -sf http://localhost:8000/openapi.json >/dev/null && break || sleep 1
+          done
+          curl -sf http://localhost:8000/openapi.json >/dev/null
+          for i in $(seq 1 60); do
+            curl -sf http://localhost:5173/ >/dev/null && break || sleep 1
+          done
+          curl -sf http://localhost:5173/ >/dev/null
+          pnpm e2e
