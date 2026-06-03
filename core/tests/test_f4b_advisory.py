@@ -13,11 +13,14 @@ import datetime as dt
 import uuid
 from decimal import Decimal
 
+from sqlalchemy import select
+
 from flow_core.db import admin_session, tenant_session
 from flow_core.models.budget import BudgetPeriod
 from flow_core.models.dependency import DependencyType
 from flow_core.models.tag import TagKind
 from flow_core.models.task import Necessity
+from flow_core.models.workflow import WorkflowState
 from flow_core.services import actors as actors_svc
 from flow_core.services import advisory, budgets, tasks, taxonomy
 from flow_core.services import dependencies as deps
@@ -29,6 +32,41 @@ _WIN = dt.datetime(2026, 1, 12, 9, 0, tzinfo=dt.UTC)
 
 def _email() -> str:
     return f"{uuid.uuid4().hex[:10]}@example.test"
+
+
+async def test_what_can_i_do_now_excludes_terminal_state_tasks() -> None:
+    """A task in a terminal workflow state must never be ranked: you cannot
+    'do now' a finished task (user report 2026-06-03). Regression guard for
+    the ``is_terminal.is_(False)`` filter in ``_owned_actionable``."""
+    async with admin_session() as s:
+        a = await signup(s, email=_email(), password="pw-strong-123", org_name="ADVT")
+    org, user = a.org_id, a.user_id
+    async with tenant_session(str(org), str(user)) as s:
+        t = await tasks.create_task(
+            s,
+            org_id=org,
+            actor_id=user,
+            assignee_ids=[user],
+            title="finish-me",
+            estimate_effort_h=Decimal("0.5"),
+        )
+        r = await advisory.what_can_i_do_now(
+            s, org_id=org, actor_id=user, window_start=_WIN, duration_minutes=60
+        )
+        assert t.id in [x.task_id for x in r]
+
+        terminal_id = (
+            await s.execute(
+                select(WorkflowState.id).where(WorkflowState.is_terminal.is_(True)).limit(1)
+            )
+        ).scalar_one()
+        t.state_id = terminal_id
+        await s.flush()
+
+        r2 = await advisory.what_can_i_do_now(
+            s, org_id=org, actor_id=user, window_start=_WIN, duration_minutes=60
+        )
+        assert t.id not in [x.task_id for x in r2]
 
 
 async def test_what_can_i_do_now_feasibility_and_ranking() -> None:

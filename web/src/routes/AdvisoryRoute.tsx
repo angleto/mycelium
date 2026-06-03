@@ -1,4 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react'
+import { Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { api, errMessage, workspaceHeader } from '../api/client'
 import { useFocus } from '../lib/focus'
@@ -308,7 +309,9 @@ export function AdvisoryRoute() {
             <ul className="list">
               {feasible.map((f) => (
                 <li key={f.task_id}>
-                  {f.title}{' '}
+                  <Link to={`/tasks/${f.task_id}`} className="advisory__task">
+                    {f.title}
+                  </Link>{' '}
                   <span className="muted">
                     · {f.necessity} · P{f.priority} · {f.remaining_minutes}{' '}
                     {t('advisory.remaining')} · {relativeDue(f.due_date)}
@@ -388,7 +391,9 @@ export function AdvisoryRoute() {
               ) : (
                 errands.map((x) => (
                   <li key={x.task_id}>
-                    {x.title}{' '}
+                    <Link to={`/tasks/${x.task_id}`} className="advisory__task">
+                      {x.title}
+                    </Link>{' '}
                     <span className="muted">
                       · {x.location ?? '-'} · {x.necessity} · P{x.priority}
                     </span>

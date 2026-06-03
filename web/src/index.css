@@ -750,6 +750,16 @@ button.btn--danger:hover {
 .list li button + button {
   margin-left: 0.4rem;
 }
+/* Advisory ranked/errand results: the title links to the task. */
+.advisory__task {
+  color: var(--text-h);
+  text-decoration: none;
+  font-weight: 500;
+}
+.advisory__task:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
 .kv {
   display: grid;
   grid-template-columns: max-content 1fr;
