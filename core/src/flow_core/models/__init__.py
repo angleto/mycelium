@@ -107,6 +107,7 @@ from flow_core.models.notification import (
     RecurrenceFreq,
     TaskRecurrence,
 )
+from flow_core.models.org_llm_provider import LLMProviderKind, OrgLLMProvider
 from flow_core.models.organization import Organization
 from flow_core.models.project_profile import ProjectProfile
 from flow_core.models.schedule import Schedule
@@ -197,6 +198,7 @@ __all__ = [
     "InvoiceNotification",
     "InvoiceState",
     "IssuerProfile",
+    "LLMProviderKind",
     "LedgerEntryKind",
     "Membership",
     "MemoryBlob",
@@ -215,6 +217,7 @@ __all__ = [
     "NotificationChannelKind",
     "NotificationPref",
     "NotificationStatus",
+    "OrgLLMProvider",
     "Organization",
     "PasswordResetToken",
     "PaymentStatus",

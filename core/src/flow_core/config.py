@@ -200,6 +200,17 @@ class Settings(BaseSettings):
     # CI / dev / unconfigured deploys never hit the network.
     ollama_url: str = ""
     open_model: str = "llama3.2:3b"
+    # Hosted LLM providers behind the same ``LLMProvider`` seam (task
+    # 8afda4e7). These keys are the "on our key" credentials: an org with
+    # a hosted provider but NO own key bills on ``CostBasis.our_key``
+    # (provider_cost x RateCard.markup); an org that stores its OWN key
+    # (Fernet-encrypted, per-org, migration 0026) bills on ``byok``. Empty
+    # keys are fine -- resolve_provider falls back to the local seam.
+    openai_api_key: str = ""
+    openai_base_url: str = "https://api.openai.com/v1"
+    anthropic_api_key: str = ""
+    anthropic_base_url: str = "https://api.anthropic.com"
+    anthropic_version: str = "2023-06-01"
     # Revision-summary worker (LLM-generated labels for the
     # recovery-history timeline). Cadence is slow because each
     # generation is a multi-second LLM call; the sweep is also bounded
