@@ -44,7 +44,9 @@ def _out(tag: Tag, scope: list[uuid.UUID] | None = None) -> TagOut:
 
 
 @router.post("/tags", response_model=TagOut)
-async def create_tag(body: TagCreateIn, ctx: Annotated[TenantCtx, Depends(tenant_ctx)]) -> TagOut:
+async def create_tag(
+    body: TagCreateIn, ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")]
+) -> TagOut:
     tag = await taxonomy.create_tag(
         ctx.session,
         org_id=ctx.org_id,
@@ -58,7 +60,7 @@ async def create_tag(body: TagCreateIn, ctx: Annotated[TenantCtx, Depends(tenant
 
 @router.get("/tags", response_model=list[TagOut])
 async def list_tags(
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
     kind: TagKind | None = None,
     for_project: uuid.UUID | None = None,
     for_client: uuid.UUID | None = None,
@@ -90,7 +92,7 @@ async def list_tags(
 async def set_tag_scope(
     tag_id: uuid.UUID,
     body: TagScopeIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> None:
     ensure_role(ctx.role, Role.owner)
     await taxonomy.set_tag_scope(
@@ -104,7 +106,7 @@ async def set_tag_scope(
 
 @router.post("/clients", response_model=TagOut)
 async def create_client(
-    body: ClientCreateIn, ctx: Annotated[TenantCtx, Depends(tenant_ctx)]
+    body: ClientCreateIn, ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")]
 ) -> TagOut:
     ensure_role(ctx.role, Role.owner)
     profile = ClientInput(
@@ -145,7 +147,7 @@ async def create_client(
 
 @router.post("/projects", response_model=TagOut)
 async def create_project(
-    body: ProjectCreateIn, ctx: Annotated[TenantCtx, Depends(tenant_ctx)]
+    body: ProjectCreateIn, ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")]
 ) -> TagOut:
     ensure_role(ctx.role, Role.owner)
     tag = await taxonomy.create_project(
@@ -209,7 +211,7 @@ def _project_out(t: Tag, p: object) -> ProjectOut:
 
 @router.get("/clients", response_model=list[ClientOut])
 async def list_clients(
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> list[ClientOut]:
     # A workspace always has the default "Personal" client.
     await taxonomy.ensure_default_client(ctx.session, org_id=ctx.org_id, actor_id=ctx.user_id)
@@ -219,7 +221,7 @@ async def list_clients(
 
 @router.get("/projects", response_model=list[ProjectOut])
 async def list_projects(
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> list[ProjectOut]:
     rows = await taxonomy.list_projects(ctx.session, org_id=ctx.org_id)
     return [_project_out(t, p) for t, p in rows]
@@ -229,7 +231,7 @@ async def list_projects(
 async def patch_client(
     tag_id: uuid.UUID,
     body: ClientPatchIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> None:
     ensure_role(ctx.role, Role.owner)
     data = body.model_dump(exclude_unset=True)
@@ -248,7 +250,7 @@ async def patch_client(
 async def patch_project(
     tag_id: uuid.UUID,
     body: ProjectPatchIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> None:
     ensure_role(ctx.role, Role.owner)
     data = body.model_dump(exclude_unset=True)
@@ -268,12 +270,16 @@ async def patch_project(
 # and the service cascades the subgraph (tasks, notes, memory blobs,
 # events, attachment objects in the store). Role: owner.
 @router.delete("/clients/{tag_id}", status_code=204)
-async def delete_client(tag_id: uuid.UUID, ctx: Annotated[TenantCtx, Depends(tenant_ctx)]) -> None:
+async def delete_client(
+    tag_id: uuid.UUID, ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")]
+) -> None:
     await taxonomy.purge_client(ctx.session, org_id=ctx.org_id, actor_id=ctx.user_id, tag_id=tag_id)
 
 
 @router.delete("/projects/{tag_id}", status_code=204)
-async def delete_project(tag_id: uuid.UUID, ctx: Annotated[TenantCtx, Depends(tenant_ctx)]) -> None:
+async def delete_project(
+    tag_id: uuid.UUID, ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")]
+) -> None:
     await taxonomy.purge_project(
         ctx.session, org_id=ctx.org_id, actor_id=ctx.user_id, tag_id=tag_id
     )
@@ -283,7 +289,7 @@ async def delete_project(tag_id: uuid.UUID, ctx: Annotated[TenantCtx, Depends(te
 async def patch_tag(
     tag_id: uuid.UUID,
     body: TagPatchIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> VersionOut:
     version = await taxonomy.update_tag(
         ctx.session,

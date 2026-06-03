@@ -30,7 +30,7 @@ def _out(r: TaskRelation) -> TaskRelationOut:
 @router.post("/task-relations", response_model=TaskRelationOut)
 async def add_task_relation(
     body: TaskRelationCreateIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> TaskRelationOut:
     rel = await svc.add_relation(
         ctx.session,
@@ -48,7 +48,7 @@ async def add_task_relation(
 )
 async def remove_task_relation(
     relation_id: uuid.UUID,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> None:
     await svc.remove_relation(
         ctx.session,
@@ -60,7 +60,7 @@ async def remove_task_relation(
 
 @router.get("/task-relations", response_model=list[TaskRelationOut])
 async def list_task_relations(
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
     task_id: uuid.UUID | None = None,
 ) -> list[TaskRelationOut]:
     rows = await svc.list_relations(ctx.session, org_id=ctx.org_id, task_id=task_id)

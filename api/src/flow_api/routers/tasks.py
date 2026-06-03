@@ -288,7 +288,7 @@ async def _state_names(ctx: TenantCtx, state_ids: set[uuid.UUID]) -> dict[uuid.U
 
 @router.post("", response_model=TaskOut)
 async def create_task(
-    body: TaskCreateIn, ctx: Annotated[TenantCtx, Depends(tenant_ctx)]
+    body: TaskCreateIn, ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")]
 ) -> TaskOut:
     task = await svc.create_task(
         ctx.session,
@@ -339,7 +339,7 @@ async def create_task(
 
 @router.get("", response_model=list[TaskOut])
 async def list_tasks(
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
     state_id: uuid.UUID | None = None,
     tag_id: uuid.UUID | None = None,
     assignee_id: uuid.UUID | None = None,
@@ -405,7 +405,9 @@ async def list_tasks(
 
 
 @router.get("/{task_id}", response_model=TaskOut)
-async def get_task(task_id: uuid.UUID, ctx: Annotated[TenantCtx, Depends(tenant_ctx)]) -> TaskOut:
+async def get_task(
+    task_id: uuid.UUID, ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")]
+) -> TaskOut:
     # include_deleted: a trashed/archived task must still open (read its
     # detail before restoring it from the Trash view). TaskOut carries
     # is_archived/deleted_at so the UI can render it read-only.
@@ -433,7 +435,7 @@ async def get_task(task_id: uuid.UUID, ctx: Annotated[TenantCtx, Depends(tenant_
 
 @router.get("/{task_id}/states", response_model=list[StateOut])
 async def task_states(
-    task_id: uuid.UUID, ctx: Annotated[TenantCtx, Depends(tenant_ctx)]
+    task_id: uuid.UUID, ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")]
 ) -> list[StateOut]:
     await svc.get_task(ctx.session, org_id=ctx.org_id, task_id=task_id, include_deleted=True)
     workflow = await wf.effective_workflow_for_task(ctx.session, ctx.org_id, task_id)
@@ -455,7 +457,7 @@ async def task_states(
 async def patch_task(
     task_id: uuid.UUID,
     body: TaskPatchIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
     edit_session_id: Annotated[str | None, Header(alias="X-Edit-Session-Id")] = None,
 ) -> TaskOut:
     # Returns the full canonical TaskOut (not just {id, version}) so any
@@ -508,7 +510,7 @@ async def patch_task(
 async def append_description(
     task_id: uuid.UUID,
     body: TaskDescriptionAppendIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> AppendOut:
     """Task 4ac39ecf: context-blind append for ``task.description``
     (mirror of /notes/{id}/append). Lets an MCP / LLM caller add a
@@ -533,7 +535,7 @@ async def append_description(
 async def prepend_description(
     task_id: uuid.UUID,
     body: TaskDescriptionPrependIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> AppendOut:
     """Task 5662a07f: context-blind prepend for ``task.description``
     (mirror of /description/append). Adds text to the FRONT without
@@ -555,7 +557,7 @@ async def prepend_description(
 async def set_state(
     task_id: uuid.UUID,
     body: TaskStateIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> VersionOut:
     version = await svc.set_state(
         ctx.session,
@@ -572,7 +574,7 @@ async def set_state(
 async def soft_delete(
     task_id: uuid.UUID,
     body: ExpectedVersionIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> VersionOut:
     version = await svc.soft_delete_task(
         ctx.session,
@@ -588,7 +590,7 @@ async def soft_delete(
 async def restore(
     task_id: uuid.UUID,
     body: ExpectedVersionIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> VersionOut:
     version = await svc.restore_task(
         ctx.session,
@@ -604,7 +606,7 @@ async def restore(
 async def archive(
     task_id: uuid.UUID,
     body: ExpectedVersionIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> VersionOut:
     version = await svc.archive_task(
         ctx.session,
@@ -621,7 +623,7 @@ async def archive(
 async def unarchive(
     task_id: uuid.UUID,
     body: ExpectedVersionIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> VersionOut:
     version = await svc.archive_task(
         ctx.session,
@@ -637,7 +639,7 @@ async def unarchive(
 @router.get("/{task_id}/reminders", response_model=list[ReminderOut])
 async def list_reminders(
     task_id: uuid.UUID,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> list[ReminderOut]:
     rows = await notif_svc.list_reminders(ctx.session, org_id=ctx.org_id, task_id=task_id)
     return [ReminderOut(id=r.id, task_id=r.task_id, offset_minutes=r.offset_minutes) for r in rows]
@@ -647,7 +649,7 @@ async def list_reminders(
 async def add_reminder(
     task_id: uuid.UUID,
     body: ReminderIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> ReminderOut:
     r = await notif_svc.add_reminder(
         ctx.session,
@@ -666,7 +668,7 @@ async def add_reminder(
 async def remove_reminder(
     task_id: uuid.UUID,
     reminder_id: uuid.UUID,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> None:
     await notif_svc.remove_reminder(
         ctx.session,
@@ -681,7 +683,7 @@ async def remove_reminder(
 async def attach_tag(
     task_id: uuid.UUID,
     body: TagRefIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> None:
     await svc.attach_tag(
         ctx.session,
@@ -696,7 +698,7 @@ async def attach_tag(
 async def detach_tag(
     task_id: uuid.UUID,
     tag_id: uuid.UUID,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> None:
     await svc.detach_tag(
         ctx.session,
@@ -711,7 +713,7 @@ async def detach_tag(
 async def assign(
     task_id: uuid.UUID,
     body: AssigneeIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> None:
     await svc.assign(
         ctx.session,
@@ -729,7 +731,7 @@ async def assign(
 async def unassign(
     task_id: uuid.UUID,
     user_id: uuid.UUID,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> None:
     await svc.unassign(
         ctx.session,
@@ -744,7 +746,7 @@ async def unassign(
 async def add_comment(
     task_id: uuid.UUID,
     body: CommentCreateIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> AnnotationOut:
     c = await svc.add_comment(
         ctx.session,
@@ -758,7 +760,7 @@ async def add_comment(
 
 @router.get("/{task_id}/comments", response_model=list[AnnotationOut])
 async def list_comments(
-    task_id: uuid.UUID, ctx: Annotated[TenantCtx, Depends(tenant_ctx)]
+    task_id: uuid.UUID, ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")]
 ) -> list[AnnotationOut]:
     rows = await svc.list_comments(ctx.session, org_id=ctx.org_id, task_id=task_id)
     return [annotation_out(c) for c in rows]
@@ -771,7 +773,7 @@ async def list_comments(
 # MessageCode.EVENT_OVERLAP, same code as the assignee-axis check.
 @router.get("/{task_id}/participants", response_model=list[ParticipantOut])
 async def list_participants_endpoint(
-    task_id: uuid.UUID, ctx: Annotated[TenantCtx, Depends(tenant_ctx)]
+    task_id: uuid.UUID, ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")]
 ) -> list[ParticipantOut]:
     rows = await part_svc.list_participants(ctx.session, org_id=ctx.org_id, task_id=task_id)
     return [
@@ -790,7 +792,7 @@ async def list_participants_endpoint(
 async def add_participant_endpoint(
     task_id: uuid.UUID,
     body: ParticipantIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> ParticipantOut:
     row = await part_svc.add_participant(
         ctx.session,
@@ -823,7 +825,7 @@ async def add_participant_endpoint(
 async def remove_participant_endpoint(
     task_id: uuid.UUID,
     identity_id: uuid.UUID,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> None:
     await part_svc.remove_participant(
         ctx.session,
@@ -837,7 +839,7 @@ async def remove_participant_endpoint(
 @router.post("/{task_id}/attachments", response_model=AttachmentOut)
 async def upload_task_attachment(
     task_id: uuid.UUID,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
     file: upload_file_field,
 ) -> AttachmentOut:
     # Size enforced BEFORE storing (guarded read + service re-check).
@@ -858,7 +860,7 @@ async def upload_task_attachment(
 @router.get("/{task_id}/attachments", response_model=list[AttachmentOut])
 async def list_task_attachments(
     task_id: uuid.UUID,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> list[AttachmentOut]:
     rows = await att_svc.list_attachments(ctx.session, org_id=ctx.org_id, task_id=task_id)
     return [att_out(r) for r in rows]
@@ -867,7 +869,7 @@ async def list_task_attachments(
 @router.post("/{task_id}/note", response_model=NoteOut)
 async def get_or_create_task_note(
     task_id: uuid.UUID,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> NoteOut:
     # Member-level (notes/tasks are member-level): open the task's work
     # note, creating it on first call. Idempotent. Time spent there is
@@ -894,7 +896,7 @@ async def get_or_create_task_note(
 async def create_task_note(
     task_id: uuid.UUID,
     body: TaskNoteCreateIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> NoteOut:
     # TASK-side of the bidirectional Proposal A link: create a *fresh*
     # work note pre-linked to the task (NOT idempotent, unlike the
@@ -938,7 +940,7 @@ def _note_task_link_out(link: Any) -> NoteTaskLinkOut:
 )
 async def list_task_note_links(
     task_id: uuid.UUID,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> TaskNoteLinksOut:
     """Symmetric to ``GET /notes/{note_id}/links`` but task-side: every
     typed note↔task link touching ``task_id`` (all four kinds). The
@@ -961,7 +963,7 @@ async def list_task_note_links(
 async def add_task_note_link(
     task_id: uuid.UUID,
     body: TaskNoteLinkIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> NoteTaskLinkOut:
     """Task-side mirror of ``POST /notes/{note_id}/task-links``. Only
     ``subject`` / ``artifact`` accepted; ``derived_from`` and
@@ -997,7 +999,7 @@ async def remove_task_note_link(
     task_id: uuid.UUID,
     note_id: uuid.UUID,
     kind: str,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> None:
     """Task-side delete. Same semantics as the note-side endpoint
     (``promoted_from`` refused, idempotent 404 only if nothing matched)."""
@@ -1060,7 +1062,7 @@ async def _task_out(ctx: TenantCtx, task: Task) -> TaskOut:
 @router.get("/{task_id}/handoffs", response_model=list[HandoffOut])
 async def list_handoffs(
     task_id: uuid.UUID,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> list[HandoffOut]:
     """Member: incoming + outgoing coordination handoffs for the task
     (the on-completion creation is automatic -- no create endpoint).
@@ -1072,7 +1074,7 @@ async def list_handoffs(
 @router.post("/{task_id}/offer", response_model=TaskOut)
 async def offer_task(
     task_id: uuid.UUID,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> TaskOut:
     """Owner: announce the task to eligible members (contract-net
     call-for-proposals). Owner-gated in the service (effective-role
@@ -1086,7 +1088,7 @@ async def offer_task(
 @router.post("/{task_id}/claim", response_model=TaskOut)
 async def claim_task(
     task_id: uuid.UUID,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> TaskOut:
     """Member: claim an offered task (contract-net award) -> the caller
     becomes an assignee, ``offered`` is cleared. 400 if not offered /
@@ -1100,7 +1102,7 @@ async def claim_task(
 @router.post("/{task_id}/decline", response_model=TaskOut)
 async def decline_task(
     task_id: uuid.UUID,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> TaskOut:
     """Member: decline an offered task (lightweight: notify the offerer
     + audit; no assignment). 400 if not offered."""
@@ -1124,7 +1126,7 @@ async def decline_task(
 )
 async def list_checklist(
     task_id: uuid.UUID,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> list[TaskChecklistItemOut]:
     rows = await checklist_svc.list_items(ctx.session, org_id=ctx.org_id, task_id=task_id)
     return [_checklist_item_out(r) for r in rows]
@@ -1138,7 +1140,7 @@ async def list_checklist(
 async def add_checklist_item(
     task_id: uuid.UUID,
     body: TaskChecklistItemCreateIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> TaskChecklistItemOut:
     item = await checklist_svc.add_item(
         ctx.session,
@@ -1160,7 +1162,7 @@ async def update_checklist_item(
     task_id: uuid.UUID,
     item_id: uuid.UUID,
     body: TaskChecklistItemPatchIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> TaskChecklistItemOut:
     item = await checklist_svc.update_item(
         ctx.session,
@@ -1184,7 +1186,7 @@ async def update_checklist_item(
 async def delete_checklist_item(
     task_id: uuid.UUID,
     item_id: uuid.UUID,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> None:
     await checklist_svc.delete_item(
         ctx.session,
@@ -1201,7 +1203,7 @@ async def delete_checklist_item(
 )
 async def clear_checklist_done(
     task_id: uuid.UUID,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> TaskChecklistClearDoneOut:
     removed = await checklist_svc.clear_done(
         ctx.session,
@@ -1219,7 +1221,7 @@ async def clear_checklist_done(
 async def reorder_checklist(
     task_id: uuid.UUID,
     body: TaskChecklistReorderIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> list[TaskChecklistItemOut]:
     rows = await checklist_svc.reorder_items(
         ctx.session,
@@ -1260,7 +1262,7 @@ def _revision_out(rev: Any) -> RevisionOut:
 @router.get("/{task_id}/revisions", response_model=list[RevisionOut])
 async def list_task_revisions(
     task_id: uuid.UUID,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     before: Annotated[datetime.datetime | None, Query()] = None,
 ) -> list[RevisionOut]:
@@ -1285,7 +1287,7 @@ async def list_task_revisions(
 async def get_task_revision(
     task_id: uuid.UUID,
     rev_id: uuid.UUID,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> RevisionOut:
     """Single revision lookup; 404 if the id doesn't belong to this
     task (defense in depth on top of RLS)."""
@@ -1303,7 +1305,7 @@ async def update_task_revision_summary(
     task_id: uuid.UUID,
     rev_id: uuid.UUID,
     body: RevisionSummaryIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> RevisionOut:
     """Set / clear the ``summary`` label on a revision. The summary is
     metadata decoupled from the snapshot: it can change on sealed
@@ -1325,7 +1327,7 @@ async def restore_task_revision(
     task_id: uuid.UUID,
     rev_id: uuid.UUID,
     body: RevisionRestoreIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> VersionOut:
     """Apply the snapshot's restorable fields back to the task. The
     operation is logged as a NEW sealed revision on the ``restore``
@@ -1347,7 +1349,7 @@ async def restore_task_revision(
 async def seal_task_edit_session(
     task_id: uuid.UUID,
     body: EditSessionSealIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> EditSessionSealOut:
     """Client-initiated seal of the open web revision for the given
     ``edit_session_id``. Idempotent: closing an already-sealed (or

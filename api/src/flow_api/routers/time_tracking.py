@@ -89,7 +89,7 @@ async def _out_many(ctx: TenantCtx, rows: list[TimeEntry]) -> list[TimeEntryOut]
 @router.post("/time/start", response_model=TimeEntryOut)
 async def start_timer(
     body: TimeStartIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> TimeEntryOut:
     e = await svc.start_timer(
         ctx.session,
@@ -107,7 +107,7 @@ async def start_timer(
 @router.post("/time/stop", response_model=TimeEntryOut)
 async def stop_timer(
     body: TimeStopIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> TimeEntryOut:
     e = await svc.stop_timer(
         ctx.session,
@@ -121,7 +121,7 @@ async def stop_timer(
 
 @router.get("/time/running", response_model=list[TimeEntryOut])
 async def running(
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> list[TimeEntryOut]:
     rows = await svc.running_entries(ctx.session, org_id=ctx.org_id, user_id=ctx.user_id)
     return await _out_many(ctx, rows)
@@ -130,7 +130,7 @@ async def running(
 @router.post("/time/entries", response_model=TimeEntryOut)
 async def add_manual_entry(
     body: TimeManualIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> TimeEntryOut:
     e = await svc.add_manual_entry(
         ctx.session,
@@ -149,7 +149,7 @@ async def add_manual_entry(
 
 @router.get("/time/entries", response_model=list[TimeEntryOut])
 async def list_entries(
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
     task_id: uuid.UUID | None = None,
     user_id: uuid.UUID | None = None,
     start_from: datetime.datetime | None = None,
@@ -179,7 +179,7 @@ async def list_entries(
 @router.get("/time/entries/{entry_id}", response_model=TimeEntryOut)
 async def get_entry(
     entry_id: uuid.UUID,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> TimeEntryOut:
     e = await svc.get_entry(ctx.session, org_id=ctx.org_id, entry_id=entry_id)
     return await _out_one(ctx, e)
@@ -189,7 +189,7 @@ async def get_entry(
 async def update_entry(
     entry_id: uuid.UUID,
     body: TimeEntryPatchIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> VersionOut:
     values = body.model_dump(exclude_unset=True, exclude={"expected_version"})
     version = await svc.update_entry(
@@ -206,7 +206,7 @@ async def update_entry(
 @router.delete("/time/entries/{entry_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_entry(
     entry_id: uuid.UUID,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> None:
     await svc.delete_entry(
         ctx.session,
@@ -242,7 +242,7 @@ async def _report(
 
 @router.get("/time/report", response_model=list[ReportRowOut])
 async def report(
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
     group_by: ReportGroup = ReportGroup.project,
     start_from: datetime.datetime | None = None,
     start_to: datetime.datetime | None = None,
@@ -276,7 +276,7 @@ async def report(
 
 @router.get("/time/report/by-task", response_model=list[TaskTimeReportOut])
 async def report_by_task(
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
     start_from: datetime.datetime | None = None,
     start_to: datetime.datetime | None = None,
 ) -> list[TaskTimeReportOut]:
@@ -311,7 +311,7 @@ async def report_by_task(
 
 @router.get("/time/report.csv")
 async def report_csv(
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
     group_by: ReportGroup = ReportGroup.project,
     start_from: datetime.datetime | None = None,
     start_to: datetime.datetime | None = None,
@@ -353,7 +353,7 @@ async def report_csv(
 
 @router.get("/time/entries.csv")
 async def entries_csv(
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
     task_id: uuid.UUID | None = None,
     user_id: uuid.UUID | None = None,
     start_from: datetime.datetime | None = None,

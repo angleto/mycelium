@@ -63,6 +63,7 @@ export function NotesRoute() {
   const [searchParams, setSearchParams] = useSearchParams()
   const [idCopied, setIdCopied] = useState(false)
   const [notes, setNotes] = useState<Note[]>([])
+  const [loading, setLoading] = useState(true)
   const [tags, setTags] = useState<Tag[]>([])
   const [fTag, setFTag] = useState('')
   const [cmd, setCmd] = useState('')
@@ -118,21 +119,26 @@ export function NotesRoute() {
   useEffect(() => {
     let active = true
     void (async () => {
-      const [n, g, tk] = await Promise.all([
-        api.GET('/notes', {
-          params: {
-            header: workspaceHeader(),
-            query: { ...(fTag ? { tag_id: fTag } : {}) },
-          },
-        }),
-        api.GET('/tags', { params: { header: workspaceHeader() } }),
-        api.GET('/tasks', { params: { header: workspaceHeader() } }),
-      ])
-      if (!active) return
-      if (n.data) setNotes(n.data)
-      if (g.data) setTags(g.data)
-      if (tk.data)
-        setLinkTasks(tk.data.map((x) => ({ id: x.id, title: x.title })))
+      setLoading(true)
+      try {
+        const [n, g, tk] = await Promise.all([
+          api.GET('/notes', {
+            params: {
+              header: workspaceHeader(),
+              query: { ...(fTag ? { tag_id: fTag } : {}) },
+            },
+          }),
+          api.GET('/tags', { params: { header: workspaceHeader() } }),
+          api.GET('/tasks', { params: { header: workspaceHeader() } }),
+        ])
+        if (!active) return
+        if (n.data) setNotes(n.data)
+        if (g.data) setTags(g.data)
+        if (tk.data)
+          setLinkTasks(tk.data.map((x) => ({ id: x.id, title: x.title })))
+      } finally {
+        if (active) setLoading(false)
+      }
     })()
     return () => {
       active = false
@@ -743,7 +749,11 @@ export function NotesRoute() {
           })}
         </p>
       )}
-      {shownNotes.length === 0 ? (
+      {loading ? (
+        <p className="hint" role="status" aria-live="polite">
+          {t('common.loading')}
+        </p>
+      ) : shownNotes.length === 0 ? (
         <p className="hint">{t('notes.none')}</p>
       ) : (
         <ul className="list">

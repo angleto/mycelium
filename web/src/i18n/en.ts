@@ -73,6 +73,7 @@ export const en = {
     yes: 'Yes',
     no: 'No',
     dashEmpty: '—',
+    loading: 'Loading…',
   },
   taskLinkKind: {
     subject: 'subject',

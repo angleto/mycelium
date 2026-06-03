@@ -47,7 +47,7 @@ def _out(tag: object) -> MemoryChannelOut:
 
 @router.get("", response_model=list[MemoryChannelOut])
 async def list_channels(
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> list[MemoryChannelOut]:
     """List the tenant's configured channels (seeds the canonical four
     on first call). Any authenticated member may list -- the memory UI

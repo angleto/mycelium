@@ -26,7 +26,7 @@ router = APIRouter(prefix="/advisory", tags=["advisory"])
 @router.post("/what-now", response_model=list[FeasibleTaskOut])
 async def what_now(
     body: WhatNowIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> list[FeasibleTaskOut]:
     rows = await svc.what_can_i_do_now(
         ctx.session,
@@ -53,7 +53,7 @@ async def what_now(
 @router.post("/errands", response_model=list[ErrandItemOut])
 async def errands(
     body: ErrandsIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> list[ErrandItemOut]:
     rows = await svc.errands(
         ctx.session,
@@ -77,7 +77,7 @@ async def errands(
 @router.get("/budget/{budget_id}/plan", response_model=BudgetPlanOut)
 async def budget_plan(
     budget_id: uuid.UUID,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> BudgetPlanOut:
     plan = await svc.prioritize_within_budget(
         ctx.session,

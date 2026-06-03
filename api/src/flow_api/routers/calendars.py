@@ -25,7 +25,7 @@ router = APIRouter(tags=["calendars"])
 @router.post("/calendars", response_model=CalendarOut)
 async def create_calendar(
     body: CalendarCreateIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> CalendarOut:
     cal = await svc.create_calendar(
         ctx.session,
@@ -46,7 +46,7 @@ async def create_calendar(
 
 @router.get("/calendars", response_model=list[CalendarOut])
 async def list_calendars(
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> list[CalendarOut]:
     rows = await svc.list_calendars(ctx.session, org_id=ctx.org_id)
     return [
@@ -65,7 +65,7 @@ async def list_calendars(
 async def add_holiday(
     calendar_id: uuid.UUID,
     body: HolidayIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> None:
     await svc.add_holiday(
         ctx.session,
@@ -79,7 +79,7 @@ async def add_holiday(
 @router.get("/calendars/{calendar_id}/holidays", response_model=list[HolidayOut])
 async def list_holidays(
     calendar_id: uuid.UUID,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> list[HolidayOut]:
     days = await svc.list_holidays(ctx.session, org_id=ctx.org_id, calendar_id=calendar_id)
     return [HolidayOut(day=d) for d in days]
@@ -92,7 +92,7 @@ async def list_holidays(
 async def remove_holiday(
     calendar_id: uuid.UUID,
     day: datetime.date,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> None:
     await svc.remove_holiday(
         ctx.session,
@@ -107,7 +107,7 @@ async def remove_holiday(
 async def set_user_calendar(
     user_id: uuid.UUID,
     body: UserCalendarIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> None:
     await svc.set_user_calendar(
         ctx.session,

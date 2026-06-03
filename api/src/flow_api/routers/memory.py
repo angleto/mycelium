@@ -52,7 +52,7 @@ def _blob_out(b: MemoryBlob, tags: list[Tag] | None = None) -> MemoryBlobOut:
 @router.post("/blobs", response_model=MemoryBlobOut)
 async def write_blob(
     body: MemoryWriteIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> MemoryBlobOut:
     blob = await svc.write_blob(
         ctx.session,
@@ -75,7 +75,7 @@ async def write_blob(
 @router.post("/search", response_model=list[MemoryHitOut])
 async def search(
     body: MemorySearchIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> list[MemoryHitOut]:
     hits = await svc.retrieve(
         ctx.session,
@@ -104,7 +104,7 @@ async def search(
 
 @router.get("/status", response_model=MemoryStatusOut)
 async def status_(
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> MemoryStatusOut:
     """Whether semantic retrieval is available (the optional embedding
     model is installed) or memory is running keyword-only. Member-level
@@ -114,7 +114,7 @@ async def status_(
 
 @router.get("/migration-status")
 async def migration_status_(
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> dict[str, int]:
     """Embedding migration coverage for this workspace (task 1d081395):
     {total, migrated, pending}. ``total`` is blobs with non-NULL text;
@@ -168,7 +168,7 @@ async def migrate_embeddings_(
 @router.get("/blobs/{blob_id}", response_model=MemoryBlobOut)
 async def get_blob(
     blob_id: uuid.UUID,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> MemoryBlobOut:
     blob = await svc.get_blob(ctx.session, org_id=ctx.org_id, blob_id=blob_id)
     tagmap = await svc.tags_by_blob(ctx.session, blob_ids=[blob.id])
@@ -178,7 +178,7 @@ async def get_blob(
 @router.delete("/blobs/{blob_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_blob(
     blob_id: uuid.UUID,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> None:
     """Delete a single memory entry (member-level, RLS-scoped). Hard
     delete; cascades to the blob's tags/sources/vector. 404 if the blob
@@ -194,7 +194,7 @@ async def delete_blob(
 @router.post("/erase", response_model=ErasedOut)
 async def erase(
     body: MemoryEraseIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> ErasedOut:
     deleted = await svc.gdpr_erase(
         ctx.session,
@@ -209,7 +209,7 @@ async def erase(
 @router.post("/consolidate", response_model=MemoryBlobOut)
 async def consolidate(
     body: MemoryConsolidateIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> MemoryBlobOut:
     blob = await svc.consolidate(
         ctx.session,
@@ -227,7 +227,7 @@ async def consolidate(
 async def attach_blob_tag(
     blob_id: uuid.UUID,
     body: TagRefIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> None:
     await svc.attach_blob_tag(
         ctx.session,
@@ -242,7 +242,7 @@ async def attach_blob_tag(
 async def detach_blob_tag(
     blob_id: uuid.UUID,
     tag_id: uuid.UUID,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> None:
     await svc.detach_blob_tag(
         ctx.session,
@@ -255,7 +255,7 @@ async def detach_blob_tag(
 
 @router.post("/recompute-tier", response_model=TierCountsOut)
 async def recompute_tier(
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> TierCountsOut:
     counts = await svc.recompute_tier(ctx.session, org_id=ctx.org_id)
     return TierCountsOut(hot=counts["hot"], warm=counts["warm"], cold=counts["cold"])

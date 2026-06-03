@@ -66,7 +66,7 @@ def _content_disposition(filename: str, mime_type: str) -> str:
 @router.get("/{attachment_id}/download")
 async def download_attachment(
     attachment_id: uuid.UUID,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> Response:
     att = await svc.get_attachment(
         ctx.session,
@@ -89,7 +89,7 @@ async def download_attachment(
 @router.delete("/{attachment_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_attachment(
     attachment_id: uuid.UUID,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> None:
     await svc.delete_attachment(
         ctx.session,

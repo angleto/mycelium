@@ -48,7 +48,7 @@ router = APIRouter(prefix="/telegram", tags=["telegram"])
 
 @router.post("/link/request", response_model=TelegramLinkRequestOut)
 async def request_link(
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> TelegramLinkRequestOut:
     settings = get_settings()
     if not settings.telegram_configured:
@@ -69,7 +69,7 @@ async def request_link(
 
 @router.get("/link/status", response_model=TelegramLinkStatusOut)
 async def get_status(
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> TelegramLinkStatusOut:
     s = await svc.get_link_status(ctx.session, user_id=ctx.user_id)
     return TelegramLinkStatusOut(
@@ -78,7 +78,7 @@ async def get_status(
 
 
 @router.delete("/link", status_code=status.HTTP_204_NO_CONTENT)
-async def unlink(ctx: Annotated[TenantCtx, Depends(tenant_ctx)]) -> None:
+async def unlink(ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")]) -> None:
     await svc.unlink(ctx.session, user_id=ctx.user_id)
     await disable_pref_on_unlink(ctx.session, user_id=ctx.user_id)
 

@@ -59,7 +59,7 @@ def _rec_out(r: TaskRecurrence) -> RecurrenceOut:
 @router.put("/prefs", response_model=NotificationPrefOut)
 async def set_pref(
     body: NotificationPrefIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> NotificationPrefOut:
     p = await svc.set_pref(
         ctx.session,
@@ -75,7 +75,7 @@ async def set_pref(
 
 @router.get("/prefs", response_model=list[NotificationPrefOut])
 async def list_prefs(
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> list[NotificationPrefOut]:
     rows = await svc.list_prefs(ctx.session, org_id=ctx.org_id, user_id=ctx.user_id)
     return [_pref_out(p) for p in rows]
@@ -83,7 +83,7 @@ async def list_prefs(
 
 @router.get("", response_model=list[NotificationOut])
 async def list_notifications(
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> list[NotificationOut]:
     rows = await svc.list_notifications(ctx.session, org_id=ctx.org_id, user_id=ctx.user_id)
     return [_n_out(n) for n in rows]
@@ -92,7 +92,7 @@ async def list_notifications(
 @router.delete("/{notification_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_notification(
     notification_id: uuid.UUID,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> None:
     await svc.delete_notification(
         ctx.session,
@@ -104,7 +104,7 @@ async def delete_notification(
 
 @router.post("/dispatch", response_model=DispatchOut)
 async def dispatch(
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> DispatchOut:
     r = await svc.dispatch_pending(ctx.session, org_id=ctx.org_id, actor_id=ctx.user_id)
     return DispatchOut(sent=r.sent, failed=r.failed)
@@ -113,7 +113,7 @@ async def dispatch(
 @router.post("/recurrences", response_model=RecurrenceOut)
 async def create_recurrence(
     body: RecurrenceIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> RecurrenceOut:
     rec = await svc.create_recurrence(
         ctx.session,
@@ -130,7 +130,7 @@ async def create_recurrence(
 
 @router.post("/recurrences/spawn-due", response_model=CountOut)
 async def spawn_due(
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> CountOut:
     n = await svc.spawn_due(ctx.session, org_id=ctx.org_id, actor_id=ctx.user_id)
     return CountOut(count=n)
@@ -138,7 +138,7 @@ async def spawn_due(
 
 @router.post("/reminders/scan", response_model=CountOut)
 async def scan_reminders(
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
     within_days: int = 1,
 ) -> CountOut:
     n = await svc.scan_reminders(

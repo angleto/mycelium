@@ -145,7 +145,7 @@ def _mandate_out(m: SdiMandate) -> SdiMandateOut:
 
 @router.get("/issuer-profiles", response_model=list[IssuerProfileOut])
 async def list_issuer_profiles(
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> list[IssuerProfileOut]:
     rows = await svc.list_issuer_profiles(ctx.session, org_id=ctx.org_id)
     return [_ip_out(p) for p in rows]
@@ -154,7 +154,7 @@ async def list_issuer_profiles(
 @router.post("/issuer-profiles", response_model=IssuerProfileOut)
 async def create_issuer_profile(
     body: IssuerProfileIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> IssuerProfileOut:
     ensure_role(ctx.role, Role.owner)
     p = await svc.create_issuer_profile(
@@ -193,7 +193,7 @@ async def create_issuer_profile(
 @router.get("/issuer-profiles/{profile_id}", response_model=IssuerProfileOut)
 async def get_issuer_profile(
     profile_id: uuid.UUID,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> IssuerProfileOut:
     return _ip_out(
         await svc.get_issuer_profile(ctx.session, org_id=ctx.org_id, profile_id=profile_id)
@@ -204,7 +204,7 @@ async def get_issuer_profile(
 async def update_issuer_profile(
     profile_id: uuid.UUID,
     body: IssuerProfilePatchIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> IssuerProfileOut:
     ensure_role(ctx.role, Role.owner)
     values = body.model_dump(exclude_unset=True, exclude={"is_default"})
@@ -222,7 +222,7 @@ async def update_issuer_profile(
 @router.post("/issuer-profiles/{profile_id}/default", response_model=IssuerProfileOut)
 async def set_default_issuer_profile(
     profile_id: uuid.UUID,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> IssuerProfileOut:
     ensure_role(ctx.role, Role.owner)
     p = await svc.set_default_issuer_profile(
@@ -235,7 +235,7 @@ async def set_default_issuer_profile(
 async def set_conservation(
     profile_id: uuid.UUID,
     body: ConservationAdhesionIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> IssuerProfileOut:
     p = await svc.set_conservation_adhesion(
         ctx.session,
@@ -250,7 +250,7 @@ async def set_conservation(
 @router.delete("/issuer-profiles/{profile_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_issuer_profile(
     profile_id: uuid.UUID,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> None:
     ensure_role(ctx.role, Role.owner)
     await svc.delete_issuer_profile(
@@ -267,7 +267,7 @@ async def delete_issuer_profile(
 )
 async def list_counters(
     profile_id: uuid.UUID,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> list[InvoiceCounterOut]:
     """Counters owned by this issuer, with ``max_emitted`` as the lower
     bound for any override. The UI uses it to disable an out-of-range
@@ -294,7 +294,7 @@ async def set_counter(
     series: str,
     year: int,
     body: InvoiceCounterPatchIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> InvoiceCounterOut:
     """Override the next number for (issuer, series, year). Admin only.
     The service rejects any value below ``max(invoices.number)`` for
@@ -324,7 +324,7 @@ async def set_counter(
 @router.get("/issuer-profiles/{profile_id}/mandate", response_model=SdiMandateOut | None)
 async def get_mandate(
     profile_id: uuid.UUID,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> SdiMandateOut | None:
     m = await msvc.get_active_mandate(ctx.session, org_id=ctx.org_id, issuer_profile_id=profile_id)
     return _mandate_out(m) if m is not None else None
@@ -333,7 +333,7 @@ async def get_mandate(
 @router.get("/issuer-profiles/{profile_id}/mandates", response_model=list[SdiMandateOut])
 async def list_mandates(
     profile_id: uuid.UUID,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> list[SdiMandateOut]:
     rows = await msvc.list_mandates(ctx.session, org_id=ctx.org_id, issuer_profile_id=profile_id)
     return [_mandate_out(m) for m in rows]
@@ -343,7 +343,7 @@ async def list_mandates(
 async def grant_mandate(
     profile_id: uuid.UUID,
     body: SdiMandateIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> SdiMandateOut:
     ensure_role(ctx.role, Role.owner)
     m = await msvc.grant_mandate(
@@ -359,7 +359,7 @@ async def grant_mandate(
 @router.delete("/issuer-profiles/{profile_id}/mandate", response_model=SdiMandateOut)
 async def revoke_mandate(
     profile_id: uuid.UUID,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> SdiMandateOut:
     ensure_role(ctx.role, Role.owner)
     m = await msvc.revoke_mandate(
@@ -374,7 +374,7 @@ async def revoke_mandate(
 @router.post("/invoices", response_model=InvoiceOut)
 async def create_invoice(
     body: InvoiceCreateIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> InvoiceOut:
     inv = await svc.create_draft(
         ctx.session,
@@ -393,7 +393,7 @@ async def create_invoice(
 async def update_invoice(
     invoice_id: uuid.UUID,
     body: InvoicePatchIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> InvoiceOut:
     values = body.model_dump(exclude_unset=True)
     inv = await svc.update_draft(
@@ -410,7 +410,7 @@ async def update_invoice(
 async def add_line(
     invoice_id: uuid.UUID,
     body: InvoiceLineIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> InvoiceLineOut:
     ln = await svc.add_line(
         ctx.session,
@@ -431,7 +431,7 @@ async def update_line(
     invoice_id: uuid.UUID,
     line_id: uuid.UUID,
     body: InvoiceLineIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> InvoiceLineOut:
     ln = await svc.update_line(
         ctx.session,
@@ -455,7 +455,7 @@ async def update_line(
 async def delete_line(
     invoice_id: uuid.UUID,
     line_id: uuid.UUID,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> None:
     await svc.delete_line(
         ctx.session,
@@ -469,7 +469,7 @@ async def delete_line(
 @router.get("/invoices/{invoice_id}/lines", response_model=list[InvoiceLineOut])
 async def list_lines(
     invoice_id: uuid.UUID,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> list[InvoiceLineOut]:
     rows = await svc.list_lines(ctx.session, org_id=ctx.org_id, invoice_id=invoice_id)
     return [_line_out(r) for r in rows]
@@ -478,14 +478,14 @@ async def list_lines(
 @router.get("/invoices/{invoice_id}", response_model=InvoiceOut)
 async def get_invoice(
     invoice_id: uuid.UUID,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> InvoiceOut:
     return _inv_out(await svc.get_invoice(ctx.session, org_id=ctx.org_id, invoice_id=invoice_id))
 
 
 @router.get("/invoices", response_model=list[InvoiceOut])
 async def list_invoices(
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> list[InvoiceOut]:
     rows = await svc.list_invoices(ctx.session, org_id=ctx.org_id)
     return [_inv_out(i) for i in rows]
@@ -495,7 +495,7 @@ async def list_invoices(
 async def transmit(
     invoice_id: uuid.UUID,
     body: TransmitIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> InvoiceOut:
     inv = await svc.transmit(
         ctx.session,
@@ -510,7 +510,7 @@ async def transmit(
 @router.get("/invoices/{invoice_id}/xml", response_model=InvoiceXmlOut)
 async def get_xml(
     invoice_id: uuid.UUID,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> InvoiceXmlOut:
     # Transmitted -> the frozen transited XML; draft -> a LIVE preview
     # built from the current draft (never 404 for a valid draft). The
@@ -523,7 +523,7 @@ async def get_xml(
 @router.get("/invoices/{invoice_id}/pdf")
 async def get_pdf(
     invoice_id: uuid.UUID,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> Response:
     number, pdf = await svc.render_pdf(ctx.session, org_id=ctx.org_id, invoice_id=invoice_id)
     return Response(
@@ -565,7 +565,7 @@ def _party_out(
 @router.get("/invoices/{invoice_id}/preview", response_model=InvoicePreviewOut)
 async def get_preview(
     invoice_id: uuid.UUID,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> InvoicePreviewOut:
     import datetime as _dt
 
@@ -645,7 +645,7 @@ async def get_preview(
 @router.post("/invoices/credit-note", response_model=InvoiceOut)
 async def credit_note(
     body: CreditNoteIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> InvoiceOut:
     inv = await svc.create_credit_note(
         ctx.session,
@@ -660,7 +660,7 @@ async def credit_note(
 @router.post("/invoices/{invoice_id}/paid", response_model=InvoiceOut)
 async def mark_paid(
     invoice_id: uuid.UUID,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> InvoiceOut:
     inv = await svc.mark_paid(
         ctx.session,
@@ -674,7 +674,7 @@ async def mark_paid(
 @router.post("/invoices/receipt", response_model=InvoiceOut)
 async def ingest_receipt(
     body: ReceiptIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> InvoiceOut:
     inv = await svc.ingest_receipt(
         ctx.session,
@@ -689,7 +689,7 @@ async def ingest_receipt(
 @router.delete("/invoices/{invoice_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_draft(
     invoice_id: uuid.UUID,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> None:
     await svc.delete_draft(
         ctx.session,

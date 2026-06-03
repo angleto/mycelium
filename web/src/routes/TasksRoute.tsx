@@ -134,6 +134,7 @@ export function TasksRoute() {
     projectId: focusProjectId,
   } = useFocus()
   const [tasks, setTasks] = useState<Task[]>([])
+  const [loading, setLoading] = useState(true)
   const [tags, setTags] = useState<Tag[]>([])
   // Projects come from /projects (not /tags) because only ProjectOut
   // carries client_tag_id, which we need to (a) filter the Project
@@ -388,31 +389,36 @@ export function TasksRoute() {
   useEffect(() => {
     let active = true
     void (async () => {
-      const h = workspaceHeader()
-      const [tk, tg, pj, cl] = await Promise.all([
-        api.GET('/tasks', {
-          params: {
-            header: h,
-            query: {
-              ...(filter ? { tag_id: filter } : {}),
-              include_checklist: true,
+      setLoading(true)
+      try {
+        const h = workspaceHeader()
+        const [tk, tg, pj, cl] = await Promise.all([
+          api.GET('/tasks', {
+            params: {
+              header: h,
+              query: {
+                ...(filter ? { tag_id: filter } : {}),
+                include_checklist: true,
+              },
             },
-          },
-        }),
-        api.GET('/tags', { params: { header: h } }),
-        api.GET('/projects', { params: { header: h } }),
-        // /clients is the authoritative client list and side-effects
-        // ``ensure_default_client``, so its response always includes the
-        // Personal default. It drives the client picker + pre-select
-        // (clientsList) — see the note on that state.
-        api.GET('/clients', { params: { header: h } }),
-      ])
-      if (!active) return
-      if (tk.data) setTasks(tk.data)
-      else setErr(errMessage(tk.error))
-      if (tg.data) setTags(tg.data)
-      if (pj.data) setProjectsByClient(pj.data)
-      if (cl.data) setClientsList(cl.data)
+          }),
+          api.GET('/tags', { params: { header: h } }),
+          api.GET('/projects', { params: { header: h } }),
+          // /clients is the authoritative client list and side-effects
+          // ``ensure_default_client``, so its response always includes the
+          // Personal default. It drives the client picker + pre-select
+          // (clientsList) — see the note on that state.
+          api.GET('/clients', { params: { header: h } }),
+        ])
+        if (!active) return
+        if (tk.data) setTasks(tk.data)
+        else setErr(errMessage(tk.error))
+        if (tg.data) setTags(tg.data)
+        if (pj.data) setProjectsByClient(pj.data)
+        if (cl.data) setClientsList(cl.data)
+      } finally {
+        if (active) setLoading(false)
+      }
     })()
     return () => {
       active = false
@@ -1170,7 +1176,11 @@ export function TasksRoute() {
         </div>
       )}
 
-      {view === 'kanban' ? (
+      {loading ? (
+        <p className="hint" role="status" aria-live="polite">
+          {t('common.loading')}
+        </p>
+      ) : view === 'kanban' ? (
         <TaskKanban
           tasks={shown}
           states={kanbanStates}

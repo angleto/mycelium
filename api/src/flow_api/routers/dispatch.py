@@ -63,7 +63,7 @@ async def _out(ctx: TenantCtx, r: DispatchRequest) -> DispatchRequestOut:
 
 @router.get("/requests", response_model=list[DispatchRequestOut])
 async def list_requests(
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> list[DispatchRequestOut]:
     """Member: the dispatch queue (RLS-scoped), newest first. Each row
     carries the task title, the assigned executor name, the projected
@@ -76,7 +76,7 @@ async def list_requests(
 async def approve_request(
     request_id: uuid.UUID,
     body: DispatchDecisionIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> DispatchRequestOut:
     """Owner: approve a pending request, then immediately attempt the
     dispatch inline (approve-then-inline-dispatch -- the caller can
@@ -98,7 +98,7 @@ async def approve_request(
 async def deny_request(
     request_id: uuid.UUID,
     body: DispatchDecisionIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> DispatchRequestOut:
     """Owner: deny an active request (never starts a run), with an
     optional short reason. Owner-gated in the service; optimistic
@@ -117,7 +117,7 @@ async def deny_request(
 @router.post("/tick", response_model=DispatchTickOut)
 async def tick(
     body: DispatchTickIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> DispatchTickOut:
     """Owner: run one closed-loop tick now (recompute -> admit -> gate
     -> dispatch). The worker calls the same service on a timer; this

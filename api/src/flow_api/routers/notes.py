@@ -199,7 +199,7 @@ def _turn(t: NoteTurn) -> NoteTurnOut:
 @router.post("", response_model=NoteOut)
 async def create_note(
     body: NoteCreateIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> NoteOut:
     n = await svc.create_note(
         ctx.session,
@@ -236,7 +236,7 @@ async def create_note(
     tags=["garden"],
 )
 async def list_workspace_note_links(
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> list[NoteLinkOut]:
     # Garden mindmap (ADR-0029 P2): single round-trip for the full
     # edge set in the workspace. Declared before ``GET /{note_id}``
@@ -248,7 +248,7 @@ async def list_workspace_note_links(
 
 @router.get("", response_model=list[NoteOut])
 async def list_notes(
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
     include_archived: bool = False,
     include_deleted: bool = False,
     project_id: uuid.UUID | None = None,
@@ -293,7 +293,7 @@ async def list_notes(
 @router.get("/{note_id}", response_model=NoteOut)
 async def get_note(
     note_id: uuid.UUID,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> NoteOut:
     n = await svc.get_note(ctx.session, org_id=ctx.org_id, note_id=note_id)
     tagmap = await svc.tags_by_note(ctx.session, note_ids=[n.id])
@@ -326,7 +326,7 @@ async def get_note(
 @router.post("/{note_id}/distill", response_model=DistillationOut)
 async def distill_note(
     note_id: uuid.UUID,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> DistillationOut:
     """Fungal decomposition (ADR-0034, task 4a718dc4): distil the note's
     body into a reusable atom note and flag both as humus so the LLM
@@ -368,7 +368,7 @@ def _checklist_item_out(it: TaskChecklistItem) -> TaskChecklistItemOut:
 @router.get("/{note_id}/checklist", response_model=list[TaskChecklistItemOut])
 async def list_note_checklist(
     note_id: uuid.UUID,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> list[TaskChecklistItemOut]:
     """A note's checklist (task bae178d2): same shape and widget as the
     task checklist. Items may carry an optional markdown ``body``."""
@@ -384,7 +384,7 @@ async def list_note_checklist(
 async def add_note_checklist_item(
     note_id: uuid.UUID,
     body: TaskChecklistItemCreateIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> TaskChecklistItemOut:
     item = await checklist_svc.add_item(
         ctx.session,
@@ -403,7 +403,7 @@ async def update_note_checklist_item(
     note_id: uuid.UUID,
     item_id: uuid.UUID,
     body: TaskChecklistItemPatchIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> TaskChecklistItemOut:
     item = await checklist_svc.update_item(
         ctx.session,
@@ -424,7 +424,7 @@ async def update_note_checklist_item(
 async def delete_note_checklist_item(
     note_id: uuid.UUID,
     item_id: uuid.UUID,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> None:
     await checklist_svc.delete_item(
         ctx.session,
@@ -438,7 +438,7 @@ async def delete_note_checklist_item(
 @router.post("/{note_id}/checklist:clear_done", response_model=TaskChecklistClearDoneOut)
 async def clear_note_checklist_done(
     note_id: uuid.UUID,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> TaskChecklistClearDoneOut:
     removed = await checklist_svc.clear_done(
         ctx.session, org_id=ctx.org_id, actor_id=ctx.user_id, note_id=note_id
@@ -450,7 +450,7 @@ async def clear_note_checklist_done(
 async def reorder_note_checklist(
     note_id: uuid.UUID,
     body: TaskChecklistReorderIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> list[TaskChecklistItemOut]:
     rows = await checklist_svc.reorder_items(
         ctx.session,
@@ -466,7 +466,7 @@ async def reorder_note_checklist(
 async def attach_note_tag(
     note_id: uuid.UUID,
     body: NoteTagIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> None:
     await svc.attach_tag(
         ctx.session,
@@ -481,7 +481,7 @@ async def attach_note_tag(
 async def detach_note_tag(
     note_id: uuid.UUID,
     tag_id: uuid.UUID,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> None:
     await svc.detach_tag(
         ctx.session,
@@ -495,7 +495,7 @@ async def detach_note_tag(
 @router.post("/{note_id}/attachments", response_model=AttachmentOut)
 async def upload_note_attachment(
     note_id: uuid.UUID,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
     file: upload_file_field,
 ) -> AttachmentOut:
     # Size is enforced BEFORE the bytes are stored (guarded read here +
@@ -516,7 +516,7 @@ async def upload_note_attachment(
 @router.get("/{note_id}/attachments", response_model=list[AttachmentOut])
 async def list_note_attachments(
     note_id: uuid.UUID,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> list[AttachmentOut]:
     rows = await att_svc.list_attachments(ctx.session, org_id=ctx.org_id, note_id=note_id)
     return [att_out(r) for r in rows]
@@ -526,7 +526,7 @@ async def list_note_attachments(
 async def update_note(
     note_id: uuid.UUID,
     body: NotePatchIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
     edit_session_id: Annotated[str | None, Header(alias="X-Edit-Session-Id")] = None,
 ) -> VersionOut:
     # task_id is bidirectional Proposal A: pass it through only when the
@@ -567,7 +567,7 @@ async def update_note(
 )
 async def list_note_parts(
     note_id: uuid.UUID,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> list[NotePartOut]:
     """List the ordered parts of a note, with the caller's per-part
     collapse state. Useful when the SPA refetches just the parts
@@ -585,7 +585,7 @@ async def list_note_parts(
 async def create_note_part(
     note_id: uuid.UUID,
     body: NotePartCreateIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> NotePartOut:
     """Append (default) or insert a part. Pass ``ord`` to insert at
     a specific position; every part at or after that ord is shifted
@@ -612,7 +612,7 @@ async def append_note_part(
     note_id: uuid.UUID,
     part_id: uuid.UUID,
     body: NotePartAppendIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
     edit_session_id: Annotated[str | None, Header(alias="X-Edit-Session-Id")] = None,
 ) -> AppendOut:
     """Append one chunk to a part's body without resending it -- stream a
@@ -648,7 +648,7 @@ async def prepend_note_part(
     note_id: uuid.UUID,
     part_id: uuid.UUID,
     body: NotePartPrependIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
     edit_session_id: Annotated[str | None, Header(alias="X-Edit-Session-Id")] = None,
 ) -> AppendOut:
     """Prepend ``text`` to the front of a part's body without resending
@@ -678,7 +678,7 @@ async def replace_in_note_part(
     note_id: uuid.UUID,
     part_id: uuid.UUID,
     body: NotePartReplaceIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
     edit_session_id: Annotated[str | None, Header(alias="X-Edit-Session-Id")] = None,
 ) -> ReplaceOut:
     """Anchored find/replace inside ONE part without resending the body
@@ -711,7 +711,7 @@ async def patch_note_part(
     note_id: uuid.UUID,
     part_id: uuid.UUID,
     body: NotePartPatchIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
     edit_session_id: Annotated[str | None, Header(alias="X-Edit-Session-Id")] = None,
 ) -> VersionOut:
     """Edit a part's body and/or lang. Pass ``lang=null`` explicitly
@@ -752,7 +752,7 @@ async def patch_note_part(
 async def delete_note_part(
     note_id: uuid.UUID,
     part_id: uuid.UUID,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> None:
     """Hard-delete a part. Remaining parts keep their ords (no
     compaction) so deep links by ord survive; reorder is explicit."""
@@ -772,7 +772,7 @@ async def delete_note_part(
 async def reorder_note_parts(
     note_id: uuid.UUID,
     body: NotePartReorderIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> list[NotePartOut]:
     """Rewrite the entire ordering. ``part_ids`` must be the full set
     of the note's parts in the desired order; missing or extra ids
@@ -796,7 +796,7 @@ async def set_note_part_ui_state(
     note_id: uuid.UUID,
     part_id: uuid.UUID,
     body: NotePartUIStateIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> NotePartOut:
     """Toggle the caller's collapse state for a part. User-scoped,
     last-write-wins. The response carries the full NotePartOut so
@@ -825,7 +825,7 @@ async def set_note_part_ui_state(
 )
 async def merge_notes(
     body: NoteMergeIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> NoteOut:
     """Fold the source note's parts into the target (task 71c9d670
     Phase 2b). Soft-deletes the source, stamps every moved part with
@@ -866,7 +866,7 @@ async def merge_notes(
 async def append_note(
     note_id: uuid.UUID,
     body: NoteAppendIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> AppendOut:
     """Task 4ac39ecf: context-blind append for ``note.summary`` /
     ``note.transcript``. The caller never has to read the body first
@@ -891,7 +891,7 @@ async def append_note(
 async def delete_note(
     note_id: uuid.UUID,
     body: ExpectedVersionIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> VersionOut:
     v = await svc.soft_delete_note(
         ctx.session,
@@ -907,7 +907,7 @@ async def delete_note(
 async def restore_note(
     note_id: uuid.UUID,
     body: ExpectedVersionIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> VersionOut:
     v = await svc.restore_note(
         ctx.session,
@@ -923,7 +923,7 @@ async def restore_note(
 async def archive_note(
     note_id: uuid.UUID,
     body: ExpectedVersionIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> VersionOut:
     v = await svc.archive_note(
         ctx.session,
@@ -940,7 +940,7 @@ async def archive_note(
 async def unarchive_note(
     note_id: uuid.UUID,
     body: ExpectedVersionIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> VersionOut:
     v = await svc.archive_note(
         ctx.session,
@@ -957,7 +957,7 @@ async def unarchive_note(
 async def transcribe(
     note_id: uuid.UUID,
     body: NoteTranscribeIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> NoteOut:
     n = await svc.transcribe(
         ctx.session,
@@ -980,7 +980,7 @@ async def transcribe(
 @router.post("/conversations", response_model=NoteOut)
 async def start_conversation(
     body: ConversationStartIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> NoteOut:
     n = await svc.create_note(
         ctx.session,
@@ -997,7 +997,7 @@ async def start_conversation(
 async def append_message(
     note_id: uuid.UUID,
     body: AppendMessageIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> NoteTurnOut:
     reply = await svc.append_message(
         ctx.session,
@@ -1013,7 +1013,7 @@ async def append_message(
 @router.get("/{note_id}/turns", response_model=list[NoteTurnOut])
 async def list_turns(
     note_id: uuid.UUID,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> list[NoteTurnOut]:
     rows = await svc.list_turns(ctx.session, org_id=ctx.org_id, note_id=note_id)
     return [_turn(t) for t in rows]
@@ -1022,7 +1022,7 @@ async def list_turns(
 @router.post("/synthesize", response_model=SynthOut)
 async def synthesize(
     body: SynthesizeIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> SynthOut:
     res = await svc.synthesize(
         ctx.session,
@@ -1037,7 +1037,7 @@ async def synthesize(
 @router.post("/command", response_model=NoteOut)
 async def command(
     body: CommandIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> NoteOut:
     n = await svc.run_command(
         ctx.session,
@@ -1058,7 +1058,7 @@ async def command(
 @router.post("/{note_id}/erase", response_model=NoteEraseOut)
 async def erase(
     note_id: uuid.UUID,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> NoteEraseOut:
     res = await svc.gdpr_erase_note(
         ctx.session,
@@ -1222,7 +1222,7 @@ async def quick_create(
 async def set_note_maturity(
     note_id: uuid.UUID,
     body: NoteSetMaturityIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> NoteOut:
     n = await note_links_svc.set_maturity(
         ctx.session,
@@ -1251,7 +1251,7 @@ async def set_note_maturity(
 async def promote_note(
     note_id: uuid.UUID,
     body: NotePromoteIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> DerivedTaskOut:
     task, link = await note_links_svc.promote_note_to_task(
         ctx.session,
@@ -1271,7 +1271,7 @@ async def promote_note(
 async def derive_task(
     note_id: uuid.UUID,
     body: NoteDeriveTaskIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> DerivedTaskOut:
     task, link = await note_links_svc.derive_task_from_note(
         ctx.session,
@@ -1294,7 +1294,7 @@ async def derive_task(
 async def link_notes(
     note_id: uuid.UUID,
     body: NoteLinkIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> NoteLinkOut:
     # ``note_id`` from the URL is the parent (the link's "from"); the
     # body carries the child and the kind. We accept the parent in
@@ -1321,7 +1321,7 @@ async def unlink_notes(
     note_id: uuid.UUID,
     child_note_id: uuid.UUID,
     kind: str,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> None:
     removed = await note_links_svc.unlink_notes(
         ctx.session,
@@ -1342,7 +1342,7 @@ async def unlink_notes(
 )
 async def list_note_links(
     note_id: uuid.UUID,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> NoteWithLinksOut:
     n = await svc.get_note(ctx.session, org_id=ctx.org_id, note_id=note_id)
     tagmap = await svc.tags_by_note(ctx.session, note_ids=[n.id])
@@ -1376,7 +1376,7 @@ async def list_note_links(
 async def add_note_task_link(
     note_id: uuid.UUID,
     body: NoteTaskLinkIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> NoteTaskLinkOut:
     """Create a typed note↔task link from the note side. ``kind`` picks
     the named operation: ``subject`` → start_task_on_note,
@@ -1414,7 +1414,7 @@ async def remove_note_task_link(
     note_id: uuid.UUID,
     task_id: uuid.UUID,
     kind: str,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> None:
     """Idempotent removal: returns 404 only if no row matched. Refuses
     ``promoted_from`` (a transplant cannot be undone via unlink; the
@@ -1459,7 +1459,7 @@ def _revision_out(rev: Any) -> RevisionOut:
 @router.get("/{note_id}/revisions", response_model=list[RevisionOut])
 async def list_note_revisions(
     note_id: uuid.UUID,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     before: Annotated[datetime.datetime | None, Query()] = None,
 ) -> list[RevisionOut]:
@@ -1479,7 +1479,7 @@ async def list_note_revisions(
 async def get_note_revision(
     note_id: uuid.UUID,
     rev_id: uuid.UUID,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> RevisionOut:
     rev = await rev_svc.get_revision(
         ctx.session,
@@ -1495,7 +1495,7 @@ async def update_note_revision_summary(
     note_id: uuid.UUID,
     rev_id: uuid.UUID,
     body: RevisionSummaryIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> RevisionOut:
     """Set / clear the ``summary`` label on a revision. Mirror of the
     /tasks endpoint; see that one for the contract."""
@@ -1514,7 +1514,7 @@ async def restore_note_revision(
     note_id: uuid.UUID,
     rev_id: uuid.UUID,
     body: RevisionRestoreIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> VersionOut:
     """Apply the snapshot's restorable fields (``title`` /
     ``transcript``) back to the note. Logged as a NEW sealed
@@ -1535,7 +1535,7 @@ async def restore_note_revision(
 async def seal_note_edit_session(
     note_id: uuid.UUID,
     body: EditSessionSealIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> EditSessionSealOut:
     count = await rev_svc.seal_open(
         ctx.session,

@@ -44,7 +44,7 @@ def _out(e: Executor) -> ExecutorOut:
 
 @router.get("", response_model=list[ExecutorOut])
 async def list_executors(
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> list[ExecutorOut]:
     rows = await svc.list_executors(ctx.session, org_id=ctx.org_id)
     return [_out(e) for e in rows]
@@ -53,7 +53,7 @@ async def list_executors(
 @router.post("", response_model=ExecutorOut)
 async def create_executor(
     body: ExecutorCreateIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> ExecutorOut:
     row = await svc.create_executor(
         ctx.session,
@@ -78,7 +78,7 @@ async def create_executor(
 async def update_executor(
     executor_id: uuid.UUID,
     body: ExecutorPatchIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> VersionOut:
     values = body.model_dump(exclude_unset=True, exclude={"expected_version"})
     version = await svc.update_executor(
@@ -95,7 +95,7 @@ async def update_executor(
 @router.delete("/{executor_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_executor(
     executor_id: uuid.UUID,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> None:
     await svc.delete_executor(
         ctx.session,

@@ -24,7 +24,7 @@ router = APIRouter(prefix="/search", tags=["search"])
 @router.post("", response_model=list[SearchHit])
 async def search(
     body: SearchIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> list[SearchHit]:
     hits = await svc.search_unified(
         ctx.session,

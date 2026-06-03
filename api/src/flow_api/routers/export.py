@@ -87,7 +87,7 @@ def _wrap_html(title: str, body_html: str) -> str:
 )
 async def export_pdf(
     payload: PdfExportIn,
-    _ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    _ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> Response:
     """Render ``payload.html`` to a vector PDF and stream it back.
 

@@ -216,7 +216,7 @@ async def tenant_ctx(
 
 
 async def tenant_admin_ctx(
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
     user: Annotated[User, Depends(current_user)],
     x_admin_mode: Annotated[str | None, Header()] = None,
 ) -> TenantCtx:

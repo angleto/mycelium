@@ -31,7 +31,7 @@ router = APIRouter(tags=["received-invoices"])
 async def send_ec(
     received_invoice_id: uuid.UUID,
     body: EsitoCommittenteIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> EsitoCommittenteOut:
     notif = await send_esito_committente(
         ctx.session,

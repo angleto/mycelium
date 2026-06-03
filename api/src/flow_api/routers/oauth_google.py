@@ -78,7 +78,7 @@ class OAuthStartOut(BaseModel):
 
 @router.get("/start", response_model=OAuthStartOut)
 async def start(
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
     scope: Annotated[OAuthScope, Query()] = "both",
 ) -> OAuthStartOut:
     s = get_settings()

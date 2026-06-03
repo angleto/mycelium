@@ -54,7 +54,7 @@ def _kinds_csv(value: str | None) -> tuple[str, ...]:
 @router.get("/{prefix}", response_model=LookupOut)
 async def lookup_prefix(
     prefix: str,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
     kinds: Annotated[str | None, Query()] = None,
     include_archived: Annotated[bool, Query()] = False,
     include_deleted: Annotated[bool, Query()] = False,

@@ -46,7 +46,7 @@ def _out(r: AgentRun) -> AgentRunOut:
 @router.post("/tasks/{task_id}/run", response_model=AgentRunOut)
 async def start_run(
     task_id: uuid.UUID,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> AgentRunOut:
     """Owner: run the agent on this dispatched ``llm_agent`` task,
     end-to-end. Returns the terminal run (succeeded|failed|cancelled|
@@ -63,7 +63,7 @@ async def start_run(
 
 @router.get("/agent-runs", response_model=list[AgentRunOut])
 async def list_runs(
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
     task_id: uuid.UUID | None = None,
 ) -> list[AgentRunOut]:
     """List agent runs (member-level), newest first, optionally filtered
@@ -75,7 +75,7 @@ async def list_runs(
 @router.get("/agent-runs/{run_id}", response_model=AgentRunOut)
 async def get_run(
     run_id: uuid.UUID,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> AgentRunOut:
     """Read one agent run (member-level, RLS-scoped)."""
     run = await svc.get_run(ctx.session, org_id=ctx.org_id, run_id=run_id)
@@ -85,7 +85,7 @@ async def get_run(
 @router.post("/agent-runs/{run_id}/cancel", response_model=AgentRunOut)
 async def cancel_run(
     run_id: uuid.UUID,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> AgentRunOut:
     """Owner: request cancellation (cooperative kill switch the loop
     observes). Idempotent; a terminal run -> 400. Owner-gated in the

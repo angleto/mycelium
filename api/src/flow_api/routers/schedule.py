@@ -51,7 +51,7 @@ def _out(s: Schedule) -> ScheduleOut:
 @router.post("/schedule/recompute", response_model=RecomputeOut)
 async def recompute(
     body: RecomputeIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> RecomputeOut:
     summary = await svc.recompute(
         ctx.session,
@@ -72,7 +72,7 @@ async def recompute(
 
 @router.get("/schedule", response_model=list[ScheduleOut])
 async def list_schedule(
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
     project_tag_id: uuid.UUID | None = None,
 ) -> list[ScheduleOut]:
     rows = await svc.list_schedule(ctx.session, org_id=ctx.org_id, project_tag_id=project_tag_id)
@@ -82,7 +82,7 @@ async def list_schedule(
 @router.get("/schedule/{task_id}", response_model=ScheduleOut)
 async def get_schedule(
     task_id: uuid.UUID,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> ScheduleOut:
     row = await svc.get_schedule(ctx.session, org_id=ctx.org_id, task_id=task_id)
     if row is None:
@@ -94,7 +94,7 @@ async def get_schedule(
 async def set_task_schedule(
     task_id: uuid.UUID,
     body: TaskScheduleIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> VersionOut:
     values = body.model_dump(exclude_unset=True, exclude={"expected_version"})
     version = await tasks_svc.set_schedule_fields(

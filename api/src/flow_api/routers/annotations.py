@@ -56,7 +56,7 @@ def annotation_out(a: Annotation) -> AnnotationOut:
 
 @router.get("", response_model=list[AnnotationOut])
 async def list_annotations(
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
     doc_kind: Annotated[str, Query()],
     doc_id: Annotated[uuid.UUID, Query()],
     include_resolved: Annotated[bool, Query()] = True,
@@ -74,7 +74,7 @@ async def list_annotations(
 @router.post("/comment", response_model=AnnotationOut)
 async def create_comment(
     body: AnnotationCommentIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> AnnotationOut:
     a = await svc.create_comment(
         ctx.session,
@@ -94,7 +94,7 @@ async def create_comment(
 @router.post("/suggestion", response_model=AnnotationOut)
 async def propose_suggestion(
     body: SuggestionIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> AnnotationOut:
     a = await svc.propose_suggestion(
         ctx.session,
@@ -114,7 +114,7 @@ async def propose_suggestion(
 @router.get("/{annotation_id}", response_model=AnnotationOut)
 async def get_annotation(
     annotation_id: uuid.UUID,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> AnnotationOut:
     a = await svc.get_annotation(ctx.session, org_id=ctx.org_id, annotation_id=annotation_id)
     return annotation_out(a)
@@ -124,7 +124,7 @@ async def get_annotation(
 async def edit_annotation(
     annotation_id: uuid.UUID,
     body: AnnotationEditIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> VersionOut:
     v = await svc.edit(
         ctx.session,
@@ -140,7 +140,7 @@ async def edit_annotation(
 @router.delete("/{annotation_id}", response_model=VersionOut)
 async def delete_annotation(
     annotation_id: uuid.UUID,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
     expected_version: Annotated[int, Query(ge=1)],
 ) -> VersionOut:
     v = await svc.soft_delete(
@@ -157,7 +157,7 @@ async def delete_annotation(
 async def resolve_annotation(
     annotation_id: uuid.UUID,
     body: ExpectedVersionIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> VersionOut:
     v = await svc.resolve(
         ctx.session,
@@ -173,7 +173,7 @@ async def resolve_annotation(
 async def reopen_annotation(
     annotation_id: uuid.UUID,
     body: ExpectedVersionIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> VersionOut:
     v = await svc.reopen(
         ctx.session,
@@ -189,7 +189,7 @@ async def reopen_annotation(
 async def accept_suggestion(
     annotation_id: uuid.UUID,
     body: ExpectedVersionIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> VersionOut:
     v = await svc.accept_suggestion(
         ctx.session,
@@ -205,7 +205,7 @@ async def accept_suggestion(
 async def reject_suggestion(
     annotation_id: uuid.UUID,
     body: ExpectedVersionIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> VersionOut:
     v = await svc.reject_suggestion(
         ctx.session,

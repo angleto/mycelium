@@ -71,7 +71,7 @@ async def create_my_workspace(
 
 @router.get("/me", response_model=WorkspaceOut)
 async def get_my_workspace(
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> WorkspaceOut:
     result = await ctx.session.execute(select(Organization).where(Organization.id == ctx.org_id))
     org = result.scalar_one_or_none()
@@ -97,7 +97,7 @@ async def get_my_workspace(
 
 @router.get("/me/members", response_model=list[MemberOut])
 async def list_workspace_members(
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> list[MemberOut]:
     """The workspace roster (any member). Powers the collaborators
     list and the SPA's "act as" switch."""
@@ -117,7 +117,7 @@ async def list_workspace_members(
 @router.post("/me/members", response_model=list[MemberOut])
 async def add_workspace_member(
     body: MemberAddIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> list[MemberOut]:
     """Add (or re-role) a collaborator by email. Requires the effective
     role owner (hardened model: only an owner manages members); the SQL
@@ -137,7 +137,7 @@ async def add_workspace_member(
 async def set_workspace_member_role(
     user_id: uuid.UUID,
     body: MemberRoleIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> list[MemberOut]:
     """Change a collaborator's role (effective role owner; SQL
     re-checks). Cannot demote the sole owner."""
@@ -157,7 +157,7 @@ async def set_workspace_member_role(
 )
 async def remove_workspace_member(
     user_id: uuid.UUID,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> Response:
     """Remove a collaborator (effective role owner; SQL re-checks).
     Cannot remove the sole owner."""
@@ -174,7 +174,7 @@ async def remove_workspace_member(
 @router.patch("/me/settings", response_model=WorkspaceVersionOut)
 async def patch_my_workspace_settings(
     body: WorkspaceSettingsIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> WorkspaceVersionOut:
     """Per-workspace config (owner: privileged namespace write under
     the hardened model). Merges into the settings bag so a future key
@@ -210,7 +210,7 @@ async def patch_my_workspace_settings(
 @router.patch("/me", response_model=WorkspaceVersionOut)
 async def patch_my_workspace(
     body: WorkspacePatchIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> WorkspaceVersionOut:
     # Renaming the namespace is a privileged write: owner only under
     # the hardened model.
@@ -227,7 +227,7 @@ async def patch_my_workspace(
 
 @router.post("/me/trash/empty", response_model=TrashEmptyOut)
 async def empty_workspace_trash(
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> TrashEmptyOut:
     """Permanently delete every soft-deleted task and note in the
     current workspace (owner/admin only; the service re-checks)."""

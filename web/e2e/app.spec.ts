@@ -140,13 +140,16 @@ test('notes: create, client auto-assigned, convert to task', async ({
   await expect(dialog.locator('.tagpick__search')).toBeVisible()
   await expect(dialog.locator('.tagpick .chip--rm').first()).toBeVisible()
 
-  // Convert to task -> a link to the created task appears.
+  // Derive a task (ADR-0029): the button is "Derive task" / "Genera task"
+  // and, on success, the app closes the modal and navigates straight to
+  // the freshly-derived task, whose title is inherited from the note.
   await dialog
-    .getByRole('button', { name: /convert to task|trasforma in task/i })
+    .getByRole('button', { name: /derive task|genera task/i })
     .click()
+  await page.waitForURL(/\/tasks\/[0-9a-f-]{8}/, { timeout: 15_000 })
   await expect(
-    page.getByText(/task created from note|task creato dalla nota/i),
-  ).toBeVisible()
+    page.getByRole('textbox', { name: /new task title|titolo nuovo task/i }),
+  ).toHaveValue(title)
   expect(errors, errors.join('\n')).toEqual([])
 })
 
@@ -169,7 +172,7 @@ test('clients: create a client and add a project inline', async ({
   const pname = `E2E project ${stamp}`
   const form = page.locator('form.cpform').first()
   await form.locator('input[name=name]').fill(cname)
-  await form.locator('input[name=ragione_sociale]').fill(`${cname} SRL`)
+  await form.locator('input[name=legal_name]').fill(`${cname} SRL`)
   await form.getByRole('button', { name: /^add$|^aggiungi$/i }).click()
 
   const item = page.locator('.cpitem', { hasText: cname }).first()
@@ -264,7 +267,7 @@ test('effective role: privileged write needs Owner mode', async ({
   const form = page.locator('form.cpform').first()
   const stamp = Date.now()
   await form.locator('input[name=name]').fill(`RBAC ${stamp}`)
-  await form.locator('input[name=ragione_sociale]').fill(`RBAC ${stamp} srl`)
+  await form.locator('input[name=legal_name]').fill(`RBAC ${stamp} srl`)
   await form.getByRole('button', { name: /^add$|^aggiungi$/i }).click()
   await expect(page.locator('main.content .err')).toBeVisible()
 
@@ -274,7 +277,7 @@ test('effective role: privileged write needs Owner mode', async ({
   const form2 = page.locator('form.cpform').first()
   await form2.locator('input[name=name]').fill(`RBAC ${stamp}`)
   await form2
-    .locator('input[name=ragione_sociale]')
+    .locator('input[name=legal_name]')
     .fill(`RBAC ${stamp} srl`)
   await form2.getByRole('button', { name: /^add$|^aggiungi$/i }).click()
   await expect(
@@ -303,23 +306,19 @@ test('task work note: open from task + billable timer in the note', async ({
     .getByRole('button', { name: /create note|crea nota/i })
     .click()
   await dialog
-    .getByRole('button', { name: /convert to task|trasforma in task/i })
+    .getByRole('button', { name: /derive task|genera task/i })
     .click()
-  // Open the created task. Read the href and navigate directly: the
-  // conversion success <p.ok> re-renders (the note is archived right
-  // after), so clicking the link races a detach in the serial suite.
-  const madeLink = page.locator('p.ok a[href^="/tasks/"]').first()
-  await expect(madeLink).toBeVisible()
-  const href = await madeLink.getAttribute('href')
-  await page.goto(href ?? '/tasks')
-  await expect(page).toHaveURL(/\/tasks\/[0-9a-f-]+/)
+  // Deriving (ADR-0029) closes the note modal and navigates straight to
+  // the new task; capture its path for the later re-visits.
+  await page.waitForURL(/\/tasks\/[0-9a-f-]+/, { timeout: 15_000 })
+  const href = new URL(page.url()).pathname
 
   // New work note (Proposal A: a note is the work log of the task) →
   // opens the linked note with the billable timer.
   await page
     .getByRole('button', { name: /new work note|nuova nota di lavoro/i })
     .click()
-  await expect(page).toHaveURL(/\/notes\?open=/)
+  await expect(page).toHaveURL(/\/notes\/[0-9a-f-]+/)
   const banner = page.locator('.notebanner')
   await expect(banner).toBeVisible()
   const timer = banner.locator('.tasktimer')

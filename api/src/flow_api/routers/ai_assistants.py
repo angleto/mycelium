@@ -50,7 +50,7 @@ _INSTRUCTIONS_MD = """\
 
 @router.get("/connector-info", response_model=ConnectorInfoOut)
 async def connector_info(
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> ConnectorInfoOut:
     # Same-origin: SPA at /, API at /api, MCP at /mcp. The frontend
     # prefixes window.location.origin so the operator gets the full
@@ -60,7 +60,7 @@ async def connector_info(
 
 @router.get("/scope-catalog", response_model=list[ScopeCatalogEntry])
 async def scope_catalog(
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> list[ScopeCatalogEntry]:
     return [
         ScopeCatalogEntry(key=s.key, category=s.category, label=s.label, description=s.description)
@@ -103,7 +103,7 @@ def _out(a: AiAssistant, token_prefix: str | None) -> AiAssistantOut:
 
 @router.get("", response_model=list[AiAssistantOut])
 async def list_assistants(
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> list[AiAssistantOut]:
     rows = await svc.list_assistants(ctx.session, org_id=ctx.org_id, user_id=ctx.user_id)
     out: list[AiAssistantOut] = []
@@ -116,7 +116,7 @@ async def list_assistants(
 @router.post("", response_model=AiAssistantCreatedOut)
 async def create_assistant(
     body: AiAssistantCreateIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> AiAssistantCreatedOut:
     res = await svc.create_assistant(
         ctx.session,
@@ -137,7 +137,7 @@ async def create_assistant(
 @router.get("/{assistant_id}", response_model=AiAssistantOut)
 async def get_assistant(
     assistant_id: uuid.UUID,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> AiAssistantOut:
     row = await svc.get_assistant(
         ctx.session,
@@ -152,7 +152,7 @@ async def get_assistant(
 async def patch_assistant(
     assistant_id: uuid.UUID,
     body: AiAssistantPatchIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> AiAssistantOut:
     await svc.update_assistant(
         ctx.session,
@@ -179,7 +179,7 @@ async def patch_assistant(
 @router.delete("/{assistant_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_assistant(
     assistant_id: uuid.UUID,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> None:
     await svc.delete_assistant(
         ctx.session,
@@ -192,7 +192,7 @@ async def delete_assistant(
 @router.post("/{assistant_id}/rotate", response_model=AiAssistantCreatedOut)
 async def rotate_secret(
     assistant_id: uuid.UUID,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> AiAssistantCreatedOut:
     res = await svc.rotate_secret(
         ctx.session,

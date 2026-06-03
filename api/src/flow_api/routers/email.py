@@ -70,7 +70,7 @@ def _msg_out(m: EmailMessage) -> EmailMessageOut:
 @router.post("/accounts", response_model=EmailAccountOut)
 async def create_account(
     body: EmailAccountCreateIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> EmailAccountOut:
     a = await svc.create_account(
         ctx.session,
@@ -90,7 +90,7 @@ async def create_account(
 
 @router.get("/accounts", response_model=list[EmailAccountOut])
 async def list_accounts(
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> list[EmailAccountOut]:
     return [_account_out(a) for a in await svc.list_accounts(ctx.session, org_id=ctx.org_id)]
 
@@ -98,7 +98,7 @@ async def list_accounts(
 @router.get("/accounts/{account_id}", response_model=EmailAccountOut)
 async def get_account(
     account_id: uuid.UUID,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> EmailAccountOut:
     return _account_out(
         await svc.get_account(ctx.session, org_id=ctx.org_id, account_id=account_id)
@@ -109,7 +109,7 @@ async def get_account(
 async def update_account(
     account_id: uuid.UUID,
     body: EmailAccountPatchIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> VersionOut:
     values = body.model_dump(exclude_unset=True, exclude={"expected_version"})
     version = await svc.update_account(
@@ -127,7 +127,7 @@ async def update_account(
 async def set_secret(
     account_id: uuid.UUID,
     body: EmailSecretIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> VersionOut:
     version = await svc.set_secret(
         ctx.session,
@@ -143,7 +143,7 @@ async def set_secret(
 @router.delete("/accounts/{account_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_account(
     account_id: uuid.UUID,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> None:
     await svc.delete_account(
         ctx.session,
@@ -156,7 +156,7 @@ async def delete_account(
 @router.post("/accounts/{account_id}/sync", response_model=SyncResultOut)
 async def sync_account(
     account_id: uuid.UUID,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
     limit: int = 50,
 ) -> SyncResultOut:
     r = await svc.sync_account(
@@ -177,7 +177,7 @@ async def sync_account(
 
 @router.get("/messages", response_model=list[EmailMessageOut])
 async def list_messages(
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
     account_id: uuid.UUID | None = None,
     linked: bool | None = None,
 ) -> list[EmailMessageOut]:
@@ -190,7 +190,7 @@ async def list_messages(
 @router.get("/messages/{message_id}", response_model=EmailMessageOut)
 async def get_message(
     message_id: uuid.UUID,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> EmailMessageOut:
     return _msg_out(await svc.get_message(ctx.session, org_id=ctx.org_id, message_id=message_id))
 
@@ -199,7 +199,7 @@ async def get_message(
 async def email_to_task(
     message_id: uuid.UUID,
     body: EmailToTaskIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> TaskIdOut:
     task_id = await svc.email_to_task(
         ctx.session,
@@ -217,7 +217,7 @@ async def email_to_task(
 async def send_message(
     account_id: uuid.UUID,
     body: EmailSendIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> SentOut:
     sent_id = await svc.send_message(
         ctx.session,
@@ -237,7 +237,7 @@ async def send_message(
 async def reply(
     message_id: uuid.UUID,
     body: EmailReplyIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> SentOut:
     sent_id = await svc.reply_to_message(
         ctx.session,

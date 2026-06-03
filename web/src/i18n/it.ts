@@ -72,6 +72,7 @@ export const it: Catalog = {
     yes: 'Sì',
     no: 'No',
     dashEmpty: '—',
+    loading: 'Caricamento…',
   },
   taskLinkKind: {
     subject: 'oggetto',

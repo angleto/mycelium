@@ -34,7 +34,7 @@ class ActorOut(BaseModel):
 
 @router.get("", response_model=list[ActorOut])
 async def list_actors(
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
     q: str | None = None,
     limit: int = 50,
 ) -> list[ActorOut]:

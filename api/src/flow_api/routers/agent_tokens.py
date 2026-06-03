@@ -49,7 +49,7 @@ def _out(t: AgentToken) -> AgentTokenOut:
 
 @router.get("", response_model=list[AgentTokenOut])
 async def list_tokens(
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> list[AgentTokenOut]:
     """List the workspace's agent tokens, newest first. Includes
     revoked rows (the UI distinguishes via ``revoked_at``) so the audit
@@ -61,7 +61,7 @@ async def list_tokens(
 @router.post("", response_model=AgentTokenCreateOut)
 async def create_token(
     body: AgentTokenCreateIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> AgentTokenCreateOut:
     """Mint a fresh long-lived bearer token (owner-gated in the
     service). The ``raw`` value in the response is the only time the
@@ -90,7 +90,7 @@ async def create_token(
 @router.delete("/{token_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def revoke_token(
     token_id: uuid.UUID,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> None:
     """Revoke a token (owner-gated in the service). Idempotent: a
     second revoke on a previously revoked token is a 204 no-op that

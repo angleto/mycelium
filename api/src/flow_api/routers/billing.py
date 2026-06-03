@@ -56,7 +56,7 @@ def _rate_out(c: RateCard) -> RateCardOut:
 
 @router.get("/balance", response_model=BalanceOut)
 async def get_balance(
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> BalanceOut:
     return BalanceOut(balance=await svc.balance(ctx.session, org_id=ctx.org_id))
 
@@ -64,7 +64,7 @@ async def get_balance(
 @router.post("/grant", response_model=BalanceOut)
 async def grant(
     body: GrantIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> BalanceOut:
     new_balance = await svc.grant_credits(
         ctx.session,
@@ -79,7 +79,7 @@ async def grant(
 @router.post("/meter", response_model=UsageOut)
 async def meter(
     body: MeterIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> UsageOut:
     record = await svc.meter(
         ctx.session,
@@ -97,7 +97,7 @@ async def meter(
 
 @router.get("/ledger", response_model=list[LedgerOut])
 async def ledger(
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
     limit: int = 100,
     offset: int = 0,
 ) -> list[LedgerOut]:
@@ -118,7 +118,7 @@ async def ledger(
 
 @router.get("/usage", response_model=list[UsageOut])
 async def usage(
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
     limit: int = 100,
 ) -> list[UsageOut]:
     rows = await svc.list_usage(ctx.session, org_id=ctx.org_id, limit=limit)
@@ -127,7 +127,7 @@ async def usage(
 
 @router.get("/rate-cards", response_model=list[RateCardOut])
 async def list_rate_cards(
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> list[RateCardOut]:
     return [_rate_out(c) for c in await svc.list_rate_cards(ctx.session, org_id=ctx.org_id)]
 
@@ -135,7 +135,7 @@ async def list_rate_cards(
 @router.post("/rate-cards", response_model=RateCardOut)
 async def upsert_rate_card(
     body: RateCardUpsertIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> RateCardOut:
     values = body.model_dump(exclude={"model_id", "provider"})
     card = await svc.upsert_rate_card(
@@ -152,7 +152,7 @@ async def upsert_rate_card(
 @router.put("/storage-rate", response_model=BalanceOut)
 async def set_storage_rate(
     body: StorageRateIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> BalanceOut:
     row = await svc.set_storage_rate(
         ctx.session,
@@ -167,7 +167,7 @@ async def set_storage_rate(
 @router.put("/byok-factor", response_model=BalanceOut)
 async def set_byok_factor(
     body: ByokFactorIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> BalanceOut:
     cfg = await svc.set_byok_factor(
         ctx.session,

@@ -24,7 +24,7 @@ router = APIRouter(tags=["dependencies"])
 @router.post("/dependencies", response_model=DependencyOut)
 async def add_dependency(
     body: DependencyCreateIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> DependencyOut:
     d = await svc.add_dependency(
         ctx.session,
@@ -51,7 +51,7 @@ async def add_dependency(
 )
 async def remove_dependency(
     dependency_id: uuid.UUID,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> None:
     await svc.remove_dependency(
         ctx.session,
@@ -63,7 +63,7 @@ async def remove_dependency(
 
 @router.get("/dependencies", response_model=list[DependencyOut])
 async def list_dependencies(
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
     task_id: uuid.UUID | None = None,
 ) -> list[DependencyOut]:
     rows = await svc.list_dependencies(ctx.session, org_id=ctx.org_id, task_id=task_id)
@@ -82,7 +82,7 @@ async def list_dependencies(
 
 @router.get("/graph", response_model=GraphOut)
 async def graph(
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
     project_tag_id: uuid.UUID | None = None,
 ) -> GraphOut:
     g = await svc.graph(ctx.session, org_id=ctx.org_id, project_tag_id=project_tag_id)

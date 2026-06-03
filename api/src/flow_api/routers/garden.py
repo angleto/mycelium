@@ -57,7 +57,7 @@ router = APIRouter(prefix="/garden", tags=["garden"])
 
 @router.get("/health", response_model=GardenHealthOut)
 async def garden_health(
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> GardenHealthOut:
     """Structural symbiosis sensors (ADR-0035): the current live readings
     plus the recent daily snapshots (newest first) for the sparkline.
@@ -79,7 +79,7 @@ async def garden_health(
 
 @router.get("/graph", response_model=GardenGraphOut)
 async def garden_graph(
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> GardenGraphOut:
     """Materialise the workspace note-graph in one round-trip:
 
@@ -106,7 +106,7 @@ async def garden_graph(
 
 @router.get("/clusters", response_model=GardenClustersOut)
 async def garden_clusters(
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> GardenClustersOut:
     """Leiden communities over the weighted note graph (task 8c0a8f08).
 
@@ -130,7 +130,7 @@ async def garden_clusters(
 @router.get("/classify/{node_id}", response_model=GardenClassifyOut)
 async def garden_classify(
     node_id: uuid.UUID,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
     kinds: Annotated[
         str | None,
         Query(description="CSV subset of tags,links,maturity,cluster (default: all)"),
@@ -193,7 +193,7 @@ async def garden_classify(
 @router.post("/apply", response_model=GardenApplyOut)
 async def garden_apply(
     body: GardenApplyIn,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> GardenApplyOut:
     """Apply or decline a ``garden_classify`` suggestion (ADR-0032 /
     ADR-0037). ``accept``/``override`` perform the mutation via the
@@ -223,7 +223,7 @@ async def garden_apply(
 
 @router.get("/walk", response_model=GardenWalkOut)
 async def garden_walk(
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
     seed: Annotated[uuid.UUID, Query(description="Note id to seed the walk on")],
     mode: Annotated[
         Literal["focused", "free_wander"],
@@ -281,7 +281,7 @@ async def garden_walk(
 @router.get("/link-suggestions/{note_id}", response_model=GardenLinkSuggestionsOut)
 async def garden_link_suggestions(
     note_id: uuid.UUID,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx)],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
     k: Annotated[int, Query(ge=1, le=20)] = 5,
 ) -> GardenLinkSuggestionsOut:
     """Top-K candidate notes to link from ``note_id`` (task c7d0bb4c).
