@@ -161,10 +161,16 @@ test('cancel discards a half-written suggestion', async ({ page }) => {
   await expect(editor).toContainText('two', { timeout: 10_000 })
 
   await editor.click()
-  await page.keyboard.press('Home')
-  for (let i = 0; i < 3; i += 1) await page.keyboard.press('Shift+ArrowRight')
   const suggestBtn = page.locator('.rte__annotate--suggest').first()
-  await expect(suggestBtn).toBeEnabled({ timeout: 5000 })
+  // On slower CI the keyboard selection can fire before ProseMirror is
+  // ready to report it, leaving the Suggest button disabled. Re-select
+  // until the toolbar reflects the non-empty selection (deterministic,
+  // no fixed settle) instead of asserting once on a possibly-lost one.
+  await expect(async () => {
+    await page.keyboard.press('Home')
+    for (let i = 0; i < 3; i += 1) await page.keyboard.press('Shift+ArrowRight')
+    await expect(suggestBtn).toBeEnabled({ timeout: 1000 })
+  }).toPass({ timeout: 10_000 })
   await suggestBtn.click()
 
   const pop = page.locator('.anno-pop').first()
