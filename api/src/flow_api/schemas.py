@@ -1498,10 +1498,20 @@ class ConsumptionOut(BaseModel):
 
 
 class WhatNowIn(BaseModel):
-    window_start: datetime.datetime
+    # Optional: omit to plan from the server's UTC now() (req #1). The
+    # router substitutes now() and coerces a naive value to UTC.
+    window_start: datetime.datetime | None = None
     duration_minutes: int = Field(gt=0)
     location: str | None = None
     context_tags: list[str] = Field(default_factory=list)
+    # Selection filters (req #3; empty list == inactive, UNION semantics).
+    focus_tag_ids: list[uuid.UUID] = Field(default_factory=list)
+    any_tag_ids: list[uuid.UUID] = Field(default_factory=list)
+    max_priority: int | None = None
+    min_necessity: Necessity | None = None
+    # Opt-in narration (req #4b). Accepted now but the deterministic T4
+    # edge always returns narrated=false; T3 wires the real narrate call.
+    narrate: bool = False
 
 
 class ErrandsIn(BaseModel):
@@ -1517,6 +1527,21 @@ class FeasibleTaskOut(BaseModel):
     # Migration 0005: due_date is a timestamptz.
     due_date: datetime.datetime | None
     remaining_minutes: int
+    # Deterministic deadline signal (ADR-0013), computed in the core.
+    slack_minutes: int | None
+    deadline_bucket: str
+
+
+class NarratedPlanOut(BaseModel):
+    """what-now envelope: the deterministic ranked plan plus an optional
+    LLM narration. ``narrated`` is false (and narration null) unless the
+    metered narrate layer (T3) ran and succeeded; the ranked plan is
+    always present and authoritative regardless."""
+
+    ranked: list[FeasibleTaskOut]
+    narration: str | None = None
+    narration_model: str | None = None
+    narrated: bool = False
 
 
 class ErrandItemOut(BaseModel):

@@ -4,6 +4,7 @@ thin adapter. Operates on the user's tasks within the org."""
 
 from __future__ import annotations
 
+import datetime as dt
 import uuid
 from typing import Annotated
 
@@ -16,6 +17,7 @@ from flow_api.schemas import (
     ErrandItemOut,
     ErrandsIn,
     FeasibleTaskOut,
+    NarratedPlanOut,
     WhatNowIn,
 )
 from flow_core.services import advisory as svc
@@ -23,21 +25,31 @@ from flow_core.services import advisory as svc
 router = APIRouter(prefix="/advisory", tags=["advisory"])
 
 
-@router.post("/what-now", response_model=list[FeasibleTaskOut])
+@router.post("/what-now", response_model=NarratedPlanOut)
 async def what_now(
     body: WhatNowIn,
     ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
-) -> list[FeasibleTaskOut]:
+) -> NarratedPlanOut:
+    # req #1: default to server now() when omitted, and coerce a naive
+    # client value to UTC so an aware now() and the aware due_date never
+    # mix in the core slack subtraction (the core also defends this).
+    ws = body.window_start or dt.datetime.now(dt.UTC)
+    if ws.tzinfo is None:
+        ws = ws.replace(tzinfo=dt.UTC)
     rows = await svc.what_can_i_do_now(
         ctx.session,
         org_id=ctx.org_id,
         actor_id=ctx.user_id,
-        window_start=body.window_start,
+        window_start=ws,
         duration_minutes=body.duration_minutes,
         location=body.location,
         context_tags=body.context_tags,
+        focus_tag_ids=body.focus_tag_ids or None,
+        any_tag_ids=body.any_tag_ids or None,
+        max_priority=body.max_priority,
+        min_necessity=body.min_necessity,
     )
-    return [
+    ranked = [
         FeasibleTaskOut(
             task_id=r.task_id,
             title=r.title,
@@ -45,9 +57,14 @@ async def what_now(
             priority=r.priority,
             due_date=r.due_date,
             remaining_minutes=r.remaining_minutes,
+            slack_minutes=r.slack_minutes,
+            deadline_bucket=r.deadline_bucket,
         )
         for r in rows
     ]
+    # DETERMINISTIC ONLY (decoupled from T3): the narrate flag is accepted
+    # but narration is wired later, behind the provider/metering epic.
+    return NarratedPlanOut(ranked=ranked, narrated=False, narration=None, narration_model=None)
 
 
 @router.post("/errands", response_model=list[ErrandItemOut])
