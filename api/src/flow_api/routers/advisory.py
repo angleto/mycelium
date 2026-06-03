@@ -62,8 +62,24 @@ async def what_now(
         )
         for r in rows
     ]
-    # DETERMINISTIC ONLY (decoupled from T3): the narrate flag is accepted
-    # but narration is wired later, behind the provider/metering epic.
+    # req #4b: opt-in narration over the SAME ranked result, in the same
+    # tenant session (metering rides the resolve_llm seam). Degrades to
+    # narrated=false on no provider / failure -- the ranked plan stands.
+    if body.narrate and rows:
+        narrated = await svc.narrate_plan(
+            ctx.session,
+            org_id=ctx.org_id,
+            actor_id=ctx.user_id,
+            window_start=ws,
+            duration_minutes=body.duration_minutes,
+            plan=rows,
+        )
+        return NarratedPlanOut(
+            ranked=ranked,
+            narrated=narrated.narrated,
+            narration=narrated.narration,
+            narration_model=narrated.narration_model,
+        )
     return NarratedPlanOut(ranked=ranked, narrated=False, narration=None, narration_model=None)
 
 

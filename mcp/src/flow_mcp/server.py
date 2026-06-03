@@ -2461,9 +2461,10 @@ async def what_can_i_do_now(
     floor) then combine by UNION within that scope. location is a soft,
     case-insensitive substring place filter (tasks with no place stay).
     Returns the NarratedPlanOut envelope
-    {ranked, narration, narration_model, narrated}; ``narrate`` is
-    accepted for REST parity but narration is wired later (T3), so this
-    deterministic path always reports narrated=false.
+    {ranked, narration, narration_model, narrated}; with ``narrate`` true
+    the advisor adds an optional rationale over the SAME ranking (metered
+    at the resolve_llm seam), degrading to narrated=false when no provider
+    is configured.
     """
     async with _tenant(token, org_id) as (s, org, user):
         if window_start is not None:
@@ -2498,11 +2499,26 @@ async def what_can_i_do_now(
             }
             for r in rows
         ]
+        narration: str | None = None
+        narration_model: str | None = None
+        narrated = False
+        if narrate and rows:
+            np = await advisory_svc.narrate_plan(
+                s,
+                org_id=org,
+                actor_id=user,
+                window_start=ws,
+                duration_minutes=duration_minutes,
+                plan=rows,
+            )
+            narration = np.narration
+            narration_model = np.narration_model
+            narrated = np.narrated
         return {
             "ranked": ranked,
-            "narration": None,
-            "narration_model": None,
-            "narrated": False,
+            "narration": narration,
+            "narration_model": narration_model,
+            "narrated": narrated,
         }
 
 
