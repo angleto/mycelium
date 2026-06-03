@@ -239,5 +239,102 @@ async def get_identity(
         )
     ).scalar_one_or_none()
     if row is None:
-        raise NotFoundError(MessageCode.IDENTITY_NOT_FOUND)
+        raise NotFoundError(
+            MessageCode.IDENTITY_NOT_FOUND,
+            passed=str(identity_id),
+            expected="identity id",
+            valid_handles=await list_handles(session, org_id=org_id),
+        )
     return row
+
+
+async def list_handles(session: AsyncSession, *, org_id: uuid.UUID, limit: int = 50) -> list[str]:
+    """The identity handles addressable in this org (capped, sorted).
+
+    Used to enrich ``identity.not_found`` error params (task 2d3abdc3) so
+    a caller who fumbled a handle/id sees what is valid instead of an
+    opaque miss.
+    """
+    rows = (
+        (
+            await session.execute(
+                select(Identity.handle)
+                .where(Identity.org_id == org_id)
+                .order_by(Identity.handle)
+                .limit(limit)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return list(rows)
+
+
+async def resolve_assignee(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    assignee_id: uuid.UUID,
+) -> uuid.UUID:
+    """Resolve an assignee reference to an *identity* id.
+
+    Accepts either an identity id (the canonical ``task.assignee_id``
+    space, ADR-0028) or a member's *user* id, mapping the latter 1:1 to
+    the member's identity. The two id spaces are easy to confuse at the
+    tool boundary (``assign_task`` takes a user id, ``set_task_assignee``
+    an identity id), so this unifies them for DX (task 2d3abdc3) without
+    widening the stored column. A user id is only accepted for an actual
+    member of this org (never materialise a non-member's identity).
+
+    Raises ``NotFoundError`` naming what was passed, what was expected,
+    and the valid handles in the org.
+    """
+    ident = (
+        await session.execute(
+            select(Identity).where(
+                Identity.id == assignee_id,
+                Identity.org_id == org_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if ident is not None:
+        return ident.id
+    member = (
+        await session.execute(
+            select(Membership.user_id).where(
+                Membership.org_id == org_id,
+                Membership.user_id == assignee_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if member is not None:
+        return (await ensure_for_user(session, org_id=org_id, user_id=assignee_id)).id
+    raise NotFoundError(
+        MessageCode.IDENTITY_NOT_FOUND,
+        passed=str(assignee_id),
+        expected="identity id or member user id",
+        valid_handles=await list_handles(session, org_id=org_id),
+    )
+
+
+async def handle_for_identity(
+    session: AsyncSession, *, org_id: uuid.UUID, identity_id: uuid.UUID
+) -> str | None:
+    """The handle of an identity in this org (None if absent). Read-back
+    helper (task 2d3abdc3): the stored ``assignee_id`` is an opaque id."""
+    return (
+        await session.execute(
+            select(Identity.handle).where(
+                Identity.id == identity_id,
+                Identity.org_id == org_id,
+            )
+        )
+    ).scalar_one_or_none()
+
+
+async def handle_for_user(session: AsyncSession, *, user_id: uuid.UUID) -> str | None:
+    """The login handle of a user (None if absent). Read-back helper for
+    ``task.owner_id`` (a user id), task 2d3abdc3."""
+    return (
+        await session.execute(select(User.handle).where(User.id == user_id))
+    ).scalar_one_or_none()

@@ -239,7 +239,9 @@ def _compact(d: dict[str, Any]) -> dict[str, Any]:
     return {k: v for k, v in d.items() if v is not None}
 
 
-def _task(t: Task, tags: list[Tag] | None = None) -> dict[str, Any]:
+def _task(
+    t: Task, tags: list[Tag] | None = None, *, collaborators_count: int = 0
+) -> dict[str, Any]:
     # Lean index shape for ``list_tasks`` / ``create_task`` returns: just
     # the fields an LLM needs to pick a row, plus ``version`` for a
     # follow-up optimistic-concurrency update. Full detail (description,
@@ -256,6 +258,8 @@ def _task(t: Task, tags: list[Tag] | None = None) -> dict[str, Any]:
         "version": t.version,
         "tags": [_tag_brief(g) for g in (tags or [])],
         "assignee_id": str(t.assignee_id) if t.assignee_id else None,
+        "owner_id": str(t.owner_id) if t.owner_id else None,
+        "collaborators_count": collaborators_count,
     }
 
 
@@ -626,8 +630,16 @@ async def list_tasks(
         )
         if limit > 0:
             rows = rows[:limit]
-        tagmap = await tasks.tags_by_task(s, task_ids=[t.id for t in rows])
-        return [_project_fields(_task(t, tagmap.get(t.id, [])), fields) for t in rows]
+        ids = [t.id for t in rows]
+        tagmap = await tasks.tags_by_task(s, task_ids=ids)
+        ccounts = await tasks.collaborator_counts(s, org_id=org, task_ids=ids)
+        return [
+            _project_fields(
+                _task(t, tagmap.get(t.id, []), collaborators_count=ccounts.get(t.id, 0)),
+                fields,
+            )
+            for t in rows
+        ]
 
 
 @mcp.tool()
@@ -703,7 +715,14 @@ async def set_task_state(
         return {"task_id": task_id, "version": version}
 
 
-def _task_full(t: Task, tags: list[Tag] | None = None) -> dict[str, Any]:
+def _task_full(
+    t: Task,
+    tags: list[Tag] | None = None,
+    *,
+    assignee_handle: str | None = None,
+    owner_handle: str | None = None,
+    collaborators: list[dict[str, str]] | None = None,
+) -> dict[str, Any]:
     # Full attribute set for editing one task. Unset nullable columns
     # (dates, estimate, cost, location, budget, parent, deleted_at) are
     # dropped via _compact: a typical task leaves most of these empty, so
@@ -731,13 +750,18 @@ def _task_full(t: Task, tags: list[Tag] | None = None) -> dict[str, Any]:
             "budget_id": str(t.budget_id) if t.budget_id else None,
             "is_archived": t.is_archived,
             "offered": t.offered,
-            # Read-back of accountability/assignment (task 901f0f9f): the
-            # write tools take a handle, but the stored values are ids
-            # (``assignee_id`` -> identities, ``owner_id`` -> users), so
-            # without these you cannot confirm what you set. Resolve to
-            # handles + the full collaborator set is a follow-up.
+            # Read-back of accountability/assignment (tasks 901f0f9f +
+            # 2d3abdc3): the write tools take a handle/id, but the stored
+            # values are opaque ids (``assignee_id`` -> identities,
+            # ``owner_id`` -> users). Emit the ids AND the resolved
+            # handles + the collaborator set so a caller can confirm what
+            # it set without a second lookup. Handles/collaborators are
+            # resolved by the get_task tool (it has the session).
             "assignee_id": str(t.assignee_id) if t.assignee_id else None,
+            "assignee_handle": assignee_handle,
             "owner_id": str(t.owner_id) if t.owner_id else None,
+            "owner_handle": owner_handle,
+            "collaborators": collaborators if collaborators else None,
             "deleted_at": t.deleted_at.isoformat() if t.deleted_at else None,
             "version": t.version,
             "tags": [_tag_brief(g) for g in (tags or [])],
@@ -747,11 +771,31 @@ def _task_full(t: Task, tags: list[Tag] | None = None) -> dict[str, Any]:
 
 @mcp.tool()
 async def get_task(token: str, org_id: str, task_id: str) -> dict[str, Any]:
-    """Read one task with its full attribute set (for editing)."""
+    """Read one task with its full attribute set (for editing). Includes
+    the assignment read-back (task 2d3abdc3): the resolved
+    ``assignee_handle`` / ``owner_handle`` next to the stored ids, plus
+    the ``collaborators`` set (people involved beyond the assignee)."""
+    from flow_core.services import identities as identities_svc
+
     async with _tenant(token, org_id) as (s, org, _user):
         t = await tasks.get_task(s, org_id=org, task_id=uuid.UUID(task_id))
         tagmap = await tasks.tags_by_task(s, task_ids=[t.id])
-        return _task_full(t, tagmap.get(t.id, []))
+        assignee_handle = (
+            await identities_svc.handle_for_identity(s, org_id=org, identity_id=t.assignee_id)
+            if t.assignee_id
+            else None
+        )
+        owner_handle = (
+            await identities_svc.handle_for_user(s, user_id=t.owner_id) if t.owner_id else None
+        )
+        collaborators = await tasks.list_collaborators(s, org_id=org, task_id=t.id)
+        return _task_full(
+            t,
+            tagmap.get(t.id, []),
+            assignee_handle=assignee_handle,
+            owner_handle=owner_handle,
+            collaborators=collaborators,
+        )
 
 
 @mcp.tool()
@@ -5129,17 +5173,16 @@ async def set_task_owner(
     owner_id: str | None = None,
     owner_handle: str | None = None,
 ) -> dict[str, Any]:
-    """Reassign accountability for a task (docs/adr/0028 D2). Owner
-    is always a real user. Pass either ``owner_id`` (uuid into
-    ``identities``) or ``owner_handle``, which accepts a bare handle
-    (``angelo``), a leading-@ handle (``@angelo``), or the member's
-    login email (``angelo@leto.blue``); all resolve under the current
-    org and the identity must be ``kind=user``.
+    """Reassign accountability for a task (docs/adr/0028 D2). The owner
+    is always a real user, so ``owner_id`` is a *user* id; alternatively
+    pass ``owner_handle``, which accepts a bare handle (``angelo``), a
+    leading-@ handle (``@angelo``), or the member's login email
+    (``angelo@leto.blue``), all resolved under the current org to a user.
 
-    Note the id-space split (task 901f0f9f): owner/assignee tools take
-    an *identity* id or handle here, while ``assign_task`` /
-    ``unassign_task`` take a *user* id. When unsure, pass a handle or
-    email and let the server resolve it."""
+    Id-space note (tasks 901f0f9f + 2d3abdc3): ``owner_id`` is a user id;
+    ``set_task_assignee`` takes an *identity* id but also accepts a
+    member's user id; ``assign_task`` / ``unassign_task`` take user ids.
+    When unsure, pass a handle or email and let the server resolve it."""
     async with _tenant(token, org_id) as (s, org, user):
         if owner_id is None and owner_handle:
             from flow_core.models.identity import IdentityKind
@@ -5151,7 +5194,12 @@ async def set_task_owner(
             # self-heals drifted identity rows. Owner must be a real user.
             ident = await identities_svc.lookup_by_handle(s, org_id=org, handle=owner_handle)
             if ident is None or ident.kind != IdentityKind.user or ident.user_id is None:
-                raise NotFoundError(MessageCode.USER_NOT_FOUND)
+                raise NotFoundError(
+                    MessageCode.USER_NOT_FOUND,
+                    passed=owner_handle,
+                    expected="handle, @handle, or member login email (must be a user)",
+                    valid_handles=await identities_svc.list_handles(s, org_id=org),
+                )
             resolved = ident.user_id
         elif owner_id is not None:
             resolved = uuid.UUID(owner_id)
@@ -5179,10 +5227,13 @@ async def set_task_assignee(
     clear: bool = False,
 ) -> dict[str, Any]:
     """Set or clear who should work on the task (docs/adr/0028 D2).
-    Pass ``assignee_id`` (uuid into ``identities``) or
-    ``assignee_handle``, which accepts a bare handle (``angelo``), a
-    leading-@ handle (``@angelo``), or the member's login email
-    (``angelo@leto.blue``); all resolve under the current org.
+    Pass ``assignee_id`` (a uuid into ``identities`` -- or, for DX, a
+    member's *user* id, auto-resolved 1:1 to their identity; task
+    2d3abdc3) or ``assignee_handle``, which accepts a bare handle
+    (``angelo``), a leading-@ handle (``@angelo``), or the member's login
+    email (``angelo@leto.blue``); all resolve under the current org. An
+    unresolved handle/id returns ``identity.not_found`` with params
+    naming what was passed, what was expected, and the valid handles.
     ``clear=True`` unassigns the task; the routing kind then falls back
     to ``task.executor_kind`` (ADR-0028)."""
     async with _tenant(token, org_id) as (s, org, user):

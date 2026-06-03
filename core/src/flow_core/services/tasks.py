@@ -10,7 +10,7 @@ from collections.abc import Sequence
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -260,9 +260,11 @@ async def create_task(
             raise DomainError(MessageCode.DOMAIN_ERROR)
         assignee_id = identity.id
     elif assignee_id is not None:
-        # Validate the identity belongs to this org (FK alone does not
-        # enforce org match).
-        await identities_svc.get_identity(session, org_id=org_id, identity_id=assignee_id)
+        # Resolve to an identity id, accepting either an identity id or a
+        # member's user id (task 2d3abdc3), and validate org membership.
+        assignee_id = await identities_svc.resolve_assignee(
+            session, org_id=org_id, assignee_id=assignee_id
+        )
     # ``owner_id`` defaults to the creator. Same rule as the
     # migration backfill: every task has an explicit human owner.
     effective_owner = owner_id or actor_id
@@ -454,6 +456,47 @@ async def tags_by_task(
     return out
 
 
+async def list_collaborators(
+    session: AsyncSession, *, org_id: uuid.UUID, task_id: uuid.UUID
+) -> list[dict[str, str]]:
+    """A task's collaborators (ADR-0028: people involved beyond the
+    assignee) as ``{user_id, handle}`` rows, sorted by handle. Read-back
+    helper for MCP get_task (task 2d3abdc3): the M:N table stores user
+    ids, so resolve to handles to confirm what was set."""
+    rows = (
+        await session.execute(
+            select(TaskCollaborator.user_id, User.handle)
+            .join(User, User.id == TaskCollaborator.user_id)
+            .where(
+                TaskCollaborator.org_id == org_id,
+                TaskCollaborator.task_id == task_id,
+            )
+            .order_by(User.handle)
+        )
+    ).all()
+    return [{"user_id": str(uid), "handle": handle} for uid, handle in rows]
+
+
+async def collaborator_counts(
+    session: AsyncSession, *, org_id: uuid.UUID, task_ids: Sequence[uuid.UUID]
+) -> dict[uuid.UUID, int]:
+    """Collaborator count per task id (one GROUP BY, no N+1). Feeds the
+    lean list_tasks row (task 2d3abdc3) without per-row handle lookups."""
+    if not task_ids:
+        return {}
+    rows = (
+        await session.execute(
+            select(TaskCollaborator.task_id, func.count())
+            .where(
+                TaskCollaborator.org_id == org_id,
+                TaskCollaborator.task_id.in_(list(task_ids)),
+            )
+            .group_by(TaskCollaborator.task_id)
+        )
+    ).all()
+    return {tid: int(n) for tid, n in rows}
+
+
 async def update_task(
     session: AsyncSession,
     *,
@@ -496,14 +539,22 @@ async def update_task(
         if handle:
             identity = await identities_svc.lookup_by_handle(session, org_id=org_id, handle=handle)
             if identity is None:
-                raise DomainError(MessageCode.DOMAIN_ERROR)
+                raise NotFoundError(
+                    MessageCode.IDENTITY_NOT_FOUND,
+                    passed=handle,
+                    expected="handle, @handle, or member login email",
+                    valid_handles=await identities_svc.list_handles(session, org_id=org_id),
+                )
             values["assignee_id"] = identity.id
         else:
             values["assignee_id"] = None
     if "assignee_id" in values and values["assignee_id"] is not None:
-        # Defensive: the FK alone is org-agnostic; validate the
-        # identity is in this tenant.
-        await identities_svc.get_identity(session, org_id=org_id, identity_id=values["assignee_id"])
+        # Resolve to an identity id, accepting either an identity id or a
+        # member's user id (task 2d3abdc3); validates org membership and
+        # raises an informative not-found otherwise.
+        values["assignee_id"] = await identities_svc.resolve_assignee(
+            session, org_id=org_id, assignee_id=values["assignee_id"]
+        )
     # Pre-validate the event pairing using current + patched values, so
     # callers can patch one of the two as long as the other is already
     # set on the row. (Both NULL after patch = revert to plain task;
