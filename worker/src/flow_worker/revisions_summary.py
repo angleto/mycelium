@@ -1,11 +1,11 @@
 """LLM-generated labels for the recovery-history timeline.
 
 Sweep ``entity_revision`` rows whose ``summary`` is still NULL,
-generate a short "speaking name" via the configured open-model LLM
-(``ai_providers.get_llm()``; in production an in-cluster Ollama
-provider, wired in ``worker/main.py``), and persist via
-``entity_revisions.set_summary``. Oldest sealed rows first so the
-timeline becomes readable from the earliest gap onwards.
+generate a short "speaking name" via the org's resolved LLM, metered at
+the seam (``services.llm_resolver.resolve_provider`` + ``MeteredLLM``;
+the local/Ollama provider is the default, wired in ``worker/main.py``),
+and persist via ``entity_revisions.set_summary``. Oldest sealed rows
+first so the timeline becomes readable from the earliest gap onwards.
 
 No-op when ``LocalLLM`` is the active provider: ``LocalLLM.complete``
 raises a ``RuntimeError`` (it's a stub, not a real backend), and
@@ -25,13 +25,13 @@ import uuid
 
 from sqlalchemy import select
 
-from flow_core.ai_providers import get_llm
 from flow_core.config import get_settings
 from flow_core.db import admin_session, tenant_session
 from flow_core.models.entity_revision import EntityRevision
 from flow_core.models.membership import Membership, Role
 from flow_core.models.organization import Organization
 from flow_core.services import entity_revisions as revisions_svc
+from flow_core.services.llm_resolver import MeteredLLM, resolve_provider
 
 _log = logging.getLogger("flow.worker.revisions_summary")
 
@@ -92,12 +92,28 @@ async def _summarize_org(org_id: uuid.UUID, owner_id: uuid.UUID, batch: int) -> 
     """Generate summaries for up to ``batch`` pending revisions in one
     workspace. Each generation is independent: a failure on one row
     is logged and the loop continues."""
-    llm = get_llm()
     filled = 0
     async with tenant_session(str(org_id), str(owner_id), actor_kind="system") as s:
         pending = await revisions_svc.list_pending_summaries(s, limit=batch)
+        if not pending:
+            return 0
+        # Resolve the org's provider ONCE, then meter each generation at
+        # the seam (task a66ba043): closes the leak where this sweep used
+        # a bare get_llm() and never charged. Per-revision operation_id
+        # keeps the debit idempotent; a stub/absent provider raises in
+        # complete() before any charge, so the sweep stays a no-op.
+        provider, basis = await resolve_provider(s, org_id)
         for rev in pending:
             try:
+                llm = MeteredLLM(
+                    provider,
+                    session=s,
+                    org_id=org_id,
+                    actor_id=owner_id,
+                    operation_id=f"revsum:{rev.id}",
+                    basis=basis,
+                    op="llm",
+                )
                 user_prompt = _build_user_prompt(rev)
                 result = await llm.complete(
                     system=_SYSTEM_PROMPT,

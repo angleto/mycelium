@@ -19,11 +19,13 @@ The metering wrapper (MeteredLLM, task a66ba043) consumes the
 from __future__ import annotations
 
 import uuid
+from collections.abc import Sequence
+from decimal import Decimal
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from flow_core.ai_providers import LLMProvider, get_llm
+from flow_core.ai_providers import LLMProvider, LLMResult, get_llm
 from flow_core.config import get_settings
 from flow_core.crypto import decrypt_secret, encrypt_secret
 from flow_core.errors import DomainError
@@ -33,7 +35,7 @@ from flow_core.llm_openai import OpenAILLM
 from flow_core.models.billing import CostBasis
 from flow_core.models.membership import Role
 from flow_core.models.org_llm_provider import LLMProviderKind, OrgLLMProvider
-from flow_core.services import audit
+from flow_core.services import audit, billing
 from flow_core.services.rbac import require_role
 
 # Safety-net model ids if a hosted provider is configured without a model.
@@ -81,6 +83,83 @@ async def resolve_provider(
         return get_llm(), CostBasis.local
 
     return provider, (CostBasis.byok if own_key else CostBasis.our_key)
+
+
+class MeteredLLM:
+    """``LLMProvider`` decorator that meters every ``complete()`` AT THE
+    SEAM (task a66ba043), so no call site can forget to charge. After the
+    wrapped call it records usage via ``billing.meter_if_billable`` with
+    the real token counts from ``LLMResult`` and the per-org ``basis``: a
+    missing rate card on a non-BYOK basis means FREE (no row), never an
+    error, so unconfigured/local orgs keep working; ``our_key`` charges
+    provider_cost x markup and ``byok`` charges the byok factor. Idempotent
+    by ``operation_id`` (re-running the same op never double-charges)."""
+
+    def __init__(
+        self,
+        inner: LLMProvider,
+        *,
+        session: AsyncSession,
+        org_id: uuid.UUID,
+        actor_id: uuid.UUID,
+        operation_id: str,
+        basis: CostBasis,
+        op: str = "llm",
+    ) -> None:
+        self._inner = inner
+        self._session = session
+        self._org_id = org_id
+        self._actor_id = actor_id
+        self._operation_id = operation_id
+        self._basis = basis
+        self._op = op
+
+    @property
+    def model_id(self) -> str | None:
+        return getattr(self._inner, "model_id", None)
+
+    async def complete(
+        self, *, system: str | None, messages: Sequence[tuple[str, str]]
+    ) -> LLMResult:
+        # Meter AFTER the provider answers, on the real token counts. A
+        # provider failure raises before any charge (sweeps then no-op).
+        result = await self._inner.complete(system=system, messages=messages)
+        await billing.meter_if_billable(
+            self._session,
+            org_id=self._org_id,
+            actor_id=self._actor_id,
+            operation_id=self._operation_id,
+            op=self._op,
+            model_id=result.model_id,
+            units_in=Decimal(result.tokens_in),
+            units_out=Decimal(result.tokens_out),
+            basis=self._basis,
+        )
+        return result
+
+
+async def resolve_llm(
+    session: AsyncSession,
+    org_id: uuid.UUID,
+    *,
+    actor_id: uuid.UUID,
+    operation_id: str,
+    op: str = "llm",
+) -> LLMProvider:
+    """The metered seam: the org's resolved provider wrapped in
+    :class:`MeteredLLM`. Callers (narration T3, worker sweeps) use this
+    instead of a bare ``get_llm()`` so metering is an invariant, not a
+    per-call-site choice."""
+    provider, basis = await resolve_provider(session, org_id)
+    return MeteredLLM(
+        provider,
+        session=session,
+        org_id=org_id,
+        actor_id=actor_id,
+        operation_id=operation_id,
+        basis=basis,
+        op=op,
+    )
 
 
 async def set_org_llm_provider(
