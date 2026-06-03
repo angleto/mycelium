@@ -146,10 +146,12 @@ function SensorCard({
   keyName,
   metric,
   series,
+  onOpen,
 }: {
   keyName: string
   metric: Metric
   series: number[]
+  onOpen: () => void
 }) {
   const { t } = useTranslation()
   const meta = META[keyName]
@@ -163,7 +165,19 @@ function SensorCard({
   const dir = t(`gardenHealth.dir.${meta.dir}`)
 
   return (
-    <section className="ghealth__card">
+    <section
+      className="ghealth__card ghealth__card--clickable"
+      role="button"
+      tabIndex={0}
+      title={t('gardenHealth.viewTrend')}
+      onClick={onOpen}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          onOpen()
+        }
+      }}
+    >
       <h2 className="ghealth__label">{t(`gardenHealth.sensor.${keyName}.label`)}</h2>
 
       {v == null ? (
@@ -211,9 +225,164 @@ function SensorCard({
   )
 }
 
+// Larger line chart for the drill-down: the metric's value over time with
+// the floor drawn as a dashed reference line. Width-responsive (the
+// viewBox scales); the axis context is in the caption below, not in the
+// SVG, to keep it dependency-free.
+function TrendChart({
+  points,
+  floor,
+}: {
+  points: { day: string; value: number }[]
+  floor?: number
+}) {
+  const w = 560
+  const h = 160
+  const padX = 6
+  const padT = 12
+  const padB = 14
+  const vals = points.map((p) => p.value)
+  const all = floor != null ? [...vals, floor] : vals
+  const min = Math.min(...all)
+  const max = Math.max(...all)
+  const span = max - min || 1
+  const xOf = (i: number) => padX + (i * (w - 2 * padX)) / (points.length - 1)
+  const yOf = (v: number) => h - padB - ((v - min) / span) * (h - padT - padB)
+  const coords = points.map((p, i) => `${xOf(i).toFixed(1)},${yOf(p.value).toFixed(1)}`).join(' ')
+  return (
+    <svg
+      className="ghealth__drill-chart"
+      width="100%"
+      height={h}
+      viewBox={`0 0 ${w} ${h}`}
+      preserveAspectRatio="none"
+      aria-hidden="true"
+    >
+      {floor != null && (
+        <line
+          x1={padX}
+          x2={w - padX}
+          y1={yOf(floor)}
+          y2={yOf(floor)}
+          stroke="currentColor"
+          strokeWidth="0.75"
+          strokeDasharray="4 4"
+          opacity="0.4"
+        />
+      )}
+      <polyline points={coords} fill="none" stroke="currentColor" strokeWidth="1.5" />
+    </svg>
+  )
+}
+
+// Per-metric drill-down (task b820d223): a 90-day trend pulled from the
+// dedicated timeseries endpoint (persisted snapshots, no live recompute),
+// with the value's own formatting, the floor reference, and the 90-day
+// range. Opened by clicking a sensor card.
+function MetricDrillDown({
+  keyName,
+  current,
+  onClose,
+}: {
+  keyName: string
+  current: Metric
+  onClose: () => void
+}) {
+  const { t } = useTranslation()
+  const meta = META[keyName]
+  const [points, setPoints] = useState<{ day: string; value: number }[] | null>(null)
+
+  useEffect(() => {
+    let active = true
+    void api
+      .GET('/garden/health/timeseries', {
+        params: { header: workspaceHeader(), query: { days: 90 } },
+      })
+      .then((r) => {
+        if (!active) return
+        const snaps = r.data ?? []
+        const series = [...snaps].reverse().flatMap((s) => {
+          const v = s.metrics?.[keyName]?.value
+          return typeof v === 'number' ? [{ day: s.day, value: v }] : []
+        })
+        setPoints(series)
+      })
+    return () => {
+      active = false
+    }
+  }, [keyName])
+
+  const floor = current.floor ?? undefined
+  const vals = (points ?? []).map((p) => p.value)
+  const lo = vals.length ? Math.min(...vals) : null
+  const hi = vals.length ? Math.max(...vals) : null
+  const now = current.value
+
+  return (
+    <div
+      className="ghealth__drill"
+      role="dialog"
+      aria-modal="true"
+      aria-label={t(`gardenHealth.sensor.${keyName}.label`)}
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget) onClose()
+      }}
+    >
+      <div className="ghealth__drill-panel">
+        <header className="ghealth__drill-head">
+          <h2>{t(`gardenHealth.sensor.${keyName}.label`)}</h2>
+          <button
+            type="button"
+            className="ghealth__drill-close"
+            onClick={onClose}
+            aria-label={t('gardenHealth.close')}
+          >
+            ×
+          </button>
+        </header>
+        {points == null ? (
+          <p className="hint">{t('common.loading')}</p>
+        ) : points.length < 2 ? (
+          <p className="ghealth__drill-empty">{t('gardenHealth.notEnough')}</p>
+        ) : (
+          <>
+            <TrendChart points={points} floor={floor} />
+            <p className="ghealth__drill-stats">
+              {now != null && (
+                <>
+                  {t('gardenHealth.now')}: <b>{fmtValue(meta.kind, now)}</b>
+                  {' · '}
+                </>
+              )}
+              {lo != null && hi != null && (
+                <>
+                  {t('gardenHealth.range90')}: {fmtValue(meta.kind, lo)}
+                  {'–'}
+                  {fmtValue(meta.kind, hi)}
+                </>
+              )}
+              {floor != null && (
+                <>
+                  {' · '}
+                  {t('gardenHealth.floor')}: {fmtValue(meta.kind, floor)}
+                </>
+              )}
+            </p>
+            <p className="ghealth__drill-span">
+              {points[0].day} → {points[points.length - 1].day}
+            </p>
+          </>
+        )}
+        <p className="ghealth__explain">{t(`gardenHealth.sensor.${keyName}.explain`)}</p>
+      </div>
+    </div>
+  )
+}
+
 export function GardenHealthRoute() {
   const { t } = useTranslation()
   const [data, setData] = useState<Health | null | undefined>(undefined)
+  const [drill, setDrill] = useState<string | null>(null)
 
   useEffect(() => {
     let active = true
@@ -260,6 +429,7 @@ export function GardenHealthRoute() {
                 keyName={key}
                 metric={data.metrics[key]!}
                 series={seriesFor(key)}
+                onOpen={() => setDrill(key)}
               />
             ))}
           </div>
@@ -286,6 +456,14 @@ export function GardenHealthRoute() {
                 ))}
               </ul>
             </section>
+          )}
+
+          {drill && data.metrics[drill] && (
+            <MetricDrillDown
+              keyName={drill}
+              current={data.metrics[drill]!}
+              onClose={() => setDrill(null)}
+            />
           )}
         </>
       )}

@@ -45,8 +45,10 @@ None of them is a vanity metric (no "you wrote N notes this week").
    more than the absolute value.
 6. **`fungal_lag`** — median time between a note's archival and the
    first distillation/pattern emitting from it. Health: < 14 days.
-7. **`density_delta_7d`** — change in links-per-node over the last
-   7 days, as a percentage. Positive = mycelium thickening.
+7. **`density_delta_7d`** — the signed change in links-per-node over the
+   last 7 days: the absolute delta of the links/notes ratio (not a
+   percentage), surfaced with its sign and an arrow. Positive = mycelium
+   thickening.
 
 ### API
 

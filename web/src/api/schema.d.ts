@@ -3936,6 +3936,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/garden/health/timeseries": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Garden Health Timeseries
+         * @description Daily garden-health snapshots over the last ``days`` (newest first),
+         *     for the per-metric drill-down chart (task b820d223). Reads the persisted
+         *     ``garden_health_daily`` rows only, no live recompute -- a longer,
+         *     cheaper window than the 30-day trend bundled into ``GET /garden/health``.
+         */
+        get: operations["garden_health_timeseries_garden_health_timeseries_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/garden/graph": {
         parameters: {
             query?: never;
@@ -19329,6 +19352,42 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["GardenHealthOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    garden_health_timeseries_garden_health_timeseries_get: {
+        parameters: {
+            query?: {
+                days?: number;
+            };
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GardenHealthSnapshotOut"][];
                 };
             };
             /** @description Validation Error */

@@ -2017,6 +2017,83 @@ button.btn--danger:hover {
   color: var(--muted);
   font-style: italic;
 }
+/* A live card is clickable: it opens the 90-day per-metric drill-down. */
+.ghealth__card--clickable {
+  cursor: pointer;
+}
+.ghealth__card--clickable:hover {
+  border-color: var(--accent);
+}
+.ghealth__card--clickable:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+/* Per-metric drill-down overlay: the 90-day trend with the floor line. */
+.ghealth__drill {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  z-index: 60;
+}
+.ghealth__drill-panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1rem 1.1rem;
+  width: 100%;
+  max-width: 640px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.25);
+}
+.ghealth__drill-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.4rem;
+}
+.ghealth__drill-head h2 {
+  font-size: 1rem;
+  margin: 0;
+  color: var(--text-h);
+}
+.ghealth__drill-close {
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-size: 1.4rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 0.2rem;
+}
+.ghealth__drill-close:hover {
+  color: var(--text-h);
+}
+.ghealth__drill-chart {
+  display: block;
+  color: var(--accent);
+  margin: 0.3rem 0;
+}
+.ghealth__drill-stats {
+  font-size: 0.85rem;
+  color: var(--muted);
+  margin: 0.4rem 0 0;
+  font-variant-numeric: tabular-nums;
+}
+.ghealth__drill-span {
+  font-size: 0.72rem;
+  color: var(--muted);
+  margin: 0.15rem 0 0;
+  font-variant-numeric: tabular-nums;
+}
+.ghealth__drill-empty {
+  font-size: 0.85rem;
+  color: var(--muted);
+  margin: 0.6rem 0;
+}
 /* Link to the health dashboard from the garden tab bar (pushed right). */
 .garden__health-link {
   margin-left: auto;

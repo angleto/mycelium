@@ -26,6 +26,10 @@ export const en = {
     now: 'now',
     over30: '30d',
     range30: '30d range',
+    range90: '90d range',
+    viewTrend: 'View 90-day trend',
+    close: 'Close',
+    notEnough: 'Not enough history yet (needs at least two daily snapshots).',
     pendingTitle: 'Not yet measured',
     pendingIntro: 'Sensors that are planned but not yet wired to a data source.',
     dir: {

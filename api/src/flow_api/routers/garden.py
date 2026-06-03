@@ -77,6 +77,25 @@ async def garden_health(
     )
 
 
+@router.get("/health/timeseries", response_model=list[GardenHealthSnapshotOut])
+async def garden_health_timeseries(
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+    days: Annotated[int, Query(ge=1, le=365)] = 90,
+) -> list[GardenHealthSnapshotOut]:
+    """Daily garden-health snapshots over the last ``days`` (newest first),
+    for the per-metric drill-down chart (task b820d223). Reads the persisted
+    ``garden_health_daily`` rows only, no live recompute -- a longer,
+    cheaper window than the 30-day trend bundled into ``GET /garden/health``."""
+    snaps = await health_svc.recent_snapshots(ctx.session, org_id=ctx.org_id, days=days)
+    return [
+        GardenHealthSnapshotOut(
+            day=s.day,
+            metrics={k: GardenHealthMetricOut(**v) for k, v in s.metrics.items()},
+        )
+        for s in snaps
+    ]
+
+
 @router.get("/graph", response_model=GardenGraphOut)
 async def garden_graph(
     ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],

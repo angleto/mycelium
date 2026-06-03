@@ -25,6 +25,10 @@ export const it: Catalog = {
     now: 'ora',
     over30: '30g',
     range30: 'intervallo 30g',
+    range90: 'intervallo 90g',
+    viewTrend: 'Vedi trend 90g',
+    close: 'Chiudi',
+    notEnough: 'Storico insufficiente (servono almeno due snapshot giornalieri).',
     pendingTitle: 'Non ancora misurati',
     pendingIntro: 'Sensori previsti ma non ancora collegati a una sorgente dati.',
     dir: {

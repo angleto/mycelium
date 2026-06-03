@@ -36,6 +36,24 @@ test('health dashboard renders the live sensor cards + a not-yet-measured sectio
   await expect(pending.locator('.ghealth__pending-reason').first()).toBeVisible()
 })
 
+test('clicking a sensor opens the per-metric drill-down', async ({ page }) => {
+  await login(page)
+  await page.goto('/garden/health')
+
+  const accept = page.locator('.ghealth__card', { hasText: 'Accept rate (7d)' })
+  await accept.click()
+
+  const drill = page.locator('.ghealth__drill')
+  await expect(drill).toBeVisible()
+  await expect(drill).toContainText('Accept rate (7d)')
+  // Fresh workspace: no daily snapshots yet -> the graceful "not enough
+  // history" state, never an error or a faked line.
+  await expect(drill.locator('.ghealth__drill-empty')).toBeVisible()
+
+  await drill.locator('.ghealth__drill-close').click()
+  await expect(drill).toBeHidden()
+})
+
 test('garden page links to the health dashboard', async ({ page }) => {
   await login(page)
   await page.goto('/garden')

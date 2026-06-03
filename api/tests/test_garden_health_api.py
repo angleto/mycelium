@@ -62,3 +62,21 @@ async def test_garden_health_contract() -> None:
 
     # No daily snapshot yet -> empty sparkline trend.
     assert body["trend"] == []
+
+
+async def test_garden_health_timeseries_contract() -> None:
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as c:
+        h = await _signup(c)
+        # Default window and a custom one: a fresh workspace has no
+        # persisted daily snapshot, so each returns an empty list (never
+        # an error, never a faked point).
+        r = await c.get("/garden/health/timeseries", headers=h)
+        assert r.status_code == 200, r.text
+        assert r.json() == []
+        r2 = await c.get("/garden/health/timeseries?days=7", headers=h)
+        assert r2.status_code == 200, r2.text
+        assert r2.json() == []
+        # The window is bounded (1..365).
+        r3 = await c.get("/garden/health/timeseries?days=0", headers=h)
+        assert r3.status_code == 422
