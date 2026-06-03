@@ -1944,6 +1944,79 @@ button.btn--danger:hover {
   font-style: italic;
   margin: 0.3rem 0 0;
 }
+/* Direction hint / trend-lead sublabel: a small muted gloss next to the
+   reading, so a number says which way is "healthy" without a verdict. */
+.ghealth__dir,
+.ghealth__sub {
+  font-size: 0.68rem;
+  color: var(--muted);
+  font-weight: 400;
+  margin-left: 0.4rem;
+  font-variant-numeric: normal;
+}
+/* Secondary "now: <abs>" line under a trend-led headline. */
+.ghealth__abs {
+  font-size: 0.8rem;
+  color: var(--muted);
+  margin: 0.05rem 0 0.3rem;
+  font-variant-numeric: tabular-nums;
+}
+/* 30-day change + range context lines. */
+.ghealth__delta,
+.ghealth__range {
+  font-size: 0.75rem;
+  color: var(--muted);
+  margin: 0.1rem 0 0;
+  font-variant-numeric: tabular-nums;
+}
+/* "Not yet measured": sensors planned but not wired to a data source.
+   Listed apart so a permanently empty reading never dilutes the live
+   sensors or reads as broken. */
+.ghealth__pending {
+  margin-top: 1.4rem;
+  border-top: 1px solid var(--border);
+  padding-top: 0.9rem;
+}
+.ghealth__pending-head {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text-h);
+  margin: 0 0 0.2rem;
+}
+.ghealth__pending-intro {
+  font-size: 0.8rem;
+  color: var(--muted);
+  margin: 0 0 0.6rem;
+}
+.ghealth__pending-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 0.5rem;
+}
+.ghealth__pending-item {
+  display: grid;
+  gap: 0.15rem;
+  padding: 0.5rem 0.7rem;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+}
+.ghealth__pending-label {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+.ghealth__pending-explain {
+  font-size: 0.78rem;
+  color: var(--muted);
+  line-height: 1.35;
+}
+.ghealth__pending-reason {
+  font-size: 0.72rem;
+  color: var(--muted);
+  font-style: italic;
+}
 /* Link to the health dashboard from the garden tab bar (pushed right). */
 .garden__health-link {
   margin-left: auto;

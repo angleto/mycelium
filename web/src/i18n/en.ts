@@ -23,6 +23,17 @@ export const en = {
     noReading: 'No reading yet',
     floor: 'floor',
     loadError: 'Could not load the health sensors.',
+    now: 'now',
+    over30: '30d',
+    range30: '30d range',
+    pendingTitle: 'Not yet measured',
+    pendingIntro: 'Sensors that are planned but not yet wired to a data source.',
+    dir: {
+      higher: 'higher is better',
+      lower: 'lower is better',
+      trend: 'the direction matters',
+      signed: '+ means thickening',
+    },
     sensor: {
       accept_rate_classify_7d: {
         label: 'Accept rate (7d)',

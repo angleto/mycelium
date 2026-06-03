@@ -22,6 +22,17 @@ export const it: Catalog = {
     noReading: 'Nessuna lettura ancora',
     floor: 'soglia',
     loadError: 'Impossibile caricare i sensori di salute.',
+    now: 'ora',
+    over30: '30g',
+    range30: 'intervallo 30g',
+    pendingTitle: 'Non ancora misurati',
+    pendingIntro: 'Sensori previsti ma non ancora collegati a una sorgente dati.',
+    dir: {
+      higher: 'più alto è meglio',
+      lower: 'più basso è meglio',
+      trend: 'conta la direzione',
+      signed: '+ = si infittisce',
+    },
     sensor: {
       accept_rate_classify_7d: {
         label: 'Tasso di accettazione (7g)',

@@ -13,21 +13,27 @@ async function login(page: Page) {
   await page.waitForURL('**/notes', { timeout: 15_000 })
 }
 
-test('health dashboard renders the seven sensor cards', async ({ page }) => {
+test('health dashboard renders the live sensor cards + a not-yet-measured section', async ({
+  page,
+}) => {
   await login(page)
   await page.goto('/garden/health')
 
   await expect(page.locator('.ghealth h1')).toBeVisible()
-  await expect(page.locator('.ghealth__card')).toHaveCount(8)
+  // The six wired sensors render as cards; the two unwired ones live in
+  // their own section, not as permanently-empty cards.
+  await expect(page.locator('.ghealth__grid .ghealth__card')).toHaveCount(6)
 
-  // Headline sensor declares its health floor (always shown).
+  // Headline sensor declares its health floor, formatted as a percentage
+  // (not a raw 0.40 float).
   const accept = page.locator('.ghealth__card', { hasText: 'Accept rate (7d)' })
-  await expect(accept.locator('.ghealth__floor')).toContainText('0.4')
+  await expect(accept.locator('.ghealth__floor')).toContainText('40%')
 
-  // A permanently-blocked sensor shows an explicit empty reading, never
-  // a faked number ("show, never judge").
-  const fungal = page.locator('.ghealth__card', { hasText: 'Fungal lag' })
-  await expect(fungal.locator('.ghealth__value--empty')).toHaveText('No reading yet')
+  // A permanently-unwired sensor is listed apart with its blocker reason,
+  // never a faked number ("show, never judge").
+  const pending = page.locator('.ghealth__pending')
+  await expect(pending).toContainText('Fungal lag')
+  await expect(pending.locator('.ghealth__pending-reason').first()).toBeVisible()
 })
 
 test('garden page links to the health dashboard', async ({ page }) => {
