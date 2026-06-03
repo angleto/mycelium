@@ -202,11 +202,29 @@ export function TaskKanban({
                     </div>
                     <div className="kanban__meta">
                       <PriorityChip priority={tk.priority} score={score} />
-                      {tk.due_date && (
+                      {tk.start_at && tk.duration_minutes ? (
+                        <span
+                          className="muted"
+                          title={t('tasks.eventTitle', {
+                            when: new Date(tk.start_at).toLocaleString(),
+                            minutes: tk.duration_minutes,
+                          })}
+                        >
+                          🕒{' '}
+                          {new Date(tk.start_at).toLocaleString([], {
+                            month: 'short',
+                            day: '2-digit',
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })}
+                          {' · '}
+                          {tk.duration_minutes}m
+                        </span>
+                      ) : tk.due_date ? (
                         <span className="muted" title={t('tasks.due')}>
                           📅 {formatDueDate(tk.due_date)}
                         </span>
-                      )}
+                      ) : null}
                     </div>
                     {tk.tags && tk.tags.length > 0 && (
                       <div className="kanban__tags">
