@@ -38,18 +38,28 @@ async function login(page: Page) {
 }
 
 // Drive the mode chip to a target mode deterministically. The chip
-// cycles user → owner → admin → user; tests must not assume the
-// incoming state (serial-suite/persisted state makes a single click
-// fragile — this reaches the intended mode regardless).
+// cycles user → owner → admin → user, but it only *offers* a mode once
+// the entitlement query backing it has resolved: `owner` needs
+// GET /workspaces/me (ws.my_role === 'owner') and `admin` needs
+// GET /auth/me (is_admin), fetched independently after login. A single
+// blind cycle can therefore miss `owner` when it clicks before
+// /workspaces/me lands — harmless locally (warm queries), but slow
+// enough on cold-Postgres CI to leave the chip stuck cycling
+// user↔admin, which is exactly the app.spec ensureMode flake. Retry the
+// whole cycle until the chip actually reaches the target: robust to
+// both the incoming state and the data-load race.
 async function ensureMode(page: Page, target: 'user' | 'owner' | 'admin') {
   const chip = page.locator('.modechip')
   await expect(chip).toBeVisible()
-  for (let i = 0; i < 4; i++) {
-    if (await chip.evaluate((el, t) => el.classList.contains(`modechip--${t}`), target))
-      return
+  await expect(async () => {
+    const at = await chip.evaluate(
+      (el, t) => el.classList.contains(`modechip--${t}`),
+      target,
+    )
+    if (at) return
     await chip.click()
-  }
-  await expect(chip).toHaveClass(new RegExp(`modechip--${target}`))
+    throw new Error(`mode chip not at ${target} yet`)
+  }).toPass({ timeout: 10_000 })
 }
 
 const ROUTES = [
