@@ -49,6 +49,61 @@ _NEC_WEIGHT: dict[Necessity, int] = {
 _CTX_PREFIX = "ctx:"
 _PLACE_PREFIX = "place:"
 
+# Deadline urgency buckets (ADR-0013: deterministic, explainable). Slack
+# is the spare minutes left before the deadline once this task is done,
+# computed solely from the passed-in ``window_start`` (never now()).
+_BUCKET_OVERDUE = "overdue"  # due_date already in the past
+_BUCKET_AT_RISK = "at_risk"  # slack below the at-risk threshold
+_BUCKET_TIGHT = "tight"  # 0 <= slack < the available window
+_BUCKET_COMFORTABLE = "comfortable"  # slack >= the available window
+_BUCKET_NONE = "none"  # no due_date at all
+
+# Tunable (open product decision #2): a task is "at risk" once its slack
+# drops below this many minutes. 0 = the window leaves no spare time
+# before the deadline. Raw ``slack_minutes`` stays visible regardless.
+_AT_RISK_THRESHOLD_MIN = 0
+
+# Urgency-first: overdue and at_risk lift ABOVE necessity/priority; the
+# remaining buckets keep the existing nec/priority/due ordering.
+_BUCKET_RANK: dict[str, int] = {
+    _BUCKET_OVERDUE: 0,
+    _BUCKET_AT_RISK: 1,
+    _BUCKET_TIGHT: 2,
+    _BUCKET_COMFORTABLE: 2,
+    _BUCKET_NONE: 2,
+}
+# Buckets whose raw slack carries ordering meaning inside their rank;
+# the rest fall back to a +inf sentinel so the sort key stays a TOTAL
+# order (mirrors the old _DT_MAX no-due-date sentinel).
+_SLACK_ORDERED = frozenset({_BUCKET_OVERDUE, _BUCKET_AT_RISK, _BUCKET_TIGHT})
+_SLACK_SENTINEL = float("inf")
+
+
+def _deadline_signal(
+    due_date: dt.datetime | None,
+    window_start: dt.datetime,
+    remaining_minutes: int,
+    duration_minutes: int,
+) -> tuple[int | None, str]:
+    """``(slack_minutes, deadline_bucket)`` for one task.
+
+    Pure: derives urgency only from the passed-in ``window_start`` (NEVER
+    ``datetime.now()`` inside the core, ADR-0013), so identical inputs
+    yield identical output and the ranking stays reproducible. ``due_date``
+    is a timestamptz (aware); the caller guarantees ``window_start`` is
+    aware too, so the subtraction never raises.
+    """
+    if due_date is None:
+        return None, _BUCKET_NONE
+    slack = round((due_date - window_start).total_seconds() / 60) - remaining_minutes
+    if due_date < window_start:
+        return slack, _BUCKET_OVERDUE
+    if slack < _AT_RISK_THRESHOLD_MIN:
+        return slack, _BUCKET_AT_RISK
+    if slack < duration_minutes:
+        return slack, _BUCKET_TIGHT
+    return slack, _BUCKET_COMFORTABLE
+
 
 @dataclass(frozen=True)
 class FeasibleTask:
@@ -59,6 +114,12 @@ class FeasibleTask:
     # Migration 0005: deadline is a timestamptz (carries time-of-day).
     due_date: dt.datetime | None
     remaining_minutes: int
+    # Deterministic deadline signal (ADR-0013): spare minutes before the
+    # deadline once this task is done (None when no due_date) and its
+    # urgency bucket. Returned so the SPA can show WHY a task ranks where
+    # it does and the LLM narrator gets facts, not ranking authority.
+    slack_minutes: int | None
+    deadline_bucket: str
 
 
 @dataclass(frozen=True)
@@ -204,6 +265,12 @@ async def what_can_i_do_now(
     await require_role(session, org_id, actor_id, Role.member)
     if duration_minutes <= 0:
         return []
+    # tz-aware guard (latent 500): due_date is timestamptz (aware); a
+    # naive window_start would make the slack subtraction raise. The
+    # edges (T4 router, T6 MCP) coerce, but defend here too so the core
+    # never 500s and the documented contract (aware == UTC) holds.
+    if window_start.tzinfo is None:
+        window_start = window_start.replace(tzinfo=dt.UTC)
     window_end = window_start + dt.timedelta(minutes=duration_minutes)
     # The claimed free window must really be free (no-ubiquity, ADR-0008).
     if await _user_busy(session, actor_id, window_start, window_end):
@@ -226,6 +293,7 @@ async def what_can_i_do_now(
         required_ctx = {n for n in tags.get(t.id, set()) if n.startswith(_CTX_PREFIX)}
         if not required_ctx.issubset(have_ctx):
             continue
+        slack, bucket = _deadline_signal(t.due_date, window_start, minutes, duration_minutes)
         out.append(
             FeasibleTask(
                 task_id=t.id,
@@ -234,16 +302,20 @@ async def what_can_i_do_now(
                 priority=t.priority,
                 due_date=t.due_date,
                 remaining_minutes=minutes,
+                slack_minutes=slack,
+                deadline_bucket=bucket,
             )
         )
-    # Sentinel must match the field's type to keep sort total: a
-    # datetime always sorts as datetime, never compared to a date.
-    _DT_MAX = dt.datetime.max.replace(tzinfo=dt.UTC)
+    # Urgency-first total order: bucket rank (overdue/at_risk lift to the
+    # top), then the existing nec/priority tiebreak. Inside the urgent
+    # buckets raw slack orders by lateness; comfortable/none fall back to
+    # a +inf sentinel so the non-urgent group keeps its old ordering.
     out.sort(
         key=lambda f: (
+            _BUCKET_RANK[f.deadline_bucket],
             _NEC_RANK[f.necessity],
             f.priority,
-            f.due_date or _DT_MAX,
+            f.slack_minutes if f.deadline_bucket in _SLACK_ORDERED else _SLACK_SENTINEL,
             f.remaining_minutes,
             str(f.task_id),
         )

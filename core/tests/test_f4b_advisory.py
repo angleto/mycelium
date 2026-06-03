@@ -130,6 +130,173 @@ async def test_what_can_i_do_now_feasibility_and_ranking() -> None:
         )
 
 
+def _by_id(rows: list[advisory.FeasibleTask]) -> dict[uuid.UUID, advisory.FeasibleTask]:
+    return {r.task_id: r for r in rows}
+
+
+async def test_what_now_deadline_urgency_outranks_necessity() -> None:
+    """T1: a soon-due could/low-priority task (at_risk / overdue) ranks
+    ABOVE a comfortable must, because deadline urgency is first-class."""
+    async with admin_session() as s:
+        a = await signup(s, email=_email(), password="pw-strong-123", org_name="URG")
+    org, user = a.org_id, a.user_id
+    async with tenant_session(str(org), str(user)) as s:
+        common = dict(org_id=org, actor_id=user, assignee_ids=[user])
+        comfy_must = await tasks.create_task(
+            s,
+            title="comfortable-must",
+            estimate_effort_h=Decimal("0.5"),
+            necessity=Necessity.must,
+            due_date=_WIN + dt.timedelta(days=7),
+            **common,
+        )
+        at_risk_could = await tasks.create_task(
+            s,
+            title="at-risk-could",
+            estimate_effort_h=Decimal("0.5"),
+            necessity=Necessity.could,
+            due_date=_WIN + dt.timedelta(minutes=20),  # 30min effort -> slack -10
+            **common,
+        )
+        overdue_could = await tasks.create_task(
+            s,
+            title="overdue-could",
+            estimate_effort_h=Decimal("0.5"),
+            necessity=Necessity.could,
+            due_date=_WIN - dt.timedelta(days=1),  # date-in-the-past -> overdue
+            **common,
+        )
+        r = await advisory.what_can_i_do_now(
+            s, org_id=org, actor_id=user, window_start=_WIN, duration_minutes=60
+        )
+    ids = [x.task_id for x in r]
+    # overdue (rank 0) then at_risk (rank 1) then comfortable must (rank 2).
+    assert ids == [overdue_could.id, at_risk_could.id, comfy_must.id]
+    by = _by_id(r)
+    assert by[overdue_could.id].deadline_bucket == "overdue"
+    assert by[at_risk_could.id].deadline_bucket == "at_risk"
+    assert by[at_risk_could.id].slack_minutes == -10
+    assert by[comfy_must.id].deadline_bucket == "comfortable"
+
+
+async def test_what_now_deadline_bucket_boundaries() -> None:
+    """T1: slack==0 -> tight, slack just below 0 -> at_risk, slack just
+    below the window -> tight, slack==window -> comfortable."""
+    async with admin_session() as s:
+        a = await signup(s, email=_email(), password="pw-strong-123", org_name="BND")
+    org, user = a.org_id, a.user_id
+    async with tenant_session(str(org), str(user)) as s:
+        common = dict(
+            org_id=org, actor_id=user, assignee_ids=[user], estimate_effort_h=Decimal("0.5")
+        )
+        # 30-min effort, 60-min window. slack = (due-window)/60 - 30.
+        at_risk = await tasks.create_task(
+            s, title="b-atrisk", due_date=_WIN + dt.timedelta(minutes=29), **common
+        )  # slack -1
+        tight0 = await tasks.create_task(
+            s, title="b-tight0", due_date=_WIN + dt.timedelta(minutes=30), **common
+        )  # slack 0
+        tight59 = await tasks.create_task(
+            s, title="b-tight59", due_date=_WIN + dt.timedelta(minutes=89), **common
+        )  # slack 59
+        comfy = await tasks.create_task(
+            s, title="b-comfy", due_date=_WIN + dt.timedelta(minutes=90), **common
+        )  # slack 60 == window
+        r = await advisory.what_can_i_do_now(
+            s, org_id=org, actor_id=user, window_start=_WIN, duration_minutes=60
+        )
+    by = _by_id(r)
+    assert (by[at_risk.id].slack_minutes, by[at_risk.id].deadline_bucket) == (-1, "at_risk")
+    assert (by[tight0.id].slack_minutes, by[tight0.id].deadline_bucket) == (0, "tight")
+    assert (by[tight59.id].slack_minutes, by[tight59.id].deadline_bucket) == (59, "tight")
+    assert (by[comfy.id].slack_minutes, by[comfy.id].deadline_bucket) == (60, "comfortable")
+
+
+async def test_what_now_no_due_date_bucket_none_sorts_after_tight() -> None:
+    """T1: a no-due_date task has slack None / bucket 'none' and, within
+    the same necessity+priority tie group, sorts AFTER a tight task
+    (finite slack beats the +inf sentinel)."""
+    async with admin_session() as s:
+        a = await signup(s, email=_email(), password="pw-strong-123", org_name="NONE")
+    org, user = a.org_id, a.user_id
+    async with tenant_session(str(org), str(user)) as s:
+        common = dict(
+            org_id=org,
+            actor_id=user,
+            assignee_ids=[user],
+            estimate_effort_h=Decimal("0.5"),
+            necessity=Necessity.should,
+            importance=2,
+            urgency=2,
+        )
+        tight = await tasks.create_task(
+            s, title="n-tight", due_date=_WIN + dt.timedelta(minutes=40), **common
+        )  # slack 10 -> tight
+        nodue = await tasks.create_task(s, title="n-nodue", **common)
+        r = await advisory.what_can_i_do_now(
+            s, org_id=org, actor_id=user, window_start=_WIN, duration_minutes=60
+        )
+    ids = [x.task_id for x in r]
+    by = _by_id(r)
+    assert by[nodue.id].slack_minutes is None
+    assert by[nodue.id].deadline_bucket == "none"
+    assert ids.index(tight.id) < ids.index(nodue.id)
+
+
+async def test_what_now_ranking_is_deterministic_incl_signal() -> None:
+    """T1: identical inputs -> byte-identical list, slack/bucket included
+    (FeasibleTask is a frozen dataclass with value equality)."""
+    async with admin_session() as s:
+        a = await signup(s, email=_email(), password="pw-strong-123", org_name="DET")
+    org, user = a.org_id, a.user_id
+    async with tenant_session(str(org), str(user)) as s:
+        common = dict(
+            org_id=org, actor_id=user, assignee_ids=[user], estimate_effort_h=Decimal("0.5")
+        )
+        await tasks.create_task(
+            s, title="d1", due_date=_WIN + dt.timedelta(minutes=20), **common
+        )
+        await tasks.create_task(s, title="d2", **common)
+        await tasks.create_task(
+            s, title="d3", due_date=_WIN + dt.timedelta(days=3), **common
+        )
+        r1 = await advisory.what_can_i_do_now(
+            s, org_id=org, actor_id=user, window_start=_WIN, duration_minutes=60
+        )
+        r2 = await advisory.what_can_i_do_now(
+            s, org_id=org, actor_id=user, window_start=_WIN, duration_minutes=60
+        )
+    assert r1 == r2
+
+
+async def test_what_now_core_coerces_naive_window_start() -> None:
+    """T1: a naive window_start is coerced to UTC in the core so the
+    slack subtraction against the aware due_date never raises (latent
+    500 guard); result matches the aware call."""
+    async with admin_session() as s:
+        a = await signup(s, email=_email(), password="pw-strong-123", org_name="TZ")
+    org, user = a.org_id, a.user_id
+    naive = _WIN.replace(tzinfo=None)
+    async with tenant_session(str(org), str(user)) as s:
+        await tasks.create_task(
+            s,
+            org_id=org,
+            actor_id=user,
+            assignee_ids=[user],
+            title="tz-task",
+            estimate_effort_h=Decimal("0.5"),
+            due_date=_WIN + dt.timedelta(minutes=20),
+        )
+        aware_r = await advisory.what_can_i_do_now(
+            s, org_id=org, actor_id=user, window_start=_WIN, duration_minutes=60
+        )
+        naive_r = await advisory.what_can_i_do_now(
+            s, org_id=org, actor_id=user, window_start=naive, duration_minutes=60
+        )
+    assert naive_r == aware_r
+    assert naive_r[0].slack_minutes == -10
+
+
 async def test_what_now_dependency_block() -> None:
     async with admin_session() as s:
         a = await signup(s, email=_email(), password="pw-strong-123", org_name="BLK")
