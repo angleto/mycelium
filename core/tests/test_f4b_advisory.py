@@ -297,6 +297,158 @@ async def test_what_now_core_coerces_naive_window_start() -> None:
     assert naive_r[0].slack_minutes == -10
 
 
+async def test_what_now_focus_tag_selection_and_empty_inactive() -> None:
+    """T2: focus_tag_ids keeps only tasks carrying a selected
+    project/client tag; an EMPTY list is inactive (== None)."""
+    async with admin_session() as s:
+        a = await signup(s, email=_email(), password="pw-strong-123", org_name="FOCUS")
+    org, user = a.org_id, a.user_id
+    async with tenant_session(str(org), str(user)) as s:
+        pa = await taxonomy.create_project(s, org_id=org, actor_id=user, name="A")
+        pb = await taxonomy.create_project(s, org_id=org, actor_id=user, name="B")
+        common = dict(
+            org_id=org, actor_id=user, assignee_ids=[user], estimate_effort_h=Decimal("0.5")
+        )
+        ta = await tasks.create_task(s, title="in-A", tag_ids=[pa.id], **common)
+        tb = await tasks.create_task(s, title="in-B", tag_ids=[pb.id], **common)
+        tc = await tasks.create_task(s, title="no-project", **common)
+        only_a = await advisory.what_can_i_do_now(
+            s, org_id=org, actor_id=user, window_start=_WIN, duration_minutes=60,
+            focus_tag_ids=[pa.id],
+        )
+        empty = await advisory.what_can_i_do_now(
+            s, org_id=org, actor_id=user, window_start=_WIN, duration_minutes=60,
+            focus_tag_ids=[],
+        )
+        none = await advisory.what_can_i_do_now(
+            s, org_id=org, actor_id=user, window_start=_WIN, duration_minutes=60,
+        )
+    assert {x.task_id for x in only_a} == {ta.id}
+    # Empty list behaves exactly like the omitted (None) selector.
+    assert {x.task_id for x in empty} == {ta.id, tb.id, tc.id}
+    assert {x.task_id for x in none} == {ta.id, tb.id, tc.id}
+
+
+async def test_what_now_max_priority_selector() -> None:
+    """T2: max_priority keeps only priority <= ceiling (priority =
+    importance*urgency, 1..25 ascending)."""
+    async with admin_session() as s:
+        a = await signup(s, email=_email(), password="pw-strong-123", org_name="PRIO")
+    org, user = a.org_id, a.user_id
+    async with tenant_session(str(org), str(user)) as s:
+        common = dict(
+            org_id=org, actor_id=user, assignee_ids=[user], estimate_effort_h=Decimal("0.5")
+        )
+        p4 = await tasks.create_task(s, title="p4", importance=2, urgency=2, **common)  # 4
+        p9 = await tasks.create_task(s, title="p9", importance=3, urgency=3, **common)  # 9
+        r = await advisory.what_can_i_do_now(
+            s, org_id=org, actor_id=user, window_start=_WIN, duration_minutes=60, max_priority=5
+        )
+    ids = {x.task_id for x in r}
+    assert p4.id in ids
+    assert p9.id not in ids
+
+
+async def test_what_now_min_necessity_selector() -> None:
+    """T2: min_necessity keeps necessities at/above the floor."""
+    async with admin_session() as s:
+        a = await signup(s, email=_email(), password="pw-strong-123", org_name="NEC")
+    org, user = a.org_id, a.user_id
+    async with tenant_session(str(org), str(user)) as s:
+        common = dict(
+            org_id=org, actor_id=user, assignee_ids=[user], estimate_effort_h=Decimal("0.5")
+        )
+        must = await tasks.create_task(s, title="m", necessity=Necessity.must, **common)
+        should = await tasks.create_task(s, title="s", necessity=Necessity.should, **common)
+        could = await tasks.create_task(s, title="c", necessity=Necessity.could, **common)
+        r = await advisory.what_can_i_do_now(
+            s, org_id=org, actor_id=user, window_start=_WIN, duration_minutes=60,
+            min_necessity=Necessity.should,
+        )
+    ids = {x.task_id for x in r}
+    assert must.id in ids and should.id in ids
+    assert could.id not in ids
+
+
+async def test_what_now_selectors_union_focus_or_priority() -> None:
+    """T2: multiple selectors UNION. focus_tag_ids=[A] + max_priority=5
+    keeps an A task of ANY priority PLUS any priority<=5 task even if not
+    in A; a task matching neither is dropped."""
+    async with admin_session() as s:
+        a = await signup(s, email=_email(), password="pw-strong-123", org_name="UNION")
+    org, user = a.org_id, a.user_id
+    async with tenant_session(str(org), str(user)) as s:
+        pa = await taxonomy.create_project(s, org_id=org, actor_id=user, name="A")
+        common = dict(
+            org_id=org, actor_id=user, assignee_ids=[user], estimate_effort_h=Decimal("0.5")
+        )
+        a_lowprio = await tasks.create_task(
+            s, title="A-p9", tag_ids=[pa.id], importance=3, urgency=3, **common
+        )  # in A, priority 9
+        cheap_noA = await tasks.create_task(
+            s, title="noA-p4", importance=2, urgency=2, **common
+        )  # not in A, priority 4
+        neither = await tasks.create_task(
+            s, title="noA-p9", importance=3, urgency=3, **common
+        )  # not in A, priority 9
+        r = await advisory.what_can_i_do_now(
+            s, org_id=org, actor_id=user, window_start=_WIN, duration_minutes=60,
+            focus_tag_ids=[pa.id], max_priority=5,
+        )
+    ids = {x.task_id for x in r}
+    assert ids == {a_lowprio.id, cheap_noA.id}
+    assert neither.id not in ids
+
+
+async def test_what_now_any_tag_selector_distinct_from_ctx_gate() -> None:
+    """T2: any_tag_ids is a generic-tag SELECTION (only carriers), it is
+    NOT the ctx: capability GATE; a ctx-only task is not selected by it."""
+    async with admin_session() as s:
+        a = await signup(s, email=_email(), password="pw-strong-123", org_name="ANYTAG")
+    org, user = a.org_id, a.user_id
+    async with tenant_session(str(org), str(user)) as s:
+        g = await taxonomy.create_tag(
+            s, org_id=org, actor_id=user, kind=TagKind.generic, name="energy"
+        )
+        cx = await taxonomy.create_tag(
+            s, org_id=org, actor_id=user, kind=TagKind.generic, name="ctx:computer"
+        )
+        common = dict(
+            org_id=org, actor_id=user, assignee_ids=[user], estimate_effort_h=Decimal("0.5")
+        )
+        t_g = await tasks.create_task(s, title="has-energy", tag_ids=[g.id], **common)
+        await tasks.create_task(s, title="ctx-only", tag_ids=[cx.id], **common)
+        await tasks.create_task(s, title="plain", **common)
+        # ctx provided so the ctx-only task is not gated out; even so it is
+        # not SELECTED, because it does not carry the selected generic tag.
+        r = await advisory.what_can_i_do_now(
+            s, org_id=org, actor_id=user, window_start=_WIN, duration_minutes=60,
+            any_tag_ids=[g.id], context_tags=["ctx:computer"],
+        )
+    assert {x.task_id for x in r} == {t_g.id}
+
+
+async def test_what_now_foreign_focus_tag_selects_nothing() -> None:
+    """T2 RLS: a focus tag id from another org matches nothing (no leak,
+    no error), because the tenant-session join never sees it."""
+    async with admin_session() as s:
+        a = await signup(s, email=_email(), password="pw-strong-123", org_name="RLS-A")
+        b = await signup(s, email=_email(), password="pw-strong-123", org_name="RLS-B")
+    org, user = a.org_id, a.user_id
+    async with tenant_session(str(b.org_id), str(b.user_id)) as s:
+        foreign = await taxonomy.create_project(s, org_id=b.org_id, actor_id=b.user_id, name="X")
+    async with tenant_session(str(org), str(user)) as s:
+        await tasks.create_task(
+            s, org_id=org, actor_id=user, assignee_ids=[user], title="mine",
+            estimate_effort_h=Decimal("0.5"),
+        )
+        r = await advisory.what_can_i_do_now(
+            s, org_id=org, actor_id=user, window_start=_WIN, duration_minutes=60,
+            focus_tag_ids=[foreign.id],
+        )
+    assert r == []
+
+
 async def test_what_now_dependency_block() -> None:
     async with admin_session() as s:
         a = await signup(s, email=_email(), password="pw-strong-123", org_name="BLK")

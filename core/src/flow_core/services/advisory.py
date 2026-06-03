@@ -217,6 +217,27 @@ async def _generic_tag_names(
     return out
 
 
+async def _tag_ids_for_kinds(
+    session: AsyncSession, task_ids: list[uuid.UUID], kinds: set[TagKind]
+) -> dict[uuid.UUID, set[uuid.UUID]]:
+    """Per-task tag ids restricted to ``kinds``, for the selection filters
+    (focus = project/client ids; any_tag = generic ids). Runs under the
+    tenant session, so cross-org tag ids simply never appear (RLS)."""
+    if not task_ids:
+        return {}
+    rows = (
+        await session.execute(
+            select(TaskTag.task_id, TaskTag.tag_id)
+            .join(Tag, Tag.id == TaskTag.tag_id)
+            .where(TaskTag.task_id.in_(task_ids), Tag.kind.in_(kinds))
+        )
+    ).all()
+    out: dict[uuid.UUID, set[uuid.UUID]] = {}
+    for task_id, tag_id in rows:
+        out.setdefault(task_id, set()).add(tag_id)
+    return out
+
+
 async def _user_busy(
     session: AsyncSession,
     user_id: uuid.UUID,
@@ -261,7 +282,26 @@ async def what_can_i_do_now(
     duration_minutes: int,
     location: str | None = None,
     context_tags: list[str] | None = None,
+    focus_tag_ids: list[uuid.UUID] | None = None,
+    any_tag_ids: list[uuid.UUID] | None = None,
+    max_priority: int | None = None,
+    min_necessity: Necessity | None = None,
 ) -> list[FeasibleTask]:
+    """Feasible tasks for a free window, urgency-first ranked (ADR-0013).
+
+    Optional SELECTION filters (requirement #3, "by priority OR focus OR
+    tags") narrow within the actor's owned/feasible set, never widening:
+    ``focus_tag_ids`` (project/client-kind tag ids, = SPA focus),
+    ``any_tag_ids`` (generic-tag selection, distinct from the ``ctx:``
+    capability GATE), ``max_priority`` (keep priority <= ceiling) and
+    ``min_necessity`` (keep at/above the necessity floor). Semantics:
+    UNION across whichever selectors are SET (a task is kept if it
+    matches AT LEAST ONE), then the feasibility filters still apply on
+    top. An EMPTY list means the selector is INACTIVE (identical to
+    None) -- never "match nothing". No selector set => unchanged
+    behaviour. All tag joins run under the tenant session (RLS), so a
+    cross-org tag id selects nothing without error.
+    """
     await require_role(session, org_id, actor_id, Role.member)
     if duration_minutes <= 0:
         return []
@@ -278,12 +318,41 @@ async def what_can_i_do_now(
     tasks = await _owned_actionable(session, actor_id, human_only=True)
     if not tasks:
         return []
-    blocked = await blocked_task_ids(session, org_id=org_id, node_ids={t.id for t in tasks})
-    tags = await _generic_tag_names(session, [t.id for t in tasks])
+    task_ids = [t.id for t in tasks]
+    blocked = await blocked_task_ids(session, org_id=org_id, node_ids=set(task_ids))
+    tags = await _generic_tag_names(session, task_ids)
     have_ctx = {c for c in (context_tags or [])}
+    # Selection filters (requirement #3). Empty list == inactive (None).
+    focus_sel = set(focus_tag_ids) if focus_tag_ids else None
+    any_sel = set(any_tag_ids) if any_tag_ids else None
+    min_nec_rank = _NEC_RANK[min_necessity] if min_necessity is not None else None
+    selection_active = (
+        focus_sel is not None
+        or any_sel is not None
+        or max_priority is not None
+        or min_nec_rank is not None
+    )
+    focus_map = (
+        await _tag_ids_for_kinds(session, task_ids, {TagKind.project, TagKind.client})
+        if focus_sel is not None
+        else {}
+    )
+    anytag_map = (
+        await _tag_ids_for_kinds(session, task_ids, {TagKind.generic})
+        if any_sel is not None
+        else {}
+    )
     out: list[FeasibleTask] = []
     for t in tasks:
         if t.id in blocked:
+            continue
+        # Scope (UNION over the active selectors), then feasibility.
+        if selection_active and not (
+            (focus_sel is not None and bool(focus_map.get(t.id, set()) & focus_sel))
+            or (any_sel is not None and bool(anytag_map.get(t.id, set()) & any_sel))
+            or (max_priority is not None and t.priority <= max_priority)
+            or (min_nec_rank is not None and _NEC_RANK[t.necessity] <= min_nec_rank)
+        ):
             continue
         minutes = _effort_minutes(t)
         if minutes is None or minutes <= 0 or minutes > duration_minutes:
