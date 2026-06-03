@@ -54,7 +54,8 @@ from flow_api.routers import (
 from flow_api.routers import (
     annotations as annotations_router,
 )
-from flow_core.config import get_settings
+from flow_core.ai_providers import set_llm_override
+from flow_core.config import Settings, get_settings
 from flow_core.errors import (
     AuthError,
     ConflictError,
@@ -64,6 +65,7 @@ from flow_core.errors import (
     NotFoundError,
 )
 from flow_core.i18n import DEFAULT_LOCALE, render
+from flow_core.llm_ollama import OllamaLLM
 from flow_core.notification_channel import set_sender_override
 from flow_core.services.mailer import build_system_mailer, set_mailer
 from flow_core.services.notification_sender import build_notification_sender
@@ -97,6 +99,22 @@ def _make_handler(
     return handler
 
 
+def _wire_local_llm_override(settings: Settings) -> bool:
+    """Install the bundled local Ollama provider as the rank-0 env fallback
+    when configured, so narration (T3) and any in-process LLM use run on the
+    in-cluster model -- the API-process counterpart of the worker startup.
+    Returns whether an override was installed. NOT a hosted-provider
+    override: per-org OpenAI/Anthropic selection is owned by
+    ``resolve_llm`` (task 8afda4e7). A later ``set_llm_override`` (e.g. CI's
+    scripted fake) still wins; unset settings leave the ``LocalLLM`` stub."""
+    if settings.ollama_url and settings.open_model:
+        url = settings.ollama_url
+        model = settings.open_model
+        set_llm_override(lambda: OllamaLLM(base_url=url, model=model))
+        return True
+    return False
+
+
 def _make_lifespan(mcp_app: Any) -> Any:
     """Parent lifespan that ALSO drives the mounted MCP sub-app's
     lifespan. FastAPI/Starlette do NOT run a mounted app's lifespan
@@ -121,6 +139,9 @@ def _make_lifespan(mcp_app: Any) -> Any:
         from flow_mcp.gateway import prewarm as prewarm_mcp_gateway
 
         settings = get_settings()
+        # Local Ollama provider as the rank-0 fallback (task T5), the
+        # API-process counterpart of the worker. Cleared on shutdown below.
+        _wire_local_llm_override(settings)
         if settings.smtp_configured:
             set_mailer(build_system_mailer(settings))
         # Install the concrete notification sender (telegram over an email
@@ -156,6 +177,10 @@ def _make_lifespan(mcp_app: Any) -> Any:
                 yield
             finally:
                 prewarm_task.cancel()
+                # Clear the local LLM override on shutdown (hygiene the
+                # worker omits): keeps set_llm_override precedence + clean
+                # teardown predictable across reloads and in CI.
+                set_llm_override(None)
 
     return _lifespan
 
