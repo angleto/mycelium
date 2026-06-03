@@ -39,6 +39,8 @@ _CASES = [
     (["auth", "mfa", "setup", "--help"], "--no-qr"),
     (["search", "--help"], "query"),
     (["what-now", "--help"], "--duration"),
+    (["what-now", "--help"], "--max-priority"),
+    (["what-now", "--help"], "--narrate"),
     (["today", "--help"], "--date"),
     (["week", "--help"], "--from"),
     (["open", "--help"], "ref"),
