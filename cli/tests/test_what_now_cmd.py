@@ -71,7 +71,7 @@ def test_what_now_reads_envelope_and_forwards_selection(monkeypatch) -> None:
             "what-now",
             "-d",
             "60",
-            "--max-priority",
+            "--min-priority",
             "5",
             "--focus-tag",
             "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
@@ -85,7 +85,7 @@ def test_what_now_reads_envelope_and_forwards_selection(monkeypatch) -> None:
     assert res.exit_code == 0, res.output
     body = cap["body"]
     assert body["duration_minutes"] == 60
-    assert body["max_priority"] == 5
+    assert body["min_priority"] == 5
     assert body["min_necessity"] == "should"
     assert body["narrate"] is True
     assert body["focus_tag_ids"] == ["aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"]
@@ -107,7 +107,7 @@ def test_what_now_unset_selectors_are_omitted(monkeypatch) -> None:
     assert res.exit_code == 0, res.output
     body = cap["body"]
     # Empty selectors are not sent at all (omitted, not [] / null).
-    for k in ("focus_tag_ids", "any_tag_ids", "max_priority", "min_necessity"):
+    for k in ("focus_tag_ids", "any_tag_ids", "min_priority", "min_necessity"):
         assert k not in body
     assert body["narrate"] is False
 

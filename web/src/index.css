@@ -592,6 +592,73 @@ label > select,
   min-width: 0;
 }
 
+/* Advisory "what can I do now" form: a responsive field grid where each
+   field stacks caption / input / hint. A fixed-height caption keeps every
+   input on the same baseline even when one caption wraps and another does
+   not, so the controls and their descriptions never read as misaligned. */
+.advform {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 0.5rem 1.2rem;
+  margin: 0.6rem 0;
+}
+.advform > label,
+.advform > .field {
+  flex: 1 1 13rem;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin: 0;
+}
+.advform .cap {
+  display: flex;
+  align-items: flex-end;
+  min-height: 2.3em;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+.advform .hint {
+  margin: 0;
+}
+.advform input {
+  width: 100%;
+}
+/* A caption paired with an inline control (necessity floor, tag grid). */
+.advrow {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.4rem 0.9rem;
+  margin: 0.55rem 0;
+}
+.advrow--tags {
+  align-items: flex-start;
+}
+.advrow > .cap {
+  min-width: 8.5rem;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+.advform__actions {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  margin: 0.8rem 0 0.2rem;
+}
+/* The active focus-scope chip reads as an APPLIED filter (accent tint),
+   not the muted default pill that looked permanently disabled. */
+.chip--scope {
+  background: color-mix(in srgb, var(--accent) 14%, var(--surface));
+  border-color: var(--accent);
+  color: var(--text-h);
+  cursor: help;
+}
+.chip--scope .chip__dot {
+  background: var(--accent);
+}
+
 /* A read-only "value" rendered as plain text inside a form label,
    sized to line up vertically with the adjacent inputs/selects. Used
    for fields that are immutable on the current entity (e.g. invoice

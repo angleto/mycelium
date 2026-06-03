@@ -284,23 +284,27 @@ async def what_can_i_do_now(
     context_tags: list[str] | None = None,
     focus_tag_ids: list[uuid.UUID] | None = None,
     any_tag_ids: list[uuid.UUID] | None = None,
-    max_priority: int | None = None,
+    min_priority: int | None = None,
     min_necessity: Necessity | None = None,
 ) -> list[FeasibleTask]:
     """Feasible tasks for a free window, urgency-first ranked (ADR-0013).
 
-    Optional SELECTION filters (requirement #3, "by priority OR focus OR
-    tags") narrow within the actor's owned/feasible set, never widening:
-    ``focus_tag_ids`` (project/client-kind tag ids, = SPA focus),
-    ``any_tag_ids`` (generic-tag selection, distinct from the ``ctx:``
-    capability GATE), ``max_priority`` (keep priority <= ceiling) and
-    ``min_necessity`` (keep at/above the necessity floor). Semantics:
-    UNION across whichever selectors are SET (a task is kept if it
-    matches AT LEAST ONE), then the feasibility filters still apply on
-    top. An EMPTY list means the selector is INACTIVE (identical to
-    None) -- never "match nothing". No selector set => unchanged
-    behaviour. All tag joins run under the tenant session (RLS), so a
-    cross-org tag id selects nothing without error.
+    Optional filters narrow the actor's owned/feasible set, never widening.
+    ``focus_tag_ids`` (project/client-kind tag ids, = SPA focus) is a hard
+    SCOPE: when set, a task is kept only if it carries one of those tags
+    ("show tasks according to the focus"). The remaining selectors then
+    combine by UNION *within* that scope -- a task survives if it matches
+    AT LEAST ONE of: ``any_tag_ids`` (generic-tag selection, distinct from
+    the ``ctx:`` capability GATE), ``min_priority`` (keep priority <= the
+    given level; priority is 1=top..25, so this is an importance FLOOR,
+    mirroring ``min_necessity``) and ``min_necessity`` (keep at/above the
+    necessity floor). An EMPTY list means the selector is INACTIVE
+    (identical to None) -- never "match nothing". No selector set =>
+    unchanged behaviour. ``location`` is a SOFT place filter: a task bound
+    to a different place is dropped, but a task with no location stays
+    (doable anywhere); the match is a case-insensitive substring. All tag
+    joins run under the tenant session (RLS), so a cross-org tag id selects
+    nothing without error.
     """
     await require_role(session, org_id, actor_id, Role.member)
     if duration_minutes <= 0:
@@ -322,16 +326,13 @@ async def what_can_i_do_now(
     blocked = await blocked_task_ids(session, org_id=org_id, node_ids=set(task_ids))
     tags = await _generic_tag_names(session, task_ids)
     have_ctx = {c for c in (context_tags or [])}
-    # Selection filters (requirement #3). Empty list == inactive (None).
+    # Selection filters. Empty list == inactive (None). Focus is a hard
+    # SCOPE (AND): when set, a task MUST carry one of the focus tags. The
+    # remaining selectors UNION *within* that scope (kept if >= 1 matches).
     focus_sel = set(focus_tag_ids) if focus_tag_ids else None
     any_sel = set(any_tag_ids) if any_tag_ids else None
     min_nec_rank = _NEC_RANK[min_necessity] if min_necessity is not None else None
-    selection_active = (
-        focus_sel is not None
-        or any_sel is not None
-        or max_priority is not None
-        or min_nec_rank is not None
-    )
+    union_active = any_sel is not None or min_priority is not None or min_nec_rank is not None
     focus_map = (
         await _tag_ids_for_kinds(session, task_ids, {TagKind.project, TagKind.client})
         if focus_sel is not None
@@ -342,22 +343,29 @@ async def what_can_i_do_now(
         if any_sel is not None
         else {}
     )
+    loc_q = location.strip().lower() if location else None
     out: list[FeasibleTask] = []
     for t in tasks:
         if t.id in blocked:
             continue
-        # Scope (UNION over the active selectors), then feasibility.
-        if selection_active and not (
-            (focus_sel is not None and bool(focus_map.get(t.id, set()) & focus_sel))
-            or (any_sel is not None and bool(anytag_map.get(t.id, set()) & any_sel))
-            or (max_priority is not None and t.priority <= max_priority)
+        # Focus is a hard scope (AND): drop anything outside it first.
+        if focus_sel is not None and not (focus_map.get(t.id, set()) & focus_sel):
+            continue
+        # The remaining selectors UNION within the (optionally focused) scope.
+        if union_active and not (
+            (any_sel is not None and bool(anytag_map.get(t.id, set()) & any_sel))
+            or (min_priority is not None and t.priority <= min_priority)
             or (min_nec_rank is not None and _NEC_RANK[t.necessity] <= min_nec_rank)
         ):
             continue
         minutes = _effort_minutes(t)
         if minutes is None or minutes <= 0 or minutes > duration_minutes:
             continue
-        if location is not None and t.location is not None and t.location != location:
+        # Soft place filter: a task bound to a DIFFERENT place is excluded;
+        # a task with no location is doable anywhere and stays. Match is a
+        # case-insensitive substring so a fragment ("stefano") finds the
+        # full place ("Santo Stefano ..."), which exact-match never did.
+        if loc_q is not None and t.location is not None and loc_q not in t.location.lower():
             continue
         required_ctx = {n for n in tags.get(t.id, set()) if n.startswith(_CTX_PREFIX)}
         if not required_ctx.issubset(have_ctx):

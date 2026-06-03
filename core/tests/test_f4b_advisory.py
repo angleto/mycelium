@@ -253,13 +253,9 @@ async def test_what_now_ranking_is_deterministic_incl_signal() -> None:
         common = dict(
             org_id=org, actor_id=user, assignee_ids=[user], estimate_effort_h=Decimal("0.5")
         )
-        await tasks.create_task(
-            s, title="d1", due_date=_WIN + dt.timedelta(minutes=20), **common
-        )
+        await tasks.create_task(s, title="d1", due_date=_WIN + dt.timedelta(minutes=20), **common)
         await tasks.create_task(s, title="d2", **common)
-        await tasks.create_task(
-            s, title="d3", due_date=_WIN + dt.timedelta(days=3), **common
-        )
+        await tasks.create_task(s, title="d3", due_date=_WIN + dt.timedelta(days=3), **common)
         r1 = await advisory.what_can_i_do_now(
             s, org_id=org, actor_id=user, window_start=_WIN, duration_minutes=60
         )
@@ -313,15 +309,27 @@ async def test_what_now_focus_tag_selection_and_empty_inactive() -> None:
         tb = await tasks.create_task(s, title="in-B", tag_ids=[pb.id], **common)
         tc = await tasks.create_task(s, title="no-project", **common)
         only_a = await advisory.what_can_i_do_now(
-            s, org_id=org, actor_id=user, window_start=_WIN, duration_minutes=60,
+            s,
+            org_id=org,
+            actor_id=user,
+            window_start=_WIN,
+            duration_minutes=60,
             focus_tag_ids=[pa.id],
         )
         empty = await advisory.what_can_i_do_now(
-            s, org_id=org, actor_id=user, window_start=_WIN, duration_minutes=60,
+            s,
+            org_id=org,
+            actor_id=user,
+            window_start=_WIN,
+            duration_minutes=60,
             focus_tag_ids=[],
         )
         none = await advisory.what_can_i_do_now(
-            s, org_id=org, actor_id=user, window_start=_WIN, duration_minutes=60,
+            s,
+            org_id=org,
+            actor_id=user,
+            window_start=_WIN,
+            duration_minutes=60,
         )
     assert {x.task_id for x in only_a} == {ta.id}
     # Empty list behaves exactly like the omitted (None) selector.
@@ -329,9 +337,9 @@ async def test_what_now_focus_tag_selection_and_empty_inactive() -> None:
     assert {x.task_id for x in none} == {ta.id, tb.id, tc.id}
 
 
-async def test_what_now_max_priority_selector() -> None:
-    """T2: max_priority keeps only priority <= ceiling (priority =
-    importance*urgency, 1..25 ascending)."""
+async def test_what_now_min_priority_selector() -> None:
+    """T2: min_priority is an importance FLOOR -- keep priority <= the level
+    (priority = importance*urgency, 1=top..25), mirroring min_necessity."""
     async with admin_session() as s:
         a = await signup(s, email=_email(), password="pw-strong-123", org_name="PRIO")
     org, user = a.org_id, a.user_id
@@ -342,7 +350,7 @@ async def test_what_now_max_priority_selector() -> None:
         p4 = await tasks.create_task(s, title="p4", importance=2, urgency=2, **common)  # 4
         p9 = await tasks.create_task(s, title="p9", importance=3, urgency=3, **common)  # 9
         r = await advisory.what_can_i_do_now(
-            s, org_id=org, actor_id=user, window_start=_WIN, duration_minutes=60, max_priority=5
+            s, org_id=org, actor_id=user, window_start=_WIN, duration_minutes=60, min_priority=5
         )
     ids = {x.task_id for x in r}
     assert p4.id in ids
@@ -362,7 +370,11 @@ async def test_what_now_min_necessity_selector() -> None:
         should = await tasks.create_task(s, title="s", necessity=Necessity.should, **common)
         could = await tasks.create_task(s, title="c", necessity=Necessity.could, **common)
         r = await advisory.what_can_i_do_now(
-            s, org_id=org, actor_id=user, window_start=_WIN, duration_minutes=60,
+            s,
+            org_id=org,
+            actor_id=user,
+            window_start=_WIN,
+            duration_minutes=60,
             min_necessity=Necessity.should,
         )
     ids = {x.task_id for x in r}
@@ -370,34 +382,82 @@ async def test_what_now_min_necessity_selector() -> None:
     assert could.id not in ids
 
 
-async def test_what_now_selectors_union_focus_or_priority() -> None:
-    """T2: multiple selectors UNION. focus_tag_ids=[A] + max_priority=5
-    keeps an A task of ANY priority PLUS any priority<=5 task even if not
-    in A; a task matching neither is dropped."""
+async def test_what_now_focus_is_hard_scope_others_union() -> None:
+    """Focus is a HARD scope (AND): a task must carry a focus tag. The other
+    selectors then UNION *within* that scope -- focus_tag_ids=[A] alone
+    keeps every A task; adding min_priority=5 keeps only the A tasks that
+    are also priority<=5, while a priority<=5 task OUTSIDE A still drops."""
     async with admin_session() as s:
-        a = await signup(s, email=_email(), password="pw-strong-123", org_name="UNION")
+        a = await signup(s, email=_email(), password="pw-strong-123", org_name="SCOPE")
     org, user = a.org_id, a.user_id
     async with tenant_session(str(org), str(user)) as s:
         pa = await taxonomy.create_project(s, org_id=org, actor_id=user, name="A")
         common = dict(
             org_id=org, actor_id=user, assignee_ids=[user], estimate_effort_h=Decimal("0.5")
         )
-        a_lowprio = await tasks.create_task(
+        a_p4 = await tasks.create_task(
+            s, title="A-p4", tag_ids=[pa.id], importance=2, urgency=2, **common
+        )  # in A, priority 4
+        a_p9 = await tasks.create_task(
             s, title="A-p9", tag_ids=[pa.id], importance=3, urgency=3, **common
         )  # in A, priority 9
         cheap_noA = await tasks.create_task(
             s, title="noA-p4", importance=2, urgency=2, **common
         )  # not in A, priority 4
-        neither = await tasks.create_task(
-            s, title="noA-p9", importance=3, urgency=3, **common
-        )  # not in A, priority 9
+        scoped = await advisory.what_can_i_do_now(
+            s,
+            org_id=org,
+            actor_id=user,
+            window_start=_WIN,
+            duration_minutes=60,
+            focus_tag_ids=[pa.id],
+        )
+        scoped_prio = await advisory.what_can_i_do_now(
+            s,
+            org_id=org,
+            actor_id=user,
+            window_start=_WIN,
+            duration_minutes=60,
+            focus_tag_ids=[pa.id],
+            min_priority=5,
+        )
+    # Focus alone scopes to A regardless of priority.
+    assert {x.task_id for x in scoped} == {a_p4.id, a_p9.id}
+    # Within the focus, min_priority narrows; the cheap task outside A never
+    # re-enters (focus is AND, not part of the OR).
+    assert {x.task_id for x in scoped_prio} == {a_p4.id}
+    assert cheap_noA.id not in {x.task_id for x in scoped_prio}
+
+
+async def test_what_now_location_soft_substring_match() -> None:
+    """location is a SOFT, case-insensitive substring place filter: a task
+    bound to a matching place stays (a fragment finds the full string), a
+    task bound to a DIFFERENT place drops, and a task with no location stays
+    (doable anywhere)."""
+    async with admin_session() as s:
+        a = await signup(s, email=_email(), password="pw-strong-123", org_name="LOC")
+    org, user = a.org_id, a.user_id
+    async with tenant_session(str(org), str(user)) as s:
+        common = dict(
+            org_id=org, actor_id=user, assignee_ids=[user], estimate_effort_h=Decimal("0.5")
+        )
+        here = await tasks.create_task(
+            s, title="at-camp", location="Santo Stefano Quisquina (camp)", **common
+        )
+        elsewhere = await tasks.create_task(s, title="at-office", location="Office", **common)
+        anywhere = await tasks.create_task(s, title="anywhere", **common)
         r = await advisory.what_can_i_do_now(
-            s, org_id=org, actor_id=user, window_start=_WIN, duration_minutes=60,
-            focus_tag_ids=[pa.id], max_priority=5,
+            s,
+            org_id=org,
+            actor_id=user,
+            window_start=_WIN,
+            duration_minutes=60,
+            location="stefano",
         )
     ids = {x.task_id for x in r}
-    assert ids == {a_lowprio.id, cheap_noA.id}
-    assert neither.id not in ids
+    assert here.id in ids  # fragment + case-insensitive substring match
+    assert anywhere.id in ids  # no location -> doable anywhere -> kept
+    assert elsewhere.id not in ids  # bound to a different place -> dropped
 
 
 async def test_what_now_any_tag_selector_distinct_from_ctx_gate() -> None:
@@ -422,8 +482,13 @@ async def test_what_now_any_tag_selector_distinct_from_ctx_gate() -> None:
         # ctx provided so the ctx-only task is not gated out; even so it is
         # not SELECTED, because it does not carry the selected generic tag.
         r = await advisory.what_can_i_do_now(
-            s, org_id=org, actor_id=user, window_start=_WIN, duration_minutes=60,
-            any_tag_ids=[g.id], context_tags=["ctx:computer"],
+            s,
+            org_id=org,
+            actor_id=user,
+            window_start=_WIN,
+            duration_minutes=60,
+            any_tag_ids=[g.id],
+            context_tags=["ctx:computer"],
         )
     assert {x.task_id for x in r} == {t_g.id}
 
@@ -439,11 +504,19 @@ async def test_what_now_foreign_focus_tag_selects_nothing() -> None:
         foreign = await taxonomy.create_project(s, org_id=b.org_id, actor_id=b.user_id, name="X")
     async with tenant_session(str(org), str(user)) as s:
         await tasks.create_task(
-            s, org_id=org, actor_id=user, assignee_ids=[user], title="mine",
+            s,
+            org_id=org,
+            actor_id=user,
+            assignee_ids=[user],
+            title="mine",
             estimate_effort_h=Decimal("0.5"),
         )
         r = await advisory.what_can_i_do_now(
-            s, org_id=org, actor_id=user, window_start=_WIN, duration_minutes=60,
+            s,
+            org_id=org,
+            actor_id=user,
+            window_start=_WIN,
+            duration_minutes=60,
             focus_tag_ids=[foreign.id],
         )
     assert r == []

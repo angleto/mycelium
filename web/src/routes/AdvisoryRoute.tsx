@@ -52,7 +52,7 @@ function bucketClass(b: string): string {
 // the page scopes, shows WHY (badges), and only narrates on demand.
 export function AdvisoryRoute() {
   const { t } = useTranslation()
-  const { focusIds, active: focusActive } = useFocus()
+  const { scopeTagIds, active: focusActive, clientName, projectName } = useFocus()
   // (#1) default window_start to now; the picker is an Advanced override.
   const [start, setStart] = useState(() => toLocalInput(new Date()))
   const [advanced, setAdvanced] = useState(false)
@@ -60,7 +60,7 @@ export function AdvisoryRoute() {
   const [loc, setLoc] = useState('')
   const [ctxTags, setCtxTags] = useState('')
   const [anyTags, setAnyTags] = useState<string[]>([])
-  const [maxPriority, setMaxPriority] = useState('')
+  const [minPriority, setMinPriority] = useState('')
   const [minNec, setMinNec] = useState<Necessity | ''>('')
   const [tags, setTags] = useState<Tag[]>([])
   const [feasible, setFeasible] = useState<Feasible[] | null>(null)
@@ -109,11 +109,13 @@ export function AdvisoryRoute() {
         .filter(Boolean),
       narrate,
     }
-    // (#3) send each selector only when active. Focus that is active-but-
-    // empty (a client with no pushed projects) must NOT zero out results.
-    if (focusActive && focusIds.length > 0) body.focus_tag_ids = focusIds
+    // Focus is a hard SCOPE on the server. Send the scope tag ids (client
+    // tag + its projects, or the single project tag): a client focus then
+    // scopes even before the project list loads, instead of silently
+    // showing everything. Empty == inactive, so nothing zeroes out.
+    if (focusActive && scopeTagIds.length > 0) body.focus_tag_ids = scopeTagIds
     if (anyTags.length > 0) body.any_tag_ids = anyTags
-    if (maxPriority) body.max_priority = Number(maxPriority)
+    if (minPriority) body.min_priority = Number(minPriority)
     if (minNec) body.min_necessity = minNec
     return { body, ws }
   }
@@ -196,62 +198,75 @@ export function AdvisoryRoute() {
       <h1>{t('advisory.title')}</h1>
       {err && <p className="err">{err}</p>}
 
-      <form onSubmit={(e) => void onWhatNow(e)} className="row">
-        <label>
-          {t('advisory.duration')}
-          <input type="number" value={dur} onChange={(e) => setDur(Number(e.target.value))} />
-          <span className="hint">{t('advisory.durationHint')}</span>
-        </label>
-        <label>
-          {t('advisory.location')}
-          <input value={loc} onChange={(e) => setLoc(e.target.value)} />
-        </label>
-        <label>
-          {t('advisory.ctxHeading')}
-          <input value={ctxTags} onChange={(e) => setCtxTags(e.target.value)} />
-        </label>
-        {focusActive && focusIds.length > 0 && (
-          <span className="chip">{t('advisory.scopeFocus')}</span>
+      <form onSubmit={(e) => void onWhatNow(e)}>
+        <div className="advform">
+          <label>
+            <span className="cap">{t('advisory.duration')}</span>
+            <input
+              type="number"
+              min={1}
+              value={dur}
+              onChange={(e) => setDur(Number(e.target.value))}
+            />
+            <span className="hint">{t('advisory.durationHint')}</span>
+          </label>
+          <label>
+            <span className="cap">{t('advisory.location')}</span>
+            <input value={loc} onChange={(e) => setLoc(e.target.value)} />
+            <span className="hint">{t('advisory.locationHint')}</span>
+          </label>
+          <label>
+            <span className="cap">{t('advisory.minPriority')}</span>
+            <input
+              type="number"
+              min={1}
+              max={25}
+              value={minPriority}
+              onChange={(e) => setMinPriority(e.target.value)}
+            />
+            <span className="hint">{t('advisory.minPriorityHint')}</span>
+          </label>
+        </div>
+
+        <div className="advrow">
+          <span className="cap">{t('advisory.necessityFloor')}</span>
+          <div className="viewtabs" role="radiogroup" aria-label={t('advisory.necessityFloor')}>
+            {(['', ...NECESSITIES] as const).map((n) => (
+              <button
+                type="button"
+                key={n || 'any'}
+                role="radio"
+                aria-checked={minNec === n}
+                className={'viewtabs__tab' + (minNec === n ? ' viewtabs__tab--active' : '')}
+                onClick={() => setMinNec(n)}
+              >
+                {n
+                  ? t(`advisory.nec${n.charAt(0).toUpperCase()}${n.slice(1)}` as const)
+                  : t('advisory.necessityAny')}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {tags.length > 0 && (
+          <div className="advrow advrow--tags">
+            <span className="cap">{t('advisory.tagsHeading')}</span>
+            <TagPickerGrid tags={tags} selected={anyTags} onToggle={toggleTag} searchable={false} />
+          </div>
         )}
-        <button type="submit">{t('advisory.ask')}</button>
+
+        <div className="advform__actions">
+          {focusActive && (
+            <span className="chip chip--scope" title={t('advisory.scopeFocusTip')}>
+              <span className="chip__dot" />
+              {projectName || clientName
+                ? t('advisory.scopeFocusNamed', { name: projectName || clientName })
+                : t('advisory.scopeFocus')}
+            </span>
+          )}
+          <button type="submit">{t('advisory.ask')}</button>
+        </div>
       </form>
-
-      <div className="row">
-        <label>
-          {t('advisory.maxPriority')}
-          <input
-            type="number"
-            min={1}
-            max={25}
-            value={maxPriority}
-            onChange={(e) => setMaxPriority(e.target.value)}
-          />
-          <span className="hint">{t('advisory.maxPriorityHint')}</span>
-        </label>
-        <div className="viewtabs" role="radiogroup" aria-label={t('advisory.necessityFloor')}>
-          {(['', ...NECESSITIES] as const).map((n) => (
-            <button
-              type="button"
-              key={n || 'any'}
-              role="radio"
-              aria-checked={minNec === n}
-              className={'viewtabs__tab' + (minNec === n ? ' viewtabs__tab--active' : '')}
-              onClick={() => setMinNec(n)}
-            >
-              {n
-                ? t(`advisory.nec${n.charAt(0).toUpperCase()}${n.slice(1)}` as const)
-                : t('advisory.necessityAny')}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {tags.length > 0 && (
-        <div className="row">
-          <span className="muted">{t('advisory.tagsHeading')}</span>
-          <TagPickerGrid tags={tags} selected={anyTags} onToggle={toggleTag} searchable={false} />
-        </div>
-      )}
 
       <p className="hint">{t('advisory.orHelp')}</p>
 
@@ -264,17 +279,25 @@ export function AdvisoryRoute() {
         >
           {t('advisory.advancedStart')}
         </button>
-        {advanced && (
+      </div>
+      {advanced && (
+        <div className="advform">
           <label>
-            {t('advisory.windowStart')}
+            <span className="cap">{t('advisory.windowStart')}</span>
             <input
               type="datetime-local"
               value={start}
               onChange={(e) => setStart(e.target.value)}
             />
+            <span className="hint">{t('advisory.windowStartHint')}</span>
           </label>
-        )}
-      </div>
+          <label>
+            <span className="cap">{t('advisory.ctxHeading')}</span>
+            <input value={ctxTags} onChange={(e) => setCtxTags(e.target.value)} />
+            <span className="hint">{t('advisory.ctxHint')}</span>
+          </label>
+        </div>
+      )}
 
       {feasible && (
         <>

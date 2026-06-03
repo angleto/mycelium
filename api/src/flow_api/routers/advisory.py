@@ -46,7 +46,7 @@ async def what_now(
         context_tags=body.context_tags,
         focus_tag_ids=body.focus_tag_ids or None,
         any_tag_ids=body.any_tag_ids or None,
-        max_priority=body.max_priority,
+        min_priority=body.min_priority,
         min_necessity=body.min_necessity,
     )
     ranked = [

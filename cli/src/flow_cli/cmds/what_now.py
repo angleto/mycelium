@@ -23,11 +23,13 @@ def what_now(
     focus_tag: list[str] = typer.Option(
         [], "--focus-tag", help="Project/client tag id to scope by (repeatable)."
     ),
-    tag: list[str] = typer.Option(
-        [], "--tag", help="Generic tag id to select by (repeatable)."
-    ),
-    max_priority: int | None = typer.Option(
-        None, "--max-priority", min=1, max=25, help="Keep tasks with priority <= this (1..25)."
+    tag: list[str] = typer.Option([], "--tag", help="Generic tag id to select by (repeatable)."),
+    min_priority: int | None = typer.Option(
+        None,
+        "--min-priority",
+        min=1,
+        max=25,
+        help="Importance floor: keep tasks at least this important (priority <= N; 1=top..25).",
     ),
     min_necessity: str | None = typer.Option(
         None, "--min-necessity", help="Necessity floor: must|should|could."
@@ -41,9 +43,12 @@ def what_now(
 ) -> None:
     """Ask the advisor what's worth doing given the time/place at hand.
 
-    Selection filters combine by UNION ("priority OR focus OR tags"): a task
-    is kept when it matches at least one active selector, then feasibility
-    (effort fit, free window, dependencies) applies. The ranking is
+    ``--focus-tag`` is a hard SCOPE: when set, only tasks carrying one of
+    those tags are considered. ``--min-priority``, ``--min-necessity`` and
+    ``--tag`` then combine by UNION within that scope (kept when at least
+    one matches), after which feasibility (effort fit, free window,
+    dependencies) applies. ``--location`` is a soft, case-insensitive
+    substring place filter (tasks with no place are kept). The ranking is
     deterministic; ``--narrate`` only adds prose, it never reorders.
     """
     if min_necessity is not None and min_necessity not in _NECESSITIES:
@@ -60,8 +65,8 @@ def what_now(
         body["focus_tag_ids"] = focus_tag
     if tag:
         body["any_tag_ids"] = tag
-    if max_priority is not None:
-        body["max_priority"] = max_priority
+    if min_priority is not None:
+        body["min_priority"] = min_priority
     if min_necessity is not None:
         body["min_necessity"] = min_necessity
     with client() as c:

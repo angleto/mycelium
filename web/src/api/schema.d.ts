@@ -9467,8 +9467,8 @@ export interface components {
             focus_tag_ids?: string[];
             /** Any Tag Ids */
             any_tag_ids?: string[];
-            /** Max Priority */
-            max_priority?: number | null;
+            /** Min Priority */
+            min_priority?: number | null;
             min_necessity?: components["schemas"]["Necessity"] | null;
             /**
              * Narrate

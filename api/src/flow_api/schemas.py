@@ -1504,10 +1504,13 @@ class WhatNowIn(BaseModel):
     duration_minutes: int = Field(gt=0)
     location: str | None = None
     context_tags: list[str] = Field(default_factory=list)
-    # Selection filters (req #3; empty list == inactive, UNION semantics).
+    # Selection filters. focus_tag_ids is a hard SCOPE (AND); any_tag_ids,
+    # min_priority and min_necessity UNION within it. Empty list == inactive.
+    # min_priority keeps priority <= the level (1=top..25), an importance
+    # FLOOR mirroring min_necessity.
     focus_tag_ids: list[uuid.UUID] = Field(default_factory=list)
     any_tag_ids: list[uuid.UUID] = Field(default_factory=list)
-    max_priority: int | None = None
+    min_priority: int | None = None
     min_necessity: Necessity | None = None
     # Opt-in narration (req #4b). Accepted now but the deterministic T4
     # edge always returns narrated=false; T3 wires the real narrate call.

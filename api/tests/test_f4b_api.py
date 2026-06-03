@@ -166,16 +166,16 @@ async def test_what_now_envelope_default_now_and_selection() -> None:
         )
         assert naive.status_code == 200
 
-        # Selection UNION at the edge: tag-selection OR max_priority. tagged
-        # matches the tag (priority 9), cheap matches max_priority<=5;
-        # neither matches nothing and drops out.
+        # Selection UNION at the edge (no focus): tag-selection OR
+        # min_priority. tagged matches the tag (priority 9), cheap matches
+        # min_priority<=5; neither matches nothing and drops out.
         sel = await c.post(
             "/advisory/what-now",
             headers=h,
             json={
                 "duration_minutes": 60,
                 "any_tag_ids": [gtag],
-                "max_priority": 5,
+                "min_priority": 5,
             },
         )
         assert sel.status_code == 200

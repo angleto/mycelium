@@ -2447,17 +2447,20 @@ async def what_can_i_do_now(
     context_tags: list[str] | None = None,
     focus_tag_ids: list[str] | None = None,
     any_tag_ids: list[str] | None = None,
-    max_priority: int | None = None,
+    min_priority: int | None = None,
     min_necessity: str | None = None,
     narrate: bool = False,
 ) -> dict[str, Any]:
     """Deterministic: feasible tasks for a free window, urgency-first ranked.
 
     window_start (ISO 8601) defaults to UTC now() when omitted; a naive
-    value is coerced to UTC. Selection filters narrow by UNION:
-    focus_tag_ids (project/client tag ids), any_tag_ids (generic tag
-    ids), max_priority (keep priority<=ceiling), min_necessity
-    (must|should|could floor). Returns the NarratedPlanOut envelope
+    value is coerced to UTC. focus_tag_ids (project/client tag ids) is a
+    hard SCOPE: when set, only tasks carrying one of those tags are kept.
+    any_tag_ids (generic tag ids), min_priority (keep priority<=level, an
+    importance floor since 1=top..25) and min_necessity (must|should|could
+    floor) then combine by UNION within that scope. location is a soft,
+    case-insensitive substring place filter (tasks with no place stay).
+    Returns the NarratedPlanOut envelope
     {ranked, narration, narration_model, narrated}; ``narrate`` is
     accepted for REST parity but narration is wired later (T3), so this
     deterministic path always reports narrated=false.
@@ -2479,7 +2482,7 @@ async def what_can_i_do_now(
             context_tags=context_tags,
             focus_tag_ids=[uuid.UUID(x) for x in focus_tag_ids] if focus_tag_ids else None,
             any_tag_ids=[uuid.UUID(x) for x in any_tag_ids] if any_tag_ids else None,
-            max_priority=max_priority,
+            min_priority=min_priority,
             min_necessity=Necessity(min_necessity) if min_necessity else None,
         )
         ranked = [

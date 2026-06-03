@@ -49,7 +49,7 @@ type Project = components['schemas']['ProjectOut']
 function ProjectFocus() {
   const { t } = useTranslation()
   const session = useSession()
-  const { clientId, projectId, setClient, setProject, setClientProjectIds } =
+  const { clientId, projectId, setClient, setProject, setClientProjectIds, setNames } =
     useFocus()
   const [clients, setClients] = useState<Tag[]>([])
   const [projects, setProjects] = useState<Project[]>([])
@@ -108,6 +108,14 @@ function ProjectFocus() {
         : [],
     )
   }, [clientId, projects, setClientProjectIds])
+  // Keep the human-readable focus names in sync so consumers (the advisory
+  // "Scoped to …" chip) can name the active scope. Falls back to the cached
+  // client name until the lists load.
+  useEffect(() => {
+    const c = clients.find((x) => x.id === clientId)
+    const p = projects.find((x) => x.id === projectId)
+    setNames(clientId ? (c?.name ?? cachedName) : '', projectId ? (p?.name ?? '') : '')
+  }, [clientId, projectId, clients, projects, cachedName, setNames])
 
   return (
     <div className="focus">

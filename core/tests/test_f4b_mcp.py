@@ -100,8 +100,8 @@ async def test_mcp_what_now_envelope_default_now_and_selection() -> None:
     row = next(x for x in env["ranked"] if x["task_id"] == hi["id"])
     assert "slack_minutes" in row and "deadline_bucket" in row
 
-    # max_priority selection narrows to the priority<=5 task.
-    sel = await what_can_i_do_now(token=token, org_id=org, duration_minutes=60, max_priority=5)
+    # min_priority (importance floor) narrows to the priority<=5 task.
+    sel = await what_can_i_do_now(token=token, org_id=org, duration_minutes=60, min_priority=5)
     assert {x["task_id"] for x in sel["ranked"]} == {hi["id"]}
 
     # min_necessity coercion (str -> Necessity): the 'could' task drops.
