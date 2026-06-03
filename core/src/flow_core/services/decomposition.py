@@ -33,6 +33,7 @@ from flow_core.models.identity import Identity
 from flow_core.models.membership import Role
 from flow_core.models.note import Note, NoteKind
 from flow_core.models.note_link import NoteNoteLink
+from flow_core.services import note_inert
 from flow_core.services import notes as notes_svc
 from flow_core.services.rbac import require_role
 
@@ -117,9 +118,12 @@ async def distill_note(
     )
     distilled.humus_kind = "distillation"
     distilled.humus_flag = True
-    # The source itself becomes humus too: it's been decomposed; the
-    # walk can now surface it as fertiliser.
-    source.humus_flag = True
+    # Anti-mutation invariant (task 8a26c000): the source becomes humus
+    # only if it is inert (archived/dormant, no open linked work, past the
+    # quiet window). A live source -- one being actively worked -- is left
+    # untouched; only the derived distillation node is created.
+    if await note_inert.is_inert(session, note=source):
+        source.humus_flag = True
     await session.flush()
     # Link: the distillation DERIVED FROM the source, so it is an
     # ordinary ``hypha_of`` (parent = source / origin, child = the new

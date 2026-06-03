@@ -12,6 +12,7 @@ Asserts the Phase 1 invariants:
 
 from __future__ import annotations
 
+import datetime as dt
 import sys
 import uuid
 from collections.abc import Iterator
@@ -25,7 +26,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from _fake_ai import FakeLLM  # noqa: E402
-from sqlalchemy import select  # noqa: E402
+from sqlalchemy import select, text  # noqa: E402
 
 from flow_core.ai_providers import set_llm_override  # noqa: E402
 from flow_core.db import admin_session, tenant_session  # noqa: E402
@@ -87,6 +88,16 @@ async def test_distill_note_creates_humus_atom(_wire_llm: None) -> None:
                 "drift between staging and prod."
             ),
         )
+        # The anti-mutation invariant (task 8a26c000) marks the SOURCE as
+        # humus only when it is inert; archive it and age it past the quiet
+        # window so the distillation's humus side-effect applies to it.
+        source.is_archived = True
+        await s.flush()
+        await s.execute(
+            text("UPDATE notes SET updated_at = :t WHERE id = :id"),
+            {"t": dt.datetime.now(dt.UTC) - dt.timedelta(days=30), "id": str(source.id)},
+        )
+        await s.refresh(source)  # the raw UPDATE bypasses the identity map
         res = await decomp.distill_note(s, org_id=org, actor_id=user, note_id=source.id)
         distilled = (
             await s.execute(select(Note).where(Note.id == res.distilled_note_id))
@@ -95,6 +106,30 @@ async def test_distill_note_creates_humus_atom(_wire_llm: None) -> None:
         assert distilled.humus_flag is True
         await s.refresh(source)
         assert source.humus_flag is True
+
+
+async def test_distill_does_not_mark_a_live_source_humus(_wire_llm: None) -> None:
+    """Anti-mutation invariant (task 8a26c000): distilling a LIVE source
+    (fresh / recently edited) still creates the derived distillation node,
+    but must NOT mark the live source as humus."""
+    org, user = await _org()
+    async with tenant_session(str(org), str(user)) as s:
+        await _seed_billing(s, org, user)
+        source = await nt.create_note(
+            s,
+            org_id=org,
+            actor_id=user,
+            kind=NoteKind.text,
+            title="live",
+            text="a non-trivial body the LLM will distill on the first pass",
+        )
+        res = await decomp.distill_note(s, org_id=org, actor_id=user, note_id=source.id)
+        distilled = (
+            await s.execute(select(Note).where(Note.id == res.distilled_note_id))
+        ).scalar_one()
+        assert distilled.humus_flag is True
+        await s.refresh(source)
+        assert source.humus_flag is False
         link = (
             await s.execute(
                 select(NoteNoteLink).where(

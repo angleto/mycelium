@@ -59,7 +59,7 @@ from flow_core.models.note_link import (
     NoteTaskLink,
 )
 from flow_core.models.task import Task
-from flow_core.services import audit
+from flow_core.services import audit, note_inert
 from flow_core.services import tasks as tasks_svc
 from flow_core.services.rbac import require_role
 
@@ -240,6 +240,9 @@ async def link_notes(
         kind in NOTE_NOTE_LINK_KILLING_KINDS
         and child_note.promoted_at is None
         and child_note.maturity != NoteMaturity.dormant.value
+        # Invariant (task 8a26c000): do not dormant a live child (one with
+        # an open linked task), even when superseded/contradicted.
+        and not await note_inert.note_has_open_work(session, note_id=child_note_id)
     ):
         prior = child_note.maturity
         child_note.maturity = NoteMaturity.dormant.value
@@ -945,6 +948,9 @@ async def tick_maturity_transitions(
                     Note.promoted_at.is_(None),
                     Note.maturity.in_([NoteMaturity.growing.value, NoteMaturity.mature.value]),
                     Note.updated_at < dormant_threshold,
+                    # Invariant (task 8a26c000): never auto-dormant a live
+                    # note (one with an open linked task).
+                    ~note_inert.open_work_exists(Note.id),
                 )
             )
         )

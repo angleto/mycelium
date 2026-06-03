@@ -54,7 +54,7 @@ from flow_core.models.note import Note
 from flow_core.models.note_link import NoteNoteLink
 from flow_core.models.note_tag import NoteTag
 from flow_core.models.tag import Tag, TagKind
-from flow_core.services import audit, note_links
+from flow_core.services import audit, note_inert, note_links
 from flow_core.services import graph as graph_svc
 from flow_core.services import link_prediction as linkpred_svc
 from flow_core.services import notes as notes_svc
@@ -493,6 +493,9 @@ async def auto_promote_mature(
                     Note.maturity == "growing",
                     Note.promoted_at.is_(None),
                     Note.deleted_at.is_(None),
+                    # Invariant (task 8a26c000): do not auto-crystallise a
+                    # note with active work (an open linked task).
+                    ~note_inert.open_work_exists(Note.id),
                 )
             )
         )
