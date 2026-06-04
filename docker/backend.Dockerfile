@@ -47,15 +47,12 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --python /app/.venv/bin/python "python-igraph>=0.11" "leidenalg>=0.10"
 
-# Pre-fetch the STT checkpoint so a freshly-rolled pod does not pay an HF
-# download (and does not depend on egress to huggingface.co). Size/quant
-# mirror the LocalSTT defaults (FLOW_STT_MODEL=small,
-# FLOW_STT_COMPUTE_TYPE=int8, CPU). faster-whisper-small is ~480 MiB and
-# backend-only, so it stays baked here. The dense embedder (bge-m3, ~2.3
-# GiB, shared with the worker) is NOT fetched here: it arrives from the
-# separate models image via `COPY --from` in the final stage, built once
-# per model version and deduplicated across releases.
+# Pre-fetch the embedding + STT checkpoints so a freshly-rolled pod does
+# not pay an HF download (and does not depend on egress to
+# huggingface.co). STT size/quant mirror the LocalSTT defaults
+# (FLOW_STT_MODEL=small, FLOW_STT_COMPUTE_TYPE=int8, CPU).
 ENV HF_HOME=/app/.cache/huggingface
+RUN /app/.venv/bin/python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('intfloat/multilingual-e5-small')"
 RUN /app/.venv/bin/python -c "from faster_whisper import WhisperModel; WhisperModel('small', device='cpu', compute_type='int8')"
 
 # ---
@@ -78,13 +75,7 @@ ENV FLOW_VERSION=${FLOW_VERSION} \
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PATH="/app/.venv/bin:$PATH" \
-    HF_HOME=/app/.cache/huggingface \
-    # Both checkpoints are baked (whisper from the builder stage, bge-m3
-    # from the models image below), so the loaders must never reach out
-    # to huggingface.co at runtime: fail fast on a missing file instead of
-    # silently downloading 2.3 GiB into the request path.
-    HF_HUB_OFFLINE=1 \
-    TRANSFORMERS_OFFLINE=1
+    HF_HOME=/app/.cache/huggingface
 
 # Runtime shared libs:
 #  - libpq5:               psycopg runtime (Alembic sync path).
@@ -109,13 +100,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 COPY --from=builder /app /app
-# The dense embedder (bge-m3) as its own late layer from the separate,
-# independently-versioned models image — built once per model version,
-# deduplicated by GHCR across every release, and merged into the HF cache
-# tree alongside the baked whisper checkpoint (disjoint hub subdirs, so
-# they coexist). Bump the tag here AND in worker.Dockerfile when the model
-# changes (see docker/models.Dockerfile).
-COPY --from=ghcr.io/angleto/flow/models:bge-m3-1 /models/ /app/.cache/huggingface/
 
 EXPOSE 8000
 # --proxy-headers + --forwarded-allow-ips so uvicorn trusts the

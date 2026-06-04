@@ -36,22 +36,12 @@ ENV FLOW_VERSION=${FLOW_VERSION} \
     FLOW_BUILD_AT=${FLOW_BUILD_AT}
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PATH="/app/.venv/bin:$PATH" \
-    HF_HOME=/app/.cache/huggingface \
-    # bge-m3 is baked from the models image below; the embedding backfill
-    # must load it offline, never download it at runtime.
-    HF_HUB_OFFLINE=1 \
-    TRANSFORMERS_OFFLINE=1
+    PATH="/app/.venv/bin:$PATH"
 
 RUN apt-get update && apt-get install -y --no-install-recommends libpq5 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 COPY --from=builder /app /app
-# The dense embedder (bge-m3) for the embedding backfill, from the same
-# separate, independently-versioned models image the backend uses (one
-# build, two consumers). Bump the tag here AND in backend.Dockerfile when
-# the model changes (see docker/models.Dockerfile).
-COPY --from=ghcr.io/angleto/flow/models:bge-m3-1 /models/ /app/.cache/huggingface/
 
 CMD ["python", "-m", "flow_worker.main"]
