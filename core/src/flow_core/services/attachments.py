@@ -19,14 +19,19 @@ from __future__ import annotations
 
 import os
 import uuid
-from collections.abc import Sequence
+from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from flow_core.attachment_store import PgAttachmentStore, get_attachment_store
+from flow_core.attachment_store import (
+    AttachmentStreamTooLarge,
+    PgAttachmentStore,
+    StreamingAttachmentStore,
+    get_attachment_store,
+)
 from flow_core.config import get_settings
 from flow_core.errors import DomainError, NotFoundError
 from flow_core.i18n import MessageCode
@@ -293,6 +298,78 @@ async def add_attachment(
         await store.put(key, data, resolved_mime)
         att.storage_key = key
         await session.flush()
+    await audit.log(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        entity="attachment",
+        entity_id=att.id,
+        action="create",
+    )
+    return att
+
+
+async def stream_attachment(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    note_id: uuid.UUID | None = None,
+    task_id: uuid.UUID | None = None,
+    filename: str,
+    mime_type: str | None,
+    chunks: AsyncIterator[bytes],
+) -> Attachment:
+    """Store a large file by STREAMING the body through the backend to S3 in
+    chunks (the gateway model: the client never touches S3, and the whole
+    file is never buffered nor written locally). Token-free for the caller
+    (the bytes arrive over HTTP, not in a tool call). Member-level; requires
+    the s3 backend; ``attachment_stream_max_bytes`` is enforced
+    incrementally (an oversize body is aborted mid-stream)."""
+    await require_role(session, org_id, actor_id, Role.member)
+    await _assert_parent(session, note_id=note_id, task_id=task_id)
+    store = get_attachment_store(get_settings())
+    if not isinstance(store, StreamingAttachmentStore):
+        raise DomainError(MessageCode.ATTACHMENT_STREAM_UNSUPPORTED)
+    safe_name = _sanitize_filename(filename)
+    # The body is a stream, so there is nothing to sniff: trust the
+    # client content-type (normalised), falling back to the generic type.
+    resolved_mime = (mime_type or "").split(";")[0].strip().lower() or _DEFAULT_MIME
+    attachment_id = uuid.uuid4()
+    client_tag_id = await _resolve_client_tag_id(session, task_id=task_id, note_id=note_id)
+    parent_kind = "tasks" if task_id is not None else "notes"
+    parent_id = task_id or note_id or attachment_id
+    key = _build_storage_key(
+        org_id=org_id,
+        client_tag_id=client_tag_id,
+        parent_kind=parent_kind,
+        parent_id=parent_id,
+        attachment_id=attachment_id,
+        filename=safe_name,
+    )
+    try:
+        size = await store.stream_put(
+            key,
+            resolved_mime,
+            chunks,
+            max_bytes=get_settings().attachment_stream_max_bytes,
+        )
+    except AttachmentStreamTooLarge as exc:
+        raise DomainError(MessageCode.ATTACHMENT_TOO_LARGE) from exc
+    att = Attachment(
+        id=attachment_id,
+        org_id=org_id,
+        note_id=note_id,
+        task_id=task_id,
+        filename=safe_name,
+        mime_type=resolved_mime,
+        size_bytes=size,
+        data=None,
+        storage_key=key,
+        uploaded_by=actor_id,
+    )
+    session.add(att)
+    await session.flush()
     await audit.log(
         session,
         org_id=org_id,

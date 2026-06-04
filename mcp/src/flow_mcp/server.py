@@ -4282,6 +4282,86 @@ async def upload_attachment(
 
 
 @mcp.tool()
+async def upload_attachment_instructions(
+    token: str,
+    org_id: str,
+    filename: str,
+    note_id: str | None = None,
+    task_id: str | None = None,
+    mime_type: str | None = None,
+) -> dict[str, Any]:
+    """Recipe for a TOKEN-FREE large-file upload (MRI, DICOM, PDF, ...).
+
+    ``upload_attachment`` carries the bytes as base64 inside the tool
+    call, so a large file blows the context budget (a few MB of base64 is
+    hundreds of KB of tokens). This tool instead returns a ready-to-run
+    ``curl`` that STREAMS the raw file through the backend gateway to
+    object storage: the bytes ride the HTTP body (never a tool argument,
+    so zero tokens), are never buffered nor written to disk server-side,
+    and S3 is never exposed to the client -- the backend is always the
+    gateway (the security model for medical data). No bytes pass through
+    this tool; only a command template comes back.
+
+    Requires the s3 attachment backend (the endpoint returns
+    ATTACHMENT_STREAM_UNSUPPORTED on the default pg backend). Pass exactly
+    one of ``note_id`` / ``task_id``. The ``curl`` has a ``$FLOW_TOKEN``
+    placeholder (fill with your agent/session token -- it is NOT echoed
+    here, it stays secret) and a ``<path-to-file>`` placeholder. On
+    success the endpoint returns the attachment JSON (id, size_bytes,
+    ...); use ``markdown_ref_template`` -- substituting the real id -- to
+    reference it from a note body / task description."""
+    from urllib.parse import quote
+
+    from flow_core.config import get_settings
+
+    if (note_id is None) == (task_id is None):
+        raise ValueError("provide exactly one of note_id / task_id")
+    # Confirm the caller can act in the org (both transports); the
+    # endpoint re-checks membership + parent visibility under RLS at
+    # upload time, so this is only a fail-fast on a bad org/token.
+    async with _tenant(token, org_id) as (_s, org, _user):
+        pass
+    settings = get_settings()
+    # The public path is the SPA origin + ``/api`` (the reverse proxy /
+    # Vite strip ``/api`` and forward to FastAPI). Never an S3 URL.
+    base = settings.frontend_base_url.rstrip("/")
+    params = [f"filename={quote(filename)}"]
+    if note_id:
+        params.append(f"note_id={note_id}")
+    if task_id:
+        params.append(f"task_id={task_id}")
+    url = f"{base}/api/attachments/stream?" + "&".join(params)
+    content_type = mime_type or "application/octet-stream"
+    curl = (
+        f"curl -fsS -X POST '{url}' \\\n"
+        f"  -H 'Authorization: Bearer $FLOW_TOKEN' \\\n"
+        f"  -H 'X-Workspace-Id: {org}' \\\n"
+        f"  -H 'Content-Type: {content_type}' \\\n"
+        f"  --data-binary @<path-to-file>"
+    )
+    bang = "!" if content_type.startswith("image/") else ""
+    return {
+        "endpoint": url,
+        "method": "POST",
+        "curl": curl,
+        "headers": {
+            "Authorization": "Bearer $FLOW_TOKEN",
+            "X-Workspace-Id": str(org),
+            "Content-Type": content_type,
+        },
+        "max_bytes": settings.attachment_stream_max_bytes,
+        "notes": (
+            "Streams the raw body through the backend gateway to object "
+            "storage; the file is never buffered server-side and S3 is "
+            "never exposed. Fill $FLOW_TOKEN with your token and "
+            "<path-to-file> with the local path. Token-free: no bytes go "
+            "through MCP."
+        ),
+        "markdown_ref_template": f"{bang}[{filename}](/attachments/<id>/download)",
+    }
+
+
+@mcp.tool()
 async def list_attachments(
     token: str,
     org_id: str,

@@ -136,6 +136,77 @@ async def test_upload_attachment_rejects_bad_base64() -> None:
         )
 
 
+async def test_upload_attachment_instructions_returns_token_free_recipe() -> None:
+    """The recipe tool returns a ready-to-run curl that streams the file
+    through the BACKEND gateway (frontend origin + ``/api`` -> the API),
+    never an S3 URL, and never echoes the secret token (a $FLOW_TOKEN
+    placeholder stays in the recipe)."""
+    from flow_core.config import get_settings
+
+    org, user, token = await _signup()
+    async with tenant_session(str(org), str(user)) as s:
+        t = await tasks_svc.create_task(s, org_id=org, actor_id=user, title="MRI host")
+    out = await mcp_server.upload_attachment_instructions(
+        token=token,
+        org_id=str(org),
+        filename="brain.nii.gz",
+        task_id=str(t.id),
+        mime_type="application/gzip",
+    )
+    base = get_settings().frontend_base_url.rstrip("/")
+    assert out["endpoint"] == (
+        f"{base}/api/attachments/stream?filename=brain.nii.gz&task_id={t.id}"
+    )
+    assert out["method"] == "POST"
+    # Goes through the backend gateway, never directly to object storage.
+    assert "/api/attachments/stream" in out["curl"]
+    assert "s3" not in out["endpoint"].lower()
+    assert "amazonaws" not in out["curl"].lower()
+    # The token is NOT leaked; only a placeholder is handed back.
+    assert "$FLOW_TOKEN" in out["curl"]
+    assert token not in out["curl"]
+    assert token not in repr(out)
+    assert out["headers"]["X-Workspace-Id"] == str(org)
+    assert out["headers"]["Content-Type"] == "application/gzip"
+    assert out["markdown_ref_template"] == "[brain.nii.gz](/attachments/<id>/download)"
+
+
+async def test_upload_attachment_instructions_image_template_is_embed() -> None:
+    org, user, token = await _signup()
+    async with tenant_session(str(org), str(user)) as s:
+        t = await tasks_svc.create_task(s, org_id=org, actor_id=user, title="Img host")
+    out = await mcp_server.upload_attachment_instructions(
+        token=token,
+        org_id=str(org),
+        filename="scan.png",
+        task_id=str(t.id),
+        mime_type="image/png",
+    )
+    assert out["markdown_ref_template"] == "![scan.png](/attachments/<id>/download)"
+
+
+async def test_upload_attachment_instructions_rejects_both_parents() -> None:
+    org, _user, token = await _signup()
+    with pytest.raises(ValueError, match="exactly one of"):
+        await mcp_server.upload_attachment_instructions(
+            token=token,
+            org_id=str(org),
+            filename="x.bin",
+            note_id=str(uuid.uuid4()),
+            task_id=str(uuid.uuid4()),
+        )
+
+
+async def test_upload_attachment_instructions_rejects_neither_parent() -> None:
+    org, _user, token = await _signup()
+    with pytest.raises(ValueError, match="exactly one of"):
+        await mcp_server.upload_attachment_instructions(
+            token=token,
+            org_id=str(org),
+            filename="x.bin",
+        )
+
+
 async def test_upload_attachment_size_guard() -> None:
     """The service's ``attachment_max_bytes`` guard still fires for the
     decoded payload (same code path as the REST upload)."""

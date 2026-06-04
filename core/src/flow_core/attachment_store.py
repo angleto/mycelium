@@ -22,11 +22,17 @@ column, never surfaced to the client.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     from flow_core.config import Settings
+
+
+class AttachmentStreamTooLarge(Exception):
+    """Raised mid-stream by ``stream_put`` when the upload exceeds the cap;
+    the service translates it to the ATTACHMENT_TOO_LARGE domain error.
+    Kept store-local so this module needs no i18n/errors import."""
 
 
 @runtime_checkable
@@ -36,6 +42,27 @@ class AttachmentStore(Protocol):
     async def get(self, key: str) -> bytes: ...
 
     async def delete(self, key: str) -> None: ...
+
+
+@runtime_checkable
+class StreamingAttachmentStore(Protocol):
+    """Capability marker: a store that can ingest an upload chunk by
+    chunk (multipart) without ever holding the whole file in memory. The
+    streaming endpoint requires this; the ``pg`` marker store does NOT
+    implement it (its bytes live in the row, no chunked path), so the
+    service rejects streaming with ATTACHMENT_STREAM_UNSUPPORTED on pg.
+    Checked by capability (``isinstance`` on this ``runtime_checkable``
+    Protocol), not by concrete class, so a real S3 store and an in-memory
+    test fake are both accepted on the same footing."""
+
+    async def stream_put(
+        self,
+        key: str,
+        content_type: str,
+        chunks: AsyncIterator[bytes],
+        *,
+        max_bytes: int,
+    ) -> int: ...
 
 
 class PgAttachmentStore:
@@ -131,6 +158,89 @@ class S3AttachmentStore:
             self._client().delete_object(Bucket=self._bucket, Key=self._full_key(key))
 
         await asyncio.to_thread(_run)
+
+    async def stream_put(  # pragma: no cover - network/creds
+        self,
+        key: str,
+        content_type: str,
+        chunks: AsyncIterator[bytes],
+        *,
+        max_bytes: int,
+    ) -> int:
+        """Pipe an upload to S3 via a multipart upload: the body is read in
+        chunks and forwarded part-by-part, so the whole file is never held
+        in memory and no local copy is written (the gateway model -- S3 is
+        never exposed to the client). ``max_bytes`` is enforced
+        incrementally; on overflow (``AttachmentStreamTooLarge``) or any
+        error the multipart upload is aborted and nothing is committed.
+        Returns the total bytes written."""
+        import asyncio
+
+        # S3 requires every part except the last to be >= 5 MiB.
+        min_part = 5 * 1024 * 1024
+        client = self._client()
+        full = self._full_key(key)
+        create = await asyncio.to_thread(
+            lambda: client.create_multipart_upload(
+                Bucket=self._bucket, Key=full, ContentType=content_type
+            )
+        )
+        upload_id = create["UploadId"]
+        parts: list[dict[str, Any]] = []
+        buf = bytearray()
+        total = 0
+        part_no = 1
+
+        async def _flush(body: bytes) -> None:
+            nonlocal part_no
+            # ``n`` is pinned to a local before the await so the capture is
+            # stable; ``part_no`` is only incremented after to_thread
+            # returns, so a parameter-less lambda (which mypy can infer,
+            # unlike a default-arg one) closes over the right value.
+            n = part_no
+            resp = await asyncio.to_thread(
+                lambda: client.upload_part(
+                    Bucket=self._bucket,
+                    Key=full,
+                    PartNumber=n,
+                    UploadId=upload_id,
+                    Body=body,
+                )
+            )
+            parts.append({"ETag": resp["ETag"], "PartNumber": n})
+            part_no += 1
+
+        try:
+            async for chunk in chunks:
+                if not chunk:
+                    continue
+                total += len(chunk)
+                if total > max_bytes:
+                    raise AttachmentStreamTooLarge
+                buf.extend(chunk)
+                while len(buf) >= min_part:
+                    await _flush(bytes(buf[:min_part]))
+                    del buf[:min_part]
+            # Final part: the remainder (or one part for a small/0-byte body
+            # so the multipart upload has at least one part to complete).
+            if buf or not parts:
+                await _flush(bytes(buf))
+            await asyncio.to_thread(
+                lambda: client.complete_multipart_upload(
+                    Bucket=self._bucket,
+                    Key=full,
+                    UploadId=upload_id,
+                    MultipartUpload={"Parts": parts},
+                )
+            )
+            return total
+        except BaseException:
+            await asyncio.to_thread(
+                lambda: client.abort_multipart_upload(
+                    Bucket=self._bucket, Key=full, UploadId=upload_id
+                )
+            )
+            raise
 
 
 _FactoryFn = Callable[[], AttachmentStore]

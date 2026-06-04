@@ -9,7 +9,7 @@ from __future__ import annotations
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, Response, UploadFile, status
+from fastapi import APIRouter, Depends, File, Query, Request, Response, UploadFile, status
 
 from flow_api.deps import TenantCtx, tenant_ctx
 from flow_api.schemas import AttachmentOut
@@ -61,6 +61,36 @@ def _content_disposition(filename: str, mime_type: str) -> str:
     disp = "inline" if mime_type.startswith("image/") else "attachment"
     safe = filename.replace('"', "")
     return f'{disp}; filename="{safe}"'
+
+
+@router.post("/stream", status_code=status.HTTP_201_CREATED)
+async def stream_attachment(
+    request: Request,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+    filename: Annotated[str, Query(min_length=1, max_length=255)],
+    note_id: Annotated[uuid.UUID | None, Query()] = None,
+    task_id: Annotated[uuid.UUID | None, Query()] = None,
+) -> AttachmentOut:
+    """Token-free large-file upload. The raw request body is streamed
+    straight through the backend gateway to the object store, chunk by
+    chunk: the whole file is never buffered in memory, never written to
+    local disk, and S3 is never exposed to the client (medical data, the
+    gateway model). The bytes ride the HTTP body, not an MCP tool
+    argument, so the upload costs zero tokens. Requires the s3 attachment
+    backend (``ATTACHMENT_STREAM_UNSUPPORTED`` otherwise). Exactly one
+    parent (``note_id`` xor ``task_id``) must be given; the file name is
+    a query param and the mime type the request ``Content-Type``."""
+    att = await svc.stream_attachment(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        note_id=note_id,
+        task_id=task_id,
+        filename=filename,
+        mime_type=request.headers.get("content-type"),
+        chunks=request.stream(),
+    )
+    return att_out(att)
 
 
 @router.get("/{attachment_id}/download")

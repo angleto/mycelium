@@ -62,6 +62,12 @@ class Settings(BaseSettings):
     # conservative. Enforced server-side in the attachments service
     # before the bytes are persisted. Override via FLOW_ATTACHMENT_MAX_BYTES.
     attachment_max_bytes: int = 10 * 1024 * 1024
+    # Larger cap for the STREAMING upload path (the backend pipes the body
+    # to S3 in chunks, never buffering the whole file nor exposing S3):
+    # medical files (DICOM/MRI) can be hundreds of MB. Enforced
+    # incrementally so an oversize body is aborted mid-stream. Override via
+    # FLOW_ATTACHMENT_STREAM_MAX_BYTES.
+    attachment_stream_max_bytes: int = 512 * 1024 * 1024
 
     # Cap on the post-append byte size of note.transcript / note.summary /
     # task.description (task 4ac39ecf). The append helpers refuse a

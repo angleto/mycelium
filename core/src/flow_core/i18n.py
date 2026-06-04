@@ -86,6 +86,7 @@ class MessageCode(enum.StrEnum):
     REVISION_NOT_FOUND = "revision.not_found"
     ATTACHMENT_NOT_FOUND = "attachment.not_found"
     ATTACHMENT_TOO_LARGE = "attachment.too_large"
+    ATTACHMENT_STREAM_UNSUPPORTED = "attachment.stream_unsupported"
     BODY_LIMIT_EXCEEDED = "body.limit_exceeded"
     INTENT_UNRECOGNIZED = "intent.unrecognized"
     INVOICE_NOT_FOUND = "invoice.not_found"
@@ -269,6 +270,9 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
         MessageCode.REVISION_NOT_FOUND: "Revision not found",
         MessageCode.ATTACHMENT_NOT_FOUND: "Attachment not found",
         MessageCode.ATTACHMENT_TOO_LARGE: "Attachment exceeds the maximum size",
+        MessageCode.ATTACHMENT_STREAM_UNSUPPORTED: (
+            "Streaming upload requires the s3 attachment backend"
+        ),
         MessageCode.BODY_LIMIT_EXCEEDED: (
             "Append would exceed the maximum body size ({max_bytes} bytes)"
         ),

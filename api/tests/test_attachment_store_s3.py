@@ -22,6 +22,7 @@ from sqlalchemy import text
 
 from flow_api.main import app
 from flow_core.attachment_store import set_attachment_store_override
+from flow_core.config import get_settings
 from flow_core.db import tenant_session
 
 
@@ -149,3 +150,104 @@ async def test_s3_backend_delete_removes_object_and_row(
         dl = await c.get(f"/attachments/{aid}/download", headers=h)
         assert dl.status_code == 404
         assert dl.json()["code"] == "attachment.not_found"
+
+
+async def test_stream_upload_through_backend_byte_identical(
+    _s3_backend: FakeAttachmentStore,
+) -> None:
+    """The token-free streaming endpoint (``POST /attachments/stream``)
+    pipes the raw request body through the backend gateway to the object
+    store; the resulting attachment is byte-identical to one uploaded the
+    ordinary way, the row carries ``data=NULL`` + a ``storage_key``, and
+    the binary never leaks back over the wire. S3 is never exposed: the
+    bytes go store-side only, via the backend."""
+    body = b"streamed-MRI-bytes\n" * 5000  # ~90 KiB, several chunks
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as c:
+        h, ws, uid = await _signup(c)
+        tid = (await c.post("/tasks", headers=h, json={"title": "T stream"})).json()["id"]
+
+        up = await c.post(
+            f"/attachments/stream?filename=scan.bin&task_id={tid}",
+            headers={**h, "Content-Type": "application/octet-stream"},
+            content=body,
+        )
+        assert up.status_code == 201, up.text
+        at = up.json()
+        assert at["filename"] == "scan.bin"
+        assert at["mime_type"] == "application/octet-stream"
+        assert at["size_bytes"] == len(body)
+        assert "data" not in at
+        assert "storage_key" not in at
+        aid = at["id"]
+
+        async with tenant_session(ws, uid) as s:
+            row = (
+                await s.execute(
+                    text("SELECT data, storage_key FROM attachments WHERE id = :i"),
+                    {"i": aid},
+                )
+            ).one()
+            assert row.data is None
+            assert row.storage_key
+            assert aid in row.storage_key
+        # The bytes were streamed to the object store under that key.
+        assert await _s3_backend.get(row.storage_key) == body
+
+        # Download is byte-identical to what was streamed in.
+        dl = await c.get(f"/attachments/{aid}/download", headers=h)
+        assert dl.status_code == 200
+        assert dl.content == body
+
+        # Self-cleanup (an S3-backed NULL-data row would block the
+        # migration downgrade gate in the shared test DB).
+        assert (await c.delete(f"/attachments/{aid}", headers=h)).status_code == 204
+
+
+async def test_stream_upload_rejected_on_pg_backend() -> None:
+    """Streaming requires an object store. On the DEFAULT pg backend (no
+    ``_s3_backend`` override) the endpoint refuses with
+    ATTACHMENT_STREAM_UNSUPPORTED -- the pg marker keeps bytes in the row
+    and has no chunked path -- and nothing is created."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as c:
+        h, _ws, _uid = await _signup(c)
+        tid = (await c.post("/tasks", headers=h, json={"title": "T pg"})).json()["id"]
+
+        up = await c.post(
+            f"/attachments/stream?filename=x.bin&task_id={tid}",
+            headers={**h, "Content-Type": "application/octet-stream"},
+            content=b"some bytes",
+        )
+        assert up.status_code == 400, up.text
+        assert up.json()["code"] == "attachment.stream_unsupported"
+
+        lst = (await c.get(f"/tasks/{tid}/attachments", headers=h)).json()
+        assert lst == []
+
+
+async def test_stream_upload_too_large_aborts(
+    _s3_backend: FakeAttachmentStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The stream cap is enforced incrementally: a body past
+    ``attachment_stream_max_bytes`` is aborted mid-stream
+    (ATTACHMENT_TOO_LARGE) and nothing is committed -- no row, no object
+    (the multipart upload is aborted, the in-row path never reached)."""
+    monkeypatch.setattr(get_settings(), "attachment_stream_max_bytes", 16, raising=True)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as c:
+        h, _ws, _uid = await _signup(c)
+        tid = (await c.post("/tasks", headers=h, json={"title": "T big"})).json()["id"]
+
+        up = await c.post(
+            f"/attachments/stream?filename=big.bin&task_id={tid}",
+            headers={**h, "Content-Type": "application/octet-stream"},
+            content=b"x" * 64,
+        )
+        assert up.status_code == 400, up.text
+        assert up.json()["code"] == "attachment.too_large"
+
+        # No object retained and no row created.
+        assert _s3_backend.objects == {}
+        lst = (await c.get(f"/tasks/{tid}/attachments", headers=h)).json()
+        assert lst == []
