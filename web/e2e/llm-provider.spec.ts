@@ -39,7 +39,7 @@ test('admin selects Scaleway on the platform key and it persists', async ({
   await card.locator('select').first().selectOption('scaleway')
   const model = card.locator('input[list="scw-models"]')
   await expect(model).toBeVisible()
-  await model.fill('openai/gpt-oss-120b:fp4')
+  await model.fill('gpt-oss-120b')
 
   // Default key mode is the platform key (our_key) for a fresh org; save.
   await card.getByRole('button', { name: 'Save', exact: true }).click()
@@ -50,7 +50,7 @@ test('admin selects Scaleway on the platform key and it persists', async ({
   const card2 = page.locator('section.card', { hasText: 'AI model provider' })
   await expect(card2.locator('select').first()).toHaveValue('scaleway')
   await expect(card2.locator('input[list="scw-models"]')).toHaveValue(
-    'openai/gpt-oss-120b:fp4',
+    'gpt-oss-120b',
   )
 })
 

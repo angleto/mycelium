@@ -41,10 +41,10 @@ from flow_core.services.rbac import require_role
 # Safety-net model ids if a hosted provider is configured without a model.
 _DEFAULT_OPENAI_MODEL = "gpt-4o-mini"
 _DEFAULT_ANTHROPIC_MODEL = "claude-3-5-haiku-latest"
-# Scaleway serverless default. The exact id is confirmed at runtime against
-# ``GET /v1/models`` (the curated roster endpoint); this is only the
-# safety net when an org selects scaleway without naming a model.
-_DEFAULT_SCALEWAY_MODEL = "mistral/mistral-small-3.2-24b-instruct-2506:fp8"
+# Scaleway serverless default (SHORT id, as ``/v1/models`` lists and the
+# inference endpoint accepts; verified against the real API 2026-06-04).
+# Only the safety net when an org selects scaleway without naming a model.
+_DEFAULT_SCALEWAY_MODEL = "mistral-small-3.2-24b-instruct-2506"
 
 
 async def get_org_llm_provider(session: AsyncSession, org_id: uuid.UUID) -> OrgLLMProvider | None:

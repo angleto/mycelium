@@ -33,10 +33,10 @@ from flow_core.models.org_embedder_provider import EmbedderProviderKind, OrgEmbe
 from flow_core.services import audit
 from flow_core.services.rbac import require_role
 
-# Default Scaleway embedding model. qwen3-embedding-8b is Matryoshka
-# (native 4096) so it can emit the fleet hosted dim (4000); the exact id
-# is confirmed at runtime against ``GET /v1/models``.
-_DEFAULT_SCALEWAY_EMBED_MODEL = "qwen/qwen3-embedding-8b"
+# Default Scaleway embedding model (SHORT id, as ``/v1/models`` lists).
+# qwen3-embedding-8b is Matryoshka (native 4096); verified to return
+# exactly the fleet hosted dim (4000) with ``dimensions=4000``.
+_DEFAULT_SCALEWAY_EMBED_MODEL = "qwen3-embedding-8b"
 
 
 async def get_org_embedder_provider(

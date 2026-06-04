@@ -121,7 +121,7 @@ async def test_set_org_embedder_provider_probe_rejects_wrong_dim() -> None:
                 org_id=org,
                 actor_id=user,
                 provider="scaleway",
-                model="qwen/qwen3-embedding-8b",
+                model="qwen3-embedding-8b",
                 api_key="scw-bad",
             )
         assert exc.value.code is MessageCode.PROVIDER_KEY_INVALID
@@ -145,7 +145,7 @@ async def test_set_org_embedder_provider_probe_accepts_correct_dim() -> None:
             org_id=org,
             actor_id=user,
             provider="scaleway",
-            model="qwen/qwen3-embedding-8b",
+            model="qwen3-embedding-8b",
             api_key="scw-good",
         )
         assert row.provider == "scaleway"

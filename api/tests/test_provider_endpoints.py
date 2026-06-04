@@ -44,23 +44,23 @@ async def test_llm_provider_endpoints_roundtrip() -> None:
         put = await c.put(
             "/llm-provider",
             headers=h,
-            json={"provider": "scaleway", "model": "openai/gpt-oss-120b:fp4"},
+            json={"provider": "scaleway", "model": "gpt-oss-120b"},
         )
         assert put.status_code == 200, put.text
         body = put.json()
         assert body["provider"] == "scaleway"
-        assert body["model"] == "openai/gpt-oss-120b:fp4"
+        assert body["model"] == "gpt-oss-120b"
         assert body["has_key"] is False
         # The stored key is never echoed (the schema has no key field).
         assert "api_key" not in put.text and "ciphertext" not in put.text
 
         # Persisted across a fresh GET.
         again = (await c.get("/llm-provider", headers=h)).json()
-        assert again["provider"] == "scaleway" and again["model"] == "openai/gpt-oss-120b:fp4"
+        assert again["provider"] == "scaleway" and again["model"] == "gpt-oss-120b"
 
         # Curated roster (no key configured -> static list, no network).
         models = (await c.get("/llm-provider/scaleway/models", headers=h)).json()
-        assert "openai/gpt-oss-120b:fp4" in models["models"]
+        assert "gpt-oss-120b" in models["models"]
 
 
 async def test_embedder_provider_endpoints_roundtrip() -> None:
@@ -72,12 +72,12 @@ async def test_embedder_provider_endpoints_roundtrip() -> None:
         put = await c.put(
             "/embedder-provider",
             headers=h,
-            json={"provider": "scaleway", "model": "qwen/qwen3-embedding-8b"},
+            json={"provider": "scaleway", "model": "qwen3-embedding-8b"},
         )
         assert put.status_code == 200, put.text
         body = put.json()
         assert body["provider"] == "scaleway"
-        assert body["model"] == "qwen/qwen3-embedding-8b"
+        assert body["model"] == "qwen3-embedding-8b"
         assert body["has_key"] is False
         assert "api_key" not in put.text and "ciphertext" not in put.text
 
@@ -85,7 +85,7 @@ async def test_embedder_provider_endpoints_roundtrip() -> None:
         assert again["provider"] == "scaleway"
 
         models = (await c.get("/embedder-provider/scaleway/models", headers=h)).json()
-        assert "qwen/qwen3-embedding-8b" in models["models"]
+        assert "qwen3-embedding-8b" in models["models"]
 
 
 async def test_provider_endpoint_requires_workspace_header() -> None:

@@ -194,14 +194,14 @@ async def test_resolve_provider_scaleway_byok_reuses_openai_client() -> None:
             org_id=org,
             actor_id=user,
             provider="scaleway",
-            model="mistral/mistral-small-3.2-24b-instruct-2506:fp8",
+            model="mistral-small-3.2-24b-instruct-2506",
             api_key="scw-org-secret",
             validate_key=False,
         )
         provider, basis = await llm_resolver.resolve_provider(s, org)
     # Scaleway is OpenAI-compatible -> reuse OpenAILLM with the Scaleway URL.
     assert isinstance(provider, OpenAILLM)
-    assert provider.model_id == "mistral/mistral-small-3.2-24b-instruct-2506:fp8"
+    assert provider.model_id == "mistral-small-3.2-24b-instruct-2506"
     assert provider._base_url == get_settings().scaleway_base_url.rstrip("/")
     assert basis is CostBasis.byok
 
@@ -258,7 +258,7 @@ async def test_set_org_llm_provider_probe_rejects_bad_key() -> None:
                 org_id=org,
                 actor_id=user,
                 provider="scaleway",
-                model="mistral/mistral-small-3.2-24b-instruct-2506:fp8",
+                model="mistral-small-3.2-24b-instruct-2506",
                 api_key="scw-bad",
             )
         assert exc.value.code is MessageCode.PROVIDER_KEY_INVALID
@@ -286,7 +286,7 @@ async def test_set_org_llm_provider_probe_accepts_good_key() -> None:
             org_id=org,
             actor_id=user,
             provider="scaleway",
-            model="mistral/mistral-small-3.2-24b-instruct-2506:fp8",
+            model="mistral-small-3.2-24b-instruct-2506",
             api_key="scw-good",
         )
     assert row.api_key_ciphertext and decrypt_secret(row.api_key_ciphertext) == "scw-good"
@@ -299,8 +299,8 @@ async def test_set_org_llm_provider_probe_accepts_good_key() -> None:
 async def test_available_models_intersects_curated_roster() -> None:
     # Live /v1/models returns a couple curated ids plus an unlisted extra.
     live_ids = [
-        "openai/gpt-oss-120b:fp4",
-        "meta/llama-3.3-70b-instruct:fp8",
+        "gpt-oss-120b",
+        "llama-3.3-70b-instruct",
         "some/uncurated-model:fp8",
     ]
     respx.get("https://api.scaleway.ai/v1/models").mock(
@@ -315,4 +315,4 @@ async def test_available_models_intersects_curated_roster() -> None:
         )
         models = await scaleway.available_models(s, org)
     # Only curated ∩ live, in curated order; the uncurated extra is dropped.
-    assert models == ["openai/gpt-oss-120b:fp4", "meta/llama-3.3-70b-instruct:fp8"]
+    assert models == ["gpt-oss-120b", "llama-3.3-70b-instruct"]

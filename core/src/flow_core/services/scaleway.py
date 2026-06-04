@@ -18,22 +18,26 @@ from flow_core.config import get_settings
 from flow_core.crypto import decrypt_secret
 from flow_core.services.llm_resolver import get_org_llm_provider
 
-# Curated Scaleway serverless chat models (canonical ``provider/model:quant``
-# ids). High-confidence picks across tiers; the exact strings are reconciled
-# against live ``/v1/models`` so a stale entry here simply never surfaces.
+# Curated Scaleway serverless chat models. SHORT ids, as returned by the
+# live ``/v1/models`` (verified against the real endpoint 2026-06-04); the
+# canonical ``provider/model:quant`` form is NOT what ``/v1/models`` lists,
+# so the roster intersection must use the short form. Stale entries here
+# simply never surface (they're intersected with the live list).
 CURATED_SCALEWAY_MODELS: tuple[str, ...] = (
-    "mistral/mistral-small-3.2-24b-instruct-2506:fp8",  # fast/cheap default, EU
-    "openai/gpt-oss-120b:fp4",  # frontier-ish general, cheap reasoning
-    "qwen/qwen3-235b-a22b-instruct-2507",  # large general + long context
-    "google/gemma-3-27b-it:bf16",  # vision (text+image)
-    "meta/llama-3.3-70b-instruct:fp8",  # general chat
+    "mistral-small-3.2-24b-instruct-2506",  # fast/cheap default, EU
+    "gpt-oss-120b",  # frontier-ish general, cheap reasoning
+    "qwen3-235b-a22b-instruct-2507",  # large general + long context
+    "gemma-3-27b-it",  # vision (text+image)
+    "llama-3.3-70b-instruct",  # general chat
 )
 
 
-# Curated Scaleway embedding models. Must be able to emit the fleet hosted
-# dim (4000): qwen3-embedding-8b is Matryoshka (native 4096) so it can;
-# bge-multilingual-gemma2 (3584 fixed) cannot and is intentionally excluded.
-CURATED_SCALEWAY_EMBED_MODELS: tuple[str, ...] = ("qwen/qwen3-embedding-8b",)
+# Curated Scaleway embedding models (SHORT ids, as ``/v1/models`` lists).
+# Must emit the fleet hosted dim (4000): qwen3-embedding-8b is Matryoshka
+# (native 4096) and was verified to return exactly 4000 with
+# ``dimensions=4000``; bge-multilingual-gemma2 (3584 fixed) cannot and is
+# intentionally excluded.
+CURATED_SCALEWAY_EMBED_MODELS: tuple[str, ...] = ("qwen3-embedding-8b",)
 
 
 async def list_live_models(*, api_key: str, base_url: str) -> list[str]:
