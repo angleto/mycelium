@@ -19,6 +19,9 @@ import { Mermaid } from './Mermaid'
 // unchanged from CodeBlock — so the same source renders read-side via the
 // react-markdown ```mermaid handler (Markdown.tsx) and survives copy to
 // any other markdown tool (GitHub, etc.).
+// The file's purpose is the TipTap Node extension exported below (not a
+// React component), which react-refresh flags on this node-view component.
+// eslint-disable-next-line react-refresh/only-export-components
 function CodeBlockView({ node }: NodeViewProps) {
   const language =
     typeof node.attrs.language === 'string' ? node.attrs.language : ''
@@ -26,7 +29,10 @@ function CodeBlockView({ node }: NodeViewProps) {
   return (
     <NodeViewWrapper className={'rte-cb' + (isMermaid ? ' rte-cb--mermaid' : '')}>
       <pre>
-        <NodeViewContent
+        {/* Explicit generic: NodeViewContent's ``as`` is NoInfer<T>, so the
+            tag is not inferred from the prop and defaults to 'div' unless
+            we pass it (@tiptap/react v3 type contract). */}
+        <NodeViewContent<'code'>
           as="code"
           className={language ? `language-${language}` : undefined}
         />
