@@ -30,7 +30,10 @@ function readEffectiveTheme(): 'light' | 'dark' {
     : 'light'
 }
 
-export function useEffectiveTheme(): 'light' | 'dark' {
+// File-private: only <Mermaid> consumes it. Keeping it unexported also
+// lets this module export solely the component, which react-refresh needs
+// for fast refresh to work.
+function useEffectiveTheme(): 'light' | 'dark' {
   const [theme, setTheme] = useState(readEffectiveTheme)
   useEffect(() => {
     const update = () => setTheme(readEffectiveTheme())
@@ -65,15 +68,18 @@ export function Mermaid({ code }: { code: string }) {
   useEffect(() => {
     let cancelled = false
     const src = code.trim()
-    if (!src) {
-      setSvg('')
-      setError(null)
-      return
-    }
     // Debounce so live-typing in the editor preview doesn't render on
     // every keystroke; a static read-side diagram just waits this once.
+    // The empty-source reset lives inside the timer too, so the effect
+    // body never calls setState synchronously (react-hooks).
     const timer = window.setTimeout(() => {
       void (async () => {
+        if (!src) {
+          if (cancelled) return
+          setSvg('')
+          setError(null)
+          return
+        }
         try {
           const mermaid = await loadMermaid()
           if (cancelled) return
