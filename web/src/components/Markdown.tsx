@@ -17,6 +17,26 @@ import {
 } from '../lib/taskMentionCache'
 import { isPrefixCandidate } from '../lib/prefixLookup'
 import { PrefixMentionChip } from './PrefixMentionChip'
+import { Mermaid } from './Mermaid'
+
+// A fenced ```mermaid block reaches react-markdown as <pre><code
+// class="language-mermaid">; detect it from the class list (string or
+// the hast array form) so it can render as a diagram instead of literal
+// code.
+function isMermaidClass(className: unknown): boolean {
+  if (typeof className === 'string') return /\blanguage-mermaid\b/.test(className)
+  if (Array.isArray(className)) return className.includes('language-mermaid')
+  return false
+}
+
+// Flatten a code node's children to its raw source text.
+function codeText(children: ReactNode): string {
+  if (typeof children === 'string') return children
+  if (Array.isArray(children)) {
+    return children.map((c) => (typeof c === 'string' ? c : '')).join('')
+  }
+  return ''
+}
 
 // Read-side markdown — the only renderer in the codebase, used by
 // /notes turns, /garden plant detail, etc. Links whose href is the
@@ -192,14 +212,27 @@ function makeComponents(parent?: ImageUploadParent): Components {
       />
     )
   },
-  // Inline ``code`` whose text matches a UUID prefix (4-36 hex, dashes
-  // ok) is turned into a clickable mention chip. The convention in
-  // roadmap notes is `91cf6aaa`-style backticked prefixes; without
-  // this hook they render as dead literals. Block code (fenced /
-  // language-tagged) is untouched because react-markdown passes a
-  // ``className`` like ``language-foo``; we only intercept when there
-  // is no className and children is a single string node.
+  // Unwrap the <pre> around a ```mermaid block so the diagram renders on
+  // its own — a block-level <div>/<svg> can't be nested inside <pre>, and
+  // the <pre> chrome (mono background, padding) would frame the graph.
+  // Every other code block keeps its normal <pre> wrapper.
+  pre({ node, children, ...rest }) {
+    const child = node?.children?.[0]
+    const cls =
+      child && child.type === 'element' ? child.properties?.className : undefined
+    if (isMermaidClass(cls)) return <>{children}</>
+    return <pre {...rest}>{children}</pre>
+  },
+  // A fenced ```mermaid block renders as a diagram. Inline ``code`` whose
+  // text matches a UUID prefix (4-36 hex, dashes ok) is turned into a
+  // clickable mention chip (the `91cf6aaa`-style roadmap convention).
+  // Other block code (fenced / language-tagged) is untouched because
+  // react-markdown passes a ``className`` like ``language-foo``; the
+  // prefix hook only intercepts when there is no className.
   code({ className, children, ...rest }) {
+    if (isMermaidClass(className)) {
+      return <Mermaid code={codeText(children).replace(/\n$/, '')} />
+    }
     if (!className && typeof children === 'string' && isPrefixCandidate(children)) {
       return <PrefixMentionChip prefix={children} />
     }

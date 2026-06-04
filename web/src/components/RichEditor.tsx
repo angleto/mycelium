@@ -14,6 +14,7 @@ import TaskList from '@tiptap/extension-task-list'
 import TaskItem from '@tiptap/extension-task-item'
 import { Table, TableCell, TableHeader, TableRow } from '@tiptap/extension-table'
 import { Markdown } from 'tiptap-markdown'
+import { CodeBlockMermaid } from './MermaidCodeBlock'
 import Suggestion, {
   type SuggestionKeyDownProps,
   type SuggestionProps,
@@ -781,7 +782,11 @@ export function RichEditor({
       // mention did window.open('@note:uuid') -> broken tab instead
       // of letting the app-side interceptor route it (the reason a
       // note opened from a converted task was unreachable).
-      StarterKit.configure({ link: false }),
+      // Disable StarterKit's bundled code block: CodeBlockMermaid below
+      // replaces it (same node name + ```fence round-trip) so a ```mermaid
+      // block renders its diagram live while every other code block keeps
+      // the default behaviour.
+      StarterKit.configure({ link: false, codeBlock: false }),
       Link.configure({
         openOnClick: false,
         autolink: false,
@@ -814,6 +819,9 @@ export function RichEditor({
       TableRow,
       TableHeader,
       TableCell,
+      // Code blocks, with a live diagram preview for ```mermaid (replaces
+      // StarterKit's codeBlock, disabled above).
+      CodeBlockMermaid,
       Markdown.configure({ html: false }),
       // LaTeX math (``$inline$`` and ``$$block$$``): KaTeX NodeView in
       // the editor + markdown-it round-trip, so what /garden's

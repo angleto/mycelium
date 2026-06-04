@@ -1689,6 +1689,57 @@ button.btn--danger:hover {
   border-radius: 7px;
   overflow: auto;
 }
+/* Mermaid diagrams: shared by the read-side ```mermaid block (Markdown.tsx,
+   rendered bare without a <pre> wrapper) and the editor code-block preview
+   (MermaidCodeBlock.tsx). Center the graph, let a wide one scroll, and cap
+   the SVG to the content width. */
+.mermaid-block {
+  margin: 0.6rem 0;
+  text-align: center;
+  overflow-x: auto;
+}
+.mermaid-block svg {
+  max-width: 100%;
+  height: auto;
+}
+.mermaid-block--error {
+  text-align: left;
+}
+.mermaid-block__source {
+  margin: 0;
+  background: var(--surface-2);
+  padding: 0.7rem;
+  border-radius: 7px;
+  overflow: auto;
+  font-family: var(--mono);
+  font-size: 0.85em;
+  white-space: pre;
+}
+.mermaid-block__hint {
+  display: block;
+  margin-top: 0.3rem;
+  color: var(--muted);
+  font-size: 0.85em;
+}
+/* Code-block node view in the WYSIWYG editor. The editable <pre><code>
+   mirrors the read-side .md pre; the mermaid variant stacks a live diagram
+   preview beneath the source, separated by a hairline. */
+.rte-cb pre {
+  margin: 0.4rem 0;
+  background: var(--surface-2);
+  padding: 0.7rem;
+  border-radius: 7px;
+  overflow: auto;
+}
+.rte-cb pre code {
+  background: none;
+  padding: 0;
+}
+.rte-cb__preview {
+  margin: 0.2rem 0 0.6rem;
+  padding-top: 0.4rem;
+  border-top: 1px dashed var(--border);
+}
 .md a.chip {
   text-decoration: none;
 }
