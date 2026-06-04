@@ -1740,6 +1740,37 @@ button.btn--danger:hover {
   padding-top: 0.4rem;
   border-top: 1px dashed var(--border);
 }
+/* Graph-only default for a mermaid block: hide the editable source <pre>
+   (kept mounted for ProseMirror) and drop the hairline that separated it
+   from the preview, so the editor matches the read-side diagram. The `>`
+   only targets the source pre, never the error-fallback pre nested inside
+   .rte-cb__preview. */
+.rte-cb--rendered > pre {
+  display: none;
+}
+.rte-cb--rendered .rte-cb__preview {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: none;
+}
+.rte-cb__toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 0.2rem;
+}
+.rte-cb__toggle {
+  font-size: 0.78em;
+  color: var(--muted);
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 0.1rem 0.5rem;
+  cursor: pointer;
+}
+.rte-cb__toggle:hover {
+  color: var(--text);
+  background: var(--surface-2);
+}
 .md a.chip {
   text-decoration: none;
 }
