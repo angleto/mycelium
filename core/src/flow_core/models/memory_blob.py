@@ -15,7 +15,7 @@ import enum
 import uuid
 from decimal import Decimal
 
-from pgvector.sqlalchemy import Vector
+from pgvector.sqlalchemy import HALFVEC, Vector
 from sqlalchemy import (
     DateTime,
     ForeignKey,
@@ -32,8 +32,18 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from flow_core.models.base import Base, OrgScopedMixin, TimestampMixin
 
-# Fixed in migration 0010 (docs/adr/0005).
-EMBED_DIM = 384
+# Two embedding tiers, each a permanent store fused at search time (RRF):
+#  - LOCAL  (``embedding`` vector(1024)): bge-m3, always-on rank-0 fallback,
+#    works offline/OSS. 1024 = bge-m3 native, under pgvector's 2000 HNSW
+#    ceiling for ``vector``.
+#  - HOSTED (``embedding_hosted`` halfvec(4000)): per-org Scaleway, selected
+#    via ``org_embedder_provider``. 4000 = pgvector's HNSW ceiling for
+#    ``halfvec``, so any future model up to 4000 native fits (Matryoshka
+#    truncation) with no reindex.
+# Both dims are fixed at the DDL level; a change is a drop+rebuild of the
+# column (embeddings are re-derivable from ``text`` via the backfill).
+EMBED_DIM = 1024
+EMBED_DIM_HOSTED = 4000
 
 
 class Tier(enum.StrEnum):
@@ -71,14 +81,15 @@ class MemoryBlob(OrgScopedMixin, TimestampMixin, Base):
     cluster_id: Mapped[uuid.UUID | None] = mapped_column(
         PG_UUID(as_uuid=True), nullable=True, index=True
     )
-    # Embedding migration v2 (task 1d081395): when ``embed_model_v2``
-    # is configured, new writes populate these columns and the
-    # migration worker backfills them for legacy rows. retrieve reads
-    # v2 if non-NULL else v1, so the cutover is transparent. The dim
-    # is parameterised at migration time (default 1024 for bge-m3).
-    embedding_v2: Mapped[list[float] | None] = mapped_column(Vector(1024), nullable=True)
-    model_id_v2: Mapped[str | None] = mapped_column(String(160), nullable=True)
-    dim_v2: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Hosted tier (task 5276207e): populated when the org has a hosted
+    # embedder (Scaleway) configured. halfvec(4000), HNSW halfvec_ip_ops.
+    # ``model_id_hosted`` records the producing model so a per-org model
+    # swap can be detected and re-embedded; NULL when no hosted tier.
+    embedding_hosted: Mapped[list[float] | None] = mapped_column(
+        HALFVEC(EMBED_DIM_HOSTED), nullable=True
+    )
+    model_id_hosted: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    dim_hosted: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
 class BlobSource(Base):

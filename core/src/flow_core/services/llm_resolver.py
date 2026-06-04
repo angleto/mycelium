@@ -41,6 +41,10 @@ from flow_core.services.rbac import require_role
 # Safety-net model ids if a hosted provider is configured without a model.
 _DEFAULT_OPENAI_MODEL = "gpt-4o-mini"
 _DEFAULT_ANTHROPIC_MODEL = "claude-3-5-haiku-latest"
+# Scaleway serverless default. The exact id is confirmed at runtime against
+# ``GET /v1/models`` (the curated roster endpoint); this is only the
+# safety net when an org selects scaleway without naming a model.
+_DEFAULT_SCALEWAY_MODEL = "mistral/mistral-small-3.2-24b-instruct-2506:fp8"
 
 
 async def get_org_llm_provider(session: AsyncSession, org_id: uuid.UUID) -> OrgLLMProvider | None:
@@ -67,7 +71,18 @@ async def resolve_provider(
         provider: LLMProvider = OpenAILLM(
             api_key=key,
             model=cfg.model or _DEFAULT_OPENAI_MODEL,
-            base_url=settings.openai_base_url,
+            base_url=cfg.base_url or settings.openai_base_url,
+        )
+    elif cfg.provider == LLMProviderKind.scaleway:
+        # Scaleway Generative APIs are OpenAI-compatible: reuse OpenAILLM
+        # with a Scaleway base_url (per-row override or the global default).
+        key = own_key or settings.scaleway_api_key
+        if not key:
+            return get_llm(), CostBasis.local
+        provider = OpenAILLM(
+            api_key=key,
+            model=cfg.model or _DEFAULT_SCALEWAY_MODEL,
+            base_url=cfg.base_url or settings.scaleway_base_url,
         )
     elif cfg.provider == LLMProviderKind.anthropic:
         key = own_key or settings.anthropic_api_key
@@ -162,6 +177,44 @@ async def resolve_llm(
     )
 
 
+async def _probe_provider_key(
+    kind: LLMProviderKind, *, key: str, model: str | None, base_url: str | None
+) -> None:
+    """Fail-closed key validation: build the candidate hosted provider and
+    issue a minimal (1-token) completion so a non-working key/model is
+    never persisted as active. Any failure (auth, network, bad model)
+    raises ``DomainError(PROVIDER_KEY_INVALID)``. ``local`` is never probed.
+    """
+    settings = get_settings()
+    try:
+        if kind == LLMProviderKind.anthropic:
+            probe: LLMProvider = AnthropicLLM(
+                api_key=key,
+                model=model or _DEFAULT_ANTHROPIC_MODEL,
+                base_url=settings.anthropic_base_url,
+                version=settings.anthropic_version,
+                max_tokens=1,
+            )
+        elif kind == LLMProviderKind.scaleway:
+            probe = OpenAILLM(
+                api_key=key,
+                model=model or _DEFAULT_SCALEWAY_MODEL,
+                base_url=base_url or settings.scaleway_base_url,
+                max_tokens=1,
+            )
+        else:  # openai (OpenAI-compatible)
+            probe = OpenAILLM(
+                api_key=key,
+                model=model or _DEFAULT_OPENAI_MODEL,
+                base_url=base_url or settings.openai_base_url,
+                max_tokens=1,
+            )
+        await probe.complete(system=None, messages=[("user", "ping")])
+    except Exception as exc:
+        # Any failure (auth, network, bad model) means the key is rejected.
+        raise DomainError(MessageCode.PROVIDER_KEY_INVALID) from exc
+
+
 async def set_org_llm_provider(
     session: AsyncSession,
     *,
@@ -169,16 +222,28 @@ async def set_org_llm_provider(
     actor_id: uuid.UUID,
     provider: str,
     model: str | None = None,
+    base_url: str | None = None,
     api_key: str | None = None,
+    validate_key: bool = True,
 ) -> OrgLLMProvider:
     """Admin: select the org's provider. ``api_key`` semantics on update:
     ``None`` leaves the stored key untouched, ``""`` clears it (back to
-    our-key/local), a value (re)encrypts and stores it (BYOK)."""
+    our-key/local), a value (re)encrypts and stores it (BYOK). ``base_url``
+    overrides the provider's global endpoint for this org (NULL = default).
+
+    ``validate_key``: when a NEW ``api_key`` is supplied for a hosted
+    provider, fail-closed probe it (1-token call) before persisting, so a
+    bad BYOK key is never stored active. Tests/programmatic callers that
+    don't want a network round-trip pass ``validate_key=False``.
+    """
     await require_role(session, org_id, actor_id, Role.admin)
     try:
         kind = LLMProviderKind(provider)
     except ValueError as exc:
         raise DomainError(MessageCode.DOMAIN_ERROR) from exc
+
+    if validate_key and api_key and kind != LLMProviderKind.local:
+        await _probe_provider_key(kind, key=api_key, model=model, base_url=base_url)
 
     existing = await get_org_llm_provider(session, org_id)
     if existing is None:
@@ -186,6 +251,7 @@ async def set_org_llm_provider(
             org_id=org_id,
             provider=kind.value,
             model=model,
+            base_url=base_url,
             api_key_ciphertext=encrypt_secret(api_key) if api_key else None,
         )
         session.add(row)
@@ -193,6 +259,7 @@ async def set_org_llm_provider(
     else:
         existing.provider = kind.value
         existing.model = model
+        existing.base_url = base_url
         if api_key is not None:
             existing.api_key_ciphertext = encrypt_secret(api_key) if api_key else None
         existing.version += 1
@@ -205,6 +272,6 @@ async def set_org_llm_provider(
         entity="org_llm_provider",
         entity_id=None,
         action="set",
-        diff={"provider": kind.value, "model": model or ""},
+        diff={"provider": kind.value, "model": model or "", "base_url": base_url or ""},
     )
     return row

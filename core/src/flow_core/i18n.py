@@ -172,6 +172,7 @@ class MessageCode(enum.StrEnum):
     SUGGESTION_STALE = "annotation.suggestion_stale"
     SUGGESTION_TEXT_REQUIRED = "annotation.suggestion_text_required"
     DOMAIN_ERROR = "domain.error"
+    PROVIDER_KEY_INVALID = "provider.key_invalid"
 
 
 # locale -> code -> template. Templates use str.format named params.
@@ -437,6 +438,9 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
         ),
         MessageCode.SUGGESTION_TEXT_REQUIRED: ("A suggestion needs the original text it replaces."),
         MessageCode.DOMAIN_ERROR: "Domain error",
+        MessageCode.PROVIDER_KEY_INVALID: (
+            "The provider API key could not be validated; check the key and model."
+        ),
     },
 }
 

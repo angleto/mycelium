@@ -53,9 +53,13 @@ class Settings(BaseSettings):
         description="Fernet key for the opaque-secret envelope.",
     )
 
-    # Memory embeddings (docs/adr/0005). Fixed at the DDL level
-    # (migration 0010); re-embedding to a new dim = a new column.
-    embed_dim: int = 384
+    # Memory embeddings (docs/adr/0005). Single embedding store at a
+    # fixed fleet dim: every embedder (local or hosted) MUST emit this
+    # dim. 1024 = bge-m3 native AND under pgvector's HNSW 2000-dim
+    # ceiling (no halfvec needed); hosted Matryoshka models truncate to
+    # it. The dim is fixed at the DDL level; changing it = drop+rebuild
+    # the column (embeddings are derived from ``text``, re-embeddable).
+    embed_dim: int = 1024
 
     # Max size of a single note/task attachment. Stored as BYTEA in the
     # DB (no object store; co-tenant deploy), so the cap is deliberately
@@ -181,20 +185,18 @@ class Settings(BaseSettings):
     # bounded (only timed-out writes) and the worker quickly drains.
     task_search_backfill_interval_seconds: int = 60
 
-    # Embedding model migration (task 1d081395). The dual-column
-    # pattern in migration 0009 lets us roll a new embedder (bge-m3
-    # 1024d default) without downtime: ``FLOW_EMBED_MODEL`` is the v1
-    # legacy model (left as is for backward-compat with installed
-    # deployments), ``FLOW_EMBED_MODEL_V2`` is the new target. When
-    # set, new writes populate ``embedding_v2`` and the migration
-    # worker backfills v2 for legacy rows. ``embed_dim_v2`` must match
-    # the model's actual dim (pgvector is strict). Leaving v2 unset
-    # keeps the system on v1 only (legacy single-model behaviour).
-    embed_model: str = "intfloat/multilingual-e5-small"
-    embed_model_v2: str = ""
-    embed_dim_v2: int = 1024
-    # Embedding migration worker (sweep-rate per workspace). Like the
-    # task-search backfill: per-workspace + exception-isolated, modest
+    # Default LOCAL embedder model (the rank-0 fallback, ``embedding``
+    # vector(1024) column). bge-m3 emits 1024 natively = ``embed_dim``.
+    embed_model: str = "BAAI/bge-m3"
+    # HOSTED tier dim (``embedding_hosted`` halfvec column). A per-org
+    # hosted embedder (Scaleway, ``org_embedder_provider``) emits this dim;
+    # 4000 = pgvector's HNSW ceiling for halfvec, so any future model up to
+    # 4000 native fits (Matryoshka truncation) with no reindex. The hosted
+    # tier coexists with the local tier and is fused at search time (RRF).
+    embed_dim_hosted: int = 4000
+    # Embedding backfill worker (sweep-rate per workspace). Re-embeds
+    # blobs whose vector is missing/stale (e.g. after a dim rebuild or a
+    # per-org model swap). Per-workspace + exception-isolated, modest
     # default so a large workspace drains without saturating the API.
     embedding_migration_interval_seconds: int = 60
 
@@ -217,6 +219,13 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
     anthropic_base_url: str = "https://api.anthropic.com"
     anthropic_version: str = "2023-06-01"
+    # Scaleway Generative APIs (EU/fr-par, OpenAI-compatible) on OUR key
+    # (basis our_key). The resolver reuses ``OpenAILLM`` with this base_url
+    # (or a per-org override stored on ``org_llm_provider.base_url``). An
+    # org with its own Scaleway IAM secret key bills on ``byok`` (task
+    # d2c60a83). Empty key => resolve_provider falls back to local.
+    scaleway_api_key: str = ""
+    scaleway_base_url: str = "https://api.scaleway.ai/v1"
     # Revision-summary worker (LLM-generated labels for the
     # recovery-history timeline). Cadence is slow because each
     # generation is a multi-second LLM call; the sweep is also bounded

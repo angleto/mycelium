@@ -1,13 +1,11 @@
-"""Embedding migration worker loop (task `1d081395`).
+"""Embedding backfill worker loop (task 5276207e).
 
-Per-workspace sweep that backfills ``embedding_v2`` via the
-configured v2 model. Same shape as the task-search backfill:
-``admin_session`` enumerates orgs, ``tenant_session`` per org for
-RLS, exception-isolated, periodic.
-
-The whole loop is a no-op when ``FLOW_EMBED_MODEL_V2`` is empty
-(no migration target configured): saves the per-org churn on a
-fresh deployment that hasn't opted in.
+Per-workspace sweep that backfills both embedding tiers (local
+``embedding`` + the optional hosted ``embedding_hosted``) for rows
+missing a vector. Same shape as the task-search backfill:
+``admin_session`` enumerates orgs, ``tenant_session`` per org for RLS
+(so ``resolve_hosted_embedder`` sees the org's config), exception-
+isolated, periodic. A batch with nothing to do is a cheap empty SELECT.
 """
 
 from __future__ import annotations
@@ -20,7 +18,6 @@ from sqlalchemy import select
 
 from flow_core.config import get_settings
 from flow_core.db import admin_session, tenant_session
-from flow_core.embedder import get_embedder_v2
 from flow_core.models.membership import Membership, Role
 from flow_core.models.organization import Organization
 from flow_core.services import embedding_migration as svc
@@ -54,14 +51,11 @@ async def _owner_of(org_id: uuid.UUID) -> uuid.UUID | None:
 
 
 async def run_once(batch_size: int = 50) -> int:
-    """One sweep across all workspaces. Returns total blobs migrated.
-    Skips entirely when no v2 model is configured."""
-    if get_embedder_v2() is None:
-        return 0
+    """One sweep across all workspaces. Returns total rows re-embedded."""
     try:
         org_ids = await _all_workspaces()
     except Exception:
-        _log.exception("embedding migration: failed to list workspaces")
+        _log.exception("embedding backfill: failed to list workspaces")
         return 0
     total = 0
     for org_id in org_ids:
@@ -70,22 +64,18 @@ async def run_once(batch_size: int = 50) -> int:
             if owner is None:
                 continue
             async with tenant_session(str(org_id), str(owner), actor_kind="system") as s:
-                count = await svc.run_embedding_migration(s, batch_size=batch_size)
+                count = await svc.run_embedding_backfill(s, org_id, batch_size=batch_size)
             if count:
-                _log.info("embedding migration org=%s migrated=%d", org_id, count)
+                _log.info("embedding backfill org=%s re_embedded=%d", org_id, count)
             total += count
         except Exception:
-            _log.exception("embedding migration failed for org=%s", org_id)
+            _log.exception("embedding backfill failed for org=%s", org_id)
     return total
 
 
 async def run_forever() -> None:
     interval = max(5, get_settings().embedding_migration_interval_seconds)
-    _log.info(
-        "embedding migration worker started (interval=%ds, model_v2=%s)",
-        interval,
-        get_settings().embed_model_v2 or "<not configured>",
-    )
+    _log.info("embedding backfill worker started (interval=%ds)", interval)
     while True:
         await run_once()
         await asyncio.sleep(interval)

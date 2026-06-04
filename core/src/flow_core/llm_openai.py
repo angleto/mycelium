@@ -27,11 +27,15 @@ class OpenAILLM:
         api_key: str,
         model: str,
         base_url: str = "https://api.openai.com/v1",
+        max_tokens: int | None = None,
         timeout: float = 60.0,
     ) -> None:
         self._api_key = api_key
         self._model = model
         self._base_url = base_url.rstrip("/")
+        # Optional output cap. Used by the fail-closed key probe to keep the
+        # validation call minimal; ``None`` leaves it unset (provider default).
+        self._max_tokens = max_tokens
         self._timeout = timeout
 
     @property
@@ -46,7 +50,13 @@ class OpenAILLM:
             payload_messages.append({"role": "system", "content": system})
         for role, content in messages:
             payload_messages.append({"role": role, "content": content})
-        payload = {"model": self._model, "messages": payload_messages, "stream": False}
+        payload: dict[str, object] = {
+            "model": self._model,
+            "messages": payload_messages,
+            "stream": False,
+        }
+        if self._max_tokens is not None:
+            payload["max_tokens"] = self._max_tokens
         headers = {"Authorization": f"Bearer {self._api_key}"}
         async with httpx.AsyncClient(timeout=self._timeout) as cx:
             r = await cx.post(f"{self._base_url}/chat/completions", json=payload, headers=headers)

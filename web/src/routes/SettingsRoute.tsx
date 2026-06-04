@@ -13,6 +13,8 @@ import { IssuerProfiles } from '../components/IssuerProfiles'
 // row was the original pain point and (b) executor rows are now
 // auto-derived from users / ai_assistants.
 import { AiAssistantsSettings } from '../components/AiAssistantsSettings'
+import { EmbedderProviderSettings } from '../components/EmbedderProviderSettings'
+import { LlmProviderSettings } from '../components/LlmProviderSettings'
 import { MemoryChannelsAdmin } from '../components/MemoryChannelsAdmin'
 import { PomodoroSettings } from '../components/PomodoroSettings'
 import { TelegramLink } from '../components/TelegramLink'
@@ -170,6 +172,8 @@ export function SettingsRoute() {
     <TelegramLink />
     <TimezoneSettings />
     <AiAssistantsSettings />
+    {me?.is_admin && isAdminMode() && <LlmProviderSettings />}
+    {me?.is_admin && isAdminMode() && <EmbedderProviderSettings />}
     {me?.is_admin && isAdminMode() && <MemoryChannelsAdmin />}
     {/* ExecutorsAdmin removed in v1.2.27, #21 Stage B */}
     <IssuerProfiles />

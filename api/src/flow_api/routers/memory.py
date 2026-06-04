@@ -116,11 +116,11 @@ async def status_(
 async def migration_status_(
     ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> dict[str, int]:
-    """Embedding migration coverage for this workspace (task 1d081395):
-    {total, migrated, pending}. ``total`` is blobs with non-NULL text;
-    ``migrated`` is blobs already populated with the v2 embedding;
-    ``pending`` is the worker's TODO. Used to decide when to run the
-    cutover migration that drops v1 columns."""
+    """Embedding backfill coverage for this workspace (task 5276207e):
+    {total, migrated, pending, hosted}. ``total`` is blobs with non-NULL
+    text; ``migrated`` is blobs with the always-on LOCAL vector; ``hosted``
+    is blobs with the optional hosted vector; ``pending`` is the local
+    backfill's TODO."""
     from flow_core.services import embedding_migration as svc
 
     return await svc.migration_status(ctx.session)
@@ -154,14 +154,13 @@ async def migrate_embeddings_(
     ctx: Annotated[TenantCtx, Depends(tenant_admin_ctx)],
     batch_size: int = 200,
 ) -> dict[str, int]:
-    """Admin-gated one-shot trigger: run the v2 embedding backfill on
-    this workspace now (don't wait for the worker tick). Returns
-    ``{migrated, batch_size}``; if migrated == batch_size, more rows
-    are pending -- re-call to drain. No-op when v2 model isn't
-    configured."""
+    """Admin-gated one-shot trigger: run the embedding backfill (both
+    tiers) on this workspace now (don't wait for the worker tick).
+    Returns ``{migrated, batch_size}``; if migrated == batch_size, more
+    rows are pending -- re-call to drain."""
     from flow_core.services import embedding_migration as svc
 
-    migrated = await svc.run_embedding_migration(ctx.session, batch_size=batch_size)
+    migrated = await svc.run_embedding_backfill(ctx.session, ctx.org_id, batch_size=batch_size)
     return {"migrated": migrated, "batch_size": batch_size}
 
 

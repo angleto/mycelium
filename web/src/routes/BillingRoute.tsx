@@ -25,6 +25,12 @@ export function BillingRoute() {
   const [reason, setReason] = useState('')
   const [role, setRole] = useState<string>('')
   const [err, setErr] = useState<string | null>(null)
+  // Rate-card upsert form (admin): price a model for our_key billing.
+  const [rcModel, setRcModel] = useState('')
+  const [rcProvider, setRcProvider] = useState('scaleway')
+  const [rcCostIn, setRcCostIn] = useState('')
+  const [rcCostOut, setRcCostOut] = useState('')
+  const [rcMarkup, setRcMarkup] = useState('1')
   const isAdmin = role === 'owner' || role === 'admin'
 
   const resetLedger = useCallback(async () => {
@@ -113,6 +119,31 @@ export function BillingRoute() {
     await reload()
   }
 
+  async function onUpsertRate(e: FormEvent) {
+    e.preventDefault()
+    setErr(null)
+    if (!rcModel.trim() || !rcProvider.trim()) return
+    const { error } = await api.POST('/billing/rate-cards', {
+      params: { header: workspaceHeader() },
+      body: {
+        model_id: rcModel.trim(),
+        provider: rcProvider.trim(),
+        provider_cost_per_input: rcCostIn.trim() || null,
+        provider_cost_per_output: rcCostOut.trim() || null,
+        markup: rcMarkup.trim() || '1',
+      },
+    })
+    if (error) {
+      setErr(errMessage(error))
+      return
+    }
+    setRcModel('')
+    setRcCostIn('')
+    setRcCostOut('')
+    setRcMarkup('1')
+    await reload()
+  }
+
   return (
     <section className="card">
       <h1>{t('billing.title')}</h1>
@@ -195,6 +226,53 @@ export function BillingRoute() {
           </li>
         ))}
       </ul>
+      {isAdmin && (
+        <form onSubmit={(e) => void onUpsertRate(e)} className="rate-upsert">
+          <h3>{t('billing.rateAdd')}</h3>
+          <p className="hint">{t('billing.rateHint')}</p>
+          <div className="row">
+            <input
+              required
+              placeholder={t('billing.rateModel')}
+              value={rcModel}
+              onChange={(e) => setRcModel(e.target.value)}
+            />
+            <input
+              required
+              placeholder={t('billing.rateProvider')}
+              value={rcProvider}
+              onChange={(e) => setRcProvider(e.target.value)}
+            />
+          </div>
+          <div className="row">
+            <input
+              type="number"
+              step="any"
+              min="0"
+              placeholder={t('billing.rateCostIn')}
+              value={rcCostIn}
+              onChange={(e) => setRcCostIn(e.target.value)}
+            />
+            <input
+              type="number"
+              step="any"
+              min="0"
+              placeholder={t('billing.rateCostOut')}
+              value={rcCostOut}
+              onChange={(e) => setRcCostOut(e.target.value)}
+            />
+            <input
+              type="number"
+              step="any"
+              min="0"
+              placeholder={t('billing.rateMarkup')}
+              value={rcMarkup}
+              onChange={(e) => setRcMarkup(e.target.value)}
+            />
+            <button type="submit">{t('billing.rateSave')}</button>
+          </div>
+        </form>
+      )}
 
       <h2>{t('billing.usage')}</h2>
       {usage.length === 0 ? (

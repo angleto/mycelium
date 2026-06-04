@@ -27,9 +27,12 @@ from __future__ import annotations
 
 import asyncio
 import importlib.util
+import math
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Protocol, cast, runtime_checkable
+from typing import Any, Protocol, cast, runtime_checkable
+
+import httpx
 
 from flow_core.config import get_settings
 
@@ -53,7 +56,7 @@ class LocalEmbedder:
     the instance itself is cached at module scope by ``get_embedder``;
     both the load and the encode are dispatched to a worker thread."""
 
-    def __init__(self, model_name: str = "intfloat/multilingual-e5-small") -> None:
+    def __init__(self, model_name: str = "BAAI/bge-m3") -> None:
         self._model_name = model_name
         self._model: object | None = None
         self._load_lock = asyncio.Lock()
@@ -120,33 +123,131 @@ class LocalEmbedder:
         ]
 
 
+def _truncate_normalize(vec: list[float], target_dim: int) -> list[float]:
+    """Coerce a raw embedding to exactly ``target_dim`` L2-normalized
+    floats. Matryoshka models keep their leading dims meaningful, so a
+    longer vector is truncated; a shorter one cannot be padded
+    faithfully (the IP opclass assumes a real unit vector), so the
+    caller treats that as a dim mismatch upstream."""
+    out = [float(x) for x in vec[:target_dim]]
+    norm = math.sqrt(sum(x * x for x in out))
+    if norm > 0:
+        out = [x / norm for x in out]
+    return out
+
+
+class HostedEmbedder:
+    """OpenAI-compatible ``/v1/embeddings`` client (Scaleway Generative
+    APIs). httpx-only, same shape as :class:`flow_core.llm_openai.OpenAILLM`.
+    Emits exactly ``target_dim`` floats: it requests ``dimensions`` (the
+    Matryoshka knob) and defensively truncates + L2-renormalizes
+    client-side, so the fleet ``embed_dim`` is always honored regardless
+    of what the endpoint returns. Token counts come from the API ``usage``
+    block so the metering seam charges real tokens."""
+
+    def __init__(
+        self,
+        *,
+        api_key: str,
+        model: str,
+        base_url: str,
+        target_dim: int,
+        timeout: float = 30.0,
+    ) -> None:
+        self._api_key = api_key
+        self._model = model
+        self._base_url = base_url.rstrip("/")
+        self._target_dim = target_dim
+        self._timeout = timeout
+
+    @property
+    def model_id(self) -> str:
+        return self._model
+
+    def _payload(self, input_: object) -> dict[str, object]:
+        return {"model": self._model, "input": input_, "dimensions": self._target_dim}
+
+    async def _post(self, input_: object) -> Any:
+        headers = {"Authorization": f"Bearer {self._api_key}"}
+        async with httpx.AsyncClient(timeout=self._timeout) as cx:
+            r = await cx.post(
+                f"{self._base_url}/embeddings", json=self._payload(input_), headers=headers
+            )
+            r.raise_for_status()
+            return r.json()
+
+    @staticmethod
+    def _tokens(usage: Any, fallback: str) -> int:
+        total = usage.get("total_tokens") or usage.get("prompt_tokens")
+        if isinstance(total, int) and total > 0:
+            return total
+        return max(1, len(fallback.split()))
+
+    async def embed(self, text: str) -> EmbedResult:
+        data = await self._post(text)
+        rows = data.get("data") or []
+        raw = (rows[0] if rows else {}).get("embedding") or []
+        usage = data.get("usage") or {}
+        return EmbedResult(
+            vector=_truncate_normalize(raw, self._target_dim),
+            model_id=self._model,
+            tokens=self._tokens(usage, text),
+        )
+
+    async def embed_batch(self, texts: list[str]) -> list[EmbedResult]:
+        if not texts:
+            return []
+        data = await self._post(texts)
+        rows = sorted(data.get("data") or [], key=lambda d: d.get("index", 0))
+        usage = data.get("usage") or {}
+        # The batch usage is for the whole call; attribute a per-row share
+        # (at least 1 token each) so metering stays additive and non-zero.
+        total = usage.get("total_tokens") or usage.get("prompt_tokens") or 0
+        per = max(1, int(total) // len(texts)) if isinstance(total, int) and total else 1
+        out: list[EmbedResult] = []
+        for row, t in zip(rows, texts, strict=False):
+            raw = row.get("embedding") or []
+            out.append(
+                EmbedResult(
+                    vector=_truncate_normalize(raw, self._target_dim),
+                    model_id=self._model,
+                    tokens=per if per > 1 else max(1, len(t.split())),
+                )
+            )
+        return out
+
+
 _FactoryFn = Callable[[], Embedder]
 _override: _FactoryFn | None = None
-_override_v2: _FactoryFn | None = None
+_hosted_override: _FactoryFn | None = None
 _singleton: LocalEmbedder | None = None
-_singleton_v2: LocalEmbedder | None = None
 
 
 def set_embedder_override(fn: _FactoryFn | None) -> None:
-    """Test seam: replace the model-backed embedder with an in-memory
-    one. Production leaves this None. Never set in production code."""
+    """Test seam: replace the LOCAL model-backed embedder with an
+    in-memory one. Production leaves this None. Never set in production."""
     global _override
     _override = fn
 
 
-def set_embedder_v2_override(fn: _FactoryFn | None) -> None:
-    """Test seam mirror of ``set_embedder_override`` for the v2 model.
-    Production leaves this None. Independent of the v1 override so
-    tests can simulate a mid-migration state (v1 active + v2
-    available) realistically."""
-    global _override_v2
-    _override_v2 = fn
+def set_hosted_embedder_override(fn: _FactoryFn | None) -> None:
+    """Test seam for the HOSTED tier: when set, ``resolve_hosted_embedder``
+    returns this fake for every org (basis our_key), so tests can exercise
+    the local+hosted dual-write/dual-read without a real Scaleway call.
+    Production leaves this None."""
+    global _hosted_override
+    _hosted_override = fn
+
+
+def get_hosted_embedder_override() -> _FactoryFn | None:
+    """The hosted-tier test override, consumed by the embedder resolver."""
+    return _hosted_override
 
 
 def get_embedder() -> Embedder:
-    """The v1 (legacy) embedder. Settings ``embed_model`` picks the
-    model name; default keeps the OSS multilingual-e5-small. Override
-    via ``set_embedder_override`` for tests."""
+    """The LOCAL embedder (the always-on rank-0 tier, ``embedding``
+    column). Settings ``embed_model`` picks the model (default bge-m3,
+    1024d). Override via ``set_embedder_override`` for tests."""
     if _override is not None:
         return _override()
     global _singleton
@@ -155,24 +256,6 @@ def get_embedder() -> Embedder:
 
         _singleton = LocalEmbedder(_gs().embed_model)
     return _singleton
-
-
-def get_embedder_v2() -> Embedder | None:
-    """The v2 embedder, only configured when ``embed_model_v2`` is
-    set (empty string = no v2 model = migration off). Returns None
-    when migration is not active; callers degrade to v1-only writes.
-    """
-    if _override_v2 is not None:
-        return _override_v2()
-    from flow_core.config import get_settings as _gs
-
-    settings = _gs()
-    if not settings.embed_model_v2:
-        return None
-    global _singleton_v2
-    if _singleton_v2 is None:
-        _singleton_v2 = LocalEmbedder(settings.embed_model_v2)
-    return _singleton_v2
 
 
 def embedder_available() -> bool:
@@ -204,3 +287,8 @@ async def embed_batch(emb: Embedder, texts: list[str]) -> list[EmbedResult]:
 
 def embed_dim() -> int:
     return get_settings().embed_dim
+
+
+def embed_dim_hosted() -> int:
+    """Fixed dim of the hosted tier (``embedding_hosted``, halfvec)."""
+    return get_settings().embed_dim_hosted

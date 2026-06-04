@@ -28,10 +28,12 @@ from flow_api.routers import (
     dependencies,
     dispatch,
     email,
+    embedder_provider,
     executors,
     export,
     garden,
     invoices,
+    llm_provider,
     lookup,
     memory,
     memory_channels,
@@ -246,6 +248,8 @@ def create_app() -> FastAPI:
     app.include_router(advisory.router)
     app.include_router(email.router)
     app.include_router(billing.router)
+    app.include_router(llm_provider.router)
+    app.include_router(embedder_provider.router)
     app.include_router(memory.router)
     app.include_router(memory_channels.router)
     app.include_router(search.router)

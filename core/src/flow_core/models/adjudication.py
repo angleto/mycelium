@@ -47,8 +47,8 @@ from flow_core.models.base import (
     VersionMixin,
 )
 
-# Match the embedder dimension fixed by ADR-0005 / migration 0010.
-EMBED_DIM = 384
+# Must match the fleet embedding dim (flow_core.models.memory_blob.EMBED_DIM).
+EMBED_DIM = 1024
 
 
 class AdjudicationStatus(enum.StrEnum):

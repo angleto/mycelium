@@ -2742,6 +2742,82 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/llm-provider": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Provider */
+        get: operations["get_provider_llm_provider_get"];
+        /** Set Provider */
+        put: operations["set_provider_llm_provider_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/llm-provider/scaleway/models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Scaleway Models
+         * @description Curated Scaleway roster intersected with the org's live ``/v1/models``.
+         */
+        get: operations["scaleway_models_llm_provider_scaleway_models_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/embedder-provider": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Provider */
+        get: operations["get_provider_embedder_provider_get"];
+        /** Set Provider */
+        put: operations["set_provider_embedder_provider_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/embedder-provider/scaleway/models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Scaleway Embedding Models
+         * @description Curated Scaleway embedding roster intersected with live ``/v1/models``.
+         */
+        get: operations["scaleway_embedding_models_embedder_provider_scaleway_models_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/memory/blobs": {
         parameters: {
             query?: never;
@@ -2807,11 +2883,11 @@ export interface paths {
         };
         /**
          * Migration Status
-         * @description Embedding migration coverage for this workspace (task 1d081395):
-         *     {total, migrated, pending}. ``total`` is blobs with non-NULL text;
-         *     ``migrated`` is blobs already populated with the v2 embedding;
-         *     ``pending`` is the worker's TODO. Used to decide when to run the
-         *     cutover migration that drops v1 columns.
+         * @description Embedding backfill coverage for this workspace (task 5276207e):
+         *     {total, migrated, pending, hosted}. ``total`` is blobs with non-NULL
+         *     text; ``migrated`` is blobs with the always-on LOCAL vector; ``hosted``
+         *     is blobs with the optional hosted vector; ``pending`` is the local
+         *     backfill's TODO.
          */
         get: operations["migration_status__memory_migration_status_get"];
         put?: never;
@@ -2858,11 +2934,10 @@ export interface paths {
         put?: never;
         /**
          * Migrate Embeddings
-         * @description Admin-gated one-shot trigger: run the v2 embedding backfill on
-         *     this workspace now (don't wait for the worker tick). Returns
-         *     ``{migrated, batch_size}``; if migrated == batch_size, more rows
-         *     are pending -- re-call to drain. No-op when v2 model isn't
-         *     configured.
+         * @description Admin-gated one-shot trigger: run the embedding backfill (both
+         *     tiers) on this workspace now (don't wait for the worker tick).
+         *     Returns ``{migrated, batch_size}``; if migrated == batch_size, more
+         *     rows are pending -- re-call to drain.
          */
         post: operations["migrate_embeddings__memory_migrate_embeddings_post"];
         delete?: never;
@@ -5968,6 +6043,36 @@ export interface components {
             /** Assignee Ids */
             assignee_ids?: string[];
         };
+        /**
+         * EmbedderProviderOut
+         * @description The org's hosted-embedder selection. The BYOK key is NEVER returned;
+         *     ``has_key`` reports whether one is stored.
+         */
+        EmbedderProviderOut: {
+            /** Provider */
+            provider: string;
+            /** Model */
+            model: string | null;
+            /** Base Url */
+            base_url: string | null;
+            /** Has Key */
+            has_key: boolean;
+            /** Is Active */
+            is_active: boolean;
+            /** Version */
+            version: number;
+        };
+        /** EmbedderProviderSetIn */
+        EmbedderProviderSetIn: {
+            /** Provider */
+            provider: string;
+            /** Model */
+            model?: string | null;
+            /** Base Url */
+            base_url?: string | null;
+            /** Api Key */
+            api_key?: string | null;
+        };
         /** ErasedOut */
         ErasedOut: {
             /** Deleted */
@@ -7002,6 +7107,36 @@ export interface components {
             default_payment_terms_days?: number | null;
             /** Is Default */
             is_default?: boolean | null;
+        };
+        /**
+         * LLMProviderOut
+         * @description The org's LLM provider selection. The BYOK key is NEVER returned;
+         *     ``has_key`` reports whether one is stored (mirrors EmailAccountOut).
+         */
+        LLMProviderOut: {
+            /** Provider */
+            provider: string;
+            /** Model */
+            model: string | null;
+            /** Base Url */
+            base_url: string | null;
+            /** Has Key */
+            has_key: boolean;
+            /** Is Active */
+            is_active: boolean;
+            /** Version */
+            version: number;
+        };
+        /** LLMProviderSetIn */
+        LLMProviderSetIn: {
+            /** Provider */
+            provider: string;
+            /** Model */
+            model?: string | null;
+            /** Base Url */
+            base_url?: string | null;
+            /** Api Key */
+            api_key?: string | null;
         };
         /** LedgerOut */
         LedgerOut: {
@@ -8383,6 +8518,11 @@ export interface components {
         RevisionSummaryIn: {
             /** Summary */
             summary?: string | null;
+        };
+        /** ScalewayModelsOut */
+        ScalewayModelsOut: {
+            /** Models */
+            models: string[];
         };
         /**
          * ScheduleMode
@@ -16600,6 +16740,218 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BalanceOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_provider_llm_provider_get: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LLMProviderOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_provider_llm_provider_put: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LLMProviderSetIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LLMProviderOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    scaleway_models_llm_provider_scaleway_models_get: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScalewayModelsOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_provider_embedder_provider_get: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EmbedderProviderOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_provider_embedder_provider_put: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EmbedderProviderSetIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EmbedderProviderOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    scaleway_embedding_models_embedder_provider_scaleway_models_get: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScalewayModelsOut"];
                 };
             };
             /** @description Validation Error */

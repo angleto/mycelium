@@ -4,15 +4,14 @@ embedding. Early-exits when the query couldn't be embedded (no
 optional dep, dim mismatch upstream) so the pipeline degrades to
 lexical-only without raising.
 
-Embedding migration v1/v2 (task `1d081395`): during the migration
-window both columns may exist. The stage picks the column to query
-based on the QUERY embedding's dim: if the query was embedded with
-the v2 model (configured ``embed_model_v2``), we search on
-``embedding_v2``; otherwise we search on the legacy ``embedding``.
-A separate ``query_embedding_v2`` slot on RetrievalContext carries
-the v2 vector for the dual-read case; when both are present the
-stage emits TWO branches and merges them so RRF can fuse v1-only
-rows (legacy, not yet backfilled) with v2-only / v2+v1 rows.
+Two embedding tiers (task 5276207e), fused by RRF: the LOCAL tier
+(``embedding`` vector(1024), always present) and the optional HOSTED
+tier (``embedding_hosted`` halfvec(4000), per-org Scaleway). The query
+is embedded by whichever tiers the org has: ``ctx.query_embedding``
+carries the local vector, ``ctx.extras['query_embedding_hosted']`` the
+hosted one. When both exist the stage emits TWO branches and merges
+them so RRF fuses local-only rows (no hosted tier / not yet backfilled)
+with hosted rows.
 """
 
 from __future__ import annotations
@@ -43,9 +42,9 @@ class SemanticDenseStage(Stage):
         candidates: list[Candidate],
     ) -> list[Candidate]:
         # No embedding at all -> degrade to lexical-only.
-        v1: EmbedResult | None = ctx.query_embedding
-        v2: EmbedResult | None = ctx.extras.get("query_embedding_v2")
-        if v1 is None and v2 is None:
+        local: EmbedResult | None = ctx.query_embedding
+        hosted: EmbedResult | None = ctx.extras.get("query_embedding_hosted")
+        if local is None and hosted is None:
             return candidates
         # pgvector iterative_scan: filter (org/project/tag) runs BEFORE
         # kNN so a selective tag still surfaces matches. SET LOCAL
@@ -53,31 +52,30 @@ class SemanticDenseStage(Stage):
         # once even if we run both branches.
         await ctx.session.execute(text("SET LOCAL hnsw.iterative_scan = strict_order"))
         new: list[Candidate] = []
-        # v2 branch: rows that have been migrated. Run first so its
-        # rank position is lower (= more important to RRF) on the
-        # rows where both vectors exist.
-        if v2 is not None:
-            stmt_v2 = (
+        # Hosted tier first so its rank position is lower (= more important
+        # to RRF) on rows where both tiers exist.
+        if hosted is not None:
+            stmt_hosted = (
                 select(MemoryBlob.id)
                 .where(
                     MemoryBlob.org_id == ctx.org_id,
                     ctx.project_pred,
-                    MemoryBlob.embedding_v2.is_not(None),
+                    MemoryBlob.embedding_hosted.is_not(None),
                     *ctx.tag_clauses,
                 )
-                .order_by(MemoryBlob.embedding_v2.max_inner_product(v2.vector))
+                .order_by(MemoryBlob.embedding_hosted.max_inner_product(hosted.vector))
                 .limit(self.oversample)
             )
-            rows_v2 = (await ctx.session.execute(stmt_v2)).scalars().all()
+            rows_hosted = (await ctx.session.execute(stmt_hosted)).scalars().all()
             new.extend(
                 Candidate(
                     blob_id=bid,
-                    scores_by_stage={f"{self.name}_v2": float(i + 1)},
+                    scores_by_stage={f"{self.name}_hosted": float(i + 1)},
                 )
-                for i, bid in enumerate(rows_v2)
+                for i, bid in enumerate(rows_hosted)
             )
-        if v1 is not None:
-            stmt_v1 = (
+        if local is not None:
+            stmt_local = (
                 select(MemoryBlob.id)
                 .where(
                     MemoryBlob.org_id == ctx.org_id,
@@ -85,15 +83,15 @@ class SemanticDenseStage(Stage):
                     MemoryBlob.embedding.is_not(None),
                     *ctx.tag_clauses,
                 )
-                .order_by(MemoryBlob.embedding.max_inner_product(v1.vector))
+                .order_by(MemoryBlob.embedding.max_inner_product(local.vector))
                 .limit(self.oversample)
             )
-            rows_v1 = (await ctx.session.execute(stmt_v1)).scalars().all()
+            rows_local = (await ctx.session.execute(stmt_local)).scalars().all()
             new.extend(
                 Candidate(
                     blob_id=bid,
                     scores_by_stage={self.name: float(i + 1)},
                 )
-                for i, bid in enumerate(rows_v1)
+                for i, bid in enumerate(rows_local)
             )
         return merge_candidates(candidates, new)

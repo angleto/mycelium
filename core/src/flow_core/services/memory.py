@@ -23,7 +23,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from flow_core.config import get_settings
-from flow_core.embedder import Embedder, EmbedResult, get_embedder, get_embedder_v2
+from flow_core.embedder import Embedder, EmbedResult, get_embedder
 from flow_core.errors import DomainError, NotFoundError
 from flow_core.i18n import MessageCode
 from flow_core.models.billing import CostBasis
@@ -224,8 +224,12 @@ async def write_blob(
     channel_id = await _resolve_channel_tag_id(
         session, org_id=org_id, channel_tag_id=channel_tag_id, channel_key=channel_key
     )
+    from flow_core.services.embedder_resolver import resolve_hosted_embedder
+
     emb = embedder or get_embedder()
-    expected = get_settings().embed_dim
+    settings = get_settings()
+    expected = settings.embed_dim
+    expected_hosted = settings.embed_dim_hosted
     selected = chunker or pick_chunker(namespace=namespace, text=text_body)
     pieces = selected.chunks(text_body)
     # Cache tag computation outside the loop: explicit/channel/inherited
@@ -235,13 +239,12 @@ async def write_blob(
     channel = {channel_id} if channel_id is not None else set()
     all_tags = explicit | inherited | channel
 
-    # v2 embedder optional: when configured, every new write populates
-    # both columns so the search surface can dual-read immediately
-    # without waiting for the worker to backfill. Cost is 2x embed
-    # per write, accepted for the duration of the migration window.
-    emb_v2 = get_embedder_v2()
-    settings_for_v2 = get_settings()
-    expected_v2 = settings_for_v2.embed_dim_v2
+    # Optional HOSTED tier: when the org has a hosted embedder, every write
+    # also populates embedding_hosted (metered on the org's basis) so search
+    # fuses both tiers immediately. None => local-only writes.
+    hosted = await resolve_hosted_embedder(session, org_id)
+    hosted_emb = hosted[0] if hosted is not None else None
+    hosted_basis = hosted[1] if hosted is not None else CostBasis.local
 
     first_blob: MemoryBlob | None = None
     for piece in pieces:
@@ -259,24 +262,25 @@ async def write_blob(
                 units_in=Decimal(result.tokens),
                 basis=CostBasis.local,
             )
-        # v2 path: populate the v2 columns when the migration target
-        # model is configured. Dim mismatch on v2 is a misconfiguration
-        # of ``embed_dim_v2`` (the column type is fixed at migration
-        # time), surface it; the v1 write above already succeeded so
-        # the row is still searchable in keyword + v1 semantic.
-        result_v2 = await _safe_embed(emb_v2, piece.text) if emb_v2 is not None else None
-        if result_v2 is not None and len(result_v2.vector) != expected_v2:
-            raise DomainError(MessageCode.MEMORY_DIM_MISMATCH, expected=str(expected_v2))
-        if result_v2 is not None:
+        # Hosted tier: populate embedding_hosted when the org has a hosted
+        # embedder. A dim mismatch is a misconfiguration (the column type is
+        # fixed); surface it. The local write above already succeeded so the
+        # row stays searchable in keyword + local semantic regardless.
+        result_hosted = (
+            await _safe_embed(hosted_emb, piece.text) if hosted_emb is not None else None
+        )
+        if result_hosted is not None and len(result_hosted.vector) != expected_hosted:
+            raise DomainError(MessageCode.MEMORY_DIM_MISMATCH, expected=str(expected_hosted))
+        if result_hosted is not None:
             await billing.meter_if_billable(
                 session,
                 org_id=org_id,
                 actor_id=actor_id,
                 operation_id=operation_id,
-                op="embed_v2",
-                model_id=result_v2.model_id,
-                units_in=Decimal(result_v2.tokens),
-                basis=CostBasis.local,
+                op="embed_hosted",
+                model_id=result_hosted.model_id,
+                units_in=Decimal(result_hosted.tokens),
+                basis=hosted_basis,
             )
         now = dt.datetime.now(tz=dt.UTC)
         blob = MemoryBlob(
@@ -288,9 +292,9 @@ async def write_blob(
             embedding=result.vector if result is not None else None,
             model_id=result.model_id if result is not None else _NO_EMBED_MODEL,
             dim=len(result.vector) if result is not None else expected,
-            embedding_v2=result_v2.vector if result_v2 is not None else None,
-            model_id_v2=result_v2.model_id if result_v2 is not None else None,
-            dim_v2=len(result_v2.vector) if result_v2 is not None else None,
+            embedding_hosted=result_hosted.vector if result_hosted is not None else None,
+            model_id_hosted=result_hosted.model_id if result_hosted is not None else None,
+            dim_hosted=len(result_hosted.vector) if result_hosted is not None else None,
             access_count=1,
             last_accessed_at=now,
             importance=importance,
@@ -351,6 +355,8 @@ async def retrieve(
     channel_id = await _resolve_channel_tag_id(
         session, org_id=org_id, channel_tag_id=channel_tag_id, channel_key=channel_key
     )
+    from flow_core.services.embedder_resolver import resolve_hosted_embedder
+
     emb = embedder or get_embedder()
     qres = await _safe_embed(emb, query)
     if qres is not None:
@@ -367,22 +373,24 @@ async def retrieve(
             units_in=Decimal(qres.tokens),
             basis=CostBasis.local,
         )
-    # Optional v2 query embed for the dual-read path: when a v2 model
-    # is configured we embed the query with both so SemanticDenseStage
-    # can hit both branches in one pass. Metered separately so the bill
-    # tracks the migration cost explicitly.
-    emb_v2_inst = get_embedder_v2()
-    qres_v2 = await _safe_embed(emb_v2_inst, query) if emb_v2_inst is not None else None
-    if qres_v2 is not None:
+    # Optional hosted query embed for the dual-tier fused read: when the
+    # org has a hosted embedder we embed the query with it too so
+    # SemanticDenseStage hits both tiers in one pass. Metered on the
+    # org's basis (our_key/byok), not local.
+    hosted = await resolve_hosted_embedder(session, org_id)
+    hosted_emb = hosted[0] if hosted is not None else None
+    hosted_basis = hosted[1] if hosted is not None else CostBasis.local
+    qres_hosted = await _safe_embed(hosted_emb, query) if hosted_emb is not None else None
+    if qres_hosted is not None:
         await billing.meter_if_billable(
             session,
             org_id=org_id,
             actor_id=actor_id,
             operation_id=operation_id,
-            op="embed_query_v2",
-            model_id=qres_v2.model_id,
-            units_in=Decimal(qres_v2.tokens),
-            basis=CostBasis.local,
+            op="embed_query_hosted",
+            model_id=qres_hosted.model_id,
+            units_in=Decimal(qres_hosted.tokens),
+            basis=hosted_basis,
         )
 
     # Build the per-call context (predicates pre-computed once) and run
@@ -436,7 +444,7 @@ async def retrieve(
         project_pred=pred,
         tag_clauses=tag_clauses,
         query_embedding=qres,
-        extras={"query_embedding_v2": qres_v2} if qres_v2 is not None else {},
+        extras={"query_embedding_hosted": qres_hosted} if qres_hosted is not None else {},
     )
     # Reranker stage is added between RRF and the final ordering only
     # when the caller asked for it (``rerank=True``) OR the workspace

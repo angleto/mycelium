@@ -1748,6 +1748,53 @@ class ByokFactorIn(BaseModel):
     factor: Decimal = Field(ge=0)
 
 
+class LLMProviderOut(BaseModel):
+    """The org's LLM provider selection. The BYOK key is NEVER returned;
+    ``has_key`` reports whether one is stored (mirrors EmailAccountOut)."""
+
+    provider: str
+    model: str | None
+    base_url: str | None
+    has_key: bool
+    is_active: bool
+    version: int
+
+
+class LLMProviderSetIn(BaseModel):
+    provider: str = Field(min_length=1, max_length=20)
+    model: str | None = Field(default=None, max_length=160)
+    base_url: str | None = Field(default=None, max_length=400)
+    # api_key semantics: ``None`` leaves the stored key untouched, ``""``
+    # clears it (back to our-key/local), a value stores it as the org's BYOK
+    # key (fail-closed probed server-side before it is persisted active).
+    api_key: str | None = None
+
+
+class ScalewayModelsOut(BaseModel):
+    models: list[str]
+
+
+class EmbedderProviderOut(BaseModel):
+    """The org's hosted-embedder selection. The BYOK key is NEVER returned;
+    ``has_key`` reports whether one is stored."""
+
+    provider: str
+    model: str | None
+    base_url: str | None
+    has_key: bool
+    is_active: bool
+    version: int
+
+
+class EmbedderProviderSetIn(BaseModel):
+    provider: str = Field(min_length=1, max_length=20)
+    model: str | None = Field(default=None, max_length=160)
+    base_url: str | None = Field(default=None, max_length=400)
+    # Same semantics as the LLM provider: None=leave, ""=clear, value=store
+    # (fail-closed probed server-side: the model must emit the hosted dim).
+    api_key: str | None = None
+
+
 # --- F6: hierarchical memory (FR-8, docs/adr/0005, 0007, 0016) ---
 
 
