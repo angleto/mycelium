@@ -122,6 +122,7 @@ def _out(
     n: Note,
     tags: list[Tag] | None = None,
     primary_task_id: uuid.UUID | None = None,
+    task_title: str | None = None,
     derived_task_ids: list[uuid.UUID] | None = None,
     linked_task_count: int = 0,
     parts: list[NotePartOut] | None = None,
@@ -147,6 +148,7 @@ def _out(
         id=n.id,
         project_id=project_id,
         task_id=primary_task_id,
+        task_title=task_title,
         kind=n.kind,
         status=n.status,
         title=n.title,
@@ -221,10 +223,14 @@ async def create_note(
     derived = await note_links_svc.derived_task_ids_for_notes(
         ctx.session, org_id=ctx.org_id, note_ids=[n.id]
     )
+    titles = await note_links_svc.task_titles_for_ids(
+        ctx.session, org_id=ctx.org_id, task_ids=[pid] if pid else []
+    )
     return _out(
         n,
         tagmap.get(n.id, []),
         primary_task_id=pid,
+        task_title=titles.get(pid) if pid else None,
         derived_task_ids=derived.get(n.id, []),
         transcript=await svc.get_body(ctx.session, note_id=n.id),
     )
@@ -273,6 +279,9 @@ async def list_notes(
     count_map = await note_links_svc.linked_task_counts_for_notes(
         ctx.session, org_id=ctx.org_id, note_ids=ids
     )
+    title_map = await note_links_svc.task_titles_for_ids(
+        ctx.session, org_id=ctx.org_id, task_ids=list(pid_map.values())
+    )
     # Phase 6 final: ``transcript`` on the API is derived from
     # note_part(ord=0)+ joined. One batched query keeps the list
     # endpoint a single round-trip.
@@ -281,7 +290,8 @@ async def list_notes(
         _out(
             n,
             tagmap.get(n.id, []),
-            primary_task_id=pid_map.get(n.id),
+            primary_task_id=(pid := pid_map.get(n.id)),
+            task_title=title_map.get(pid) if pid else None,
             derived_task_ids=derived_map.get(n.id, []),
             linked_task_count=count_map.get(n.id, 0),
             transcript=bodies.get(n.id),
@@ -306,6 +316,9 @@ async def get_note(
     counts = await note_links_svc.linked_task_counts_for_notes(
         ctx.session, org_id=ctx.org_id, note_ids=[n.id]
     )
+    titles = await note_links_svc.task_titles_for_ids(
+        ctx.session, org_id=ctx.org_id, task_ids=[pid] if pid else []
+    )
     # Phase 2a: GET /notes/{id} includes the ordered parts plus the
     # caller's per-part collapse state. List endpoints leave parts
     # empty for payload economy; the single-note path is the canonical
@@ -317,6 +330,7 @@ async def get_note(
         n,
         tagmap.get(n.id, []),
         primary_task_id=pid,
+        task_title=titles.get(pid) if pid else None,
         derived_task_ids=derived.get(n.id, []),
         linked_task_count=counts.get(n.id, 0),
         parts=parts,

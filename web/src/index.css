@@ -3217,10 +3217,13 @@ button.btn--danger:hover {
   gap: 0.6rem;
 }
 /* Running stop button carries the live readout; tabular figures keep
-   its width from jittering as the seconds tick. */
+   its width from jittering as the seconds tick. It is a filled accent
+   chip (green background), so the readout must use ``--accent-fg`` --
+   the foreground designed to contrast the accent. Using ``--accent``
+   here printed green-on-green and was unreadable. */
 .tasktimer__stop {
   font-variant-numeric: tabular-nums;
-  color: var(--accent);
+  color: var(--accent-fg);
 }
 .notebanner {
   display: flex;
@@ -3232,6 +3235,13 @@ button.btn--danger:hover {
   border-radius: 8px;
   background: var(--surface-2);
   font-size: 0.84rem;
+}
+/* The linked task's title, shown inline in the work-note banner and
+   doubling as the "open task" link. Weighted up so it reads as the
+   subject of the sentence, not as boilerplate. */
+.notebanner__task {
+  font-weight: 600;
+  color: var(--text-h);
 }
 
 /* Time: inline entry edit + clickable by-task report rows. */

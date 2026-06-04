@@ -506,6 +506,32 @@ async def primary_task_ids_for_notes(
     return out
 
 
+async def task_titles_for_ids(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    task_ids: list[uuid.UUID],
+) -> dict[uuid.UUID, str | None]:
+    """Batch ``{task_id: title}`` for the given task ids. Includes
+    archived and soft-deleted tasks on purpose: a note's "work note"
+    banner shows the linked task's title regardless of the task's
+    lifecycle state, so it must not blank out for a note linked to a
+    closed task. Duplicate ids in the input collapse; missing ids are
+    simply absent from the result."""
+    uniq = list({tid for tid in task_ids if tid is not None})
+    if not uniq:
+        return {}
+    rows = (
+        await session.execute(
+            select(Task.id, Task.title).where(
+                Task.org_id == org_id,
+                Task.id.in_(uniq),
+            )
+        )
+    ).all()
+    return {tid: title for tid, title in rows}
+
+
 async def derived_task_ids_for_notes(
     session: AsyncSession,
     *,

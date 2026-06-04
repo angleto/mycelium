@@ -920,8 +920,17 @@ export function NotesRoute() {
                   {sel.task_id ? (
                     <>
                       <span>{t('notes.linkedTask')}</span>
-                      <Link to={`/tasks/${sel.task_id}`}>
-                        {t('notes.openTask')}
+                      {/* The task TITLE is the link: visible inline (no
+                          longer hidden behind a generic "Open task"),
+                          and clicking it still opens the task. Falls
+                          back to the generic label for payloads that
+                          predate ``task_title`` on NoteOut. */}
+                      <Link
+                        to={`/tasks/${sel.task_id}`}
+                        className="notebanner__task"
+                        title={t('notes.openTask')}
+                      >
+                        {sel.task_title ?? t('notes.openTask')}
                       </Link>
                       <button
                         type="button"
@@ -932,7 +941,16 @@ export function NotesRoute() {
                         {t('notes.unlinkTask')}
                       </button>
                       <span className="modal__sp" />
-                      <TaskTimer taskId={sel.task_id} noteId={sel.id} />
+                      {/* Start (⏱▶ serial / ⏱▶▶ parallel) and stop the
+                          timer right here -- billed to the linked task
+                          without opening it. ``labeled`` spells the
+                          start actions out so the affordance is not
+                          missed in the banner. */}
+                      <TaskTimer
+                        taskId={sel.task_id}
+                        noteId={sel.id}
+                        labeled
+                      />
                     </>
                   ) : (
                     <>

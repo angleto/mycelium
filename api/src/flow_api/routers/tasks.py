@@ -157,6 +157,7 @@ def _note_out(
     n: Note,
     tags: list[Tag] | None = None,
     primary_task_id: uuid.UUID | None = None,
+    task_title: str | None = None,
     transcript: str | None = None,
 ) -> NoteOut:
     # Built exactly like routers/notes.py::_out so the SPA gets the same
@@ -174,6 +175,7 @@ def _note_out(
         id=n.id,
         project_id=project_id,
         task_id=primary_task_id,
+        task_title=task_title,
         kind=n.kind,
         status=n.status,
         title=n.title,
@@ -884,10 +886,14 @@ async def get_or_create_task_note(
     pid = await note_links_svc.primary_task_id_for_note(
         ctx.session, org_id=ctx.org_id, note_id=n.id
     )
+    titles = await note_links_svc.task_titles_for_ids(
+        ctx.session, org_id=ctx.org_id, task_ids=[pid] if pid else []
+    )
     return _note_out(
         n,
         tagmap.get(n.id, []),
         primary_task_id=pid,
+        task_title=titles.get(pid) if pid else None,
         transcript=await notes_svc.get_body(ctx.session, note_id=n.id),
     )
 
@@ -914,10 +920,14 @@ async def create_task_note(
     pid = await note_links_svc.primary_task_id_for_note(
         ctx.session, org_id=ctx.org_id, note_id=n.id
     )
+    titles = await note_links_svc.task_titles_for_ids(
+        ctx.session, org_id=ctx.org_id, task_ids=[pid] if pid else []
+    )
     return _note_out(
         n,
         tagmap.get(n.id, []),
         primary_task_id=pid,
+        task_title=titles.get(pid) if pid else None,
         transcript=await notes_svc.get_body(ctx.session, note_id=n.id),
     )
 

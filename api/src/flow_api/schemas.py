@@ -2066,6 +2066,12 @@ class NoteOut(BaseModel):
     # Set when the note is a task's "work note" (the SPA detects it to
     # open it from the task and bill its timer to the task).
     task_id: uuid.UUID | None = None
+    # Title of the linked task (``task_id``), denormalized so the note's
+    # "work note" banner can show *which* task time is billed to without
+    # a second round-trip. Resolved regardless of the task's lifecycle
+    # state (archived / soft-deleted), so the banner never blanks out for
+    # a note linked to a closed task. None when the note has no task.
+    task_title: str | None = None
     kind: NoteKind
     status: NoteStatus
     title: str | None

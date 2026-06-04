@@ -18,9 +18,16 @@ import { useRunningTimers, refreshRunning } from '../lib/useRunningTimer'
 export function TaskTimer({
   taskId,
   noteId,
+  labeled = false,
 }: {
   taskId: string
   noteId?: string
+  // Show a text label next to the start glyphs (⏱▶ Start / ⏱▶▶ Start
+  // parallel) instead of the icon alone. Used where there is room and
+  // the affordance must be obvious -- e.g. the note's work-note banner,
+  // where an icon-only control was easy to miss. Left off in the
+  // compact call sites (task list rows, kanban cards).
+  labeled?: boolean
 }) {
   const { t } = useTranslation()
   const { running, now } = useRunningTimers()
@@ -84,7 +91,7 @@ export function TaskTimer({
             aria-label={t('time.startSerial')}
             onClick={() => void start(false)}
           >
-            ⏱▶
+            ⏱▶{labeled ? ` ${t('time.startSerial')}` : ''}
           </button>
           <button
             type="button"
@@ -94,7 +101,7 @@ export function TaskTimer({
             aria-label={t('time.startParallel')}
             onClick={() => void start(true)}
           >
-            ⏱▶▶
+            ⏱▶▶{labeled ? ` ${t('time.startParallel')}` : ''}
           </button>
         </>
       )}

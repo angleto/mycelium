@@ -391,3 +391,44 @@ async def test_deleting_note_with_billed_time_keeps_entry_on_delete_set_null() -
         # Billing rollup is intact: the task is still there for invoicing.
         assert after["task_id"] == tid
         assert after["duration_seconds"] == 7200
+
+
+async def test_note_serializer_carries_linked_task_title() -> None:
+    """The work-note banner shows *which* task time is billed to:
+    ``NoteOut.task_title`` is the linked task's title, resolved on
+    create, GET, and list. Crucially it survives the task being archived
+    -- a note linked to a closed task must not blank out, which a
+    client-side ``/tasks`` lookup (filtered to live tasks) could not
+    guarantee."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as c:
+        _, h = await _signup(c)
+
+        task = (await c.post("/tasks", headers=h, json={"title": "Onboard Acme"})).json()
+        tid, tver = task["id"], task["version"]
+
+        # Create path (POST /tasks/{id}/notes) carries the title.
+        note = (await c.post(f"/tasks/{tid}/notes", headers=h, json={})).json()
+        nid = note["id"]
+        assert note["task_id"] == tid
+        assert note["task_title"] == "Onboard Acme"
+
+        # GET /notes/{id} (the deep link the banner opens) carries it.
+        assert (await c.get(f"/notes/{nid}", headers=h)).json()["task_title"] == "Onboard Acme"
+
+        # List endpoint carries it too (the list-click open path).
+        lst = (await c.get("/notes", headers=h)).json()
+        row = next(n for n in lst if n["id"] == nid)
+        assert row["task_title"] == "Onboard Acme"
+
+        # Archive the task: it drops out of the default task list, but
+        # the note still reports the title (resolved server-side with no
+        # lifecycle filter).
+        r = await c.post(f"/tasks/{tid}/archive", headers=h, json={"expected_version": tver})
+        assert r.status_code == 200, r.text
+        assert (await c.get(f"/notes/{nid}", headers=h)).json()["task_title"] == "Onboard Acme"
+
+        # A note with no task has task_title None.
+        plain = (await c.post("/notes", headers=h, json={"kind": "text", "text": "x"})).json()
+        assert plain["task_id"] is None
+        assert plain["task_title"] is None

@@ -4124,6 +4124,34 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/attachments/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Stream Attachment
+         * @description Token-free large-file upload. The raw request body is streamed
+         *     straight through the backend gateway to the object store, chunk by
+         *     chunk: the whole file is never buffered in memory, never written to
+         *     local disk, and S3 is never exposed to the client (medical data, the
+         *     gateway model). The bytes ride the HTTP body, not an MCP tool
+         *     argument, so the upload costs zero tokens. Requires the s3 attachment
+         *     backend (``ATTACHMENT_STREAM_UNSUPPORTED`` otherwise). Exactly one
+         *     parent (``note_id`` xor ``task_id``) must be given; the file name is
+         *     a query param and the mime type the request ``Content-Type``.
+         */
+        post: operations["stream_attachment_attachments_stream_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/attachments/{attachment_id}/download": {
         parameters: {
             query?: never;
@@ -7492,6 +7520,8 @@ export interface components {
             project_id: string | null;
             /** Task Id */
             task_id?: string | null;
+            /** Task Title */
+            task_title?: string | null;
             kind: components["schemas"]["NoteKind"];
             status: components["schemas"]["NoteStatus"];
             /** Title */
@@ -19614,6 +19644,44 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["GardenLinkSuggestionsOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    stream_attachment_attachments_stream_post: {
+        parameters: {
+            query: {
+                filename: string;
+                note_id?: string | null;
+                task_id?: string | null;
+            };
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AttachmentOut"];
                 };
             };
             /** @description Validation Error */
