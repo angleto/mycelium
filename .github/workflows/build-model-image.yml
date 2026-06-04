@@ -1,0 +1,60 @@
+# Flow — model image build & push (public repo, free CI).
+# ========================================================
+# Builds the linux/arm64 model image (docker/models.Dockerfile) and pushes
+# it to GHCR. This is the heavy, rarely-changing ML checkpoint (BAAI/bge-m3,
+# ~2.3 GiB) that the backend and worker images consume via `COPY --from`,
+# so it is built ONCE per model version and reused across every app build.
+#
+# Manual only: run this BEFORE the first `build-images` that references a
+# new `models:<tag>`, and again only when you bump the model (new tag +
+# the matching `COPY --from=ghcr.io/angleto/flow/models:<tag>` line in
+# backend.Dockerfile and worker.Dockerfile). Routine app releases do NOT
+# trigger it — the existing model layer is reused and deduplicated by GHCR.
+
+name: build-model-image
+
+on:
+  workflow_dispatch:
+    inputs:
+      model_tag:
+        description: "Model image tag to push (e.g. bge-m3-1)"
+        required: true
+        default: "bge-m3-1"
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: flow-build-model-image-${{ github.event.inputs.model_tag }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    # Native arm64 hosted runner (free for public repos) so the model
+    # image matches the cluster arch the app images COPY --from it on.
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - name: Checkout (Dockerfile)
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build + push model image
+        env:
+          TAG: ${{ github.event.inputs.model_tag }}
+        run: |
+          set -euo pipefail
+          docker buildx build --platform linux/arm64 \
+            -f docker/models.Dockerfile \
+            -t ghcr.io/angleto/flow/models:"$TAG" \
+            --push .
+          echo "Pushed: ghcr.io/angleto/flow/models:$TAG"
