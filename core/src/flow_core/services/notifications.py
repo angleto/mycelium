@@ -21,6 +21,7 @@ from sqlalchemy import delete, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from flow_core.config import get_settings
 from flow_core.errors import DomainError
 from flow_core.i18n import MessageCode
 from flow_core.models.dependency import TaskDependency
@@ -520,17 +521,20 @@ async def spawn_due(
         )
         # Copy the template's reminder offsets onto the occurrence so it
         # fires the same reminders relative to its anchor.
-        offsets = (
-            (
-                await session.execute(
-                    select(TaskReminder.offset_minutes).where(TaskReminder.task_id == rec.task_id)
-                )
-            )
+        src_reminders = (
+            (await session.execute(select(TaskReminder).where(TaskReminder.task_id == rec.task_id)))
             .scalars()
             .all()
         )
-        for off in offsets:
-            session.add(TaskReminder(org_id=org_id, task_id=new_task.id, offset_minutes=off))
+        for sr in src_reminders:
+            session.add(
+                TaskReminder(
+                    org_id=org_id,
+                    task_id=new_task.id,
+                    offset_minutes=sr.offset_minutes,
+                    channels=sr.channels,
+                )
+            )
         rec.last_spawned_at = ref
         rec.next_run = _advance(rec.next_run, rec.freq, rec.interval)
         if rec.until is not None and rec.next_run > rec.until:
@@ -638,6 +642,10 @@ async def scan_reminders(
     # no per-pref target (the targets are the subscriptions), so it counts
     # as a usable channel only when the user has subscribed a device.
     users_with_push = set((await session.execute(select(PushSubscription.user_id))).scalars().all())
+    # Deep-link base for the task reference appended to every reminder body
+    # (telegram/email render it clickable; the service worker opens it on a
+    # webpush notification click). The SPA routes a single task at /tasks/<id>.
+    base_url = get_settings().frontend_base_url.rstrip("/")
     enqueued = 0
     for t in candidates:
         if t.start_at is not None:
@@ -654,15 +662,16 @@ async def scan_reminders(
         # in 4 months is still in-window once it gets close enough).
         if reference > horizon + dt.timedelta(days=120):
             continue
-        offsets = list(
-            (
-                await session.execute(
-                    select(TaskReminder.offset_minutes).where(TaskReminder.task_id == t.id)
-                )
-            )
+        reminder_rows = list(
+            (await session.execute(select(TaskReminder).where(TaskReminder.task_id == t.id)))
             .scalars()
             .all()
-        ) or [0]
+        )
+        # (offset_minutes, channels) per reminder; no explicit reminders ->
+        # one implicit "at due" reminder on the recipient's default channels.
+        reminder_specs: list[tuple[int, list[str] | None]] = [
+            (r.offset_minutes, r.channels) for r in reminder_rows
+        ] or [(0, None)]
         recipients = set(
             (
                 await session.execute(
@@ -712,7 +721,7 @@ async def scan_reminders(
             when_label = (
                 local.date().isoformat() if date_only else local.strftime("%Y-%m-%d %H:%M %Z")
             )
-            for raw_off in offsets:
+            for raw_off, rchannels in reminder_specs:
                 # Sub-day offsets on a date-only task have no defined
                 # firing minute -> fire at the reference ("at due").
                 off = 0 if date_only and 0 < raw_off < 1440 else raw_off
@@ -720,7 +729,18 @@ async def scan_reminders(
                 if fire_at > horizon:
                     continue
                 when = "at due" if off == 0 else f"{off} min before"
-                for p in prefs:
+                # Per-reminder channel selection: NULL channels = the
+                # recipient's default (all usable prefs); a set list restricts
+                # this reminder to those channels (intersected with usable).
+                eff_prefs = (
+                    prefs
+                    if not rchannels
+                    else [p for p in prefs if p.channel.value in set(rchannels)]
+                )
+                reminder_body = (
+                    f"'{t.title}' is due on {when_label} ({when}).\n{base_url}/tasks/{t.id}"
+                )
+                for p in eff_prefs:
                     await enqueue(
                         session,
                         org_id=org_id,
@@ -729,7 +749,7 @@ async def scan_reminders(
                         channel=p.channel,
                         kind="reminder",
                         title=f"Task due: {t.title}",
-                        body=f"'{t.title}' is due on {when_label} ({when}).",
+                        body=reminder_body,
                         dedupe_key=(
                             f"reminder:{t.id}:{uid}:{p.channel.value}:{fire_at.isoformat()}"
                         ),
@@ -755,6 +775,19 @@ async def list_reminders(
     )
 
 
+def _normalize_channels(channels: list[str] | None) -> list[str] | None:
+    """Keep only valid channel values (dedup, order-preserving). Empty / None
+    -> None, meaning "the recipient's default" (all their enabled channels)."""
+    if not channels:
+        return None
+    valid = {c.value for c in NotificationChannelKind}
+    out: list[str] = []
+    for c in channels:
+        if c in valid and c not in out:
+            out.append(c)
+    return out or None
+
+
 async def add_reminder(
     session: AsyncSession,
     *,
@@ -762,9 +795,11 @@ async def add_reminder(
     actor_id: uuid.UUID,
     task_id: uuid.UUID,
     offset_minutes: int,
+    channels: list[str] | None = None,
 ) -> TaskReminder:
     await require_role(session, org_id, actor_id, Role.member)
     await tasks_svc.get_task(session, org_id=org_id, task_id=task_id)
+    eff_channels = _normalize_channels(channels)
     existing = (
         await session.execute(
             select(TaskReminder).where(
@@ -774,8 +809,17 @@ async def add_reminder(
         )
     ).scalar_one_or_none()
     if existing is not None:
+        # Re-adding the same offset updates its channel selection.
+        if existing.channels != eff_channels:
+            existing.channels = eff_channels
+            await session.flush()
         return existing
-    r = TaskReminder(org_id=org_id, task_id=task_id, offset_minutes=max(0, offset_minutes))
+    r = TaskReminder(
+        org_id=org_id,
+        task_id=task_id,
+        offset_minutes=max(0, offset_minutes),
+        channels=eff_channels,
+    )
     session.add(r)
     await session.flush()
     await audit.log(

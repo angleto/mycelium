@@ -754,6 +754,7 @@ export const en = {
     remAtDue: 'At due',
     remBefore: '{{v}} before',
     remAdd: 'Add reminder',
+    remChannels: 'Channels (none = all enabled):',
     remCustom: 'Custom…',
     remCustomPh: 'min',
     // Scope filter + date focus (TasksRoute toolbar). The scope narrows

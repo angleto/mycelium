@@ -644,7 +644,12 @@ async def list_reminders(
     ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> list[ReminderOut]:
     rows = await notif_svc.list_reminders(ctx.session, org_id=ctx.org_id, task_id=task_id)
-    return [ReminderOut(id=r.id, task_id=r.task_id, offset_minutes=r.offset_minutes) for r in rows]
+    return [
+        ReminderOut(
+            id=r.id, task_id=r.task_id, offset_minutes=r.offset_minutes, channels=r.channels
+        )
+        for r in rows
+    ]
 
 
 @router.post("/{task_id}/reminders", response_model=ReminderOut)
@@ -659,8 +664,11 @@ async def add_reminder(
         actor_id=ctx.user_id,
         task_id=task_id,
         offset_minutes=body.offset_minutes,
+        channels=[c.value for c in body.channels] if body.channels else None,
     )
-    return ReminderOut(id=r.id, task_id=r.task_id, offset_minutes=r.offset_minutes)
+    return ReminderOut(
+        id=r.id, task_id=r.task_id, offset_minutes=r.offset_minutes, channels=r.channels
+    )
 
 
 @router.delete(

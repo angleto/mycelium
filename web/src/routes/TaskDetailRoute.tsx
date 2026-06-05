@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { api, errMessage, workspaceHeader } from '../api/client'
+import { api, authFetch, errMessage, workspaceHeader } from '../api/client'
 import { AnnotationsPanel } from '../components/AnnotationsPanel'
 import { RichEditor } from '../components/RichEditor'
 import { toAnchors, useAnnotations } from '../lib/useAnnotations'
@@ -106,6 +106,8 @@ export function TaskDetailRoute() {
   >([])
   const [remOff, setRemOff] = useState('1440')
   const [remCustom, setRemCustom] = useState(false)
+  // Channels for the next reminder; empty = the user's default (all enabled).
+  const [remChannels, setRemChannels] = useState<string[]>([])
   const [deps, setDeps] = useState<Dep[]>([])
   const [depOther, setDepOther] = useState('')
   const [depQuery, setDepQuery] = useState('')
@@ -618,14 +620,22 @@ export function TaskDetailRoute() {
 
   async function addReminder() {
     setErr(null)
-    const { error } = await api.POST('/tasks/{task_id}/reminders', {
-      params: { header: workspaceHeader(), path: { task_id: id } },
-      body: { offset_minutes: Number(remOff) },
+    // authFetch, not the typed client: ReminderIn.channels is not in the
+    // committed OpenAPI schema yet, and regenerating it would pull in
+    // unrelated in-flight changes.
+    const res = await authFetch(`/tasks/${id}/reminders`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        offset_minutes: Number(remOff),
+        channels: remChannels.length ? remChannels : null,
+      }),
     })
-    if (error) {
-      setErr(errMessage(error))
+    if (!res.ok) {
+      setErr(t('error.generic'))
       return
     }
+    setRemChannels([])
     await reloadReminders()
   }
 
@@ -1117,18 +1127,22 @@ export function TaskDetailRoute() {
           <strong>{t('tasks.reminders')}</strong>{' '}
           <span className="hint">{t('tasks.remHint')}</span>
           <div className="row" style={{ flexWrap: 'wrap' }}>
-            {reminders.map((r) => (
-              <span key={r.id} className="chip">
-                {fmtOffset(r.offset_minutes)}
-                <button
-                  type="button"
-                  className="btn--ghost btn--sm"
-                  onClick={() => void removeReminder(r.id)}
-                >
-                  ✕
-                </button>
-              </span>
-            ))}
+            {reminders.map((r) => {
+              const ch = (r as { channels?: string[] | null }).channels
+              return (
+                <span key={r.id} className="chip">
+                  {fmtOffset(r.offset_minutes)}
+                  {ch && ch.length ? ` · ${ch.join('/')}` : ''}
+                  <button
+                    type="button"
+                    className="btn--ghost btn--sm"
+                    onClick={() => void removeReminder(r.id)}
+                  >
+                    ✕
+                  </button>
+                </span>
+              )
+            })}
           </div>
           <div className="row">
             <select
@@ -1170,6 +1184,21 @@ export function TaskDetailRoute() {
                 }}
               />
             )}
+            <span className="hint">{t('tasks.remChannels')}</span>
+            {['email', 'telegram', 'webpush'].map((c) => (
+              <label key={c} className="chip">
+                <input
+                  type="checkbox"
+                  checked={remChannels.includes(c)}
+                  onChange={(e) =>
+                    setRemChannels((xs) =>
+                      e.target.checked ? [...xs, c] : xs.filter((x) => x !== c),
+                    )
+                  }
+                />{' '}
+                {c}
+              </label>
+            ))}
             <button
               type="button"
               className="btn--sm"

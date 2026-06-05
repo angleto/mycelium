@@ -4,7 +4,7 @@
 // network so an offline backend yields a real error, not a stale UI.
 
 // Bump on every behaviour change so old SWs are replaced atomically.
-const CACHE = 'flow-shell-v3'
+const CACHE = 'flow-shell-v4'
 
 self.addEventListener('install', () => {
   // The first activation is fine without any preload — the SPA bundle
@@ -97,18 +97,28 @@ self.addEventListener('push', (event) => {
   )
 })
 
-// Clicking the notification focuses an existing Flow tab, or opens one.
+// Clicking the notification opens the referenced task. The reminder body
+// ends with a deep-link (e.g. https://flow.xeno.garden/tasks/<id>); focus an
+// existing Flow tab and navigate it there, or open a new one.
 self.addEventListener('notificationclick', (event) => {
   event.notification.close()
+  const match = (event.notification.body || '').match(/https?:\/\/\S+/)
+  const url = match ? match[0] : '/'
   event.waitUntil(
-    self.clients
-      .matchAll({ type: 'window', includeUncontrolled: true })
-      .then((clientList) => {
-        for (const client of clientList) {
-          if ('focus' in client) return client.focus()
+    (async () => {
+      const all = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
+      for (const client of all) {
+        if ('focus' in client) {
+          try {
+            await client.navigate(url)
+          } catch {
+            /* navigate can reject (cross-origin / not controlled); focus anyway */
+          }
+          return client.focus()
         }
-        if (self.clients.openWindow) return self.clients.openWindow('/')
-        return undefined
-      }),
+      }
+      if (self.clients.openWindow) return self.clients.openWindow(url)
+      return undefined
+    })(),
   )
 })

@@ -21,6 +21,7 @@ from sqlalchemy import (
     UniqueConstraint,
 )
 from sqlalchemy import Enum as SAEnum
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -176,3 +177,9 @@ class TaskReminder(UUIDPKMixin, TimestampMixin, Base):
         index=True,
     )
     offset_minutes: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    # Channels this reminder fires on (a subset of NotificationChannelKind
+    # values, e.g. ["email", "telegram"]). NULL = use the recipient's default
+    # -- every channel they have enabled; a set list restricts THIS reminder
+    # to those channels (still intersected with what each recipient has
+    # usable). Lets one reminder go to mail+telegram and another to webpush.
+    channels: Mapped[list[str] | None] = mapped_column(JSONB, nullable=True)

@@ -755,6 +755,7 @@ export const it: Catalog = {
     remAtDue: 'Alla scadenza',
     remBefore: '{{v}} prima',
     remAdd: 'Aggiungi promemoria',
+    remChannels: 'Canali (nessuno = tutti gli abilitati):',
     remCustom: 'Personalizzato…',
     remCustomPh: 'min',
     scope: {

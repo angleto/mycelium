@@ -2725,12 +2725,16 @@ class CountOut(BaseModel):
 class ReminderIn(BaseModel):
     # Minutes before the task due date (0 = at due).
     offset_minutes: int = Field(ge=0, le=525600)
+    # Channels for THIS reminder; null/empty = the user's default (all their
+    # enabled channels). Lets one reminder go to e.g. email + telegram.
+    channels: list[NotificationChannelKind] | None = None
 
 
 class ReminderOut(BaseModel):
     id: uuid.UUID
     task_id: uuid.UUID
     offset_minutes: int
+    channels: list[str] | None = None
 
 
 # --- Telegram bot integration (epic #125 P2) ---
