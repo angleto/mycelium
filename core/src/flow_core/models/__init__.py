@@ -111,6 +111,7 @@ from flow_core.models.org_embedder_provider import EmbedderProviderKind, OrgEmbe
 from flow_core.models.org_llm_provider import LLMProviderKind, OrgLLMProvider
 from flow_core.models.organization import Organization
 from flow_core.models.project_profile import ProjectProfile
+from flow_core.models.push_subscription import PushSubscription
 from flow_core.models.schedule import Schedule
 from flow_core.models.sdi_mandate import SdiMandate, SdiMandateStatus
 from flow_core.models.sdi_notification import InvoiceNotification, ReceivedInvoiceNotification
@@ -183,6 +184,7 @@ __all__ = [
     "EmailMessage",
     "EmailProvider",
     "EmailVerificationToken",
+    "EmbedderProviderKind",
     "EntityRevision",
     "ExecKind",
     "Executor",
@@ -218,13 +220,13 @@ __all__ = [
     "NotificationChannelKind",
     "NotificationPref",
     "NotificationStatus",
-    "EmbedderProviderKind",
     "OrgEmbedderProvider",
     "OrgLLMProvider",
     "Organization",
     "PasswordResetToken",
     "PaymentStatus",
     "ProjectProfile",
+    "PushSubscription",
     "RateCard",
     "RateUnit",
     "ReceivedInvoice",

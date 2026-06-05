@@ -20,6 +20,10 @@ dependencies = [
     "httpx>=0.27",
     "lxml>=5",
     "signxml>=4",
+    # Web Push (RFC 8030/8291): encrypts + VAPID-signs browser push
+    # payloads. Sync (requests-based) so the sender wraps it in
+    # asyncio.to_thread, like the SMTP mailer.
+    "pywebpush>=2",
     # Markdown anchor resolution for inline suggestions (services/md_anchor):
     # mirrors the editor's markdown-it so accept resolves rendered-text
     # anchors against the markdown source. Already resolved transitively

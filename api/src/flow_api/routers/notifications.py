@@ -16,11 +16,16 @@ from flow_api.schemas import (
     NotificationOut,
     NotificationPrefIn,
     NotificationPrefOut,
+    PushSubscriptionIn,
+    PushUnsubscribeIn,
     RecurrenceIn,
     RecurrenceOut,
+    VapidPublicKeyOut,
 )
+from flow_core.config import get_settings
 from flow_core.models.notification import Notification, NotificationPref, TaskRecurrence
 from flow_core.services import notifications as svc
+from flow_core.services import push_subscriptions as push_svc
 
 router = APIRouter(prefix="/notifications", tags=["notifications"])
 
@@ -79,6 +84,44 @@ async def list_prefs(
 ) -> list[NotificationPrefOut]:
     rows = await svc.list_prefs(ctx.session, org_id=ctx.org_id, user_id=ctx.user_id)
     return [_pref_out(p) for p in rows]
+
+
+@router.get("/push/vapid-public-key", response_model=VapidPublicKeyOut)
+async def push_vapid_public_key(
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+) -> VapidPublicKeyOut:
+    s = get_settings()
+    return VapidPublicKeyOut(configured=s.vapid_configured, public_key=s.vapid_public_key)
+
+
+@router.post("/push/subscribe", status_code=status.HTTP_204_NO_CONTENT)
+async def push_subscribe(
+    body: PushSubscriptionIn,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+) -> None:
+    await push_svc.upsert_subscription(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        user_id=ctx.user_id,
+        endpoint=body.endpoint,
+        p256dh=body.keys.p256dh,
+        auth=body.keys.auth,
+    )
+
+
+@router.post("/push/unsubscribe", status_code=status.HTTP_204_NO_CONTENT)
+async def push_unsubscribe(
+    body: PushUnsubscribeIn,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+) -> None:
+    await push_svc.delete_subscription(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        user_id=ctx.user_id,
+        endpoint=body.endpoint,
+    )
 
 
 @router.get("", response_model=list[NotificationOut])

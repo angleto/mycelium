@@ -2658,6 +2658,32 @@ class NotificationPrefOut(BaseModel):
     target: str
 
 
+class PushSubscriptionKeys(BaseModel):
+    p256dh: str = Field(max_length=256)
+    auth: str = Field(max_length=256)
+
+
+class PushSubscriptionIn(BaseModel):
+    """A browser PushManager subscription in its ``toJSON()`` shape:
+    endpoint + encryption keys. ``expirationTime`` is ignored."""
+
+    endpoint: str = Field(max_length=2048)
+    keys: PushSubscriptionKeys
+
+
+class PushUnsubscribeIn(BaseModel):
+    endpoint: str = Field(max_length=2048)
+
+
+class VapidPublicKeyOut(BaseModel):
+    """Handed to the SPA so it can subscribe the browser's push manager.
+    ``configured`` is false when the deploy has no VAPID keypair, in which
+    case the SPA hides the browser-notifications affordance."""
+
+    configured: bool
+    public_key: str
+
+
 class NotificationOut(BaseModel):
     id: uuid.UUID
     user_id: uuid.UUID

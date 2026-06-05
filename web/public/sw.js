@@ -4,7 +4,7 @@
 // network so an offline backend yields a real error, not a stale UI.
 
 // Bump on every behaviour change so old SWs are replaced atomically.
-const CACHE = 'flow-shell-v2'
+const CACHE = 'flow-shell-v3'
 
 self.addEventListener('install', () => {
   // The first activation is fine without any preload — the SPA bundle
@@ -72,5 +72,43 @@ self.addEventListener('fetch', (event) => {
       const fresh = await networkPromise
       return fresh ?? offlineFallback()
     })(),
+  )
+})
+
+// Web Push (#D): the backend sends {title, body} via the Push API. Show it
+// as a system notification; userVisibleOnly subscriptions REQUIRE a visible
+// notification per push or the browser drops the subscription.
+self.addEventListener('push', (event) => {
+  let data = {}
+  try {
+    data = event.data ? event.data.json() : {}
+  } catch {
+    data = {}
+  }
+  const title = data.title || 'Flow'
+  const body = typeof data.body === 'string' ? data.body : ''
+  event.waitUntil(
+    self.registration.showNotification(title, {
+      body,
+      tag: 'flow-reminder',
+      icon: '/icon-192.png',
+      badge: '/icon-192.png',
+    }),
+  )
+})
+
+// Clicking the notification focuses an existing Flow tab, or opens one.
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close()
+  event.waitUntil(
+    self.clients
+      .matchAll({ type: 'window', includeUncontrolled: true })
+      .then((clientList) => {
+        for (const client of clientList) {
+          if ('focus' in client) return client.focus()
+        }
+        if (self.clients.openWindow) return self.clients.openWindow('/')
+        return undefined
+      }),
   )
 })

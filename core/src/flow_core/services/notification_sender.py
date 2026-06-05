@@ -31,6 +31,7 @@ from flow_core.models.notification import NotificationChannelKind
 from flow_core.notification_channel import NotificationSender
 from flow_core.services.mailer import OutboundEmail, get_mailer
 from flow_core.services.notifications_telegram import TelegramNotificationSender
+from flow_core.services.notifications_webpush import WebPushNotificationSender
 
 
 class EmailNotificationSender:
@@ -51,11 +52,15 @@ class EmailNotificationSender:
 
 
 def build_notification_sender() -> NotificationSender:
-    """Telegram-aware sender over an email fallback.
+    """Web Push -> Telegram -> email delegating chain.
 
-    Reads no settings directly: the telegram half resolves the live
-    ``get_telegram_api()`` at send time (configured Bot API or fail-closed
-    stub) and the email half resolves the live ``get_mailer()`` at send
-    time. Both globals are wired earlier in the same startup path, so this
-    only needs to be called once after ``set_mailer``."""
-    return TelegramNotificationSender(fallback=EmailNotificationSender())
+    Each sender handles its own channel and delegates the rest to its
+    fallback, so the dispatcher stays a single seam. Reads no settings
+    eagerly: webpush resolves the VAPID config at send time, the telegram
+    half resolves the live ``get_telegram_api()`` (configured Bot API or
+    fail-closed stub), and the email half resolves the live
+    ``get_mailer()``. All are wired earlier in the same startup path, so
+    this only needs calling once after ``set_mailer``."""
+    return WebPushNotificationSender(
+        fallback=TelegramNotificationSender(fallback=EmailNotificationSender())
+    )

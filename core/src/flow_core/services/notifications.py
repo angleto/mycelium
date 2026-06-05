@@ -11,6 +11,7 @@ idempotent via a stable dedupe key.
 from __future__ import annotations
 
 import datetime as dt
+import json
 import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -34,6 +35,7 @@ from flow_core.models.notification import (
     TaskRecurrence,
     TaskReminder,
 )
+from flow_core.models.push_subscription import PushSubscription
 from flow_core.models.task import Task
 from flow_core.models.task_collaborator import TaskCollaborator
 from flow_core.models.task_tag import TaskTag
@@ -42,6 +44,7 @@ from flow_core.models.workflow import WorkflowState
 from flow_core.notification_channel import NotificationSender, get_sender
 from flow_core.services import audit
 from flow_core.services import tasks as tasks_svc
+from flow_core.services.notifications_webpush import WebPushGone
 from flow_core.services.rbac import require_role
 
 
@@ -190,6 +193,80 @@ async def enqueue(
     return n
 
 
+async def _dispatch_webpush(
+    session: AsyncSession,
+    sender: NotificationSender,
+    n: Notification,
+    *,
+    org_id: uuid.UUID,
+    now: dt.datetime,
+) -> bool:
+    """Fan a webpush notification out to all of the user's subscriptions.
+
+    Unlike email/telegram the pref carries no ``target`` (the targets are
+    the device subscriptions): the pref is just the on/off switch. Succeeds
+    if at least one device accepts; an endpoint the push service reports
+    gone (404/410) is pruned. Mutates ``n`` in place; returns whether it
+    counts as sent."""
+    pref = (
+        await session.execute(
+            select(NotificationPref).where(
+                NotificationPref.org_id == org_id,
+                NotificationPref.user_id == n.user_id,
+                NotificationPref.channel == NotificationChannelKind.webpush,
+            )
+        )
+    ).scalar_one_or_none()
+    if pref is None or not pref.enabled:
+        n.status = NotificationStatus.failed
+        n.last_error = "no enabled channel pref"
+        n.attempts += 1
+        return False
+    subs = list(
+        (
+            await session.execute(
+                select(PushSubscription).where(
+                    PushSubscription.org_id == org_id,
+                    PushSubscription.user_id == n.user_id,
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if not subs:
+        n.status = NotificationStatus.failed
+        n.last_error = "no webpush subscriptions"
+        n.attempts += 1
+        return False
+    delivered = 0
+    last_error = ""
+    for sub in subs:
+        target = json.dumps(
+            {"endpoint": sub.endpoint, "keys": {"p256dh": sub.p256dh, "auth": sub.auth}}
+        )
+        try:
+            await sender.send(
+                channel=NotificationChannelKind.webpush,
+                target=target,
+                title=n.title,
+                body=n.body,
+            )
+            delivered += 1
+        except WebPushGone:
+            await session.delete(sub)  # endpoint permanently gone -> prune
+        except Exception as exc:  # transient: keep the row, record + retry later
+            last_error = str(exc)
+    if delivered > 0:
+        n.status = NotificationStatus.sent
+        n.sent_at = now
+        return True
+    n.status = NotificationStatus.failed
+    n.attempts += 1
+    n.last_error = last_error or "no live webpush subscriptions"
+    return False
+
+
 async def dispatch_pending(
     session: AsyncSession,
     *,
@@ -225,6 +302,13 @@ async def dispatch_pending(
     )
     sent = failed = 0
     for n in rows:
+        # webpush has no single per-pref target: fan out to every device.
+        if n.channel == NotificationChannelKind.webpush:
+            if await _dispatch_webpush(session, snd, n, org_id=org_id, now=now):
+                sent += 1
+            else:
+                failed += 1
+            continue
         pref = (
             await session.execute(
                 select(NotificationPref).where(
@@ -550,6 +634,10 @@ async def scan_reminders(
         .all()
     )
     tz_cache: dict[uuid.UUID, dt.tzinfo] = {}
+    # Users with at least one browser push subscription: a webpush pref has
+    # no per-pref target (the targets are the subscriptions), so it counts
+    # as a usable channel only when the user has subscribed a device.
+    users_with_push = set((await session.execute(select(PushSubscription.user_id))).scalars().all())
     enqueued = 0
     for t in candidates:
         if t.start_at is not None:
@@ -603,7 +691,12 @@ async def scan_reminders(
             prefs = [
                 p
                 for p in await list_prefs(session, org_id=org_id, user_id=uid)
-                if p.enabled and p.target
+                if p.enabled
+                and (
+                    uid in users_with_push
+                    if p.channel == NotificationChannelKind.webpush
+                    else bool(p.target)
+                )
             ]
             if not prefs:
                 continue

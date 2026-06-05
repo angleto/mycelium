@@ -36,6 +36,11 @@ from flow_core.models.base import (
 class NotificationChannelKind(enum.StrEnum):
     telegram = "telegram"
     email = "email"
+    # Browser Web Push (RFC 8030/8291). Unlike email/telegram the per-user
+    # NotificationPref carries no single ``target``: a user has many device
+    # subscriptions (``push_subscriptions``), so the pref is just the on/off
+    # switch and dispatch fans out to every subscription.
+    webpush = "webpush"
 
 
 class NotificationStatus(enum.StrEnum):

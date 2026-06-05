@@ -1787,6 +1787,17 @@ export const it: Catalog = {
       'Promemoria/notifiche vengono inviati su un canale configurato e abilitato. Un canale richiede un target (chat id Telegram o email) prima di poter essere abilitato.',
     hintActions:
       'Invia spedisce le notifiche in sospeso. Genera dovute materializza i task ricorrenti. Scansiona promemoria accoda i promemoria di scadenza per i task assegnati a te.',
+    browserPush: {
+      title: 'Notifiche del browser',
+      hint: 'Ricevi i promemoria come notifiche in questo browser, anche quando Flow non e aperto. Per dispositivo.',
+      enable: 'Abilita su questo dispositivo',
+      disable: 'Disabilita su questo dispositivo',
+      on: 'abilitate su questo dispositivo',
+      off: 'non abilitate su questo dispositivo',
+      unsupported: 'Questo browser non supporta le notifiche push.',
+      unconfigured: 'Le notifiche push del browser non sono configurate sul server.',
+      denied: 'Le notifiche sono bloccate nelle impostazioni del browser; consentile per abilitare.',
+    },
     freqOpt: {
       daily: 'Giornaliera',
       weekly: 'Settimanale',

@@ -284,6 +284,16 @@ class Settings(BaseSettings):
     # purpose: the webhook handler must reply quickly or Telegram retries.
     telegram_http_timeout_seconds: float = 10.0
 
+    # Web Push (VAPID, RFC 8292). The public key is handed to the SPA (it
+    # subscribes the browser's push manager with it); the private key signs
+    # each push and is a secret; subject is a mailto:/https: contact the
+    # push service may use. All three set => webpush dispatch is active;
+    # unset => the channel fails closed per item (like an unconfigured bot)
+    # and the SPA hides the subscribe affordance.
+    vapid_public_key: str = ""
+    vapid_private_key: str = ""
+    vapid_subject: str = ""
+
     # Conversational assistant (ADR-0026). When enabled, a free-text
     # Telegram message is handled by an in-process LLM agent that uses
     # Flow's tools (read/scoped-write on notes/tasks) and replies. Off by
@@ -434,6 +444,14 @@ class Settings(BaseSettings):
         """SMTP transport is active iff host and From are both set
         (the validator above guarantees from is present when host is)."""
         return bool(self.smtp_host and self.smtp_from)
+
+    @property
+    def vapid_configured(self) -> bool:
+        """Web Push dispatch is active iff the VAPID keypair and subject are
+        all set. Same fail-closed spirit as smtp/telegram: unconfigured, the
+        webpush sender records a per-item failure and the SPA does not offer
+        the browser-subscribe button."""
+        return bool(self.vapid_public_key and self.vapid_private_key and self.vapid_subject)
 
     @property
     def sdicoop_active(self) -> bool:

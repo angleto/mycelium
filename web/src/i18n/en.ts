@@ -1787,6 +1787,17 @@ export const en = {
       'Reminders/notifications are delivered on a configured + enabled channel. A channel needs a target (Telegram chat id or email) before it can be enabled.',
     hintActions:
       'Dispatch sends pending notifications. Spawn due materializes recurring tasks. Scan reminders enqueues due-date reminders for tasks assigned to you.',
+    browserPush: {
+      title: 'Browser notifications',
+      hint: 'Get reminders as notifications in this browser, even when Flow is not open. Per device.',
+      enable: 'Enable on this device',
+      disable: 'Disable on this device',
+      on: 'enabled on this device',
+      off: 'not enabled on this device',
+      unsupported: 'This browser does not support push notifications.',
+      unconfigured: 'Browser push is not configured on this server.',
+      denied: 'Notifications are blocked in the browser settings; allow them to enable.',
+    },
     freqOpt: {
       daily: 'Daily',
       weekly: 'Weekly',
