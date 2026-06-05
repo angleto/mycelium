@@ -188,12 +188,19 @@ def set_telegram_api_override(fn: Callable[[], TelegramApi] | None) -> None:
 
 def get_telegram_api() -> TelegramApi:
     """Return the active ``TelegramApi``. Order: test override >
-    configured ``HttpxTelegramApi`` (when ``telegram_configured``) >
-    ``_UnconfiguredTelegramApi`` fallback."""
+    ``HttpxTelegramApi`` (when ``telegram_send_configured`` -- bot token
+    present) > ``_UnconfiguredTelegramApi`` fallback.
+
+    The gate is ``telegram_send_configured`` (token only), NOT
+    ``telegram_configured`` (token + username + webhook secret): sending a
+    message needs only the token, and the worker -- which dispatches
+    reminders but never serves the webhook -- is wired with the token
+    alone. The webhook/link routers keep the full ``telegram_configured``
+    gate."""
     if _override is not None:
         return _override()
     settings = get_settings()
-    if settings.telegram_configured:
+    if settings.telegram_send_configured:
         return HttpxTelegramApi(
             bot_token=settings.telegram_bot_token,
             timeout_seconds=settings.telegram_http_timeout_seconds,

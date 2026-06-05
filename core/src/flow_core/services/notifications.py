@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from flow_core.errors import DomainError
 from flow_core.i18n import MessageCode
 from flow_core.models.dependency import TaskDependency
+from flow_core.models.identity import Identity, IdentityKind
 from flow_core.models.membership import Role
 from flow_core.models.notification import (
     Notification,
@@ -495,9 +496,12 @@ async def scan_reminders(
     within_days: int = 1,
     now: dt.datetime | None = None,
 ) -> int:
-    """Enqueue (idempotent) reminders for assignees with an enabled
-    channel. Each task fires its configured ``task_reminders`` N minutes
-    before a firing reference:
+    """Enqueue (idempotent) reminders for a task's recipients -- its owner,
+    its collaborators, and its assignee when that assignee is a human
+    identity -- that have an enabled channel. An AI-assistant assignee is
+    never notified (it has no inbox; owner and collaborators are always real
+    users by FK). Each task fires its configured ``task_reminders`` N
+    minutes before a firing reference:
 
       * appointment tasks (``start_at`` set) use ``start_at`` with minute
         precision;
@@ -571,7 +575,7 @@ async def scan_reminders(
             .scalars()
             .all()
         ) or [0]
-        assignees = (
+        recipients = set(
             (
                 await session.execute(
                     select(TaskCollaborator.user_id).where(TaskCollaborator.task_id == t.id)
@@ -580,7 +584,22 @@ async def scan_reminders(
             .scalars()
             .all()
         )
-        for uid in assignees:
+        # Recipients = owner + collaborators + the assignee when it is a
+        # human. owner_id and collaborator user_ids are always real users
+        # (FK to ``users``), so no bot can appear there. The only recipient
+        # that can be a bot is the primary ``assignee_id`` (an identity that
+        # may be an AI assistant): resolve it and add it only when its kind
+        # is ``user`` -- an assistant assignee is never notified (no inbox).
+        recipients.add(t.owner_id)
+        if t.assignee_id is not None:
+            ident = (
+                await session.execute(
+                    select(Identity.kind, Identity.user_id).where(Identity.id == t.assignee_id)
+                )
+            ).one_or_none()
+            if ident is not None and ident.kind == IdentityKind.user and ident.user_id is not None:
+                recipients.add(ident.user_id)
+        for uid in recipients:
             prefs = [
                 p
                 for p in await list_prefs(session, org_id=org_id, user_id=uid)

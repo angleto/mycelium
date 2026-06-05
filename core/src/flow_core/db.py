@@ -118,13 +118,22 @@ async def tenant_session(
 
 @asynccontextmanager
 async def admin_session(*, actor_kind: ActorKind = "system") -> AsyncIterator[AsyncSession]:
-    """A session with no tenant context. Bootstrap/migrations/tests only.
+    """A no-tenant session: sets the actor kind but never ``app.current_org``.
 
-    Do not use in application paths: RLS stays active and, without
-    GUCs, sees no org-scoped rows (fail-closed). ``actor_kind``
-    defaults to ``system`` so any audit emitted from this path is
-    attributed to a system actor; callers can override (e.g. a CLI
-    tool acting on behalf of a specific operator).
+    Used by the worker to enumerate workspaces before fanning out into a
+    per-org ``tenant_session`` (and by bootstrap/migrations/tests). Under
+    RLS this session is fail-closed for org-scoped tables EXCEPT the
+    enumeration tables (``organizations``, ``memberships``,
+    ``google_calendar_subscriptions``), which carry a ``FOR SELECT`` policy
+    that opens to a system session with no current org (migration 0029).
+    So a ``system`` caller can list every workspace and resolve its owner,
+    yet still sees nothing in tasks/notifications/etc. until it narrows to
+    a single org via ``tenant_session``.
+
+    ``actor_kind`` defaults to ``system`` so audit rows from this path are
+    attributed to a system actor and the enumeration policies apply;
+    callers can override (e.g. a CLI acting for a specific operator), but a
+    non-system kind sees no org-scoped rows at all (fail-closed).
     """
     sm = get_sessionmaker()
     async with sm() as session:

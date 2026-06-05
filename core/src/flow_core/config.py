@@ -411,6 +411,18 @@ class Settings(BaseSettings):
         )
 
     @property
+    def telegram_send_configured(self) -> bool:
+        """Telegram *outbound send* needs only the bot token: ``sendMessage``
+        builds its URL from the token alone (see ``HttpxTelegramApi``). Unlike
+        ``telegram_configured`` -- which additionally requires the username
+        (for deep links) and the webhook secret (for inbound verification) --
+        this gates the notification dispatch path, so a deploy that has the
+        token but not the webhook half can still deliver reminders. The worker
+        is exactly that case: it sends but never serves the webhook, so wiring
+        only ``FLOW_TELEGRAM_BOT_TOKEN`` into it is sufficient and correct."""
+        return bool(self.telegram_bot_token)
+
+    @property
     def telegram_webhook_url_base(self) -> str:
         """Resolved public base URL the bot webhook is exposed at: the
         explicit override when set, otherwise the SPA's base URL (the

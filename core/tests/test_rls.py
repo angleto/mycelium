@@ -26,9 +26,16 @@ async def _signup(name: str) -> tuple[uuid.UUID, uuid.UUID]:
 
 
 async def test_fail_closed_without_guc() -> None:
-    async with admin_session() as s:
-        count = (await s.execute(text("SELECT count(*) FROM organizations"))).scalar_one()
-    assert count == 0
+    # Migration 0029 opens organizations/memberships/calendar_subscriptions
+    # to a SYSTEM session with no current org (worker enumeration) -- but
+    # only those tables and only the system actor. Everything else stays
+    # fail-closed under RLS without a tenant GUC.
+    async with admin_session(actor_kind="human_direct") as s:
+        # a non-system no-tenant session sees no orgs at all
+        assert (await s.execute(text("SELECT count(*) FROM organizations"))).scalar_one() == 0
+    async with admin_session() as s:  # actor_kind defaults to "system"
+        # a non-enumeration org-scoped table is still fail-closed for system
+        assert (await s.execute(text("SELECT count(*) FROM tasks"))).scalar_one() == 0
 
 
 async def test_org_isolation() -> None:

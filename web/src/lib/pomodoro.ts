@@ -272,6 +272,46 @@ export type Pomodoro = {
   setRemaining: (ms: number) => void
 }
 
+// Browser notification permission must be requested from a user gesture
+// (enabling the toggle, or Start), not at fire time: a phase completes
+// minutes later, far from any gesture, and `maybeNotify` below is a no-op
+// unless permission is already 'granted'. Only prompt while 'default' so a
+// user who already decided is not re-prompted.
+function requestNotifyPermission(): void {
+  if (typeof Notification === 'undefined') return
+  if (Notification.permission === 'default') void Notification.requestPermission()
+}
+
+// One shared AudioContext, created lazily and unlocked on a user gesture.
+// Browsers start a context 'suspended' until a gesture resumes it, and a
+// phase ends long after the Start click. The previous code made a NEW
+// context per beep at fire time: with no recent gesture it was born
+// suspended and silent (and per-page context limits eventually threw). So
+// we (a) reuse a single context and (b) resume() it right before playing.
+let _audioCtx: AudioContext | null = null
+
+function getAudioContext(): AudioContext | null {
+  if (typeof window === 'undefined') return null
+  const AC =
+    window.AudioContext ||
+    (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
+  if (!AC) return null
+  if (_audioCtx === null) {
+    try {
+      _audioCtx = new AC()
+    } catch {
+      return null
+    }
+  }
+  return _audioCtx
+}
+
+// Unlock audio within a user gesture (Start / Resume / enabling sound).
+function primeAudio(): void {
+  const ctx = getAudioContext()
+  if (ctx && ctx.state === 'suspended') void ctx.resume()
+}
+
 function maybeNotify(prev: Phase, suggestedNext: Phase, cfg: PomodoroConfig): void {
   if (!cfg.notify) return
   if (typeof Notification === 'undefined') return
@@ -297,13 +337,8 @@ function maybeNotify(prev: Phase, suggestedNext: Phase, cfg: PomodoroConfig): vo
   }
 }
 
-function beep(cfg: PomodoroConfig): void {
-  if (!cfg.sound) return
+function playTone(ctx: AudioContext): void {
   try {
-    const AC =
-      window.AudioContext ||
-      (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
-    const ctx = new AC()
     const osc = ctx.createOscillator()
     const gain = ctx.createGain()
     osc.connect(gain)
@@ -317,6 +352,22 @@ function beep(cfg: PomodoroConfig): void {
     osc.stop(ctx.currentTime + 0.65)
   } catch {
     /* WebAudio blocked: degrade silently */
+  }
+}
+
+function beep(cfg: PomodoroConfig): void {
+  if (!cfg.sound) return
+  const ctx = getAudioContext()
+  if (ctx === null) return
+  // The context may have drifted back to 'suspended' while the tab was
+  // backgrounded; resume before playing, otherwise play straight away.
+  if (ctx.state === 'suspended') {
+    void ctx
+      .resume()
+      .then(() => playTone(ctx))
+      .catch(() => {})
+  } else {
+    playTone(ctx)
   }
 }
 
@@ -402,23 +453,29 @@ export function usePomodoro(): Pomodoro {
 
   const start = useCallback(
     (phase: Phase) => {
-      if (config.notify && typeof Notification !== 'undefined') {
-        if (Notification.permission === 'default') {
-          void Notification.requestPermission()
-        }
-      }
+      // Within the click gesture: unlock audio and line up notification
+      // permission so the end-of-phase alarm can actually fire later.
+      primeAudio()
+      if (config.notify) requestNotifyPermission()
       dispatch({ type: 'start', phase })
     },
     [config.notify],
   )
   const pause = useCallback(() => dispatch({ type: 'pause' }), [])
-  const resume = useCallback(() => dispatch({ type: 'resume' }), [])
+  const resume = useCallback(() => {
+    primeAudio()
+    dispatch({ type: 'resume' })
+  }, [])
   const skip = useCallback(() => dispatch({ type: 'skip' }), [])
   const stop = useCallback(() => dispatch({ type: 'stop' }), [])
-  const updateConfig = useCallback(
-    (patch: Partial<PomodoroConfig>) => dispatch({ type: 'updateConfig', patch }),
-    [],
-  )
+  const updateConfig = useCallback((patch: Partial<PomodoroConfig>) => {
+    // Toggling a channel ON is a user gesture: secure the browser
+    // permission (notifications) / unlock audio (sound) now, not at fire
+    // time when no gesture is in scope.
+    if (patch.notify === true) requestNotifyPermission()
+    if (patch.sound === true) primeAudio()
+    dispatch({ type: 'updateConfig', patch })
+  }, [])
   const adjustEndsAt = useCallback(
     (deltaMs: number) => dispatch({ type: 'adjustEndsAt', deltaMs }),
     [],
