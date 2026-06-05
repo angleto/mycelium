@@ -4361,6 +4361,234 @@ async def upload_attachment_instructions(
     }
 
 
+def _text_stream_recipe(
+    *, url: str, org: uuid.UUID, method: str, max_bytes: int, returns: str
+) -> dict[str, Any]:
+    """Shared shape for the TOKEN-FREE inline-body recipes: a ready-to-run
+    ``curl`` that streams a local UTF-8 markdown file as the raw request
+    body (``--data-binary``), so the body never rides a tool argument.
+    Mirrors ``upload_attachment_instructions`` but the bytes land in a
+    Postgres TEXT column (a note part / annotation body), so NO S3 backend
+    is needed. ``$FLOW_TOKEN`` and ``<path-to-file>`` are placeholders the
+    caller fills; the token is never echoed back."""
+    content_type = "text/markdown; charset=utf-8"
+    curl = (
+        f"curl -fsS -X {method} '{url}' \\\n"
+        f"  -H 'Authorization: Bearer $FLOW_TOKEN' \\\n"
+        f"  -H 'X-Workspace-Id: {org}' \\\n"
+        f"  -H 'Content-Type: {content_type}' \\\n"
+        f"  --data-binary @<path-to-file>"
+    )
+    return {
+        "endpoint": url,
+        "method": method,
+        "curl": curl,
+        "headers": {
+            "Authorization": "Bearer $FLOW_TOKEN",
+            "X-Workspace-Id": str(org),
+            "Content-Type": content_type,
+        },
+        "max_bytes": max_bytes,
+        "notes": (
+            "Streams the file as the raw request body straight into the "
+            "document's TEXT column: no bytes go through MCP (token-free) "
+            "and no S3 backend is needed. Fill $FLOW_TOKEN with your token "
+            "and <path-to-file> with the local markdown file. On success "
+            f"the endpoint returns {returns}."
+        ),
+    }
+
+
+@mcp.tool()
+async def add_note_part_instructions(
+    token: str,
+    org_id: str,
+    note_id: str,
+    title: str | None = None,
+    lang: str | None = None,
+    ord: int | None = None,
+) -> dict[str, Any]:
+    """Recipe for a TOKEN-FREE note-part create: stream a local markdown
+    file straight into a NEW part's body instead of sending it as an
+    ``add_note_part`` argument (which spends tokens proportional to the
+    body size). The body rides the HTTP request body; the metadata
+    (``title`` / ``lang`` / ``ord``) go in the URL. No S3 needed -- the
+    text lands in the part's TEXT column. Fill $FLOW_TOKEN +
+    <path-to-file>; the response carries the new ``id`` and ``version``."""
+    from urllib.parse import quote
+
+    from flow_core.config import get_settings
+
+    async with _tenant(token, org_id) as (_s, org, _user):
+        pass
+    settings = get_settings()
+    base = settings.frontend_base_url.rstrip("/")
+    params: list[str] = []
+    if title is not None:
+        params.append(f"title={quote(title)}")
+    if lang is not None:
+        params.append(f"lang={quote(lang)}")
+    if ord is not None:
+        params.append(f"ord={ord}")
+    qs = ("?" + "&".join(params)) if params else ""
+    url = f"{base}/api/notes/{note_id}/parts/stream{qs}"
+    return _text_stream_recipe(
+        url=url,
+        org=org,
+        method="POST",
+        max_bytes=settings.note_body_max_bytes,
+        returns="the new part JSON (id, ord, version)",
+    )
+
+
+@mcp.tool()
+async def set_note_part_body_instructions(
+    token: str,
+    org_id: str,
+    note_id: str,
+    part_id: str,
+    expected_version: int,
+) -> dict[str, Any]:
+    """Recipe for a TOKEN-FREE full-body REPLACE of an existing note part:
+    stream the whole new markdown from a local file into the part's body
+    column without resending it as a tool argument. ``expected_version``
+    is the optimistic cursor (a mismatch is stale_version -> 409); an
+    empty file clears the part. For incremental growth use
+    ``append_note_part`` instead. The response carries the new
+    ``version``."""
+    from flow_core.config import get_settings
+
+    async with _tenant(token, org_id) as (_s, org, _user):
+        pass
+    settings = get_settings()
+    base = settings.frontend_base_url.rstrip("/")
+    url = (
+        f"{base}/api/notes/{note_id}/parts/{part_id}/body/stream"
+        f"?expected_version={expected_version}"
+    )
+    return _text_stream_recipe(
+        url=url,
+        org=org,
+        method="PUT",
+        max_bytes=settings.note_body_max_bytes,
+        returns="the part id + new version",
+    )
+
+
+@mcp.tool()
+async def add_comment_instructions(
+    token: str,
+    org_id: str,
+    doc_kind: str,
+    doc_id: str,
+    anchor_quote: str | None = None,
+    parent_id: str | None = None,
+) -> dict[str, Any]:
+    """Recipe for a TOKEN-FREE inline comment: stream the comment text
+    from a local file into ``annotation.body`` instead of spending it as
+    an ``add_annotation`` argument. ``doc_kind`` is ``note_part`` (doc_id
+    = note-part id) or ``task_description`` (doc_id = task id);
+    ``anchor_quote`` pins it to a passage (omit for a whole-document /
+    work-diary comment); ``parent_id`` makes it a reply. An agent token
+    attributes the comment to its AI-assistant identity, same as the MCP
+    tool. The response carries the new annotation JSON."""
+    from urllib.parse import quote
+
+    from flow_core.config import get_settings
+
+    if doc_kind not in ("note_part", "task_description"):
+        raise ValueError("doc_kind must be 'note_part' or 'task_description'")
+    async with _tenant(token, org_id) as (_s, org, _user):
+        pass
+    settings = get_settings()
+    base = settings.frontend_base_url.rstrip("/")
+    params = [f"doc_kind={quote(doc_kind)}", f"doc_id={doc_id}"]
+    if anchor_quote is not None:
+        params.append(f"anchor_quote={quote(anchor_quote)}")
+    if parent_id is not None:
+        params.append(f"parent_id={parent_id}")
+    url = f"{base}/api/annotations/comment/stream?" + "&".join(params)
+    return _text_stream_recipe(
+        url=url,
+        org=org,
+        method="POST",
+        max_bytes=settings.note_body_max_bytes,
+        returns="the new annotation JSON (id, kind, status, version)",
+    )
+
+
+@mcp.tool()
+async def propose_suggestion_instructions(
+    token: str,
+    org_id: str,
+    doc_kind: str,
+    doc_id: str,
+    original_text: str,
+    rationale: str = "",
+) -> dict[str, Any]:
+    """Recipe for a TOKEN-FREE suggestion: stream the PROPOSED replacement
+    text (the large free-form field) from a local file as the request
+    body; the struck ``original_text`` it replaces is a bounded query
+    param (the agent already holds it, capped to keep the URL short). An
+    empty file is a deletion suggestion. Nothing changes in the document
+    until the suggestion is accepted. ``doc_kind`` is ``note_part`` or
+    ``task_description``. The response carries the new annotation JSON."""
+    from urllib.parse import quote
+
+    from flow_core.config import get_settings
+
+    if doc_kind not in ("note_part", "task_description"):
+        raise ValueError("doc_kind must be 'note_part' or 'task_description'")
+    async with _tenant(token, org_id) as (_s, org, _user):
+        pass
+    settings = get_settings()
+    base = settings.frontend_base_url.rstrip("/")
+    params = [
+        f"doc_kind={quote(doc_kind)}",
+        f"doc_id={doc_id}",
+        f"original_text={quote(original_text)}",
+    ]
+    if rationale:
+        params.append(f"rationale={quote(rationale)}")
+    url = f"{base}/api/annotations/suggestion/stream?" + "&".join(params)
+    return _text_stream_recipe(
+        url=url,
+        org=org,
+        method="POST",
+        max_bytes=settings.note_body_max_bytes,
+        returns="the new suggestion JSON (id, original_text, proposed_text, version)",
+    )
+
+
+@mcp.tool()
+async def edit_annotation_body_instructions(
+    token: str,
+    org_id: str,
+    annotation_id: str,
+    expected_version: int,
+) -> dict[str, Any]:
+    """Recipe for a TOKEN-FREE replace of an annotation's body (a
+    comment's text or a suggestion's rationale): stream the new text from
+    a local file instead of spending it as an ``edit_annotation``
+    argument. ``expected_version`` is the optimistic cursor (a mismatch is
+    stale_version -> 409); author-or-admin only. The response carries the
+    new version."""
+    from flow_core.config import get_settings
+
+    async with _tenant(token, org_id) as (_s, org, _user):
+        pass
+    settings = get_settings()
+    base = settings.frontend_base_url.rstrip("/")
+    url = f"{base}/api/annotations/{annotation_id}/body/stream?expected_version={expected_version}"
+    return _text_stream_recipe(
+        url=url,
+        org=org,
+        method="PATCH",
+        max_bytes=settings.note_body_max_bytes,
+        returns="the annotation id + new version",
+    )
+
+
 @mcp.tool()
 async def list_attachments(
     token: str,

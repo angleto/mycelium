@@ -7,11 +7,13 @@ inline rendering is web-specific."""
 from __future__ import annotations
 
 import uuid
-from typing import Annotated, cast
+from typing import Annotated, Any, cast
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from flow_api.deps import TenantCtx, tenant_ctx
+from flow_api.deps import TenantCtx, current_claims, tenant_ctx
 from flow_api.schemas import (
     AnnotationCommentIn,
     AnnotationEditIn,
@@ -20,10 +22,37 @@ from flow_api.schemas import (
     SuggestionIn,
     VersionOut,
 )
+from flow_api.textstream import read_capped_text
+from flow_core.config import get_settings
+from flow_core.errors import DomainError
+from flow_core.i18n import MessageCode
 from flow_core.models.annotation import Annotation
+from flow_core.models.identity import Identity
 from flow_core.services import annotations as svc
 
 router = APIRouter(prefix="/annotations", tags=["annotations"])
+
+
+async def _author_identity_id(
+    session: AsyncSession, *, org_id: uuid.UUID, claims: dict[str, Any]
+) -> uuid.UUID | None:
+    """The AI-assistant identity behind an agent token, so an agent's
+    token-free streaming write is attributed to the same identity badge
+    as its MCP-tool writes (``_resolve_agent_context``). ``None`` for a
+    human bearer or a bare token, in which case the service defaults to
+    the actor's user identity."""
+    if claims.get("typ") != "agent":
+        return None
+    assistant_id = claims.get("assistant_id")
+    if not assistant_id:
+        return None
+    row = await session.execute(
+        select(Identity.id).where(
+            Identity.ai_assistant_id == uuid.UUID(assistant_id),
+            Identity.org_id == org_id,
+        )
+    )
+    return row.scalar_one_or_none()
 
 
 def annotation_out(a: Annotation) -> AnnotationOut:
@@ -91,6 +120,46 @@ async def create_comment(
     return annotation_out(a)
 
 
+@router.post("/comment/stream", response_model=AnnotationOut)
+async def create_comment_stream(
+    request: Request,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+    claims: Annotated[dict[str, Any], Depends(current_claims)],
+    doc_kind: Annotated[str, Query()],
+    doc_id: Annotated[uuid.UUID, Query()],
+    anchor_quote: Annotated[str | None, Query(max_length=8192)] = None,
+    anchor_prefix: Annotated[str | None, Query(max_length=2048)] = None,
+    anchor_suffix: Annotated[str | None, Query(max_length=2048)] = None,
+    parent_id: Annotated[uuid.UUID | None, Query()] = None,
+) -> AnnotationOut:
+    """Token-free comment: the comment text is the raw request body,
+    streamed into ``annotation.body`` instead of riding a tool argument
+    (the inline-body analogue of ``POST /attachments/stream``; no S3).
+    The bounded anchor fields stay query params (the agent already holds
+    them). Body is size-capped + UTF-8; an empty body is rejected. An
+    agent token attributes the comment to its AI-assistant identity, same
+    as the MCP tool. Use the MCP ``add_comment_instructions`` tool for
+    the matching ``curl``."""
+    body_text = await read_capped_text(request, max_bytes=get_settings().note_body_max_bytes)
+    if not body_text:
+        raise DomainError(MessageCode.ANNOTATION_BODY_REQUIRED)
+    author = await _author_identity_id(ctx.session, org_id=ctx.org_id, claims=claims)
+    a = await svc.create_comment(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        doc_kind=doc_kind,
+        doc_id=doc_id,
+        body=body_text,
+        anchor_quote=anchor_quote,
+        anchor_prefix=anchor_prefix,
+        anchor_suffix=anchor_suffix,
+        parent_id=parent_id,
+        author_identity_id=author,
+    )
+    return annotation_out(a)
+
+
 @router.post("/suggestion", response_model=AnnotationOut)
 async def propose_suggestion(
     body: SuggestionIn,
@@ -107,6 +176,43 @@ async def propose_suggestion(
         rationale=body.rationale,
         anchor_prefix=body.anchor_prefix,
         anchor_suffix=body.anchor_suffix,
+    )
+    return annotation_out(a)
+
+
+@router.post("/suggestion/stream", response_model=AnnotationOut)
+async def propose_suggestion_stream(
+    request: Request,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+    claims: Annotated[dict[str, Any], Depends(current_claims)],
+    doc_kind: Annotated[str, Query()],
+    doc_id: Annotated[uuid.UUID, Query()],
+    original_text: Annotated[str, Query(min_length=1, max_length=8192)],
+    rationale: Annotated[str, Query(max_length=4096)] = "",
+    anchor_prefix: Annotated[str | None, Query(max_length=2048)] = None,
+    anchor_suffix: Annotated[str | None, Query(max_length=2048)] = None,
+) -> AnnotationOut:
+    """Token-free suggestion: the PROPOSED replacement (the large
+    free-form field) is the raw request body; the struck ``original_text``
+    it replaces is a query param (a bounded anchor the agent already
+    holds, capped to keep the URL short). An empty body is a deletion
+    suggestion. Nothing touches the document until the suggestion is
+    accepted. Use the MCP ``propose_suggestion_instructions`` tool for the
+    matching ``curl``."""
+    proposed_text = await read_capped_text(request, max_bytes=get_settings().note_body_max_bytes)
+    author = await _author_identity_id(ctx.session, org_id=ctx.org_id, claims=claims)
+    a = await svc.propose_suggestion(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        doc_kind=doc_kind,
+        doc_id=doc_id,
+        original_text=original_text,
+        proposed_text=proposed_text,
+        rationale=rationale,
+        anchor_prefix=anchor_prefix,
+        anchor_suffix=anchor_suffix,
+        author_identity_id=author,
     )
     return annotation_out(a)
 
@@ -133,6 +239,36 @@ async def edit_annotation(
         annotation_id=annotation_id,
         body=body.body,
         expected_version=body.expected_version,
+    )
+    return VersionOut(id=annotation_id, version=v)
+
+
+@router.patch("/{annotation_id}/body/stream", response_model=VersionOut)
+async def edit_annotation_body_stream(
+    annotation_id: uuid.UUID,
+    request: Request,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+    claims: Annotated[dict[str, Any], Depends(current_claims)],
+    expected_version: Annotated[int, Query(ge=1)],
+) -> VersionOut:
+    """Token-free replace of an annotation's body (a comment's text or a
+    suggestion's rationale): the new text is the raw request body,
+    streamed in instead of riding a tool argument. ``expected_version``
+    is the optimistic cursor (a mismatch is ``stale_version`` -> 409);
+    author-or-admin only. Use the MCP ``edit_annotation_body_instructions``
+    tool for the matching ``curl``."""
+    body_text = await read_capped_text(request, max_bytes=get_settings().note_body_max_bytes)
+    if not body_text:
+        raise DomainError(MessageCode.ANNOTATION_BODY_REQUIRED)
+    ident = await _author_identity_id(ctx.session, org_id=ctx.org_id, claims=claims)
+    v = await svc.edit(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        annotation_id=annotation_id,
+        body=body_text,
+        expected_version=expected_version,
+        actor_identity_id=ident,
     )
     return VersionOut(id=annotation_id, version=v)
 

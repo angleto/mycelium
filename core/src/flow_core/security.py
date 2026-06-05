@@ -94,6 +94,13 @@ async def decode_token_async(
       only for agent tokens (JWTs do not carry an org)
     - ``scope``: capability bucket (str), present only for agent tokens
     - ``typ``: ``"agent"`` for agent tokens, absent for JWTs
+    - ``tid``: the agent-token row id (str), present only for agent
+      tokens; lets a direct-HTTP caller resolve the token's binding
+      without re-authenticating
+    - ``assistant_id``: the AI-assistant the token is bound to (str) or
+      ``None`` for a bare token; present only for agent tokens. The API
+      uses it to attribute an agent's direct-HTTP write (the token-free
+      streaming path) to the same identity badge as its MCP-tool writes
 
     Raises :class:`flow_core.errors.AuthError` on a bad / revoked /
     expired credential, same contract as :func:`decode_token`.
@@ -111,5 +118,7 @@ async def decode_token_async(
             "org_id": str(result.org_id),
             "scope": result.scope,
             "typ": "agent",
+            "tid": str(result.token_id),
+            "assistant_id": (str(result.assistant_id) if result.assistant_id else None),
         }
     return decode_token(raw)

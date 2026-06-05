@@ -171,6 +171,8 @@ class MessageCode(enum.StrEnum):
     SUGGESTION_NOT_PENDING = "annotation.suggestion_not_pending"
     SUGGESTION_STALE = "annotation.suggestion_stale"
     SUGGESTION_TEXT_REQUIRED = "annotation.suggestion_text_required"
+    ANNOTATION_BODY_REQUIRED = "annotation.body_required"
+    BODY_INVALID_ENCODING = "body.invalid_encoding"
     DOMAIN_ERROR = "domain.error"
     PROVIDER_KEY_INVALID = "provider.key_invalid"
 
@@ -277,6 +279,8 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
         MessageCode.BODY_LIMIT_EXCEEDED: (
             "Append would exceed the maximum body size ({max_bytes} bytes)"
         ),
+        MessageCode.BODY_INVALID_ENCODING: "Request body is not valid UTF-8 text",
+        MessageCode.ANNOTATION_BODY_REQUIRED: "A comment needs a non-empty body",
         MessageCode.INTENT_UNRECOGNIZED: ("Command not recognized: {raw}"),
         MessageCode.INVOICE_NOT_FOUND: "Invoice not found",
         MessageCode.INVOICE_NOT_DRAFT: (

@@ -61,6 +61,42 @@ separately, NOT yet implemented):
   used below (navigation reads → `notes:read` / `tasks:read`; task
   relations → `tasks:read` / `tasks:write`; memory tools → `memory:*`).
 
+## Addendum 2026-06-05 — token-free inline-body writes
+
+Mirrors the attachment precedent (`upload_attachment_instructions` →
+`POST /attachments/stream`) for INLINE markdown bodies. The body rides
+the HTTP request body (`curl --data-binary @file`), never a tool
+argument, and lands straight in the Postgres TEXT column
+(`note_part.body` / `annotation.body`), so the write is token-free and
+needs NO S3 backend. Each MCP tool only returns a ready-to-run `curl`
+(`$FLOW_TOKEN` + `<path-to-file>` placeholders; the token is never
+echoed); the actual write is a streaming REST endpoint that goes through
+`tenant_ctx` (same RLS / membership gate as every other write). The
+streamed body is size-capped at `note_body_max_bytes` and UTF-8 decoded
+(`api/src/flow_api/textstream.py`).
+
+| MCP `*_instructions` tool | streaming endpoint | service entry point | scope key |
+| --- | --- | --- | --- |
+| `add_note_part_instructions` | `POST /notes/{id}/parts/stream` | `note_parts.create_part` | `notes:write` |
+| `set_note_part_body_instructions` | `PUT /notes/{id}/parts/{pid}/body/stream` | `note_parts.update_part` | `notes:write` |
+| `add_comment_instructions` | `POST /annotations/comment/stream` | `annotations.create_comment` | `notes:write` / `tasks:write` (by `doc_kind`) |
+| `propose_suggestion_instructions` | `POST /annotations/suggestion/stream` | `annotations.propose_suggestion` | `notes:write` / `tasks:write` |
+| `edit_annotation_body_instructions` | `PATCH /annotations/{id}/body/stream` | `annotations.edit` | `notes:write` / `tasks:write` |
+
+Notes:
+
+- The precedent `upload_attachment_instructions` (also a recipe tool) is
+  not in the per-domain tables below; like it, these five build a `curl`
+  and touch no tenant data themselves beyond an org/token fail-fast.
+- AI authorship parity: an agent token streaming an annotation is
+  attributed to its AI-assistant identity badge, same as the MCP
+  `add_annotation` path (resolved in the annotations router from the
+  agent-token claims, which now carry `tid` / `assistant_id`).
+- The gateway auto-discovers these from the live registry
+  (`gateway._catalog()` iterates `_tool_manager.list_tools()`), so no
+  allow-list edit is needed; `search_tools` / `execute_tool` see them
+  immediately.
+
 ## Convention
 
 - `path:line` columns point at the symbol declaration. The MCP path is

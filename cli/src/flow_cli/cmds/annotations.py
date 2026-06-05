@@ -11,6 +11,8 @@ on the web and over MCP; only the inline highlight is web-only.
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
 from typing import Any
 
 import typer
@@ -78,15 +80,18 @@ def comment(
     body: str | None = typer.Option(
         None, "--body", "-m", help="Comment body. Use '-' for stdin; omit to open $EDITOR."
     ),
+    body_file: Path | None = typer.Option(
+        None, "--body-file", help="Read the comment body from a file (wins over --body)."
+    ),
     quote: str | None = typer.Option(
         None, "--quote", help="Passage to anchor to (omit for a whole-document comment)."
     ),
     parent_id: str | None = typer.Option(None, "--reply-to", help="Reply to this annotation id."),
 ) -> None:
     """Add an inline comment to a document."""
-    if body == "-":
-        import sys
-
+    if body_file is not None:
+        body = body_file.read_text()
+    elif body == "-":
         body = sys.stdin.read().strip()
     elif body is None:
         body = edit_in_editor("").strip()
@@ -112,12 +117,28 @@ def comment(
 def suggest(
     doc_kind: str = typer.Argument(..., help=_DOC_HELP),
     doc_id: str = typer.Argument(...),
-    original: str = typer.Option(..., "--original", "-o", help="Text to replace."),
-    proposed: str = typer.Option(..., "--proposed", "-p", help="Replacement (empty = deletion)."),
+    original: str | None = typer.Option(None, "--original", "-o", help="Text to replace."),
+    original_file: Path | None = typer.Option(
+        None, "--original-file", help="Read --original from a file (wins over --original)."
+    ),
+    proposed: str | None = typer.Option(
+        None, "--proposed", "-p", help="Replacement (empty = deletion)."
+    ),
+    proposed_file: Path | None = typer.Option(
+        None, "--proposed-file", help="Read --proposed from a file (wins over --proposed)."
+    ),
     why: str = typer.Option("", "--why", help="Rationale."),
 ) -> None:
     """Propose an edit (original -> proposed). Nothing changes in the
     document until the suggestion is accepted."""
+    if original_file is not None:
+        original = original_file.read_text()
+    if proposed_file is not None:
+        proposed = proposed_file.read_text()
+    if not original:
+        raise CLIError("provide --original or --original-file (the text to replace).")
+    if proposed is None:
+        raise CLIError("provide --proposed or --proposed-file (use --proposed '' to delete).")
     with client() as c:
         a = get_json(
             c.post(
@@ -170,9 +191,16 @@ def reject(annotation_id: str = typer.Argument(...)) -> None:
 @app.command("edit")
 def edit(
     annotation_id: str = typer.Argument(...),
-    body: str = typer.Option(..., "--body", "-m", help="New body."),
+    body: str | None = typer.Option(None, "--body", "-m", help="New body."),
+    body_file: Path | None = typer.Option(
+        None, "--body-file", help="Read the new body from a file (wins over --body)."
+    ),
 ) -> None:
     """Edit an annotation body (author or admin only)."""
+    if body_file is not None:
+        body = body_file.read_text()
+    if not body:
+        raise CLIError("provide --body or --body-file.")
     with client() as c:
         version = _annotation_version(c, annotation_id)
         get_json(

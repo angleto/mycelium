@@ -9,7 +9,7 @@ import datetime
 import uuid
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
@@ -65,6 +65,8 @@ from flow_api.schemas import (
     TaskChecklistReorderIn,
     VersionOut,
 )
+from flow_api.textstream import read_capped_text
+from flow_core.config import get_settings
 from flow_core.db import admin_session
 from flow_core.models.note import Note, NoteKind, NoteTurn
 from flow_core.models.project_profile import ProjectProfile
@@ -618,6 +620,41 @@ async def create_note_part(
 
 
 @router.post(
+    "/{note_id}/parts/stream",
+    response_model=NotePartOut,
+    status_code=status.HTTP_201_CREATED,
+    tags=["garden"],
+)
+async def create_note_part_stream(
+    note_id: uuid.UUID,
+    request: Request,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+    title: Annotated[str | None, Query(max_length=300)] = None,
+    lang: Annotated[str | None, Query(max_length=16)] = None,
+    ord: Annotated[int | None, Query(ge=0)] = None,
+) -> NotePartOut:
+    """Token-free create of a note part: the markdown body is the raw
+    request body, streamed straight into the part's TEXT column instead
+    of riding a tool argument (the inline-body analogue of
+    ``POST /attachments/stream``; no S3 needed). Metadata (``title`` /
+    ``lang`` / ``ord``) are query params. The body is size-capped
+    (``note_body_max_bytes``) and must be valid UTF-8. Use the MCP
+    ``add_note_part_instructions`` tool for the matching ``curl``."""
+    body_text = await read_capped_text(request, max_bytes=get_settings().note_body_max_bytes)
+    part = await parts_svc.create_part(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        note_id=note_id,
+        body=body_text,
+        title=title,
+        lang=lang,
+        ord=ord,
+    )
+    return _part_out(part)
+
+
+@router.post(
     "/{note_id}/parts/{part_id}/append",
     response_model=AppendOut,
     tags=["garden"],
@@ -754,6 +791,42 @@ async def patch_note_part(
         channel=channel,
         edit_session_id=edit_session_id,
         **kwargs,
+    )
+    return VersionOut(id=part_id, version=v)
+
+
+@router.put(
+    "/{note_id}/parts/{part_id}/body/stream",
+    response_model=VersionOut,
+    tags=["garden"],
+)
+async def replace_note_part_body_stream(
+    note_id: uuid.UUID,
+    part_id: uuid.UUID,
+    request: Request,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+    expected_version: Annotated[int, Query(ge=1)],
+    edit_session_id: Annotated[str | None, Header(alias="X-Edit-Session-Id")] = None,
+) -> VersionOut:
+    """Token-free full-body replace of a note part: the new markdown is
+    the raw request body, streamed into the part's TEXT column without
+    resending it as a tool argument. ``expected_version`` is the
+    optimistic cursor (a mismatch is ``stale_version`` -> 409); the body
+    is size-capped (``note_body_max_bytes``) and must be valid UTF-8. An
+    empty body clears the part. For incremental growth use ``/append``;
+    this is the "I have the whole new body in a file" path. Use the MCP
+    ``set_note_part_body_instructions`` tool for the matching ``curl``."""
+    body_text = await read_capped_text(request, max_bytes=get_settings().note_body_max_bytes)
+    channel = "web" if edit_session_id else "api"
+    v = await parts_svc.update_part(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        part_id=part_id,
+        expected_version=expected_version,
+        body=body_text,
+        channel=channel,
+        edit_session_id=edit_session_id,
     )
     return VersionOut(id=part_id, version=v)
 

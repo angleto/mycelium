@@ -337,6 +337,7 @@ def parts_add(
         None,
         "--file",
         "-f",
+        "--body-file",
         help="Read body from a file. Use '-' for stdin. Omit to open $EDITOR.",
     ),
     lang: str | None = typer.Option(
@@ -348,8 +349,8 @@ def parts_add(
         help="Insert at this ord (shifts following parts forward). Omit = append.",
     ),
 ) -> None:
-    """Add a markdown part to a note. Body comes from --file, stdin
-    (-), or an interactive $EDITOR session."""
+    """Add a markdown part to a note. Body comes from --file / --body-file,
+    stdin (-), or an interactive $EDITOR session."""
     if file is not None:
         if str(file) == "-":
             body = sys.stdin.read()
