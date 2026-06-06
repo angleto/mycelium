@@ -114,7 +114,8 @@ async def test_attachment_upload_list_download_task_and_note() -> None:
         assert dl.status_code == 200
         assert dl.content == png
         assert dl.headers["content-type"].startswith("image/png")
-        assert dl.headers["content-disposition"] == 'inline; filename="shot.png"'
+        cd = dl.headers["content-disposition"]
+        assert cd == "inline; filename=\"shot.png\"; filename*=UTF-8''shot.png"
 
 
 async def test_non_image_attachment_uses_attachment_disposition() -> None:
@@ -135,7 +136,8 @@ async def test_non_image_attachment_uses_attachment_disposition() -> None:
         dl = await c.get(f"/attachments/{aid}/download", headers=h)
         assert dl.status_code == 200
         assert dl.content == body
-        assert dl.headers["content-disposition"] == 'attachment; filename="notes.txt"'
+        cd = dl.headers["content-disposition"]
+        assert cd == "attachment; filename=\"notes.txt\"; filename*=UTF-8''notes.txt"
 
 
 async def test_oversize_attachment_rejected(monkeypatch: pytest.MonkeyPatch) -> None:

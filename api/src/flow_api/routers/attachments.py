@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import uuid
 from typing import Annotated
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, File, Query, Request, Response, UploadFile, status
 
@@ -56,11 +57,19 @@ upload_file_field = Annotated[UploadFile, File()]
 
 def _content_disposition(filename: str, mime_type: str) -> str:
     # Images render in the browser (inline) for the preview; everything
-    # else is offered as a download (attachment). The filename is
-    # already sanitised in the service; quote it defensively.
+    # else is offered as a download (attachment).
     disp = "inline" if mime_type.startswith("image/") else "attachment"
-    safe = filename.replace('"', "")
-    return f'{disp}; filename="{safe}"'
+    # The ASGI server latin-1 encodes header values, so a filename with
+    # non-latin-1 characters (emoji, smart quotes) must not go in the bare
+    # ``filename=`` -- it would raise UnicodeEncodeError and 500 the
+    # download. RFC 6266: an ASCII fallback in ``filename=`` plus the full
+    # UTF-8 name in ``filename*=`` (percent-encoded, RFC 5987); modern
+    # browsers prefer ``filename*``.
+    ascii_name = filename.encode("ascii", "ignore").decode("ascii").replace('"', "").strip()
+    if not ascii_name:
+        ascii_name = "download"
+    quoted = quote(filename, safe="")
+    return f"{disp}; filename=\"{ascii_name}\"; filename*=UTF-8''{quoted}"
 
 
 @router.post("/stream", status_code=status.HTTP_201_CREATED)

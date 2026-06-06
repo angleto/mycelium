@@ -114,7 +114,8 @@ async def test_s3_backend_upload_download_byte_identical(
         assert dl.status_code == 200
         assert dl.content == png
         assert dl.headers["content-type"].startswith("image/png")
-        assert dl.headers["content-disposition"] == 'inline; filename="shot.png"'
+        cd = dl.headers["content-disposition"]
+        assert cd == "inline; filename=\"shot.png\"; filename*=UTF-8''shot.png"
 
         # Self-cleanup: an S3-backed row left in the shared test DB has
         # data NULL, which (by design) would block the migration
