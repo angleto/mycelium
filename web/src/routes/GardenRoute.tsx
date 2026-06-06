@@ -93,6 +93,9 @@ export function GardenRoute() {
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
   const [idCopied, setIdCopied] = useState(false)
+  // First-load flag: show the empty-state copy only once the fetch has
+  // resolved, never during the initial (possibly slow) load.
+  const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     try {
@@ -126,15 +129,19 @@ export function GardenRoute() {
   useEffect(() => {
     let active = true
     void (async () => {
-      const [n, tk] = await Promise.all([
-        api.GET('/notes', { params: { header: workspaceHeader() } }),
-        api.GET('/tasks', { params: { header: workspaceHeader() } }),
-      ])
-      if (!active) return
-      if (n.error) setErr(errMessage(n.error))
-      else setNotes(n.data ?? [])
-      if (tk.data)
-        setAllTasks(tk.data.map((x) => ({ id: x.id, title: x.title })))
+      try {
+        const [n, tk] = await Promise.all([
+          api.GET('/notes', { params: { header: workspaceHeader() } }),
+          api.GET('/tasks', { params: { header: workspaceHeader() } }),
+        ])
+        if (!active) return
+        if (n.error) setErr(errMessage(n.error))
+        else setNotes(n.data ?? [])
+        if (tk.data)
+          setAllTasks(tk.data.map((x) => ({ id: x.id, title: x.title })))
+      } finally {
+        if (active) setLoading(false)
+      }
     })()
     return () => {
       active = false
@@ -300,7 +307,9 @@ export function GardenRoute() {
 
       {err && <p className="err">{err}</p>}
 
-      {tab === 'mindmap' ? (
+      {loading ? (
+        <p className="hint garden__empty">{t('garden.loading')}</p>
+      ) : tab === 'mindmap' ? (
         <GardenMindmap
           notes={visible}
           workspaceId={workspaceId ?? '_'}

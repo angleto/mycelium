@@ -155,6 +155,13 @@ async def enqueue(
             # Keep the firing moment current (also backfills NULL on rows
             # enqueued before migration 0018 added the column).
             existing.fire_at = fire_at
+            # Refresh the content of a not-yet-sent row so a re-scan picks up
+            # an improved title/body (e.g. the added task deep-link, dropped
+            # redundant text) in place, instead of leaving a stale message
+            # queued. A ``sent`` row is terminal and never rewritten.
+            if existing.status is not NotificationStatus.sent:
+                existing.title = title
+                existing.body = body
             if (
                 existing.status is NotificationStatus.failed
                 and existing.attempts < MAX_NOTIFICATION_ATTEMPTS
@@ -728,7 +735,13 @@ async def scan_reminders(
                 fire_at = reference - dt.timedelta(minutes=off)
                 if fire_at > horizon:
                     continue
-                when = "at due" if off == 0 else f"{off} min before"
+                # Body: the task title is already the notification title, so
+                # don't repeat it. Show the due moment (date for date-only,
+                # date+time for appointments) + the deep-link. For offset 0
+                # omit "(at due)" (redundant); for an early reminder note how
+                # early it is.
+                detail = when_label if off == 0 else f"{when_label} ({off} min before)"
+                reminder_body = f"Due {detail}\n{base_url}/tasks/{t.id}"
                 # Per-reminder channel selection: NULL channels = the
                 # recipient's default (all usable prefs); a set list restricts
                 # this reminder to those channels (intersected with usable).
@@ -736,9 +749,6 @@ async def scan_reminders(
                     prefs
                     if not rchannels
                     else [p for p in prefs if p.channel.value in set(rchannels)]
-                )
-                reminder_body = (
-                    f"'{t.title}' is due on {when_label} ({when}).\n{base_url}/tasks/{t.id}"
                 )
                 for p in eff_prefs:
                     await enqueue(

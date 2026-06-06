@@ -254,8 +254,10 @@ async def test_reminder_scan_promotes_subday_on_date_only() -> None:
     assert n == 1
     reminder_notes = [x for x in notes if x.kind == "reminder"]
     assert len(reminder_notes) == 1
-    # Promoted to 0 -> "at due" wording, not "60 min before".
-    assert "at due" in reminder_notes[0].body
+    # Promoted to 0 (date-only): plain "Due <date>", no "min before" and no
+    # redundant "(at due)" suffix.
+    assert "min before" not in reminder_notes[0].body
+    assert "(at due)" not in reminder_notes[0].body
 
 
 async def test_reminder_scan_is_idempotent() -> None:
@@ -537,9 +539,8 @@ async def test_reminder_label_and_dateonly_in_user_timezone() -> None:
         notes = await nf.list_notifications(s, org_id=org, user_id=user)
     assert n == 1
     reminder = next(x for x in notes if x.kind == "reminder")
-    # Promoted to "at due" (date-only) and labelled with the local date,
-    # not a UTC time.
-    assert "at due" in reminder.body
+    # Date-only: labelled with the local date (not a UTC time), no "(at due)".
+    assert "(at due)" not in reminder.body
     assert due_day.isoformat() in reminder.body
     assert "UTC" not in reminder.body
 
