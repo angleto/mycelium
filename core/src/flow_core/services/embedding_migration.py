@@ -67,12 +67,10 @@ async def _backfill_tier(
                 expected_dim,
             )
             continue
-        upd = (
-            await session.execute(
-                update(MemoryBlob)
-                .where(MemoryBlob.id == blob_id, MemoryBlob.org_id == blob_org, is_null)
-                .values(**set_values(result))
-            )
+        upd = await session.execute(
+            update(MemoryBlob)
+            .where(MemoryBlob.id == blob_id, MemoryBlob.org_id == blob_org, is_null)
+            .values(**set_values(result))
         )
         if upd.rowcount > 0:  # type: ignore[attr-defined]
             done += 1

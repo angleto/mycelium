@@ -46,14 +46,28 @@ async def test_enqueue_refreshes_pending_body() -> None:
     org, user = await _org()
     async with tenant_session(str(org), str(user)) as s:
         n1 = await nf.enqueue(
-            s, org_id=org, actor_id=user, user_id=user,
-            channel=NotificationChannelKind.email, kind="reminder",
-            title="T1", body="old body", dedupe_key="dk:refresh:1", fire_at=None,
+            s,
+            org_id=org,
+            actor_id=user,
+            user_id=user,
+            channel=NotificationChannelKind.email,
+            kind="reminder",
+            title="T1",
+            body="old body",
+            dedupe_key="dk:refresh:1",
+            fire_at=None,
         )
         n2 = await nf.enqueue(
-            s, org_id=org, actor_id=user, user_id=user,
-            channel=NotificationChannelKind.email, kind="reminder",
-            title="T2", body="new body", dedupe_key="dk:refresh:1", fire_at=None,
+            s,
+            org_id=org,
+            actor_id=user,
+            user_id=user,
+            channel=NotificationChannelKind.email,
+            kind="reminder",
+            title="T2",
+            body="new body",
+            dedupe_key="dk:refresh:1",
+            fire_at=None,
         )
     assert n1.id == n2.id  # same row (dedup on dedupe_key)
     assert n2.body == "new body"  # not-yet-sent row refreshed in place

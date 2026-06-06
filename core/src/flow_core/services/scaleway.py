@@ -62,9 +62,7 @@ async def available_models(session: AsyncSession, org_id: uuid.UUID) -> list[str
     """
     cfg = await get_org_llm_provider(session, org_id)
     settings = get_settings()
-    own_key = (
-        decrypt_secret(cfg.api_key_ciphertext) if cfg and cfg.api_key_ciphertext else None
-    )
+    own_key = decrypt_secret(cfg.api_key_ciphertext) if cfg and cfg.api_key_ciphertext else None
     api_key = own_key or settings.scaleway_api_key
     base_url = (cfg.base_url if cfg else None) or settings.scaleway_base_url
     if not api_key:

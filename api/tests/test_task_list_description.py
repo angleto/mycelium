@@ -31,9 +31,7 @@ async def test_list_defers_description_detail_keeps_it() -> None:
             "X-Workspace-Id": a["workspace_id"],
         }
         tk = (
-            await c.post(
-                "/tasks", headers=h, json={"title": "T", "description": "the body"}
-            )
+            await c.post("/tasks", headers=h, json={"title": "T", "description": "the body"})
         ).json()
         tid = tk["id"]
 
