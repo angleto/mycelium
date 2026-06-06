@@ -99,6 +99,7 @@ def _out(
     created_by_kind: str | None = None,
     created_by_label: str | None = None,
     checklist: list[TaskChecklistItem] | None = None,
+    include_description: bool = True,
 ) -> TaskOut:
     from flow_core.models.task import ExecKind
 
@@ -115,7 +116,7 @@ def _out(
         tags=[TagBrief(id=g.id, kind=g.kind, name=g.name, color=g.color) for g in (tags or [])],
         id=t.id,
         title=t.title,
-        description=t.description,
+        description=t.description if include_description else None,
         state_id=t.state_id,
         state=state_name,
         priority=t.priority,
@@ -374,6 +375,7 @@ async def list_tasks(
         parent_task_id=parent_task_id,
         include_archived=include_archived,
         include_deleted=include_deleted,
+        with_description=False,
     )
     names = await _state_names(ctx, {t.state_id for t in rows})
     tagmap = await svc.tags_by_task(ctx.session, task_ids=[t.id for t in rows])
@@ -401,6 +403,7 @@ async def list_tasks(
                 created_by_kind=ck,
                 created_by_label=cl,
                 checklist=items_map.get(t.id, []) if include_checklist else None,
+                include_description=False,
             )
         )
     return out

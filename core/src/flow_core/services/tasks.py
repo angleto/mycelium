@@ -13,6 +13,7 @@ from typing import Any
 from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import defer
 
 from flow_core.concurrency import optimistic_update
 from flow_core.errors import ConflictError, DomainError, NotFoundError
@@ -401,8 +402,15 @@ async def list_tasks(
     parent_task_id: uuid.UUID | None = None,
     include_archived: bool = False,
     include_deleted: bool = False,
+    with_description: bool = True,
 ) -> list[Task]:
     stmt = select(Task)
+    # The list view does not need the (potentially large) description: the
+    # SPA free-text search is server-side and the body is edited on the
+    # detail page. Defer it so listing hundreds of tasks doesn't transfer
+    # every body. Callers that read ``description`` keep the default.
+    if not with_description:
+        stmt = stmt.options(defer(Task.description))
     if not include_deleted:
         stmt = stmt.where(Task.deleted_at.is_(None))
     if not include_archived:
