@@ -35,6 +35,30 @@ from flow_core.services import identities as identities_svc
 from flow_core.services import task_search as _task_search
 from flow_core.services import workflow as wf
 from flow_core.services.rbac import require_role
+from flow_core.timewindow import end_of_day, resolve_tz
+
+
+async def _promote_due(
+    session: AsyncSession,
+    value: dt.date | dt.datetime | None,
+    *,
+    owner_id: uuid.UUID,
+) -> dt.datetime | None:
+    """Resolve a due-date input to a stored timestamptz. A date-only due
+    (a plain ``date`` == "due that day, no specific time") is promoted to
+    end-of-day in the OWNER's configured timezone -- the single place
+    that decides the time-of-day for "no time specified", so the SPA, the
+    MCP and the HTTP API all agree and a date-only deadline expires at
+    the end of the owner's calendar day. A real ``datetime`` is an
+    explicit instant and is stored unchanged."""
+    if value is None:
+        return None
+    if isinstance(value, dt.datetime):
+        return value
+    name = (
+        await session.execute(select(User.timezone).where(User.id == owner_id))
+    ).scalar_one_or_none()
+    return end_of_day(value, resolve_tz(name))
 
 
 def derive_priority(importance: int, urgency: int) -> int:
@@ -164,10 +188,11 @@ async def create_task(
     importance: int = 4,
     urgency: int = 4,
     start_date: dt.date | None = None,
-    # Migration 0005: due_date is now a TIMESTAMPTZ. Date-only inputs
-    # should be normalised to end-of-day UTC by the caller (the API
-    # adapter does this), so the service simply forwards the value.
-    due_date: dt.datetime | None = None,
+    # A date-only due (a plain ``date``) is promoted to end-of-day in the
+    # owner's configured timezone by ``_promote_due`` below; a real
+    # ``datetime`` is an explicit instant stored as-is. Migration 0005:
+    # due_date is a TIMESTAMPTZ.
+    due_date: dt.date | dt.datetime | None = None,
     billable: bool | None = None,
     parent_task_id: uuid.UUID | None = None,
     # docs/adr/0028: pass either ``assignee_id`` (uuid into identities)
@@ -269,6 +294,8 @@ async def create_task(
     # ``owner_id`` defaults to the creator. Same rule as the
     # migration backfill: every task has an explicit human owner.
     effective_owner = owner_id or actor_id
+    # A date-only due is anchored to end-of-day in the owner's timezone.
+    due_date = await _promote_due(session, due_date, owner_id=effective_owner)
     # Default ``created_by_identity_id`` to the user identity of the
     # actor. Callers (notably the MCP server) can override this with
     # the ai_assistant identity when the request came in through an
@@ -529,6 +556,12 @@ async def update_task(
         raise DomainError(MessageCode.DOMAIN_ERROR)
     await require_role(session, org_id, actor_id, Role.member)
     current = await get_task(session, org_id=org_id, task_id=task_id)
+    if "due_date" in values:
+        # Same date-only -> end-of-day-in-owner's-tz promotion as create
+        # (the owner is the task's existing owner).
+        values["due_date"] = await _promote_due(
+            session, values["due_date"], owner_id=current.owner_id
+        )
     if "importance" in values or "urgency" in values:
         # importance/urgency are NOT NULL since migration 0102, so the
         # service can re-derive ``priority`` unconditionally from the

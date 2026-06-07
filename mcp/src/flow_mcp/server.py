@@ -85,6 +85,7 @@ from flow_core.services.rbac import get_role
 from flow_core.services.taxonomy import ClientInput
 from flow_core.services.time_tracking import ReportGroup
 from flow_core.services.workflow import StateEdit, StateSpec
+from flow_core.timewindow import split_due
 
 mcp: FastMCP = FastMCP("flow")
 
@@ -916,19 +917,15 @@ async def update_task(
     if start_date is not None:
         values["start_date"] = dt.date.fromisoformat(start_date)
     if due_date is not None:
-        # Migration 0005: due_date is a timestamptz. Accept either a
-        # full ISO datetime (preserves the caller's time-of-day) or a
-        # bare date (promoted to end-of-day UTC, matching the SPA's
-        # "no time set" convention so a "due tomorrow" agent action
-        # still expires at the end of the calendar day, not at
-        # midnight UTC).
-        raw = due_date.strip()
-        if "t" in raw.lower() or "+" in raw or " " in raw:
-            values["due_date"] = dt.datetime.fromisoformat(raw)
-        else:
-            values["due_date"] = dt.datetime.combine(
-                dt.date.fromisoformat(raw), dt.time(23, 59, 59), tzinfo=dt.UTC
-            )
+        # A bare ``YYYY-MM-DD`` is date-only ("due that day, no time"); a
+        # full ISO datetime is an explicit instant. The core service
+        # promotes the date-only case to end-of-day in the OWNER's
+        # configured timezone -- the single source of truth shared by the
+        # SPA, the HTTP API and here -- so the MCP just parses the shape
+        # and forwards it. (Previously this baked end-of-day UTC, which
+        # for a non-UTC user rolled into the next day and fired the
+        # reminder a day late.)
+        values["due_date"] = split_due(due_date)
     if billable is not None:
         values["billable"] = billable
     if estimate_effort_h is not None:

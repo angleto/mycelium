@@ -99,15 +99,21 @@ class MeOut(BaseModel):
     display_name: str | None = None
     # IANA timezone (NULL = UTC). Drives local-time reminder labels.
     timezone: str | None = None
+    # Minutes after local midnight that a date-only task's reminders fire
+    # (0 = start of day; 360 = 06:00). See ``users.day_start_minute``.
+    day_start_minute: int = 0
     is_admin: bool
 
 
 class MePatchIn(BaseModel):
-    """Profile update for the caller. Currently the IANA timezone used to
-    render reminder labels in local time; an empty/absent value clears it
-    (-> UTC). Validated server-side against the IANA database."""
+    """Profile update for the caller: the IANA timezone (reminder labels;
+    an explicit empty/null clears it -> UTC) and ``day_start_minute`` (the
+    minute after local midnight a date-only task's reminders fire; null
+    resets it to 0). Only the fields actually sent are applied. Validated
+    server-side."""
 
     timezone: str | None = Field(default=None, max_length=64)
+    day_start_minute: int | None = Field(default=None, ge=0, le=1439)
 
 
 class AdminUserOut(BaseModel):
@@ -514,7 +520,12 @@ class TaskCreateIn(BaseModel):
     importance: int = Field(default=4, ge=1, le=5)
     urgency: int = Field(default=4, ge=1, le=5)
     start_date: datetime.date | None = None
-    due_date: datetime.datetime | None = None
+    # A bare ``YYYY-MM-DD`` is date-only ("due that day, no time"): the
+    # service anchors it to end-of-day in the owner's configured timezone
+    # (the single source of truth for the time-of-day). A full ISO
+    # datetime (with a time component) is an explicit instant, stored
+    # as-is. Parsed by ``timewindow.split_due`` in the router.
+    due_date: str | None = Field(default=None, max_length=40)
     billable: bool | None = None
     parent_task_id: uuid.UUID | None = None
     # docs/adr/0028: ``executor_kind`` kept as an optional input for
@@ -559,7 +570,10 @@ class TaskPatchIn(BaseModel):
     importance: int | None = Field(default=None, ge=1, le=5)
     urgency: int | None = Field(default=None, ge=1, le=5)
     start_date: datetime.date | None = None
-    due_date: datetime.datetime | None = None
+    # Bare ``YYYY-MM-DD`` = date-only (anchored to end-of-day in the
+    # owner's timezone); a full ISO datetime is an explicit instant. See
+    # ``TaskCreateIn.due_date``.
+    due_date: str | None = Field(default=None, max_length=40)
     billable: bool | None = None
     estimate_effort_h: Decimal | None = None
     # docs/adr/0028: ``executor_kind`` is no longer persisted (read

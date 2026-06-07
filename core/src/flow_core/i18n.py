@@ -99,6 +99,7 @@ class MessageCode(enum.StrEnum):
     MANDATE_NOT_FOUND = "invoice.mandate_not_found"
     NOTIFICATION_NOT_FOUND = "notification.not_found"
     USER_TIMEZONE_INVALID = "user.timezone_invalid"
+    USER_DAY_START_INVALID = "user.day_start_invalid"
     EXECUTOR_NOT_FOUND = "executor.not_found"
     EXECUTOR_INVALID = "executor.invalid"
     AGENT_RUN_NOT_FOUND = "agent_run.not_found"
@@ -303,6 +304,9 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
         MessageCode.MANDATE_NOT_FOUND: "No active SdI transmission mandate to revoke",
         MessageCode.NOTIFICATION_NOT_FOUND: "Notification not found",
         MessageCode.USER_TIMEZONE_INVALID: "Invalid timezone: {detail}",
+        MessageCode.USER_DAY_START_INVALID: (
+            "Invalid day start: must be 0..1439 minutes after midnight (got {detail})"
+        ),
         MessageCode.EXECUTOR_NOT_FOUND: "Executor not found",
         MessageCode.EXECUTOR_INVALID: "Invalid executor: {detail}",
         MessageCode.AGENT_RUN_NOT_FOUND: "Agent run not found",

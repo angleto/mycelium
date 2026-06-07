@@ -44,7 +44,7 @@ from flow_core.services.auth import (
     signup,
     verify_email,
 )
-from flow_core.services.users import set_timezone
+from flow_core.services.users import update_profile
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -118,6 +118,7 @@ async def me_endpoint(
         email=user.email,
         display_name=user.display_name,
         timezone=user.timezone,
+        day_start_minute=user.day_start_minute,
         is_admin=user.is_admin,
     )
 
@@ -127,17 +128,24 @@ async def patch_me_endpoint(
     body: MePatchIn,
     user: Annotated[User, Depends(current_user)],
 ) -> MeOut:
-    """Update the caller's profile. Currently the IANA timezone used to
-    render reminder labels in local time; validated server-side. The
+    """Update the caller's reminder profile (timezone and/or day-start);
+    only the fields actually sent are applied. Validated server-side. The
     users table is global (no tenant RLS), so the write goes through the
     no-tenant admin session like the other auth flows."""
+    sent = body.model_fields_set
+    patch: dict[str, Any] = {}
+    if "timezone" in sent:
+        patch["timezone"] = body.timezone
+    if "day_start_minute" in sent:
+        patch["day_start_minute"] = body.day_start_minute
     async with admin_session() as session:
-        updated = await set_timezone(session, user_id=user.id, timezone=body.timezone)
+        updated = await update_profile(session, user_id=user.id, **patch)
         return MeOut(
             user_id=updated.id,
             email=updated.email,
             display_name=updated.display_name,
             timezone=updated.timezone,
+            day_start_minute=updated.day_start_minute,
             is_admin=updated.is_admin,
         )
 

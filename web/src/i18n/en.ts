@@ -225,6 +225,14 @@ export const en = {
       save: 'Save',
       saved: 'Saved.',
     },
+    dayStart: {
+      title: 'Day start',
+      help: 'When a task is due on a date with no specific time, its reminder fires at this local time instead of at the end of the day (which arrived a day late). Set it to your morning, e.g. 06:00, so a "due today" task reminds you in time to act.',
+      label: 'Date-only reminders fire at',
+      save: 'Save',
+      saved: 'Saved.',
+      invalid: 'Enter a valid time (HH:MM).',
+    },
   },
   nav: {
     logout: 'Sign out',

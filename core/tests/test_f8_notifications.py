@@ -545,6 +545,56 @@ async def test_reminder_label_and_dateonly_in_user_timezone() -> None:
     assert "UTC" not in reminder.body
 
 
+async def test_dateonly_reminder_anchors_to_day_start() -> None:
+    """A date-only deadline (stored end-of-day in the owner's tz) fires
+    its reminder at the user's configured day-start time IN THEIR
+    timezone -- not at 23:59:59 (the end-of-day expiry sentinel), which
+    read as a day late. day_start_minute=360 -> 06:00 local."""
+    org, user = await _org()
+    rome = ZoneInfo("Europe/Rome")
+    async with admin_session() as s:
+        await users_svc.update_profile(
+            s, user_id=user, timezone="Europe/Rome", day_start_minute=360
+        )
+    # A bare date is date-only: the service stores end-of-day in the
+    # owner's (Rome) timezone.
+    due_day = (dt.datetime.now(tz=rome) + dt.timedelta(days=2)).date()
+    async with tenant_session(str(org), str(user)) as s:
+        await _enable_email(s, org, user)
+        await tasks_svc.create_task(
+            s, org_id=org, actor_id=user, title="report", due_date=due_day, assignee_ids=[user]
+        )
+        await nf.scan_reminders(s, org_id=org, actor_id=user, within_days=7)
+        notes = await nf.list_notifications(s, org_id=org, user_id=user)
+    reminder = next(x for x in notes if x.kind == "reminder")
+    assert reminder.fire_at is not None
+    local = reminder.fire_at.astimezone(rome)
+    assert (local.hour, local.minute, local.second) == (6, 0, 0)
+    assert local.date() == due_day
+
+
+async def test_dateonly_reminder_default_day_start_is_local_midnight() -> None:
+    """With no day-start configured, a date-only reminder anchors to local
+    midnight (start of day), not the 23:59:59 end-of-day sentinel."""
+    org, user = await _org()
+    rome = ZoneInfo("Europe/Rome")
+    async with admin_session() as s:
+        await users_svc.set_timezone(s, user_id=user, timezone="Europe/Rome")
+    due_day = (dt.datetime.now(tz=rome) + dt.timedelta(days=2)).date()
+    async with tenant_session(str(org), str(user)) as s:
+        await _enable_email(s, org, user)
+        await tasks_svc.create_task(
+            s, org_id=org, actor_id=user, title="report", due_date=due_day, assignee_ids=[user]
+        )
+        await nf.scan_reminders(s, org_id=org, actor_id=user, within_days=7)
+        notes = await nf.list_notifications(s, org_id=org, user_id=user)
+    reminder = next(x for x in notes if x.kind == "reminder")
+    assert reminder.fire_at is not None
+    local = reminder.fire_at.astimezone(rome)
+    assert (local.hour, local.minute, local.second) == (0, 0, 0)
+    assert local.date() == due_day
+
+
 async def test_recurrence_spawn_copies_timing_and_reminders() -> None:
     """A spawned occurrence is anchored on the recurrence's next_run and
     inherits the template's reminder offsets (so recurring tasks actually

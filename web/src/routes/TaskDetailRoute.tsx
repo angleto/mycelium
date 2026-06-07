@@ -552,17 +552,17 @@ export function TaskDetailRoute() {
     setUrgency(n)
     void autosave({ urgency: n })
   }
-  // Build the ISO datetime we send to /tasks/{id}: empty date clears
-  // the deadline; empty time defaults to 23:59:59 local (the
-  // "no time specified" convention the user asked for on task
-  // a3d1f5f4 item 3). Whatever we send is in the user's local tz
-  // and ``toISOString`` normalises to UTC for the backend.
+  // What we send to /tasks/{id} as ``due_date``: empty date clears the
+  // deadline; with NO time we send a bare ``YYYY-MM-DD`` (date-only
+  // intent) and the backend anchors it to end-of-day in the user's
+  // configured timezone (the single source of truth, so SPA/MCP/API
+  // agree); with a time we send the explicit instant as a UTC ISO.
   function buildDueIso(date: string, time: string): string | null {
     if (!date) return null
-    const t = time || '23:59:59'
+    if (!time) return date
     // datetime-local interprets "YYYY-MM-DDTHH:MM(:SS)?" as local;
     // toISOString then yields the matching UTC instant.
-    return new Date(`${date}T${t}`).toISOString()
+    return new Date(`${date}T${time}`).toISOString()
   }
   function onDueDate(v: string) {
     setDueDate(v)

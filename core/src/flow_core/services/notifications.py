@@ -15,7 +15,6 @@ import json
 import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy import delete, or_, select
 from sqlalchemy.exc import IntegrityError
@@ -47,6 +46,7 @@ from flow_core.services import audit
 from flow_core.services import tasks as tasks_svc
 from flow_core.services.notifications_webpush import WebPushGone
 from flow_core.services.rbac import require_role
+from flow_core.timewindow import DEFAULT_DAY_START_MINUTE, day_start_anchor, resolve_tz
 
 
 @dataclass(frozen=True)
@@ -551,36 +551,32 @@ async def spawn_due(
     return spawned
 
 
-def _resolve_tz(name: str | None) -> dt.tzinfo:
-    """An IANA timezone name -> tzinfo, falling back to UTC for an unset
-    or unrecognised value (a stored ``users.timezone`` should be valid,
-    but never let a bad string break the reminder sweep)."""
-    if not name:
-        return dt.UTC
-    try:
-        return ZoneInfo(name)
-    except (ZoneInfoNotFoundError, ValueError):
-        return dt.UTC
-
-
-async def _user_tz(
+async def _user_reminder_ctx(
     session: AsyncSession,
     *,
     user_id: uuid.UUID,
-    cache: dict[uuid.UUID, dt.tzinfo],
-) -> dt.tzinfo:
-    """The recipient's timezone (``users.timezone``), memoised per sweep.
-    Used to render reminder labels in local time and to detect the
-    date-only ("no time set") sentinel in the user's own timezone."""
+    cache: dict[uuid.UUID, tuple[dt.tzinfo, int]],
+) -> tuple[dt.tzinfo, int]:
+    """The recipient's ``(timezone, day_start_minute)``, memoised per
+    sweep. The timezone renders reminder labels in local time and detects
+    the date-only ("no time set") sentinel in the user's own timezone;
+    ``day_start_minute`` anchors a date-only task's reminders to the
+    morning (see ``timewindow.day_start_anchor``)."""
     cached = cache.get(user_id)
     if cached is not None:
         return cached
-    name = (
-        await session.execute(select(User.timezone).where(User.id == user_id))
-    ).scalar_one_or_none()
-    tz = _resolve_tz(name)
-    cache[user_id] = tz
-    return tz
+    row = (
+        await session.execute(
+            select(User.timezone, User.day_start_minute).where(User.id == user_id)
+        )
+    ).one_or_none()
+    ctx: tuple[dt.tzinfo, int]
+    if row is None:
+        ctx = (dt.UTC, DEFAULT_DAY_START_MINUTE)
+    else:
+        ctx = (resolve_tz(row.timezone), row.day_start_minute or DEFAULT_DAY_START_MINUTE)
+    cache[user_id] = ctx
+    return ctx
 
 
 async def scan_reminders(
@@ -598,23 +594,28 @@ async def scan_reminders(
     users by FK). Each task fires its configured ``task_reminders`` N
     minutes before a firing reference:
 
-      * appointment tasks (``start_at`` set) use ``start_at`` with minute
-        precision;
-      * date-only tasks fall back to ``due_date`` (end-of-day).
+      * appointment tasks (``start_at`` set) fire relative to ``start_at``
+        with minute precision;
+      * date-only tasks (``due_date`` stored at end-of-day) anchor their
+        reminders to the START of the due day -- ``day_start_minute``
+        after local midnight in the recipient's timezone (configurable,
+        default 0) -- NOT to the 23:59:59 end-of-day expiry sentinel. So
+        "due today, no time" fires in the morning instead of at 23:59,
+        which the user perceives as a day late. (The expiry/overdue
+        boundary is unchanged: it is still end-of-day.)
 
     A deadline without explicit reminders gets one implicit reminder at
-    the reference. Sub-day offsets (``0 < off < 1440``) only have a
-    defined firing minute when the task has a ``start_at``; on date-only
-    tasks they are promoted to ``0`` (at reference) so they fire at a
-    defined moment rather than silently bucketing to one day before the
-    due date (the pre-v2.0.27 behaviour).
+    the anchor. Sub-day offsets (``0 < off < 1440``) only have a defined
+    firing minute when the task has a ``start_at``; on date-only tasks
+    they are promoted to ``0`` (at the anchor) so they fire at a defined
+    moment rather than silently bucketing to one day before the due date
+    (the pre-v2.0.27 behaviour).
 
-    The label shown to the user and the date-only detection are done in
-    the RECIPIENT's timezone (``users.timezone``, UTC when unset): the
-    SPA stores an unspecified time as end-of-day LOCAL, which round-trips
-    to 23:59:59 in that user's timezone (only 23:59:59 UTC for a UTC
-    user). The firing moment (``fire_at``) is an absolute instant and is
-    timezone-independent."""
+    The label, the date-only detection and the day-start anchor are all
+    computed in the RECIPIENT's timezone (``users.timezone``, UTC when
+    unset): a date-only ``due_date`` is end-of-day in the owner's zone,
+    which round-trips to 23:59:59 there. The firing moment (``fire_at``)
+    is an absolute instant and is timezone-independent."""
     ref = now or dt.datetime.now(tz=dt.UTC)
     # Horizon is "end of the (ref + within_days) calendar day in UTC":
     # since migration 0005 a date-only ``due_date`` lands at 23:59:59
@@ -644,7 +645,7 @@ async def scan_reminders(
         .unique()
         .all()
     )
-    tz_cache: dict[uuid.UUID, dt.tzinfo] = {}
+    ctx_cache: dict[uuid.UUID, tuple[dt.tzinfo, int]] = {}
     # Users with at least one browser push subscription: a webpush pref has
     # no per-pref target (the targets are the subscriptions), so it counts
     # as a usable channel only when the user has subscribed a device.
@@ -716,23 +717,30 @@ async def scan_reminders(
             ]
             if not prefs:
                 continue
-            tz = await _user_tz(session, user_id=uid, cache=tz_cache)
+            tz, day_start_minute = await _user_reminder_ctx(session, user_id=uid, cache=ctx_cache)
             local = reference.astimezone(tz)
             # date-only ("no time set") detection in the RECIPIENT's own
-            # timezone: the SPA stores an unspecified time as end-of-day
-            # local, which round-trips to 23:59:59 in that timezone.
-            # Appointment tasks always carry a real time.
+            # timezone: a date-only due is end-of-day in the owner's zone,
+            # which round-trips to 23:59:59 there. Appointment tasks always
+            # carry a real time.
             date_only = (
                 is_due_date and local.hour == 23 and local.minute == 59 and local.second == 59
             )
             when_label = (
                 local.date().isoformat() if date_only else local.strftime("%Y-%m-%d %H:%M %Z")
             )
+            # Date-only tasks anchor to the START of the due day (day_start
+            # after local midnight), NOT the 23:59:59 expiry sentinel, so a
+            # "due today" reminder fires in the morning. Timed/appointment
+            # tasks fire relative to their real instant.
+            anchor = (
+                day_start_anchor(local.date(), tz, day_start_minute) if date_only else reference
+            )
             for raw_off, rchannels in reminder_specs:
                 # Sub-day offsets on a date-only task have no defined
-                # firing minute -> fire at the reference ("at due").
+                # firing minute -> fire at the anchor ("at due").
                 off = 0 if date_only and 0 < raw_off < 1440 else raw_off
-                fire_at = reference - dt.timedelta(minutes=off)
+                fire_at = anchor - dt.timedelta(minutes=off)
                 if fire_at > horizon:
                     continue
                 # Body: the task title is already the notification title, so

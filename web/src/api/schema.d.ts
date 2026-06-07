@@ -7226,18 +7226,27 @@ export interface components {
             display_name?: string | null;
             /** Timezone */
             timezone?: string | null;
+            /**
+             * Day Start Minute
+             * @default 0
+             */
+            day_start_minute?: number;
             /** Is Admin */
             is_admin: boolean;
         };
         /**
          * MePatchIn
-         * @description Profile update for the caller. Currently the IANA timezone used to
-         *     render reminder labels in local time; an empty/absent value clears it
-         *     (-> UTC). Validated server-side against the IANA database.
+         * @description Profile update for the caller: the IANA timezone (reminder labels;
+         *     an explicit empty/null clears it -> UTC) and ``day_start_minute`` (the
+         *     minute after local midnight a date-only task's reminders fire; null
+         *     resets it to 0). Only the fields actually sent are applied. Validated
+         *     server-side.
          */
         MePatchIn: {
             /** Timezone */
             timezone?: string | null;
+            /** Day Start Minute */
+            day_start_minute?: number | null;
         };
         /** MemberAddIn */
         MemberAddIn: {

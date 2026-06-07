@@ -224,6 +224,14 @@ export const it: Catalog = {
       save: 'Salva',
       saved: 'Salvato.',
     },
+    dayStart: {
+      title: 'Inizio giornata',
+      help: 'Quando un task scade in una data senza un orario preciso, il promemoria parte a questo orario locale invece che a fine giornata (che arrivava con un giorno di ritardo). Impostalo al mattino, es. 06:00, così un task "scade oggi" ti avvisa in tempo per agire.',
+      label: 'I promemoria con sola data partono alle',
+      save: 'Salva',
+      saved: 'Salvato.',
+      invalid: 'Inserisci un orario valido (HH:MM).',
+    },
   },
   nav: {
     logout: 'Esci',

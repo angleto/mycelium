@@ -67,8 +67,24 @@ from flow_core.services import participants as part_svc
 from flow_core.services import task_checklist as checklist_svc
 from flow_core.services import tasks as svc
 from flow_core.services import workflow as wf
+from flow_core.timewindow import split_due
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
+
+
+def _parse_due(raw: str | None) -> datetime.date | datetime.datetime | None:
+    """Parse the ``due_date`` input into a date (date-only intent) or an
+    aware datetime; the service promotes the date-only case to end-of-day
+    in the owner's timezone. A malformed value is a 422, not a 500."""
+    if raw is None:
+        return None
+    try:
+        return split_due(raw)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"invalid due_date: {raw!r}",
+        ) from exc
 
 
 def _checklist_item_out(it: TaskChecklistItem) -> TaskChecklistItemOut:
@@ -302,7 +318,7 @@ async def create_task(
         importance=body.importance,
         urgency=body.urgency,
         start_date=body.start_date,
-        due_date=body.due_date,
+        due_date=_parse_due(body.due_date),
         billable=body.billable,
         parent_task_id=body.parent_task_id,
         executor_kind=body.executor_kind,
@@ -474,6 +490,10 @@ async def patch_task(
     # that had NULL importance/urgency and showed a different priority
     # than the list/kanban — bug fixed by deleting the JS derive).
     values: dict[str, Any] = body.model_dump(exclude_unset=True, exclude={"expected_version"})
+    if "due_date" in values:
+        # The input is a string (bare date or full ISO); the service
+        # promotes a date-only value to end-of-day in the owner's tz.
+        values["due_date"] = _parse_due(values["due_date"])
     # ``X-Edit-Session-Id`` flips the recovery-history channel to ``web``
     # so consecutive autosaves under the same session coalesce into one
     # open revision. Without the header, every PATCH is a sealed

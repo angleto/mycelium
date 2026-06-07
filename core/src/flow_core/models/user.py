@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import datetime
 
-from sqlalchemy import DateTime, String, Text, text
+from sqlalchemy import DateTime, SmallInteger, String, Text, text
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -35,6 +35,15 @@ class User(UUIDPKMixin, TimestampMixin, Base):
     # set") detection in ``scan_reminders``. NULL = UTC. Captured from the
     # browser on signup/settings; user-overridable.
     timezone: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # Minutes after local midnight (in ``timezone``) that a date-only
+    # task's reminders anchor to (migration 0033). 0 = local midnight
+    # (start of day, the default); 360 = 06:00. Lets a "due today"
+    # reminder fire in the morning instead of at the 23:59:59 end-of-day
+    # expiry sentinel (which read as a day late). Expiry/overdue is
+    # unaffected -- it still runs at end-of-day.
+    day_start_minute: Mapped[int] = mapped_column(
+        SmallInteger, nullable=False, server_default=text("0")
+    )
     is_admin: Mapped[bool] = mapped_column(nullable=False, server_default=text("false"))
 
     # Email verification (gated by FLOW_REQUIRE_EMAIL_VERIFICATION).

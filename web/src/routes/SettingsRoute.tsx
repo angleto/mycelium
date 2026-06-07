@@ -19,6 +19,7 @@ import { MemoryChannelsAdmin } from '../components/MemoryChannelsAdmin'
 import { PomodoroSettings } from '../components/PomodoroSettings'
 import { TelegramLink } from '../components/TelegramLink'
 import { TimezoneSettings } from '../components/TimezoneSettings'
+import { DayStartSettings } from '../components/DayStartSettings'
 import { useMe } from '../auth/useMe'
 import { isAdminMode } from '../auth/session'
 import type { components } from '../api/schema'
@@ -171,6 +172,7 @@ export function SettingsRoute() {
     <GmailConnect />
     <TelegramLink />
     <TimezoneSettings />
+    <DayStartSettings />
     <AiAssistantsSettings />
     {me?.is_admin && isAdminMode() && <LlmProviderSettings />}
     {me?.is_admin && isAdminMode() && <EmbedderProviderSettings />}
