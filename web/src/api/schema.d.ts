@@ -118,8 +118,8 @@ export interface paths {
         head?: never;
         /**
          * Patch Me Endpoint
-         * @description Update the caller's profile. Currently the IANA timezone used to
-         *     render reminder labels in local time; validated server-side. The
+         * @description Update the caller's reminder profile (timezone and/or day-start);
+         *     only the fields actually sent are applied. Validated server-side. The
          *     users table is global (no tenant RLS), so the write goes through the
          *     no-tenant admin session like the other auth flows.
          */
@@ -1374,6 +1374,33 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/annotations/comment/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Comment Stream
+         * @description Token-free comment: the comment text is the raw request body,
+         *     streamed into ``annotation.body`` instead of riding a tool argument
+         *     (the inline-body analogue of ``POST /attachments/stream``; no S3).
+         *     The bounded anchor fields stay query params (the agent already holds
+         *     them). Body is size-capped + UTF-8; an empty body is rejected. An
+         *     agent token attributes the comment to its AI-assistant identity, same
+         *     as the MCP tool. Use the MCP ``add_comment_instructions`` tool for
+         *     the matching ``curl``.
+         */
+        post: operations["create_comment_stream_annotations_comment_stream_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/annotations/suggestion": {
         parameters: {
             query?: never;
@@ -1385,6 +1412,32 @@ export interface paths {
         put?: never;
         /** Propose Suggestion */
         post: operations["propose_suggestion_annotations_suggestion_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/annotations/suggestion/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Propose Suggestion Stream
+         * @description Token-free suggestion: the PROPOSED replacement (the large
+         *     free-form field) is the raw request body; the struck ``original_text``
+         *     it replaces is a query param (a bounded anchor the agent already
+         *     holds, capped to keep the URL short). An empty body is a deletion
+         *     suggestion. Nothing touches the document until the suggestion is
+         *     accepted. Use the MCP ``propose_suggestion_instructions`` tool for the
+         *     matching ``curl``.
+         */
+        post: operations["propose_suggestion_stream_annotations_suggestion_stream_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1408,6 +1461,31 @@ export interface paths {
         head?: never;
         /** Edit Annotation */
         patch: operations["edit_annotation_annotations__annotation_id__patch"];
+        trace?: never;
+    };
+    "/annotations/{annotation_id}/body/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Edit Annotation Body Stream
+         * @description Token-free replace of an annotation's body (a comment's text or a
+         *     suggestion's rationale): the new text is the raw request body,
+         *     streamed in instead of riding a tool argument. ``expected_version``
+         *     is the optimistic cursor (a mismatch is ``stale_version`` -> 409);
+         *     author-or-admin only. Use the MCP ``edit_annotation_body_instructions``
+         *     tool for the matching ``curl``.
+         */
+        patch: operations["edit_annotation_body_stream_annotations__annotation_id__body_stream_patch"];
         trace?: never;
     };
     "/annotations/{annotation_id}/resolve": {
@@ -3399,6 +3477,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/notes/{note_id}/parts/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Note Part Stream
+         * @description Token-free create of a note part: the markdown body is the raw
+         *     request body, streamed straight into the part's TEXT column instead
+         *     of riding a tool argument (the inline-body analogue of
+         *     ``POST /attachments/stream``; no S3 needed). Metadata (``title`` /
+         *     ``lang`` / ``ord``) are query params. The body is size-capped
+         *     (``note_body_max_bytes``) and must be valid UTF-8. Use the MCP
+         *     ``add_note_part_instructions`` tool for the matching ``curl``.
+         */
+        post: operations["create_note_part_stream_notes__note_id__parts_stream_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/notes/{note_id}/parts/{part_id}/append": {
         parameters: {
             query?: never;
@@ -3503,6 +3607,33 @@ export interface paths {
          *     falls back to ``api`` and each save seals its own revision.
          */
         patch: operations["patch_note_part_notes__note_id__parts__part_id__patch"];
+        trace?: never;
+    };
+    "/notes/{note_id}/parts/{part_id}/body/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Replace Note Part Body Stream
+         * @description Token-free full-body replace of a note part: the new markdown is
+         *     the raw request body, streamed into the part's TEXT column without
+         *     resending it as a tool argument. ``expected_version`` is the
+         *     optimistic cursor (a mismatch is ``stale_version`` -> 409); the body
+         *     is size-capped (``note_body_max_bytes``) and must be valid UTF-8. An
+         *     empty body clears the part. For incremental growth use ``/append``;
+         *     this is the "I have the whole new body in a file" path. Use the MCP
+         *     ``set_note_part_body_instructions`` tool for the matching ``curl``.
+         */
+        put: operations["replace_note_part_body_stream_notes__note_id__parts__part_id__body_stream_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/notes/{note_id}/parts/order": {
@@ -4633,6 +4764,57 @@ export interface paths {
         /** Set Pref */
         put: operations["set_pref_notifications_prefs_put"];
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/notifications/push/vapid-public-key": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Push Vapid Public Key */
+        get: operations["push_vapid_public_key_notifications_push_vapid_public_key_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/notifications/push/subscribe": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Push Subscribe */
+        post: operations["push_subscribe_notifications_push_subscribe_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/notifications/push/unsubscribe": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Push Unsubscribe */
+        post: operations["push_unsubscribe_notifications_push_unsubscribe_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -7995,7 +8177,7 @@ export interface components {
          * NotificationChannelKind
          * @enum {string}
          */
-        NotificationChannelKind: "telegram" | "email";
+        NotificationChannelKind: "telegram" | "email" | "webpush";
         /** NotificationOut */
         NotificationOut: {
             /**
@@ -8179,6 +8361,28 @@ export interface components {
             expected_version: number;
             /** Workflow Id */
             workflow_id?: string | null;
+        };
+        /**
+         * PushSubscriptionIn
+         * @description A browser PushManager subscription in its ``toJSON()`` shape:
+         *     endpoint + encryption keys. ``expirationTime`` is ignored.
+         */
+        PushSubscriptionIn: {
+            /** Endpoint */
+            endpoint: string;
+            keys: components["schemas"]["PushSubscriptionKeys"];
+        };
+        /** PushSubscriptionKeys */
+        PushSubscriptionKeys: {
+            /** P256Dh */
+            p256dh: string;
+            /** Auth */
+            auth: string;
+        };
+        /** PushUnsubscribeIn */
+        PushUnsubscribeIn: {
+            /** Endpoint */
+            endpoint: string;
         };
         /**
          * QuickCreateIn
@@ -8381,6 +8585,8 @@ export interface components {
         ReminderIn: {
             /** Offset Minutes */
             offset_minutes: number;
+            /** Channels */
+            channels?: components["schemas"]["NotificationChannelKind"][] | null;
         };
         /** ReminderOut */
         ReminderOut: {
@@ -8396,6 +8602,8 @@ export interface components {
             task_id: string;
             /** Offset Minutes */
             offset_minutes: number;
+            /** Channels */
+            channels?: string[] | null;
         };
         /**
          * ReplaceOut
@@ -9639,6 +9847,18 @@ export interface components {
             input?: unknown;
             /** Context */
             ctx?: Record<string, never>;
+        };
+        /**
+         * VapidPublicKeyOut
+         * @description Handed to the SPA so it can subscribe the browser's push manager.
+         *     ``configured`` is false when the deploy has no VAPID keypair, in which
+         *     case the SPA hides the browser-notifications affordance.
+         */
+        VapidPublicKeyOut: {
+            /** Configured */
+            configured: boolean;
+            /** Public Key */
+            public_key: string;
         };
         /** VerifyEmailIn */
         VerifyEmailIn: {
@@ -13089,6 +13309,47 @@ export interface operations {
             };
         };
     };
+    create_comment_stream_annotations_comment_stream_post: {
+        parameters: {
+            query: {
+                doc_kind: string;
+                doc_id: string;
+                anchor_quote?: string | null;
+                anchor_prefix?: string | null;
+                anchor_suffix?: string | null;
+                parent_id?: string | null;
+            };
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnnotationOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     propose_suggestion_annotations_suggestion_post: {
         parameters: {
             query?: never;
@@ -13106,6 +13367,47 @@ export interface operations {
                 "application/json": components["schemas"]["SuggestionIn"];
             };
         };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnnotationOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    propose_suggestion_stream_annotations_suggestion_stream_post: {
+        parameters: {
+            query: {
+                doc_kind: string;
+                doc_id: string;
+                original_text: string;
+                rationale?: string;
+                anchor_prefix?: string | null;
+                anchor_suffix?: string | null;
+            };
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
             200: {
@@ -13220,6 +13522,44 @@ export interface operations {
                 "application/json": components["schemas"]["AnnotationEditIn"];
             };
         };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VersionOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    edit_annotation_body_stream_annotations__annotation_id__body_stream_patch: {
+        parameters: {
+            query: {
+                expected_version: number;
+            };
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                annotation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
             200: {
@@ -18391,6 +18731,46 @@ export interface operations {
             };
         };
     };
+    create_note_part_stream_notes__note_id__parts_stream_post: {
+        parameters: {
+            query?: {
+                title?: string | null;
+                lang?: string | null;
+                ord?: number | null;
+            };
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                note_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotePartOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     append_note_part_notes__note_id__parts__part_id__append_post: {
         parameters: {
             query?: never;
@@ -18573,6 +18953,46 @@ export interface operations {
                 "application/json": components["schemas"]["NotePartPatchIn"];
             };
         };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VersionOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    replace_note_part_body_stream_notes__note_id__parts__part_id__body_stream_put: {
+        parameters: {
+            query: {
+                expected_version: number;
+            };
+            header: {
+                "X-Edit-Session-Id"?: string | null;
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                note_id: string;
+                part_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
             200: {
@@ -21304,6 +21724,112 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["NotificationPrefOut"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    push_vapid_public_key_notifications_push_vapid_public_key_get: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VapidPublicKeyOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    push_subscribe_notifications_push_subscribe_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PushSubscriptionIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    push_unsubscribe_notifications_push_unsubscribe_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PushUnsubscribeIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {
