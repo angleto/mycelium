@@ -48,6 +48,20 @@ def normalize_timezone(value: str | None) -> str | None:
     return name
 
 
+SUPPORTED_LANGUAGES = ("en", "it")
+
+
+def normalize_language(value: str | None) -> str | None:
+    """Validate the UI / notification locale. A supported code ("it" /
+    "en") is kept; anything else (including None / empty / an unsupported
+    tag) clears the preference, which resolves to the default locale
+    ("en") when reminder text is rendered."""
+    if value is None:
+        return None
+    code = value.strip().lower()
+    return code if code in SUPPORTED_LANGUAGES else None
+
+
 def normalize_day_start_minute(value: int | None) -> int:
     """Validate the per-user day-start offset (minutes after local
     midnight). None resets to 0 (start of day). Out of the 0..1439 range
@@ -75,17 +89,20 @@ async def update_profile(
     user_id: uuid.UUID,
     timezone: str | None | Any = _UNSET,
     day_start_minute: int | None | Any = _UNSET,
+    language: str | None | Any = _UNSET,
 ) -> User:
-    """Patch the caller's reminder profile. Only the fields actually
-    passed are touched (the ``_UNSET`` sentinel distinguishes "leave
-    alone" from an explicit ``None``), so patching the day start does not
-    clear the timezone and vice-versa. Caller is already authenticated
-    (``current_user``), so the row exists."""
+    """Patch the caller's reminder profile (timezone / day start /
+    language). Only the fields actually passed are touched (the
+    ``_UNSET`` sentinel distinguishes "leave alone" from an explicit
+    ``None``), so patching one does not clear the others. Caller is
+    already authenticated (``current_user``), so the row exists."""
     user = (await session.execute(select(User).where(User.id == user_id))).scalar_one()
     if timezone is not _UNSET:
         user.timezone = normalize_timezone(timezone)
     if day_start_minute is not _UNSET:
         user.day_start_minute = normalize_day_start_minute(day_start_minute)
+    if language is not _UNSET:
+        user.language = normalize_language(language)
     await session.flush()
     return user
 

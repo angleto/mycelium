@@ -22,7 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from flow_core.config import get_settings
 from flow_core.errors import DomainError
-from flow_core.i18n import MessageCode
+from flow_core.i18n import DEFAULT_LOCALE, MessageCode, render
 from flow_core.models.dependency import TaskDependency
 from flow_core.models.identity import Identity, IdentityKind
 from flow_core.models.membership import Role
@@ -555,28 +555,62 @@ async def _user_reminder_ctx(
     session: AsyncSession,
     *,
     user_id: uuid.UUID,
-    cache: dict[uuid.UUID, tuple[dt.tzinfo, int]],
-) -> tuple[dt.tzinfo, int]:
-    """The recipient's ``(timezone, day_start_minute)``, memoised per
-    sweep. The timezone renders reminder labels in local time and detects
-    the date-only ("no time set") sentinel in the user's own timezone;
-    ``day_start_minute`` anchors a date-only task's reminders to the
-    morning (see ``timewindow.day_start_anchor``)."""
+    cache: dict[uuid.UUID, tuple[dt.tzinfo, int, str]],
+) -> tuple[dt.tzinfo, int, str]:
+    """The recipient's ``(timezone, day_start_minute, language)``, memoised
+    per sweep. The timezone renders labels in local time and detects the
+    date-only sentinel; ``day_start_minute`` anchors a date-only task's
+    reminders to the morning (``timewindow.day_start_anchor``); ``language``
+    (en / it, default ``en``) localises the reminder title and body."""
     cached = cache.get(user_id)
     if cached is not None:
         return cached
     row = (
         await session.execute(
-            select(User.timezone, User.day_start_minute).where(User.id == user_id)
+            select(User.timezone, User.day_start_minute, User.language).where(User.id == user_id)
         )
     ).one_or_none()
-    ctx: tuple[dt.tzinfo, int]
+    ctx: tuple[dt.tzinfo, int, str]
     if row is None:
-        ctx = (dt.UTC, DEFAULT_DAY_START_MINUTE)
+        ctx = (dt.UTC, DEFAULT_DAY_START_MINUTE, DEFAULT_LOCALE)
     else:
-        ctx = (resolve_tz(row.timezone), row.day_start_minute or DEFAULT_DAY_START_MINUTE)
+        ctx = (
+            resolve_tz(row.timezone),
+            row.day_start_minute or DEFAULT_DAY_START_MINUTE,
+            row.language or DEFAULT_LOCALE,
+        )
     cache[user_id] = ctx
     return ctx
+
+
+def _humanize_offset(minutes: int, locale: str) -> str:
+    """A reminder offset in minutes as a human string in ``locale`` (en /
+    it): exact day / hour multiples read as "1 day" / "3 hours" ("1
+    giorno" / "3 ore"); a mixed sub-day value as "2 hours 10 min"; a
+    sub-hour value as "30 min". So the reminder body shows "(2 days
+    before)" / "(2 giorni prima)" instead of "(2880 min before)"."""
+    if minutes % 1440 == 0:
+        d = minutes // 1440
+        return render(
+            MessageCode.DURATION_DAY if d == 1 else MessageCode.DURATION_DAYS, locale, n=d
+        )
+    if minutes < 60:
+        return render(MessageCode.DURATION_MIN, locale, n=minutes)
+    h, m = divmod(minutes, 60)
+    hours = render(MessageCode.DURATION_HOUR if h == 1 else MessageCode.DURATION_HOURS, locale, n=h)
+    if m == 0:
+        return hours
+    return f"{hours} {render(MessageCode.DURATION_MIN, locale, n=m)}"
+
+
+# A reminder whose fire moment is more than this in the past is dropped
+# rather than dispatched. It still covers a task added a little after its
+# fire moment, but not a long-overdue task, nor a fire_at that re-surfaces
+# with a fresh dedupe key (a release that changes the date-only anchor
+# would otherwise re-send every past reminder at once -- the v2.0.93
+# symptom). The task still shows overdue in the UI; this only governs the
+# pre-due nudge.
+STALE_GRACE = dt.timedelta(days=1)
 
 
 async def scan_reminders(
@@ -645,7 +679,7 @@ async def scan_reminders(
         .unique()
         .all()
     )
-    ctx_cache: dict[uuid.UUID, tuple[dt.tzinfo, int]] = {}
+    ctx_cache: dict[uuid.UUID, tuple[dt.tzinfo, int, str]] = {}
     # Users with at least one browser push subscription: a webpush pref has
     # no per-pref target (the targets are the subscriptions), so it counts
     # as a usable channel only when the user has subscribed a device.
@@ -717,7 +751,12 @@ async def scan_reminders(
             ]
             if not prefs:
                 continue
-            tz, day_start_minute = await _user_reminder_ctx(session, user_id=uid, cache=ctx_cache)
+            tz, day_start_minute, language = await _user_reminder_ctx(
+                session, user_id=uid, cache=ctx_cache
+            )
+            # Reminder title in the recipient's language (same for every
+            # offset on this task); the body adds the due moment + offset.
+            rtitle = render(MessageCode.REMINDER_TITLE, language, title=t.title)
             local = reference.astimezone(tz)
             # date-only ("no time set") detection in the RECIPIENT's own
             # timezone: a date-only due is end-of-day in the owner's zone,
@@ -743,13 +782,27 @@ async def scan_reminders(
                 fire_at = anchor - dt.timedelta(minutes=off)
                 if fire_at > horizon:
                     continue
-                # Body: the task title is already the notification title, so
-                # don't repeat it. Show the due moment (date for date-only,
-                # date+time for appointments) + the deep-link. For offset 0
-                # omit "(at due)" (redundant); for an early reminder note how
-                # early it is.
-                detail = when_label if off == 0 else f"{when_label} ({off} min before)"
-                reminder_body = f"Due {detail}\n{base_url}/tasks/{t.id}"
+                # Don't re-send a reminder whose moment is long past: an
+                # overdue task, or a fire_at re-surfaced under a new dedupe
+                # key, must not fire a stale pre-due nudge weeks late.
+                if fire_at < ref - STALE_GRACE:
+                    continue
+                # Body in the recipient's language: the title is already the
+                # notification title, so don't repeat it. Show the due moment
+                # (date for date-only, date+time for appointments) + the
+                # deep-link. Offset 0 omits the lead time; an early reminder
+                # states it in human units (h/d), not raw minutes.
+                detail = (
+                    render(MessageCode.REMINDER_DUE, language, when=when_label)
+                    if off == 0
+                    else render(
+                        MessageCode.REMINDER_DUE_BEFORE,
+                        language,
+                        when=when_label,
+                        offset=_humanize_offset(off, language),
+                    )
+                )
+                reminder_body = f"{detail}\n{base_url}/tasks/{t.id}"
                 # Per-reminder channel selection: NULL channels = the
                 # recipient's default (all usable prefs); a set list restricts
                 # this reminder to those channels (intersected with usable).
@@ -766,7 +819,7 @@ async def scan_reminders(
                         user_id=uid,
                         channel=p.channel,
                         kind="reminder",
-                        title=f"Task due: {t.title}",
+                        title=rtitle,
                         body=reminder_body,
                         dedupe_key=(
                             f"reminder:{t.id}:{uid}:{p.channel.value}:{fire_at.isoformat()}"

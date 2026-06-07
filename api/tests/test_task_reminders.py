@@ -3,6 +3,7 @@ per configured offset to the task's assignees."""
 
 from __future__ import annotations
 
+import datetime as dt
 import uuid
 
 from httpx import ASGITransport, AsyncClient
@@ -32,11 +33,14 @@ async def test_reminders_crud_and_scan() -> None:
         # returns it as `user_id` in this codebase's SignupOut.
         assert uid is not None
 
+        # A future due date so the "at due" reminder is not dropped as
+        # stale (computed, not hardcoded, to stay future as time passes).
+        due = (dt.date.today() + dt.timedelta(days=30)).isoformat()
         tk = (
             await c.post(
                 "/tasks",
                 headers=h,
-                json={"title": "Bill", "due_date": "2026-06-01"},
+                json={"title": "Bill", "due_date": due},
             )
         ).json()
         tid = tk["id"]

@@ -573,6 +573,49 @@ async def test_dateonly_reminder_anchors_to_day_start() -> None:
     assert local.date() == due_day
 
 
+async def test_reminder_text_localized_italian() -> None:
+    """An ``it`` recipient gets the reminder title/body and the humanised
+    lead time in Italian -- "(2 giorni prima)", not "(2880 min before)"."""
+    org, user = await _org()
+    rome = ZoneInfo("Europe/Rome")
+    async with admin_session() as s:
+        await users_svc.update_profile(s, user_id=user, language="it", timezone="Europe/Rome")
+    # Date-only, due in 5 days, "2 days before" -> fires in 3 days (within
+    # the look-ahead, not stale).
+    due_day = (dt.datetime.now(tz=rome) + dt.timedelta(days=5)).date()
+    async with tenant_session(str(org), str(user)) as s:
+        await _enable_email(s, org, user)
+        task = await tasks_svc.create_task(
+            s, org_id=org, actor_id=user, title="Camp", due_date=due_day, assignee_ids=[user]
+        )
+        await nf.add_reminder(s, org_id=org, actor_id=user, task_id=task.id, offset_minutes=2880)
+        await nf.scan_reminders(s, org_id=org, actor_id=user, within_days=7)
+        notes = await nf.list_notifications(s, org_id=org, user_id=user)
+    reminder = next(x for x in notes if x.kind == "reminder")
+    assert reminder.title.startswith("Attività in scadenza:")
+    assert "In scadenza" in reminder.body
+    assert "2 giorni prima" in reminder.body
+    assert "min before" not in reminder.body and "days before" not in reminder.body
+
+
+async def test_stale_overdue_reminder_dropped() -> None:
+    """A reminder whose fire moment is weeks in the past (an overdue task,
+    or a re-surfaced fire_at) is not enqueued -- no stale nudge."""
+    org, user = await _org()
+    due = dt.datetime.now(tz=dt.UTC) - dt.timedelta(days=30)
+    due_eod = dt.datetime.combine(due.date(), dt.time(23, 59, 59), tzinfo=dt.UTC)
+    async with tenant_session(str(org), str(user)) as s:
+        await _enable_email(s, org, user)
+        task = await tasks_svc.create_task(
+            s, org_id=org, actor_id=user, title="old", due_date=due_eod, assignee_ids=[user]
+        )
+        await nf.add_reminder(s, org_id=org, actor_id=user, task_id=task.id, offset_minutes=1440)
+        n = await nf.scan_reminders(s, org_id=org, actor_id=user, within_days=1)
+        notes = await nf.list_notifications(s, org_id=org, user_id=user)
+    assert n == 0
+    assert [x for x in notes if x.kind == "reminder"] == []
+
+
 async def test_dateonly_reminder_default_day_start_is_local_midnight() -> None:
     """With no day-start configured, a date-only reminder anchors to local
     midnight (start of day), not the 23:59:59 end-of-day sentinel."""

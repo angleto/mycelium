@@ -176,6 +176,18 @@ class MessageCode(enum.StrEnum):
     BODY_INVALID_ENCODING = "body.invalid_encoding"
     DOMAIN_ERROR = "domain.error"
     PROVIDER_KEY_INVALID = "provider.key_invalid"
+    # Worker-generated reminder text (localised per recipient, see
+    # services.notifications.scan_reminders). ``{when}`` is the due
+    # date/datetime, ``{offset}`` the humanised lead time.
+    REMINDER_TITLE = "reminder.title"
+    REMINDER_DUE = "reminder.due"
+    REMINDER_DUE_BEFORE = "reminder.due_before"
+    # Humanised durations for the reminder lead time (``{n}`` count).
+    DURATION_MIN = "duration.min"
+    DURATION_HOUR = "duration.hour"
+    DURATION_HOURS = "duration.hours"
+    DURATION_DAY = "duration.day"
+    DURATION_DAYS = "duration.days"
 
 
 # locale -> code -> template. Templates use str.format named params.
@@ -449,6 +461,28 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
         MessageCode.PROVIDER_KEY_INVALID: (
             "The provider API key could not be validated; check the key and model."
         ),
+        MessageCode.REMINDER_TITLE: "Task due: {title}",
+        MessageCode.REMINDER_DUE: "Due {when}",
+        MessageCode.REMINDER_DUE_BEFORE: "Due {when} ({offset} before)",
+        MessageCode.DURATION_MIN: "{n} min",
+        MessageCode.DURATION_HOUR: "{n} hour",
+        MessageCode.DURATION_HOURS: "{n} hours",
+        MessageCode.DURATION_DAY: "{n} day",
+        MessageCode.DURATION_DAYS: "{n} days",
+    },
+    # Italian. Only the user-facing strings that the backend actually
+    # emits to a recipient are translated here (currently the reminder
+    # notifications); any code missing from this table falls back to the
+    # English template via ``render``.
+    "it": {
+        MessageCode.REMINDER_TITLE: "Attività in scadenza: {title}",
+        MessageCode.REMINDER_DUE: "In scadenza {when}",
+        MessageCode.REMINDER_DUE_BEFORE: "In scadenza {when} ({offset} prima)",
+        MessageCode.DURATION_MIN: "{n} min",
+        MessageCode.DURATION_HOUR: "{n} ora",
+        MessageCode.DURATION_HOURS: "{n} ore",
+        MessageCode.DURATION_DAY: "{n} giorno",
+        MessageCode.DURATION_DAYS: "{n} giorni",
     },
 }
 

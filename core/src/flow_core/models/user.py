@@ -44,6 +44,11 @@ class User(UUIDPKMixin, TimestampMixin, Base):
     day_start_minute: Mapped[int] = mapped_column(
         SmallInteger, nullable=False, server_default=text("0")
     )
+    # UI / notification locale, "it" | "en" (migration 0034). Drives the
+    # language of worker-generated reminder text (no request context, so
+    # it can't read Accept-Language). NULL = the default locale ("en").
+    # Captured from the SPA's language switcher.
+    language: Mapped[str | None] = mapped_column(String(8), nullable=True)
     is_admin: Mapped[bool] = mapped_column(nullable=False, server_default=text("false"))
 
     # Email verification (gated by FLOW_REQUIRE_EMAIL_VERIFICATION).

@@ -301,6 +301,14 @@ export function AppShell() {
   const { t } = useTranslation()
   const navigate = useNavigate()
   const { me } = useMe()
+  // Adopt the stored language once the profile loads, so the SPA opens in
+  // the user's saved language (i18next itself does not persist) and the UI
+  // matches the language their reminders are sent in.
+  useEffect(() => {
+    if (me?.language && me.language !== i18n.language) {
+      void i18n.changeLanguage(me.language)
+    }
+  }, [me?.language])
   const elevated = useAdminMode()
   const canAdmin = !!me?.is_admin
   // Mobile sidebar toggle. The hamburger in topbar flips this; CSS
@@ -504,7 +512,13 @@ export function AppShell() {
       <select
         aria-label="language"
         value={i18n.language}
-        onChange={(e) => void i18n.changeLanguage(e.target.value)}
+        onChange={(e) => {
+          const lng = e.target.value
+          void i18n.changeLanguage(lng)
+          // Persist so the choice survives a reload AND so worker-generated
+          // notifications (reminders) reach this user in their language.
+          void api.PATCH('/auth/me', { body: { language: lng } })
+        }}
       >
         <option value="en">EN</option>
         <option value="it">IT</option>

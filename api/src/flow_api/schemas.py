@@ -102,6 +102,8 @@ class MeOut(BaseModel):
     # Minutes after local midnight that a date-only task's reminders fire
     # (0 = start of day; 360 = 06:00). See ``users.day_start_minute``.
     day_start_minute: int = 0
+    # UI / notification locale ("it" | "en"); NULL = default ("en").
+    language: str | None = None
     is_admin: bool
 
 
@@ -114,6 +116,7 @@ class MePatchIn(BaseModel):
 
     timezone: str | None = Field(default=None, max_length=64)
     day_start_minute: int | None = Field(default=None, ge=0, le=1439)
+    language: str | None = Field(default=None, max_length=8)
 
 
 class AdminUserOut(BaseModel):

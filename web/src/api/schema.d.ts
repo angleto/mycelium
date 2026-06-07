@@ -7413,6 +7413,8 @@ export interface components {
              * @default 0
              */
             day_start_minute?: number;
+            /** Language */
+            language?: string | null;
             /** Is Admin */
             is_admin: boolean;
         };
@@ -7429,6 +7431,8 @@ export interface components {
             timezone?: string | null;
             /** Day Start Minute */
             day_start_minute?: number | null;
+            /** Language */
+            language?: string | null;
         };
         /** MemberAddIn */
         MemberAddIn: {

@@ -119,6 +119,7 @@ async def me_endpoint(
         display_name=user.display_name,
         timezone=user.timezone,
         day_start_minute=user.day_start_minute,
+        language=user.language,
         is_admin=user.is_admin,
     )
 
@@ -138,6 +139,8 @@ async def patch_me_endpoint(
         patch["timezone"] = body.timezone
     if "day_start_minute" in sent:
         patch["day_start_minute"] = body.day_start_minute
+    if "language" in sent:
+        patch["language"] = body.language
     async with admin_session() as session:
         updated = await update_profile(session, user_id=user.id, **patch)
         return MeOut(
@@ -146,6 +149,7 @@ async def patch_me_endpoint(
             display_name=updated.display_name,
             timezone=updated.timezone,
             day_start_minute=updated.day_start_minute,
+            language=updated.language,
             is_admin=updated.is_admin,
         )
 
