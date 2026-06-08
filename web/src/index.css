@@ -4881,3 +4881,45 @@ button.btn--danger:hover {
   margin: 0;
   font-size: 0.8rem;
 }
+
+/* The action popover (clicking an existing comment/suggestion) is a
+   centered modal: a full-screen backdrop whose click closes it, with the
+   dialog centred inside. This replaces the old mark-anchored placement,
+   which could drop the dialog's buttons below the viewport's bottom. */
+.anno-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(0, 0, 0, 0.32);
+}
+.anno-pop--modal {
+  /* Centred by the backdrop's flexbox, not by viewport coordinates. */
+  position: static;
+  width: 380px;
+  max-width: 100%;
+  /* Bounded height so a long comment scrolls inside the dialog instead of
+     growing past the screen. */
+  max-height: min(85vh, 640px);
+}
+.anno-pop__scroll {
+  /* The variable-height content (quote/diff, body, replies, edit/reply
+     fields). Scrolls within the dialog; min-height:0 lets it actually
+     shrink inside the flex column so overflow-y engages. */
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+.anno-pop__footer {
+  /* Pinned below the scroll region: the action buttons stay visible no
+     matter how tall the comment is. */
+  flex: 0 0 auto;
+  padding-top: 0.4rem;
+  border-top: 1px solid var(--border, #e5e5e5);
+}

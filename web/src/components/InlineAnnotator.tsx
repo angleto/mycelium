@@ -45,8 +45,6 @@ interface Sel {
 
 interface ActiveAt {
   id: string
-  left: number
-  top: number
 }
 
 interface Props {
@@ -183,13 +181,12 @@ export const InlineAnnotator = forwardRef<InlineAnnotatorHandle, Props>(
       if (!el) return
       const id = el.getAttribute('data-annotation-id')
       if (!id) return
-      const rect = el.getBoundingClientRect()
       setCompose(null)
       setSel(null)
       setEditing(false)
       setReplying(false)
       setErr('')
-      setActive({ id, left: rect.left, top: rect.bottom })
+      setActive({ id })
     }
     dom.addEventListener('click', onClick)
     return () => dom.removeEventListener('click', onClick)
@@ -393,36 +390,79 @@ export const InlineAnnotator = forwardRef<InlineAnnotatorHandle, Props>(
         </div>
       )}
 
-      {/* Action popover on an existing annotation */}
+      {/* Action popover on an existing annotation. Rendered as a centered
+          modal (not anchored to the clicked mark) so a tall comment — long
+          body + replies + a full row of actions — can never push its
+          buttons below the viewport. A click on the backdrop, like Escape,
+          closes it; the dialog stops the mousedown so an in-dialog click is
+          never read as an outside click. The variable-height content lives
+          in a scroll region and the action buttons sit in a pinned footer,
+          so the buttons stay in view however long the comment runs. */}
       {active && current && (
-        <div
-          className="anno-pop"
-          style={{ position: 'fixed', left: clampLeft(active.left - 80), top: active.top + 6 }}
-          onMouseDown={(e) => e.stopPropagation()}
-        >
-          {current.kind === 'suggestion' ? (
-            <div className="anno-pop__diff">
-              {current.original_text && <del className="anno-del">{current.original_text}</del>}{' '}
-              {current.proposed_text && <ins className="anno-ins">{current.proposed_text}</ins>}
-            </div>
-          ) : (
-            current.anchor_quote && (
-              <div className="anno-pop__quote" title={current.anchor_quote}>
-                “{current.anchor_quote.slice(0, 80)}”
-              </div>
-            )
-          )}
+        <div className="anno-modal-backdrop" onMouseDown={closeAll}>
+          <div
+            className="anno-pop anno-pop--modal"
+            role="dialog"
+            aria-modal="true"
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <div className="anno-pop__scroll">
+              {current.kind === 'suggestion' ? (
+                <div className="anno-pop__diff">
+                  {current.original_text && <del className="anno-del">{current.original_text}</del>}{' '}
+                  {current.proposed_text && <ins className="anno-ins">{current.proposed_text}</ins>}
+                </div>
+              ) : (
+                current.anchor_quote && (
+                  <div className="anno-pop__quote" title={current.anchor_quote}>
+                    “{current.anchor_quote.slice(0, 80)}”
+                  </div>
+                )
+              )}
 
-          {editing ? (
-            <>
-              <textarea
-                className="anno-pop__input"
-                autoFocus
-                rows={3}
-                value={editText}
-                onChange={(e) => setEditText(e.target.value)}
-              />
-              <div className="anno-pop__actions">
+              {editing ? (
+                <textarea
+                  className="anno-pop__input"
+                  autoFocus
+                  rows={3}
+                  value={editText}
+                  onChange={(e) => setEditText(e.target.value)}
+                />
+              ) : (
+                current.body && (
+                  <div className="anno-pop__body">
+                    <MarkdownView text={current.body} parent={parent} />
+                  </div>
+                )
+              )}
+
+              {/* Existing replies (read-only here; full thread in the panel). */}
+              {repliesOf(current.id).length > 0 && (
+                <ul className="anno-pop__replies">
+                  {repliesOf(current.id).map((r) => (
+                    <li key={r.id}>{r.body}</li>
+                  ))}
+                </ul>
+              )}
+
+              {replying && (
+                <textarea
+                  className="anno-pop__input"
+                  autoFocus
+                  rows={2}
+                  value={replyText}
+                  onChange={(e) => setReplyText(e.target.value)}
+                  placeholder={t('annotations.replyPlaceholder', { defaultValue: 'Reply…' })}
+                />
+              )}
+            </div>
+
+            {err && <p className="err anno-pop__err">{err}</p>}
+
+            {/* Pinned footer: the mode-appropriate action buttons, kept below
+                the scroll region so they never spill off-screen. */}
+            {editing ? (
+              <div className="anno-pop__actions anno-pop__footer">
                 <button type="button" className="btn--sm" onClick={() => void doSaveEdit(current)}>
                   {t('common.save', { defaultValue: 'Save' })}
                 </button>
@@ -434,35 +474,8 @@ export const InlineAnnotator = forwardRef<InlineAnnotatorHandle, Props>(
                   {t('common.cancel', { defaultValue: 'Cancel' })}
                 </button>
               </div>
-            </>
-          ) : (
-            current.body && (
-              <div className="anno-pop__body">
-                <MarkdownView text={current.body} parent={parent} />
-              </div>
-            )
-          )}
-
-          {/* Existing replies (read-only here; full thread in the panel). */}
-          {repliesOf(current.id).length > 0 && (
-            <ul className="anno-pop__replies">
-              {repliesOf(current.id).map((r) => (
-                <li key={r.id}>{r.body}</li>
-              ))}
-            </ul>
-          )}
-
-          {replying && (
-            <>
-              <textarea
-                className="anno-pop__input"
-                autoFocus
-                rows={2}
-                value={replyText}
-                onChange={(e) => setReplyText(e.target.value)}
-                placeholder={t('annotations.replyPlaceholder', { defaultValue: 'Reply…' })}
-              />
-              <div className="anno-pop__actions">
+            ) : replying ? (
+              <div className="anno-pop__actions anno-pop__footer">
                 <button type="button" className="btn--sm" onClick={() => void doReply(current)}>
                   {t('annotations.send', { defaultValue: 'Send' })}
                 </button>
@@ -474,79 +487,75 @@ export const InlineAnnotator = forwardRef<InlineAnnotatorHandle, Props>(
                   {t('common.cancel', { defaultValue: 'Cancel' })}
                 </button>
               </div>
-            </>
-          )}
-
-          {err && <p className="err anno-pop__err">{err}</p>}
-
-          {!editing && !replying && (
-            <div className="anno-pop__actions">
-              {current.kind === 'suggestion' && current.status === 'open' && (
-                <>
-                  <button type="button" className="btn--sm" onClick={() => void doAct(current, 'accept')}>
-                    {t('annotations.accept', { defaultValue: 'Accept' })}
-                  </button>
+            ) : (
+              <div className="anno-pop__actions anno-pop__footer">
+                {current.kind === 'suggestion' && current.status === 'open' && (
+                  <>
+                    <button type="button" className="btn--sm" onClick={() => void doAct(current, 'accept')}>
+                      {t('annotations.accept', { defaultValue: 'Accept' })}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn--sm btn--ghost"
+                      onClick={() => void doAct(current, 'reject')}
+                    >
+                      {t('annotations.reject', { defaultValue: 'Reject' })}
+                    </button>
+                  </>
+                )}
+                {current.kind === 'comment' && current.status === 'open' && (
                   <button
                     type="button"
                     className="btn--sm btn--ghost"
-                    onClick={() => void doAct(current, 'reject')}
+                    onClick={() => void doAct(current, 'resolve')}
                   >
-                    {t('annotations.reject', { defaultValue: 'Reject' })}
+                    {t('annotations.resolve', { defaultValue: 'Resolve' })}
                   </button>
-                </>
-              )}
-              {current.kind === 'comment' && current.status === 'open' && (
-                <button
-                  type="button"
-                  className="btn--sm btn--ghost"
-                  onClick={() => void doAct(current, 'resolve')}
-                >
-                  {t('annotations.resolve', { defaultValue: 'Resolve' })}
-                </button>
-              )}
-              {current.kind === 'comment' && current.status !== 'open' && (
-                <button
-                  type="button"
-                  className="btn--sm btn--ghost"
-                  onClick={() => void doAct(current, 'reopen')}
-                >
-                  {t('annotations.reopen', { defaultValue: 'Reopen' })}
-                </button>
-              )}
-              {current.kind === 'comment' && (
+                )}
+                {current.kind === 'comment' && current.status !== 'open' && (
+                  <button
+                    type="button"
+                    className="btn--sm btn--ghost"
+                    onClick={() => void doAct(current, 'reopen')}
+                  >
+                    {t('annotations.reopen', { defaultValue: 'Reopen' })}
+                  </button>
+                )}
+                {current.kind === 'comment' && (
+                  <button
+                    type="button"
+                    className="btn--sm btn--ghost"
+                    onClick={() => {
+                      setReplyText('')
+                      setReplying(true)
+                    }}
+                  >
+                    {t('annotations.reply', { defaultValue: 'Reply' })}
+                  </button>
+                )}
                 <button
                   type="button"
                   className="btn--sm btn--ghost"
                   onClick={() => {
-                    setReplyText('')
-                    setReplying(true)
+                    setEditText(current.body ?? '')
+                    setEditing(true)
                   }}
                 >
-                  {t('annotations.reply', { defaultValue: 'Reply' })}
+                  {t('common.edit', { defaultValue: 'Edit' })}
                 </button>
-              )}
-              <button
-                type="button"
-                className="btn--sm btn--ghost"
-                onClick={() => {
-                  setEditText(current.body ?? '')
-                  setEditing(true)
-                }}
-              >
-                {t('common.edit', { defaultValue: 'Edit' })}
-              </button>
-              <button
-                type="button"
-                className="btn--sm btn--danger"
-                onClick={() => void doDelete(current)}
-              >
-                ×
-              </button>
-              <button type="button" className="btn--sm btn--ghost" onClick={closeAll}>
-                {t('common.close', { defaultValue: 'Close' })}
-              </button>
-            </div>
-          )}
+                <button
+                  type="button"
+                  className="btn--sm btn--danger"
+                  onClick={() => void doDelete(current)}
+                >
+                  ×
+                </button>
+                <button type="button" className="btn--sm btn--ghost" onClick={closeAll}>
+                  {t('common.close', { defaultValue: 'Close' })}
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       )}
     </>,
