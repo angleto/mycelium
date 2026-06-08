@@ -18065,6 +18065,7 @@ export interface operations {
                 include_deleted?: boolean;
                 project_id?: string | null;
                 tag_id?: string | null;
+                q?: string | null;
             };
             header: {
                 "x-workspace-id": string;

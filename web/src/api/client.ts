@@ -231,21 +231,23 @@ export async function searchTasksByText(
 /** Server-side note search over the WHOLE corpus (not just the newest
  * window the plain list returns): ``GET /notes?q=`` filters by note
  * title, part body and tag name. ``tagId`` ANDs the active tag filter
- * so search composes with it. Untyped on purpose — the generated
- * schema doesn't expose ``q`` on /notes yet (same rationale as
- * ``searchTasksByText`` above); switch to the typed client once the
- * schema is regenerated. Non-2xx returns [] so the caller falls back to
- * its client-side filter over the already-loaded notes. */
+ * so search composes with it. Typed via the shared client (auth +
+ * X-Workspace-Id + 401-refresh handled by the middleware); ``data ?? []``
+ * so a non-2xx (or a request superseded mid-type) degrades to the
+ * caller's client-side filter over the already-loaded notes. */
 export async function searchNotesByText(
   query: string,
   tagId?: string,
   signal?: AbortSignal,
 ): Promise<components['schemas']['NoteOut'][]> {
-  const qs = new URLSearchParams({ q: query })
-  if (tagId) qs.set('tag_id', tagId)
-  const res = await authFetch(`/notes?${qs.toString()}`, { signal })
-  if (!res.ok) return []
-  return (await res.json()) as components['schemas']['NoteOut'][]
+  const { data } = await api.GET('/notes', {
+    params: {
+      header: workspaceHeader(),
+      query: { q: query, ...(tagId ? { tag_id: tagId } : {}) },
+    },
+    signal,
+  })
+  return data ?? []
 }
 
 // After auth we hold a token but no workspace context yet: fetch the
