@@ -537,6 +537,72 @@ def parts_replace(
     )
 
 
+# 1 MiB body cap, mirrors core ``note_body_max_bytes``. Checked client-side
+# so an oversize file fails up front instead of after streaming a megabyte.
+_BODY_MAX_BYTES = 1 * 1024 * 1024
+
+
+@parts_app.command("set-body")
+def parts_set_body(
+    note_id: str = typer.Argument(..., autocompletion=complete_note_id),
+    part_id: str = typer.Argument(...),
+    file: Path = typer.Option(
+        ...,
+        "--file",
+        "-f",
+        "--body-file",
+        help="File holding the FULL new body. Use '-' for stdin.",
+    ),
+    expected_version: int | None = typer.Option(
+        None,
+        "--expected-version",
+        help="Optimistic version guard; omit to read the part's current version first.",
+    ),
+    allow_empty: bool = typer.Option(
+        False, "--allow-empty", help="Permit an empty body (clears the part)."
+    ),
+) -> None:
+    """Replace a part's ENTIRE body from a file (or stdin) in one streamed
+    PUT to /body/stream. The body never rides a tool argument and the bearer
+    stays in credentials.toml, so neither the text nor your token enters an
+    agent's context. Capped at 1 MiB; for incremental growth use ``append``.
+    A stale --expected-version is a 409 (re-read and retry)."""
+    raw = sys.stdin.buffer.read() if str(file) == "-" else file.read_bytes()
+    if not raw and not allow_empty:
+        raise CLIError("empty body; pass --allow-empty to clear the part.")
+    if len(raw) > _BODY_MAX_BYTES:
+        raise CLIError(
+            f"body is {len(raw)} bytes, over the {_BODY_MAX_BYTES}-byte cap; "
+            "split it across parts or grow it with `append`."
+        )
+    try:
+        raw.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise CLIError(f"body is not valid UTF-8: {exc}") from exc
+    with client() as c:
+        full = _resolve_note(c, note_id)
+        pid = _resolve_part(c, full, part_id)
+        if expected_version is None:
+            rows = get_json(c.get(f"/notes/{full}/parts"))
+            part = next(p for p in rows if p["id"] == pid)
+            expected_version = int(part["version"])
+        resp = get_json(
+            c.put(
+                f"/notes/{full}/parts/{pid}/body/stream",
+                params={"expected_version": expected_version},
+                content=raw,
+                headers={"Content-Type": "text/markdown; charset=utf-8"},
+            )
+        )
+    if json_mode():
+        emit_json(resp)
+        return
+    success(
+        f"replaced body of part {short_id(pid)} on note {short_id(full)} "
+        f"({len(raw)} bytes, v{resp.get('version')})"
+    )
+
+
 @parts_app.command("list")
 def parts_list(
     note_id: str = typer.Argument(..., autocompletion=complete_note_id),
