@@ -3627,6 +3627,11 @@ export interface paths {
          *     empty body clears the part. For incremental growth use ``/append``;
          *     this is the "I have the whole new body in a file" path. Use the MCP
          *     ``set_note_part_body_instructions`` tool for the matching ``curl``.
+         *
+         *     Auth accepts a normal bearer (JWT / agent token, with X-Workspace-Id)
+         *     or a scoped one-time capability token (``flow_cap_``) for this exact
+         *     part, minted by the MCP ``set_note_part_body_capability`` tool and
+         *     consumed here on success.
          */
         put: operations["replace_note_part_body_stream_notes__note_id__parts__part_id__body_stream_put"];
         post?: never;
@@ -18984,9 +18989,9 @@ export interface operations {
             query: {
                 expected_version: number;
             };
-            header: {
+            header?: {
                 "X-Edit-Session-Id"?: string | null;
-                "x-workspace-id": string;
+                "x-workspace-id"?: string | null;
                 "x-project-id"?: string | null;
                 "x-workspace-role"?: string | null;
                 "x-admin-mode"?: string | null;
