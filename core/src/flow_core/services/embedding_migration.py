@@ -18,6 +18,8 @@ from __future__ import annotations
 
 import logging
 import uuid
+from collections.abc import Callable, Mapping
+from typing import Any
 
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -34,8 +36,8 @@ async def _backfill_tier(
     *,
     embedder: Embedder,
     expected_dim: int,
-    is_null,
-    set_values,
+    is_null: Any,
+    set_values: Callable[..., Mapping[str, Any]],
     batch_size: int,
     tier: str,
 ) -> int:
