@@ -2067,6 +2067,8 @@ def _time_entry(
         "started_at": e.started_at.isoformat(),
         "ended_at": e.ended_at.isoformat() if e.ended_at else None,
         "duration_seconds": e.duration_seconds,
+        "accumulated_seconds": e.accumulated_seconds,
+        "resumed_at": e.resumed_at.isoformat() if e.resumed_at else None,
         "source": e.source.value,
         "executor_kind": e.executor_kind.value,
         "billable": e.billable,
@@ -2152,6 +2154,46 @@ async def stop_timer(
             actor_id=user,
             task_id=uuid.UUID(task_id) if task_id else None,
             memo=memo,
+        )
+        return await _time_entry_one(s, e)
+
+
+@mcp.tool()
+async def pause_timer(
+    token: str,
+    org_id: str,
+    task_id: str | None = None,
+) -> dict[str, Any]:
+    """Pause a running timer without finalizing it: the one for
+    ``task_id`` if given, else the serial timer. Banks the elapsed so
+    far and freezes it; the entry stays open and can be resumed. No-op
+    if already paused; NO_RUNNING_TIMER if nothing is open."""
+    async with _tenant(token, org_id) as (s, org, user):
+        e = await time_svc.pause_timer(
+            s,
+            org_id=org,
+            actor_id=user,
+            task_id=uuid.UUID(task_id) if task_id else None,
+        )
+        return await _time_entry_one(s, e)
+
+
+@mcp.tool()
+async def resume_timer(
+    token: str,
+    org_id: str,
+    task_id: str | None = None,
+) -> dict[str, Any]:
+    """Resume a paused timer: the one for ``task_id`` if given, else the
+    serial timer. The elapsed ticks again from the banked total. No-op
+    if already running; NO_RUNNING_TIMER if there is no open (paused)
+    entry."""
+    async with _tenant(token, org_id) as (s, org, user):
+        e = await time_svc.resume_timer(
+            s,
+            org_id=org,
+            actor_id=user,
+            task_id=uuid.UUID(task_id) if task_id else None,
         )
         return await _time_entry_one(s, e)
 

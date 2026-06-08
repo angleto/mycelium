@@ -1390,6 +1390,16 @@ class TimeStopIn(BaseModel):
     memo: str | None = None
 
 
+class TimePauseIn(BaseModel):
+    # Pause a specific task's running timer; omit to pause the serial one.
+    task_id: uuid.UUID | None = None
+
+
+class TimeResumeIn(BaseModel):
+    # Resume a specific task's paused timer; omit to resume the serial one.
+    task_id: uuid.UUID | None = None
+
+
 class TimeManualIn(BaseModel):
     # As TimeStartIn: a ``note_id`` derives the billing task.
     task_id: uuid.UUID | None = None
@@ -1424,6 +1434,13 @@ class TimeEntryOut(BaseModel):
     started_at: datetime.datetime
     ended_at: datetime.datetime | None
     duration_seconds: int | None
+    # Pause/resume. ``accumulated_seconds`` is the active time banked so
+    # far; ``resumed_at`` is the start of the current live segment (null
+    # while paused, and once stopped). The client derives live elapsed as
+    # ``accumulated_seconds + (now - resumed_at)`` while running, frozen at
+    # ``accumulated_seconds`` while paused — never accumulated client-side.
+    accumulated_seconds: int
+    resumed_at: datetime.datetime | None
     source: TimeSource
     executor_kind: ExecKind
     billable: bool

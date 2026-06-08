@@ -19,6 +19,7 @@ import { useWorkflowStates } from '../lib/useWorkflowStates'
 import { periodRange, type Period } from '../lib/period'
 import { PeriodPicker } from '../components/PeriodPicker'
 import { TaskPickList } from '../components/TaskPickList'
+import { activeElapsedSec, isPaused } from '../lib/time'
 import type { components } from '../api/schema'
 
 type Task = components['schemas']['TaskOut']
@@ -581,13 +582,28 @@ export function TimeRoute() {
     await reloadEntries()
   }
 
+  // Pause freezes a running entry (server banks the elapsed); resume
+  // reopens a live segment. The entry stays open either way.
+  async function pauseResumeTask(taskId: string, paused: boolean) {
+    setErr(null)
+    const { error } = await api.POST(paused ? '/time/resume' : '/time/pause', {
+      params: { header: workspaceHeader() },
+      body: { task_id: taskId },
+    })
+    if (error) {
+      setErr(errMessage(error))
+      return
+    }
+    await refreshRunning()
+    await reloadEntries()
+  }
+
   async function onStart(e: FormEvent, parallel: boolean) {
     e.preventDefault()
     await startTask(pick, parallel)
   }
 
-  const runningByTask = new Set(running.map((r) => r.task_id))
-  const secs = (iso: string) => (now - new Date(iso).getTime()) / 1000
+  const runningByTask = new Map(running.map((r) => [r.task_id, r]))
   // Per-task view: drop tasks with no time logged (0% / unreported).
   const shownByTask = byTask.filter((r) => r.total_seconds > 0)
 
@@ -617,7 +633,18 @@ export function TimeRoute() {
                   </span>
                 </span>
                 <span className="taskrow__meta">
-                  <strong>{hhmmss(secs(r.started_at))}</strong>
+                  <strong className={isPaused(r) ? 'is-paused' : undefined}>
+                    {hhmmss(activeElapsedSec(r, now))}
+                  </strong>
+                  <button
+                    type="button"
+                    className="btn--ghost btn--sm"
+                    onClick={() => void pauseResumeTask(r.task_id, isPaused(r))}
+                  >
+                    {isPaused(r)
+                      ? `⏱▶ ${t('time.resume')}`
+                      : `⏱⏸ ${t('time.pause')}`}
+                  </button>
                   <button
                     type="button"
                     className="btn--sm"
@@ -834,13 +861,34 @@ export function TimeRoute() {
                   {t('time.deleteEntry')}
                 </button>
                 {runningByTask.has(en.task_id) ? (
-                  <button
-                    type="button"
-                    className="btn--sm"
-                    onClick={() => void stopTask(en.task_id)}
-                  >
-                    ⏱■
-                  </button>
+                  (() => {
+                    const live = runningByTask.get(en.task_id)
+                    const paused = !!live && isPaused(live)
+                    return (
+                      <>
+                        <button
+                          type="button"
+                          className="btn--ghost btn--sm"
+                          title={paused ? t('time.resume') : t('time.pause')}
+                          aria-label={paused ? t('time.resume') : t('time.pause')}
+                          onClick={() =>
+                            void pauseResumeTask(en.task_id, paused)
+                          }
+                        >
+                          {paused ? '⏱▶' : '⏱⏸'}
+                        </button>
+                        <button
+                          type="button"
+                          className="btn--sm"
+                          title={t('time.stop')}
+                          aria-label={t('time.stop')}
+                          onClick={() => void stopTask(en.task_id)}
+                        >
+                          ⏱■
+                        </button>
+                      </>
+                    )
+                  })()
                 ) : (
                   <>
                     <button

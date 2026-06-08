@@ -19,7 +19,7 @@ import { Logo } from './Logo'
 import { Icon, type IconName } from './NavIcon'
 import { ThemeToggle } from './ThemeToggle'
 import { PomodoroTimer } from './PomodoroTimer'
-import { hms, elapsedSec } from '../lib/time'
+import { hms, activeElapsedSec, isPaused } from '../lib/time'
 import { useRunningTimers } from '../lib/useRunningTimer'
 import { parseMentionHref, routeForMention } from '../lib/mentions'
 import {
@@ -196,6 +196,7 @@ function RunningIndicator() {
   const safeIdx = idx % ordered.length
   const cur = ordered[safeIdx]
   const title = titles[cur.task_id] ?? cur.task_id.slice(0, 8)
+  const paused = isPaused(cur)
   return (
     <Link
       to="/time"
@@ -203,14 +204,20 @@ function RunningIndicator() {
       title={t('time.runningNow')}
       aria-label={t('time.runningNow')}
     >
-      <span className="running__spin" aria-hidden="true" />
+      <span
+        className={paused ? 'running__spin is-paused' : 'running__spin'}
+        aria-hidden="true"
+      />
       <span className="running__n">
         {safeIdx + 1}/{ordered.length}
       </span>
       <span className="running__title">
         <span>{title}</span>
       </span>
-      <span className="running__t">{hms(elapsedSec(cur.started_at, now))}</span>
+      <span className="running__t">
+        {paused ? '⏸ ' : ''}
+        {hms(activeElapsedSec(cur, now))}
+      </span>
     </Link>
   )
 }

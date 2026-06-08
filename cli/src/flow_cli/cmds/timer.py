@@ -70,6 +70,46 @@ def stop(
 
 
 @app.command()
+def pause(
+    task_id: str | None = typer.Argument(
+        None,
+        autocompletion=complete_task_id,
+        help="Task to pause (omit for the serial timer).",
+    ),
+) -> None:
+    """Pause a running timer without finalizing it (resume it later)."""
+    payload: dict[str, Any] = {}
+    with client() as c:
+        if task_id is not None:
+            payload["task_id"] = _resolve_task(c, task_id)
+        paused = get_json(c.post("/time/pause", json=payload))
+    if json_mode():
+        emit_json(paused)
+        return
+    success("timer paused")
+
+
+@app.command()
+def resume(
+    task_id: str | None = typer.Argument(
+        None,
+        autocompletion=complete_task_id,
+        help="Task to resume (omit for the serial timer).",
+    ),
+) -> None:
+    """Resume a paused timer."""
+    payload: dict[str, Any] = {}
+    with client() as c:
+        if task_id is not None:
+            payload["task_id"] = _resolve_task(c, task_id)
+        resumed = get_json(c.post("/time/resume", json=payload))
+    if json_mode():
+        emit_json(resumed)
+        return
+    success("timer resumed")
+
+
+@app.command()
 def status() -> None:
     """List running timers + today's total billable time."""
     today_local = dt.date.today()
@@ -91,19 +131,24 @@ def status() -> None:
     if running:
         rows = []
         for r in running:
-            started = _parse_dt(r.get("started_at"))
-            elapsed = int((now - started).total_seconds()) if started else 0
-            rows.append((short_id(r.get("task_id")), _fmt_elapsed(elapsed), r.get("memo") or ""))
-        emit_table("Running", ["task_id", "elapsed", "memo"], rows)
+            state = "paused" if r.get("resumed_at") is None else "running"
+            rows.append(
+                (
+                    short_id(r.get("task_id")),
+                    state,
+                    _fmt_elapsed(_active_secs(r, now)),
+                    r.get("memo") or "",
+                )
+            )
+        emit_table("Running", ["task_id", "state", "elapsed", "memo"], rows)
     else:
         info("[dim]no running timer.[/dim]")
 
     total_secs = sum(int(e.get("duration_seconds") or 0) for e in entries)
-    # Add the running portion (not yet stopped → no duration_seconds).
+    # Add the live portion (not yet stopped → no duration_seconds). A
+    # paused entry contributes its frozen accumulated time, not wall clock.
     for r in running:
-        started = _parse_dt(r.get("started_at"))
-        if started:
-            total_secs += int((now - started).total_seconds())
+        total_secs += _active_secs(r, now)
     if total_secs:
         info(f"\n[bold]today total[/bold]: {_fmt_elapsed(total_secs)} ({len(entries)} entries)")
 
@@ -324,6 +369,18 @@ def _fmt_elapsed(secs: int) -> str:
     if h:
         return f"{h}h{m:02d}m"
     return f"{m:02d}m{s:02d}s"
+
+
+def _active_secs(r: dict[str, Any], now: dt.datetime) -> int:
+    """Active seconds of a live (running or paused) entry, mirroring the
+    server: banked ``accumulated_seconds`` plus the current segment when
+    running. A paused entry (``resumed_at`` null) is frozen at the banked
+    total, so wall-clock time during a pause is not counted."""
+    acc = int(r.get("accumulated_seconds") or 0)
+    resumed = _parse_dt(r.get("resumed_at"))
+    if resumed is None:
+        return acc
+    return acc + int((now - resumed).total_seconds())
 
 
 def _parse_dt(s: Any) -> dt.datetime | None:

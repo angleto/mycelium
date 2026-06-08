@@ -1273,6 +1273,8 @@ export const en = {
     pick: 'Task',
     start: 'Start',
     stop: 'Stop',
+    pause: 'Pause',
+    resume: 'Resume',
     runningNow: 'Running now',
     serial: 'serial',
     parallel: 'parallel',

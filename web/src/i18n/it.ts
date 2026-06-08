@@ -1272,6 +1272,8 @@ export const it: Catalog = {
     pick: 'Task',
     start: 'Avvia',
     stop: 'Ferma',
+    pause: 'Pausa',
+    resume: 'Riprendi',
     runningNow: 'In esecuzione',
     serial: 'seriale',
     parallel: 'parallelo',

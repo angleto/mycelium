@@ -50,6 +50,17 @@ class TimeEntry(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, Base)
             "duration_seconds IS NULL OR duration_seconds >= 0",
             name="ck_time_entries_duration",
         ),
+        CheckConstraint(
+            "accumulated_seconds >= 0",
+            name="ck_time_entries_accumulated",
+        ),
+        # A finalized entry is not actively running: once ``ended_at`` is
+        # set ``resumed_at`` must be NULL (running and paused both keep
+        # ``ended_at`` NULL).
+        CheckConstraint(
+            "ended_at IS NULL OR resumed_at IS NULL",
+            name="ck_time_entries_resumed",
+        ),
     )
 
     task_id: Mapped[uuid.UUID] = mapped_column(
@@ -69,6 +80,20 @@ class TimeEntry(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, Base)
         DateTime(timezone=True), nullable=True
     )
     duration_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Pause/resume (migration 0039). A live timer can be paused without
+    # being finalized. ``accumulated_seconds`` banks the active seconds
+    # of completed run-segments (everything before the current one);
+    # ``resumed_at`` is the start of the CURRENT active segment (NOT NULL
+    # while running, NULL while paused, NULL once stopped) while
+    # ``started_at`` stays the original session start. Live total =
+    # ``accumulated_seconds + (server_now - resumed_at)`` while running,
+    # ``accumulated_seconds`` while paused; on stop the live segment is
+    # banked and the sum frozen into ``duration_seconds``. Still
+    # server-authoritative: the client never accumulates.
+    accumulated_seconds: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    resumed_at: Mapped[datetime.datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     source: Mapped[TimeSource] = mapped_column(
         SAEnum(TimeSource, name="time_source", native_enum=True, create_type=False),
         nullable=False,

@@ -235,9 +235,19 @@ async def _stop_entry(
     memo: str | None = None,
 ) -> TimeEntry:
     ended = _now()
+    # Bank the live segment (if running) on top of what previous
+    # run-segments already accumulated. A paused entry has
+    # ``resumed_at IS NULL`` so its frozen ``accumulated_seconds`` is the
+    # final total. The billable figure is the active time, not the
+    # wall-clock span ``ended - started_at`` (which now includes pauses).
+    total = entry.accumulated_seconds
+    if entry.resumed_at is not None:
+        total += int((ended - entry.resumed_at).total_seconds())
     values: dict[str, Any] = {
         "ended_at": ended,
-        "duration_seconds": int((ended - entry.started_at).total_seconds()),
+        "resumed_at": None,
+        "accumulated_seconds": total,
+        "duration_seconds": total,
     }
     if memo is not None:
         values["memo"] = memo
@@ -297,6 +307,9 @@ async def start_timer(
         started_at=started,
         ended_at=None,
         duration_seconds=None,
+        # First active segment opens now; nothing banked yet.
+        accumulated_seconds=0,
+        resumed_at=started,
         source=TimeSource.timer,
         executor_kind=task.executor_kind,
         billable=eff_billable,
@@ -344,6 +357,88 @@ async def stop_timer(
     return await _stop_entry(session, org_id=org_id, actor_id=actor_id, entry=entry, memo=memo)
 
 
+async def pause_timer(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    task_id: uuid.UUID | None = None,
+) -> TimeEntry:
+    """Pause a running timer without finalizing it: bank the live
+    segment into ``accumulated_seconds`` and clear ``resumed_at`` so the
+    elapsed freezes. The entry stays open (``ended_at IS NULL``), so it
+    keeps its serial / per-task slot and can be resumed later. Targets
+    the ``task_id`` timer, or the serial one when omitted. Pausing an
+    already-paused timer is a no-op; NO_RUNNING_TIMER if nothing is
+    open."""
+    await require_role(session, org_id, actor_id, Role.member)
+    if task_id is not None:
+        entry = await running_for_task(session, org_id=org_id, user_id=actor_id, task_id=task_id)
+    else:
+        entry = await running_serial(session, org_id=org_id, user_id=actor_id)
+    if entry is None:
+        raise DomainError(MessageCode.NO_RUNNING_TIMER)
+    if entry.resumed_at is None:
+        return entry  # already paused — idempotent
+    now = _now()
+    banked = entry.accumulated_seconds + int((now - entry.resumed_at).total_seconds())
+    await optimistic_update(
+        session,
+        TimeEntry,
+        pk=entry.id,
+        expected_version=entry.version,
+        values={"accumulated_seconds": banked, "resumed_at": None},
+    )
+    await audit.log(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        entity="time_entry",
+        entity_id=entry.id,
+        action="pause",
+    )
+    return await get_entry(session, org_id=org_id, entry_id=entry.id)
+
+
+async def resume_timer(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    task_id: uuid.UUID | None = None,
+) -> TimeEntry:
+    """Resume a paused timer: open a new active segment
+    (``resumed_at = server_now``) so the elapsed ticks again from the
+    banked ``accumulated_seconds``. Targets the ``task_id`` timer, or the
+    serial one when omitted. Resuming an already-running timer is a
+    no-op; NO_RUNNING_TIMER if there is no open (paused) entry."""
+    await require_role(session, org_id, actor_id, Role.member)
+    if task_id is not None:
+        entry = await running_for_task(session, org_id=org_id, user_id=actor_id, task_id=task_id)
+    else:
+        entry = await running_serial(session, org_id=org_id, user_id=actor_id)
+    if entry is None:
+        raise DomainError(MessageCode.NO_RUNNING_TIMER)
+    if entry.resumed_at is not None:
+        return entry  # already running — idempotent
+    await optimistic_update(
+        session,
+        TimeEntry,
+        pk=entry.id,
+        expected_version=entry.version,
+        values={"resumed_at": _now()},
+    )
+    await audit.log(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        entity="time_entry",
+        entity_id=entry.id,
+        action="resume",
+    )
+    return await get_entry(session, org_id=org_id, entry_id=entry.id)
+
+
 async def add_manual_entry(
     session: AsyncSession,
     *,
@@ -378,6 +473,10 @@ async def add_manual_entry(
         started_at=started_at,
         ended_at=ended_at,
         duration_seconds=seconds,
+        # Manual entries are finalized single segments (never paused):
+        # the banked total equals the duration.
+        accumulated_seconds=seconds,
+        resumed_at=None,
         source=TimeSource.manual,
         executor_kind=task.executor_kind,
         billable=eff_billable,
@@ -510,6 +609,13 @@ async def update_entry(
         patch["duration_seconds"] = (
             None if new_ended is None else int((new_ended - new_started).total_seconds())
         )
+        # A manual interval correction collapses the entry to one
+        # contiguous segment: the explicit [start, end] overrides any
+        # prior pause banking. Un-stopping (ended None) reopens a live
+        # segment running from new_started; finalizing banks the whole
+        # interval (accumulated == duration).
+        patch["accumulated_seconds"] = 0 if new_ended is None else patch["duration_seconds"]
+        patch["resumed_at"] = new_started if new_ended is None else None
 
     # Re-snapshot billing when the entry moves to a different task OR
     # when ``billable`` is explicitly toggled. Moving an entry to a task

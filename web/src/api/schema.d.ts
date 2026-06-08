@@ -2288,6 +2288,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/time/pause": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Pause Timer */
+        post: operations["pause_timer_time_pause_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/time/resume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Resume Timer */
+        post: operations["resume_timer_time_resume_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/time/running": {
         parameters: {
             query?: never;
@@ -9659,6 +9693,10 @@ export interface components {
             ended_at: string | null;
             /** Duration Seconds */
             duration_seconds: number | null;
+            /** Accumulated Seconds */
+            accumulated_seconds: number;
+            /** Resumed At */
+            resumed_at: string | null;
             source: components["schemas"]["TimeSource"];
             executor_kind: components["schemas"]["ExecKind"];
             /** Billable */
@@ -9726,6 +9764,16 @@ export interface components {
             memo?: string | null;
             /** Note Id */
             note_id?: string | null;
+        };
+        /** TimePauseIn */
+        TimePauseIn: {
+            /** Task Id */
+            task_id?: string | null;
+        };
+        /** TimeResumeIn */
+        TimeResumeIn: {
+            /** Task Id */
+            task_id?: string | null;
         };
         /**
          * TimeSource
@@ -15585,6 +15633,82 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["TimeStopIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TimeEntryOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    pause_timer_time_pause_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TimePauseIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TimeEntryOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    resume_timer_time_resume_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TimeResumeIn"];
             };
         };
         responses: {

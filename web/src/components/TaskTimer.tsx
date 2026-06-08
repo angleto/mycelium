@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { api, errMessage, workspaceHeader } from '../api/client'
-import { hms, elapsedSec } from '../lib/time'
+import { hms, activeElapsedSec, isPaused } from '../lib/time'
 import { useRunningTimers, refreshRunning } from '../lib/useRunningTimer'
 
 // Start/stop the timer for ONE task, with a live elapsed readout.
@@ -34,6 +34,7 @@ export function TaskTimer({
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const entry = running.find((r) => r.task_id === taskId) ?? null
+  const paused = entry != null && isPaused(entry)
 
   async function start(parallel: boolean) {
     setBusy(true)
@@ -65,22 +66,54 @@ export function TaskTimer({
     await refreshRunning()
   }
 
+  // Pause keeps the entry open (server banks the elapsed and freezes it);
+  // resume reopens a live segment. Both are server-authoritative, so the
+  // readout reflects server truth after the reconcile.
+  async function pauseOrResume(paused: boolean) {
+    setBusy(true)
+    setErr(null)
+    const { error } = await api.POST(paused ? '/time/resume' : '/time/pause', {
+      params: { header: workspaceHeader() },
+      body: { task_id: taskId },
+    })
+    setBusy(false)
+    if (error) {
+      setErr(errMessage(error))
+      return
+    }
+    await refreshRunning()
+  }
+
   // The shared timer control: ⏱▶ start (serial), ⏱▶▶ start parallel,
-  // ⏱■ stop with a live readout. Same buttons everywhere (task list,
-  // kanban, task detail, work notes) — server-authoritative.
+  // and — while a timer is open — ⏱⏸ pause / ⏱▶ resume next to ⏱■ stop
+  // with a live readout (frozen while paused). Same buttons everywhere
+  // (task list, kanban, task detail, work notes) — server-authoritative.
   return (
     <span className="tasktimer">
       {entry ? (
-        <button
-          type="button"
-          className="btn--sm tasktimer__stop"
-          disabled={busy}
-          title={t('time.stop')}
-          aria-label={t('time.stop')}
-          onClick={() => void stop()}
-        >
-          ⏱■ {hms(elapsedSec(entry.started_at, now))}
-        </button>
+        <>
+          <button
+            type="button"
+            className="btn--ghost btn--sm tasktimer__pause"
+            disabled={busy}
+            title={paused ? t('time.resume') : t('time.pause')}
+            aria-label={paused ? t('time.resume') : t('time.pause')}
+            onClick={() => void pauseOrResume(paused)}
+          >
+            {paused ? '⏱▶' : '⏱⏸'}
+            {labeled ? ` ${paused ? t('time.resume') : t('time.pause')}` : ''}
+          </button>
+          <button
+            type="button"
+            className={`btn--sm tasktimer__stop${paused ? ' is-paused' : ''}`}
+            disabled={busy}
+            title={t('time.stop')}
+            aria-label={t('time.stop')}
+            onClick={() => void stop()}
+          >
+            ⏱■ {hms(activeElapsedSec(entry, now))}
+          </button>
+        </>
       ) : (
         <>
           <button

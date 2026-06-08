@@ -27,6 +27,29 @@ export function elapsedSec(startedAtIso: string, nowMs: number): number {
   return (nowMs - new Date(startedAtIso).getTime()) / 1000
 }
 
+// Live elapsed for a running/paused timer entry, kept server-authoritative.
+// While running (`resumed_at` set) it is the banked `accumulated_seconds`
+// plus the current segment (`now - resumed_at`); while paused (`resumed_at`
+// null) it is frozen at `accumulated_seconds`. Mirrors the server's stop
+// computation, so the readout never drifts and a pause stops the clock.
+export function activeElapsedSec(
+  entry: { accumulated_seconds?: number | null; resumed_at?: string | null },
+  nowMs: number,
+): number {
+  const acc = entry.accumulated_seconds ?? 0
+  if (!entry.resumed_at) return acc
+  return acc + (nowMs - new Date(entry.resumed_at).getTime()) / 1000
+}
+
+// A live entry is paused when it is still open (no `ended_at`) but has no
+// current active segment (`resumed_at` null).
+export function isPaused(entry: {
+  ended_at?: string | null
+  resumed_at?: string | null
+}): boolean {
+  return entry.ended_at == null && entry.resumed_at == null
+}
+
 // Compact, locale-driven relative time ("3 hr. ago", "ieri") for recency
 // surfaces (Recent-tasks widget). Uses Intl.RelativeTimeFormat keyed on the
 // active i18n language, so there's no hardcoded copy to translate. Anything

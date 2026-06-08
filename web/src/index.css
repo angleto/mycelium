@@ -266,6 +266,17 @@ a:hover {
     animation-duration: 6s;
   }
 }
+/* Paused timer: freeze the spinner and dim the frozen readout so a
+   paused entry reads differently from a live (ticking) one. */
+.running__spin.is-paused {
+  animation: none;
+  border-top-color: var(--border);
+  opacity: 0.6;
+}
+.tasktimer__stop.is-paused,
+.taskrow__meta strong.is-paused {
+  opacity: 0.6;
+}
 .nav {
   flex: 1;
   display: flex;

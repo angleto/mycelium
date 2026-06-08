@@ -22,6 +22,8 @@ from flow_api.schemas import (
     TimeEntryOut,
     TimeEntryPatchIn,
     TimeManualIn,
+    TimePauseIn,
+    TimeResumeIn,
     TimeStartIn,
     TimeStopIn,
     VersionOut,
@@ -48,6 +50,8 @@ def _out(
         started_at=e.started_at,
         ended_at=e.ended_at,
         duration_seconds=e.duration_seconds,
+        accumulated_seconds=e.accumulated_seconds,
+        resumed_at=e.resumed_at,
         source=e.source,
         executor_kind=e.executor_kind,
         billable=e.billable,
@@ -115,6 +119,34 @@ async def stop_timer(
         actor_id=ctx.user_id,
         task_id=body.task_id,
         memo=body.memo,
+    )
+    return await _out_one(ctx, e)
+
+
+@router.post("/time/pause", response_model=TimeEntryOut)
+async def pause_timer(
+    body: TimePauseIn,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+) -> TimeEntryOut:
+    e = await svc.pause_timer(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        task_id=body.task_id,
+    )
+    return await _out_one(ctx, e)
+
+
+@router.post("/time/resume", response_model=TimeEntryOut)
+async def resume_timer(
+    body: TimeResumeIn,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+) -> TimeEntryOut:
+    e = await svc.resume_timer(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        task_id=body.task_id,
     )
     return await _out_one(ctx, e)
 
