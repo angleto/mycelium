@@ -1556,7 +1556,12 @@ export const it: Catalog = {
     run: 'Esegui',
     startConv: 'Avvia conversazione',
     yours: 'Note',
+    search: 'Cerca note per titolo, testo o tag…',
+    searchHint:
+      'Cerca nei titoli, nel testo e nei nomi dei tag; tutte le parole devono corrispondere.',
+    searching: 'ricerca…',
     none: 'Nessuna nota.',
+    noneMatch: 'Nessuna nota corrisponde alla ricerca.',
     open: 'Apri',
     edit: 'Modifica',
     editing: 'Modifica nota',

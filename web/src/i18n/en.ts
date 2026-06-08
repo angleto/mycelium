@@ -1556,7 +1556,12 @@ export const en = {
     run: 'Run',
     startConv: 'Start conversation',
     yours: 'Notes',
+    search: 'Search notes by title, text or tag…',
+    searchHint:
+      'Searches note titles, bodies and tag names; every word must match.',
+    searching: 'searching…',
     none: 'No notes yet.',
+    noneMatch: 'No notes match the search.',
     open: 'Open',
     edit: 'Edit',
     editing: 'Editing note',

@@ -7,7 +7,13 @@ import {
 } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { api, authFetch, errMessage, workspaceHeader } from '../api/client'
+import {
+  api,
+  authFetch,
+  errMessage,
+  searchNotesByText,
+  workspaceHeader,
+} from '../api/client'
 import { useSession } from '../auth/useSession'
 import {
   NotePartsEditor,
@@ -66,6 +72,20 @@ export function NotesRoute() {
   const [loading, setLoading] = useState(true)
   const [tags, setTags] = useState<Tag[]>([])
   const [fTag, setFTag] = useState('')
+  // Free-text search. Kept in local component state (not the URL like
+  // /tasks): the note editor is an in-place modal — the route never
+  // unmounts when a note is opened — so the query survives open/close
+  // on its own, and the path-based ``/notes/:id`` modal URL stays
+  // clean. Two layers, like /tasks: an instant client-side filter over
+  // the loaded notes (title + transcript + tag names) AND a debounced
+  // server search (``searchHits``) that covers the WHOLE corpus, not
+  // just the newest window the plain list returns.
+  const [q, setQ] = useState('')
+  // Server-side full-corpus hits for the current query: null when the
+  // box is empty (use the plain ``notes`` list), an array once the
+  // debounced /notes?q= search has answered.
+  const [searchHits, setSearchHits] = useState<Note[] | null>(null)
+  const [searching, setSearching] = useState(false)
   const [cmd, setCmd] = useState('')
   const [msg, setMsg] = useState<string | null>(null)
   const [err, setErr] = useState<string | null>(null)
@@ -114,7 +134,16 @@ export function NotesRoute() {
       },
     })
     if (data) setNotes(data)
-  }, [fTag])
+    // While a search is active the list renders ``searchHits`` (full
+    // corpus), so the bare notes refresh above is not what's on screen.
+    // Re-run the server search too — otherwise an archive / delete / tag
+    // change wouldn't reflect in the results until the query re-runs.
+    const query = q.trim()
+    if (query) {
+      const hits = await searchNotesByText(query, fTag || undefined)
+      setSearchHits(hits)
+    }
+  }, [fTag, q])
 
   useEffect(() => {
     let active = true
@@ -145,14 +174,58 @@ export function NotesRoute() {
     }
   }, [activeId, fTag])
 
+  // Debounced server-side search (250ms, abortable) — same shape as the
+  // /tasks free-text search. An empty box clears the hits so the plain
+  // list shows again; ``fTag`` rides along so search composes with the
+  // active tag filter. The set-state-in-effect disables match TasksRoute
+  // (CI-only lint rule): these are external-state resets, not a render
+  // loop.
+  useEffect(() => {
+    const query = q.trim()
+    if (!query) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setSearchHits(null)
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setSearching(false)
+      return
+    }
+    const ac = new AbortController()
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setSearching(true)
+    const handle = window.setTimeout(() => {
+      void (async () => {
+        try {
+          const hits = await searchNotesByText(
+            query,
+            fTag || undefined,
+            ac.signal,
+          )
+          if (ac.signal.aborted) return
+          setSearchHits(hits)
+        } catch {
+          if (!ac.signal.aborted) setSearchHits([])
+        } finally {
+          if (!ac.signal.aborted) setSearching(false)
+        }
+      })()
+    }, 250)
+    return () => {
+      window.clearTimeout(handle)
+      ac.abort()
+    }
+  }, [q, fTag])
+
   // Focus (client/project) filters the list client-side, reactively.
   // A note belongs to a client and may have no project. In "client
   // focus" (no project narrowing) include the client-only notes via
   // the client tag; under project narrowing match only the project, so
   // narrowing a project does not bleed in client-only notes or notes
   // of sibling projects.
+  // Candidate set the filters run on: the server's full-corpus hits
+  // while a search is active, otherwise the plain (newest-window) list.
+  const candidates = searchHits ?? notes
   const shownNotes = focusActive
-    ? notes.filter((n) => {
+    ? candidates.filter((n) => {
         if (n.project_id != null && focusIds.includes(n.project_id))
           return true
         const tagIds = (n.tags ?? []).map((g) => g.id)
@@ -167,7 +240,29 @@ export function NotesRoute() {
           return true
         return false
       })
-    : notes
+    : candidates
+
+  // Instant client-side narrowing on top of the focus filter: split the
+  // query into whitespace tokens and require every token to appear in
+  // the note's title, body (transcript = concatenated part bodies) or a
+  // tag name. This gives zero-latency feedback while the debounced
+  // server search is in flight and is a correct fallback if the server
+  // hasn't answered yet; once ``searchHits`` lands it refines the same
+  // fields, so no server hit is ever wrongly hidden. Case-insensitive.
+  const queryTokens = q.trim().toLowerCase().split(/\s+/).filter(Boolean)
+  const visibleNotes =
+    queryTokens.length === 0
+      ? shownNotes
+      : shownNotes.filter((n) => {
+          const hay = [
+            n.title ?? '',
+            n.transcript ?? '',
+            ...(n.tags ?? []).map((g) => g.name),
+          ]
+            .join('\n')
+            .toLowerCase()
+          return queryTokens.every((tok) => hay.includes(tok))
+        })
 
   // closeModal now depends on routeId (it pops the URL only when
   // we're on /notes/:id), so memoise it — otherwise the Esc-listener
@@ -725,6 +820,21 @@ export function NotesRoute() {
           {t('notes.newNote')}
         </button>
       </div>
+      <div className="row">
+        <input
+          type="search"
+          placeholder={t('notes.search')}
+          title={t('notes.searchHint')}
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          style={{ flex: 1, minWidth: '12rem' }}
+        />
+        {searching && (
+          <span className="hint" aria-live="polite">
+            {t('notes.searching')}
+          </span>
+        )}
+      </div>
       {tags.length > 0 && (
         <div className="row">
           <span className="muted">{t('notes.allTags')}:</span>
@@ -753,11 +863,13 @@ export function NotesRoute() {
         <p className="hint" role="status" aria-live="polite">
           {t('common.loading')}
         </p>
-      ) : shownNotes.length === 0 ? (
-        <p className="hint">{t('notes.none')}</p>
+      ) : visibleNotes.length === 0 ? (
+        <p className="hint">
+          {q.trim() ? t('notes.noneMatch') : t('notes.none')}
+        </p>
       ) : (
         <ul className="list">
-          {shownNotes.map((n) => (
+          {visibleNotes.map((n) => (
             <NoteListItem
               key={n.id}
               note={n}

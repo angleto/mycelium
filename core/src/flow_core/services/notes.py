@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -151,12 +151,19 @@ async def list_notes(
     include_deleted: bool = False,
     project_id: uuid.UUID | None = None,
     tag_id: uuid.UUID | None = None,
+    q: str | None = None,
 ) -> list[Note]:
     """Notes in the workspace, newest first (for the @note picker and
     the notes list). RLS scopes to the org. Archived/deleted are
     excluded unless explicitly requested (trash & archive view).
     ``project_id`` / ``tag_id`` organize the list (project focus, tag
-    filter)."""
+    filter). ``q`` is a free-text filter applied server-side over the
+    WHOLE corpus (so it is not capped to the ``limit`` newest rows the
+    way a client-side filter would be): each whitespace term must match
+    the note title, any part body/title, or a tag name (terms ANDed,
+    fields ORed, case-insensitive)."""
+    from flow_core.models.note_part import NotePart
+
     stmt = select(Note)
     if not include_deleted:
         stmt = stmt.where(Note.deleted_at.is_(None))
@@ -168,6 +175,24 @@ async def list_notes(
         stmt = stmt.where(Note.id.in_(select(NoteTag.note_id).where(NoteTag.tag_id == project_id)))
     if tag_id is not None:
         stmt = stmt.where(Note.id.in_(select(NoteTag.note_id).where(NoteTag.tag_id == tag_id)))
+    if q is not None:
+        for term in (w for w in q.split() if w.strip()):
+            like = f"%{term}%"
+            part_notes = select(NotePart.note_id).where(
+                or_(NotePart.body.ilike(like), NotePart.title.ilike(like))
+            )
+            tag_notes = (
+                select(NoteTag.note_id)
+                .join(Tag, Tag.id == NoteTag.tag_id)
+                .where(Tag.name.ilike(like))
+            )
+            stmt = stmt.where(
+                or_(
+                    Note.title.ilike(like),
+                    Note.id.in_(part_notes),
+                    Note.id.in_(tag_notes),
+                )
+            )
     stmt = stmt.order_by(Note.created_at.desc()).limit(limit)
     return list((await session.execute(stmt)).scalars().all())
 

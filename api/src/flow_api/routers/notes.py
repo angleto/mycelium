@@ -261,6 +261,7 @@ async def list_notes(
     include_deleted: bool = False,
     project_id: uuid.UUID | None = None,
     tag_id: uuid.UUID | None = None,
+    q: str | None = None,
 ) -> list[NoteOut]:
     rows = await svc.list_notes(
         ctx.session,
@@ -269,6 +270,7 @@ async def list_notes(
         include_deleted=include_deleted,
         project_id=project_id,
         tag_id=tag_id,
+        q=q,
     )
     ids = [n.id for n in rows]
     tagmap = await svc.tags_by_note(ctx.session, note_ids=ids)

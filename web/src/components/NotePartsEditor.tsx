@@ -68,6 +68,9 @@ export const NotePartsEditor = forwardRef<NotePartsEditorHandle, Props>(
     const [err, setErr] = useState('')
     const [loading, setLoading] = useState(false)
     const [busyPid, setBusyPid] = useState<string | null>(null)
+    // Which part's id chip just got copied (transient, per-part so only
+    // the clicked chip flips to its "copied" label, not every chip).
+    const [copiedPid, setCopiedPid] = useState<string | null>(null)
     const [editingBody, setEditingBody] = useState<Record<string, string>>({})
     // Title draft keyed by part.id. Distinct from ``editingBody`` so
     // a user can edit just the title without bumping the body draft
@@ -455,6 +458,42 @@ export const NotePartsEditor = forwardRef<NotePartsEditorHandle, Props>(
                     {p.ui_collapsed ? '▸' : '▾'}
                   </button>
                   <span className="parts-editor__ord muted">#{p.ord}</span>
+                  {/* Copyable part id, mirroring the note's id chip in
+                      the modal head: the full UUID is the stable handle
+                      to reference this exact part (e.g. paste it to an
+                      assistant or the CLI). Visible label is truncated;
+                      the title holds the full id, and click copies it. */}
+                  <button
+                    type="button"
+                    className="chip"
+                    title={
+                      copiedPid === p.id
+                        ? t('notes.parts.idCopied', { defaultValue: 'Copied' })
+                        : p.id
+                    }
+                    aria-label={t('notes.parts.copyId', {
+                      defaultValue: 'Copy part ID',
+                    })}
+                    onClick={async () => {
+                      try {
+                        await navigator.clipboard.writeText(p.id)
+                        setCopiedPid(p.id)
+                        window.setTimeout(
+                          () =>
+                            setCopiedPid((c) => (c === p.id ? null : c)),
+                          1500,
+                        )
+                      } catch {
+                        // Clipboard unavailable (insecure context /
+                        // denied): the id is still in the title tooltip.
+                        setCopiedPid(null)
+                      }
+                    }}
+                  >
+                    {copiedPid === p.id
+                      ? t('notes.parts.idCopied', { defaultValue: 'Copied' })
+                      : `ID ${p.id.slice(0, 8)}…`}
+                  </button>
                   {p.lang && (
                     <span className="chip chip--lang" title="lang">
                       {p.lang}
