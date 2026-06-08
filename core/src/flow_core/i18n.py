@@ -19,6 +19,7 @@ class MessageCode(enum.StrEnum):
     AUTH_MISSING_BEARER = "auth.missing_bearer"
     AUTH_TOKEN_INVALID = "auth.token_invalid"  # noqa: S105 (message code, not a secret)
     AUTH_TOKEN_NO_SUB = "auth.token_no_sub"  # noqa: S105 (message code, not a secret)
+    AUTH_WORKSPACE_REQUIRED = "auth.workspace_required"
     AUTH_EMAIL_ALREADY_REGISTERED = "auth.email_already_registered"
     AUTH_EMAIL_NOT_VERIFIED = "auth.email_not_verified"
     AUTH_ACCOUNT_LOCKED = "auth.account_locked"
@@ -150,6 +151,8 @@ class MessageCode(enum.StrEnum):
     TELEGRAM_ASSISTANT_BUDGET = "telegram.assistant_budget"
     AGENT_TOKEN_NOT_FOUND = "agent_token.not_found"  # noqa: S105 (message code, not a secret)
     AGENT_TOKEN_INVALID = "agent_token.invalid"  # noqa: S105 (message code, not a secret)
+    CAPABILITY_TOKEN_INVALID = "capability_token.invalid"  # noqa: S105 (message code, not a secret)
+    CAPABILITY_TOKEN_SCOPE = "capability_token.scope"  # noqa: S105 (message code, not a secret)
     AI_ASSISTANT_NOT_FOUND = "ai_assistant.not_found"
     AI_ASSISTANT_INVALID_SCOPE = "ai_assistant.invalid_scope"
     NOTE_MATURITY_INVALID = "note.maturity_invalid"
@@ -197,6 +200,7 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
         MessageCode.AUTH_MISSING_BEARER: "Missing Authorization: Bearer header",
         MessageCode.AUTH_TOKEN_INVALID: "Invalid or expired token",
         MessageCode.AUTH_TOKEN_NO_SUB: "Token without subject",
+        MessageCode.AUTH_WORKSPACE_REQUIRED: "X-Workspace-Id header is required",
         MessageCode.AUTH_EMAIL_ALREADY_REGISTERED: "Email already registered",
         MessageCode.AUTH_EMAIL_NOT_VERIFIED: "Email not verified",
         MessageCode.AUTH_ACCOUNT_LOCKED: (
@@ -418,6 +422,12 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
         MessageCode.AI_ASSISTANT_NOT_FOUND: "AI assistant not found",
         MessageCode.AI_ASSISTANT_INVALID_SCOPE: ("Unknown scope key: {key}"),
         MessageCode.AGENT_TOKEN_INVALID: "Invalid or revoked agent token",
+        MessageCode.CAPABILITY_TOKEN_INVALID: (
+            "Invalid, expired, or already-used capability token"
+        ),
+        MessageCode.CAPABILITY_TOKEN_SCOPE: (
+            "Capability token is not valid for this resource or action"
+        ),
         MessageCode.NOTE_MATURITY_INVALID: "Invalid maturity '{maturity}'. Allowed: {valid}.",
         MessageCode.NOTE_PROMOTED_READONLY: (
             "This note was transplanted to a task and is read-only."

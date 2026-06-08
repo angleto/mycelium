@@ -4452,7 +4452,8 @@ async def set_note_part_body_instructions(
     is the optimistic cursor (a mismatch is stale_version -> 409); an
     empty file clears the part. For incremental growth use
     ``append_note_part`` instead. The response carries the new
-    ``version``."""
+    ``version``. If the agent has no PAT to fill ``$FLOW_TOKEN``, use
+    ``set_note_part_body_capability`` for a self-contained token."""
     from flow_core.config import get_settings
 
     async with _tenant(token, org_id) as (_s, org, _user):
@@ -4470,6 +4471,74 @@ async def set_note_part_body_instructions(
         max_bytes=settings.note_body_max_bytes,
         returns="the part id + new version",
     )
+
+
+@mcp.tool()
+async def set_note_part_body_capability(
+    token: str,
+    org_id: str,
+    note_id: str,
+    part_id: str,
+    expected_version: int,
+    ttl_seconds: int = 300,
+) -> dict[str, Any]:
+    """Like ``set_note_part_body_instructions`` but needs NO long-lived
+    PAT: mint a single-use, short-TTL capability token scoped to writing
+    THIS part's body, and return a ready ``curl`` with that ephemeral
+    token already in the Authorization header (not a ``$FLOW_TOKEN``
+    placeholder, and no ``X-Workspace-Id`` -- the org is baked into the
+    token). Use this for an agent that has no local Flow CLI / PAT.
+
+    The token authorizes exactly one write to this part, is consumed on
+    first success, and expires in ``ttl_seconds`` (default 300). A
+    retried 409 (stale ``expected_version``) does not burn it. If the
+    agent DOES have the Flow CLI, prefer ``flow notes parts set-body``
+    instead: there the credential never leaves the machine."""
+    from flow_core.config import get_settings
+    from flow_core.services import capability_tokens as cap_svc
+
+    async with _tenant(token, org_id) as (session, org, user):
+        grant = await cap_svc.mint(
+            session,
+            org_id=org,
+            actor_id=user,
+            action=cap_svc.ACTION_NOTE_PART_BODY_WRITE,
+            resource_kind=cap_svc.RESOURCE_NOTE_PART,
+            resource_id=uuid.UUID(part_id),
+            ttl_seconds=ttl_seconds,
+        )
+    settings = get_settings()
+    base = settings.frontend_base_url.rstrip("/")
+    url = (
+        f"{base}/api/notes/{note_id}/parts/{part_id}/body/stream"
+        f"?expected_version={expected_version}"
+    )
+    content_type = "text/markdown; charset=utf-8"
+    curl = (
+        f"curl -fsS -X PUT '{url}' \\\n"
+        f"  -H 'Authorization: Bearer {grant.raw}' \\\n"
+        f"  -H 'Content-Type: {content_type}' \\\n"
+        f"  --data-binary @<path-to-file>"
+    )
+    return {
+        "endpoint": url,
+        "method": "PUT",
+        "curl": curl,
+        "headers": {
+            "Authorization": f"Bearer {grant.raw}",
+            "Content-Type": content_type,
+        },
+        "max_bytes": settings.note_body_max_bytes,
+        "expires_at": grant.expires_at.isoformat(),
+        "notes": (
+            "The Authorization header already carries a single-use "
+            "capability token scoped to writing ONLY this part's body; it "
+            "is consumed on first success and expires at the time above. No "
+            "PAT and no X-Workspace-Id needed. Fill <path-to-file> with the "
+            "local UTF-8 markdown file. On success the endpoint returns the "
+            "part id + new version."
+        ),
+    }
 
 
 @mcp.tool()

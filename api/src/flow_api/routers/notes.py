@@ -13,7 +13,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, s
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
-from flow_api.deps import TenantCtx, tenant_ctx
+from flow_api.deps import TenantCtx, part_body_write_ctx, tenant_ctx
 from flow_api.routers.attachments import att_out, read_capped, upload_file_field
 from flow_api.schemas import (
     AppendMessageIn,
@@ -74,6 +74,7 @@ from flow_core.models.tag import Tag, TagKind
 from flow_core.models.task_checklist_item import TaskChecklistItem
 from flow_core.services import agent_tokens as agent_tokens_svc
 from flow_core.services import attachments as att_svc
+from flow_core.services import capability_tokens as capability_tokens_svc
 from flow_core.services import decomposition as decomposition_svc
 from flow_core.services import entity_revisions as rev_svc
 from flow_core.services import note_links as note_links_svc
@@ -806,7 +807,7 @@ async def replace_note_part_body_stream(
     note_id: uuid.UUID,
     part_id: uuid.UUID,
     request: Request,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+    ctx: Annotated[TenantCtx, Depends(part_body_write_ctx, scope="function")],
     expected_version: Annotated[int, Query(ge=1)],
     edit_session_id: Annotated[str | None, Header(alias="X-Edit-Session-Id")] = None,
 ) -> VersionOut:
@@ -817,7 +818,12 @@ async def replace_note_part_body_stream(
     is size-capped (``note_body_max_bytes``) and must be valid UTF-8. An
     empty body clears the part. For incremental growth use ``/append``;
     this is the "I have the whole new body in a file" path. Use the MCP
-    ``set_note_part_body_instructions`` tool for the matching ``curl``."""
+    ``set_note_part_body_instructions`` tool for the matching ``curl``.
+
+    Auth accepts a normal bearer (JWT / agent token, with X-Workspace-Id)
+    or a scoped one-time capability token (``flow_cap_``) for this exact
+    part, minted by the MCP ``set_note_part_body_capability`` tool and
+    consumed here on success."""
     body_text = await read_capped_text(request, max_bytes=get_settings().note_body_max_bytes)
     channel = "web" if edit_session_id else "api"
     v = await parts_svc.update_part(
@@ -830,6 +836,10 @@ async def replace_note_part_body_stream(
         channel=channel,
         edit_session_id=edit_session_id,
     )
+    if ctx.capability_token_id is not None:
+        # One-time: burn the capability now that the guarded write
+        # committed (same transaction; a rolled-back write un-burns it).
+        await capability_tokens_svc.consume(ctx.session, token_id=ctx.capability_token_id)
     return VersionOut(id=part_id, version=v)
 
 

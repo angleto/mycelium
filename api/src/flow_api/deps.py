@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import Annotated, Any
 
@@ -23,6 +24,7 @@ from flow_core.i18n import MessageCode
 from flow_core.models.membership import Role
 from flow_core.models.user import User
 from flow_core.security import decode_token_async
+from flow_core.services import capability_tokens
 from flow_core.services.auth import assert_token_not_revoked
 from flow_core.services.rbac import _RANK, get_role
 
@@ -89,6 +91,39 @@ async def current_user(
     if user is None or not user.is_active:
         raise AuthError(MessageCode.AUTH_TOKEN_INVALID)
     return user
+
+
+async def _active_user(user_id: uuid.UUID) -> User:
+    """Look up the active User by id (global table, admin session), same
+    rejection contract as ``current_user``. Used by the part-body-stream
+    dep for the capability-token branch, which has the user id from the
+    token rather than from a decoded JWT subject."""
+    async with admin_session() as session:
+        user = (await session.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
+    if user is None or not user.is_active:
+        raise AuthError(MessageCode.AUTH_TOKEN_INVALID)
+    return user
+
+
+async def _resolve_user(token: str) -> User:
+    """Decode a JWT / agent-token bearer, enforce jti revocation, and
+    return the active User. Mirrors ``current_user_id`` + ``current_user``
+    for the part-body-stream dep, which cannot reuse those FastAPI deps
+    because it must first branch on a capability-token bearer."""
+    claims = await decode_token_async(token)
+    sub = claims.get("sub")
+    if not isinstance(sub, str):
+        raise AuthError(MessageCode.AUTH_TOKEN_NO_SUB)
+    jti = claims.get("jti")
+    if isinstance(jti, str):
+        try:
+            jti_uuid: uuid.UUID | None = uuid.UUID(jti)
+        except ValueError:
+            jti_uuid = None
+        if jti_uuid is not None:
+            async with admin_session() as session:
+                await assert_token_not_revoked(session, jti=jti_uuid)
+    return await _active_user(uuid.UUID(sub))
 
 
 _TRUTHY = {"1", "true", "yes", "on"}
@@ -162,20 +197,25 @@ class TenantCtx:
     org_id: uuid.UUID
     project_id: uuid.UUID | None
     role: Role
+    # Set only when the request authenticated with a capability token
+    # (the part-body-stream dep); the endpoint consumes it on success.
+    capability_token_id: uuid.UUID | None = None
 
 
-async def tenant_ctx(
-    user: Annotated[User, Depends(current_user)],
-    x_workspace_id: Annotated[str, Header()],
-    x_project_id: Annotated[str | None, Header()] = None,
-    x_workspace_role: Annotated[str | None, Header()] = None,
-    x_admin_mode: Annotated[str | None, Header()] = None,
+@asynccontextmanager
+async def _tenant_scope(
+    user: User,
+    org_id: uuid.UUID,
+    project_id: uuid.UUID | None,
+    *,
+    x_workspace_role: str | None,
+    x_admin_mode: str | None,
 ) -> AsyncIterator[TenantCtx]:
-    # Header is X-Workspace-Id (user-facing). Internally the tenant is
-    # still org_id (RLS unchanged, ADR-0015); the rename lives here in
-    # the adapter, not in core.
-    org_id = uuid.UUID(x_workspace_id)
-    project_id = uuid.UUID(x_project_id) if x_project_id else None
+    """RLS-scoped tenant session shared by ``tenant_ctx`` and the
+    part-body-stream dep: open the session as the human/api caller,
+    resolve the sudo-clamped effective role, publish it for the
+    service-layer RBAC choke point, and yield the ctx. Behaviour is
+    identical to the original inline ``tenant_ctx`` body."""
     async with tenant_session(
         str(org_id),
         str(user.id),
@@ -213,6 +253,93 @@ async def tenant_ctx(
             project_id=project_id,
             role=role,
         )
+
+
+async def tenant_ctx(
+    user: Annotated[User, Depends(current_user)],
+    x_workspace_id: Annotated[str, Header()],
+    x_project_id: Annotated[str | None, Header()] = None,
+    x_workspace_role: Annotated[str | None, Header()] = None,
+    x_admin_mode: Annotated[str | None, Header()] = None,
+) -> AsyncIterator[TenantCtx]:
+    # Header is X-Workspace-Id (user-facing). Internally the tenant is
+    # still org_id (RLS unchanged, ADR-0015); the rename lives here in
+    # the adapter, not in core.
+    org_id = uuid.UUID(x_workspace_id)
+    project_id = uuid.UUID(x_project_id) if x_project_id else None
+    async with _tenant_scope(
+        user,
+        org_id,
+        project_id,
+        x_workspace_role=x_workspace_role,
+        x_admin_mode=x_admin_mode,
+    ) as ctx:
+        yield ctx
+
+
+async def part_body_write_ctx(
+    part_id: uuid.UUID,
+    token: Annotated[str, Depends(_bearer_token)],
+    x_workspace_id: Annotated[str | None, Header()] = None,
+    x_project_id: Annotated[str | None, Header()] = None,
+    x_workspace_role: Annotated[str | None, Header()] = None,
+    x_admin_mode: Annotated[str | None, Header()] = None,
+) -> AsyncIterator[TenantCtx]:
+    """Tenant context for the note-part body stream, accepting EITHER a
+    normal bearer (JWT / agent token, exactly like ``tenant_ctx``) OR a
+    capability token (``flow_cap_``) scoped to ``note_part_body:write``
+    on this very ``part_id``.
+
+    The capability path is confined to this endpoint:
+    ``decode_token_async`` does not know ``flow_cap_``, so such a token
+    is rejected everywhere else. On the capability branch the request
+    runs as the token's user with a fixed ``member`` role, and
+    ``capability_token_id`` is set so the endpoint consumes the token
+    after the write commits."""
+    if capability_tokens.is_capability_token(token):
+        princ = await capability_tokens.authenticate(token)
+        if princ is None:
+            raise AuthError(MessageCode.CAPABILITY_TOKEN_INVALID)
+        if (
+            princ.action != capability_tokens.ACTION_NOTE_PART_BODY_WRITE
+            or princ.resource_kind != capability_tokens.RESOURCE_NOTE_PART
+            or princ.resource_id != part_id
+        ):
+            raise ForbiddenError(MessageCode.CAPABILITY_TOKEN_SCOPE)
+        user = await _active_user(princ.user_id)
+        async with tenant_session(
+            str(princ.org_id),
+            str(user.id),
+            actor_kind="mcp_token",
+            actor_subject_id=str(princ.token_id),
+        ) as session:
+            await session.execute(
+                text("SELECT set_config('app.current_role', :r, true)"),
+                {"r": Role.member.value},
+            )
+            yield TenantCtx(
+                session=session,
+                user_id=user.id,
+                org_id=princ.org_id,
+                project_id=None,
+                role=Role.member,
+                capability_token_id=princ.token_id,
+            )
+        return
+    # Normal bearer: same contract as tenant_ctx (X-Workspace-Id required).
+    if not x_workspace_id:
+        raise AuthError(MessageCode.AUTH_WORKSPACE_REQUIRED)
+    user = await _resolve_user(token)
+    org_id = uuid.UUID(x_workspace_id)
+    project_id = uuid.UUID(x_project_id) if x_project_id else None
+    async with _tenant_scope(
+        user,
+        org_id,
+        project_id,
+        x_workspace_role=x_workspace_role,
+        x_admin_mode=x_admin_mode,
+    ) as ctx:
+        yield ctx
 
 
 async def tenant_admin_ctx(
