@@ -185,6 +185,14 @@ class Settings(BaseSettings):
     # bounded (only timed-out writes) and the worker quickly drains.
     task_search_backfill_interval_seconds: int = 60
 
+    # Note-search pointer backfill worker. Indexes note parts that
+    # pre-date the per-part index deploy (migration 0040) and never went
+    # through the listener path, so old notes become searchable without a
+    # manual edit. Keyword-only re-embedding is handled generically by the
+    # embedding-migration worker, so this loop only needs the pointer
+    # sweep. Same low-cost cadence as the task-search backfill.
+    note_search_backfill_interval_seconds: int = 60
+
     # Default LOCAL embedder model (the rank-0 fallback, ``embedding``
     # vector(1024) column). bge-m3 emits 1024 natively = ``embed_dim``.
     embed_model: str = "BAAI/bge-m3"

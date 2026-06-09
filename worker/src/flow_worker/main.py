@@ -24,6 +24,7 @@ from flow_worker import (
     dispatch,
     embedding_migration,
     google_calendar,
+    note_search_backfill,
     reminders,
     revisions,
     revisions_retention,
@@ -44,13 +45,16 @@ async def _run() -> None:
     #    scan_reminders + dispatch_pending; closes the FR-12 loop);
     #  - task-search embedding backfill (re-embeds task blobs whose
     #    initial write timed out; the listener-driven resync is the
-    #    authoritative path, this is a safety net).
+    #    authoritative path, this is a safety net);
+    #  - note-search pointer backfill (indexes note parts that pre-date
+    #    the per-part index deploy so the back-catalogue is searchable).
     await asyncio.gather(
         dispatch.run_forever(),
         google_calendar.run_forever(),
         telegram_assistant.run_forever(),
         reminders.run_forever(),
         task_search_backfill.run_forever(),
+        note_search_backfill.run_forever(),
         revisions.run_forever(),
         revisions_retention.run_forever(),
         revisions_summary.run_forever(),
