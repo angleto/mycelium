@@ -426,11 +426,11 @@ async def _run_tool(
             return "error: search needs args.q"
         raw_kinds = args.get("kinds")
         if isinstance(raw_kinds, list) and raw_kinds:
-            kinds = [str(k) for k in raw_kinds if str(k) in ("task", "blob")]
+            kinds = [str(k) for k in raw_kinds if str(k) in ("task", "blob", "note")]
         else:
-            kinds = ["task", "blob"]
+            kinds = ["task", "blob", "note"]
         if not kinds:
-            return "error: search.kinds must include 'task' or 'blob'"
+            return "error: search.kinds must include 'task', 'note' or 'blob'"
         raw_limit = args.get("limit")
         try:
             limit = int(raw_limit) if isinstance(raw_limit, int | str) else 10
@@ -457,7 +457,12 @@ async def _run_tool(
             return "search: (no results)"
         search_lines: list[str] = []
         for h in hits:
-            ident = f"task:{h.task_id}" if h.kind == "task" and h.task_id else f"blob:{h.blob_id}"
+            if h.kind == "task" and h.task_id:
+                ident = f"task:{h.task_id}"
+            elif h.kind == "note" and h.note_id:
+                ident = f"note:{h.note_id}"
+            else:
+                ident = f"blob:{h.blob_id}"
             title = _short(h.title or "", 60)
             snippet = _short(h.snippet or "", 120) if h.snippet else ""
             tail = f" -- {snippet}" if snippet else ""

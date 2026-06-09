@@ -198,6 +198,8 @@ export function errMessage(e: unknown): string {
 export type ServerSearchHit = {
   kind: string
   task_id: string | null
+  note_id: string | null
+  part_id: string | null
   blob_id: string
   title: string | null
   snippet: string | null
@@ -207,13 +209,14 @@ export type ServerSearchHit = {
 export async function searchTasksByText(
   query: string,
   signal?: AbortSignal,
+  kinds: string[] = ['task'],
 ): Promise<ServerSearchHit[]> {
   const res = await authFetch('/search', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
       q: query,
-      kinds: ['task'],
+      kinds,
       limit: 100,
       operation_id: 'tasks-route-search',
     }),

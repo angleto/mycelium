@@ -265,9 +265,9 @@ async def _run_tool(
         query = str(args.get("query") or task.title)
         raw_kinds = args.get("kinds")
         if isinstance(raw_kinds, list) and raw_kinds:
-            kinds = [str(k) for k in raw_kinds if str(k) in ("task", "blob")]
+            kinds = [str(k) for k in raw_kinds if str(k) in ("task", "blob", "note")]
         else:
-            kinds = ["task", "blob"]
+            kinds = ["task", "blob", "note"]
         if not kinds:
             return "search:err:kinds"
         raw_limit = args.get("limit")

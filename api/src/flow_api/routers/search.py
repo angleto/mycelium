@@ -1,10 +1,11 @@
-"""Unified search across tasks and memory blobs.
+"""Unified search across tasks, notes and memory blobs.
 
 Wraps the existing memory RRF pipeline with a kind-aware split: ``task``
 kind uses the org-wide retrieve (project_id=None) and resolves blobs to
-tasks via ``task_index_pointer``; ``blob`` kind keeps the per-project
-predicate. Snippet is computed server-side via Postgres ``ts_headline``;
-the response is typed.
+tasks via ``task_index_pointer``; ``note`` kind resolves note-part blobs
+to their note via ``note_part_index_pointer`` (per-project); ``blob``
+kind keeps the per-project predicate. Snippet is computed server-side via
+Postgres ``ts_headline``; the response is typed.
 """
 
 from __future__ import annotations
@@ -45,6 +46,8 @@ async def search(
         SearchHit(
             kind=h.kind,
             task_id=h.task_id,
+            note_id=h.note_id,
+            part_id=h.part_id,
             blob_id=h.blob_id,
             title=h.title,
             snippet=h.snippet,

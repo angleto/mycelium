@@ -3049,15 +3049,17 @@ async def search(
     include_deleted: bool = False,
     rerank: bool = False,
 ) -> list[dict[str, Any]]:
-    """Unified free-text search across tasks and memory blobs.
+    """Unified free-text search across tasks, notes and memory blobs.
 
-    ``kinds`` defaults to ``['task', 'blob']``. Task hits are org-wide
-    (project filtering goes via ``tag_ids``); blob hits respect the
-    caller's ``project_id``. Results carry an ``ts_headline`` snippet.
-    Use this instead of ``memory_search`` when the caller wants
-    "everything that mentions X" rather than memory-only retrieval.
-    ``rerank=True`` opts into a cross-encoder pass on the top-K (task
-    27579d6a) regardless of the env default.
+    ``kinds`` defaults to ``['task', 'blob', 'note']``. Task hits are
+    org-wide (project filtering goes via ``tag_ids``); note and blob hits
+    respect the caller's ``project_id``. ``note`` hits carry ``note_id`` +
+    ``part_id`` and a title (the note part blob resolved to its note).
+    Results carry an ``ts_headline`` snippet. Use this instead of
+    ``memory_search`` when the caller wants "everything that mentions X"
+    rather than memory-only retrieval. ``rerank=True`` opts into a
+    cross-encoder pass on the top-K (task 27579d6a) regardless of the env
+    default.
     """
     async with _tenant(token, org_id) as (s, org, user):
         hits = await task_search_svc.search_unified(
@@ -3066,7 +3068,7 @@ async def search(
             actor_id=user,
             project_id=uuid.UUID(project_id) if project_id else None,
             query=q,
-            kinds=kinds or ["task", "blob"],
+            kinds=kinds or ["task", "blob", "note"],
             tag_ids=[uuid.UUID(t) for t in (tag_ids or [])],
             channel_keys=channel_keys or [],
             limit=limit,
@@ -3079,6 +3081,8 @@ async def search(
             {
                 "kind": h.kind,
                 "task_id": str(h.task_id) if h.task_id else None,
+                "note_id": str(h.note_id) if h.note_id else None,
+                "part_id": str(h.part_id) if h.part_id else None,
                 "blob_id": str(h.blob_id),
                 "title": h.title,
                 "snippet": h.snippet,

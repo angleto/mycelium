@@ -238,3 +238,120 @@ async def test_archived_task_hidden_by_default(_fake_embedder: None) -> None:
             )
         ).json()
         assert any(h_["task_id"] == tid for h_ in hits)
+
+
+async def test_note_is_searchable_as_kind_note(_fake_embedder: None) -> None:
+    """A text note created via /notes is indexed per-part at commit time
+    and surfaces in /search as a titled ``kind='note'`` hit that carries
+    ``note_id`` + ``part_id`` (resolved via ``note_part_index_pointer``),
+    not as an opaque ``kind='blob'`` row."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as c:
+        h = await _signup(c)
+        await _grant_and_rate(c, h)
+        note = (
+            await c.post(
+                "/notes",
+                headers=h,
+                json={
+                    "kind": "text",
+                    "title": "Roadmap notes",
+                    "text": "the mycelium decomposition differentiator zphlogiston",
+                },
+            )
+        ).json()
+        nid = note["id"]
+
+        hits = (
+            await c.post(
+                "/search",
+                headers=h,
+                json={"q": "zphlogiston", "limit": 10},
+            )
+        ).json()
+        note_hits = [x for x in hits if x["kind"] == "note"]
+        assert any(x["note_id"] == nid for x in note_hits), (
+            f"expected the note as kind='note', got {hits}"
+        )
+        hit = next(x for x in note_hits if x["note_id"] == nid)
+        assert hit["title"] == "Roadmap notes"
+        assert hit["part_id"]
+        assert hit["task_id"] is None
+
+
+async def test_note_blob_is_deduped_from_blob_kind(_fake_embedder: None) -> None:
+    """When both 'note' and 'blob' are requested, the note part blob is
+    emitted once as the titled ``kind='note'`` row, not also as the
+    opaque ``kind='blob'`` row (the catch-all blob branch spans the note
+    channel, so without dedup the same blob would appear twice)."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as c:
+        h = await _signup(c)
+        await _grant_and_rate(c, h)
+        note = (
+            await c.post(
+                "/notes",
+                headers=h,
+                json={"kind": "text", "title": "Dedup check", "text": "qwxvz unique token"},
+            )
+        ).json()
+        nid = note["id"]
+
+        hits = (
+            await c.post(
+                "/search",
+                headers=h,
+                json={"q": "qwxvz", "kinds": ["note", "blob"], "limit": 10},
+            )
+        ).json()
+        # The note's underlying blob id appears exactly once, as kind=note.
+        note_rows = [x for x in hits if x["kind"] == "note" and x["note_id"] == nid]
+        assert len(note_rows) == 1, f"note should surface once: {hits}"
+        note_blob_id = note_rows[0]["blob_id"]
+        assert not any(x["kind"] == "blob" and x["blob_id"] == note_blob_id for x in hits), (
+            f"note blob must not also appear as kind='blob': {hits}"
+        )
+
+
+async def test_soft_deleted_note_hidden_unless_include_deleted(_fake_embedder: None) -> None:
+    """A soft-deleted note is filtered out of ``kind='note'`` hits by
+    default (the part blob lingers but the note row is hidden), and
+    re-appears with include_deleted=true -- mirroring the task branch."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as c:
+        h = await _signup(c)
+        await _grant_and_rate(c, h)
+        note = (
+            await c.post(
+                "/notes",
+                headers=h,
+                json={"kind": "text", "title": "Doomed", "text": "kqxjj soon gone"},
+            )
+        ).json()
+        nid = note["id"]
+
+        # Visible first.
+        hits = (await c.post("/search", headers=h, json={"q": "kqxjj", "kinds": ["note"]})).json()
+        assert any(x["note_id"] == nid for x in hits)
+
+        await c.post(
+            f"/notes/{nid}/delete",
+            headers=h,
+            json={"expected_version": note["version"]},
+        )
+
+        hits = (await c.post("/search", headers=h, json={"q": "kqxjj", "kinds": ["note"]})).json()
+        assert not any(x.get("note_id") == nid for x in hits), (
+            "soft-deleted note should be hidden by default"
+        )
+
+        hits = (
+            await c.post(
+                "/search",
+                headers=h,
+                json={"q": "kqxjj", "kinds": ["note"], "include_deleted": True},
+            )
+        ).json()
+        assert any(x.get("note_id") == nid for x in hits), (
+            f"include_deleted=true should expose the soft-deleted note: {hits}"
+        )

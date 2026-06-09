@@ -69,6 +69,8 @@ from sqlalchemy.orm import Session, object_session
 
 from flow_core.embedder import Embedder, EmbedResult, get_embedder
 from flow_core.models.memory_blob import EMBED_DIM, BlobSource, MemoryBlob
+from flow_core.models.note import Note
+from flow_core.models.note_part_index_pointer import NotePartIndexPointer
 from flow_core.models.task import Task
 from flow_core.models.task_checklist_item import TaskChecklistItem
 from flow_core.models.task_index_pointer import TaskIndexPointer
@@ -531,15 +533,23 @@ async def _attach_channel_tag(
 
 @dataclass(frozen=True)
 class UnifiedHit:
-    """Result row for the unified /search endpoint. ``task_id`` is None
-    when the underlying blob is not a task blob (kind='blob')."""
+    """Result row for the unified /search endpoint.
 
-    kind: str  # 'task' | 'blob'
+    The entity ref depends on ``kind``:
+      - ``task``: ``task_id`` set (resolved via ``task_index_pointer``).
+      - ``note``: ``note_id`` + ``part_id`` set (resolved via
+        ``note_part_index_pointer``); ``title`` is the note title.
+      - ``blob``: none of the above set -- an opaque memory row.
+    """
+
+    kind: str  # 'task' | 'note' | 'blob'
     blob_id: uuid.UUID
     task_id: uuid.UUID | None
     title: str | None
     snippet: str | None
     score: float
+    note_id: uuid.UUID | None = None
+    part_id: uuid.UUID | None = None
 
 
 async def search_unified(
@@ -558,23 +568,26 @@ async def search_unified(
     operation_id: str,
     rerank: bool = False,
 ) -> list[UnifiedHit]:
-    """Unified search across tasks and memory blobs.
+    """Unified search across tasks, notes and memory blobs.
 
     Project scoping is split per kind: ``task`` blobs carry
     ``project_id=NULL`` (org-wide; task entities don't have a
     ``project_id`` column intrinsically -- project filtering is
-    available via the project's tag in ``tag_ids``), ``blob`` hits run
-    project-scoped against the caller's current project. The two
-    branches are independent retrieves; results are merged by score
-    descending (RRF is already applied inside each branch).
+    available via the project's tag in ``tag_ids``), ``note`` and
+    ``blob`` hits run project-scoped against the caller's current
+    project. Each kind is an independent retrieve; results are merged by
+    score descending (RRF is already applied inside each branch), then
+    deduped so a blob that resolved to a task/note isn't also surfaced as
+    an opaque ``blob`` row.
     """
     # Local imports break a static cycle: memory imports nothing from
     # task_search, but task_search imports memory only at call time.
     from flow_core.services import memory as memory_svc
 
     want_task = "task" in kinds
+    want_note = "note" in kinds
     want_blob = "blob" in kinds
-    if not want_task and not want_blob:
+    if not want_task and not want_note and not want_blob:
         return []
 
     hits: list[UnifiedHit] = []
@@ -627,6 +640,59 @@ async def search_unified(
                     )
                 )
 
+    if want_note:
+        # Note search mirrors the task branch: the 'note' channel tag
+        # scopes the retrieve to note-part blobs, then we resolve each
+        # blob to its note via ``note_part_index_pointer`` and surface a
+        # titled hit that the SPA can route to /notes/:id. Project-scoped
+        # like 'blob' (note part blobs carry the note's project_id).
+        note_hits = await memory_svc.retrieve(
+            session,
+            org_id=org_id,
+            actor_id=actor_id,
+            project_id=project_id,
+            query=query,
+            operation_id=operation_id,
+            limit=max(limit * 2, limit),
+            tag_ids=tag_ids,
+            channel_key="note",
+            rerank=rerank,
+        )
+        if note_hits:
+            blob_ids = [h.blob.id for h in note_hits]
+            blob_to_ref = await _resolve_note_refs(session, blob_ids)
+            note_meta = await _note_filter_meta(
+                session,
+                note_ids=[nid for nid, _pid in blob_to_ref.values()],
+                include_archived=include_archived,
+                include_deleted=include_deleted,
+            )
+            snippets = await _ts_headlines(session, blob_ids=blob_ids, query=query)
+            for h in note_hits:
+                ref = blob_to_ref.get(h.blob.id)
+                if ref is None:
+                    # Blob on the note channel with no live pointer (e.g.
+                    # a legacy explicit note write, or an orphan): skip
+                    # rather than surface a hit that won't route.
+                    continue
+                note_id, part_id = ref
+                note_m = note_meta.get(note_id)
+                if note_m is None:
+                    # Note gone or filtered out (soft-deleted/archived).
+                    continue
+                hits.append(
+                    UnifiedHit(
+                        kind="note",
+                        blob_id=h.blob.id,
+                        task_id=None,
+                        note_id=note_id,
+                        part_id=part_id,
+                        title=note_m.title,
+                        snippet=snippets.get(h.blob.id),
+                        score=h.rrf,
+                    )
+                )
+
     if want_blob:
         # Channel filter for blob search: if the caller asked for a
         # specific channel via channel_keys, narrow to it; otherwise
@@ -668,6 +734,14 @@ async def search_unified(
                     )
                 )
 
+    # Dedup by blob: the catch-all 'blob' branch (channel=None) spans
+    # every channel, so a task/note blob also surfaces there as an opaque
+    # row. When the same blob was already emitted as a titled kind
+    # (task/note), drop the 'blob' duplicate -- keep the row that routes.
+    typed_blob_ids = {h.blob_id for h in hits if h.kind in ("task", "note")}
+    if typed_blob_ids:
+        hits = [h for h in hits if not (h.kind == "blob" and h.blob_id in typed_blob_ids)]
+
     hits.sort(key=lambda r: (-r.score, r.kind, str(r.blob_id)))
     return hits[:limit]
 
@@ -685,6 +759,57 @@ async def _resolve_task_ids(
         )
     ).all()
     return {bid: tid for bid, tid in rows}
+
+
+async def _resolve_note_refs(
+    session: AsyncSession, blob_ids: list[uuid.UUID]
+) -> dict[uuid.UUID, tuple[uuid.UUID, uuid.UUID]]:
+    """Map each note-part blob id to ``(note_id, part_id)`` via the
+    ``note_part_index_pointer`` (note_id is denormalised on the pointer,
+    so this is a single SELECT with no join to ``note_part``)."""
+    if not blob_ids:
+        return {}
+    rows = (
+        await session.execute(
+            select(
+                NotePartIndexPointer.blob_id,
+                NotePartIndexPointer.note_id,
+                NotePartIndexPointer.part_id,
+            ).where(NotePartIndexPointer.blob_id.in_(blob_ids))
+        )
+    ).all()
+    return {bid: (nid, pid) for bid, nid, pid in rows}
+
+
+@dataclass(frozen=True)
+class _NoteMeta:
+    title: str | None
+
+
+async def _note_filter_meta(
+    session: AsyncSession,
+    *,
+    note_ids: list[uuid.UUID],
+    include_archived: bool,
+    include_deleted: bool,
+) -> dict[uuid.UUID, _NoteMeta]:
+    """Batched SELECT of note ids + titles, applying the same
+    soft-delete / archived visibility filters as the task branch so a
+    hidden note is not surfaced even if its part blob ranked high."""
+    if not note_ids:
+        return {}
+    stmt = select(Note.id, Note.title, Note.deleted_at, Note.is_archived).where(
+        Note.id.in_(note_ids)
+    )
+    rows = (await session.execute(stmt)).all()
+    out: dict[uuid.UUID, _NoteMeta] = {}
+    for nid, title, deleted_at, is_archived in rows:
+        if deleted_at is not None and not include_deleted:
+            continue
+        if is_archived and not include_archived:
+            continue
+        out[nid] = _NoteMeta(title=title)
+    return out
 
 
 @dataclass(frozen=True)

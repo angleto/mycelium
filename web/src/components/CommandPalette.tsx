@@ -20,19 +20,16 @@ import { getRecents, pushRecent } from '../lib/recents'
 //   * id branch — when the query looks like a hex prefix, the
 //     deterministic /lookup resolver returns the matching task/note(s),
 //     shown first with the matched prefix highlighted in the code badge.
-//   * server branch (tasks) — POST /search (FTS + pgvector RRF) so a
-//     task matched only by description / checklist text / semantics
-//     surfaces, not just by title. Debounced + abortable.
+//   * server branch (tasks + notes) — POST /search (FTS + pgvector RRF)
+//     so a task or note matched only by body / checklist text /
+//     semantics surfaces, not just by title. ``kind='note'`` hits carry
+//     a ``note_id`` (resolved server-side via note_part_index_pointer),
+//     so they route to /notes/:id. Debounced + abortable.
 //   * client branch — instant substring match over the task / note
 //     titles already loaded, so the palette feels live before the
-//     server responds and works for note titles (see below).
+//     server responds (and covers title-only matches without a round
+//     trip). Server + client note rows dedupe by route via add().
 //   * recent — when the box is empty, the recently-visited entities.
-//
-// Notes are intentionally NOT server-searched: /search returns note
-// matches as memory-blob ids and the SearchHit shape exposes no note
-// route, so a server note hit isn't navigable from here. Note titles
-// stay on the instant client-side filter; server-side note search is a
-// backend follow-up (expose the note id/route on note hits).
 //
 // Navigation uses the server-supplied route_url for id matches and the
 // canonical /tasks/:id /notes/:id routes for the rest.
@@ -100,9 +97,14 @@ export function CommandPalette() {
     prefix: string
     matches: LookupMatch[]
   }>({ prefix: '', matches: [] })
-  // Server-side TASK hits, keyed by the query string they resolved for
-  // (same staleness guard as idLookup).
+  // Server-side TASK + NOTE hits, keyed by the query string they
+  // resolved for (same staleness guard as idLookup). One /search call
+  // returns both kinds; we split by kind into these two buckets.
   const [serverTasks, setServerTasks] = useState<{
+    q: string
+    hits: { id: string; title: string }[]
+  }>({ q: '', hits: [] })
+  const [serverNotes, setServerNotes] = useState<{
     q: string
     hits: { id: string; title: string }[]
   }>({ q: '', hits: [] })
@@ -133,6 +135,7 @@ export function CommandPalette() {
     setSel(0)
     setIdLookup({ prefix: '', matches: [] })
     setServerTasks({ q: '', hits: [] })
+    setServerNotes({ q: '', hits: [] })
   }
 
   // Load the title-search corpus once per open (async setState in the
@@ -171,22 +174,31 @@ export function CommandPalette() {
     }
   }, [q])
 
-  // Server-side task search (debounced + abortable). Augments the
-  // instant client-side title filter with the FTS + pgvector pipeline,
-  // so a task matched by description / checklist / semantics surfaces.
+  // Server-side task + note search (debounced + abortable). Augments
+  // the instant client-side title filter with the FTS + pgvector
+  // pipeline, so a task or note matched by body / checklist / semantics
+  // surfaces (not just by title). One call returns both kinds; we split
+  // task hits (resolved to ``task_id``) from note hits (``note_id``).
   useEffect(() => {
     const needle = q.trim()
     if (needle.length < TEXT_MIN) return
     const ac = new AbortController()
     const handle = window.setTimeout(() => {
-      void searchTasksByText(needle, ac.signal)
+      void searchTasksByText(needle, ac.signal, ['task', 'note'])
         .then((hits) => {
           if (ac.signal.aborted) return
+          const key = needle.toLowerCase()
           setServerTasks({
-            q: needle.toLowerCase(),
+            q: key,
             hits: hits
-              .filter((h) => h.task_id)
+              .filter((h) => h.kind === 'task' && h.task_id)
               .map((h) => ({ id: h.task_id as string, title: h.title ?? '' })),
+          })
+          setServerNotes({
+            q: key,
+            hits: hits
+              .filter((h) => h.kind === 'note' && h.note_id)
+              .map((h) => ({ id: h.note_id as string, title: h.title ?? '' })),
           })
         })
         .catch(() => {
@@ -251,6 +263,20 @@ export function CommandPalette() {
           })
         }
       }
+      // Server-side note hits (semantic / body matches the instant
+      // title filter below can't see). Deduped by route via add().
+      if (serverNotes.q === needle) {
+        for (const h of serverNotes.hits) {
+          add({
+            key: `sn-${h.id}`,
+            kind: 'note',
+            id: h.id,
+            section: 'note',
+            title: h.title || h.id,
+            route: `/notes/${h.id}`,
+          })
+        }
+      }
       // Instant client-side title filters (tasks + notes).
       for (const tk of tasks) {
         if (tk.title.toLowerCase().includes(needle)) {
@@ -283,7 +309,7 @@ export function CommandPalette() {
       collected.filter((r) => r.section === s),
     )
     return ordered.slice(0, 20)
-  }, [q, idLookup, serverTasks, tasks, notes])
+  }, [q, idLookup, serverTasks, serverNotes, tasks, notes])
 
   if (!open) return null
 

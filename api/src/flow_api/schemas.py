@@ -2926,14 +2926,15 @@ class AiAssistantCreatedOut(BaseModel):
 
 class SearchIn(BaseModel):
     """Unified free-text search across the org. ``kinds`` defaults to
-    ['task', 'blob']; ``kinds=['task']`` is the SPA's task-search path,
-    ``kinds=['blob']`` mirrors /memory/search. ``include_archived`` and
-    ``include_deleted`` only apply to ``task`` hits. ``rerank`` opts
-    into the cross-encoder reranker for this call regardless of the
-    env default (task 27579d6a)."""
+    ['task', 'blob', 'note']; ``kinds=['task']`` is the SPA's task-search
+    path, ``kinds=['blob']`` mirrors /memory/search, ``kinds=['note']``
+    returns titled note hits (a note part blob resolved to its note).
+    ``include_archived`` and ``include_deleted`` apply to ``task`` and
+    ``note`` hits. ``rerank`` opts into the cross-encoder reranker for
+    this call regardless of the env default (task 27579d6a)."""
 
     q: str = Field(min_length=1, max_length=2000)
-    kinds: list[str] = Field(default_factory=lambda: ["task", "blob"])
+    kinds: list[str] = Field(default_factory=lambda: ["task", "blob", "note"])
     tag_ids: list[uuid.UUID] = Field(default_factory=list)
     channel_keys: list[str] = Field(default_factory=list)
     limit: int = Field(default=20, gt=0, le=100)
@@ -2944,14 +2945,18 @@ class SearchIn(BaseModel):
 
 
 class SearchHit(BaseModel):
-    """One row in the unified search response. ``task_id`` is set for
-    ``kind='task'`` hits (resolved through ``task_index_pointer``); the
-    ``blob_id`` is always the underlying memory row. ``snippet`` is the
-    server-side ``ts_headline`` extract; ``title`` is the task title
-    when applicable, otherwise None."""
+    """One row in the unified search response. The entity ref depends on
+    ``kind``: ``task_id`` for ``kind='task'`` (via ``task_index_pointer``),
+    ``note_id`` + ``part_id`` for ``kind='note'`` (via
+    ``note_part_index_pointer``), neither for an opaque ``kind='blob'``.
+    The ``blob_id`` is always the underlying memory row. ``snippet`` is
+    the server-side ``ts_headline`` extract; ``title`` is the task/note
+    title when applicable, otherwise None."""
 
-    kind: str  # 'task' | 'blob'
+    kind: str  # 'task' | 'note' | 'blob'
     task_id: uuid.UUID | None = None
+    note_id: uuid.UUID | None = None
+    part_id: uuid.UUID | None = None
     blob_id: uuid.UUID
     title: str | None = None
     snippet: str | None = None
