@@ -155,27 +155,8 @@ function ProjectFocus() {
 // which resyncs on resume from lid-close / reconnect / tab-switch.
 function RunningIndicator() {
   const { t } = useTranslation()
-  const session = useSession()
   const { running: runs, now } = useRunningTimers()
-  const [titles, setTitles] = useState<Record<string, string>>({})
   const [idx, setIdx] = useState(0)
-
-  // Resolve task titles for the running entries (TimeEntryOut has only
-  // task_id). One list fetch, cached by id.
-  useEffect(() => {
-    let active = true
-    void (async () => {
-      const { data } = await api.GET('/tasks', {
-        params: { header: workspaceHeader() },
-      })
-      if (active && data) {
-        setTitles(Object.fromEntries(data.map((tk) => [tk.id, tk.title])))
-      }
-    })()
-    return () => {
-      active = false
-    }
-  }, [session?.workspaceId])
 
   // Cycle through the running entries every 5s when there is >1.
   // (idx is bounded at render via safeIdx, so no reset needed here.)
@@ -195,7 +176,11 @@ function RunningIndicator() {
   )
   const safeIdx = idx % ordered.length
   const cur = ordered[safeIdx]
-  const title = titles[cur.task_id] ?? cur.task_id.slice(0, 8)
+  // The running entry already carries the server-resolved task title;
+  // use it directly. A separate /tasks fetch missed tasks absent from
+  // that (filtered/paginated) list — archived, done, or a note's subject
+  // task — and fell back to the raw UUID prefix in the chip.
+  const title = cur.task_title ?? cur.task_id.slice(0, 8)
   const paused = isPaused(cur)
   return (
     <Link

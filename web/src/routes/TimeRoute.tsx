@@ -622,7 +622,7 @@ export function TimeRoute() {
             {running.map((r) => (
               <li key={r.id} className="taskrow">
                 <span className="taskrow__title">
-                  {titleOf(r.task_id)}{' '}
+                  {r.task_title ?? titleOf(r.task_id)}{' '}
                   {r.executor_kind === 'llm_agent' && (
                     <span className="aibadge" title={t('tasks.aiTitle')}>
                       {t('tasks.aiBadge')}
