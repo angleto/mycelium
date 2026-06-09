@@ -84,7 +84,8 @@ async def tenant_session(
     # registered at import time) doesn't pull db.py into a circular cycle.
     # The side-effect of the import is what matters: it registers the
     # SQLAlchemy mapper-level event listeners that track task/checklist
-    # mutations into ``session.info``.
+    # and note-part mutations into ``session.info``.
+    from flow_core.services.note_search import flush_note_search_dirty
     from flow_core.services.task_search import flush_task_search_dirty
 
     sm = get_sessionmaker()
@@ -114,6 +115,9 @@ async def tenant_session(
             # the embedding vector is best-effort within a 2 s timeout
             # and the backfill worker fills the rest).
             await flush_task_search_dirty(session)
+            # Same chokepoint for the note index: one blob per note PART,
+            # resync'd atomically with the part mutation.
+            await flush_note_search_dirty(session)
 
 
 @asynccontextmanager

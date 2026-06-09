@@ -39,7 +39,7 @@ from flow_core.i18n import MessageCode
 from flow_core.models.membership import Role
 from flow_core.models.note import Note
 from flow_core.models.note_part import NotePart, NotePartUIState
-from flow_core.services import audit
+from flow_core.services import audit, note_search
 from flow_core.services.rbac import require_role
 
 
@@ -233,6 +233,7 @@ async def update_part(
         expected_version=expected_version,
         values=values,
     )
+    note_search.mark_note_part_dirty(session, part_id)
     # Record a note-level revision so the timeline reflects part
     # edits. version_from == version_to: the note's row version is
     # not bumped by part changes (parts carry their own VersionMixin),
@@ -327,6 +328,9 @@ async def append_to_part(
         values={"body": new_body},
     )
     if is_last:
+        # Re-index the part only on the final chunk so a 16-chunk upload
+        # triggers a single re-embed, not N (the original 27f4d6c9 contract).
+        note_search.mark_note_part_dirty(session, part_id)
         # Lazy import: avoids the note_parts <-> notes import cycle.
         from flow_core.services.notes import _log_note_revision
 
@@ -390,6 +394,7 @@ async def prepend_to_part(
         expected_version=expected_version,
         values={"body": new_body},
     )
+    note_search.mark_note_part_dirty(session, part_id)
     # Single-shot: seal the recovery revision now (unlike chunked append,
     # which defers to is_last).
     from flow_core.services.notes import _log_note_revision
@@ -462,6 +467,7 @@ async def replace_in_part(
         expected_version=expected_version,
         values={"body": new_body},
     )
+    note_search.mark_note_part_dirty(session, part_id)
     # Single-shot edit: seal the recovery revision now (same pattern as
     # prepend_to_part). version_from == version_to: the note row's own
     # version is unchanged by part edits.
@@ -503,6 +509,11 @@ async def delete_part(
     is an explicit operation."""
     await require_role(session, org_id, actor_id, Role.member)
     part = await _get_part(session, org_id=org_id, part_id=part_id)
+    # Drop the part's search blob inline first: the index pointer cascades
+    # with the part row (FK ON DELETE CASCADE), so a deferred flush would
+    # no longer resolve the blob to delete. Deleting the blob now cascades
+    # the pointer, so the part DELETE below has nothing left to cascade.
+    await note_search.delete_part_index_now(session, part_id)
     await session.execute(delete(NotePart).where(NotePart.id == part_id, NotePart.org_id == org_id))
     await session.flush()
     await audit.log(
@@ -683,6 +694,10 @@ async def merge_notes(
             )
             .execution_options(synchronize_session=False)
         )
+        # Core UPDATE bypasses mapper events: re-point the part's search
+        # index to the target note (the resync refreshes note_id + project
+        # without re-embedding when the body is unchanged).
+        note_search.mark_note_part_dirty(session, sp.id)
     # Soft-delete the source (matches services.notes.soft_delete_note
     # semantics: deleted_at = now(), maturity untouched, FK rows kept).
     await session.execute(

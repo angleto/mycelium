@@ -140,7 +140,13 @@ async def test_transcription_metered_feeds_memory_and_erases(
         # canonical helper.
         body = await nt.get_body(s, note_id=done.id)
         assert body and done.status.value == "ready"
-        assert after < before  # STT (+ embedding) debited
+        assert after < before  # STT debited
+        note_id = note.id
+    # The transcript is indexed PER PART by services.note_search at commit
+    # (deferred, like task search -- no inline note-level memory write),
+    # so retrieval + erase run in a fresh transaction once the indexing
+    # flush of the previous one has landed.
+    async with tenant_session(str(org), str(user)) as s:
         # Transcript is retrievable from memory within the note's project.
         hits = await memory_svc.retrieve(
             s,
@@ -151,11 +157,11 @@ async def test_transcription_metered_feeds_memory_and_erases(
             operation_id="tr1-q",
         )
         assert len(hits) >= 1
-        # Erase by note: cascades to the provenance-linked memory blob.
-        erased = await nt.gdpr_erase_note(s, org_id=org, actor_id=user, note_id=note.id)
+        # Erase by note: cascades to the per-part search blobs.
+        erased = await nt.gdpr_erase_note(s, org_id=org, actor_id=user, note_id=note_id)
         assert erased.memory_blobs_deleted >= 1
         with pytest.raises(NotFoundError):
-            await nt.get_note(s, org_id=org, note_id=note.id)
+            await nt.get_note(s, org_id=org, note_id=note_id)
 
 
 async def test_conversation_turn_is_metered(_providers: None) -> None:

@@ -1124,23 +1124,14 @@ async def transcribe(
         await _upsert_part_zero(session, org_id=org_id, note_id=note.id, body=res.text)
     note.status = NoteStatus.ready
     await session.flush()
-    if embed and res.text:
-        note_project_id = await project_tag_for_note(session, note_id=note.id)
-        await memory_svc.write_blob(
-            session,
-            org_id=org_id,
-            actor_id=actor_id,
-            project_id=note_project_id,
-            text_body=res.text,
-            operation_id=f"{operation_id}:mem",
-            namespace="note",
-            sources=[("note", str(note.id))],
-            # Note-derived memory lands on the canonical "note" channel
-            # deterministically (resolved via the seeded channel_key
-            # path; the channel is guaranteed seeded by
-            # ensure_default_memory_channels).
-            channel_key="note",
-        )
+    # Indexing convergence (task 9fc94327): the transcript now lives in
+    # note_part(ord=0), and the per-part search index
+    # (services.note_search) embeds every part at commit on the seeded
+    # "note" channel. So there is no separate note-level memory write here
+    # -- one blob per part, no double index for voice notes. ``embed`` is
+    # retained for call-site compatibility; indexing is now unconditional
+    # (decision 2026-06-09: every note is a searchable node).
+    _ = embed
     await audit.log(
         session,
         org_id=org_id,
@@ -1271,10 +1262,23 @@ async def gdpr_erase_note(
     note_id: uuid.UUID,
 ) -> NoteErasure:
     """Cascade: memory blobs (by note provenance) + note + turns. The
-    S3 audio_ref is returned for the caller/worker to delete."""
+    S3 audio_ref is returned for the caller/worker to delete.
+
+    Two provenance shapes are erased: the legacy note-level blob
+    (``source_kind='note'``, written by older transcribes) and the
+    per-part search blobs (``source_kind='note_part'``) that the note
+    search index (services.note_search) now writes for every part. Both
+    must go so an erase leaves no embedding behind."""
+    from flow_core.models.note_part import NotePart
+
     await require_role(session, org_id, actor_id, Role.member)
     note = await get_note(session, org_id=org_id, note_id=note_id)
     audio_ref = note.audio_ref
+    part_ids = (
+        (await session.execute(select(NotePart.id).where(NotePart.note_id == note_id)))
+        .scalars()
+        .all()
+    )
     blobs_deleted = await memory_svc.gdpr_erase(
         session,
         org_id=org_id,
@@ -1282,6 +1286,14 @@ async def gdpr_erase_note(
         source_kind="note",
         source_id=str(note_id),
     )
+    for pid in part_ids:
+        blobs_deleted += await memory_svc.gdpr_erase(
+            session,
+            org_id=org_id,
+            actor_id=actor_id,
+            source_kind="note_part",
+            source_id=str(pid),
+        )
     await session.delete(note)
     await session.flush()
     await audit.log(

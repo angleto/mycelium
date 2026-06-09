@@ -99,6 +99,7 @@ from flow_core.models.note_link import (
     NoteTaskLink,
 )
 from flow_core.models.note_part import NotePart, NotePartUIState
+from flow_core.models.note_part_index_pointer import NotePartIndexPointer
 from flow_core.models.note_tag import NoteTag
 from flow_core.models.notification import (
     Notification,
@@ -213,6 +214,7 @@ __all__ = [
     "NoteMaturity",
     "NoteNoteLink",
     "NotePart",
+    "NotePartIndexPointer",
     "NotePartUIState",
     "NoteStatus",
     "NoteTag",
