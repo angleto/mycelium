@@ -47,8 +47,12 @@ class CapabilityToken(UUIDPKMixin, OrgScopedMixin, TimestampMixin, Base):
     prefix: Mapped[str] = mapped_column(String(20), nullable=False)
     # What the token authorizes: ``action`` on ``resource_kind`` /
     # ``resource_id``. Kept generic (free text) so a new capability kind
-    # needs no schema change. v1: action="note_part_body:write",
-    # resource_kind="note_part", resource_id=<part id>.
+    # needs no schema change. Two kinds today:
+    #   - action="note_part_body:write", resource_kind="note_part",
+    #     resource_id=<part id>  (single-use, consumed on first write);
+    #   - action="attachment:read", resource_kind="note"|"task",
+    #     resource_id=<parent id>  (multi-use within the TTL, never
+    #     consumed: reads any attachment of that note/task).
     action: Mapped[str] = mapped_column(String(64), nullable=False)
     resource_kind: Mapped[str] = mapped_column(String(32), nullable=False)
     resource_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)

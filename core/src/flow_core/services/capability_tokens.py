@@ -39,11 +39,21 @@ _PREFIX_CHARS: int = 16
 # operation, not stored. Five minutes covers a stream + a retry.
 DEFAULT_TTL_SECONDS: int = 300
 
-# Capability kinds. v1 ships exactly one: the token-free part-body
-# stream. Named constants so the minting tool, the verifier scope-check,
-# and the tests all agree on the exact strings.
+# Capability kinds. Named constants so the minting tool, the verifier
+# scope-check, and the tests all agree on the exact strings.
+#
+# 1. note_part_body:write -- single-use, resource = one note_part: the
+#    token-free part-body stream, consumed on first successful write.
+# 2. attachment:read -- multi-use within the TTL, resource = the PARENT
+#    (a note or task): downloads ANY attachment of that parent until the
+#    token expires. NOT consumed (a download is idempotent and an agent
+#    usually fetches several files in a row), so the short TTL is the
+#    only bound.
 ACTION_NOTE_PART_BODY_WRITE = "note_part_body:write"
 RESOURCE_NOTE_PART = "note_part"
+ACTION_ATTACHMENT_READ = "attachment:read"
+RESOURCE_NOTE = "note"
+RESOURCE_TASK = "task"
 
 
 def _hash(raw: str) -> bytes:
@@ -188,10 +198,13 @@ async def consume(session: AsyncSession, *, token_id: uuid.UUID) -> bool:
 
 
 __all__ = [
+    "ACTION_ATTACHMENT_READ",
     "ACTION_NOTE_PART_BODY_WRITE",
     "DEFAULT_TTL_SECONDS",
     "RAW_PREFIX",
+    "RESOURCE_NOTE",
     "RESOURCE_NOTE_PART",
+    "RESOURCE_TASK",
     "AuthenticatedCapability",
     "MintResult",
     "authenticate",

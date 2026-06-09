@@ -2359,6 +2359,26 @@ class AttachmentOut(BaseModel):
     created_at: datetime.datetime
 
 
+class AttachmentCapabilityIn(BaseModel):
+    # Mint a parent-scoped ``attachment:read`` capability token. ``parent_kind``
+    # selects the note vs task scope; ``ttl_seconds`` caps the lifetime (the
+    # grant is multi-use until then, never consumed).
+    parent_kind: Literal["note", "task"]
+    parent_id: uuid.UUID
+    ttl_seconds: int = Field(default=300, ge=1, le=3600)
+
+
+class AttachmentCapabilityOut(BaseModel):
+    # ``token`` is the raw ``flow_cap_`` value, returned exactly once. The
+    # caller builds a ``GET /attachments/{id}/download`` per listed attachment
+    # with ``Authorization: Bearer <token>`` (no PAT, no X-Workspace-Id).
+    token: str
+    expires_at: datetime.datetime
+    parent_kind: str
+    parent_id: uuid.UUID
+    attachments: list[AttachmentOut]
+
+
 # --- F7: electronic invoicing (FR-9, docs/adr/0009, 0010, 0011) ---
 
 

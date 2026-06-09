@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from flow_core.db import admin_session, tenant_session
 from flow_core.errors import AuthError, ForbiddenError, NotFoundError
 from flow_core.i18n import MessageCode
+from flow_core.models.attachment import Attachment
 from flow_core.models.membership import Role
 from flow_core.models.user import User
 from flow_core.security import decode_token_async
@@ -324,6 +325,93 @@ async def part_body_write_ctx(
                 project_id=None,
                 role=Role.member,
                 capability_token_id=princ.token_id,
+            )
+        return
+    # Normal bearer: same contract as tenant_ctx (X-Workspace-Id required).
+    if not x_workspace_id:
+        raise AuthError(MessageCode.AUTH_WORKSPACE_REQUIRED)
+    user = await _resolve_user(token)
+    org_id = uuid.UUID(x_workspace_id)
+    project_id = uuid.UUID(x_project_id) if x_project_id else None
+    async with _tenant_scope(
+        user,
+        org_id,
+        project_id,
+        x_workspace_role=x_workspace_role,
+        x_admin_mode=x_admin_mode,
+    ) as ctx:
+        yield ctx
+
+
+async def attachment_read_ctx(
+    attachment_id: uuid.UUID,
+    token: Annotated[str, Depends(_bearer_token)],
+    x_workspace_id: Annotated[str | None, Header()] = None,
+    x_project_id: Annotated[str | None, Header()] = None,
+    x_workspace_role: Annotated[str | None, Header()] = None,
+    x_admin_mode: Annotated[str | None, Header()] = None,
+) -> AsyncIterator[TenantCtx]:
+    """Tenant context for the attachment binary download, accepting
+    EITHER a normal bearer (JWT / agent token, exactly like
+    ``tenant_ctx``) OR a capability token (``flow_cap_``) scoped to
+    ``attachment:read`` on the attachment's PARENT (a note or task).
+
+    The capability is parent-scoped and multi-use within its TTL, not
+    single-use: one mint downloads every attachment of that note/task
+    until it expires, so this dep does NOT consume it (``download`` is a
+    read and an agent typically fetches several files). It still confines
+    access: the token authorises only attachments whose ``note_id`` /
+    ``task_id`` matches the token's ``resource_id``, and only this
+    download endpoint understands ``flow_cap_`` at all (``decode_token_async``
+    rejects it everywhere else). The capability branch runs as the token's
+    user with a fixed ``member`` role."""
+    if capability_tokens.is_capability_token(token):
+        princ = await capability_tokens.authenticate(token)
+        if princ is None:
+            raise AuthError(MessageCode.CAPABILITY_TOKEN_INVALID)
+        if princ.action != capability_tokens.ACTION_ATTACHMENT_READ or princ.resource_kind not in (
+            capability_tokens.RESOURCE_NOTE,
+            capability_tokens.RESOURCE_TASK,
+        ):
+            raise ForbiddenError(MessageCode.CAPABILITY_TOKEN_SCOPE)
+        user = await _active_user(princ.user_id)
+        async with tenant_session(
+            str(princ.org_id),
+            str(user.id),
+            actor_kind="mcp_token",
+            actor_subject_id=str(princ.token_id),
+        ) as session:
+            await session.execute(
+                text("SELECT set_config('app.current_role', :r, true)"),
+                {"r": Role.member.value},
+            )
+            # The attachment must exist in the token's org (RLS) AND hang
+            # off the exact parent the token is scoped to. Select only the
+            # parent ids -- never the ``data`` blob -- for the check.
+            row = (
+                await session.execute(
+                    select(Attachment.note_id, Attachment.task_id).where(
+                        Attachment.id == attachment_id
+                    )
+                )
+            ).first()
+            if row is None:
+                raise NotFoundError(MessageCode.ATTACHMENT_NOT_FOUND)
+            parent_ok = (
+                princ.resource_kind == capability_tokens.RESOURCE_NOTE
+                and row.note_id == princ.resource_id
+            ) or (
+                princ.resource_kind == capability_tokens.RESOURCE_TASK
+                and row.task_id == princ.resource_id
+            )
+            if not parent_ok:
+                raise ForbiddenError(MessageCode.CAPABILITY_TOKEN_SCOPE)
+            yield TenantCtx(
+                session=session,
+                user_id=user.id,
+                org_id=princ.org_id,
+                project_id=None,
+                role=Role.member,
             )
         return
     # Normal bearer: same contract as tenant_ctx (X-Workspace-Id required).

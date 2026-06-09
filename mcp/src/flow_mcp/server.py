@@ -4584,6 +4584,92 @@ async def set_note_part_body_capability(
 
 
 @mcp.tool()
+async def download_attachment_capability(
+    token: str,
+    org_id: str,
+    parent_kind: str,
+    parent_id: str,
+    ttl_seconds: int = 300,
+) -> dict[str, Any]:
+    """Mint ONE short-TTL capability token that downloads EVERY attachment
+    of a note or task with NO long-lived PAT and NO ``X-Workspace-Id`` (the
+    org is baked into the token), and return a ready ``curl -o`` per file.
+    Use this for an agent that has no local Flow CLI / PAT and needs to pull
+    a task's or note's attachments to disk.
+
+    ``parent_kind`` is ``"task"`` or ``"note"``; ``parent_id`` its id. The
+    token is scoped to ``attachment:read`` on that parent: it authorises
+    only attachments hanging off it, and is multi-use until it expires in
+    ``ttl_seconds`` (default 300) -- a download is idempotent, so it is NOT
+    consumed on first use. If the agent DOES have the Flow CLI, prefer
+    ``flow attachments download`` instead: there the credential never leaves
+    the machine."""
+    import shlex
+
+    from flow_core.config import get_settings
+    from flow_core.services import attachments as att_svc
+    from flow_core.services import capability_tokens as cap_svc
+
+    kind = parent_kind.strip().lower()
+    if kind not in ("note", "task"):
+        raise ValueError("parent_kind must be 'note' or 'task'")
+    pid = uuid.UUID(parent_id)
+    resource_kind = cap_svc.RESOURCE_NOTE if kind == "note" else cap_svc.RESOURCE_TASK
+    async with _tenant(token, org_id) as (session, org, user):
+        grant = await cap_svc.mint(
+            session,
+            org_id=org,
+            actor_id=user,
+            action=cap_svc.ACTION_ATTACHMENT_READ,
+            resource_kind=resource_kind,
+            resource_id=pid,
+            ttl_seconds=ttl_seconds,
+        )
+        metas = await att_svc.list_attachments(
+            session,
+            org_id=org,
+            note_id=pid if kind == "note" else None,
+            task_id=pid if kind == "task" else None,
+        )
+    settings = get_settings()
+    base = settings.frontend_base_url.rstrip("/")
+    auth = f"Bearer {grant.raw}"
+    attachments: list[dict[str, Any]] = []
+    for m in metas:
+        url = f"{base}/api/attachments/{m.id}/download"
+        attachments.append(
+            {
+                "id": str(m.id),
+                "filename": m.filename,
+                "mime_type": m.mime_type,
+                "size_bytes": m.size_bytes,
+                "url": url,
+                "curl": (
+                    f"curl -fsS '{url}' -H 'Authorization: {auth}' -o {shlex.quote(m.filename)}"
+                ),
+            }
+        )
+    return {
+        "parent_kind": kind,
+        "parent_id": str(pid),
+        "attachment_count": len(attachments),
+        "expires_at": grant.expires_at.isoformat(),
+        "authorization": auth,
+        "attachments": attachments,
+        "notes": (
+            "Each 'curl' already carries a single capability token scoped to "
+            "reading ONLY this " + kind + "'s attachments; no PAT and no "
+            "X-Workspace-Id needed. The token is multi-use until 'expires_at' "
+            "(so all the curls above share it) and is never consumed. Run each "
+            "curl to write the file to the current directory under its original "
+            "name; adjust the -o path as needed. If 'attachments' is empty the "
+            + kind
+            + " has none."
+        ),
+    }
+
+
+@mcp.tool()
 async def add_comment_instructions(
     token: str,
     org_id: str,

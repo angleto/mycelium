@@ -15,6 +15,7 @@ import typer
 
 from flow_cli import __version__
 from flow_cli.cmds import annotations as annotations_cmd
+from flow_cli.cmds import attachments as attachments_cmd
 from flow_cli.cmds import auth as auth_cmd
 from flow_cli.cmds import clients as clients_cmd
 from flow_cli.cmds import invoices as invoices_cmd
@@ -85,6 +86,7 @@ app.add_typer(invoices_cmd.app, name="invoice")
 app.add_typer(workspace_cmd.app, name="workspace")
 app.add_typer(notif_cmd.app, name="notif")
 app.add_typer(schedule_cmd.app, name="schedule")
+app.add_typer(attachments_cmd.app, name="attachments")
 
 # Top-level single commands
 app.command(name="today", help="Today's running timer + tasks (+ --date / --tz).")(today_cmd.today)

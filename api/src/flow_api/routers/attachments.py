@@ -12,13 +12,14 @@ from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, File, Query, Request, Response, UploadFile, status
 
-from flow_api.deps import TenantCtx, tenant_ctx
-from flow_api.schemas import AttachmentOut
+from flow_api.deps import TenantCtx, attachment_read_ctx, tenant_ctx
+from flow_api.schemas import AttachmentCapabilityIn, AttachmentCapabilityOut, AttachmentOut
 from flow_core.config import get_settings
 from flow_core.errors import DomainError
 from flow_core.i18n import MessageCode
 from flow_core.models.attachment import Attachment
 from flow_core.services import attachments as svc
+from flow_core.services import capability_tokens
 
 router = APIRouter(prefix="/attachments", tags=["attachments"])
 
@@ -102,11 +103,55 @@ async def stream_attachment(
     return att_out(att)
 
 
+@router.post("/capability", status_code=status.HTTP_201_CREATED)
+async def mint_download_capability(
+    payload: AttachmentCapabilityIn,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+) -> AttachmentCapabilityOut:
+    """Mint a parent-scoped, multi-use ``attachment:read`` capability token
+    (``flow_cap_``) that downloads EVERY attachment of a note or task with no
+    PAT and no X-Workspace-Id, and return the parent's attachment metadata so
+    the caller can build a ``curl`` per file. Member-gated (``mint`` enforces
+    the same floor a download does, so the token grants nothing the caller did
+    not already hold). The raw token is returned exactly once; it is multi-use
+    until ``expires_at`` and never consumed. Powers ``flow attachments
+    download-capability``; the MCP ``download_attachment_capability`` tool mints
+    the same grant directly through the service."""
+    is_note = payload.parent_kind == "note"
+    resource_kind = capability_tokens.RESOURCE_NOTE if is_note else capability_tokens.RESOURCE_TASK
+    grant = await capability_tokens.mint(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        action=capability_tokens.ACTION_ATTACHMENT_READ,
+        resource_kind=resource_kind,
+        resource_id=payload.parent_id,
+        ttl_seconds=payload.ttl_seconds,
+    )
+    metas = await svc.list_attachments(
+        ctx.session,
+        org_id=ctx.org_id,
+        note_id=payload.parent_id if is_note else None,
+        task_id=None if is_note else payload.parent_id,
+    )
+    return AttachmentCapabilityOut(
+        token=grant.raw,
+        expires_at=grant.expires_at,
+        parent_kind=payload.parent_kind,
+        parent_id=payload.parent_id,
+        attachments=[att_out(m) for m in metas],
+    )
+
+
 @router.get("/{attachment_id}/download")
 async def download_attachment(
     attachment_id: uuid.UUID,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+    ctx: Annotated[TenantCtx, Depends(attachment_read_ctx, scope="function")],
 ) -> Response:
+    # ``attachment_read_ctx`` accepts a normal bearer (SPA / CLI, byte
+    # identical to before) OR a parent-scoped ``flow_cap_`` capability
+    # token, so an agent with no PAT can fetch the file with the ephemeral
+    # token alone. The scope (org + parent) is already enforced by the dep.
     att = await svc.get_attachment(
         ctx.session,
         org_id=ctx.org_id,
