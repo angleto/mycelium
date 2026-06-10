@@ -37,6 +37,22 @@ from flow_core.services.rbac import require_role
 
 _RRF_K = 60
 _OVERSAMPLE = 50
+# Lexical-priority fusion. The lexical (FTS) branch only returns blobs
+# that actually contain the query terms, so it is precise; the semantic
+# branch is recall-but-noisy (bge-m3 packs unrelated same-language text
+# into a high cosine band). Weighting lexical above semantic in RRF makes
+# an exact term match always outrank a pure-semantic neighbour, so a
+# keyword/name query is no longer flooded by semantic noise that ties
+# under equal-weight rank-only fusion. The semantic branch still
+# contributes (recall) and boosts blobs that match both.
+_LEXICAL_RRF_WEIGHT = 1.0
+_SEMANTIC_RRF_WEIGHT = 0.3
+# Relative-score floor: after fusion, drop candidates below this fraction
+# of the top score. A keyword query has a wide gap (lexical hits high,
+# weighted-down semantic noise far below) so the noise is cut; a
+# conceptual query has a flat all-semantic profile so nothing is cut
+# (recall preserved). See RelativeFloorStage.
+_RELATIVE_FLOOR_RATIO = 0.4
 # Per-org key (Organization.settings JSONB) for the semantic-similarity
 # floor applied in SemanticDenseStage. 0.0 = disabled (historical
 # behaviour). Tuned live from the admin GUI; see services.retrieval.
@@ -431,6 +447,7 @@ async def retrieve(
         LexicalFTSStage,
         LimitStage,
         OrderingStage,
+        RelativeFloorStage,
         RerankGate,
         RRFFusionStage,
         SemanticDenseStage,
@@ -483,7 +500,14 @@ async def retrieve(
     stages: list[_Stage] = [
         LexicalFTSStage(oversample=_OVERSAMPLE),
         SemanticDenseStage(oversample=_OVERSAMPLE, min_similarity=sem_min_sim),
-        RRFFusionStage(k=_RRF_K),
+        RRFFusionStage(
+            k=_RRF_K,
+            weights={
+                "lexical": _LEXICAL_RRF_WEIGHT,
+                "semantic": _SEMANTIC_RRF_WEIGHT,
+                "semantic_hosted": _SEMANTIC_RRF_WEIGHT,
+            },
+        ),
     ]
     if use_rerank:
         stages.append(
@@ -504,6 +528,10 @@ async def retrieve(
             # on chunks (otherwise top-10 could collapse to 3 sources
             # with 7 chunks of the same parent).
             DedupeBySourceStage(),
+            # Cut the weighted-down semantic tail once the real (lexical)
+            # hits have set the top score. No-op for flat all-semantic
+            # (conceptual) queries, so recall there is unchanged.
+            RelativeFloorStage(ratio=_RELATIVE_FLOOR_RATIO),
             GraderMinStage(min_score=grader_min_rrf),
             LimitStage(k=limit),
             AccessCounterStage(),

@@ -12,6 +12,7 @@ from flow_core.services.retrieval.stages.order_limit import (
     GraderMinStage,
     LimitStage,
     OrderingStage,
+    RelativeFloorStage,
 )
 from flow_core.services.retrieval.stages.rerank import (
     CrossEncoderRerankerStage,
@@ -28,6 +29,7 @@ __all__ = [
     "LimitStage",
     "OrderingStage",
     "RRFFusionStage",
+    "RelativeFloorStage",
     "RerankGate",
     "SemanticDenseStage",
 ]

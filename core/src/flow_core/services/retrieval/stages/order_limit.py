@@ -76,6 +76,38 @@ class GraderMinStage(Stage):
 
 
 @dataclass
+class RelativeFloorStage(Stage):
+    """Drop candidates whose fused score falls far below the top hit.
+
+    A keyword/name query produces a wide score gap: the lexical hits sit
+    near the top while pure-semantic noise (weighted down in fusion)
+    trails far behind -- those are cut. A conceptual query produces a
+    FLAT score profile (all semantic, similar ranks), so nothing is more
+    than ``ratio`` below the top and the cut is a no-op: recall for
+    genuinely-semantic queries is preserved. ``ratio`` 0 disables it.
+
+    Runs after OrderingStage (candidates already score-DESC) so the top
+    is ``candidates[0]``."""
+
+    name: str = "relative_floor"
+    ratio: float = 0.0
+
+    async def run(
+        self,
+        query: str,
+        ctx: RetrievalContext,
+        candidates: list[Candidate],
+    ) -> list[Candidate]:
+        if self.ratio <= 0.0 or not candidates:
+            return candidates
+        top = max(c.score for c in candidates)
+        if top <= 0.0:
+            return candidates
+        floor = self.ratio * top
+        return [c for c in candidates if c.score >= floor]
+
+
+@dataclass
 class LimitStage(Stage):
     name: str = "limit"
     k: int = 10

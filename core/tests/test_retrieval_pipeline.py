@@ -182,3 +182,38 @@ def test_semantic_stage_keep_gate() -> None:
     assert gated._keep(-0.5) is True  # cosine 0.5 == floor
     assert gated._keep(-0.3) is False  # cosine 0.3 < 0.5
     assert gated._keep(0.0) is False  # cosine 0.0 < 0.5
+
+
+async def test_relative_floor_cuts_low_tail() -> None:
+    """RelativeFloorStage drops candidates below ``ratio * top``; a flat
+    profile (all near the top) is untouched; ratio 0 disables."""
+    from flow_core.services.retrieval.stages import RelativeFloorStage
+
+    top = Candidate(blob_id=uuid.uuid4(), score=0.020)
+    mid = Candidate(blob_id=uuid.uuid4(), score=0.016)
+    tail = Candidate(blob_id=uuid.uuid4(), score=0.005)  # 0.25*top
+    out = await RelativeFloorStage(ratio=0.4).run("q", _ctx_stub(), [top, mid, tail])
+    ids = {c.blob_id for c in out}
+    assert top.blob_id in ids
+    assert mid.blob_id in ids  # 0.8*top >= 0.4*top
+    assert tail.blob_id not in ids  # 0.25*top < 0.4*top
+
+    out = await RelativeFloorStage(ratio=0.0).run("q", _ctx_stub(), [top, mid, tail])
+    assert len(out) == 3
+
+
+async def test_weighted_rrf_lexical_beats_semantic_only() -> None:
+    """With lexical weight 1.0 and semantic 0.3, a lexical-only hit
+    outscores a semantic-only hit at the same rank, and a both-branch hit
+    wins outright."""
+    lex_only = Candidate(blob_id=uuid.uuid4(), scores_by_stage={"lexical": 1.0})
+    sem_only = Candidate(blob_id=uuid.uuid4(), scores_by_stage={"semantic": 1.0})
+    both = Candidate(blob_id=uuid.uuid4(), scores_by_stage={"lexical": 1.0, "semantic": 1.0})
+    out = await RRFFusionStage(k=60, weights={"lexical": 1.0, "semantic": 0.3}).run(
+        "q", _ctx_stub(), [lex_only, sem_only, both]
+    )
+    by_id = {c.blob_id: c.score for c in out}
+    assert by_id[lex_only.blob_id] == pytest.approx(1.0 / 61)
+    assert by_id[sem_only.blob_id] == pytest.approx(0.3 / 61)
+    assert by_id[both.blob_id] == pytest.approx(1.0 / 61 + 0.3 / 61)
+    assert by_id[lex_only.blob_id] > by_id[sem_only.blob_id]

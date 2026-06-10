@@ -227,23 +227,20 @@ async def test_tier_recompute_keeps_cold_queryable() -> None:
     assert b.id in {h.blob.id for h in hits}  # cold stays queryable
 
 
-async def test_semantic_similarity_floor_drops_far_neighbours() -> None:
-    """The per-org semantic floor (Organization.settings) removes vector
-    neighbours below the cosine threshold so a query whose only semantic
-    'matches' are far noise returns just the genuine (lexical) hits.
+async def test_keyword_query_drops_semantic_only_noise() -> None:
+    """Lexical-priority fusion + the relative floor make a keyword query
+    return the real (lexical) hit and drop pure-semantic noise.
 
-    Under the bag-of-words FakeEmbedder a doc that shares no token with
-    the query is orthogonal (cosine 0), so it can enter ONLY via the
-    semantic branch -- the perfect probe for the floor."""
-    from sqlalchemy import update
-
-    from flow_core.models.organization import Organization
-
-    org, user = await _org("FLOOR")
+    Under the bag-of-words FakeEmbedder a doc sharing no token with the
+    query is orthogonal (cosine 0), so it enters ONLY via the semantic
+    branch. Weighted RRF sinks it well below the lexical hit and the
+    relative floor then cuts it -- the exact 'marzia returns unrelated
+    essays' failure, reproduced and fixed."""
+    org, user = await _org("KWNOISE")
     proj = uuid.uuid4()
     async with tenant_session(str(org), str(user)) as s:
         await _seed_billing(s, org, user)
-        near = await mem.write_blob(
+        lexical = await mem.write_blob(
             s,
             org_id=org,
             actor_id=user,
@@ -252,7 +249,7 @@ async def test_semantic_similarity_floor_drops_far_neighbours() -> None:
             operation_id="a",
             embedder=_FAKE,
         )
-        far = await mem.write_blob(
+        semantic_only = await mem.write_blob(
             s,
             org_id=org,
             actor_id=user,
@@ -261,9 +258,7 @@ async def test_semantic_similarity_floor_drops_far_neighbours() -> None:
             operation_id="b",
             embedder=_FAKE,
         )
-        # Floor OFF (default 0.0): the orthogonal neighbour is kept
-        # (semantic-only candidate), proving it relies on the floor.
-        off = await mem.retrieve(
+        hits = await mem.retrieve(
             s,
             org_id=org,
             actor_id=user,
@@ -272,26 +267,50 @@ async def test_semantic_similarity_floor_drops_far_neighbours() -> None:
             operation_id="q0",
             embedder=_FAKE,
         )
-        ids_off = {h.blob.id for h in off}
-        assert near.id in ids_off
-        assert far.id in ids_off
+        ids = {h.blob.id for h in hits}
+        assert lexical.id in ids
+        assert semantic_only.id not in ids
+        # The surviving hit is the lexical match, ranked top.
+        assert hits[0].blob.id == lexical.id
 
-        # Floor ON at 0.5: cosine(query "alpha", "zzzbravo...") == 0 < 0.5
-        # -> dropped; the real match (cosine 1.0) stays.
-        await s.execute(
-            update(Organization)
-            .where(Organization.id == org)
-            .values(settings={mem.SEMANTIC_MIN_SIM_KEY: 0.5})
-        )
-        on = await mem.retrieve(
+
+async def test_conceptual_query_keeps_semantic_results() -> None:
+    """The relative floor must NOT cut a genuinely-semantic query: with
+    no lexical hit the score profile is flat (all semantic, similar
+    ranks), so every result stays -- recall is preserved."""
+    org, user = await _org("CONCEPT")
+    proj = uuid.uuid4()
+    async with tenant_session(str(org), str(user)) as s:
+        await _seed_billing(s, org, user)
+        a = await mem.write_blob(
             s,
             org_id=org,
             actor_id=user,
             project_id=proj,
-            query="alpha",
-            operation_id="q1",
+            text_body="quarterly revenue forecast model",
+            operation_id="a",
             embedder=_FAKE,
         )
-        ids_on = {h.blob.id for h in on}
-        assert near.id in ids_on
-        assert far.id not in ids_on
+        b = await mem.write_blob(
+            s,
+            org_id=org,
+            actor_id=user,
+            project_id=proj,
+            text_body="annual budget projection spreadsheet",
+            operation_id="b",
+            embedder=_FAKE,
+        )
+        # Query shares no exact token with either doc -> both enter only
+        # via the semantic branch (flat profile); neither is cut.
+        hits = await mem.retrieve(
+            s,
+            org_id=org,
+            actor_id=user,
+            project_id=proj,
+            query="financial planning numbers",
+            operation_id="q",
+            embedder=_FAKE,
+        )
+        ids = {h.blob.id for h in hits}
+        assert a.id in ids
+        assert b.id in ids
