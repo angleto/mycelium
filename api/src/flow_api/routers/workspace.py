@@ -36,6 +36,7 @@ from flow_core.i18n import MessageCode
 from flow_core.models.membership import Role
 from flow_core.models.organization import Organization
 from flow_core.services import dispatch_loop, memberships, trash
+from flow_core.services import memory as memory_svc
 from flow_core.services.auth import (
     create_org_for_user,
     delete_org_for_user,
@@ -197,6 +198,11 @@ async def patch_my_workspace_settings(
         merged[dispatch_loop.SETTINGS_KEY] = dispatch_loop.normalize_policy(
             body.autonomous_dispatch
         ).value
+    # Memory-retrieval semantic floor (cosine 0..1). Only written when
+    # present so an estimate-presets save doesn't clobber it; validated
+    # in [0,1] by the schema.
+    if body.retrieval_semantic_min_similarity is not None:
+        merged[memory_svc.SEMANTIC_MIN_SIM_KEY] = body.retrieval_semantic_min_similarity
     new_version = await optimistic_update(
         ctx.session,
         Organization,

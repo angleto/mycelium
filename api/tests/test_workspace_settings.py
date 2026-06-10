@@ -63,3 +63,60 @@ async def test_estimate_presets_default_update_validation() -> None:
             json={"expected_version": me["version"], "estimate_presets": [0]},
         )
         assert r.status_code == 422
+
+
+async def test_retrieval_semantic_floor_roundtrip_and_merge() -> None:
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as c:
+        a = (
+            await c.post(
+                "/auth/signup",
+                json={"email": _email(), "password": "pw-strong-123"},
+            )
+        ).json()
+        h = {
+            "Authorization": f"Bearer {a['token']}",
+            "X-Workspace-Id": a["workspace_id"],
+            "X-Workspace-Role": "owner",
+        }
+
+        me = (await c.get("/workspaces/me", headers=h)).json()
+        # Default: gate off.
+        assert me["settings"]["retrieval_semantic_min_similarity"] == 0.0
+        ver = me["version"]
+
+        # Set the floor.
+        r = await c.patch(
+            "/workspaces/me/settings",
+            headers=h,
+            json={
+                "expected_version": ver,
+                "estimate_presets": [1],
+                "retrieval_semantic_min_similarity": 0.55,
+            },
+        )
+        assert r.status_code == 200, r.text
+        me = (await c.get("/workspaces/me", headers=h)).json()
+        assert me["settings"]["retrieval_semantic_min_similarity"] == 0.55
+
+        # A presets-only save must NOT clobber the floor (merge).
+        r = await c.patch(
+            "/workspaces/me/settings",
+            headers=h,
+            json={"expected_version": me["version"], "estimate_presets": [2, 4]},
+        )
+        assert r.status_code == 200
+        me = (await c.get("/workspaces/me", headers=h)).json()
+        assert me["settings"]["retrieval_semantic_min_similarity"] == 0.55
+
+        # Out of range -> 422 (schema validator, le=1.0).
+        r = await c.patch(
+            "/workspaces/me/settings",
+            headers=h,
+            json={
+                "expected_version": me["version"],
+                "estimate_presets": [1],
+                "retrieval_semantic_min_similarity": 1.5,
+            },
+        )
+        assert r.status_code == 422

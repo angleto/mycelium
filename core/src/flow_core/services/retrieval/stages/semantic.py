@@ -34,6 +34,25 @@ from flow_core.services.retrieval.types import (
 class SemanticDenseStage(Stage):
     name: str = "semantic"
     oversample: int = 50
+    # Minimum cosine similarity a neighbour must clear to enter the
+    # candidate set. Embeddings are L2-normalized so inner product =
+    # cosine; pgvector ``<#>`` (``max_inner_product``) returns the
+    # NEGATED inner product, hence ``cosine = -distance``. 0.0 disables
+    # the gate (every kNN row is kept, the historical behaviour). A
+    # positive floor drops far neighbours so a keyword/proper-noun query
+    # with no genuine semantic match doesn't flood the fusion with noise
+    # that ties (rank-only RRF) with the real lexical hits. Per-org,
+    # tuned from the admin GUI (Organization.settings).
+    min_similarity: float = 0.0
+
+    def _keep(self, distance: float) -> bool:
+        # distance = -cosine; keep when cosine >= floor. The floor only
+        # bites when > 0 so the default is a true no-op (preserves the
+        # historical "keep every kNN row, including slightly-negative
+        # cosine" behaviour exactly).
+        if self.min_similarity <= 0.0:
+            return True
+        return -float(distance) >= self.min_similarity
 
     async def run(
         self,
@@ -55,43 +74,45 @@ class SemanticDenseStage(Stage):
         # Hosted tier first so its rank position is lower (= more important
         # to RRF) on rows where both tiers exist.
         if hosted is not None:
+            dist_hosted = MemoryBlob.embedding_hosted.max_inner_product(hosted.vector)
             stmt_hosted = (
-                select(MemoryBlob.id)
+                select(MemoryBlob.id, dist_hosted)
                 .where(
                     MemoryBlob.org_id == ctx.org_id,
                     ctx.project_pred,
                     MemoryBlob.embedding_hosted.is_not(None),
                     *ctx.tag_clauses,
                 )
-                .order_by(MemoryBlob.embedding_hosted.max_inner_product(hosted.vector))
+                .order_by(dist_hosted)
                 .limit(self.oversample)
             )
-            rows_hosted = (await ctx.session.execute(stmt_hosted)).scalars().all()
+            rows_hosted = (await ctx.session.execute(stmt_hosted)).all()
             new.extend(
                 Candidate(
-                    blob_id=bid,
-                    scores_by_stage={f"{self.name}_hosted": float(i + 1)},
+                    blob_id=row[0],
+                    scores_by_stage={f"{self.name}_hosted": float(rank)},
                 )
-                for i, bid in enumerate(rows_hosted)
+                for rank, row in enumerate((r for r in rows_hosted if self._keep(r[1])), start=1)
             )
         if local is not None:
+            dist_local = MemoryBlob.embedding.max_inner_product(local.vector)
             stmt_local = (
-                select(MemoryBlob.id)
+                select(MemoryBlob.id, dist_local)
                 .where(
                     MemoryBlob.org_id == ctx.org_id,
                     ctx.project_pred,
                     MemoryBlob.embedding.is_not(None),
                     *ctx.tag_clauses,
                 )
-                .order_by(MemoryBlob.embedding.max_inner_product(local.vector))
+                .order_by(dist_local)
                 .limit(self.oversample)
             )
-            rows_local = (await ctx.session.execute(stmt_local)).scalars().all()
+            rows_local = (await ctx.session.execute(stmt_local)).all()
             new.extend(
                 Candidate(
-                    blob_id=bid,
-                    scores_by_stage={self.name: float(i + 1)},
+                    blob_id=row[0],
+                    scores_by_stage={self.name: float(rank)},
                 )
-                for i, bid in enumerate(rows_local)
+                for rank, row in enumerate((r for r in rows_local if self._keep(r[1])), start=1)
             )
         return merge_candidates(candidates, new)

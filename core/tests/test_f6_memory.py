@@ -225,3 +225,73 @@ async def test_tier_recompute_keeps_cold_queryable() -> None:
         )
     assert counts["cold"] >= 1
     assert b.id in {h.blob.id for h in hits}  # cold stays queryable
+
+
+async def test_semantic_similarity_floor_drops_far_neighbours() -> None:
+    """The per-org semantic floor (Organization.settings) removes vector
+    neighbours below the cosine threshold so a query whose only semantic
+    'matches' are far noise returns just the genuine (lexical) hits.
+
+    Under the bag-of-words FakeEmbedder a doc that shares no token with
+    the query is orthogonal (cosine 0), so it can enter ONLY via the
+    semantic branch -- the perfect probe for the floor."""
+    from sqlalchemy import update
+
+    from flow_core.models.organization import Organization
+
+    org, user = await _org("FLOOR")
+    proj = uuid.uuid4()
+    async with tenant_session(str(org), str(user)) as s:
+        await _seed_billing(s, org, user)
+        near = await mem.write_blob(
+            s,
+            org_id=org,
+            actor_id=user,
+            project_id=proj,
+            text_body="alpha alpha alpha",
+            operation_id="a",
+            embedder=_FAKE,
+        )
+        far = await mem.write_blob(
+            s,
+            org_id=org,
+            actor_id=user,
+            project_id=proj,
+            text_body="zzzbravo zzzbravo zzzbravo",
+            operation_id="b",
+            embedder=_FAKE,
+        )
+        # Floor OFF (default 0.0): the orthogonal neighbour is kept
+        # (semantic-only candidate), proving it relies on the floor.
+        off = await mem.retrieve(
+            s,
+            org_id=org,
+            actor_id=user,
+            project_id=proj,
+            query="alpha",
+            operation_id="q0",
+            embedder=_FAKE,
+        )
+        ids_off = {h.blob.id for h in off}
+        assert near.id in ids_off
+        assert far.id in ids_off
+
+        # Floor ON at 0.5: cosine(query "alpha", "zzzbravo...") == 0 < 0.5
+        # -> dropped; the real match (cosine 1.0) stays.
+        await s.execute(
+            update(Organization)
+            .where(Organization.id == org)
+            .values(settings={mem.SEMANTIC_MIN_SIM_KEY: 0.5})
+        )
+        on = await mem.retrieve(
+            s,
+            org_id=org,
+            actor_id=user,
+            project_id=proj,
+            query="alpha",
+            operation_id="q1",
+            embedder=_FAKE,
+        )
+        ids_on = {h.blob.id for h in on}
+        assert near.id in ids_on
+        assert far.id not in ids_on

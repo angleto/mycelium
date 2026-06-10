@@ -4397,6 +4397,34 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/attachments/capability": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mint Download Capability
+         * @description Mint a parent-scoped, multi-use ``attachment:read`` capability token
+         *     (``flow_cap_``) that downloads EVERY attachment of a note or task with no
+         *     PAT and no X-Workspace-Id, and return the parent's attachment metadata so
+         *     the caller can build a ``curl`` per file. Member-gated (``mint`` enforces
+         *     the same floor a download does, so the token grants nothing the caller did
+         *     not already hold). The raw token is returned exactly once; it is multi-use
+         *     until ``expires_at`` and never consumed. Powers ``flow attachments
+         *     download-capability``; the MCP ``download_attachment_capability`` tool mints
+         *     the same grant directly through the service.
+         */
+        post: operations["mint_download_capability_attachments_capability_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/attachments/{attachment_id}/download": {
         parameters: {
             query?: never;
@@ -5455,6 +5483,43 @@ export interface components {
              * Format: uuid
              */
             user_id: string;
+        };
+        /** AttachmentCapabilityIn */
+        AttachmentCapabilityIn: {
+            /**
+             * Parent Kind
+             * @enum {string}
+             */
+            parent_kind: "note" | "task";
+            /**
+             * Parent Id
+             * Format: uuid
+             */
+            parent_id: string;
+            /**
+             * Ttl Seconds
+             * @default 300
+             */
+            ttl_seconds?: number;
+        };
+        /** AttachmentCapabilityOut */
+        AttachmentCapabilityOut: {
+            /** Token */
+            token: string;
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
+            /** Parent Kind */
+            parent_kind: string;
+            /**
+             * Parent Id
+             * Format: uuid
+             */
+            parent_id: string;
+            /** Attachments */
+            attachments: components["schemas"]["AttachmentOut"][];
         };
         /** AttachmentOut */
         AttachmentOut: {
@@ -8898,17 +8963,23 @@ export interface components {
         SdiStatus: "none" | "RC" | "MC" | "NS" | "AT" | "NE" | "DT";
         /**
          * SearchHit
-         * @description One row in the unified search response. ``task_id`` is set for
-         *     ``kind='task'`` hits (resolved through ``task_index_pointer``); the
-         *     ``blob_id`` is always the underlying memory row. ``snippet`` is the
-         *     server-side ``ts_headline`` extract; ``title`` is the task title
-         *     when applicable, otherwise None.
+         * @description One row in the unified search response. The entity ref depends on
+         *     ``kind``: ``task_id`` for ``kind='task'`` (via ``task_index_pointer``),
+         *     ``note_id`` + ``part_id`` for ``kind='note'`` (via
+         *     ``note_part_index_pointer``), neither for an opaque ``kind='blob'``.
+         *     The ``blob_id`` is always the underlying memory row. ``snippet`` is
+         *     the server-side ``ts_headline`` extract; ``title`` is the task/note
+         *     title when applicable, otherwise None.
          */
         SearchHit: {
             /** Kind */
             kind: string;
             /** Task Id */
             task_id?: string | null;
+            /** Note Id */
+            note_id?: string | null;
+            /** Part Id */
+            part_id?: string | null;
             /**
              * Blob Id
              * Format: uuid
@@ -8926,11 +8997,12 @@ export interface components {
         /**
          * SearchIn
          * @description Unified free-text search across the org. ``kinds`` defaults to
-         *     ['task', 'blob']; ``kinds=['task']`` is the SPA's task-search path,
-         *     ``kinds=['blob']`` mirrors /memory/search. ``include_archived`` and
-         *     ``include_deleted`` only apply to ``task`` hits. ``rerank`` opts
-         *     into the cross-encoder reranker for this call regardless of the
-         *     env default (task 27579d6a).
+         *     ['task', 'blob', 'note']; ``kinds=['task']`` is the SPA's task-search
+         *     path, ``kinds=['blob']`` mirrors /memory/search, ``kinds=['note']``
+         *     returns titled note hits (a note part blob resolved to its note).
+         *     ``include_archived`` and ``include_deleted`` apply to ``task`` and
+         *     ``note`` hits. ``rerank`` opts into the cross-encoder reranker for
+         *     this call regardless of the env default (task 27579d6a).
          */
         SearchIn: {
             /** Q */
@@ -10087,6 +10159,11 @@ export interface components {
             default_client_tag_id?: string | null;
             /** @default approval_required */
             autonomous_dispatch?: components["schemas"]["AutonomousDispatch"];
+            /**
+             * Retrieval Semantic Min Similarity
+             * @default 0
+             */
+            retrieval_semantic_min_similarity?: number;
         };
         /** WorkspaceSettingsIn */
         WorkspaceSettingsIn: {
@@ -10095,6 +10172,8 @@ export interface components {
             /** Estimate Presets */
             estimate_presets: (number | string)[];
             autonomous_dispatch?: components["schemas"]["AutonomousDispatch"] | null;
+            /** Retrieval Semantic Min Similarity */
+            retrieval_semantic_min_similarity?: number | null;
         };
         /**
          * WorkspaceSummaryOut
@@ -20610,11 +20689,49 @@ export interface operations {
             };
         };
     };
-    download_attachment_attachments__attachment_id__download_get: {
+    mint_download_capability_attachments_capability_post: {
         parameters: {
             query?: never;
             header: {
                 "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AttachmentCapabilityIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AttachmentCapabilityOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    download_attachment_attachments__attachment_id__download_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-workspace-id"?: string | null;
                 "x-project-id"?: string | null;
                 "x-workspace-role"?: string | null;
                 "x-admin-mode"?: string | null;

@@ -37,6 +37,30 @@ from flow_core.services.rbac import require_role
 
 _RRF_K = 60
 _OVERSAMPLE = 50
+# Per-org key (Organization.settings JSONB) for the semantic-similarity
+# floor applied in SemanticDenseStage. 0.0 = disabled (historical
+# behaviour). Tuned live from the admin GUI; see services.retrieval.
+SEMANTIC_MIN_SIM_KEY = "retrieval_semantic_min_similarity"
+
+
+async def semantic_min_similarity(session: AsyncSession, org_id: uuid.UUID) -> float:
+    """Read the per-org semantic-similarity floor from the workspace
+    settings bag, clamped to [0, 1]. Absent / malformed -> 0.0 (gate
+    off)."""
+    from flow_core.models.organization import Organization
+
+    raw = (
+        await session.execute(select(Organization.settings).where(Organization.id == org_id))
+    ).scalar_one_or_none()
+    if not isinstance(raw, dict):
+        return 0.0
+    try:
+        val = float(raw.get(SEMANTIC_MIN_SIM_KEY, 0.0))
+    except (TypeError, ValueError):
+        return 0.0
+    return max(0.0, min(1.0, val))
+
+
 # Sentinel model id recorded on a blob written while the embedder is
 # unavailable (missing optional extra / load failure): the row is kept
 # valid and FTS-searchable, just without a semantic vector. The SPA
@@ -453,11 +477,12 @@ async def retrieve(
     # stage is a no-op so the pipeline cost is bounded by RRF.
     settings = _get_settings()
     use_rerank = rerank or settings.reranker_enabled
+    sem_min_sim = await semantic_min_similarity(session, org_id)
     from flow_core.services.retrieval.types import Stage as _Stage
 
     stages: list[_Stage] = [
         LexicalFTSStage(oversample=_OVERSAMPLE),
-        SemanticDenseStage(oversample=_OVERSAMPLE),
+        SemanticDenseStage(oversample=_OVERSAMPLE, min_similarity=sem_min_sim),
         RRFFusionStage(k=_RRF_K),
     ]
     if use_rerank:

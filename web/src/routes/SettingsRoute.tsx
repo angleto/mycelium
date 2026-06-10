@@ -16,6 +16,7 @@ import { AiAssistantsSettings } from '../components/AiAssistantsSettings'
 import { EmbedderProviderSettings } from '../components/EmbedderProviderSettings'
 import { LlmProviderSettings } from '../components/LlmProviderSettings'
 import { MemoryChannelsAdmin } from '../components/MemoryChannelsAdmin'
+import { RetrievalSettings } from '../components/RetrievalSettings'
 import { PomodoroSettings } from '../components/PomodoroSettings'
 import { TelegramLink } from '../components/TelegramLink'
 import { TimezoneSettings } from '../components/TimezoneSettings'
@@ -177,6 +178,7 @@ export function SettingsRoute() {
     {me?.is_admin && isAdminMode() && <LlmProviderSettings />}
     {me?.is_admin && isAdminMode() && <EmbedderProviderSettings />}
     {me?.is_admin && isAdminMode() && <MemoryChannelsAdmin />}
+    {me?.is_admin && isAdminMode() && <RetrievalSettings />}
     {/* ExecutorsAdmin removed in v1.2.27, #21 Stage B */}
     <IssuerProfiles />
     <EstimatePresets />

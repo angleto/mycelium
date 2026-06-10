@@ -201,6 +201,12 @@ class WorkspaceSettings(BaseModel):
     # (the loop creates pending requests a human must approve), never
     # ``auto`` (no silent auto-spend).
     autonomous_dispatch: AutonomousDispatch = AutonomousDispatch.approval_required
+    # Semantic-similarity floor for memory retrieval (cosine, 0..1).
+    # 0.0 disables the gate (every kNN neighbour is kept). A positive
+    # value drops far semantic neighbours so a keyword/name query is not
+    # flooded by noise that ties with the real lexical hits under
+    # rank-only RRF. Tuned live here; lexical matches are never gated.
+    retrieval_semantic_min_similarity: float = 0.0
 
 
 class WorkspaceOut(BaseModel):
@@ -245,6 +251,10 @@ class WorkspaceSettingsIn(BaseModel):
     # estimate-presets save does not have to restate it; only written
     # when present (owner-gated, like the rest of the namespace).
     autonomous_dispatch: AutonomousDispatch | None = None
+    # Memory-retrieval semantic-similarity floor (cosine, 0..1; 0 = off).
+    # Optional so an estimate-presets save does not restate it; only
+    # written when present. Tuned live from the SPA settings page.
+    retrieval_semantic_min_similarity: float | None = Field(default=None, ge=0.0, le=1.0)
 
     @field_validator("estimate_presets")
     @classmethod

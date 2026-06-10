@@ -163,3 +163,22 @@ def test_merge_candidates_appends_new_ids() -> None:
     incoming = [Candidate(blob_id=b, scores_by_stage={"sem": 1.0})]
     merged = merge_candidates(existing, incoming)
     assert [c.blob_id for c in merged] == [a, b]
+
+
+def test_semantic_stage_keep_gate() -> None:
+    """``SemanticDenseStage._keep`` gates on cosine = -distance. Floor 0
+    is a no-op (keeps everything, even negative cosine); a positive floor
+    keeps only neighbours at/above it."""
+    from flow_core.services.retrieval.stages.semantic import SemanticDenseStage
+
+    off = SemanticDenseStage(min_similarity=0.0)
+    # distance = -cosine. Floor off keeps every row, including a
+    # slightly-negative cosine (distance +0.1).
+    assert off._keep(-0.9) is True
+    assert off._keep(0.1) is True
+
+    gated = SemanticDenseStage(min_similarity=0.5)
+    assert gated._keep(-0.6) is True  # cosine 0.6 >= 0.5
+    assert gated._keep(-0.5) is True  # cosine 0.5 == floor
+    assert gated._keep(-0.3) is False  # cosine 0.3 < 0.5
+    assert gated._keep(0.0) is False  # cosine 0.0 < 0.5
