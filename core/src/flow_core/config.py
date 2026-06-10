@@ -165,6 +165,16 @@ class Settings(BaseSettings):
     # per-subscription and exception-isolated, like the dispatch loop.
     google_calendar_sync_interval_seconds: int = 300
 
+    # Tick interval + per-account fetch cap for the periodic email
+    # connector sync worker (docs/adr/0023, FR-7). NOT gated on
+    # ``google_configured``: a workspace may hold only IMAP/Proton
+    # accounts; Gmail accounts fail per-account when OAuth is absent.
+    # Modest by default (do not hammer the IMAP/Gmail endpoints);
+    # per-account exception-isolated. FLOW_EMAIL_SYNC_INTERVAL_SECONDS /
+    # FLOW_EMAIL_SYNC_FETCH_LIMIT.
+    email_sync_interval_seconds: int = 300
+    email_sync_fetch_limit: int = 50
+
     # Closed-loop dispatch worker (docs/adr/0025 P5). The periodic tick
     # interval, in seconds. Modest by default (do not hammer the
     # scheduler); per-workspace and exception-isolated. Configurable via

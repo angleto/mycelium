@@ -22,6 +22,7 @@ from flow_core.services.mailer import build_system_mailer, set_mailer
 from flow_core.services.notification_sender import build_notification_sender
 from flow_worker import (
     dispatch,
+    email_sync,
     embedding_migration,
     google_calendar,
     note_search_backfill,
@@ -39,6 +40,8 @@ async def _run() -> None:
     #  - P5 closed-loop dispatch tick;
     #  - epic #125 P1 Google Calendar periodic ingest (no-op when
     #    Google OAuth is not configured);
+    #  - F5/ADR-0023 email connector periodic sync (idempotent IMAP/Gmail
+    #    ingest per workspace; no-op when no accounts exist);
     #  - ADR-0026 P3 Telegram assistant queue drain (no-op when
     #    FLOW_ASSISTANT_ENABLED is false);
     #  - reminders + notification-dispatch tick (per-workspace
@@ -51,6 +54,7 @@ async def _run() -> None:
     await asyncio.gather(
         dispatch.run_forever(),
         google_calendar.run_forever(),
+        email_sync.run_forever(),
         telegram_assistant.run_forever(),
         reminders.run_forever(),
         task_search_backfill.run_forever(),
@@ -88,7 +92,8 @@ def main() -> None:
         open_model = settings.open_model
         set_llm_override(lambda: OllamaLLM(base_url=ollama_url, model=open_model))
     logging.getLogger("flow.worker").info(
-        "worker started (env=%s); jobs: dispatch-loop, google-calendar-sync, telegram-assistant",
+        "worker started (env=%s); jobs: dispatch-loop, google-calendar-sync, "
+        "email-sync, telegram-assistant",
         settings.env,
     )
     asyncio.run(_run())
