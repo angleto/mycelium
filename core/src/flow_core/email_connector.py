@@ -102,10 +102,22 @@ class ImapSmtpConnector:
         with imaplib.IMAP4_SSL(host, port) as imap:
             self._imap_login(imap)
             imap.select("INBOX")
-            _typ, data = imap.search(None, "ALL")
-            ids = data[0].split()[-limit:] if data and data[0] else []
-            for num in ids:
-                _t, raw = imap.fetch(num, "(RFC822)")
+            # Idempotency key = "UIDVALIDITY:UID", never sequence numbers:
+            # a sequence number shifts on any expunge (e.g. archiving a
+            # message), which both re-ingests old mail under fresh ids and
+            # silently *drops* new mail whose shifted number is already
+            # stored. UIDs are stable within a UIDVALIDITY epoch; a rare
+            # mailbox rebuild bumps UIDVALIDITY and re-ingests under the
+            # new prefix (duplicates over loss).
+            uv = imap.response("UIDVALIDITY")[1]
+            uv0 = uv[0] if uv else None
+            uidvalidity = uv0.decode() if isinstance(uv0, bytes) else "0"
+            _typ, data = imap.uid("search", "ALL")
+            listing = data[0] if data else None
+            uids = listing.split()[-limit:] if isinstance(listing, bytes) else []
+            for raw_uid in uids:
+                uid = raw_uid.decode()
+                _t, raw = imap.uid("fetch", uid, "(RFC822)")
                 if not raw or not isinstance(raw[0], tuple):
                     continue
                 msg = email.message_from_bytes(raw[0][1])
@@ -120,7 +132,7 @@ class ImapSmtpConnector:
                     received_at = received_at.replace(tzinfo=dt.UTC)
                 out.append(
                     FetchedMessage(
-                        provider_message_id=num.decode(),
+                        provider_message_id=f"{uidvalidity}:{uid}",
                         message_id=msg.get("Message-ID"),
                         in_reply_to=msg.get("In-Reply-To"),
                         thread_id=msg.get("In-Reply-To") or msg.get("Message-ID"),
