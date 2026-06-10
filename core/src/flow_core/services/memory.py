@@ -37,16 +37,17 @@ from flow_core.services.rbac import require_role
 
 _RRF_K = 60
 _OVERSAMPLE = 50
-# Lexical-priority fusion. The lexical (FTS) branch only returns blobs
-# that actually contain the query terms, so it is precise; the semantic
-# branch is recall-but-noisy (bge-m3 packs unrelated same-language text
-# into a high cosine band). Weighting lexical above semantic in RRF makes
-# an exact term match always outrank a pure-semantic neighbour, so a
-# keyword/name query is no longer flooded by semantic noise that ties
-# under equal-weight rank-only fusion. The semantic branch still
-# contributes (recall) and boosts blobs that match both.
-_LEXICAL_RRF_WEIGHT = 1.0
-_SEMANTIC_RRF_WEIGHT = 0.3
+# Tiered fusion weights. The signals are ranked by precision: an EXACT
+# term match (``simple`` FTS) is the strongest; a STEM-only match
+# (``italian`` FTS) is fuzzy and over-matches proper nouns ('marzia' vs
+# 'marzo'); a SEMANTIC neighbour is the weakest (bge-m3 packs unrelated
+# same-language text into a high cosine band). Weighting them apart makes
+# an exact hit always outrank a stem-only or semantic-only one under the
+# otherwise rank-only RRF, so a keyword/name query is not flooded by
+# fuzzy noise. A blob that matches several tiers sums their weights.
+_LEXICAL_EXACT_WEIGHT = 1.0
+_LEXICAL_STEM_WEIGHT = 0.2
+_SEMANTIC_RRF_WEIGHT = 0.2
 # Relative-score floor: after fusion, drop candidates below this fraction
 # of the top score. A keyword query has a wide gap (lexical hits high,
 # weighted-down semantic noise far below) so the noise is cut; a
@@ -503,7 +504,8 @@ async def retrieve(
         RRFFusionStage(
             k=_RRF_K,
             weights={
-                "lexical": _LEXICAL_RRF_WEIGHT,
+                "lexical_exact": _LEXICAL_EXACT_WEIGHT,
+                "lexical_stem": _LEXICAL_STEM_WEIGHT,
                 "semantic": _SEMANTIC_RRF_WEIGHT,
                 "semantic_hosted": _SEMANTIC_RRF_WEIGHT,
             },

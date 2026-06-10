@@ -314,3 +314,46 @@ async def test_conceptual_query_keeps_semantic_results() -> None:
         ids = {h.blob.id for h in hits}
         assert a.id in ids
         assert b.id in ids
+
+
+async def test_stem_collision_yields_to_exact_match() -> None:
+    """The Italian stemmer conflates a short proper noun with a common
+    word (search 'marzia' stem-matches an essay dated 'marzo'). Splitting
+    lexical into exact vs stem and weighting exact far higher means the
+    exact 'Marzia' hit dominates and the stem-only 'marzo' blob is cut by
+    the relative floor -- the real 'marzia returns unrelated content' bug."""
+    org, user = await _org("STEM")
+    proj = uuid.uuid4()
+    async with tenant_session(str(org), str(user)) as s:
+        await _seed_billing(s, org, user)
+        exact = await mem.write_blob(
+            s,
+            org_id=org,
+            actor_id=user,
+            project_id=proj,
+            text_body="promemoria per Marzia",
+            operation_id="a",
+            embedder=_FAKE,
+        )
+        collision = await mem.write_blob(
+            s,
+            org_id=org,
+            actor_id=user,
+            project_id=proj,
+            text_body="consegna del progetto entro marzo 2025",
+            operation_id="b",
+            embedder=_FAKE,
+        )
+        hits = await mem.retrieve(
+            s,
+            org_id=org,
+            actor_id=user,
+            project_id=proj,
+            query="marzia",
+            operation_id="q",
+            embedder=_FAKE,
+        )
+        ids = {h.blob.id for h in hits}
+        assert exact.id in ids
+        assert collision.id not in ids
+        assert hits[0].blob.id == exact.id
