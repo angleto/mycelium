@@ -63,9 +63,18 @@ class Settings(BaseSettings):
 
     # Max size of a single note/task attachment. Stored as BYTEA in the
     # DB (no object store; co-tenant deploy), so the cap is deliberately
-    # conservative. Enforced server-side in the attachments service
-    # before the bytes are persisted. Override via FLOW_ATTACHMENT_MAX_BYTES.
+    # conservative. This is the DEFAULT when a workspace has not set its
+    # own (admin-tunable) override in the settings bag; enforced
+    # server-side in the attachments service before the bytes are
+    # persisted. Override via FLOW_ATTACHMENT_MAX_BYTES.
     attachment_max_bytes: int = 10 * 1024 * 1024
+    # Hard ceiling for the per-workspace, admin-tunable buffered cap
+    # above. The buffered path reads the WHOLE file into memory before it
+    # is persisted, so the admin knob must not be unbounded (an oversize
+    # value would OOM the worker). Ops sets the absolute max here; an
+    # admin then tunes the live cap within [1, this] from the settings
+    # page. Override via FLOW_ATTACHMENT_MAX_BYTES_CEILING.
+    attachment_max_bytes_ceiling: int = 100 * 1024 * 1024
     # Larger cap for the STREAMING upload path (the backend pipes the body
     # to S3 in chunks, never buffering the whole file nor exposing S3):
     # medical files (DICOM/MRI) can be hundreds of MB. Enforced

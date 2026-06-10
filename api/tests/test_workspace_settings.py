@@ -120,3 +120,80 @@ async def test_retrieval_semantic_floor_roundtrip_and_merge() -> None:
             },
         )
         assert r.status_code == 422
+
+
+async def test_attachment_max_bytes_roundtrip_merge_and_clamp() -> None:
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as c:
+        a = (
+            await c.post(
+                "/auth/signup",
+                json={"email": _email(), "password": "pw-strong-123"},
+            )
+        ).json()
+        h = {
+            "Authorization": f"Bearer {a['token']}",
+            "X-Workspace-Id": a["workspace_id"],
+            "X-Workspace-Role": "owner",
+        }
+
+        me = (await c.get("/workspaces/me", headers=h)).json()
+        # Default surfaced as the effective value (config default, clamped),
+        # plus the hard ceiling that bounds the admin input.
+        default = me["settings"]["attachment_max_bytes"]
+        ceiling = me["settings"]["attachment_max_bytes_ceiling"]
+        assert default > 0
+        assert ceiling >= default
+        ver = me["version"]
+
+        # Raise the per-workspace cap (below the ceiling).
+        override = 25 * 1024 * 1024
+        r = await c.patch(
+            "/workspaces/me/settings",
+            headers=h,
+            json={
+                "expected_version": ver,
+                "estimate_presets": [1],
+                "attachment_max_bytes": override,
+            },
+        )
+        assert r.status_code == 200, r.text
+        me = (await c.get("/workspaces/me", headers=h)).json()
+        assert me["settings"]["attachment_max_bytes"] == override
+
+        # A presets-only save must NOT clobber the cap (merge).
+        r = await c.patch(
+            "/workspaces/me/settings",
+            headers=h,
+            json={"expected_version": me["version"], "estimate_presets": [2, 4]},
+        )
+        assert r.status_code == 200
+        me = (await c.get("/workspaces/me", headers=h)).json()
+        assert me["settings"]["attachment_max_bytes"] == override
+
+        # Above the ceiling -> clamped on write (the buffered path holds
+        # the whole file in memory, so the ceiling is a hard bound).
+        r = await c.patch(
+            "/workspaces/me/settings",
+            headers=h,
+            json={
+                "expected_version": me["version"],
+                "estimate_presets": [1],
+                "attachment_max_bytes": ceiling + 999 * 1024 * 1024,
+            },
+        )
+        assert r.status_code == 200, r.text
+        me = (await c.get("/workspaces/me", headers=h)).json()
+        assert me["settings"]["attachment_max_bytes"] == ceiling
+
+        # Below the floor (0) -> 422 (schema validator, ge=1).
+        r = await c.patch(
+            "/workspaces/me/settings",
+            headers=h,
+            json={
+                "expected_version": me["version"],
+                "estimate_presets": [1],
+                "attachment_max_bytes": 0,
+            },
+        )
+        assert r.status_code == 422

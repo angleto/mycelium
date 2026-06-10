@@ -10164,6 +10164,16 @@ export interface components {
              * @default 0
              */
             retrieval_semantic_min_similarity?: number;
+            /**
+             * Attachment Max Bytes
+             * @default 0
+             */
+            attachment_max_bytes?: number;
+            /**
+             * Attachment Max Bytes Ceiling
+             * @default 0
+             */
+            attachment_max_bytes_ceiling?: number;
         };
         /** WorkspaceSettingsIn */
         WorkspaceSettingsIn: {
@@ -10174,6 +10184,8 @@ export interface components {
             autonomous_dispatch?: components["schemas"]["AutonomousDispatch"] | null;
             /** Retrieval Semantic Min Similarity */
             retrieval_semantic_min_similarity?: number | null;
+            /** Attachment Max Bytes */
+            attachment_max_bytes?: number | null;
         };
         /**
          * WorkspaceSummaryOut

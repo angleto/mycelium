@@ -518,8 +518,9 @@ async def upload_note_attachment(
     file: upload_file_field,
 ) -> AttachmentOut:
     # Size is enforced BEFORE the bytes are stored (guarded read here +
-    # a re-check in the service). Member-level, org-scoped (RLS).
-    data = await read_capped(file)
+    # a re-check in the service), against the workspace's effective cap.
+    # Member-level, org-scoped (RLS).
+    data = await read_capped(file, ctx)
     att = await att_svc.add_attachment(
         ctx.session,
         org_id=ctx.org_id,

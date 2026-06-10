@@ -4260,7 +4260,8 @@ async def synthesize_speech(
 #
 # Binary UPLOAD over MCP: the file bytes are base64-encoded inside the
 # JSON tool call (the protocol exchanges JSON, not multipart). The
-# ``attachment_max_bytes`` guard from settings still applies — it is
+# workspace's effective size cap still applies — the per-workspace
+# admin-tunable ``attachment_max_bytes`` (or the config default),
 # checked on the *decoded* payload by the service layer, exactly like
 # the REST path. Practical for an LLM agent that wants to attach a
 # rendered report or a small PDF without bouncing through REST.
@@ -4279,8 +4280,9 @@ async def upload_attachment(
     """Attach a file (base64-encoded bytes) to a note OR a task.
 
     Exactly one of ``note_id`` / ``task_id`` must be set. ``data_b64``
-    is base64 of the raw file contents; the server decodes and
-    enforces ``attachment_max_bytes`` (default 10 MiB) on the
+    is base64 of the raw file contents; the server decodes and enforces
+    the workspace's effective attachment size cap (the admin-tunable
+    per-workspace ``attachment_max_bytes``, default 10 MiB) on the
     decoded size. The detected mime overrides ``mime_type`` if the
     sniffer disagrees with a misleading client hint.
 

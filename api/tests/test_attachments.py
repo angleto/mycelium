@@ -161,6 +161,47 @@ async def test_oversize_attachment_rejected(monkeypatch: pytest.MonkeyPatch) -> 
         assert lst == []
 
 
+async def test_per_workspace_cap_override_raises_effective_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The admin-tunable per-workspace override must lift the EFFECTIVE
+    # cap above the config default: a tiny default + a generous ceiling,
+    # then raise the workspace cap and confirm a body that the default
+    # would reject now fits (and one above the override still does not).
+    monkeypatch.setattr(get_settings(), "attachment_max_bytes", 16, raising=True)
+    monkeypatch.setattr(get_settings(), "attachment_max_bytes_ceiling", 4096, raising=True)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as c:
+        h, _ws, _uid = await _signup(c)
+        owner = {**h, "X-Workspace-Role": "owner"}
+        ver = (await c.get("/workspaces/me", headers=owner)).json()["version"]
+
+        # Raise the per-workspace cap to 1 KiB (owner-gated).
+        r = await c.patch(
+            "/workspaces/me/settings",
+            headers=owner,
+            json={"expected_version": ver, "estimate_presets": [1], "attachment_max_bytes": 1024},
+        )
+        assert r.status_code == 200, r.text
+
+        task = (await c.post("/tasks", headers=h, json={"title": "T"})).json()
+        # 64 bytes: rejected at the default (16), accepted under the override.
+        ok = await c.post(
+            f"/tasks/{task['id']}/attachments",
+            headers=h,
+            files={"file": ("ok.bin", b"x" * 64, "application/octet-stream")},
+        )
+        assert ok.status_code == 200, ok.text
+        # Above the override (2 KiB > 1 KiB) -> still rejected.
+        big = await c.post(
+            f"/tasks/{task['id']}/attachments",
+            headers=h,
+            files={"file": ("big.bin", b"x" * 2048, "application/octet-stream")},
+        )
+        assert big.status_code == 400, big.text
+        assert big.json()["code"] == "attachment.too_large"
+
+
 async def test_delete_attachment_then_download_404() -> None:
     png = _png_bytes()
     transport = ASGITransport(app=app)

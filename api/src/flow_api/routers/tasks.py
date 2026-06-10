@@ -875,9 +875,10 @@ async def upload_task_attachment(
     ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
     file: upload_file_field,
 ) -> AttachmentOut:
-    # Size enforced BEFORE storing (guarded read + service re-check).
-    # Member-level (notes/tasks are member-level), org-scoped via RLS.
-    data = await read_capped(file)
+    # Size enforced BEFORE storing (guarded read + service re-check),
+    # against the workspace's effective cap. Member-level (notes/tasks
+    # are member-level), org-scoped via RLS.
+    data = await read_capped(file, ctx)
     att = await att_svc.add_attachment(
         ctx.session,
         org_id=ctx.org_id,

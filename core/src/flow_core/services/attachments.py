@@ -39,6 +39,7 @@ from flow_core.models.attachment import Attachment
 from flow_core.models.membership import Role
 from flow_core.models.note import Note
 from flow_core.models.note_tag import NoteTag
+from flow_core.models.organization import Organization
 from flow_core.models.project_profile import ProjectProfile
 from flow_core.models.tag import Tag, TagKind
 from flow_core.models.task import Task
@@ -238,6 +239,35 @@ def _build_storage_key(
     )
 
 
+# JSONB key of the per-workspace, admin-tunable buffered-attachment cap
+# (bytes) in ``Organization.settings``. Absent => the config default.
+MAX_BYTES_KEY = "attachment_max_bytes"
+
+
+async def effective_max_bytes(session: AsyncSession, org_id: uuid.UUID) -> int:
+    """The buffered-attachment size cap in force for this workspace: the
+    per-org override from the settings bag if set and valid, else the
+    config default, in either case clamped to ``[1, ceiling]`` so an
+    admin (or a stale/garbage value) can never push the in-memory
+    buffered path past the hard ceiling. Missing/malformed => the
+    (clamped) default, never an exception."""
+    cfg = get_settings()
+    ceiling = cfg.attachment_max_bytes_ceiling
+    default = min(cfg.attachment_max_bytes, ceiling)
+    row = await session.execute(select(Organization.settings).where(Organization.id == org_id))
+    bag = row.scalar_one_or_none() or {}
+    raw = bag.get(MAX_BYTES_KEY)
+    if raw is None:
+        return default
+    try:
+        val = int(raw)
+    except (TypeError, ValueError):
+        return default
+    if val <= 0:
+        return default
+    return min(val, ceiling)
+
+
 async def add_attachment(
     session: AsyncSession,
     *,
@@ -250,11 +280,12 @@ async def add_attachment(
     data: bytes,
 ) -> Attachment:
     """Store a file on a note XOR a task. Member-level. The size is
-    enforced against ``settings.attachment_max_bytes`` BEFORE the row is
-    added; the filename is sanitised; the mime is normalised."""
+    enforced against the workspace's effective cap (``effective_max_bytes``)
+    BEFORE the row is added; the filename is sanitised; the mime is
+    normalised."""
     await require_role(session, org_id, actor_id, Role.member)
     await _assert_parent(session, note_id=note_id, task_id=task_id)
-    max_bytes = get_settings().attachment_max_bytes
+    max_bytes = await effective_max_bytes(session, org_id)
     if len(data) > max_bytes:
         raise DomainError(MessageCode.ATTACHMENT_TOO_LARGE)
     safe_name = _sanitize_filename(filename)

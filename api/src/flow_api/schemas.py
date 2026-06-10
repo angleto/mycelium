@@ -207,6 +207,13 @@ class WorkspaceSettings(BaseModel):
     # flooded by noise that ties with the real lexical hits under
     # rank-only RRF. Tuned live here; lexical matches are never gated.
     retrieval_semantic_min_similarity: float = 0.0
+    # Per-workspace buffered-attachment size cap (bytes), admin-tunable.
+    # The /me handler fills these with the EFFECTIVE value (the override
+    # or, absent one, the config default -- always clamped to the
+    # ceiling) and the hard ceiling, so the settings page can render the
+    # current cap and bound its input. Placeholders here; never the bag.
+    attachment_max_bytes: int = 0
+    attachment_max_bytes_ceiling: int = 0
 
 
 class WorkspaceOut(BaseModel):
@@ -255,6 +262,11 @@ class WorkspaceSettingsIn(BaseModel):
     # Optional so an estimate-presets save does not restate it; only
     # written when present. Tuned live from the SPA settings page.
     retrieval_semantic_min_similarity: float | None = Field(default=None, ge=0.0, le=1.0)
+    # Per-workspace buffered-attachment size cap (bytes), admin-tunable.
+    # Optional so an estimate-presets save does not restate it; only
+    # written when present. ge=1 is the floor; the endpoint clamps to the
+    # runtime config ceiling (the SPA also bounds its input to it).
+    attachment_max_bytes: int | None = Field(default=None, ge=1)
 
     @field_validator("estimate_presets")
     @classmethod

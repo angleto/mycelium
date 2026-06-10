@@ -30,11 +30,13 @@ from flow_api.schemas import (
     WorkspaceVersionOut,
 )
 from flow_core.concurrency import optimistic_update
+from flow_core.config import get_settings
 from flow_core.db import admin_session
 from flow_core.errors import NotFoundError
 from flow_core.i18n import MessageCode
 from flow_core.models.membership import Role
 from flow_core.models.organization import Organization
+from flow_core.services import attachments as attachments_svc
 from flow_core.services import dispatch_loop, memberships, trash
 from flow_core.services import memory as memory_svc
 from flow_core.services.auth import (
@@ -87,11 +89,20 @@ async def get_my_workspace(
         my_role = (await get_role(ctx.session, ctx.org_id, ctx.user_id)).value
     except NotFoundError:
         my_role = Role.owner.value
+    settings_out = WorkspaceSettings.model_validate(org.settings or {})
+    # The attachment cap is computed, not a raw bag field: surface the
+    # EFFECTIVE value (override or config default, clamped) so the SPA
+    # shows exactly what is enforced, plus the hard ceiling that bounds
+    # the admin input.
+    settings_out.attachment_max_bytes = await attachments_svc.effective_max_bytes(
+        ctx.session, ctx.org_id
+    )
+    settings_out.attachment_max_bytes_ceiling = get_settings().attachment_max_bytes_ceiling
     return WorkspaceOut(
         id=org.id,
         name=org.name,
         version=org.version,
-        settings=WorkspaceSettings.model_validate(org.settings or {}),
+        settings=settings_out,
         my_role=my_role,
     )
 
@@ -203,6 +214,13 @@ async def patch_my_workspace_settings(
     # in [0,1] by the schema.
     if body.retrieval_semantic_min_similarity is not None:
         merged[memory_svc.SEMANTIC_MIN_SIM_KEY] = body.retrieval_semantic_min_similarity
+    # Per-workspace buffered-attachment cap (bytes). Only written when
+    # present; clamped to the runtime ceiling so the stored value never
+    # exceeds what the in-memory buffered path can safely hold (the read
+    # path re-clamps defensively).
+    if body.attachment_max_bytes is not None:
+        ceiling = get_settings().attachment_max_bytes_ceiling
+        merged[attachments_svc.MAX_BYTES_KEY] = min(body.attachment_max_bytes, ceiling)
     new_version = await optimistic_update(
         ctx.session,
         Organization,

@@ -13,6 +13,7 @@ import { IssuerProfiles } from '../components/IssuerProfiles'
 // row was the original pain point and (b) executor rows are now
 // auto-derived from users / ai_assistants.
 import { AiAssistantsSettings } from '../components/AiAssistantsSettings'
+import { AttachmentSettings } from '../components/AttachmentSettings'
 import { EmbedderProviderSettings } from '../components/EmbedderProviderSettings'
 import { LlmProviderSettings } from '../components/LlmProviderSettings'
 import { MemoryChannelsAdmin } from '../components/MemoryChannelsAdmin'
@@ -179,6 +180,7 @@ export function SettingsRoute() {
     {me?.is_admin && isAdminMode() && <EmbedderProviderSettings />}
     {me?.is_admin && isAdminMode() && <MemoryChannelsAdmin />}
     {me?.is_admin && isAdminMode() && <RetrievalSettings />}
+    {me?.is_admin && isAdminMode() && <AttachmentSettings />}
     {/* ExecutorsAdmin removed in v1.2.27, #21 Stage B */}
     <IssuerProfiles />
     <EstimatePresets />

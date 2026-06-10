@@ -14,7 +14,6 @@ from fastapi import APIRouter, Depends, File, Query, Request, Response, UploadFi
 
 from flow_api.deps import TenantCtx, attachment_read_ctx, tenant_ctx
 from flow_api.schemas import AttachmentCapabilityIn, AttachmentCapabilityOut, AttachmentOut
-from flow_core.config import get_settings
 from flow_core.errors import DomainError
 from flow_core.i18n import MessageCode
 from flow_core.models.attachment import Attachment
@@ -39,11 +38,13 @@ def att_out(a: svc.AttachmentMeta | Attachment) -> AttachmentOut:
     )
 
 
-async def read_capped(file: UploadFile) -> bytes:
+async def read_capped(file: UploadFile, ctx: TenantCtx) -> bytes:
     """Read the upload while guarding the size: read one byte past the
-    cap and reject early, so an oversize body is never fully buffered
-    nor stored (the service re-checks defensively)."""
-    cap = get_settings().attachment_max_bytes
+    workspace's effective cap and reject early, so an oversize body is
+    never fully buffered nor stored (the service re-checks defensively).
+    The cap is the per-workspace admin-tunable override (clamped to the
+    config ceiling), falling back to the config default."""
+    cap = await svc.effective_max_bytes(ctx.session, ctx.org_id)
     data = await file.read(cap + 1)
     if len(data) > cap:
         raise DomainError(MessageCode.ATTACHMENT_TOO_LARGE)
