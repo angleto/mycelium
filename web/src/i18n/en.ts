@@ -296,6 +296,7 @@ export const en = {
     previewLoading: 'Loading preview…',
     previewError: 'Could not load preview.',
     previewTooLarge: 'File too large to preview (over 50 MiB) — use Download.',
+    textTruncated: 'Preview truncated — download the file for the full contents.',
     pdfMobileTitle: 'PDF preview',
     pdfMobileHint:
       "Mobile browsers don't render PDFs reliably inline. Open it in a new tab.",

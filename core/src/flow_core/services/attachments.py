@@ -53,9 +53,14 @@ _DEFAULT_MIME = "application/octet-stream"
 
 # Extension -> mime allowlist used ONLY as the fallback when
 # python-magic/libmagic is not importable AND the client did not send a
-# usable content-type. Deliberately small (the common preview/doc set);
-# anything unknown stays the generic binary type.
+# usable content-type. It only needs to cover the formats whose stored mime
+# the UI keys on (the inline-safe disposition, the eager image thumbnail);
+# the broad client-side preview classifier (web attachmentKind.ts) also
+# falls back to the extension, so a gap here just means octet-stream, not a
+# missing preview. Ambiguous extensions (e.g. ``.ts`` = TypeScript vs MPEG
+# transport stream) are deliberately omitted.
 _EXT_MIME: dict[str, str] = {
+    # images
     ".png": "image/png",
     ".jpg": "image/jpeg",
     ".jpeg": "image/jpeg",
@@ -63,14 +68,44 @@ _EXT_MIME: dict[str, str] = {
     ".webp": "image/webp",
     ".svg": "image/svg+xml",
     ".bmp": "image/bmp",
+    ".ico": "image/x-icon",
     ".tif": "image/tiff",
     ".tiff": "image/tiff",
+    ".avif": "image/avif",
+    ".heic": "image/heic",
+    ".heif": "image/heif",
+    # audio
+    ".mp3": "audio/mpeg",
+    ".wav": "audio/wav",
+    ".ogg": "audio/ogg",
+    ".oga": "audio/ogg",
+    ".opus": "audio/opus",
+    ".m4a": "audio/mp4",
+    ".aac": "audio/aac",
+    ".flac": "audio/flac",
+    ".weba": "audio/webm",
+    ".mid": "audio/midi",
+    ".midi": "audio/midi",
+    # video
+    ".mp4": "video/mp4",
+    ".m4v": "video/x-m4v",
+    ".webm": "video/webm",
+    ".mov": "video/quicktime",
+    ".ogv": "video/ogg",
+    ".mkv": "video/x-matroska",
+    ".avi": "video/x-msvideo",
+    # documents
     ".pdf": "application/pdf",
+    ".zip": "application/zip",
+    # text / data
     ".txt": "text/plain",
+    ".log": "text/plain",
     ".csv": "text/csv",
+    ".tsv": "text/tab-separated-values",
     ".md": "text/markdown",
     ".json": "application/json",
-    ".zip": "application/zip",
+    ".yaml": "application/yaml",
+    ".yml": "application/yaml",
 }
 
 

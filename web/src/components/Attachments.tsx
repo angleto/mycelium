@@ -2,22 +2,26 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { authFetch, errMessage } from '../api/client'
 import { useMediaQuery, MOBILE_QUERY } from '../lib/useMediaQuery'
+import { attachmentKind } from '../lib/attachmentKind'
 
 // Attachments on a note OR a task (exactly one parent). Binary
 // upload/download go through authFetch (raw, authenticated) since the
 // typed JSON client does not fit multipart/blob.
 //
-// Preview affordances (ported from bitvision_phoenix's DocumentPreview):
-//   - Images: inline 44x44 thumbnail (fetched eagerly), click opens a
-//     lightbox with the full-size blob — same as before.
-//   - PDFs: clickable "PDF" tile; on click we fetch the binary lazily,
-//     wrap it in an iframe on desktop, or surface an "Open in new tab"
-//     CTA on mobile (Safari/Chrome on phones do not render PDFs in
-//     iframes reliably).
-//   - Anything else: 📎 icon + download-only, as today.
+// Preview affordances dispatch on attachmentKind() — the same classifier
+// the markdown `![]()` embed uses, so the panel and the body never
+// disagree on a file's kind:
+//   - Images: inline 44x44 thumbnail (fetched eagerly), click → lightbox
+//     with the full-size blob.
+//   - PDFs: clickable tile → iframe on desktop, "Open in new tab" CTA on
+//     mobile (Safari/Chrome on phones do not render PDFs in iframes).
+//   - Audio / Video: tile → an <audio>/<video> player in the lightbox.
+//   - Text (txt/md/csv/json/code/…): tile → the contents in a monospace
+//     panel (truncated past TEXT_PREVIEW_MAX_CHARS).
+//   - Anything else: 📎 icon + download-only.
 //
-// Object URLs never escape this component: the eager thumbs are
-// revoked when the list refetches, and the modal-owned blob (PDF) is
+// Object URLs never escape this component: the eager thumbs are revoked
+// when the list refetches, and a modal-owned blob (pdf/audio/video) is
 // revoked when the modal closes. The bearer token is on authFetch's
 // Authorization header — never on a DOM `src` attribute.
 
@@ -29,10 +33,13 @@ type AttachmentMeta = {
   created_at: string
 }
 
-// Hard cap mirroring bitvision's "binary" branch. Pulling >50 MiB
-// through the browser to render a preview is wasteful even when the
-// blob would render fine; force the user through Download instead.
+// Hard cap on bytes pulled through the browser to render a preview;
+// past it we force the user through Download instead.
 const MAX_PREVIEW_BYTES = 50 * 1024 * 1024
+
+// Characters of a text file shown inline before truncation. Mirrors the
+// markdown text-embed cap.
+const TEXT_PREVIEW_MAX_CHARS = 256 * 1024
 
 function humanSize(n: number): string {
   if (n < 1024) return `${n} B`
@@ -40,13 +47,12 @@ function humanSize(n: number): string {
   return `${(n / (1024 * 1024)).toFixed(1)} MB`
 }
 
-const isImage = (m: string) => m.startsWith('image/')
-const isPdf = (m: string, fn: string) =>
-  m === 'application/pdf' || fn.toLowerCase().endsWith('.pdf')
-
 type Preview =
   | { kind: 'image'; url: string; name: string; owned: false }
   | { kind: 'pdf'; url: string; name: string; owned: true }
+  | { kind: 'audio'; url: string; name: string; owned: true }
+  | { kind: 'video'; url: string; name: string; owned: true }
+  | { kind: 'text'; text: string; name: string; truncated: boolean }
   | { kind: 'loading'; name: string }
   | { kind: 'error'; name: string; message: string }
   | { kind: 'too-large'; name: string }
@@ -93,7 +99,9 @@ export function Attachments({
       setItems(rows)
       const next: Record<string, string> = {}
       for (const r of rows.filter(
-        (x) => isImage(x.mime_type) && x.size_bytes <= MAX_PREVIEW_BYTES,
+        (x) =>
+          attachmentKind(x.mime_type, x.filename) === 'image' &&
+          x.size_bytes <= MAX_PREVIEW_BYTES,
       )) {
         const b = await authFetch(`/attachments/${r.id}/download`)
         if (!active) break
@@ -138,7 +146,12 @@ export function Attachments({
     setPreview({ kind: 'image', url, name: it.filename, owned: false })
   }
 
-  async function openPdfPreview(it: AttachmentMeta) {
+  // Fetch the binary lazily and show it in the lightbox. pdf/audio/video
+  // each own their object URL (revoked on close).
+  async function openBlobPreview(
+    it: AttachmentMeta,
+    kind: 'pdf' | 'audio' | 'video',
+  ) {
     if (it.size_bytes > MAX_PREVIEW_BYTES) {
       setPreview({ kind: 'too-large', name: it.filename })
       return
@@ -154,7 +167,34 @@ export function Attachments({
       return
     }
     const url = URL.createObjectURL(await res.blob())
-    setPreview({ kind: 'pdf', url, name: it.filename, owned: true })
+    setPreview({ kind, url, name: it.filename, owned: true })
+  }
+
+  // Text preview: fetch + decode, capped to TEXT_PREVIEW_MAX_CHARS. Held
+  // as a string (not an object URL), so there is nothing to revoke.
+  async function openTextPreview(it: AttachmentMeta) {
+    if (it.size_bytes > MAX_PREVIEW_BYTES) {
+      setPreview({ kind: 'too-large', name: it.filename })
+      return
+    }
+    setPreview({ kind: 'loading', name: it.filename })
+    const res = await authFetch(`/attachments/${it.id}/download`)
+    if (!res.ok) {
+      setPreview({
+        kind: 'error',
+        name: it.filename,
+        message: `HTTP ${res.status}`,
+      })
+      return
+    }
+    const raw = await res.text()
+    const truncated = raw.length > TEXT_PREVIEW_MAX_CHARS
+    setPreview({
+      kind: 'text',
+      name: it.filename,
+      text: truncated ? raw.slice(0, TEXT_PREVIEW_MAX_CHARS) : raw,
+      truncated,
+    })
   }
 
   async function onPick(f: File) {
@@ -221,9 +261,11 @@ export function Attachments({
         <p className="hint">{t('attach.none')}</p>
       ) : (
         <ul className="atts__list">
-          {items.map((it) => (
+          {items.map((it) => {
+            const kind = attachmentKind(it.mime_type, it.filename)
+            return (
             <li key={it.id} className="att">
-              {isImage(it.mime_type) && thumbs[it.id] ? (
+              {kind === 'image' && thumbs[it.id] ? (
                 <button
                   type="button"
                   className="att__thumb"
@@ -232,15 +274,45 @@ export function Attachments({
                 >
                   <img src={thumbs[it.id]} alt={it.filename} />
                 </button>
-              ) : isPdf(it.mime_type, it.filename) ? (
+              ) : kind === 'pdf' ? (
                 <button
                   type="button"
                   className="att__thumb att__thumb--pdf"
                   title={t('attach.preview')}
                   aria-label={t('attach.preview')}
-                  onClick={() => void openPdfPreview(it)}
+                  onClick={() => void openBlobPreview(it, 'pdf')}
                 >
                   PDF
+                </button>
+              ) : kind === 'audio' ? (
+                <button
+                  type="button"
+                  className="att__thumb att__thumb--audio"
+                  title={t('attach.preview')}
+                  aria-label={t('attach.preview')}
+                  onClick={() => void openBlobPreview(it, 'audio')}
+                >
+                  ♪
+                </button>
+              ) : kind === 'video' ? (
+                <button
+                  type="button"
+                  className="att__thumb att__thumb--video"
+                  title={t('attach.preview')}
+                  aria-label={t('attach.preview')}
+                  onClick={() => void openBlobPreview(it, 'video')}
+                >
+                  ▶
+                </button>
+              ) : kind === 'text' ? (
+                <button
+                  type="button"
+                  className="att__thumb att__thumb--text"
+                  title={t('attach.preview')}
+                  aria-label={t('attach.preview')}
+                  onClick={() => void openTextPreview(it)}
+                >
+                  TXT
                 </button>
               ) : (
                 <span className="att__icon" aria-hidden>
@@ -266,7 +338,8 @@ export function Attachments({
                 {t('attach.remove')}
               </button>
             </li>
-          ))}
+            )
+          })}
         </ul>
       )}
       {preview && (
@@ -312,6 +385,53 @@ export function Attachments({
               <button
                 type="button"
                 className="btn--sm btn--ghost"
+                onClick={closePreview}
+              >
+                {t('attach.close')}
+              </button>
+            </div>
+          )}
+          {preview.kind === 'audio' && (
+            <div
+              className="lightbox__panel"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <p>
+                <strong>{preview.name}</strong>
+              </p>
+              <audio src={preview.url} controls autoPlay />
+              <button
+                type="button"
+                className="btn--sm btn--ghost"
+                onClick={closePreview}
+              >
+                {t('attach.close')}
+              </button>
+            </div>
+          )}
+          {preview.kind === 'video' && (
+            <div
+              className="lightbox__panel lightbox__panel--video"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <video src={preview.url} controls autoPlay className="lightbox__video" />
+            </div>
+          )}
+          {preview.kind === 'text' && (
+            <div
+              className="lightbox__panel lightbox__panel--text"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <p>
+                <strong>{preview.name}</strong>
+              </p>
+              <pre className="lightbox__text">{preview.text}</pre>
+              {preview.truncated && (
+                <p className="hint">{t('attach.textTruncated')}</p>
+              )}
+              <button
+                type="button"
+                className="btn--sm"
                 onClick={closePreview}
               >
                 {t('attach.close')}

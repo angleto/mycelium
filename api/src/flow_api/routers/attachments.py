@@ -57,10 +57,32 @@ async def read_capped(file: UploadFile, ctx: TenantCtx) -> bytes:
 upload_file_field = Annotated[UploadFile, File()]
 
 
+# MIME types served ``inline`` (rendered in the browser) for preview;
+# everything else is offered as a download (``attachment``). Executable-in-
+# browser types are DELIBERATELY excluded: the download route is
+# same-origin, so an inline ``text/html`` / ``image/svg+xml`` would be a
+# stored-XSS vector (an uploaded .svg/.html opened directly could run script
+# in the app origin). Raster images, pdf, audio, video and non-html text are
+# safe to render inline. Paired with ``X-Content-Type-Options: nosniff`` on
+# the response so a text/plain body cannot be sniffed back into html.
+_INLINE_UNSAFE_MIME = frozenset({"image/svg+xml", "text/html", "application/xhtml+xml", "text/xml"})
+
+
+def _is_inline_safe(mime_type: str) -> bool:
+    m = mime_type.split(";", 1)[0].strip().lower()
+    if m in _INLINE_UNSAFE_MIME:
+        return False
+    if m.startswith(("image/", "audio/", "video/")):
+        return True
+    if m == "application/pdf":
+        return True
+    if m.startswith("text/"):
+        return True
+    return False
+
+
 def _content_disposition(filename: str, mime_type: str) -> str:
-    # Images render in the browser (inline) for the preview; everything
-    # else is offered as a download (attachment).
-    disp = "inline" if mime_type.startswith("image/") else "attachment"
+    disp = "inline" if _is_inline_safe(mime_type) else "attachment"
     # The ASGI server latin-1 encodes header values, so a filename with
     # non-latin-1 characters (emoji, smart quotes) must not go in the bare
     # ``filename=`` -- it would raise UnicodeEncodeError and 500 the
@@ -167,6 +189,10 @@ async def download_attachment(
         media_type=att.mime_type,
         headers={
             "Content-Disposition": _content_disposition(att.filename, att.mime_type),
+            # Never let the browser second-guess our Content-Type: an inline
+            # text/plain (or octet-stream) must not be sniffed into html and
+            # executed in the app origin.
+            "X-Content-Type-Options": "nosniff",
         },
     )
 

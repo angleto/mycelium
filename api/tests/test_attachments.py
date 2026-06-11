@@ -3,8 +3,10 @@
 Covers: multipart upload to a task and a note -> AttachmentOut with the
 right size/mime/filename and NO ``data`` field leaked; list returns
 metadata only; download returns the exact bytes with the right
-Content-Type and an INLINE disposition for image/* (attachment for a
-non-image); oversize -> 400 ATTACHMENT_TOO_LARGE (cap lowered via the
+Content-Type and an inline-safe Content-Disposition (inline for raster
+images / pdf / audio / video / non-html text, attachment for opaque and
+executable-in-browser types) plus X-Content-Type-Options: nosniff;
+oversize -> 400 ATTACHMENT_TOO_LARGE (cap lowered via the
 cached settings, the proper override seam); delete -> 204 then download
 404 ATTACHMENT_NOT_FOUND; deleting the parent task/note CASCADE-deletes
 its attachments; cross-org isolation (a second org's token cannot
@@ -118,26 +120,44 @@ async def test_attachment_upload_list_download_task_and_note() -> None:
         assert cd == "inline; filename=\"shot.png\"; filename*=UTF-8''shot.png"
 
 
-async def test_non_image_attachment_uses_attachment_disposition() -> None:
+async def test_download_disposition_inline_safe_vs_attachment() -> None:
+    # Inline-safe types (text/plain, audio, video, pdf, raster images)
+    # render in the browser; opaque types are forced to download. Every
+    # response carries X-Content-Type-Options: nosniff so an inline body
+    # cannot be sniffed back into executable html.
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://t") as c:
         h, _ws, _uid = await _signup(c)
         task = (await c.post("/tasks", headers=h, json={"title": "T"})).json()
+        tid = task["id"]
+
         body = b"hello, plain text body\n"
         up = await c.post(
-            f"/tasks/{task['id']}/attachments",
+            f"/tasks/{tid}/attachments",
             headers=h,
             files={"file": ("notes.txt", body, "text/plain")},
         )
         assert up.status_code == 200, up.text
-        aid = up.json()["id"]
+        txt_id = up.json()["id"]
         assert up.json()["mime_type"] == "text/plain"
 
-        dl = await c.get(f"/attachments/{aid}/download", headers=h)
+        dl = await c.get(f"/attachments/{txt_id}/download", headers=h)
         assert dl.status_code == 200
         assert dl.content == body
-        cd = dl.headers["content-disposition"]
-        assert cd == "attachment; filename=\"notes.txt\"; filename*=UTF-8''notes.txt"
+        assert dl.headers["content-disposition"].startswith("inline")
+        assert dl.headers["x-content-type-options"] == "nosniff"
+
+        # An opaque binary is download-only.
+        up_bin = await c.post(
+            f"/tasks/{tid}/attachments",
+            headers=h,
+            files={"file": ("blob.bin", b"\x00\x01\x02", "application/octet-stream")},
+        )
+        assert up_bin.status_code == 200, up_bin.text
+        bin_id = up_bin.json()["id"]
+        dl_bin = await c.get(f"/attachments/{bin_id}/download", headers=h)
+        cd = dl_bin.headers["content-disposition"]
+        assert cd == "attachment; filename=\"blob.bin\"; filename*=UTF-8''blob.bin"
 
 
 async def test_oversize_attachment_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -317,3 +337,88 @@ async def test_cross_org_isolation() -> None:
         assert ok.status_code == 200 and ok.content == png
         # B's own org list for B's (nonexistent) task is empty/scoped.
         _ = wsb
+
+
+# --- Pure helpers (no DB): mime resolution + the inline-safe disposition.
+# These guard the preview feature (a wide format set resolved to a usable
+# mime) and the security posture (svg/html/xhtml are NEVER served inline,
+# which would be a same-origin stored-XSS vector).
+
+import flow_core.services.attachments as _att_svc  # noqa: E402
+from flow_api.routers.attachments import (  # noqa: E402
+    _content_disposition,
+    _is_inline_safe,
+)
+
+
+@pytest.mark.parametrize(
+    ("mime", "inline"),
+    [
+        ("image/png", True),
+        ("image/jpeg", True),
+        ("application/pdf", True),
+        ("audio/mpeg", True),
+        ("video/mp4", True),
+        ("text/plain", True),
+        ("text/markdown", True),
+        ("text/csv", True),
+        # executable-in-browser types: download only.
+        ("image/svg+xml", False),
+        ("text/html", False),
+        ("application/xhtml+xml", False),
+        ("text/xml", False),
+        # opaque / unknown: download.
+        ("application/octet-stream", False),
+        ("application/zip", False),
+        # parameters and casing are tolerated.
+        ("text/plain; charset=utf-8", True),
+        ("IMAGE/PNG", True),
+    ],
+)
+def test_inline_safe_allowlist(mime: str, inline: bool) -> None:
+    assert _is_inline_safe(mime) is inline
+    disp = _content_disposition("file.bin", mime)
+    assert disp.startswith("inline" if inline else "attachment")
+
+
+def test_content_disposition_non_ascii_filename() -> None:
+    # A non-latin-1 filename must not 500 the latin-1 header encoder: an
+    # ASCII fallback in filename= plus the UTF-8 name in filename* (RFC 5987).
+    disp = _content_disposition("relazione—finale.pdf", "application/pdf")
+    assert disp.startswith("inline")
+    assert "filename*=UTF-8''" in disp
+
+
+@pytest.mark.parametrize(
+    ("filename", "expected"),
+    [
+        ("clip.mp3", "audio/mpeg"),
+        ("clip.wav", "audio/wav"),
+        ("clip.ogg", "audio/ogg"),
+        ("movie.mp4", "video/mp4"),
+        ("movie.webm", "video/webm"),
+        ("notes.md", "text/markdown"),
+        ("data.yaml", "application/yaml"),
+        ("photo.avif", "image/avif"),
+        ("UPPER.MP3", "audio/mpeg"),
+        # unknown extension, no sniff/client mime -> generic binary type.
+        ("mystery.zzz", "application/octet-stream"),
+    ],
+)
+def test_resolve_mime_extension_fallback(
+    monkeypatch: pytest.MonkeyPatch, filename: str, expected: str
+) -> None:
+    # Force the no-sniff path (libmagic is optional and may be present in a
+    # dev env), so the extension allowlist is the deterministic resolver.
+    monkeypatch.setattr(_att_svc, "_sniff_mime", lambda data: None)
+    got = _att_svc._resolve_mime(filename=filename, client_mime=None, data=b"\x00\x01\x02")
+    assert got == expected
+
+
+def test_resolve_mime_prefers_client_over_extension(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A usable client content-type wins over the extension allowlist.
+    monkeypatch.setattr(_att_svc, "_sniff_mime", lambda data: None)
+    got = _att_svc._resolve_mime(filename="clip.mp3", client_mime="audio/ogg", data=b"\x00")
+    assert got == "audio/ogg"

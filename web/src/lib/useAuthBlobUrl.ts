@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { authFetch } from '../api/client'
 import type { ImageUploadParent } from './imageUpload'
 import {
+  attachmentBasename,
   classifyAttachmentRef,
   ensureAttachmentManifest,
   isAttachmentManifestLoaded,
@@ -22,6 +23,10 @@ type Entry = {
   refcount: number
   promise: Promise<string | null>
   url: string | null
+  // The blob's Content-Type, captured at fetch time. Authoritative for
+  // media-kind dispatch (useAttachmentMedia) — null until the fetch
+  // settles, and for an image-only consumer it is simply ignored.
+  mime: string | null
 }
 
 const cache: Map<string, Entry> = new Map()
@@ -36,9 +41,11 @@ function acquire(src: string): Entry {
     const res = await authFetch(src)
     if (!res.ok) return null
     const blob = await res.blob()
+    const cur = cache.get(src)
+    if (cur) cur.mime = blob.type || null
     return URL.createObjectURL(blob)
   })()
-  const entry: Entry = { refcount: 1, promise, url: null }
+  const entry: Entry = { refcount: 1, promise, url: null, mime: null }
   cache.set(src, entry)
   void promise.then((u) => {
     const cur = cache.get(src)
@@ -216,4 +223,116 @@ export function useAttachmentImage(
   if (blob) return { url: blob, loading: false }
   if (fetchPath && failedPath === fetchPath) return { url: null, loading: false }
   return { url: null, loading: true }
+}
+
+export type AttachmentMediaState = {
+  // Object URL for an /attachments src (or a passed-through absolute URL),
+  // or null while resolving / when the reference is broken.
+  url: string | null
+  // The blob's Content-Type once fetched (null until then, or for an
+  // absolute passthrough). Authoritative input to attachmentKind().
+  mime: string | null
+  // Best-effort filename for the reference: the basename of a `name` ref
+  // (e.g. `recording.mp3`), else null. Lets the caller refine the kind by
+  // extension and label the embed. (An /attachments/<id> ref carries no
+  // name; the caller can fall back to the markdown alt text.)
+  name: string | null
+  // True while a fetch / manifest lookup is genuinely in flight. When
+  // false with url null the reference is broken (not an endless spinner).
+  loading: boolean
+}
+
+/**
+ * Generalised sibling of useAttachmentImage: resolves the SAME three ref
+ * shapes (auth path, bare filename, absolute URL) into a renderable object
+ * URL, but additionally surfaces the blob's mime and the reference's
+ * filename so the caller can dispatch on attachmentKind() — image vs audio
+ * vs video vs text. Shares the one refcounted blob cache, so an image
+ * embedded both here and via useAttachmentImage is still fetched once.
+ *
+ * Kept as a separate hook (rather than refactoring useAttachmentImage to
+ * delegate) so the existing image path — used by the live editor preview —
+ * stays byte-identical and cannot regress.
+ */
+export function useAttachmentMedia(
+  src: string | undefined | null,
+  parent?: ImageUploadParent,
+): AttachmentMediaState {
+  const kind = useMemo(() => classifyAttachmentRef(src), [src])
+  const name = useMemo<string | null>(
+    () => (kind === 'name' && src ? attachmentBasename(src) : null),
+    [kind, src],
+  )
+
+  const [tick, setTick] = useState(0)
+  const [failedPath, setFailedPath] = useState<string | null>(null)
+
+  // Kick the manifest fetch for an unresolved filename reference.
+  useEffect(() => {
+    if (kind !== 'name' || !parent || !src) return
+    if (resolveAttachmentName(parent, src)) return
+    if (isAttachmentManifestLoaded(parent)) return
+    let active = true
+    void ensureAttachmentManifest(parent).then(() => {
+      if (active) setTick((v) => v + 1)
+    })
+    return () => {
+      active = false
+    }
+    // parent depended on via kind/id (a fresh object each render).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [kind, parent?.kind, parent?.id, src])
+
+  const nameRes = useMemo<{ url: string | null; pending: boolean }>(() => {
+    if (kind !== 'name') return { url: null, pending: false }
+    if (!parent || !src) return { url: null, pending: false }
+    const hit = resolveAttachmentName(parent, src)
+    if (hit) return { url: hit, pending: false }
+    return { url: null, pending: !isAttachmentManifestLoaded(parent) }
+    // tick forces a re-read of the module-level manifest cache.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [kind, parent?.kind, parent?.id, src, tick])
+
+  const fetchPath =
+    kind === 'auth' ? src ?? null : kind === 'name' ? nameRes.url : null
+
+  useEffect(() => {
+    if (!fetchPath) return
+    let active = true
+    const entry = acquire(fetchPath)
+    if (!entry.url) {
+      void entry.promise.then((u) => {
+        if (!active) return
+        if (u) setTick((v) => v + 1)
+        else setFailedPath(fetchPath)
+      })
+    }
+    return () => {
+      active = false
+      release(fetchPath)
+    }
+  }, [fetchPath])
+
+  const resolved = useMemo<{ url: string | null; mime: string | null }>(() => {
+    if (!fetchPath) return { url: null, mime: null }
+    const entry = cache.get(fetchPath)
+    return { url: entry?.url ?? null, mime: entry?.mime ?? null }
+    // tick forces a re-read once the fetch settles.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fetchPath, tick])
+
+  if (kind === 'empty') return { url: null, mime: null, name, loading: false }
+  if (kind === 'absolute') {
+    return { url: src ?? null, mime: null, name, loading: false }
+  }
+  if (kind === 'name' && !nameRes.url) {
+    return { url: null, mime: null, name, loading: nameRes.pending }
+  }
+  if (resolved.url) {
+    return { url: resolved.url, mime: resolved.mime, name, loading: false }
+  }
+  if (fetchPath && failedPath === fetchPath) {
+    return { url: null, mime: null, name, loading: false }
+  }
+  return { url: null, mime: null, name, loading: true }
 }

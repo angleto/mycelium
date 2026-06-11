@@ -296,6 +296,8 @@ export const it: Catalog = {
     previewError: 'Anteprima non disponibile.',
     previewTooLarge:
       'File troppo grande per l’anteprima (oltre 50 MiB) — usa Scarica.',
+    textTruncated:
+      'Anteprima troncata — scarica il file per il contenuto completo.',
     pdfMobileTitle: 'Anteprima PDF',
     pdfMobileHint:
       'I browser mobili non mostrano i PDF in modo affidabile inline. Aprilo in una nuova scheda.',

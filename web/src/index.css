@@ -2398,6 +2398,85 @@ button.btn--danger:hover {
   font-size: 0.9em;
 }
 
+/* `![]()` block media embeds. A lone-image paragraph is unwrapped to
+   .md-embed so a <figure>/<pre> sits in a clean block context (never
+   nested in a <p>). */
+.md-embed {
+  margin: 0.6em 0;
+}
+/* Image with an opt-in caption (the markdown title: ![alt](src "caption")). */
+.md-figure {
+  margin: 0;
+  display: inline-block;
+  max-width: 100%;
+}
+.md-figcaption {
+  margin-top: 0.3em;
+  font-size: 0.85em;
+  font-style: italic;
+  color: var(--text-muted, inherit);
+  text-align: center;
+}
+.md-media {
+  margin: 0;
+}
+.md-media--audio audio,
+.md-media--video video {
+  display: block;
+  max-width: 100%;
+}
+.md-media--audio audio {
+  width: min(100%, 28rem);
+}
+.md-media--video video {
+  max-height: 60vh;
+  border-radius: 6px;
+  background: #000;
+}
+/* Embedded text file: filename header + monospace (or rendered-markdown)
+   body, bounded so a long file scrolls in place instead of pushing the
+   note. */
+.md-media--text {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--surface-sunken, var(--surface));
+}
+.md-textfile__name {
+  display: block;
+  padding: 0.3em 0.6em;
+  font-size: 0.8em;
+  font-weight: 600;
+  font-family: var(--mono, monospace);
+  color: var(--text-muted, inherit);
+  background: var(--surface-2, rgba(0, 0, 0, 0.04));
+  border-bottom: 1px solid var(--border);
+}
+.md-textfile {
+  margin: 0;
+  max-height: 28rem;
+  overflow: auto;
+  padding: 0.6em 0.8em;
+  font-size: 0.85em;
+  line-height: 1.45;
+  white-space: pre;
+}
+.md-textfile code {
+  background: none;
+  padding: 0;
+  font-family: var(--mono, monospace);
+}
+.md-textfile__md {
+  max-height: 28rem;
+  overflow: auto;
+  padding: 0.2em 0.8em;
+}
+.md-textfile__more {
+  margin: 0;
+  padding: 0.3em 0.8em 0.5em;
+  font-size: 0.8em;
+}
+
 /* Attachment picker (editor toolbar → link an attachment). */
 .attref__backdrop {
   position: fixed;
@@ -3488,7 +3567,10 @@ button.btn--danger:hover {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.att__thumb--pdf {
+.att__thumb--pdf,
+.att__thumb--audio,
+.att__thumb--video,
+.att__thumb--text {
   width: 44px;
   height: 44px;
   display: inline-flex;
@@ -3500,6 +3582,10 @@ button.btn--danger:hover {
   letter-spacing: 0.04em;
   color: var(--accent, #b5179e);
   background: var(--surface-2, #f4f4f6);
+}
+.att__thumb--audio,
+.att__thumb--video {
+  font-size: 1.1rem;
 }
 .lightbox {
   position: fixed;
@@ -3546,6 +3632,40 @@ button.btn--danger:hover {
 }
 .lightbox__panel .btn--sm {
   align-self: flex-start;
+}
+.lightbox__panel audio {
+  width: min(70vw, 30rem);
+}
+/* Video preview spans the lightbox like the PDF iframe; transparent panel
+   so only the player chrome shows. */
+.lightbox__panel--video {
+  background: transparent;
+  padding: 0;
+}
+.lightbox__video {
+  max-width: min(100%, 1100px);
+  max-height: 90vh;
+  border-radius: 6px;
+  background: #000;
+  cursor: default;
+}
+/* Text preview: a wide scrollable monospace panel. */
+.lightbox__panel--text {
+  max-width: min(92vw, 56rem);
+  width: 100%;
+  align-items: stretch;
+}
+.lightbox__text {
+  margin: 0;
+  max-height: 70vh;
+  overflow: auto;
+  padding: 0.8em 1em;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  white-space: pre;
+  background: var(--surface-sunken, var(--surface));
+  border: 1px solid var(--border);
+  border-radius: 6px;
 }
 .mch__row {
   display: flex;

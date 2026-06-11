@@ -31,10 +31,14 @@ export function isAttachmentHref(href: string | null | undefined): href is strin
   return !!href && ATTACHMENT_HREF_RE.test(href)
 }
 
-// Types a browser can render inline (a new-tab blob view). Anything else
-// is downloaded instead. We key on the filename extension because the
-// markdown link only carries the name, not the mime.
-const PREVIEWABLE_EXT = /\.(pdf|png|jpe?g|gif|webp|svg|bmp)$/i
+// Extensions a browser can SAFELY render when an attachment link is opened
+// in a new tab. The tab navigates to a blob: object URL, which inherits the
+// app's origin — so an executable type (html, svg, xhtml) is deliberately
+// EXCLUDED to avoid stored-XSS, and downloaded instead. The backend's
+// inline-safe Content-Disposition allowlist mirrors this set. We key on the
+// filename extension because the markdown link only carries the name.
+const PREVIEWABLE_EXT =
+  /\.(pdf|png|jpe?g|jfif|gif|webp|bmp|ico|tiff?|avif|heic|heif|apng|mp3|wav|ogg|oga|opus|m4a|aac|flac|weba|mp4|m4v|webm|mov|ogv|txt|text|log|md|markdown|csv|tsv|json|yaml|yml|toml|ini)$/i
 
 function isPreviewable(name: string | undefined): boolean {
   return !!name && PREVIEWABLE_EXT.test(name)
