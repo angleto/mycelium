@@ -12,8 +12,13 @@ until their data source lands -- explicit, never a faked number:
 
   * ``time_to_first_link`` / ``tag_entropy_local`` / ``leiden_modularity``
     / ``density_delta_7d``: follow-up (graph + snapshot-history queries).
-  * ``recall_at_k``: blocked on search-click logs (the ``is_probe`` flag)
-    that do not exist yet.
+  * ``recall_at_k``: computed from the ``search_clicks`` log (task
+    89508ca9). Today the production ranking IS the held-out re-rank
+    (no learning loop trains on clicks yet, ADR-0037 pending), so the
+    metric is the fraction of real (non-probe) clicked queries whose
+    clicked node sat at rank 1 of the top-``RECALL_K``. When ADR-0037
+    lands, this computation must switch to the leave-one-out re-rank
+    the ADR specifies.
   * ``fungal_lag``: blocked on the decomposition pipeline (ADR-0039)
     emitting distillation notes.
 
@@ -38,10 +43,15 @@ from flow_core.models.classification_feedback import ClassificationFeedback
 from flow_core.models.garden_health import GardenHealthDaily
 from flow_core.models.note import Note
 from flow_core.models.note_link import NoteNoteLink
+from flow_core.models.search_click import SearchClick
 from flow_core.services import graph as graph_svc
 
 ACCEPT_RATE_FLOOR = 0.40
 TAG_ENTROPY_FLOOR = 1.2
+# Top-K window of the recall sensor: a click below this rank says the
+# ranking failed badly enough that "was it top-1?" is no longer the
+# interesting question, so it is excluded from the denominator.
+RECALL_K = 10
 
 # A human decision on a proposal. ``auto`` (the worker's system
 # promotion) is excluded so the ratio reflects what the *person* chose.
@@ -53,7 +63,7 @@ _NO_LINKS = "no note-to-note links yet"
 _NO_TAGGED_NEIGHBOURHOOD = "no linked neighbourhood carries a generic tag yet"
 _NO_CLUSTERS = "clustering unavailable (needs the optional extra, or >=1 community)"
 _NO_NOTES = "no notes yet"
-_RECALL_BLOCKED = "blocked: search-click logs (the is_probe flag) not captured yet"
+_NO_CLICKS = "no real (non-probe) search clicks in window yet"
 _FUNGAL_BLOCKED = "blocked: decomposition pipeline (ADR-0039) not emitting distillation notes yet"
 
 
@@ -113,6 +123,42 @@ async def _accept_rate(
     if not total:
         return None
     return round(accepted / total, 4)
+
+
+async def _recall_at_k(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    window_days: int,
+    now: datetime.datetime,
+    k: int = RECALL_K,
+) -> float | None:
+    """Fraction of real (non-probe) search clicks in the trailing window,
+    landing inside the top-``k``, whose clicked node was rank 1.
+
+    ADR-0035 defines recall over the *held-out re-rank*; until the
+    online-learning loop (ADR-0037) trains on clicks, the production
+    ranking and the leave-one-out re-rank are the same thing, so the
+    logged rank is the held-out rank. None when there were no real
+    clicks: an empty denominator is "no signal yet", not zero."""
+    since = now - datetime.timedelta(days=window_days)
+    row = (
+        await session.execute(
+            select(
+                func.count(),
+                func.count().filter(SearchClick.rank == 1),
+            ).where(
+                SearchClick.org_id == org_id,
+                SearchClick.is_probe.is_(False),
+                SearchClick.rank <= k,
+                SearchClick.ts >= since,
+            )
+        )
+    ).one()
+    total, top1 = int(row[0]), int(row[1])
+    if not total:
+        return None
+    return round(top1 / total, 4)
 
 
 async def _time_to_first_link(session: AsyncSession, *, org_id: uuid.UUID) -> float | None:
@@ -212,6 +258,7 @@ async def compute_health(
     now = now or _utcnow()
     r7 = await _accept_rate(session, org_id=org_id, window_days=7, now=now)
     r30 = await _accept_rate(session, org_id=org_id, window_days=30, now=now)
+    recall = await _recall_at_k(session, org_id=org_id, window_days=30, now=now)
     ttl = await _time_to_first_link(session, org_id=org_id)
     entropy = await graph_svc.compute_tag_neighborhood_entropy(session, org_id=org_id)
     modularity = (await graph_svc.compute_leiden_clusters(session, org_id=org_id)).modularity
@@ -224,7 +271,7 @@ async def compute_health(
             r30, ACCEPT_RATE_FLOOR, None if r30 is not None else _NO_DECISIONS
         ),
         time_to_first_link=Metric(ttl, None, None if ttl is not None else _NO_LINKS),
-        recall_at_k=Metric(None, None, _RECALL_BLOCKED),
+        recall_at_k=Metric(recall, None, None if recall is not None else _NO_CLICKS),
         tag_entropy_local=Metric(
             entropy,
             TAG_ENTROPY_FLOOR,

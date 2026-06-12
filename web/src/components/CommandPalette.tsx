@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { api, searchTasksByText, workspaceHeader } from '../api/client'
+import { api, logSearchClick, searchTasksByText, workspaceHeader } from '../api/client'
 import {
   isPrefixCandidate,
   lookupPrefix,
@@ -100,14 +100,20 @@ export function CommandPalette() {
   // Server-side TASK + NOTE hits, keyed by the query string they
   // resolved for (same staleness guard as idLookup). One /search call
   // returns both kinds; we split by kind into these two buckets.
+  // ``rank`` is the hit's 1-based position in the ORIGINAL ranked
+  // /search list (across kinds) and ``total`` its length: the click
+  // telemetry (ADR-0035 recall_at_k) needs the retrieval rank, not the
+  // visual row index after sectioning/merging.
   const [serverTasks, setServerTasks] = useState<{
     q: string
-    hits: { id: string; title: string }[]
-  }>({ q: '', hits: [] })
+    total: number
+    hits: { id: string; title: string; rank: number }[]
+  }>({ q: '', total: 0, hits: [] })
   const [serverNotes, setServerNotes] = useState<{
     q: string
-    hits: { id: string; title: string }[]
-  }>({ q: '', hits: [] })
+    total: number
+    hits: { id: string; title: string; rank: number }[]
+  }>({ q: '', total: 0, hits: [] })
   const inputRef = useRef<HTMLInputElement>(null)
 
   // Global hotkey: Cmd/Ctrl+K toggles, Escape closes. setState happens
@@ -134,8 +140,8 @@ export function CommandPalette() {
     setQ('')
     setSel(0)
     setIdLookup({ prefix: '', matches: [] })
-    setServerTasks({ q: '', hits: [] })
-    setServerNotes({ q: '', hits: [] })
+    setServerTasks({ q: '', total: 0, hits: [] })
+    setServerNotes({ q: '', total: 0, hits: [] })
   }
 
   // Load the title-search corpus once per open (async setState in the
@@ -188,17 +194,30 @@ export function CommandPalette() {
         .then((hits) => {
           if (ac.signal.aborted) return
           const key = needle.toLowerCase()
+          // Carry the original 1-based rank through the kind split so
+          // the click telemetry reports the retrieval rank.
+          const ranked = hits.map((h, i) => ({ ...h, rank: i + 1 }))
           setServerTasks({
             q: key,
-            hits: hits
+            total: hits.length,
+            hits: ranked
               .filter((h) => h.kind === 'task' && h.task_id)
-              .map((h) => ({ id: h.task_id as string, title: h.title ?? '' })),
+              .map((h) => ({
+                id: h.task_id as string,
+                title: h.title ?? '',
+                rank: h.rank,
+              })),
           })
           setServerNotes({
             q: key,
-            hits: hits
+            total: hits.length,
+            hits: ranked
               .filter((h) => h.kind === 'note' && h.note_id)
-              .map((h) => ({ id: h.note_id as string, title: h.title ?? '' })),
+              .map((h) => ({
+                id: h.note_id as string,
+                title: h.title ?? '',
+                rank: h.rank,
+              })),
           })
         })
         .catch(() => {
@@ -319,6 +338,26 @@ export function CommandPalette() {
   const needle = q.trim()
 
   const go = (r: Row) => {
+    // Click telemetry (ADR-0035 recall_at_k): only server-branch rows
+    // carry a retrieval rank, so only those are logged. The id branch
+    // (code lookup) and the instant client-side title filter are
+    // navigation aids, not ranked retrieval — logging them would skew
+    // the sensor. Row origin is encoded in the key prefix by rows().
+    const isServerRow = r.key.startsWith('s-') || r.key.startsWith('sn-')
+    const lowered = q.trim().toLowerCase()
+    if (isServerRow && lowered) {
+      const bucket = r.kind === 'task' ? serverTasks : serverNotes
+      const hit = bucket.q === lowered ? bucket.hits.find((h) => h.id === r.id) : undefined
+      if (hit) {
+        logSearchClick({
+          q: q.trim(),
+          hitKind: r.kind,
+          hitId: r.id,
+          rank: hit.rank,
+          resultCount: bucket.total,
+        })
+      }
+    }
     setOpen(false)
     pushRecent({ kind: r.kind, id: r.id, title: r.title, route: r.route })
     navigate(r.route)

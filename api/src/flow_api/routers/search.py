@@ -12,11 +12,12 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Response, status
 from pydantic import BaseModel, Field
 
 from flow_api.deps import TenantCtx, tenant_admin_ctx, tenant_ctx
-from flow_api.schemas import SearchHit, SearchIn
+from flow_api.schemas import SearchClickIn, SearchHit, SearchIn
+from flow_core.services import search_clicks as clicks_svc
 from flow_core.services import task_search as svc
 
 router = APIRouter(prefix="/search", tags=["search"])
@@ -55,6 +56,29 @@ async def search(
         )
         for h in hits
     ]
+
+
+@router.post("/click", status_code=status.HTTP_204_NO_CONTENT)
+async def log_click(
+    body: SearchClickIn,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+) -> Response:
+    """Record one search-result click (ADR-0035 ``recall_at_k``,
+    task 89508ca9): which query led to which entity, at which rank of
+    the shown top-K. Append-only telemetry, fire-and-forget from the
+    SPA; the nightly garden-health snapshot aggregates it."""
+    await clicks_svc.log_click(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        query=body.q,
+        hit_kind=body.hit_kind,
+        hit_id=body.hit_id,
+        rank=body.rank,
+        result_count=body.result_count,
+        is_probe=body.is_probe,
+    )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 class ReindexOut(BaseModel):

@@ -206,6 +206,34 @@ export type ServerSearchHit = {
   score: number
 }
 
+/** Fire-and-forget search-click telemetry (ADR-0035 recall_at_k):
+ * which query led the user to open which entity, at which 1-based rank
+ * of the ranked /search result list, out of how many ranked hits. The
+ * nightly garden-health snapshot aggregates these into the recall
+ * sensor. Errors are swallowed: telemetry must never break (or even
+ * delay) navigation. */
+export function logSearchClick(ev: {
+  q: string
+  hitKind: 'task' | 'note' | 'blob'
+  hitId: string
+  rank: number
+  resultCount: number
+}): void {
+  void authFetch('/search/click', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      q: ev.q,
+      hit_kind: ev.hitKind,
+      hit_id: ev.hitId,
+      rank: ev.rank,
+      result_count: ev.resultCount,
+    }),
+  }).catch(() => {
+    /* telemetry only */
+  })
+}
+
 export async function searchTasksByText(
   query: string,
   signal?: AbortSignal,

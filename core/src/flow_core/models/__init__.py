@@ -118,6 +118,11 @@ from flow_core.models.schedule import Schedule
 from flow_core.models.sdi_mandate import SdiMandate, SdiMandateStatus
 from flow_core.models.sdi_notification import InvoiceNotification, ReceivedInvoiceNotification
 from flow_core.models.sdi_received import ReceivedInvoice
+from flow_core.models.search_click import (
+    SEARCH_CLICK_KINDS,
+    SEARCH_CLICK_QUERY_MAX,
+    SearchClick,
+)
 from flow_core.models.tag import Tag, TagKind
 from flow_core.models.tag_scope import TagScope
 from flow_core.models.task import (
@@ -151,6 +156,8 @@ __all__ = [
     "DEFAULT_AUTONOMOUS_DISPATCH",
     "NOTE_NOTE_LINK_KINDS",
     "NOTE_TASK_LINK_KINDS",
+    "SEARCH_CLICK_KINDS",
+    "SEARCH_CLICK_QUERY_MAX",
     "ActivityLog",
     "Adjudication",
     "AdjudicationStatus",
@@ -245,6 +252,7 @@ __all__ = [
     "SdiMandateStatus",
     "SdiStatus",
     "SdiTransmissionCounter",
+    "SearchClick",
     "StorageKind",
     "StorageRate",
     "Tag",

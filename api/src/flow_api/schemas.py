@@ -2984,3 +2984,18 @@ class SearchHit(BaseModel):
     snippet: str | None = None
     score: float
     tags: list[TagBrief] = Field(default_factory=list)
+
+
+class SearchClickIn(BaseModel):
+    """One search-result click event (ADR-0035 ``recall_at_k``,
+    task 89508ca9). ``rank`` is the clicked hit's 1-based position in
+    the ranked list the user saw; ``result_count`` is how many ranked
+    hits were shown. ``is_probe`` marks synthetic golden-fixture
+    queries so the recall sensor reads real queries only."""
+
+    q: str = Field(min_length=1, max_length=500)
+    hit_kind: str  # 'task' | 'note' | 'blob'
+    hit_id: uuid.UUID
+    rank: int = Field(ge=1)
+    result_count: int = Field(ge=1)
+    is_probe: bool = False
