@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { api, errMessage, workspaceHeader } from '../api/client'
 import { useSession } from '../auth/useSession'
 import { kindGlyph } from '../lib/tagGlyph'
+import { readableOn } from '../lib/color'
 import { useFocus } from '../lib/focus'
 import { useWorkflowStates } from '../lib/useWorkflowStates'
 import { formatDueDate } from '../lib/time'
@@ -320,7 +321,11 @@ export function GraphRoute() {
             const color = g.color || undefined
             const style: CSSProperties = on
               ? color
-                ? { background: color, borderColor: color, color: '#fff' }
+                ? {
+                    background: color,
+                    borderColor: color,
+                    color: readableOn(color),
+                  }
                 : {}
               : color
                 ? { borderColor: `${color}66` }
@@ -346,7 +351,12 @@ export function GraphRoute() {
               >
                 <span
                   className="chip__glyph"
-                  style={{ color: color || 'currentColor' }}
+                  style={{
+                    // ON the chip is FILLED with the tag color: the
+                    // glyph must use the chip's computed foreground,
+                    // or it melts into its own background.
+                    color: on ? 'currentColor' : color || 'currentColor',
+                  }}
                   aria-hidden="true"
                 >
                   {kindGlyph(g.kind)}

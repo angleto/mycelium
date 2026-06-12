@@ -27,7 +27,14 @@
   font: 15px/1.5 var(--sans);
   color: var(--text);
   background: var(--bg);
-  color-scheme: light dark;
+  /* Native widgets (datetime/date/time fields, select popups,
+     scrollbars) must follow the APPLIED palette, not the OS: with
+     ``light dark`` the browser resolved the scheme from the OS
+     preference, so forcing the app theme opposite to the OS rendered
+     native input text black-on-black (dark app, light OS) or
+     white-on-white (light app, dark OS). Each palette block below
+     pins its own scheme. */
+  color-scheme: light;
   -webkit-font-smoothing: antialiased;
 }
 
@@ -38,6 +45,7 @@
    query is the only way to read the system preference; keep the two
    copies in sync. */
 :root[data-theme='dark'] {
+  color-scheme: dark;
   --bg: #0f1612;
   --surface: #161e18;
   --surface-2: #1f2820;
@@ -60,6 +68,7 @@
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme='light']):not([data-theme='dark']) {
+    color-scheme: dark;
     --bg: #0f1612;
     --surface: #161e18;
     --surface-2: #1f2820;
@@ -870,7 +879,7 @@ button.btn--danger:hover {
 }
 .toggle-pill--on {
   background: var(--accent);
-  color: var(--accent-fg, #fff);
+  color: var(--accent-fg);
   border-color: var(--accent);
 }
 .toggle-pill:hover { border-color: var(--accent); }
@@ -2345,7 +2354,7 @@ button.btn--danger:hover {
 }
 .rte__fmt--on {
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-fg);
   border-color: var(--accent);
 }
 .rte__raw {
@@ -2711,7 +2720,7 @@ button.btn--danger:hover {
 .viewtabs__tab + .viewtabs__tab { border-left: 1px solid var(--border); }
 .viewtabs__tab--active {
   background: var(--accent);
-  color: var(--accent-contrast, #fff);
+  color: var(--accent-fg);
   font-weight: 600;
 }
 
@@ -4160,7 +4169,7 @@ button.btn--danger:hover {
 }
 .garden__tab--active {
   background: var(--accent);
-  color: var(--surface);
+  color: var(--accent-fg);
   border-color: var(--accent);
 }
 .garden__tab-count {

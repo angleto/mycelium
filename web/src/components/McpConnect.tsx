@@ -257,7 +257,7 @@ export function McpConnect() {
           </button>
           <pre
             style={{
-              background: 'var(--color-code-bg, #f6f8fa)',
+              background: 'var(--surface-2)',
               padding: '0.6rem',
               borderRadius: 4,
               overflow: 'auto',

@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { kindGlyph } from '../lib/tagGlyph'
+import { readableOn } from '../lib/color'
 import type { components } from '../api/schema'
 
 type Tag = components['schemas']['TagOut']
@@ -95,7 +96,7 @@ export function TagPickerGrid({
                   ? {
                       background: color,
                       borderColor: color,
-                      color: '#fff',
+                      color: readableOn(color),
                     }
                   : {}
                 : color
@@ -115,7 +116,12 @@ export function TagPickerGrid({
                 >
                   <span
                     className="chip__glyph"
-                    style={{ color: color || 'currentColor' }}
+                    style={{
+                      // ON the chip is FILLED with the tag color: the
+                      // glyph must use the chip's computed foreground,
+                      // or it melts into its own background.
+                      color: on ? 'currentColor' : color || 'currentColor',
+                    }}
                     aria-hidden="true"
                   >
                     {kindGlyph(g.kind)}
