@@ -871,6 +871,9 @@ export const it: Catalog = {
       tagEdges: 'Mostra collegamenti per tag in comune',
       showCentrality: 'Mostra centralità',
       showEdgeWeights: 'Mostra peso archi',
+      clusterColors: 'Colora per comunità',
+      clusterColorsUnavailable:
+        'Comunità non ancora calcolate (clustering non disponibile sul server)',
       replant: 'Ridisponi',
       replantHint: 'Ricalcola la disposizione e riquadra la vista',
       replantConfirm:

@@ -871,6 +871,9 @@ export const en = {
       tagEdges: 'Show shared-tag links',
       showCentrality: 'Show centrality',
       showEdgeWeights: 'Show edge weights',
+      clusterColors: 'Color by community',
+      clusterColorsUnavailable:
+        'Communities not computed yet (clustering not available on the server)',
       replant: 'Re-plant',
       replantHint: 'Recompute the layout and reframe the view',
       replantConfirm:

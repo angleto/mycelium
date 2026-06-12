@@ -82,6 +82,16 @@ const LINK_COLOR: Record<LinkKind, string> = {
 
 const MAX_TAG_DOTS = 4
 
+// Deterministic colour per Leiden community (ADR-0031 v2): golden-angle
+// hue walk so consecutive cluster ids land far apart on the wheel.
+// Mid saturation/lightness reads as a border accent on both themes;
+// the node text never sits directly on this colour (the background
+// only takes a light color-mix tint), so contrast is theme-safe.
+function clusterColorFor(cluster: number): string {
+  const hue = Math.round((cluster * 137.508) % 360)
+  return `hsl(${hue}, 60%, 46%)`
+}
+
 interface PlantNodeData extends Record<string, unknown> {
   note: Note
   tagDots: TagBrief[]
@@ -91,6 +101,9 @@ interface PlantNodeData extends Record<string, unknown> {
   degree: number
   entropy: number
   centrality: number | null
+  // Leiden community colour (toggle-gated): border + light tint.
+  // null = toggle off, or note not in any computed cluster.
+  clusterColor: string | null
   walkStep: number | null
   isWalkSeed: boolean
   // Focus+context overlay (render-only): set by the displayNodes
@@ -110,6 +123,7 @@ function PlantNode({ data }: NodeProps<Node<PlantNodeData>>) {
     degree,
     entropy,
     centrality,
+    clusterColor,
     walkStep,
     isWalkSeed,
     focusState,
@@ -138,6 +152,13 @@ function PlantNode({ data }: NodeProps<Node<PlantNodeData>>) {
   }
   if (haloRadius > 0) {
     style.boxShadow = `0 0 ${haloRadius}px color-mix(in srgb, var(--bloom) ${haloMix}%, transparent)`
+  }
+  if (clusterColor) {
+    // Border carries the community signal; the background takes only
+    // a light tint over the theme surface so var(--text) stays
+    // readable in both themes (see feedback on theme contrast).
+    style.borderColor = clusterColor
+    style.background = `color-mix(in srgb, ${clusterColor} 14%, var(--surface-2))`
   }
   return (
     <div
@@ -602,6 +623,10 @@ function GardenMindmapInner({ notes, workspaceId, onOpenNote }: GardenMindmapPro
   const [showTagEdges, setShowTagEdges] = useState(false)
   const [showCentrality, setShowCentrality] = useState(false)
   const [showEdgeWeights, setShowEdgeWeights] = useState(false)
+  // Colour nodes by Leiden community (ADR-0031 v2 upgrade). Off by
+  // default: the tag dots already carry colour, and the cluster layer
+  // is an analysis lens, not the resting look.
+  const [colorByCluster, setColorByCluster] = useState(false)
   const [centrality, setCentrality] = useState<Record<string, number>>({})
   const [edgeWeightMap, setEdgeWeightMap] = useState<Record<string, number>>({})
   // Leiden communities from /garden/clusters (task 8c0a8f08). Empty when
@@ -869,6 +894,7 @@ function GardenMindmapInner({ notes, workspaceId, onOpenNote }: GardenMindmapPro
           degree: degreeByNode.get(n.id) ?? 0,
           entropy: entropyByNode.get(n.id) ?? 0,
           centrality: null,
+          clusterColor: null,
           walkStep: null,
           isWalkSeed: false,
           onOpen: onOpenNote,
@@ -953,6 +979,10 @@ function GardenMindmapInner({ notes, workspaceId, onOpenNote }: GardenMindmapPro
             degree: degreeByNode.get(n.id) ?? 0,
             entropy: entropyByNode.get(n.id) ?? 0,
             centrality: showCentrality ? (centrality[n.id] ?? 0) : null,
+            clusterColor:
+              colorByCluster && clusters[n.id] != null
+                ? clusterColorFor(clusters[n.id])
+                : null,
             walkStep: walkPath[n.id] ?? null,
             isWalkSeed: walkSeed === n.id,
             onOpen: onOpenNote,
@@ -978,6 +1008,7 @@ function GardenMindmapInner({ notes, workspaceId, onOpenNote }: GardenMindmapPro
     centralityMap,
     clusters,
     clusterKeyFor,
+    colorByCluster,
     walkPath,
     walkSeed,
   ])
@@ -1548,6 +1579,22 @@ function GardenMindmapInner({ notes, workspaceId, onOpenNote }: GardenMindmapPro
           />
           <span>{t('garden.mindmap.showEdgeWeights')}</span>
         </label>
+        <label
+          className="garden__mindmap-toggle"
+          title={
+            Object.keys(clusters).length === 0
+              ? t('garden.mindmap.clusterColorsUnavailable')
+              : undefined
+          }
+        >
+          <input
+            type="checkbox"
+            checked={colorByCluster}
+            disabled={Object.keys(clusters).length === 0}
+            onChange={(e) => setColorByCluster(e.target.checked)}
+          />
+          <span>{t('garden.mindmap.clusterColors')}</span>
+        </label>
         <select
           value={walkMode}
           onChange={(e) =>
@@ -1671,6 +1718,7 @@ function GardenMindmapInner({ notes, workspaceId, onOpenNote }: GardenMindmapPro
               nodeColor={(n) => {
                 const data = n.data as PlantNodeData | undefined
                 if (data?.dimmed) return 'var(--muted)'
+                if (data?.clusterColor) return data.clusterColor
                 const first = data?.tagDots?.[0]
                 return first?.color || 'var(--moss)'
               }}
