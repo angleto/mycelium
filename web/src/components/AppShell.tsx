@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { api, workspaceHeader } from '../api/client'
+import { api, errMessage, workspaceHeader } from '../api/client'
 import {
   clearSession,
   getSession,
@@ -20,7 +20,7 @@ import { Icon, type IconName } from './NavIcon'
 import { ThemeToggle } from './ThemeToggle'
 import { PomodoroTimer } from './PomodoroTimer'
 import { hms, activeElapsedSec, isPaused } from '../lib/time'
-import { useRunningTimers } from '../lib/useRunningTimer'
+import { useRunningTimers, refreshRunning } from '../lib/useRunningTimer'
 import { parseMentionHref, routeForMention } from '../lib/mentions'
 import {
   isAttachmentHref,
@@ -150,24 +150,28 @@ function ProjectFocus() {
 
 // Top-bar running indicator. One timer: spinner + title + live
 // elapsed. Several: cycles every 5s through them showing "i/n", the
-// task title (scrolling) and that timer's live elapsed. State comes
-// from the shared server-authoritative source (useRunningTimers),
-// which resyncs on resume from lid-close / reconnect / tab-switch.
+// task title (scrolling) and that timer's live elapsed. The title +
+// elapsed are a link to the task currently shown; clicking the "i/n"
+// badge advances to the next timer (wrapping) instead of navigating;
+// the trailing ⏸/▶ and ■ controls pause/resume/stop the shown timer
+// with the same server calls as TaskTimer. State comes from the
+// shared server-authoritative source (useRunningTimers), which
+// resyncs on resume from lid-close / reconnect / tab-switch.
 function RunningIndicator() {
   const { t } = useTranslation()
   const { running: runs, now } = useRunningTimers()
   const [idx, setIdx] = useState(0)
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
 
-  // Cycle through the running entries every 5s when there is >1.
-  // (idx is bounded at render via safeIdx, so no reset needed here.)
+  // Auto-advance every 5s when there is >1. Keyed on idx so a manual
+  // advance (badge click) re-arms the full 5s window before the next
+  // automatic step. (idx is bounded at render via safeIdx.)
   useEffect(() => {
     if (runs.length <= 1) return
-    const c = setInterval(
-      () => setIdx((i) => (i + 1) % runs.length),
-      5000,
-    )
-    return () => clearInterval(c)
-  }, [runs.length])
+    const c = setTimeout(() => setIdx((i) => (i + 1) % runs.length), 5000)
+    return () => clearTimeout(c)
+  }, [runs.length, idx])
 
   if (runs.length === 0) return null
   const ordered = [...runs].sort(
@@ -182,28 +186,89 @@ function RunningIndicator() {
   // task — and fell back to the raw UUID prefix in the chip.
   const title = cur.task_title ?? cur.task_id.slice(0, 8)
   const paused = isPaused(cur)
+
+  // Same server-authoritative protocol as TaskTimer: POST, then
+  // reconcile via refreshRunning() so every consumer (this chip, the
+  // TaskTimers) reflects server truth.
+  async function stop() {
+    setBusy(true)
+    setErr(null)
+    const { error } = await api.POST('/time/stop', {
+      params: { header: workspaceHeader() },
+      body: { task_id: cur.task_id },
+    })
+    setBusy(false)
+    if (error) setErr(errMessage(error))
+    await refreshRunning()
+  }
+
+  async function pauseOrResume() {
+    setBusy(true)
+    setErr(null)
+    const { error } = await api.POST(paused ? '/time/resume' : '/time/pause', {
+      params: { header: workspaceHeader() },
+      body: { task_id: cur.task_id },
+    })
+    setBusy(false)
+    if (error) setErr(errMessage(error))
+    await refreshRunning()
+  }
+
   return (
-    <Link
-      to="/time"
-      className="running"
-      title={t('time.runningNow')}
-      aria-label={t('time.runningNow')}
-    >
+    <span className="running">
       <span
         className={paused ? 'running__spin is-paused' : 'running__spin'}
         aria-hidden="true"
       />
-      <span className="running__n">
-        {safeIdx + 1}/{ordered.length}
-      </span>
-      <span className="running__title">
-        <span>{title}</span>
-      </span>
-      <span className="running__t">
-        {paused ? '⏸ ' : ''}
-        {hms(activeElapsedSec(cur, now))}
-      </span>
-    </Link>
+      {ordered.length > 1 ? (
+        <button
+          type="button"
+          className="running__n"
+          title={t('time.nextTimer')}
+          aria-label={t('time.nextTimer')}
+          onClick={() => setIdx((safeIdx + 1) % ordered.length)}
+        >
+          {safeIdx + 1}/{ordered.length}
+        </button>
+      ) : (
+        <span className="running__n">1/1</span>
+      )}
+      <Link
+        to={`/tasks/${cur.task_id}`}
+        className="running__link"
+        title={t('time.runningNow')}
+        aria-label={t('time.runningNow')}
+      >
+        <span className="running__title">
+          <span>{title}</span>
+        </span>
+        <span className="running__t">
+          {paused ? '⏸ ' : ''}
+          {hms(activeElapsedSec(cur, now))}
+        </span>
+      </Link>
+      <button
+        type="button"
+        className="running__ctl"
+        disabled={busy}
+        title={paused ? t('time.resume') : t('time.pause')}
+        aria-label={paused ? t('time.resume') : t('time.pause')}
+        onClick={() => void pauseOrResume()}
+      >
+        {paused ? '▶' : '⏸'}
+      </button>
+      <button
+        type="button"
+        className="running__ctl"
+        disabled={busy}
+        title={t('time.stop')}
+        aria-label={t('time.stop')}
+        onClick={() => void stop()}
+      >
+        ■
+      </button>
+      {err && <span className="err">{err}</span>}
+    </span>
   )
 }
 

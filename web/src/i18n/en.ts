@@ -1277,6 +1277,7 @@ export const en = {
     pause: 'Pause',
     resume: 'Resume',
     runningNow: 'Running now',
+    nextTimer: 'Next timer',
     serial: 'serial',
     parallel: 'parallel',
     startSerial: 'Start',

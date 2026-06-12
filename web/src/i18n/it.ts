@@ -1277,6 +1277,7 @@ export const it: Catalog = {
     pause: 'Pausa',
     resume: 'Riprendi',
     runningNow: 'In esecuzione',
+    nextTimer: 'Timer successivo',
     serial: 'seriale',
     parallel: 'parallelo',
     startSerial: 'Avvia',
