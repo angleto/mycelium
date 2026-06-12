@@ -403,6 +403,173 @@ async def test_voice_transcription_failure_tells_user(_fake_tg: FakeTelegramApi)
     assert outcome.note_id is not None
 
 
+# ---------------------------------------------------------------------------
+# Voice happy path: caption-driven note/task routing (task 44ba3f14,
+# tests task bf0cc9d1). Runs with the deterministic FakeSTT and seeded
+# billing (transcription is metered via the strict ``meter``).
+# ---------------------------------------------------------------------------
+
+
+async def _linked_user(_fake_tg: FakeTelegramApi) -> tuple[uuid.UUID, uuid.UUID, int]:
+    """Signup + mint + redeem: a user with a linked Telegram chat and a
+    staged fake voice file (file_id ``vf1``)."""
+    org, user = await _signup()
+    async with tenant_session(str(org), str(user)) as s:
+        issued = await svc.create_link_code(
+            s, org_id=org, user_id=user, bot_username="flow_test_bot"
+        )
+    chat_id = uuid.uuid4().int & 0xFFFFFFFF
+    await svc.handle_webhook_update(
+        _start_update(update_id=_uid(), code=issued.code, chat_id=chat_id)
+    )
+    _fake_tg.files["voice/vf1.oga"] = b"fake-ogg-bytes"
+    return org, user, chat_id
+
+
+async def _seed_stt_billing(org: uuid.UUID, user: uuid.UUID) -> None:
+    """Credits + a fake-stt rate card: ``notes.transcribe`` meters via
+    the strict ``billing.meter``, which errors on a missing card."""
+    from decimal import Decimal
+
+    from flow_core.services import billing
+
+    async with tenant_session(str(org), str(user)) as s:
+        await billing.grant_credits(s, org_id=org, actor_id=user, amount=Decimal(1000))
+        await billing.upsert_rate_card(
+            s,
+            org_id=org,
+            actor_id=user,
+            model_id="fake-stt",
+            provider="local",
+            values={
+                "credits_per_input": Decimal("0.001"),
+                "credits_per_output": Decimal("0.001"),
+            },
+        )
+
+
+@pytest.fixture
+def _fake_stt() -> Iterator[None]:
+    from _fake_ai import FakeSTT
+
+    from flow_core.ai_providers import set_stt_override
+
+    set_stt_override(FakeSTT)
+    try:
+        yield
+    finally:
+        set_stt_override(None)
+
+
+async def test_voice_without_caption_creates_voice_note_with_transcript(
+    _fake_tg: FakeTelegramApi, _fake_stt: None
+) -> None:
+    from flow_core.models.note import NoteKind, NoteStatus
+    from flow_core.services.notes import get_body
+
+    org, user, chat_id = await _linked_user(_fake_tg)
+    await _seed_stt_billing(org, user)
+
+    outcome = await svc.handle_webhook_update(
+        _voice_update(update_id=_uid(), chat_id=chat_id, file_id="vf1")
+    )
+    assert outcome.note_id is not None and outcome.task_id is None
+    assert outcome.reply_text is not None
+    assert "transcription is unavailable" not in outcome.reply_text
+    async with tenant_session(str(org), str(user)) as s:
+        note = (await s.execute(select(Note).where(Note.id == outcome.note_id))).scalar_one()
+        assert note.kind is NoteKind.voice
+        assert note.status is NoteStatus.ready
+        assert note.audio_ref is not None and note.audio_ref.startswith("attachment:")
+        assert note.promoted_at is None
+        # FakeSTT transcript lands in note_part(ord=0).
+        assert (await get_body(s, note_id=note.id)) == f"transcript of {note.audio_ref}"
+
+
+@pytest.mark.parametrize(
+    "caption",
+    ["task: Comprare il latte", "t: Comprare il latte", "/task Comprare il latte"],
+)
+async def test_voice_caption_task_prefix_promotes_to_task(
+    _fake_tg: FakeTelegramApi, _fake_stt: None, caption: str
+) -> None:
+    org, user, chat_id = await _linked_user(_fake_tg)
+    await _seed_stt_billing(org, user)
+
+    outcome = await svc.handle_webhook_update(
+        _voice_update(update_id=_uid(), chat_id=chat_id, file_id="vf1", caption=caption)
+    )
+    assert outcome.task_id is not None
+    async with tenant_session(str(org), str(user)) as s:
+        task = (await s.execute(select(Task).where(Task.id == outcome.task_id))).scalar_one()
+        # The routing prefix is stripped; the rest is the title hint.
+        assert task.title == "Comprare il latte"
+        # The voice note survives as the promoted source of the task.
+        notes = (await s.execute(select(Note))).scalars().all()
+        promoted = [n for n in notes if n.promoted_at is not None]
+        assert len(promoted) == 1
+
+
+async def test_voice_caption_bare_task_titles_from_transcript_first_line(
+    _fake_tg: FakeTelegramApi, _fake_stt: None
+) -> None:
+    org, user, chat_id = await _linked_user(_fake_tg)
+    await _seed_stt_billing(org, user)
+
+    outcome = await svc.handle_webhook_update(
+        _voice_update(update_id=_uid(), chat_id=chat_id, file_id="vf1", caption="task")
+    )
+    assert outcome.task_id is not None
+    async with tenant_session(str(org), str(user)) as s:
+        task = (await s.execute(select(Task).where(Task.id == outcome.task_id))).scalar_one()
+        # No title in the caption -> first transcript line wins.
+        assert task.title.startswith("transcript of attachment:")
+
+
+async def test_voice_caption_task_without_transcript_uses_placeholder(
+    _fake_tg: FakeTelegramApi,
+) -> None:
+    """STT down + caption ``task`` with no title text: the promotion
+    still happens (the task is the user's explicit intent) and the
+    title falls back to the generic placeholder."""
+    from flow_core.ai_providers import set_stt_override
+
+    class _RaisingSTT:
+        model_id = "raising-stt"
+
+        async def transcribe(self, **_: object) -> object:
+            raise RuntimeError("STT unavailable")
+
+    org, user, chat_id = await _linked_user(_fake_tg)
+
+    set_stt_override(lambda: _RaisingSTT())  # type: ignore[arg-type,return-value]
+    try:
+        outcome = await svc.handle_webhook_update(
+            _voice_update(update_id=_uid(), chat_id=chat_id, file_id="vf1", caption="task")
+        )
+    finally:
+        set_stt_override(None)
+
+    assert outcome.task_id is not None
+    async with tenant_session(str(org), str(user)) as s:
+        task = (await s.execute(select(Task).where(Task.id == outcome.task_id))).scalar_one()
+        assert task.title == "Voice task from Telegram"
+
+
+async def test_voice_caption_without_prefix_stays_note(
+    _fake_tg: FakeTelegramApi, _fake_stt: None
+) -> None:
+    org, user, chat_id = await _linked_user(_fake_tg)
+    await _seed_stt_billing(org, user)
+
+    outcome = await svc.handle_webhook_update(
+        _voice_update(update_id=_uid(), chat_id=chat_id, file_id="vf1", caption="promemoria latte")
+    )
+    # A caption that does not start with a task prefix must never
+    # promote: the clip stays a plain voice note.
+    assert outcome.note_id is not None and outcome.task_id is None
+
+
 async def test_telegram_notification_sender_calls_api(_fake_tg: FakeTelegramApi) -> None:
     from flow_core.services.notifications_telegram import TelegramNotificationSender
 
