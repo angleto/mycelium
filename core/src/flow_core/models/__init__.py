@@ -62,6 +62,7 @@ from flow_core.models.email import (
 )
 from flow_core.models.entity_revision import EntityRevision
 from flow_core.models.executor import Executor, ExecutorKind
+from flow_core.models.garden_graph_snapshot import GardenGraphSnapshot
 from flow_core.models.garden_health import GardenHealthDaily
 from flow_core.models.google_calendar import (
     CalendarSubscription,
@@ -199,6 +200,7 @@ __all__ = [
     "ExecKind",
     "Executor",
     "ExecutorKind",
+    "GardenGraphSnapshot",
     "GardenHealthDaily",
     "GoogleCalendarStatus",
     "HandoffStatus",

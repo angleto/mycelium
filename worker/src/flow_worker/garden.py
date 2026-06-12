@@ -29,7 +29,7 @@ from flow_core.config import get_settings
 from flow_core.db import admin_session, tenant_session
 from flow_core.models.membership import Membership, Role
 from flow_core.models.organization import Organization
-from flow_core.services import garden_classify, garden_health, note_links
+from flow_core.services import garden_classify, garden_health, graph_snapshot, note_links
 
 _log = logging.getLogger("flow.worker.garden")
 
@@ -93,6 +93,16 @@ async def run_once() -> int:
                     await garden_health.persist_snapshot(hs, org_id=org_id)
             except Exception:
                 _log.exception("garden health snapshot failed for org=%s", org_id)
+            # Graph-analytics materialisation (task d8664631): PageRank +
+            # Leiden + betweenness into garden_graph_snapshot. Signature-
+            # gated, so an unchanged graph costs three COUNT queries; only
+            # a real change pays the O(V·E) betweenness. Own session for
+            # the same failure-isolation reason as the health snapshot.
+            try:
+                async with tenant_session(str(org_id), str(owner), actor_kind="system") as gs:
+                    await graph_snapshot.refresh_graph_snapshot(gs, org_id=org_id)
+            except Exception:
+                _log.exception("graph snapshot refresh failed for org=%s", org_id)
             n = sum(counters.values()) + auto_matured
             if n > 0:
                 _log.info(

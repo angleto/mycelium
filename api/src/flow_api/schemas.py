@@ -1000,10 +1000,20 @@ class GardenGraphOut(BaseModel):
     """Response of GET /garden/graph: edges + centrality in one
     payload. ``centrality`` is a ``{note_id: pagerank}`` map summing
     to 1 across the workspace; an empty workspace returns ``[]`` and
-    ``{}`` respectively."""
+    ``{}`` respectively.
+
+    Phase 2 (task d8664631): ``betweenness`` is the cluster-bridge
+    centrality served from the worker-materialised snapshot (empty
+    until the first refresh; ``analytics_computed_at`` is its age).
+    ``recency`` is the separate freshness axis (``exp(-age/tau)`` per
+    note, computed live) consumers combine with centrality to counter
+    the cold start of new, not-yet-linked notes."""
 
     edges: list[GardenGraphEdge]
     centrality: dict[uuid.UUID, float]
+    betweenness: dict[uuid.UUID, float] = Field(default_factory=dict)
+    recency: dict[uuid.UUID, float] = Field(default_factory=dict)
+    analytics_computed_at: datetime.datetime | None = None
 
 
 class GardenClustersOut(BaseModel):

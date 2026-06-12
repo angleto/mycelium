@@ -36,10 +36,11 @@ volume.
 
 from __future__ import annotations
 
+import datetime
 import math
 import random
 import uuid
-from collections import defaultdict
+from collections import defaultdict, deque
 from collections.abc import Iterable
 from dataclasses import dataclass
 
@@ -443,6 +444,102 @@ async def compute_personalized_pagerank(
     return {nodes[i]: rank[i] for i in range(n)}
 
 
+async def compute_betweenness(
+    session: AsyncSession, *, org_id: uuid.UUID
+) -> dict[uuid.UUID, float]:
+    """Betweenness centrality over the org's note weave (task d8664631,
+    Phase 2 of 8c0a8f08): the cluster-bridge detector. A note that sits
+    on many shortest paths between other notes is a bridge between
+    glades, even when its PageRank is unremarkable.
+
+    Brandes' algorithm over the UNDIRECTED edge set of
+    ``compute_note_edge_weights``, traversed unweighted: bridges are a
+    structural property of the weave's topology, and the weights
+    already shape PageRank (their own axis). Pure Python, deterministic
+    (sorted traversal order), O(V·E): too slow for the request path on
+    a grown garden, which is exactly why the worker computes it offline
+    into ``garden_graph_snapshot`` and the API serves the stored copy.
+
+    Values are normalised to [0, 1] by ``(n-1)(n-2)`` (the undirected
+    pair count times two, folding Brandes' double count), with ``n``
+    the number of connected notes. Isolated notes are omitted (their
+    betweenness is zero by definition).
+    """
+    edges = await compute_note_edge_weights(session, org_id=org_id)
+    adj: dict[uuid.UUID, list[uuid.UUID]] = defaultdict(list)
+    for e in edges:
+        if e.src == e.dst or e.weight <= 0:
+            continue
+        adj[e.src].append(e.dst)
+        adj[e.dst].append(e.src)
+    nodes = sorted(adj.keys(), key=str)
+    n = len(nodes)
+    if n < 3:
+        return dict.fromkeys(nodes, 0.0)
+    bc: dict[uuid.UUID, float] = dict.fromkeys(nodes, 0.0)
+    for s in nodes:
+        # BFS phase: shortest-path counts (sigma) + predecessor DAG.
+        stack: list[uuid.UUID] = []
+        pred: dict[uuid.UUID, list[uuid.UUID]] = defaultdict(list)
+        sigma: dict[uuid.UUID, float] = defaultdict(float)
+        sigma[s] = 1.0
+        dist: dict[uuid.UUID, int] = {s: 0}
+        queue: deque[uuid.UUID] = deque([s])
+        while queue:
+            v = queue.popleft()
+            stack.append(v)
+            for w in adj[v]:
+                if w not in dist:
+                    dist[w] = dist[v] + 1
+                    queue.append(w)
+                if dist[w] == dist[v] + 1:
+                    sigma[w] += sigma[v]
+                    pred[w].append(v)
+        # Accumulation phase: dependency back-propagation.
+        delta: dict[uuid.UUID, float] = defaultdict(float)
+        while stack:
+            w = stack.pop()
+            for v in pred[w]:
+                delta[v] += (sigma[v] / sigma[w]) * (1.0 + delta[w])
+            if w != s:
+                bc[w] += delta[w]
+    norm = float((n - 1) * (n - 2))
+    return {v: round(bc[v] / norm, 6) for v in nodes}
+
+
+# Recency half-feel: a note keeps ~37% of its boost after this many
+# days. Two weeks matches the garden's seasonal cadence (the maturity
+# sweep's seed->growing window).
+RECENCY_TAU_DAYS = 14.0
+
+
+async def compute_recency(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    now: datetime.datetime | None = None,
+) -> dict[uuid.UUID, float]:
+    """Exponential freshness per note: ``exp(-age_days / tau)``, 1.0 at
+    creation decaying toward 0. Deliberately a SEPARATE axis from
+    centrality (task d8664631): folding it into PageRank would let
+    novelty masquerade as importance and skew every centrality
+    consumer (sensors included). Consumers that want to counter the
+    cold start (a brand-new note has no links, hence no centrality)
+    combine the two explicitly. Pure function of ``created_at``: cheap
+    to compute live, nothing to materialise."""
+    now = now or datetime.datetime.now(datetime.UTC)
+    rows = (
+        await session.execute(
+            select(Note.id, Note.created_at).where(Note.org_id == org_id, Note.deleted_at.is_(None))
+        )
+    ).all()
+    out: dict[uuid.UUID, float] = {}
+    for nid, created in rows:
+        age_days = max(0.0, (now - created).total_seconds() / 86400.0)
+        out[nid] = round(math.exp(-age_days / RECENCY_TAU_DAYS), 4)
+    return out
+
+
 async def compute_leiden_clusters(
     session: AsyncSession,
     *,
@@ -628,11 +725,14 @@ def softor(values: Iterable[float]) -> float:
 
 
 __all__ = [
+    "RECENCY_TAU_DAYS",
     "EdgeWeight",
     "adamic_adar_pair",
     "biased_random_walk",
+    "compute_betweenness",
     "compute_note_edge_weights",
     "compute_pagerank",
     "compute_personalized_pagerank",
+    "compute_recency",
     "softor",
 ]

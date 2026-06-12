@@ -170,3 +170,41 @@ async def test_cross_tenant_isolation() -> None:
         assert a_a not in ids_in_b and a_b not in ids_in_b
         # And the centrality map is scoped to B only.
         assert a_a not in body_b["centrality"]
+
+
+async def test_phase2_recency_live_and_betweenness_from_snapshot() -> None:
+    """Phase 2 (task d8664631): ``recency`` is computed live (a fresh
+    note reads ~1.0); ``betweenness`` is served from the materialised
+    snapshot only — empty with a null ``analytics_computed_at`` before
+    the worker's first refresh, populated after."""
+    from flow_core.db import tenant_session
+    from flow_core.services import graph_snapshot as snap_svc
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as c:
+        h = await _signup(c)
+        a = await _make_note(c, h, "a")
+        b = await _make_note(c, h, "b")
+        n3 = await _make_note(c, h, "c")
+        await _link(c, h, a, b, "related")
+        await _link(c, h, b, n3, "related")
+
+        before = (await c.get("/garden/graph", headers=h)).json()
+        assert before["betweenness"] == {}
+        assert before["analytics_computed_at"] is None
+        # Fresh notes carry a full recency boost, separate from
+        # centrality.
+        assert before["recency"][a] >= 0.99
+
+        # The worker tick's refresh (signature-gated) populates the
+        # snapshot; the endpoint then serves the stored betweenness.
+        org = h["X-Workspace-Id"]
+        me = (await c.get("/auth/me", headers=h)).json()
+        async with tenant_session(org, me["user_id"]) as s:
+            assert await snap_svc.refresh_graph_snapshot(s, org_id=uuid.UUID(org)) is True
+
+        after = (await c.get("/garden/graph", headers=h)).json()
+        assert after["analytics_computed_at"] is not None
+        # Path a-b-c: b is the bridge.
+        assert isclose(after["betweenness"][b], 1.0, abs_tol=1e-6)
+        assert after["betweenness"][a] == 0.0

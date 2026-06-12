@@ -50,6 +50,7 @@ from flow_api.schemas import (
 from flow_core.services import garden_classify as classify_svc
 from flow_core.services import garden_health as health_svc
 from flow_core.services import graph as svc
+from flow_core.services import graph_snapshot as graph_snapshot_svc
 from flow_core.services import link_prediction as linkpred_svc
 
 router = APIRouter(prefix="/garden", tags=["garden"])
@@ -109,17 +110,32 @@ async def garden_graph(
     - ``centrality``: ``{note_id: pagerank}`` over the manual
       directed link graph (damping=0.85, power iteration). The map
       sums to 1.0 across the workspace.
+    - ``recency``: separate freshness axis per note (``exp(-age/tau)``),
+      live, for cold-start compensation (task d8664631).
+    - ``betweenness``: cluster-bridge centrality from the worker's
+      materialised snapshot (O(V·E) Brandes is offline-only). Empty
+      until the first snapshot; ``analytics_computed_at`` labels its
+      age so the client can tell "no bridges" from "not computed yet".
 
-    Both computed on demand (no cache). Bounded cost: O(L) for the
-    edges, O(iter · L) for PageRank; the typical garden's link count
-    stays well under 10k so each call resolves comfortably under a
-    second.
+    Edges / PageRank / recency are computed on demand (no cache):
+    bounded cost (O(L), O(iter · L), O(N)) and the post-edit reload
+    must see fresh weights. Serving them snapshot-first is the planned
+    flip once latency/volume demand it (the snapshot already stores
+    them).
     """
     edges = await svc.compute_note_edge_weights(ctx.session, org_id=ctx.org_id)
     centrality = await svc.compute_pagerank(ctx.session, org_id=ctx.org_id)
+    recency = await svc.compute_recency(ctx.session, org_id=ctx.org_id)
+    snap = await graph_snapshot_svc.get_graph_snapshot(ctx.session, org_id=ctx.org_id)
+    betweenness: dict[uuid.UUID, float] = {}
+    if snap is not None:
+        betweenness = {uuid.UUID(k): float(v) for k, v in snap.betweenness.items()}
     return GardenGraphOut(
         edges=[GardenGraphEdge(src=e.src, dst=e.dst, weight=e.weight) for e in edges],
         centrality=centrality,
+        betweenness=betweenness,
+        recency=recency,
+        analytics_computed_at=snap.computed_at if snap is not None else None,
     )
 
 

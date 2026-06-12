@@ -319,6 +319,9 @@ function forceLayout(
   links: { source: string; target: string; weight: number }[],
   opts: {
     centrality: Map<string, number>
+    // Freshness axis from /garden/graph (task d8664631): exp-decayed
+    // age per note, separate from centrality.
+    recency: Map<string, number>
     clusterOf: (id: string) => string
   },
 ): Record<string, { x: number; y: number }> {
@@ -333,6 +336,13 @@ function forceLayout(
   for (const n of notes) maxC = Math.max(maxC, opts.centrality.get(n.id) ?? 0)
   const cNorm = (id: string): number =>
     maxC > 0 ? (opts.centrality.get(id) ?? 0) / maxC : 0
+  // Layout score = centrality with a recency floor: a brand-new note
+  // has no links (hence no centrality) and would land on the far rim
+  // of its glade — the cold start the separate recency axis exists to
+  // counter. Half-weighted so freshness alone never beats a real hub,
+  // and the boost decays away (tau 14d) as the note earns links.
+  const score = (id: string): number =>
+    Math.max(cNorm(id), 0.5 * (opts.recency.get(id) ?? 0))
   const phi = Math.PI * (3 - Math.sqrt(5))
   const sorted = [...notes].sort((a, b) => a.id.localeCompare(b.id))
   const idx = new Map<string, number>(sorted.map((n, i) => [n.id, i]))
@@ -366,19 +376,19 @@ function forceLayout(
     const rCent = (rIntra + 240) * Math.sqrt(ci + 0.5)
     const ccx = Math.cos(ca) * rCent
     const ccy = Math.sin(ca) * rCent
-    // Highest centrality at the centroid; the rest on rings by
-    // centrality rank with a golden-angle angular slot.
+    // Highest score at the centroid; the rest on rings by score rank
+    // (centrality with the recency floor) with a golden-angle slot.
     const ordered = [...members].sort((ia, ib) => {
-      const da = cNorm(sorted[ia].id)
-      const db = cNorm(sorted[ib].id)
+      const da = score(sorted[ia].id)
+      const db = score(sorted[ib].id)
       return db - da || sorted[ia].id.localeCompare(sorted[ib].id)
     })
     const ringUnit = rIntra / Math.max(1, Math.sqrt(size))
     ordered.forEach((i, rank) => {
       cgx[i] = ccx
       cgy[i] = ccy
-      // Hubs cling to the centroid; leaves drift out.
-      gravW[i] = 0.4 + 1.6 * cNorm(sorted[i].id)
+      // Hubs (and fresh seeds) cling to the centroid; leaves drift out.
+      gravW[i] = 0.4 + 1.6 * score(sorted[i].id)
       const rr = Math.sqrt(rank) * ringUnit
       const aa = rank * phi
       x[i] = ccx + Math.cos(aa) * rr
@@ -628,6 +638,10 @@ function GardenMindmapInner({ notes, workspaceId, onOpenNote }: GardenMindmapPro
   // is an analysis lens, not the resting look.
   const [colorByCluster, setColorByCluster] = useState(false)
   const [centrality, setCentrality] = useState<Record<string, number>>({})
+  // Freshness axis (task d8664631): exp-decayed note age from
+  // /garden/graph, kept separate from centrality and folded into the
+  // layout score only (cold-start fix for new unlinked notes).
+  const [recency, setRecency] = useState<Record<string, number>>({})
   const [edgeWeightMap, setEdgeWeightMap] = useState<Record<string, number>>({})
   // Leiden communities from /garden/clusters (task 8c0a8f08). Empty when
   // the optional clustering extra (igraph + leidenalg) is not installed;
@@ -688,6 +702,7 @@ function GardenMindmapInner({ notes, workspaceId, onOpenNote }: GardenMindmapPro
     () => new Map(Object.entries(centrality)),
     [centrality],
   )
+  const recencyMap = useMemo(() => new Map(Object.entries(recency)), [recency])
   // Cluster key per note for the layout: Leiden community when present,
   // else the primary-tag bucket, else a single shared glade. This is
   // the grouping the cluster-radial layout lays out as separate glades.
@@ -874,6 +889,7 @@ function GardenMindmapInner({ notes, workspaceId, onOpenNote }: GardenMindmapPro
       notes.length > 0
         ? forceLayout(notes, weightedLinks, {
           centrality: centralityMap,
+          recency: recencyMap,
           clusterOf: clusterKeyFor,
         })
         : seedLayout(notes, primaryTagFor)
@@ -951,6 +967,7 @@ function GardenMindmapInner({ notes, workspaceId, onOpenNote }: GardenMindmapPro
       const seeded = shouldForceLayout
         ? forceLayout(notes, weightedLinks, {
           centrality: centralityMap,
+          recency: recencyMap,
           clusterOf: clusterKeyFor,
         })
         : seedLayout(notes, primaryTagFor)
@@ -1006,6 +1023,7 @@ function GardenMindmapInner({ notes, workspaceId, onOpenNote }: GardenMindmapPro
     showCentrality,
     centrality,
     centralityMap,
+    recencyMap,
     clusters,
     clusterKeyFor,
     colorByCluster,
@@ -1106,8 +1124,10 @@ function GardenMindmapInner({ notes, workspaceId, onOpenNote }: GardenMindmapPro
     const data = (await res.json()) as {
       edges: { src: string; dst: string; weight: number }[]
       centrality: Record<string, number>
+      recency?: Record<string, number>
     }
     setCentrality(data.centrality || {})
+    setRecency(data.recency || {})
     const wmap: Record<string, number> = {}
     for (const e of data.edges) {
       const k = e.src < e.dst ? `${e.src}::${e.dst}` : `${e.dst}::${e.src}`
@@ -1133,9 +1153,11 @@ function GardenMindmapInner({ notes, workspaceId, onOpenNote }: GardenMindmapPro
       const data = (await res.json()) as {
         edges: { src: string; dst: string; weight: number }[]
         centrality: Record<string, number>
+        recency?: Record<string, number>
       }
       if (!active) return
       setCentrality(data.centrality || {})
+      setRecency(data.recency || {})
       const wmap: Record<string, number> = {}
       for (const e of data.edges) {
         const k = e.src < e.dst ? `${e.src}::${e.dst}` : `${e.dst}::${e.src}`
@@ -1434,13 +1456,14 @@ function GardenMindmapInner({ notes, workspaceId, onOpenNote }: GardenMindmapPro
     lastForceSig.current = ''
     const seeded = forceLayout(notes, weightedLinks, {
           centrality: centralityMap,
+          recency: recencyMap,
           clusterOf: clusterKeyFor,
         })
     setNodes((cur) =>
       cur.map((n) => ({ ...n, position: seeded[n.id] ?? n.position })),
     )
     window.setTimeout(() => rf.fitView({ padding: 0.2, maxZoom: 1.4 }), 60)
-  }, [t, workspaceId, notes, weightedLinks, centralityMap, clusterKeyFor, setNodes, rf])
+  }, [t, workspaceId, notes, weightedLinks, centralityMap, recencyMap, clusterKeyFor, setNodes, rf])
 
   // ---------------------------------------------------------------
   // Edge creation: drag from a node handle to another node opens a
