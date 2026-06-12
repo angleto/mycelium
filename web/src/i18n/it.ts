@@ -912,6 +912,9 @@ export const it: Catalog = {
       dormant: 'dormiente',
     },
     changeMaturity: 'Maturità:',
+    distill: 'Distilla',
+    distillHint:
+      'Distilla la nota in un atomo riusabile (compost → humus). Una nota già distillata riapre la distillazione esistente.',
     promote: 'Promuovi a task',
     promoteConfirm: 'Promuovere questa nota a task? La nota diventerà sola lettura.',
     derive: 'Genera task',

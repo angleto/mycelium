@@ -260,6 +260,25 @@ export function GardenRoute() {
     setOpenData(null)
   }
 
+  // Fungal decomposition (ADR-0034): distil a composting note into a
+  // reusable atom. Idempotent server-side, so re-clicking lands on the
+  // existing distillation. On success the plant modal opens on the
+  // distilled note (the freshly grown hypha), not the source.
+  async function onDistill(noteId: string) {
+    setBusy(true)
+    setErr('')
+    const { data, error } = await api.POST('/notes/{note_id}/distill', {
+      params: { header: workspaceHeader(), path: { note_id: noteId } },
+    })
+    setBusy(false)
+    if (error || !data) {
+      setErr(errMessage(error))
+      return
+    }
+    await reload()
+    await openPlant(data.distilled_note_id)
+  }
+
   // Esc closes the modal — same convention as /notes.
   useEffect(() => {
     if (!openId) return
@@ -389,6 +408,21 @@ export function GardenRoute() {
                       </span>
                     </button>
                   </>
+                )}
+                {tab === 'cemetery' && (
+                  <button
+                    type="button"
+                    className="plant__btn plant__btn--ghost"
+                    disabled={busy}
+                    title={t('garden.distillHint')}
+                    aria-label={t('garden.distill')}
+                    onClick={() => void onDistill(n.id)}
+                  >
+                    <span aria-hidden="true">⚗️</span>
+                    <span className="plant__btn-label">
+                      {t('garden.distill')}
+                    </span>
+                  </button>
                 )}
                 <Link
                   to={`/notes/${n.id}`}

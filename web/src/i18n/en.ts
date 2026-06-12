@@ -912,6 +912,9 @@ export const en = {
       dormant: 'dormant',
     },
     changeMaturity: 'Maturity:',
+    distill: 'Distill',
+    distillHint:
+      'Distill this note into a reusable atom (compost → humus). Already-distilled notes reopen their existing distillation.',
     promote: 'Promote to task',
     promoteConfirm: 'Promote this note to a task? The note becomes read-only.',
     derive: 'Derive task',
