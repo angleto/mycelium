@@ -357,3 +357,93 @@ async def test_stem_collision_yields_to_exact_match() -> None:
         assert exact.id in ids
         assert collision.id not in ids
         assert hits[0].blob.id == exact.id
+
+
+async def test_semantic_similarity_floor_drops_far_neighbours(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The per-org semantic floor (``Organization.settings``) removes
+    vector neighbours below the cosine threshold, so a query whose only
+    semantic "matches" are far noise returns just the genuine (lexical)
+    hits.
+
+    Under the bag-of-words ``FakeEmbedder`` a doc that shares no token
+    with the query is orthogonal (cosine 0), so it can enter ONLY via the
+    semantic branch -- the perfect probe for the floor.
+
+    Isolation: the separate relative-score floor (``RelativeFloorStage``,
+    ratio ``_RELATIVE_FLOOR_RATIO``=0.4) would itself cut the
+    weighted-down orthogonal neighbour even with the semantic floor OFF,
+    masking the probe -- which is why commit cc55eda dropped this test
+    instead of fixing it. Disable that one stage here so the per-org
+    *semantic* floor is the only variable under test. This restores the
+    end-to-end coverage of the configurable-floor read path
+    (``semantic_min_similarity`` helper -> ``retrieve`` ->
+    ``SemanticDenseStage._keep``) that no surviving test exercises.
+    """
+    from sqlalchemy import update
+
+    from flow_core.models.organization import Organization
+
+    # Control the confounding relative floor; the semantic floor is the
+    # variable under test. Read at retrieve()-time from module globals.
+    monkeypatch.setattr(mem, "_RELATIVE_FLOOR_RATIO", 0.0)
+
+    org, user = await _org("FLOOR")
+    proj = uuid.uuid4()
+    async with tenant_session(str(org), str(user)) as s:
+        await _seed_billing(s, org, user)
+        near = await mem.write_blob(
+            s,
+            org_id=org,
+            actor_id=user,
+            project_id=proj,
+            text_body="alpha alpha alpha",
+            operation_id="a",
+            embedder=_FAKE,
+        )
+        far = await mem.write_blob(
+            s,
+            org_id=org,
+            actor_id=user,
+            project_id=proj,
+            text_body="zzzbravo zzzbravo zzzbravo",
+            operation_id="b",
+            embedder=_FAKE,
+        )
+        # Floor OFF (default 0.0): the orthogonal neighbour is kept (it is
+        # a semantic-only candidate), proving the next assertion relies on
+        # the floor and nothing else.
+        off = await mem.retrieve(
+            s,
+            org_id=org,
+            actor_id=user,
+            project_id=proj,
+            query="alpha",
+            operation_id="q0",
+            embedder=_FAKE,
+        )
+        ids_off = {h.blob.id for h in off}
+        assert near.id in ids_off
+        assert far.id in ids_off
+
+        # Floor ON at 0.5: cosine(query "alpha", "zzzbravo...") == 0 < 0.5
+        # -> dropped; the real match (cosine 1.0, also a lexical hit)
+        # stays. The per-org setting is read live by mem.retrieve.
+        await s.execute(
+            update(Organization)
+            .where(Organization.id == org)
+            .values(settings={mem.SEMANTIC_MIN_SIM_KEY: 0.5})
+        )
+        on = await mem.retrieve(
+            s,
+            org_id=org,
+            actor_id=user,
+            project_id=proj,
+            query="alpha",
+            operation_id="q1",
+            embedder=_FAKE,
+        )
+        ids_on = {h.blob.id for h in on}
+        assert near.id in ids_on
+        assert far.id not in ids_on
