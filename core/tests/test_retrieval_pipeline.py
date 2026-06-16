@@ -165,6 +165,64 @@ def test_merge_candidates_appends_new_ids() -> None:
     assert [c.blob_id for c in merged] == [a, b]
 
 
+def test_merge_candidates_propagates_humus_provenance() -> None:
+    """ADR-0034: a blob surfaced by BOTH a live branch and the humus source
+    keeps the humus marker (the note carries the flag), so the leaf icon and
+    the cap still see it."""
+    bid = uuid.uuid4()
+    existing = [Candidate(blob_id=bid, scores_by_stage={"lexical_exact": 1.0})]
+    incoming = [Candidate(blob_id=bid, scores_by_stage={"humus": 1.0}, provenance="humus")]
+    merged = merge_candidates(existing, incoming)
+    assert len(merged) == 1
+    assert merged[0].provenance == "humus"
+    assert merged[0].scores_by_stage == {"lexical_exact": 1.0, "humus": 1.0}
+
+
+async def test_humus_branch_is_a_small_boost_not_an_override() -> None:
+    """ADR-0034: humus is fused on the low precision tier (weight 0.2),
+    so a humus atom nudges above an equivalent live note but never
+    outranks an EXACT lexical match (weight 1.0). This keeps the boost
+    'small' and the fused scale low enough not to trip the relative floor."""
+    exact_live = Candidate(blob_id=uuid.uuid4(), scores_by_stage={"lexical_exact": 1.0})
+    humus_semantic = Candidate(
+        blob_id=uuid.uuid4(), scores_by_stage={"semantic": 1.0, "humus": 1.0}
+    )
+    out = await RRFFusionStage(
+        k=60, weights={"lexical_exact": 1.0, "semantic": 0.2, "humus": 0.2}
+    ).run("q", _ctx_stub(), [exact_live, humus_semantic])
+    by_id = {c.blob_id: c.score for c in out}
+    assert by_id[exact_live.blob_id] == pytest.approx(1.0 / 61)
+    assert by_id[humus_semantic.blob_id] == pytest.approx(0.2 / 61 + 0.2 / 61)
+    # The exact live match still wins despite the humus boost.
+    assert by_id[exact_live.blob_id] > by_id[humus_semantic.blob_id]
+
+
+async def test_humus_cap_limits_slots_and_keeps_live() -> None:
+    """ADR-0034 hard cap: at most floor(limit*ratio) humus candidates kept
+    (the most relevant, since this runs after ordering); every live
+    candidate kept; freed slots fall to live ranked just below."""
+    from flow_core.services.retrieval.stages import HumusCapStage
+
+    humus = [
+        Candidate(blob_id=uuid.uuid4(), score=1.0 - i * 0.01, provenance="humus") for i in range(5)
+    ]
+    live = [Candidate(blob_id=uuid.uuid4(), score=0.5 - i * 0.01) for i in range(5)]
+    out = await HumusCapStage(ratio=0.3, limit=10).run("q", _ctx_stub(), humus + live)
+    kept_humus = [c for c in out if c.provenance == "humus"]
+    assert kept_humus == humus[:3]  # floor(10*0.3) most-relevant humus
+    assert [c for c in out if c.provenance != "humus"] == live  # all live kept
+
+
+async def test_humus_cap_zero_budget_drops_all_humus() -> None:
+    """A small limit whose 30% floors to 0 drops humus entirely (hard cap)."""
+    from flow_core.services.retrieval.stages import HumusCapStage
+
+    humus = Candidate(blob_id=uuid.uuid4(), score=1.0, provenance="humus")
+    live = Candidate(blob_id=uuid.uuid4(), score=0.5)
+    out = await HumusCapStage(ratio=0.3, limit=2).run("q", _ctx_stub(), [humus, live])
+    assert out == [live]
+
+
 def test_semantic_stage_keep_gate() -> None:
     """``SemanticDenseStage._keep`` gates on cosine = -distance. Floor 0
     is a no-op (keeps everything, even negative cosine); a positive floor

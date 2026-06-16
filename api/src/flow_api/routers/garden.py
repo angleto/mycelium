@@ -305,8 +305,16 @@ async def garden_walk(
         q=q,
         seed_rng=seed_rng,
     )
+    # Mark which steps are humus so the mindmap renders the leaf (ADR-0034);
+    # the walk already biased toward them, this is the transparency half.
+    humus = await svc.humus_note_ids(ctx.session, org_id=ctx.org_id)
     steps = [
-        GardenWalkStep(note_id=nid, step=i, weight=1.0 / max(1, i))
+        GardenWalkStep(
+            note_id=nid,
+            step=i,
+            weight=1.0 / max(1, i),
+            provenance="humus" if nid in humus else None,
+        )
         for i, nid in enumerate(path)
         if nid != seed or i == 0
     ]

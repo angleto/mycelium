@@ -610,6 +610,25 @@ async def compute_leiden_clusters(
     return ClusterResult(clusters=clusters, modularity=modularity)
 
 
+# Free-wander humus bias (ADR-0034): a humus neighbour's pick weight is
+# multiplied by ``1 + _HUMUS_WANDER_BOOST * (pagerank / max_pagerank)`` so
+# the wander drifts toward high-centrality long-fermented atoms. Fixed,
+# not learned. Live neighbours keep factor 1.0.
+_HUMUS_WANDER_BOOST = 2.0
+# Hard cap: humus stays <= this fraction of the walk (ADR-0034).
+_HUMUS_WANDER_CAP = 0.5
+
+
+async def humus_note_ids(session: AsyncSession, *, org_id: uuid.UUID) -> set[uuid.UUID]:
+    """The org's humus notes (``humus_flag`` set by the decomposition
+    pipeline, ADR-0039). Read-side predicate for the walk bias and the
+    walk-step provenance marker; uses the partial index ix_notes_humus_flag."""
+    rows = await session.execute(
+        select(Note.id).where(Note.org_id == org_id, Note.humus_flag.is_(True))
+    )
+    return {r[0] for r in rows}
+
+
 async def biased_random_walk(
     session: AsyncSession,
     *,
@@ -648,7 +667,14 @@ async def biased_random_walk(
         adj[e.dst].append((e.src, e.weight))
     if seed_id not in adj or not adj[seed_id]:
         return [seed_id]
+    # Humus bias inputs (ADR-0034): the flagged-note set + PageRank for the
+    # centrality weighting. Both are cheap on a <1k-note weave; skip the
+    # PageRank pass entirely when the workspace has no humus.
+    humus_ids = await humus_note_ids(session, org_id=org_id)
+    pagerank = await compute_pagerank(session, org_id=org_id) if humus_ids else {}
+    max_pr = max(pagerank.values(), default=0.0) or 1.0
     walk: list[uuid.UUID] = [seed_id]
+    humus_count = 1 if seed_id in humus_ids else 0
     prev: uuid.UUID | None = None
     cur: uuid.UUID = seed_id
     for _ in range(max(0, budget - 1)):
@@ -657,8 +683,8 @@ async def biased_random_walk(
             break
         if prev is None:
             # First step: plain weighted pick.
+            ids = [n for n, _ in candidates]
             weights = [w for _, w in candidates]
-            nxt = _weighted_pick(rng, [n for n, _ in candidates], weights)
         else:
             # Second-order bias: distance(prev -> candidate) is 0 if
             # candidate is prev itself (return), 1 if candidate is a
@@ -675,10 +701,28 @@ async def biased_random_walk(
                     factor = 1.0 / max(q, 1e-9)
                 weights.append(w * factor)
                 ids.append(cand)
-            nxt = _weighted_pick(rng, ids, weights)
+        # Humus bias + hard cap (ADR-0034): boost high-centrality humus
+        # neighbours (PageRank * humus_flag), but suppress humus once it
+        # reaches the cap so it stays a minority of the walk. If the cap
+        # empties the choice (every neighbour is capped humus) fall back to
+        # the un-biased weights so the walk never dead-ends.
+        at_cap = humus_count >= _HUMUS_WANDER_CAP * len(walk)
+        biased = []
+        for cand, w in zip(ids, weights, strict=True):
+            if cand in humus_ids and not at_cap:
+                biased.append(w * (1.0 + _HUMUS_WANDER_BOOST * (pagerank.get(cand, 0.0) / max_pr)))
+            elif cand in humus_ids:
+                biased.append(0.0)
+            else:
+                biased.append(w)
+        if sum(biased) <= 0.0:
+            biased = weights
+        nxt = _weighted_pick(rng, ids, biased)
         if nxt is None:
             break
         walk.append(nxt)
+        if nxt in humus_ids:
+            humus_count += 1
         prev = cur
         cur = nxt
     return walk
@@ -734,5 +778,6 @@ __all__ = [
     "compute_pagerank",
     "compute_personalized_pagerank",
     "compute_recency",
+    "humus_note_ids",
     "softor",
 ]

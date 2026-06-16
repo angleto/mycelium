@@ -1041,6 +1041,10 @@ class GardenWalkStep(BaseModel):
     note_id: uuid.UUID
     step: int
     weight: float
+    # Provenance marker (ADR-0034): "humus" when the node is a flagged
+    # humus note (the free wander biases toward high-centrality humus),
+    # else None. The mindmap renders a leaf marker on humus steps.
+    provenance: str | None = None
 
 
 class GardenWalkOut(BaseModel):
@@ -1929,6 +1933,10 @@ class MemoryHitOut(BaseModel):
     # source is multi-chunk; ``None`` means the caller should fall back
     # to ``blob.summary`` / a head of ``blob.text``.
     chunk_snippet: str | None = None
+    # Provenance marker (ADR-0034): "humus" when surfaced via the parallel
+    # humus source (archived material decomposed into atoms), else None.
+    # The SPA renders a leaf icon + "from archived material" affordance.
+    provenance: str | None = None
 
 
 class MemoryEraseIn(BaseModel):

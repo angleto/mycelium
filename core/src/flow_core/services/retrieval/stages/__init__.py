@@ -7,6 +7,7 @@ from __future__ import annotations
 from flow_core.services.retrieval.stages.access import AccessCounterStage
 from flow_core.services.retrieval.stages.dedupe import DedupeBySourceStage
 from flow_core.services.retrieval.stages.fusion import RRFFusionStage
+from flow_core.services.retrieval.stages.humus import HumusCapStage, HumusStage
 from flow_core.services.retrieval.stages.lexical import LexicalFTSStage
 from flow_core.services.retrieval.stages.order_limit import (
     GraderMinStage,
@@ -25,6 +26,8 @@ __all__ = [
     "CrossEncoderRerankerStage",
     "DedupeBySourceStage",
     "GraderMinStage",
+    "HumusCapStage",
+    "HumusStage",
     "LexicalFTSStage",
     "LimitStage",
     "OrderingStage",

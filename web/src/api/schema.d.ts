@@ -3236,6 +3236,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/search/click": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Log Click
+         * @description Record one search-result click (ADR-0035 ``recall_at_k``,
+         *     task 89508ca9): which query led to which entity, at which rank of
+         *     the shown top-K. Append-only telemetry, fire-and-forget from the
+         *     SPA; the nightly garden-health snapshot aggregates it.
+         */
+        post: operations["log_click_search_click_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/search/reindex": {
         parameters: {
             query?: never;
@@ -4222,11 +4245,18 @@ export interface paths {
          *     - ``centrality``: ``{note_id: pagerank}`` over the manual
          *       directed link graph (damping=0.85, power iteration). The map
          *       sums to 1.0 across the workspace.
+         *     - ``recency``: separate freshness axis per note (``exp(-age/tau)``),
+         *       live, for cold-start compensation (task d8664631).
+         *     - ``betweenness``: cluster-bridge centrality from the worker's
+         *       materialised snapshot (O(V·E) Brandes is offline-only). Empty
+         *       until the first snapshot; ``analytics_computed_at`` labels its
+         *       age so the client can tell "no bridges" from "not computed yet".
          *
-         *     Both computed on demand (no cache). Bounded cost: O(L) for the
-         *     edges, O(iter · L) for PageRank; the typical garden's link count
-         *     stays well under 10k so each call resolves comfortably under a
-         *     second.
+         *     Edges / PageRank / recency are computed on demand (no cache):
+         *     bounded cost (O(L), O(iter · L), O(N)) and the post-edit reload
+         *     must see fresh weights. Serving them snapshot-first is the planned
+         *     flip once latency/volume demand it (the snapshot already stores
+         *     them).
          */
         get: operations["garden_graph_garden_graph_get"];
         put?: never;
@@ -6689,6 +6719,13 @@ export interface components {
          *     payload. ``centrality`` is a ``{note_id: pagerank}`` map summing
          *     to 1 across the workspace; an empty workspace returns ``[]`` and
          *     ``{}`` respectively.
+         *
+         *     Phase 2 (task d8664631): ``betweenness`` is the cluster-bridge
+         *     centrality served from the worker-materialised snapshot (empty
+         *     until the first refresh; ``analytics_computed_at`` is its age).
+         *     ``recency`` is the separate freshness axis (``exp(-age/tau)`` per
+         *     note, computed live) consumers combine with centrality to counter
+         *     the cold start of new, not-yet-linked notes.
          */
         GardenGraphOut: {
             /** Edges */
@@ -6697,6 +6734,16 @@ export interface components {
             centrality: {
                 [key: string]: number;
             };
+            /** Betweenness */
+            betweenness?: {
+                [key: string]: number;
+            };
+            /** Recency */
+            recency?: {
+                [key: string]: number;
+            };
+            /** Analytics Computed At */
+            analytics_computed_at?: string | null;
         };
         /**
          * GardenHealthMetricOut
@@ -6829,6 +6876,8 @@ export interface components {
             step: number;
             /** Weight */
             weight: number;
+            /** Provenance */
+            provenance?: string | null;
         };
         /** GrantIn */
         GrantIn: {
@@ -7661,6 +7710,8 @@ export interface components {
             chunk_index?: number;
             /** Chunk Snippet */
             chunk_snippet?: string | null;
+            /** Provenance */
+            provenance?: string | null;
         };
         /** MemorySearchIn */
         MemorySearchIn: {
@@ -8961,6 +9012,34 @@ export interface components {
          * @enum {string}
          */
         SdiStatus: "none" | "RC" | "MC" | "NS" | "AT" | "NE" | "DT";
+        /**
+         * SearchClickIn
+         * @description One search-result click event (ADR-0035 ``recall_at_k``,
+         *     task 89508ca9). ``rank`` is the clicked hit's 1-based position in
+         *     the ranked list the user saw; ``result_count`` is how many ranked
+         *     hits were shown. ``is_probe`` marks synthetic golden-fixture
+         *     queries so the recall sensor reads real queries only.
+         */
+        SearchClickIn: {
+            /** Q */
+            q: string;
+            /** Hit Kind */
+            hit_kind: string;
+            /**
+             * Hit Id
+             * Format: uuid
+             */
+            hit_id: string;
+            /** Rank */
+            rank: number;
+            /** Result Count */
+            result_count: number;
+            /**
+             * Is Probe
+             * @default false
+             */
+            is_probe?: boolean;
+        };
         /**
          * SearchHit
          * @description One row in the unified search response. The entity ref depends on
@@ -18187,6 +18266,42 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["SearchHit"][];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    log_click_search_click_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SearchClickIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

@@ -80,6 +80,11 @@ class Candidate:
     # Avoids a separate SELECT in the caller for the typical small top-K.
     text: str | None = None
     created_at: datetime.datetime | None = None
+    # User-facing provenance marker (ADR-0034). "humus" = surfaced via
+    # the parallel humus source (archived material decomposed into
+    # atoms); None = ordinary live retrieval. Carried through fusion /
+    # ordering / dedupe to the Hit so the SPA can render the leaf icon.
+    provenance: str | None = None
 
 
 @runtime_checkable
@@ -113,6 +118,11 @@ def merge_candidates(
         if c.blob_id in by_id:
             merged = by_id[c.blob_id]
             merged.scores_by_stage.update(c.scores_by_stage)
+            # A blob surfaced by both a live branch and the humus source
+            # is still humus (the note carries the flag): keep the marker
+            # so the leaf icon and the humus cap both see it.
+            if c.provenance and not merged.provenance:
+                merged.provenance = c.provenance
         else:
             by_id[c.blob_id] = c
             out.append(c)

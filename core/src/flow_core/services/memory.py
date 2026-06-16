@@ -54,6 +54,21 @@ _SEMANTIC_RRF_WEIGHT = 0.2
 # conceptual query has a flat all-semantic profile so nothing is cut
 # (recall preserved). See RelativeFloorStage.
 _RELATIVE_FLOOR_RATIO = 0.4
+# Humus read-path (ADR-0034, task 06fbf2a7). Archived material that the
+# decomposition pipeline flagged (``notes.humus_flag``) re-enters the
+# focused walk as a PARALLEL source, late-fused with a SMALL boost and
+# hard-capped so it cannot crowd out live notes.
+#   * ``_HUMUS_RRF_BOOST`` (0.2): the branch weight (ADR: "a small
+#     boost"). On the same precision tier as the semantic/stem signals,
+#     NOT the exact tier (1.0): a humus atom gets a nudge above an
+#     equivalent live note, but never overrides an exact lexical match,
+#     and the fused scale stays low enough that the relative-floor
+#     pruning of live results is unaffected. (The ADR's illustrative
+#     "k=10 in RRF" assumed a standalone two-list fusion; this pipeline
+#     fuses every branch at one k=_RRF_K, so the boost is the weight.)
+#   * ``_HUMUS_FOCUSED_CAP`` (0.3): hard cap = 30% of the focused slots.
+_HUMUS_RRF_BOOST = 0.2
+_HUMUS_FOCUSED_CAP = 0.3
 # Per-org key (Organization.settings JSONB) for the semantic-similarity
 # floor applied in SemanticDenseStage. 0.0 = disabled (historical
 # behaviour). Tuned live from the admin GUI; see services.retrieval.
@@ -98,6 +113,10 @@ class Hit:
     # preview from blob.summary / blob.text head). ``None`` means
     # "no targeted snippet, fall back to whatever the caller renders".
     chunk_snippet: str | None = None
+    # Provenance marker (ADR-0034): "humus" when the hit was surfaced via
+    # the parallel humus source (archived material), else None. Drives
+    # the leaf icon + the "from archived material" footer in the SPA.
+    provenance: str | None = None
 
 
 async def _safe_embed(emb: Embedder, text: str) -> EmbedResult | None:
@@ -445,6 +464,8 @@ async def retrieve(
         CrossEncoderRerankerStage,
         DedupeBySourceStage,
         GraderMinStage,
+        HumusCapStage,
+        HumusStage,
         LexicalFTSStage,
         LimitStage,
         OrderingStage,
@@ -501,6 +522,10 @@ async def retrieve(
     stages: list[_Stage] = [
         LexicalFTSStage(oversample=_OVERSAMPLE),
         SemanticDenseStage(oversample=_OVERSAMPLE, min_similarity=sem_min_sim),
+        # Parallel humus source (ADR-0034): archived material re-enters the
+        # focused walk, late-fused below with a fixed boost + small k, then
+        # hard-capped (HumusCapStage) so it never crowds out live notes.
+        HumusStage(oversample=_OVERSAMPLE, min_similarity=sem_min_sim),
         RRFFusionStage(
             k=_RRF_K,
             weights={
@@ -508,6 +533,7 @@ async def retrieve(
                 "lexical_stem": _LEXICAL_STEM_WEIGHT,
                 "semantic": _SEMANTIC_RRF_WEIGHT,
                 "semantic_hosted": _SEMANTIC_RRF_WEIGHT,
+                "humus": _HUMUS_RRF_BOOST,
             },
         ),
     ]
@@ -535,6 +561,10 @@ async def retrieve(
             # (conceptual) queries, so recall there is unchanged.
             RelativeFloorStage(ratio=_RELATIVE_FLOOR_RATIO),
             GraderMinStage(min_score=grader_min_rrf),
+            # Hard cap on humus slots (ADR-0034): runs after ordering so the
+            # kept humus are the most relevant; freed slots fall to live
+            # candidates ranked just below, then LimitStage truncates.
+            HumusCapStage(ratio=_HUMUS_FOCUSED_CAP, limit=limit),
             LimitStage(k=limit),
             AccessCounterStage(),
         ]
@@ -576,6 +606,7 @@ async def retrieve(
             rrf=c.score,
             chunk_index=c.chunk_index,
             chunk_snippet=snippets.get(c.blob_id),
+            provenance=c.provenance,
         )
         for c in top
         if c.blob_id in blobs

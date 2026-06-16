@@ -97,6 +97,7 @@ async def search(
             rrf=h.rrf,
             chunk_index=h.chunk_index,
             chunk_snippet=h.chunk_snippet,
+            provenance=h.provenance,
         )
         for h in hits
     ]

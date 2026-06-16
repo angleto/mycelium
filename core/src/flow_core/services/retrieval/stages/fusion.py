@@ -24,7 +24,10 @@ class RRFFusionStage(Stage):
     name: str = "rrf"
     k: int = 60
     # Per-stage multipliers keyed by the ``scores_by_stage`` name
-    # (e.g. 'lexical', 'semantic', 'semantic_hosted'). Missing -> 1.0.
+    # (e.g. 'lexical', 'semantic', 'semantic_hosted', 'humus'). Missing
+    # -> 1.0. The humus source (ADR-0034) is weighted on the low
+    # precision tier (a small boost, not the exact tier) so it nudges
+    # archived atoms up without overriding an exact lexical match.
     weights: dict[str, float] = field(default_factory=dict)
 
     async def run(
