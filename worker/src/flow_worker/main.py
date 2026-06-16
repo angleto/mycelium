@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Awaitable, Callable
 
 from flow_core.ai_providers import set_llm_override
 from flow_core.config import get_settings
@@ -24,6 +25,7 @@ from flow_worker import (
     dispatch,
     email_sync,
     embedding_migration,
+    garden,
     google_calendar,
     note_search_backfill,
     reminders,
@@ -35,35 +37,50 @@ from flow_worker import (
 )
 
 
+def _enabled_jobs() -> list[Callable[[], Awaitable[None]]]:
+    """The run-forever job factories to gather, in order.
+
+    Always-on (each self-gates / no-ops when unconfigured):
+     - P5 closed-loop dispatch tick;
+     - epic #125 P1 Google Calendar periodic ingest (no-op without OAuth);
+     - F5/ADR-0023 email connector periodic sync (no-op without accounts);
+     - ADR-0026 P3 Telegram assistant queue drain (no-op when
+       FLOW_ASSISTANT_ENABLED is false);
+     - reminders + notification-dispatch tick (FR-12);
+     - task-search embedding backfill (timed-out re-embed safety net);
+     - note-search pointer backfill (back-catalogue indexing);
+     - revisions snapshot/retention/summary sweeps;
+     - embedding backfill (both tiers, per-org hosted via resolver).
+
+    Opt-in:
+     - garden seasonal-rule sweep (maturity transitions + garden-health
+       ADR-0035 + graph/betweenness d8664631 snapshots). Gated on
+       ``garden_loop_enabled`` (default off, tasks 44b4c212 / d8664631):
+       it mutates note maturity on real data, so a deployment activates
+       it deliberately.
+    """
+    jobs: list[Callable[[], Awaitable[None]]] = [
+        dispatch.run_forever,
+        google_calendar.run_forever,
+        email_sync.run_forever,
+        telegram_assistant.run_forever,
+        reminders.run_forever,
+        task_search_backfill.run_forever,
+        note_search_backfill.run_forever,
+        revisions.run_forever,
+        revisions_retention.run_forever,
+        revisions_summary.run_forever,
+        embedding_migration.run_forever,
+    ]
+    if get_settings().garden_loop_enabled:
+        jobs.append(garden.run_forever)
+    return jobs
+
+
 async def _run() -> None:
-    # Registered jobs run concurrently:
-    #  - P5 closed-loop dispatch tick;
-    #  - epic #125 P1 Google Calendar periodic ingest (no-op when
-    #    Google OAuth is not configured);
-    #  - F5/ADR-0023 email connector periodic sync (idempotent IMAP/Gmail
-    #    ingest per workspace; no-op when no accounts exist);
-    #  - ADR-0026 P3 Telegram assistant queue drain (no-op when
-    #    FLOW_ASSISTANT_ENABLED is false);
-    #  - reminders + notification-dispatch tick (per-workspace
-    #    scan_reminders + dispatch_pending; closes the FR-12 loop);
-    #  - task-search embedding backfill (re-embeds task blobs whose
-    #    initial write timed out; the listener-driven resync is the
-    #    authoritative path, this is a safety net);
-    #  - note-search pointer backfill (indexes note parts that pre-date
-    #    the per-part index deploy so the back-catalogue is searchable).
-    await asyncio.gather(
-        dispatch.run_forever(),
-        google_calendar.run_forever(),
-        email_sync.run_forever(),
-        telegram_assistant.run_forever(),
-        reminders.run_forever(),
-        task_search_backfill.run_forever(),
-        note_search_backfill.run_forever(),
-        revisions.run_forever(),
-        revisions_retention.run_forever(),
-        revisions_summary.run_forever(),
-        embedding_migration.run_forever(),
-    )
+    # Registered jobs run concurrently; see ``_enabled_jobs`` for the
+    # list and the opt-in garden loop.
+    await asyncio.gather(*(job() for job in _enabled_jobs()))
 
 
 def main() -> None:
@@ -93,8 +110,9 @@ def main() -> None:
         set_llm_override(lambda: OllamaLLM(base_url=ollama_url, model=open_model))
     logging.getLogger("flow.worker").info(
         "worker started (env=%s); jobs: dispatch-loop, google-calendar-sync, "
-        "email-sync, telegram-assistant",
+        "email-sync, telegram-assistant; garden-loop=%s",
         settings.env,
+        "on" if settings.garden_loop_enabled else "off",
     )
     asyncio.run(_run())
 

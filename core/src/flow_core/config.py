@@ -188,6 +188,17 @@ class Settings(BaseSettings):
     # disables it outright. FLOW_GARDEN_AUTO_MATURE_ENABLED=false to turn off.
     garden_auto_mature_enabled: bool = True
 
+    # Garden seasonal-rule worker loop (docs/adr/0029 P1 + tasks 44b4c212 /
+    # d8664631). The single periodic sweep that runs the maturity
+    # transitions (seed->growing->dormant) AND materialises the
+    # garden-health (ADR-0035) + graph/betweenness (d8664631) snapshots.
+    # OFF by default: the maturity sweep mutates note maturity on real
+    # data, so a deployment activates it deliberately. Set
+    # FLOW_GARDEN_LOOP_ENABLED=true to schedule it. Auto-promotion
+    # growing->mature stays independently gated by
+    # ``garden_auto_mature_enabled`` above.
+    garden_loop_enabled: bool = False
+
     # Reminders + notification-dispatch worker. One periodic tick scans
     # due reminders into pending Notifications (idempotent by
     # dedupe_key) and then dispatches all pending notifications through

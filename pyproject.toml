@@ -88,4 +88,4 @@ ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-testpaths = ["core/tests", "api/tests", "cli/tests"]
+testpaths = ["core/tests", "api/tests", "cli/tests", "worker/tests"]
