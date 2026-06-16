@@ -1,4 +1,4 @@
-.PHONY: sync lint fmt type test up down db-bootstrap migrate revision \
+.PHONY: sync lint fmt type test eval up down db-bootstrap migrate revision \
         run-api run-mcp run-worker run-sdi
 
 sync:
@@ -15,6 +15,13 @@ type:
 
 test:
 	uv run pytest
+
+# Offline retrieval eval gate (ADR-0035 / Mycelio WS-E1): deterministic
+# gold-set recall@k/MRR + dense-tier health over the real pipeline. Runs
+# in CI as part of `test`; this target runs just the gate for a quick
+# local baseline check.
+eval:
+	uv run pytest core/tests/test_eval_offline.py -q
 
 up:
 	docker compose -f deploy/local/docker-compose.yml up -d
