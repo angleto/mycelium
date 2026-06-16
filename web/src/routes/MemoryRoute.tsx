@@ -423,6 +423,17 @@ export function MemoryRoute() {
                               ? t('memory.ch.indexed')
                               : t('memory.ch.keywordOnly')}
                           </span>
+                          {h.provenance === 'humus' && (
+                            <>
+                              {' '}
+                              <span
+                                className="tag tag--humus"
+                                title={t('memory.humus.tip')}
+                              >
+                                🍃 {t('memory.humus.badge')}
+                              </span>
+                            </>
+                          )}
                         </span>
                         <button
                           type="button"

@@ -885,6 +885,8 @@ export const it: Catalog = {
       walkRun: 'Walk',
       walkClear: 'Pulisci',
       walkSeed: 'Seed: {{title}}',
+      humusStep: 'Raggiunto via humus (materiale archiviato: fertilizzante, non archivio)',
+      humusLegend: 'humus',
       createLink: 'Crea collegamento',
       confirmDelete: 'Rimuovere questo collegamento?',
       swapDirection: 'Inverti direzione',
@@ -1499,6 +1501,10 @@ export const it: Catalog = {
       'Isolamento duro: una ricerca vede solo questo workspace (e progetto, se impostato), mai un altro tenant.',
     tierLegend:
       'Ogni risultato mostra il tier (hot/warm/cold = indizio di recency, non ritenzione) e rrf (punteggio di pertinenza, piu alto = meglio).',
+    humus: {
+      badge: 'humus',
+      tip: 'Da materiale archiviato: fertilizzante riportato nel recall, non la nota viva (ADR-0034).',
+    },
     ch: {
       channel: 'Canale',
       none: '— nessun canale —',

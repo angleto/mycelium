@@ -106,6 +106,10 @@ interface PlantNodeData extends Record<string, unknown> {
   clusterColor: string | null
   walkStep: number | null
   isWalkSeed: boolean
+  // ADR-0034 transparency: this node was reached via the humus
+  // (archived material) source during a free-wander. Renders a leaf
+  // marker so the user can audit fertiliser-vs-live contributions.
+  isHumus: boolean
   // Focus+context overlay (render-only): set by the displayNodes
   // memo when a node is hovered/pinned. ``focus`` = the node itself,
   // ``neighbor`` = directly linked, ``faded`` = out of focus.
@@ -114,6 +118,7 @@ interface PlantNodeData extends Record<string, unknown> {
 }
 
 function PlantNode({ data }: NodeProps<Node<PlantNodeData>>) {
+  const { t } = useTranslation()
   const {
     note,
     tagDots,
@@ -126,6 +131,7 @@ function PlantNode({ data }: NodeProps<Node<PlantNodeData>>) {
     clusterColor,
     walkStep,
     isWalkSeed,
+    isHumus,
     focusState,
     onOpen,
   } = data
@@ -171,7 +177,8 @@ function PlantNode({ data }: NodeProps<Node<PlantNodeData>>) {
         (focusState === 'neighbor' ? ' mm-node--neighbor' : '') +
         (focusState === 'focus' ? ' mm-node--focus' : '') +
         (walkStep != null ? ' mm-node--walk' : '') +
-        (isWalkSeed ? ' mm-node--walk-seed' : '')
+        (isWalkSeed ? ' mm-node--walk-seed' : '') +
+        (isHumus ? ' mm-node--humus' : '')
       }
       style={style}
       onDoubleClick={() => onOpen(note.id)}
@@ -215,6 +222,11 @@ function PlantNode({ data }: NodeProps<Node<PlantNodeData>>) {
       {walkStep != null && (
         <span className="mm-node__walk-step" title={`walk step ${walkStep}`}>
           {walkStep}
+        </span>
+      )}
+      {isHumus && (
+        <span className="mm-node__humus" title={t('garden.mindmap.humusStep')}>
+          🍃
         </span>
       )}
       <Handle
@@ -660,6 +672,10 @@ function GardenMindmapInner({ notes, workspaceId, onOpenNote }: GardenMindmapPro
   const [walkSeed, setWalkSeed] = useState<string | null>(null)
   const [walkPath, setWalkPath] = useState<Record<string, number>>({})
   const [walkSeq, setWalkSeq] = useState<string[]>([])
+  // ADR-0034 transparency: note ids whose free-wander visit was
+  // reached via humus (archived material). Drives the leaf marker so
+  // the user can tell fertiliser-sourced steps from live ones.
+  const [walkHumus, setWalkHumus] = useState<Set<string>>(new Set())
   const [walkResultMode, setWalkResultMode] = useState<
     'focused' | 'free_wander'
   >('focused')
@@ -913,6 +929,7 @@ function GardenMindmapInner({ notes, workspaceId, onOpenNote }: GardenMindmapPro
           clusterColor: null,
           walkStep: null,
           isWalkSeed: false,
+          isHumus: false,
           onOpen: onOpenNote,
         },
         draggable: true,
@@ -1002,6 +1019,7 @@ function GardenMindmapInner({ notes, workspaceId, onOpenNote }: GardenMindmapPro
                 : null,
             walkStep: walkPath[n.id] ?? null,
             isWalkSeed: walkSeed === n.id,
+            isHumus: walkHumus.has(n.id),
             onOpen: onOpenNote,
           },
           draggable: true,
@@ -1029,6 +1047,7 @@ function GardenMindmapInner({ notes, workspaceId, onOpenNote }: GardenMindmapPro
     colorByCluster,
     walkPath,
     walkSeed,
+    walkHumus,
   ])
 
   // Persist positions ONLY on a real drag-end. The earlier
@@ -1646,18 +1665,28 @@ function GardenMindmapInner({ notes, workspaceId, onOpenNote }: GardenMindmapPro
                 return
               }
               const data = (await res.json()) as {
-                steps: { note_id: string; step: number }[]
+                steps: {
+                  note_id: string
+                  step: number
+                  provenance?: string | null
+                }[]
               }
               const sorted = [...data.steps].sort((a, b) => a.step - b.step)
               const next: Record<string, number> = {}
               // First visit wins the badge step so a revisited node keeps
               // a stable number; the full sequence (with revisits) lives
               // in walkSeq and drives the trail.
+              const humus = new Set<string>()
               for (const s of sorted) {
                 if (!(s.note_id in next)) next[s.note_id] = s.step
+                // ADR-0034: mark a node humus if it was reached via the
+                // archived source on any visit (faithful to the bias,
+                // not only the first hit).
+                if (s.provenance === 'humus') humus.add(s.note_id)
               }
               setWalkPath(next)
               setWalkSeq(sorted.map((s) => s.note_id))
+              setWalkHumus(humus)
               setWalkResultMode(walkMode)
             })()
           }}
@@ -1671,6 +1700,7 @@ function GardenMindmapInner({ notes, workspaceId, onOpenNote }: GardenMindmapPro
           onClick={() => {
             setWalkPath({})
             setWalkSeq([])
+            setWalkHumus(new Set())
           }}
         >
           {t('garden.mindmap.walkClear')}
@@ -1700,6 +1730,14 @@ function GardenMindmapInner({ notes, workspaceId, onOpenNote }: GardenMindmapPro
               {t(`garden.mindmap.linkKind.${k}`)}
             </span>
           ))}
+          {walkHumus.size > 0 && (
+            <span
+              className="garden__mindmap-legend-item"
+              title={t('garden.mindmap.humusStep')}
+            >
+              🍃 {t('garden.mindmap.humusLegend')}
+            </span>
+          )}
         </span>
       </div>
 

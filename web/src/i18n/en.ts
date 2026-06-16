@@ -885,6 +885,8 @@ export const en = {
       walkRun: 'Walk',
       walkClear: 'Clear walk',
       walkSeed: 'Seed: {{title}}',
+      humusStep: 'Reached via humus (archived material: fertiliser, not archive)',
+      humusLegend: 'humus',
       createLink: 'Create link',
       confirmDelete: 'Remove this link?',
       swapDirection: 'Swap direction',
@@ -1499,6 +1501,10 @@ export const en = {
       'Hard-isolated: a search only ever sees this workspace (and project, if set), never another tenant.',
     tierLegend:
       'Each result shows its tier (hot/warm/cold = recency hint, not retention) and rrf (relevance score, higher = better).',
+    humus: {
+      badge: 'humus',
+      tip: 'From archived material: fertiliser surfaced back into recall, not the live note (ADR-0034).',
+    },
     ch: {
       channel: 'Channel',
       none: '— no channel —',

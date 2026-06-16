@@ -3291,6 +3291,14 @@ button.btn--danger:hover {
   background: var(--surface-2);
   color: var(--muted);
 }
+/* Humus provenance badge on /memory search hits (ADR-0034): a leaf +
+   'humus' label on results surfaced from archived material. The light
+   moss tint keeps var(--text) readable on both themes. */
+.tag--humus {
+  background: color-mix(in srgb, var(--moss) 18%, var(--surface-2));
+  color: var(--text);
+  border: 1px solid color-mix(in srgb, var(--moss) 35%, var(--border));
+}
 .cpchildren {
   margin: 0.4rem 0 0.2rem 1.45rem;
   padding-left: 0.7rem;
@@ -4584,6 +4592,20 @@ button.btn--danger:hover {
   border: 1px solid color-mix(in srgb, var(--bloom) 35%, var(--border));
   line-height: 1.4;
   flex: 0 0 auto;
+}
+/* Humus provenance (ADR-0034 transparency): a node reached via the
+   archived 'humus' source during a free-wander gets a leaf marker at
+   top-left (opposite the walk-step badge), mirrored by the .tag--humus
+   badge on /memory search hits. */
+.mm-node__humus {
+  position: absolute;
+  top: -6px;
+  left: -6px;
+  font-size: 0.72rem;
+  line-height: 1;
+  filter: drop-shadow(0 0 2px var(--surface));
+  pointer-events: none;
+  z-index: 3;
 }
 .mm-node__handle {
   width: 9px;
