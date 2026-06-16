@@ -16,6 +16,7 @@ import uuid
 
 import pytest
 
+from flow_core.config import get_settings
 from flow_core.db import admin_session, tenant_session
 from flow_core.email_connector import (
     FetchedMessage,
@@ -113,3 +114,61 @@ async def test_run_once_is_idempotent() -> None:
     async with tenant_session(str(org), str(user)) as s:
         msgs = await svc.list_messages(s, org_id=org)
     assert len(msgs) == 2
+
+
+async def test_run_once_advances_last_sync_at() -> None:
+    """The sweep stamps ``last_sync_at`` on every account it touches: a fresh
+    account starts NULL and, after one sweep, carries a timestamp at-or-after
+    the sweep start. This is the signal the periodic loop is making progress
+    (the task's "il loop fa progredire last_sync_at")."""
+    org, user = await _workspace_with_account("ESYNC3")
+
+    async with tenant_session(str(org), str(user)) as s:
+        before = (await svc.list_accounts(s, org_id=org))[0]
+    assert before.last_sync_at is None  # fresh account, never synced
+
+    started = dt.datetime.now(tz=dt.UTC)
+    await email_sync.run_once()
+
+    async with tenant_session(str(org), str(user)) as s:
+        after = (await svc.list_accounts(s, org_id=org))[0]
+    assert after.last_sync_at is not None
+    assert after.last_sync_at >= started
+
+
+class _StopLoop(Exception):
+    """Sentinel to break out of ``run_forever`` after one tick."""
+
+
+async def _captured_interval(monkeypatch) -> float:
+    """Run ``run_forever`` with a no-op sweep and a sleep that records the
+    interval then aborts the loop; return the recorded interval. Keeps the
+    test off the network and off the wall-clock."""
+    captured: list[float] = []
+
+    async def _noop_sweep() -> int:
+        return 0
+
+    async def _capture_sleep(seconds: float) -> None:
+        captured.append(seconds)
+        raise _StopLoop
+
+    monkeypatch.setattr(email_sync, "run_once", _noop_sweep)
+    monkeypatch.setattr(email_sync.asyncio, "sleep", _capture_sleep)
+    with pytest.raises(_StopLoop):
+        await email_sync.run_forever()
+    return captured[0]
+
+
+async def test_run_forever_uses_configured_interval(monkeypatch) -> None:
+    """``run_forever`` sleeps for ``email_sync_interval_seconds`` between
+    sweeps (the task's "intervallo configurabile via setting")."""
+    monkeypatch.setattr(get_settings(), "email_sync_interval_seconds", 4242)
+    assert await _captured_interval(monkeypatch) == 4242
+
+
+async def test_run_forever_clamps_interval_to_floor(monkeypatch) -> None:
+    """A too-small configured interval is clamped to the 30s floor, so the
+    knob can never make the loop hammer the IMAP/Gmail endpoints."""
+    monkeypatch.setattr(get_settings(), "email_sync_interval_seconds", 5)
+    assert await _captured_interval(monkeypatch) == 30
