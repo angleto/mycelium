@@ -25,6 +25,7 @@ from flow_core.models.billing import (
     BillingConfig,
     CostBasis,
     CreditLedger,
+    DefaultRateCard,
     LedgerEntryKind,
     RateCard,
     StorageKind,
@@ -35,6 +36,12 @@ from flow_core.models.billing import (
 from flow_core.models.membership import Role
 from flow_core.services import audit
 from flow_core.services.rbac import require_role
+
+# A resolved rate is either the org's own override (RateCard) or the
+# fleet-wide default (DefaultRateCard, task 62676443). They share the
+# cost columns _compute_credits reads, so the metering core treats them
+# interchangeably.
+RateLike = RateCard | DefaultRateCard
 
 _RATE_UPDATABLE = frozenset(
     {
@@ -148,12 +155,28 @@ async def ensure_credits(session: AsyncSession, *, org_id: uuid.UUID, needed: De
         )
 
 
-async def _active_rate_card(session: AsyncSession, model_id: str | None) -> RateCard | None:
+async def _active_rate_card(session: AsyncSession, model_id: str | None) -> RateLike | None:
+    """Resolve the rate for ``model_id``: the org's active override wins,
+    else the fleet-wide default (task 62676443, mechanism B). Returns
+    None when neither exists -> ``meter_if_billable`` treats that as free
+    (e.g. the bundled local embedder), ``meter`` raises."""
     if model_id is None:
         return None
-    return (
+    override = (
         await session.execute(
             select(RateCard).where(RateCard.model_id == model_id, RateCard.is_active.is_(True))
+        )
+    ).scalar_one_or_none()
+    if override is not None:
+        return override
+    # No per-org card: fall back to the fleet default (no org_id, no RLS,
+    # so it is visible inside any tenant session).
+    return (
+        await session.execute(
+            select(DefaultRateCard).where(
+                DefaultRateCard.model_id == model_id,
+                DefaultRateCard.is_active.is_(True),
+            )
         )
     ).scalar_one_or_none()
 
@@ -163,7 +186,7 @@ def _compute_credits(
     basis: CostBasis,
     units_in: Decimal,
     units_out: Decimal,
-    rate: RateCard | None,
+    rate: RateLike | None,
     byok_factor: Decimal,
 ) -> Decimal:
     if basis is CostBasis.byok:

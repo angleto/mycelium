@@ -112,6 +112,42 @@ class RateCard(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, Base):
     tier: Mapped[str | None] = mapped_column(String(40), nullable=True)
 
 
+class DefaultRateCard(UUIDPKMixin, TimestampMixin, VersionMixin, Base):
+    """Fleet-wide default rate card (task 62676443, mechanism B).
+
+    The per-org :class:`RateCard` is an *override*; this table is the
+    *default salvo override*: when an org has no active card for a
+    ``model_id``, the metering core (:func:`services.billing._active_rate_card`)
+    falls back here, so ``our_key`` calls to hosted providers are billed
+    fleet-wide without a per-tenant seed. It carries NO ``org_id`` and NO
+    RLS (it is shared config, not tenant data); writes are migration- /
+    platform-admin-only, reads are open to every tenant session. The
+    cost columns mirror :class:`RateCard` so the same ``_compute_credits``
+    consumes either (see the ``RateLike`` alias in the service)."""
+
+    __tablename__ = "default_rate_card"
+    __table_args__ = (UniqueConstraint("model_id", name="uq_default_rate_card_model_id"),)
+
+    model_id: Mapped[str] = mapped_column(String(160), nullable=False)
+    provider: Mapped[str] = mapped_column(String(80), nullable=False)
+    unit: Mapped[RateUnit] = mapped_column(
+        SAEnum(RateUnit, name="rate_unit", native_enum=True, create_type=False),
+        nullable=False,
+        server_default="token",
+    )
+    credits_per_input: Mapped[Decimal] = mapped_column(
+        Numeric(18, 8), nullable=False, server_default="0"
+    )
+    credits_per_output: Mapped[Decimal] = mapped_column(
+        Numeric(18, 8), nullable=False, server_default="0"
+    )
+    provider_cost_per_input: Mapped[Decimal | None] = mapped_column(Numeric(18, 8), nullable=True)
+    provider_cost_per_output: Mapped[Decimal | None] = mapped_column(Numeric(18, 8), nullable=True)
+    markup: Mapped[Decimal] = mapped_column(Numeric(8, 4), nullable=False, server_default="1")
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
+    tier: Mapped[str | None] = mapped_column(String(40), nullable=True)
+
+
 class StorageRate(TimestampMixin, VersionMixin, Base):
     __tablename__ = "storage_rates"
     __table_args__ = (PrimaryKeyConstraint("org_id", "kind", name="pk_storage_rates"),)
