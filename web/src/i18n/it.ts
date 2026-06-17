@@ -1347,6 +1347,9 @@ export const it: Catalog = {
     ask: 'Suggerisci',
     feasible: 'Fattibili, ordinati',
     none: 'Nulla di fattibile per quella finestra.',
+    overWindowHeading: 'Non entra in questa finestra ({{count}})',
+    overWindowHint:
+      'Questi task superano ogni altro filtro ma richiedono più tempo della finestra. Allunga la finestra (o spezzali) per affrontarli.',
     errandsTitle: 'Raggruppamento commissioni',
     context: 'Contesto (opzionale)',
     bundle: 'Raggruppa commissioni',

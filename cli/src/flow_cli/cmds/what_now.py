@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime as dt
+from typing import Any
 
 import typer
 
@@ -74,27 +75,33 @@ def what_now(
     if json_mode():
         emit_json(resp)
         return
+    headers = ["id", "title", "need", "pri", "urgency", "slack(m)", "due", "rem(m)"]
+
+    def _rows(items: list[dict[str, Any]]) -> list[tuple[Any, ...]]:
+        return [
+            (
+                short_id(r.get("task_id")),
+                _truncate(str(r.get("title", "")), 56),
+                r.get("necessity"),
+                r.get("priority"),
+                r.get("deadline_bucket"),
+                _slack(r.get("slack_minutes")),
+                r.get("due_date") or "",
+                r.get("remaining_minutes"),
+            )
+            for r in items
+        ]
+
     rows = resp.get("ranked", [])
     if not rows:
-        info("[dim]nothing actionable in that window.[/dim]")
+        info("[dim]nothing fits that window.[/dim]")
     else:
-        emit_table(
-            None,
-            ["id", "title", "need", "pri", "urgency", "slack(m)", "due", "rem(m)"],
-            [
-                (
-                    short_id(r.get("task_id")),
-                    _truncate(r.get("title", ""), 56),
-                    r.get("necessity"),
-                    r.get("priority"),
-                    r.get("deadline_bucket"),
-                    _slack(r.get("slack_minutes")),
-                    r.get("due_date") or "",
-                    r.get("remaining_minutes"),
-                )
-                for r in rows
-            ],
-        )
+        emit_table(None, headers, _rows(rows))
+    # Tasks that clear every other filter but need more time than the window:
+    # shown apart so a too-long overdue/at-risk task is not silently hidden.
+    over = resp.get("over_window", [])
+    if over:
+        emit_table("Needs a longer window (effort exceeds it)", headers, _rows(over))
     if narrate:
         if resp.get("narrated") and resp.get("narration"):
             model = resp.get("narration_model")

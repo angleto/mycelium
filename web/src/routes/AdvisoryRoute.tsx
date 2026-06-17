@@ -65,6 +65,11 @@ export function AdvisoryRoute() {
   const [minNec, setMinNec] = useState<Necessity | ''>('')
   const [tags, setTags] = useState<Tag[]>([])
   const [feasible, setFeasible] = useState<Feasible[] | null>(null)
+  // Tasks that clear every filter except they need more time than the
+  // window. Surfaced apart (collapsed) so a too-long overdue/at-risk task
+  // is not silently hidden when the slot is shorter than its effort.
+  const [overWindow, setOverWindow] = useState<Feasible[]>([])
+  const [showOverWindow, setShowOverWindow] = useState(false)
   // The window_start actually POSTed, so relative-due labels use the SAME
   // clock the core ranked against (no server-substituted now() drift).
   const [postedWindow, setPostedWindow] = useState<Date | null>(null)
@@ -135,6 +140,7 @@ export function AdvisoryRoute() {
     }
     setPostedWindow(ws)
     setFeasible(data.ranked)
+    setOverWindow(data.over_window ?? [])
     // Fresh ranking resets any prior narration.
     setAsked(false)
     setNarrating(false)
@@ -160,6 +166,7 @@ export function AdvisoryRoute() {
     }
     setPostedWindow(ws)
     setFeasible(data.ranked)
+    setOverWindow(data.over_window ?? [])
     setNarrated(!!data.narrated)
     setNarration(data.narration ?? null)
     setNarrationModel(data.narration_model ?? null)
@@ -192,6 +199,33 @@ export function AdvisoryRoute() {
     if (days >= 1) return t('advisory.dueIn', { n: days, unit: 'd' })
     const hours = Math.max(1, Math.round(ms / 3_600_000))
     return t('advisory.dueIn', { n: hours, unit: 'h' })
+  }
+
+  // One ranked task row, shared by the feasible list and the over-window
+  // list (same facts/badges; the partition is the only difference).
+  function renderItem(f: Feasible) {
+    return (
+      <li key={f.task_id}>
+        <Link to={`/tasks/${f.task_id}`} className="advisory__task">
+          {f.title}
+        </Link>{' '}
+        <span className="muted">
+          · {f.necessity} · P{f.priority} · {f.remaining_minutes} {t('advisory.remaining')} ·{' '}
+          {relativeDue(f.due_date)}
+          {f.slack_minutes != null && (
+            <>
+              {' '}
+              · {t('advisory.slack')} {f.slack_minutes}m
+            </>
+          )}
+        </span>
+        {f.deadline_bucket !== 'none' && (
+          <span className={`urg ${bucketClass(f.deadline_bucket)}`}>
+            {t(`advisory.${BUCKET_LABEL[f.deadline_bucket]}` as const)}
+          </span>
+        )}
+      </li>
+    )
   }
 
   return (
@@ -306,30 +340,26 @@ export function AdvisoryRoute() {
           {feasible.length === 0 ? (
             <p className="hint">{t('advisory.none')}</p>
           ) : (
-            <ul className="list">
-              {feasible.map((f) => (
-                <li key={f.task_id}>
-                  <Link to={`/tasks/${f.task_id}`} className="advisory__task">
-                    {f.title}
-                  </Link>{' '}
-                  <span className="muted">
-                    · {f.necessity} · P{f.priority} · {f.remaining_minutes}{' '}
-                    {t('advisory.remaining')} · {relativeDue(f.due_date)}
-                    {f.slack_minutes != null && (
-                      <>
-                        {' '}
-                        · {t('advisory.slack')} {f.slack_minutes}m
-                      </>
-                    )}
-                  </span>
-                  {f.deadline_bucket !== 'none' && (
-                    <span className={`urg ${bucketClass(f.deadline_bucket)}`}>
-                      {t(`advisory.${BUCKET_LABEL[f.deadline_bucket]}` as const)}
-                    </span>
-                  )}
-                </li>
-              ))}
-            </ul>
+            <ul className="list">{feasible.map(renderItem)}</ul>
+          )}
+
+          {overWindow.length > 0 && (
+            <div className="advisory__overwindow">
+              <button
+                type="button"
+                className="btn--ghost btn--sm"
+                aria-expanded={showOverWindow}
+                onClick={() => setShowOverWindow((v) => !v)}
+              >
+                {t('advisory.overWindowHeading', { count: overWindow.length })}
+              </button>
+              {showOverWindow && (
+                <>
+                  <p className="hint">{t('advisory.overWindowHint')}</p>
+                  <ul className="list">{overWindow.map(renderItem)}</ul>
+                </>
+              )}
+            </div>
           )}
 
           <div className="row">

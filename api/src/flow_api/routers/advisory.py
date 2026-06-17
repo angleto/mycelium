@@ -36,7 +36,7 @@ async def what_now(
     ws = body.window_start or dt.datetime.now(dt.UTC)
     if ws.tzinfo is None:
         ws = ws.replace(tzinfo=dt.UTC)
-    rows = await svc.what_can_i_do_now(
+    plan = await svc.what_can_i_do_now(
         ctx.session,
         org_id=ctx.org_id,
         actor_id=ctx.user_id,
@@ -49,8 +49,9 @@ async def what_now(
         min_priority=body.min_priority,
         min_necessity=body.min_necessity,
     )
-    ranked = [
-        FeasibleTaskOut(
+
+    def _out(r: svc.FeasibleTask) -> FeasibleTaskOut:
+        return FeasibleTaskOut(
             task_id=r.task_id,
             title=r.title,
             necessity=r.necessity,
@@ -60,27 +61,36 @@ async def what_now(
             slack_minutes=r.slack_minutes,
             deadline_bucket=r.deadline_bucket,
         )
-        for r in rows
-    ]
-    # req #4b: opt-in narration over the SAME ranked result, in the same
-    # tenant session (metering rides the resolve_llm seam). Degrades to
-    # narrated=false on no provider / failure -- the ranked plan stands.
-    if body.narrate and rows:
+
+    ranked = [_out(r) for r in plan.fits]
+    over_window = [_out(r) for r in plan.over_window]
+    # req #4b: opt-in narration over the SAME ranked (fits) result, in the
+    # same tenant session (metering rides the resolve_llm seam). Degrades to
+    # narrated=false on no provider / failure -- the ranked plan stands. Only
+    # ``fits`` is narrated: an over_window task cannot be finished here.
+    if body.narrate and plan.fits:
         narrated = await svc.narrate_plan(
             ctx.session,
             org_id=ctx.org_id,
             actor_id=ctx.user_id,
             window_start=ws,
             duration_minutes=body.duration_minutes,
-            plan=rows,
+            plan=plan.fits,
         )
         return NarratedPlanOut(
             ranked=ranked,
+            over_window=over_window,
             narrated=narrated.narrated,
             narration=narrated.narration,
             narration_model=narrated.narration_model,
         )
-    return NarratedPlanOut(ranked=ranked, narrated=False, narration=None, narration_model=None)
+    return NarratedPlanOut(
+        ranked=ranked,
+        over_window=over_window,
+        narrated=False,
+        narration=None,
+        narration_model=None,
+    )
 
 
 @router.post("/errands", response_model=list[ErrandItemOut])

@@ -1347,6 +1347,9 @@ export const en = {
     ask: 'Suggest',
     feasible: 'Feasible, ranked',
     none: 'Nothing feasible for that window.',
+    overWindowHeading: "Doesn't fit this window ({{count}})",
+    overWindowHint:
+      'These pass every other filter but need more time than the window. Lengthen the window (or split them) to tackle them.',
     errandsTitle: 'Errand bundling',
     context: 'Context (optional)',
     bundle: 'Bundle errands',

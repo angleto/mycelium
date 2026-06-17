@@ -12,6 +12,7 @@ from __future__ import annotations
 import datetime as dt
 import uuid
 from decimal import Decimal
+from typing import Any
 
 from sqlalchemy import select
 
@@ -34,6 +35,13 @@ def _email() -> str:
     return f"{uuid.uuid4().hex[:10]}@example.test"
 
 
+async def _fits(*args: Any, **kwargs: Any) -> list[advisory.FeasibleTask]:
+    """The ``.fits`` partition of ``what_can_i_do_now`` -- the doable, ranked
+    list most tests assert on. The ``over_window`` partition (effort exceeds
+    the window) has dedicated coverage below."""
+    return (await advisory.what_can_i_do_now(*args, **kwargs)).fits
+
+
 async def test_what_can_i_do_now_excludes_terminal_state_tasks() -> None:
     """A task in a terminal workflow state must never be ranked: you cannot
     'do now' a finished task (user report 2026-06-03). Regression guard for
@@ -50,9 +58,7 @@ async def test_what_can_i_do_now_excludes_terminal_state_tasks() -> None:
             title="finish-me",
             estimate_effort_h=Decimal("0.5"),
         )
-        r = await advisory.what_can_i_do_now(
-            s, org_id=org, actor_id=user, window_start=_WIN, duration_minutes=60
-        )
+        r = await _fits(s, org_id=org, actor_id=user, window_start=_WIN, duration_minutes=60)
         assert t.id in [x.task_id for x in r]
 
         terminal_id = (
@@ -63,9 +69,7 @@ async def test_what_can_i_do_now_excludes_terminal_state_tasks() -> None:
         t.state_id = terminal_id
         await s.flush()
 
-        r2 = await advisory.what_can_i_do_now(
-            s, org_id=org, actor_id=user, window_start=_WIN, duration_minutes=60
-        )
+        r2 = await _fits(s, org_id=org, actor_id=user, window_start=_WIN, duration_minutes=60)
         assert t.id not in [x.task_id for x in r2]
 
 
@@ -128,14 +132,12 @@ async def test_what_can_i_do_now_feasibility_and_ranking() -> None:
 
         # 60-min window, no location/context: A,B,E feasible (C too big,
         # D needs ctx:computer). Order: must, then should by priority.
-        r = await advisory.what_can_i_do_now(
-            s, org_id=org, actor_id=user, window_start=_WIN, duration_minutes=60
-        )
+        r = await _fits(s, org_id=org, actor_id=user, window_start=_WIN, duration_minutes=60)
         assert [x.task_id for x in r] == [ta.id, tb.id, te.id]
         assert r[0].necessity is Necessity.must
 
         # Providing the context unlocks D.
-        r2 = await advisory.what_can_i_do_now(
+        r2 = await _fits(
             s,
             org_id=org,
             actor_id=user,
@@ -161,10 +163,7 @@ async def test_what_can_i_do_now_feasibility_and_ranking() -> None:
             duration_minutes=60,
         )
         assert (
-            await advisory.what_can_i_do_now(
-                s, org_id=org, actor_id=user, window_start=_WIN, duration_minutes=60
-            )
-            == []
+            await _fits(s, org_id=org, actor_id=user, window_start=_WIN, duration_minutes=60) == []
         )
 
 
@@ -204,9 +203,7 @@ async def test_what_now_deadline_urgency_outranks_necessity() -> None:
             due_date=_WIN - dt.timedelta(days=1),  # date-in-the-past -> overdue
             **common,
         )
-        r = await advisory.what_can_i_do_now(
-            s, org_id=org, actor_id=user, window_start=_WIN, duration_minutes=60
-        )
+        r = await _fits(s, org_id=org, actor_id=user, window_start=_WIN, duration_minutes=60)
     ids = [x.task_id for x in r]
     # overdue (rank 0) then at_risk (rank 1) then comfortable must (rank 2).
     assert ids == [overdue_could.id, at_risk_could.id, comfy_must.id]
@@ -240,9 +237,7 @@ async def test_what_now_deadline_bucket_boundaries() -> None:
         comfy = await tasks.create_task(
             s, title="b-comfy", due_date=_WIN + dt.timedelta(minutes=90), **common
         )  # slack 60 == window
-        r = await advisory.what_can_i_do_now(
-            s, org_id=org, actor_id=user, window_start=_WIN, duration_minutes=60
-        )
+        r = await _fits(s, org_id=org, actor_id=user, window_start=_WIN, duration_minutes=60)
     by = _by_id(r)
     assert (by[at_risk.id].slack_minutes, by[at_risk.id].deadline_bucket) == (-1, "at_risk")
     assert (by[tight0.id].slack_minutes, by[tight0.id].deadline_bucket) == (0, "tight")
@@ -271,9 +266,7 @@ async def test_what_now_no_due_date_bucket_none_sorts_after_tight() -> None:
             s, title="n-tight", due_date=_WIN + dt.timedelta(minutes=40), **common
         )  # slack 10 -> tight
         nodue = await tasks.create_task(s, title="n-nodue", **common)
-        r = await advisory.what_can_i_do_now(
-            s, org_id=org, actor_id=user, window_start=_WIN, duration_minutes=60
-        )
+        r = await _fits(s, org_id=org, actor_id=user, window_start=_WIN, duration_minutes=60)
     ids = [x.task_id for x in r]
     by = _by_id(r)
     assert by[nodue.id].slack_minutes is None
@@ -294,12 +287,8 @@ async def test_what_now_ranking_is_deterministic_incl_signal() -> None:
         await tasks.create_task(s, title="d1", due_date=_WIN + dt.timedelta(minutes=20), **common)
         await tasks.create_task(s, title="d2", **common)
         await tasks.create_task(s, title="d3", due_date=_WIN + dt.timedelta(days=3), **common)
-        r1 = await advisory.what_can_i_do_now(
-            s, org_id=org, actor_id=user, window_start=_WIN, duration_minutes=60
-        )
-        r2 = await advisory.what_can_i_do_now(
-            s, org_id=org, actor_id=user, window_start=_WIN, duration_minutes=60
-        )
+        r1 = await _fits(s, org_id=org, actor_id=user, window_start=_WIN, duration_minutes=60)
+        r2 = await _fits(s, org_id=org, actor_id=user, window_start=_WIN, duration_minutes=60)
     assert r1 == r2
 
 
@@ -321,12 +310,8 @@ async def test_what_now_core_coerces_naive_window_start() -> None:
             estimate_effort_h=Decimal("0.5"),
             due_date=_WIN + dt.timedelta(minutes=20),
         )
-        aware_r = await advisory.what_can_i_do_now(
-            s, org_id=org, actor_id=user, window_start=_WIN, duration_minutes=60
-        )
-        naive_r = await advisory.what_can_i_do_now(
-            s, org_id=org, actor_id=user, window_start=naive, duration_minutes=60
-        )
+        aware_r = await _fits(s, org_id=org, actor_id=user, window_start=_WIN, duration_minutes=60)
+        naive_r = await _fits(s, org_id=org, actor_id=user, window_start=naive, duration_minutes=60)
     assert naive_r == aware_r
     assert naive_r[0].slack_minutes == -10
 
@@ -346,7 +331,7 @@ async def test_what_now_focus_tag_selection_and_empty_inactive() -> None:
         ta = await tasks.create_task(s, title="in-A", tag_ids=[pa.id], **common)
         tb = await tasks.create_task(s, title="in-B", tag_ids=[pb.id], **common)
         tc = await tasks.create_task(s, title="no-project", **common)
-        only_a = await advisory.what_can_i_do_now(
+        only_a = await _fits(
             s,
             org_id=org,
             actor_id=user,
@@ -354,7 +339,7 @@ async def test_what_now_focus_tag_selection_and_empty_inactive() -> None:
             duration_minutes=60,
             focus_tag_ids=[pa.id],
         )
-        empty = await advisory.what_can_i_do_now(
+        empty = await _fits(
             s,
             org_id=org,
             actor_id=user,
@@ -362,7 +347,7 @@ async def test_what_now_focus_tag_selection_and_empty_inactive() -> None:
             duration_minutes=60,
             focus_tag_ids=[],
         )
-        none = await advisory.what_can_i_do_now(
+        none = await _fits(
             s,
             org_id=org,
             actor_id=user,
@@ -387,7 +372,7 @@ async def test_what_now_min_priority_selector() -> None:
         )
         p4 = await tasks.create_task(s, title="p4", importance=2, urgency=2, **common)  # 4
         p9 = await tasks.create_task(s, title="p9", importance=3, urgency=3, **common)  # 9
-        r = await advisory.what_can_i_do_now(
+        r = await _fits(
             s, org_id=org, actor_id=user, window_start=_WIN, duration_minutes=60, min_priority=5
         )
     ids = {x.task_id for x in r}
@@ -407,7 +392,7 @@ async def test_what_now_min_necessity_selector() -> None:
         must = await tasks.create_task(s, title="m", necessity=Necessity.must, **common)
         should = await tasks.create_task(s, title="s", necessity=Necessity.should, **common)
         could = await tasks.create_task(s, title="c", necessity=Necessity.could, **common)
-        r = await advisory.what_can_i_do_now(
+        r = await _fits(
             s,
             org_id=org,
             actor_id=user,
@@ -442,7 +427,7 @@ async def test_what_now_focus_is_hard_scope_others_union() -> None:
         cheap_noA = await tasks.create_task(
             s, title="noA-p4", importance=2, urgency=2, **common
         )  # not in A, priority 4
-        scoped = await advisory.what_can_i_do_now(
+        scoped = await _fits(
             s,
             org_id=org,
             actor_id=user,
@@ -450,7 +435,7 @@ async def test_what_now_focus_is_hard_scope_others_union() -> None:
             duration_minutes=60,
             focus_tag_ids=[pa.id],
         )
-        scoped_prio = await advisory.what_can_i_do_now(
+        scoped_prio = await _fits(
             s,
             org_id=org,
             actor_id=user,
@@ -484,7 +469,7 @@ async def test_what_now_location_soft_substring_match() -> None:
         )
         elsewhere = await tasks.create_task(s, title="at-office", location="Office", **common)
         anywhere = await tasks.create_task(s, title="anywhere", **common)
-        r = await advisory.what_can_i_do_now(
+        r = await _fits(
             s,
             org_id=org,
             actor_id=user,
@@ -519,7 +504,7 @@ async def test_what_now_any_tag_selector_distinct_from_ctx_gate() -> None:
         await tasks.create_task(s, title="plain", **common)
         # ctx provided so the ctx-only task is not gated out; even so it is
         # not SELECTED, because it does not carry the selected generic tag.
-        r = await advisory.what_can_i_do_now(
+        r = await _fits(
             s,
             org_id=org,
             actor_id=user,
@@ -549,7 +534,7 @@ async def test_what_now_foreign_focus_tag_selects_nothing() -> None:
             title="mine",
             estimate_effort_h=Decimal("0.5"),
         )
-        r = await advisory.what_can_i_do_now(
+        r = await _fits(
             s,
             org_id=org,
             actor_id=user,
@@ -591,12 +576,142 @@ async def test_what_now_dependency_block() -> None:
         )
         ids = {
             x.task_id
-            for x in await advisory.what_can_i_do_now(
+            for x in await _fits(
                 s, org_id=org, actor_id=user, window_start=_WIN, duration_minutes=60
             )
         }
     assert pred.id in ids  # pred is free
     assert succ.id not in ids  # succ blocked by non-terminal pred
+
+
+async def test_what_now_over_window_partition() -> None:
+    """A task that clears every filter but needs MORE time than the window is
+    not dropped: it lands in ``over_window`` (not ``fits``), carrying its full
+    effort as remaining_minutes, while a fitting task stays in ``fits``."""
+    async with admin_session() as s:
+        a = await signup(s, email=_email(), password="pw-strong-123", org_name="OVW")
+    org, user = a.org_id, a.user_id
+    async with tenant_session(str(org), str(user)) as s:
+        common = dict(org_id=org, actor_id=user, assignee_ids=[user])
+        fits = await tasks.create_task(
+            s, title="fits-30", estimate_effort_h=Decimal("0.5"), **common
+        )
+        too_long = await tasks.create_task(
+            s, title="needs-90", estimate_effort_h=Decimal("1.5"), **common
+        )
+        plan = await advisory.what_can_i_do_now(
+            s, org_id=org, actor_id=user, window_start=_WIN, duration_minutes=60
+        )
+    fit_ids = [x.task_id for x in plan.fits]
+    over_ids = [x.task_id for x in plan.over_window]
+    assert fits.id in fit_ids and fits.id not in over_ids
+    assert too_long.id in over_ids and too_long.id not in fit_ids
+    over = {x.task_id: x for x in plan.over_window}[too_long.id]
+    assert over.remaining_minutes == 90  # full effort, even though the window is 60
+
+
+async def test_what_now_over_window_keeps_overdue_must_visible() -> None:
+    """Regression (user report 2026-06-17): a ``must`` whose effort exceeds the
+    window must NOT silently vanish. An overdue, too-long must lands in
+    ``over_window`` with its urgency bucket intact instead of disappearing."""
+    async with admin_session() as s:
+        a = await signup(s, email=_email(), password="pw-strong-123", org_name="OVWMUST")
+    org, user = a.org_id, a.user_id
+    async with tenant_session(str(org), str(user)) as s:
+        training = await tasks.create_task(
+            s,
+            org_id=org,
+            actor_id=user,
+            assignee_ids=[user],
+            title="climbing-75",
+            estimate_effort_h=Decimal("1.25"),  # 75 min > 60-min window
+            necessity=Necessity.must,
+            due_date=_WIN - dt.timedelta(hours=2),  # already overdue
+        )
+        plan = await advisory.what_can_i_do_now(
+            s, org_id=org, actor_id=user, window_start=_WIN, duration_minutes=60
+        )
+    assert training.id not in [x.task_id for x in plan.fits]
+    over = {x.task_id: x for x in plan.over_window}
+    assert training.id in over
+    assert over[training.id].deadline_bucket == "overdue"
+    assert over[training.id].remaining_minutes == 75
+
+
+async def test_what_now_over_window_still_obeys_hard_filters() -> None:
+    """``over_window`` relaxes ONLY the time-fit: place, capability (ctx),
+    dependency-block and focus scope still exclude a too-long task entirely
+    (it appears in NEITHER partition). Only the unblocked, place-less,
+    ctx-free task survives -- in ``over_window`` because it is too long."""
+    async with admin_session() as s:
+        a = await signup(s, email=_email(), password="pw-strong-123", org_name="OVWHARD")
+    org, user = a.org_id, a.user_id
+    async with tenant_session(str(org), str(user)) as s:
+        ctx_tag = await taxonomy.create_tag(
+            s, org_id=org, actor_id=user, kind=TagKind.generic, name="ctx:computer"
+        )
+        # 90-min effort everywhere -> every candidate is over the 60-min window.
+        common = dict(
+            org_id=org, actor_id=user, assignee_ids=[user], estimate_effort_h=Decimal("1.5")
+        )
+        wrong_place = await tasks.create_task(s, title="big-elsewhere", location="Office", **common)
+        needs_ctx = await tasks.create_task(s, title="big-ctx", tag_ids=[ctx_tag.id], **common)
+        pred = await tasks.create_task(s, title="big-pred", **common)
+        succ = await tasks.create_task(s, title="big-succ", **common)
+        await deps.add_dependency(
+            s,
+            org_id=org,
+            actor_id=user,
+            predecessor_id=pred.id,
+            successor_id=succ.id,
+            type=DependencyType.FS,
+        )
+        plan = await advisory.what_can_i_do_now(
+            s,
+            org_id=org,
+            actor_id=user,
+            window_start=_WIN,
+            duration_minutes=60,
+            location="camp",  # substring matches none of the placed tasks
+        )
+    everywhere = {x.task_id for x in plan.fits} | {x.task_id for x in plan.over_window}
+    assert wrong_place.id not in everywhere  # bound to a different place
+    assert needs_ctx.id not in everywhere  # ctx:computer not provided
+    assert succ.id not in everywhere  # blocked by the non-terminal pred
+    assert pred.id in {x.task_id for x in plan.over_window}  # survivor, just too long
+
+
+async def test_what_now_busy_window_empties_both_partitions() -> None:
+    """A non-free window yields an EMPTY plan in BOTH partitions: if you are
+    busy now there is nothing to start, over-window candidates included."""
+    async with admin_session() as s:
+        a = await signup(s, email=_email(), password="pw-strong-123", org_name="OVWBUSY")
+    org, user = a.org_id, a.user_id
+    async with tenant_session(str(org), str(user)) as s:
+        await tasks.create_task(
+            s,
+            org_id=org,
+            actor_id=user,
+            assignee_ids=[user],
+            title="big-task",
+            estimate_effort_h=Decimal("1.5"),  # would be an over_window candidate
+        )
+        await actors_svc.mint_user_handle(s, user_id=user, seed="busy")
+        ident = await identities_svc.ensure_for_user(s, org_id=org, user_id=user)
+        await tasks.create_task(
+            s,
+            org_id=org,
+            actor_id=user,
+            title="Busy",
+            assignee_id=ident.id,
+            start_at=_WIN + dt.timedelta(minutes=30),
+            duration_minutes=60,
+        )
+        plan = await advisory.what_can_i_do_now(
+            s, org_id=org, actor_id=user, window_start=_WIN, duration_minutes=60
+        )
+    assert plan.fits == []
+    assert plan.over_window == []
 
 
 async def test_prioritize_within_budget_knapsack_and_determinism() -> None:

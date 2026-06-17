@@ -7850,6 +7850,8 @@ export interface components {
         NarratedPlanOut: {
             /** Ranked */
             ranked: components["schemas"]["FeasibleTaskOut"][];
+            /** Over Window */
+            over_window?: components["schemas"]["FeasibleTaskOut"][];
             /** Narration */
             narration?: string | null;
             /** Narration Model */

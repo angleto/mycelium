@@ -125,6 +125,41 @@ class FeasibleTask:
 
 
 @dataclass(frozen=True)
+class FeasiblePlan:
+    """Partition of the actor's feasible tasks for a window (ADR-0013).
+
+    ``fits`` are completable WITHIN the window: the authoritative,
+    urgency-first ranked answer (unchanged semantics). ``over_window`` pass
+    every other filter (scope, place, capability, dependencies, free window)
+    but need MORE time than the window allows, surfaced separately so an
+    overdue/at-risk ``must`` never silently disappears just because the slot
+    is shorter than its effort. Both lists carry the same ranking; narration
+    runs over ``fits`` only (an over-window task cannot be finished here)."""
+
+    fits: list[FeasibleTask]
+    over_window: list[FeasibleTask]
+
+
+def _rank_key(f: FeasibleTask) -> tuple[int, int, int, float, int, str]:
+    """Urgency-first total order (ADR-0013): bucket rank (overdue/at_risk
+    lift ABOVE necessity), then the nec/priority tiebreak, then raw slack
+    inside the urgent buckets (comfortable/none fall back to a +inf sentinel
+    so the non-urgent group keeps its prior ordering), then effort, then id."""
+    return (
+        _BUCKET_RANK[f.deadline_bucket],
+        _NEC_RANK[f.necessity],
+        f.priority,
+        # slack is non-None in every _SLACK_ORDERED bucket; the explicit
+        # guard keeps the sentinel fallback total AND type-checkable.
+        f.slack_minutes
+        if f.deadline_bucket in _SLACK_ORDERED and f.slack_minutes is not None
+        else _SLACK_SENTINEL,
+        f.remaining_minutes,
+        str(f.task_id),
+    )
+
+
+@dataclass(frozen=True)
 class NarratedPlan:
     """The deterministic ranked plan plus an OPTIONAL LLM rationale. The
     ranking is authoritative and unchanged; ``narration`` is advice only.
@@ -302,7 +337,7 @@ async def what_can_i_do_now(
     any_tag_ids: list[uuid.UUID] | None = None,
     min_priority: int | None = None,
     min_necessity: Necessity | None = None,
-) -> list[FeasibleTask]:
+) -> FeasiblePlan:
     """Feasible tasks for a free window, urgency-first ranked (ADR-0013).
 
     Optional filters narrow the actor's owned/feasible set, never widening.
@@ -321,10 +356,15 @@ async def what_can_i_do_now(
     (doable anywhere); the match is a case-insensitive substring. All tag
     joins run under the tenant session (RLS), so a cross-org tag id selects
     nothing without error.
+
+    Returns a ``FeasiblePlan``: ``fits`` (completable within the window, the
+    authoritative ranked answer) plus ``over_window`` (same filters, but
+    effort exceeds the window) so a too-long urgent task is surfaced apart
+    instead of silently dropped.
     """
     await require_role(session, org_id, actor_id, Role.member)
     if duration_minutes <= 0:
-        return []
+        return FeasiblePlan(fits=[], over_window=[])
     # tz-aware guard (latent 500): due_date is timestamptz (aware); a
     # naive window_start would make the slack subtraction raise. The
     # edges (T4 router, T6 MCP) coerce, but defend here too so the core
@@ -334,10 +374,10 @@ async def what_can_i_do_now(
     window_end = window_start + dt.timedelta(minutes=duration_minutes)
     # The claimed free window must really be free (no-ubiquity, ADR-0008).
     if await _user_busy(session, actor_id, window_start, window_end):
-        return []
+        return FeasiblePlan(fits=[], over_window=[])
     tasks = await _owned_actionable(session, actor_id, human_only=True)
     if not tasks:
-        return []
+        return FeasiblePlan(fits=[], over_window=[])
     task_ids = [t.id for t in tasks]
     blocked = await blocked_task_ids(session, org_id=org_id, node_ids=set(task_ids))
     tags = await _generic_tag_names(session, task_ids)
@@ -361,6 +401,7 @@ async def what_can_i_do_now(
     )
     loc_q = location.strip().lower() if location else None
     out: list[FeasibleTask] = []
+    over: list[FeasibleTask] = []
     for t in tasks:
         if t.id in blocked:
             continue
@@ -375,45 +416,39 @@ async def what_can_i_do_now(
         ):
             continue
         minutes = _effort_minutes(t)
-        if minutes is None or minutes <= 0 or minutes > duration_minutes:
+        # No usable estimate is a HARD drop (we cannot reason about fit). The
+        # effort-vs-window comparison is NOT a drop: a task that clears every
+        # other filter but needs more time than the window goes to the
+        # ``over_window`` bucket below instead of vanishing, so an overdue /
+        # at-risk must stays visible even when the slot is too short for it.
+        if minutes is None or minutes <= 0:
             continue
-        # Soft place filter: a task bound to a DIFFERENT place is excluded;
-        # a task with no location is doable anywhere and stays. Match is a
-        # case-insensitive substring so a fragment ("stefano") finds the
-        # full place ("Santo Stefano ..."), which exact-match never did.
+        # Place + capability are hard gates that apply to over_window tasks
+        # too: a too-long task in the wrong place / lacking a ctx still must
+        # not surface. Only the time-fit is relaxed.
         if loc_q is not None and t.location is not None and loc_q not in t.location.lower():
             continue
         required_ctx = {n for n in tags.get(t.id, set()) if n.startswith(_CTX_PREFIX)}
         if not required_ctx.issubset(have_ctx):
             continue
         slack, bucket = _deadline_signal(t.due_date, window_start, minutes, duration_minutes)
-        out.append(
-            FeasibleTask(
-                task_id=t.id,
-                title=t.title,
-                necessity=t.necessity,
-                priority=t.priority,
-                due_date=t.due_date,
-                remaining_minutes=minutes,
-                slack_minutes=slack,
-                deadline_bucket=bucket,
-            )
+        ft = FeasibleTask(
+            task_id=t.id,
+            title=t.title,
+            necessity=t.necessity,
+            priority=t.priority,
+            due_date=t.due_date,
+            remaining_minutes=minutes,
+            slack_minutes=slack,
+            deadline_bucket=bucket,
         )
-    # Urgency-first total order: bucket rank (overdue/at_risk lift to the
-    # top), then the existing nec/priority tiebreak. Inside the urgent
-    # buckets raw slack orders by lateness; comfortable/none fall back to
-    # a +inf sentinel so the non-urgent group keeps its old ordering.
-    out.sort(
-        key=lambda f: (
-            _BUCKET_RANK[f.deadline_bucket],
-            _NEC_RANK[f.necessity],
-            f.priority,
-            f.slack_minutes if f.deadline_bucket in _SLACK_ORDERED else _SLACK_SENTINEL,
-            f.remaining_minutes,
-            str(f.task_id),
-        )
-    )
-    return out
+        (out if minutes <= duration_minutes else over).append(ft)
+    # Urgency-first total order on BOTH partitions (same key): a too-long task
+    # is ranked among its peers in over_window exactly as it would rank among
+    # the doable ones, so the most urgent over-window item leads its section.
+    out.sort(key=_rank_key)
+    over.sort(key=_rank_key)
+    return FeasiblePlan(fits=out, over_window=over)
 
 
 # Advisor-only narration prompt (requirement #4b). The ranking is fixed

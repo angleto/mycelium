@@ -2544,10 +2544,13 @@ async def what_can_i_do_now(
     floor) then combine by UNION within that scope. location is a soft,
     case-insensitive substring place filter (tasks with no place stay).
     Returns the NarratedPlanOut envelope
-    {ranked, narration, narration_model, narrated}; with ``narrate`` true
-    the advisor adds an optional rationale over the SAME ranking (metered
-    at the resolve_llm seam), degrading to narrated=false when no provider
-    is configured.
+    {ranked, over_window, narration, narration_model, narrated}: ``ranked``
+    are the tasks completable within the window; ``over_window`` clear every
+    other filter but need more time than the window (effort > duration),
+    surfaced apart so a too-long overdue/at-risk must is not silently
+    dropped. With ``narrate`` true the advisor adds an optional rationale
+    over the SAME ranking (metered at the resolve_llm seam), degrading to
+    narrated=false when no provider is configured.
     """
     async with _tenant(token, org_id) as (s, org, user):
         if window_start is not None:
@@ -2556,7 +2559,7 @@ async def what_can_i_do_now(
                 ws = ws.replace(tzinfo=dt.UTC)
         else:
             ws = dt.datetime.now(dt.UTC)
-        rows = await advisory_svc.what_can_i_do_now(
+        plan = await advisory_svc.what_can_i_do_now(
             s,
             org_id=org,
             actor_id=user,
@@ -2569,8 +2572,9 @@ async def what_can_i_do_now(
             min_priority=min_priority,
             min_necessity=Necessity(min_necessity) if min_necessity else None,
         )
-        ranked = [
-            {
+
+        def _row(r: advisory_svc.FeasibleTask) -> dict[str, Any]:
+            return {
                 "task_id": str(r.task_id),
                 "title": r.title,
                 "necessity": r.necessity.value,
@@ -2580,25 +2584,27 @@ async def what_can_i_do_now(
                 "slack_minutes": r.slack_minutes,
                 "deadline_bucket": r.deadline_bucket,
             }
-            for r in rows
-        ]
+
+        ranked = [_row(r) for r in plan.fits]
+        over_window = [_row(r) for r in plan.over_window]
         narration: str | None = None
         narration_model: str | None = None
         narrated = False
-        if narrate and rows:
+        if narrate and plan.fits:
             np = await advisory_svc.narrate_plan(
                 s,
                 org_id=org,
                 actor_id=user,
                 window_start=ws,
                 duration_minutes=duration_minutes,
-                plan=rows,
+                plan=plan.fits,
             )
             narration = np.narration
             narration_model = np.narration_model
             narrated = np.narrated
         return {
             "ranked": ranked,
+            "over_window": over_window,
             "narration": narration,
             "narration_model": narration_model,
             "narrated": narrated,

@@ -1612,6 +1612,11 @@ class NarratedPlanOut(BaseModel):
     always present and authoritative regardless."""
 
     ranked: list[FeasibleTaskOut]
+    # Tasks that clear every filter except they need MORE time than the
+    # window (effort > duration). Surfaced separately so a too-long
+    # overdue/at-risk task stays visible instead of being silently dropped;
+    # not narrated (it cannot be finished within this window).
+    over_window: list[FeasibleTaskOut] = Field(default_factory=list)
     narration: str | None = None
     narration_model: str | None = None
     narrated: bool = False
