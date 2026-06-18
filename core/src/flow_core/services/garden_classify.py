@@ -39,7 +39,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from flow_core.errors import DomainError, NotFoundError
@@ -71,6 +71,15 @@ MATURE_SUGGEST = 0.65  # surface a one-tap proposal at/above this
 MATURE_AUTO = 0.85  # auto-promote (reversible, label-only) at/above this
 DEG_SATURATION = 3  # ADR-0029 manual-link threshold for "mature"
 DEFAULT_K = 5
+
+# Cold-start damping (WS-D5, ADR-0032). Below this many notes the graph
+# signals degenerate -- Leiden collapses to one community, PageRank /
+# percentile are near-uniform, co-occurrence support is thin -- so a
+# fixed-floor heuristic emits a "confident" but empty suggestion (E3:
+# leiden_id 0, tags []) that teaches the forester to ignore the panel.
+# A linear ramp damps every confidence toward 0 on a sparse corpus so weak
+# signals fall back under their floors instead of masquerading as certainty.
+COLD_START_NODES = 20
 
 # The set of suggestion kinds the engine can produce.
 ALL_KINDS: frozenset[str] = frozenset({"tags", "links", "maturity", "cluster"})
@@ -150,6 +159,7 @@ def _suggest_tags(
     by_note: dict[uuid.UUID, set[uuid.UUID]],
     tag_deg: dict[uuid.UUID, int],
     k: int,
+    damping: float = 1.0,
 ) -> list[TagSuggestion]:
     """Candidate generic tags ranked by rarity-discounted co-occurrence
     with the node's existing generic tags. A tag found on many notes that
@@ -168,7 +178,7 @@ def _suggest_tags(
     out: list[TagSuggestion] = []
     for c, n in support.items():
         raw = n / math.log(2.0 + tag_deg.get(c, 0))
-        conf = 1.0 - 1.0 / (1.0 + raw)  # squash to [0, 1)
+        conf = (1.0 - 1.0 / (1.0 + raw)) * damping  # squash to [0, 1), cold-start damped
         if conf < TAG_FLOOR:
             continue
         out.append(
@@ -183,18 +193,23 @@ def _suggest_tags(
 
 
 async def _suggest_links(
-    session: AsyncSession, *, org_id: uuid.UUID, node_id: uuid.UUID, k: int
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    node_id: uuid.UUID,
+    k: int,
+    damping: float = 1.0,
 ) -> list[LinkCandidate]:
     rows = await linkpred_svc.suggest_links_for_note(session, org_id=org_id, note_id=node_id, k=k)
     return [
         LinkCandidate(
             target_id=r.note_id,
             link_kind="related",  # v1 default (neutral association); kind MLP is v2 (ADR-0032)
-            confidence=r.score,
+            confidence=r.score * damping,
             rationale=r.rationale,
         )
         for r in rows
-        if r.score >= LINK_FLOOR
+        if r.score * damping >= LINK_FLOOR
     ]
 
 
@@ -213,8 +228,19 @@ def _pr_percentile(pageranks: dict[uuid.UUID, float], node_id: uuid.UUID) -> flo
     return (rank - 1) / (n - 1)
 
 
+def _cold_start_damping(node_count: int) -> float:
+    """Confidence multiplier in [0, 1]: full at ``COLD_START_NODES`` notes or
+    more, a linear ramp below (0 for an empty corpus). Applied to every
+    suggestion's confidence before its floor, so a sparse corpus -- where the
+    graph statistics are unreliable -- yields fewer/no over-confident
+    suggestions rather than degenerate ones (WS-D5)."""
+    if node_count >= COLD_START_NODES:
+        return 1.0
+    return max(0.0, node_count / COLD_START_NODES)
+
+
 async def _suggest_maturity(
-    session: AsyncSession, *, org_id: uuid.UUID, note: Note
+    session: AsyncSession, *, org_id: uuid.UUID, note: Note, damping: float = 1.0
 ) -> tuple[MaturitySuggestion | None, dict[str, float]]:
     """The value-axis promotion ``growing → mature``.
 
@@ -236,7 +262,7 @@ async def _suggest_maturity(
 
     degree = await _manual_link_degree(session, org_id=org_id, note_id=note.id)
     deg_term = min(1.0, degree / DEG_SATURATION)
-    conf = min(pr_pct, deg_term)
+    conf = min(pr_pct, deg_term) * damping
     diag.update(pr_pct=pr_pct, manual_degree=float(degree), conf_mature=conf)
 
     if conf < MATURE_SUGGEST:
@@ -271,7 +297,7 @@ async def _manual_link_degree(
 
 
 async def _suggest_cluster(
-    session: AsyncSession, *, org_id: uuid.UUID, node_id: uuid.UUID
+    session: AsyncSession, *, org_id: uuid.UUID, node_id: uuid.UUID, damping: float = 1.0
 ) -> tuple[ClusterSuggestion | None, str]:
     res = await graph_svc.compute_leiden_clusters(session, org_id=org_id)
     if res.modularity is None:
@@ -283,7 +309,8 @@ async def _suggest_cluster(
             modularity=res.modularity,
             # Modularity is the confidence proxy: a well-separated
             # partition means the community assignment is trustworthy.
-            confidence=max(0.0, res.modularity),
+            # Cold-start damped (a 1-community collapse is near-0 already).
+            confidence=max(0.0, res.modularity) * damping,
         ),
         "leiden_cluster",
     )
@@ -316,29 +343,54 @@ async def classify_node(
     signals: list[str] = []
     raw: dict[str, float] = {}
 
+    # Cold-start damping (WS-D5): scale every confidence by how mature the
+    # corpus is. On a sparse graph the floor-based heuristics would emit
+    # "confident" but empty suggestions; damping pushes weak signals back
+    # under their floors instead. Counted once and threaded into each suggester.
+    node_count = int(
+        (
+            await session.execute(
+                select(func.count())
+                .select_from(Note)
+                .where(Note.org_id == org_id, Note.deleted_at.is_(None))
+            )
+        ).scalar_one()
+    )
+    damping = _cold_start_damping(node_count)
+    if damping < 1.0:
+        signals.append("corpus_too_sparse")
+        raw["cold_start_damping"] = damping
+        raw["node_count"] = float(node_count)
+
     tags: list[TagSuggestion] = []
     if "tags" in wanted:
         by_note, tag_deg = await _note_generic_tags(session, org_id=org_id)
-        tags = _suggest_tags(node_id=node_id, by_note=by_note, tag_deg=tag_deg, k=k)
+        tags = _suggest_tags(
+            node_id=node_id, by_note=by_note, tag_deg=tag_deg, k=k, damping=damping
+        )
         if tags:
             signals.append("tag_cooccur_adamic_adar")
 
     links: list[LinkCandidate] = []
     if "links" in wanted:
-        links = await _suggest_links(session, org_id=org_id, node_id=node_id, k=k)
+        links = await _suggest_links(session, org_id=org_id, node_id=node_id, k=k, damping=damping)
         if links:
             signals.append("linkpred_ppr")
 
     maturity: MaturitySuggestion | None = None
     if "maturity" in wanted:
-        maturity, mat_diag = await _suggest_maturity(session, org_id=org_id, note=note)
+        maturity, mat_diag = await _suggest_maturity(
+            session, org_id=org_id, note=note, damping=damping
+        )
         raw.update(mat_diag)
         if maturity is not None:
             signals.extend(["pagerank_pct", "manual_degree"])
 
     cluster: ClusterSuggestion | None = None
     if "cluster" in wanted:
-        cluster, cluster_signal = await _suggest_cluster(session, org_id=org_id, node_id=node_id)
+        cluster, cluster_signal = await _suggest_cluster(
+            session, org_id=org_id, node_id=node_id, damping=damping
+        )
         signals.append(cluster_signal)
 
     return ClassifyResult(

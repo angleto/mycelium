@@ -79,6 +79,18 @@ async def _link(
     )
 
 
+async def _warm_corpus(s: object, org: uuid.UUID) -> None:
+    """Insert ``COLD_START_NODES`` isolated filler notes so the corpus clears
+    the cold-start threshold and confidence damping is 1.0. The ranking tests
+    use this to isolate the signal logic under test from WS-D5's sparse-graph
+    damping (the fillers are untagged + unlinked, so they perturb no signal:
+    a personalised PPR cannot reach them, co-occurrence support is unchanged,
+    and the PageRank max is unmoved -- only the node count grows)."""
+    for i in range(gc.COLD_START_NODES):
+        s.add(Note(org_id=org, kind=NoteKind.text, title=f"filler-{i}"))  # type: ignore[attr-defined]
+    await s.flush()  # type: ignore[attr-defined]
+
+
 # ---------------------------------------------------------------------------
 # Shape + kinds filter
 # ---------------------------------------------------------------------------
@@ -131,6 +143,7 @@ async def test_tag_suggestion_picks_cooccurring_tag() -> None:
             await _attach(s, org, nid, x)
         await _attach(s, org, b.id, y)
         await _attach(s, org, c.id, y)
+        await _warm_corpus(s, org)  # past the cold-start threshold: damping=1.0
         res = await gc.classify_node(s, org_id=org, node_id=a.id, kinds=frozenset({"tags"}))
     suggested = {t.tag_id for t in res.tags}
     assert y in suggested
@@ -157,6 +170,7 @@ async def test_link_suggestion_excludes_linked_and_surfaces_shared_tag_candidate
             await _attach(s, org, a.id, tid)
             await _attach(s, org, d.id, tid)
         await _link(s, org, user, a.id, b.id)
+        await _warm_corpus(s, org)  # past the cold-start threshold: damping=1.0
         res = await gc.classify_node(s, org_id=org, node_id=a.id, kinds=frozenset({"links"}))
     targets = {lc.target_id for lc in res.links}
     assert b.id not in targets  # already linked
@@ -196,6 +210,7 @@ async def test_maturity_auto_promotes_central_and_curated_hub() -> None:
     org, user = await _make_workspace()
     async with tenant_session(str(org), str(user)) as s:
         hub_id = await _hub(s, org, user, in_links=5)  # deg=5 -> deg_term=1.0
+        await _warm_corpus(s, org)  # past the cold-start threshold: damping=1.0
         res = await gc.classify_node(s, org_id=org, node_id=hub_id, kinds=frozenset({"maturity"}))
     assert res.maturity is not None
     assert res.maturity.value == "mature"
@@ -210,6 +225,7 @@ async def test_maturity_proposal_tier_when_central_but_undercurated() -> None:
         # deg=2 -> deg_term=0.667; still the PR max so pr_pct=1.0;
         # conf=min(1.0, 0.667)=0.667 in [SUGGEST, AUTO).
         hub_id = await _hub(s, org, user, in_links=2, isolated=2)
+        await _warm_corpus(s, org)  # past the cold-start threshold: damping=1.0
         res = await gc.classify_node(s, org_id=org, node_id=hub_id, kinds=frozenset({"maturity"}))
     assert res.maturity is not None
     assert res.maturity.value == "mature"
@@ -255,3 +271,41 @@ async def test_cluster_signal_present_or_degraded_gracefully() -> None:
     else:
         assert "leiden_cluster" in res.signals_used
         assert res.cluster.modularity is not None
+
+
+# ---------------------------------------------------------------------------
+# Cold-start damping (WS-D5)
+# ---------------------------------------------------------------------------
+
+
+def test_cold_start_damping_factor() -> None:
+    """Linear ramp: 0 for an empty corpus, 0.5 at the half-point, full at the
+    threshold and beyond."""
+    assert gc._cold_start_damping(0) == 0.0
+    assert gc._cold_start_damping(gc.COLD_START_NODES // 2) == 0.5
+    assert gc._cold_start_damping(gc.COLD_START_NODES) == 1.0
+    assert gc._cold_start_damping(gc.COLD_START_NODES + 50) == 1.0
+
+
+async def test_cold_start_damps_confident_suggestion_on_sparse_corpus() -> None:
+    """The exact tag-co-occurrence scenario that surfaces a candidate on a
+    warm corpus produces NO suggestion on a 3-note corpus, because the
+    confidence is damped under the floor -- and the result flags
+    corpus_too_sparse so the absence is explained, not silent."""
+    org, user = await _make_workspace()
+    async with tenant_session(str(org), str(user)) as s:
+        a = await _make_note(s, org, user, "a")
+        b = await _make_note(s, org, user, "b")
+        c = await _make_note(s, org, user, "c")
+        x = await _generic_tag(s, org, user, "x-tag")
+        y = await _generic_tag(s, org, user, "y-tag")
+        for nid in (a.id, b.id, c.id):
+            await _attach(s, org, nid, x)
+        await _attach(s, org, b.id, y)
+        await _attach(s, org, c.id, y)
+        # No warm-up: 3 notes is deep in the cold-start regime.
+        res = await gc.classify_node(s, org_id=org, node_id=a.id, kinds=frozenset({"tags"}))
+    assert res.tags == []  # the co-occurring tag is damped under TAG_FLOOR
+    assert "corpus_too_sparse" in res.signals_used
+    assert res.raw["cold_start_damping"] < 1.0
+    assert res.raw["node_count"] == 3.0
