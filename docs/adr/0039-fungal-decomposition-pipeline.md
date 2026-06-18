@@ -35,8 +35,10 @@ depend on.
    source's project (the junction project, migration 0016).
 4. Flags the **source** `humus_flag=true`: it has been decomposed and
    the walk may now surface it as fertiliser.
-5. Links distillation → source with an `atom_of` `note_note_link`
-   (the distillation is an atom of the source).
+5. Links source → distillation with a `hypha_of` `note_note_link`
+   (parent = source/origin, child = the distillation grown from it;
+   `atom_of` was renamed by migration `0022_note_link_split_atom_of`,
+   ADR-0040 D3).
 
 **Idempotent** on `(source_note_id, humus_kind='distillation')`: a
 second call returns the existing distillation untouched. Member role
@@ -101,7 +103,7 @@ Two batch producers, both emitting humus notes with the corresponding
 ### Reversibility and transparency
 
 A distillation is an ordinary note: the user can read, edit, or delete
-it, and the `atom_of` link is inspectable from either end. Re-running is
+it, and the `hypha_of` link is inspectable from either end. Re-running is
 a no-op. Nothing about decomposition is hidden or irreversible, which is
 the precondition for the Phase-3 automatic trigger to be acceptable
 later.
@@ -130,5 +132,5 @@ later.
   automatic-classification machinery.
 - **Store the distillation inline on the source note.** Rejected: it
   would make the source mutable by a machine process and lose the
-  separate-node provenance (the `atom_of` link, independent maturity,
+  separate-node provenance (the `hypha_of` link, independent maturity,
   independent retrieval).
