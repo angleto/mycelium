@@ -19,8 +19,11 @@ until their data source lands -- explicit, never a faked number:
     clicked node sat at rank 1 of the top-``RECALL_K``. When ADR-0037
     lands, this computation must switch to the leave-one-out re-rank
     the ADR specifies.
-  * ``fungal_lag``: blocked on the decomposition pipeline (ADR-0039)
-    emitting distillation notes.
+  * ``fungal_lag`` (WS-C6): median seconds from a source note's first
+    archiving to its first distillation (``hypha_of`` humus atom) -- how
+    long decomposition takes to turn an archived note into humus.
+    ``value=None`` with a reason only when there are genuinely no
+    distillations yet (or none from an archived source).
 
 The nightly worker tick calls :func:`persist_snapshot` to write one
 ``garden_health_daily`` row per org per day; the live endpoint reads the
@@ -39,6 +42,7 @@ from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from flow_core.models.activity_log import ActivityLog
 from flow_core.models.classification_feedback import ClassificationFeedback
 from flow_core.models.garden_health import GardenHealthDaily
 from flow_core.models.note import Note
@@ -64,7 +68,8 @@ _NO_TAGGED_NEIGHBOURHOOD = "no linked neighbourhood carries a generic tag yet"
 _NO_CLUSTERS = "clustering unavailable (needs the optional extra, or >=1 community)"
 _NO_NOTES = "no notes yet"
 _NO_CLICKS = "no real (non-probe) search clicks in window yet"
-_FUNGAL_BLOCKED = "blocked: decomposition pipeline (ADR-0039) not emitting distillation notes yet"
+_NO_DISTILLATIONS = "no distillation notes yet (decomposition has not produced humus)"
+_NO_ARCHIVED_DISTILLATIONS = "distillations exist but none derive from an archived source yet"
 
 
 @dataclass(frozen=True)
@@ -248,6 +253,70 @@ async def _density_delta_7d(
     return round(links_now / notes_now - links_then / notes_then, 4)
 
 
+async def _fungal_lag(
+    session: AsyncSession, *, org_id: uuid.UUID
+) -> tuple[float | None, str | None]:
+    """Median seconds from a source note's first archiving to its first
+    distillation (the ``hypha_of`` humus atom) -- how long decomposition
+    takes to turn an archived note into humus (WS-C6).
+
+    Returns ``(value, reason)``; ``reason`` is set only when ``value`` is
+    None: ``_NO_DISTILLATIONS`` when there are genuinely zero distillations,
+    ``_NO_ARCHIVED_DISTILLATIONS`` when distillations exist but none derive
+    from an archived source (e.g. all distilled on-demand while live).
+    """
+    # (source_id, distillation created_at) for every hypha_of humus atom.
+    distill_rows = (
+        await session.execute(
+            select(NoteNoteLink.parent_note_id, Note.created_at)
+            .join(Note, Note.id == NoteNoteLink.child_note_id)
+            .where(
+                NoteNoteLink.org_id == org_id,
+                NoteNoteLink.kind == "hypha_of",
+                Note.humus_kind == "distillation",
+                Note.deleted_at.is_(None),
+            )
+        )
+    ).all()
+    if not distill_rows:
+        return None, _NO_DISTILLATIONS
+    # First distillation per source (the idempotency guard means one per
+    # source in practice; min() honours "first" if that ever changes).
+    first_distill: dict[uuid.UUID, datetime.datetime] = {}
+    for source_id, distill_ts in distill_rows:
+        cur = first_distill.get(source_id)
+        if cur is None or distill_ts < cur:
+            first_distill[source_id] = distill_ts
+    # First archiving per source: the earliest action='archive' audit event.
+    # A note starts is_archived=False, so its first archive event is always
+    # the flip to True -- unambiguous without parsing the diff (archive and
+    # unarchive share the action name).
+    archive_rows = (
+        await session.execute(
+            select(ActivityLog.entity_id, func.min(ActivityLog.ts))
+            .where(
+                ActivityLog.entity == "note",
+                ActivityLog.action == "archive",
+                ActivityLog.entity_id.in_(list(first_distill)),
+            )
+            .group_by(ActivityLog.entity_id)
+        )
+    ).all()
+    first_archive: dict[uuid.UUID, datetime.datetime] = {
+        sid: ts for sid, ts in archive_rows if sid is not None
+    }
+    lags = sorted(
+        (first_distill[sid] - first_archive[sid]).total_seconds()
+        for sid in first_distill
+        if sid in first_archive and first_archive[sid] <= first_distill[sid]
+    )
+    if not lags:
+        return None, _NO_ARCHIVED_DISTILLATIONS
+    mid = len(lags) // 2
+    median = lags[mid] if len(lags) % 2 else (lags[mid - 1] + lags[mid]) / 2
+    return round(median, 1), None
+
+
 async def compute_health(
     session: AsyncSession,
     *,
@@ -263,6 +332,7 @@ async def compute_health(
     entropy = await graph_svc.compute_tag_neighborhood_entropy(session, org_id=org_id)
     modularity = (await graph_svc.compute_leiden_clusters(session, org_id=org_id)).modularity
     density = await _density_delta_7d(session, org_id=org_id, now=now)
+    fungal_value, fungal_reason = await _fungal_lag(session, org_id=org_id)
     return GardenHealth(
         accept_rate_classify_7d=Metric(
             r7, ACCEPT_RATE_FLOOR, None if r7 is not None else _NO_DECISIONS
@@ -280,7 +350,7 @@ async def compute_health(
         leiden_modularity=Metric(
             modularity, None, None if modularity is not None else _NO_CLUSTERS
         ),
-        fungal_lag=Metric(None, None, _FUNGAL_BLOCKED),
+        fungal_lag=Metric(fungal_value, None, fungal_reason),
         density_delta_7d=Metric(density, None, None if density is not None else _NO_NOTES),
     )
 

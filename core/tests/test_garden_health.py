@@ -9,19 +9,41 @@ daily-snapshot persistence the nightly worker tick uses.
 from __future__ import annotations
 
 import datetime
+import sys
 import uuid
+from collections.abc import Iterator
+from pathlib import Path
 
+import pytest
 from sqlalchemy import update
 
-from flow_core.db import admin_session, tenant_session
-from flow_core.models.classification_feedback import ClassificationFeedback
-from flow_core.models.note import Note, NoteKind
-from flow_core.models.note_tag import NoteTag
-from flow_core.models.tag import TagKind
-from flow_core.services import garden_health as health_svc
-from flow_core.services import note_links, taxonomy
-from flow_core.services import notes as notes_svc
-from flow_core.services.auth import signup
+ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from _fake_ai import FakeLLM  # noqa: E402
+
+from flow_core.ai_providers import set_llm_override  # noqa: E402
+from flow_core.db import admin_session, tenant_session  # noqa: E402
+from flow_core.models.activity_log import ActivityLog  # noqa: E402
+from flow_core.models.classification_feedback import ClassificationFeedback  # noqa: E402
+from flow_core.models.note import Note, NoteKind  # noqa: E402
+from flow_core.models.note_tag import NoteTag  # noqa: E402
+from flow_core.models.tag import TagKind  # noqa: E402
+from flow_core.services import decomposition as decomp  # noqa: E402
+from flow_core.services import garden_health as health_svc  # noqa: E402
+from flow_core.services import note_links, taxonomy  # noqa: E402
+from flow_core.services import notes as notes_svc  # noqa: E402
+from flow_core.services.auth import signup  # noqa: E402
+
+
+@pytest.fixture
+def _wire_llm() -> Iterator[None]:
+    set_llm_override(FakeLLM)
+    try:
+        yield
+    finally:
+        set_llm_override(None)
 
 
 async def _org_user() -> tuple[uuid.UUID, uuid.UUID]:
@@ -206,3 +228,62 @@ async def test_recall_at_k_is_blocked_with_reason() -> None:
         health = await health_svc.compute_health(s, org_id=org)
     assert health.recall_at_k.value is None
     assert health.recall_at_k.reason
+
+
+async def test_fungal_lag_measures_archive_to_distillation(_wire_llm: None) -> None:
+    """WS-C6: fungal_lag is the real median seconds from a source's first
+    archiving to its first distillation -- not the old hardcoded 'blocked'
+    constant. The activity log is append-only, so the controlled backdated
+    archive event is inserted directly (identical in shape to archive_note's
+    row) to assert a known positive interval."""
+    org, user = await _org_user()
+    async with tenant_session(str(org), str(user)) as s:
+        source = await notes_svc.create_note(
+            s,
+            org_id=org,
+            actor_id=user,
+            kind=NoteKind.text,
+            title="finished",
+            text="a finished thought worth distilling into reusable atoms",
+        )
+        await s.flush()
+        archived_at = datetime.datetime.now(datetime.UTC) - datetime.timedelta(hours=2)
+        s.add(
+            ActivityLog(
+                org_id=org,
+                actor_id=user,
+                actor_kind="human_direct",
+                entity="note",
+                entity_id=source.id,
+                action="archive",
+                ts=archived_at,
+            )
+        )
+        await s.flush()
+        await decomp.distill_note(s, org_id=org, actor_id=user, note_id=source.id)
+        health = await health_svc.compute_health(s, org_id=org)
+    assert health.fungal_lag.reason is None
+    assert health.fungal_lag.value is not None
+    # ~2h between the backdated archive and the just-now distillation.
+    assert health.fungal_lag.value >= 7000
+
+
+async def test_fungal_lag_reason_when_distillation_from_live_source(_wire_llm: None) -> None:
+    """A distillation whose source was never archived contributes no
+    archive->distill interval: value None with the specific reason (NOT the
+    generic 'no distillations yet', which is reserved for a truly empty
+    corpus)."""
+    org, user = await _org_user()
+    async with tenant_session(str(org), str(user)) as s:
+        source = await notes_svc.create_note(
+            s,
+            org_id=org,
+            actor_id=user,
+            kind=NoteKind.text,
+            title="live",
+            text="a non-trivial body the LLM will distill on the first pass",
+        )
+        await decomp.distill_note(s, org_id=org, actor_id=user, note_id=source.id)
+        health = await health_svc.compute_health(s, org_id=org)
+    assert health.fungal_lag.value is None
+    assert health.fungal_lag.reason == health_svc._NO_ARCHIVED_DISTILLATIONS
