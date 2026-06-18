@@ -26,7 +26,7 @@ from dataclasses import dataclass
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from flow_core.ai_providers import LLMProvider, get_llm
+from flow_core.ai_providers import LLMProvider
 from flow_core.errors import DomainError
 from flow_core.i18n import MessageCode
 from flow_core.models.identity import Identity
@@ -35,6 +35,7 @@ from flow_core.models.note import Note, NoteKind
 from flow_core.models.note_link import NoteNoteLink
 from flow_core.services import note_inert
 from flow_core.services import notes as notes_svc
+from flow_core.services.llm_resolver import resolve_llm
 from flow_core.services.rbac import require_role
 
 _DISTILL_SYSTEM = (
@@ -97,7 +98,21 @@ async def distill_note(
     body = await notes_svc.get_body(session, note_id=note_id)
     if not body or not body.strip():
         raise DomainError(MessageCode.DOMAIN_ERROR)
-    provider = llm or get_llm()
+    # Route through the per-org METERED seam (WS-C3): an org on a hosted
+    # provider (anthropic/scaleway/openai) gets ITS model and is charged,
+    # instead of silently falling back to the local model for free -- the
+    # bug this fixes, where the metering the docstrings/ADRs promise was
+    # bypassed by a bare get_llm(). ``llm`` stays an explicit test/override
+    # injection. The operation_id is deterministic so a retried distill
+    # never double-charges (the idempotency guard above already prevents a
+    # second LLM call once the humus atom exists).
+    provider = llm or await resolve_llm(
+        session,
+        org_id,
+        actor_id=actor_id,
+        operation_id=f"distill:{org_id}:{note_id}",
+        op="distill",
+    )
     res = await provider.complete(
         system=_DISTILL_SYSTEM,
         messages=[("user", body)],

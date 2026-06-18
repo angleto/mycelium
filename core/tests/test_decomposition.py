@@ -30,6 +30,7 @@ from sqlalchemy import select, text  # noqa: E402
 
 from flow_core.ai_providers import set_llm_override  # noqa: E402
 from flow_core.db import admin_session, tenant_session  # noqa: E402
+from flow_core.models.billing import CostBasis, UsageRecord  # noqa: E402
 from flow_core.models.note import Note, NoteKind  # noqa: E402
 from flow_core.models.note_link import NoteNoteLink  # noqa: E402
 from flow_core.services import billing  # noqa: E402
@@ -139,6 +140,35 @@ async def test_distill_does_not_mark_a_live_source_humus(_wire_llm: None) -> Non
             )
         ).scalar_one()
         assert link.kind == "hypha_of"
+
+
+async def test_distill_note_meters_through_the_seam(_wire_llm: None) -> None:
+    """WS-C3 (privacy/billing fix): distillation must charge through the
+    per-org MeteredLLM seam, not a bare get_llm() that never bills. With a
+    rate card seeded, the first distillation produces exactly one UsageRecord
+    under ``op='distill'`` on the REAL model id, and the balance drops."""
+    org, user = await _org()
+    async with tenant_session(str(org), str(user)) as s:
+        await _seed_billing(s, org, user)
+        before = await billing.balance(s, org_id=org)
+        source = await nt.create_note(
+            s,
+            org_id=org,
+            actor_id=user,
+            kind=NoteKind.text,
+            title="meter me",
+            text="a non-trivial finished thought worth distilling into reusable atoms",
+        )
+        res = await decomp.distill_note(s, org_id=org, actor_id=user, note_id=source.id)
+        rec = (
+            await s.execute(
+                select(UsageRecord).where(UsageRecord.operation_id == f"distill:{org}:{source.id}")
+            )
+        ).scalar_one()
+        assert rec.op == "distill"
+        assert rec.basis is CostBasis.local
+        assert rec.model_id == res.model_id  # the REAL model, not the 'cached' sentinel
+        assert await billing.balance(s, org_id=org) < before
 
 
 async def test_distill_note_is_idempotent(_wire_llm: None) -> None:
