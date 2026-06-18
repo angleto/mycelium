@@ -316,6 +316,12 @@ button.running__n {
 .taskrow__meta strong.is-paused {
   opacity: 0.6;
 }
+/* Paused timer readout: de-emphasize with the secondary text color
+   (theme-tuned, same standard as muted text) rather than opacity, so
+   contrast stays consistent across light/dark. */
+.running__t.is-paused {
+  color: var(--muted);
+}
 .nav {
   flex: 1;
   display: flex;

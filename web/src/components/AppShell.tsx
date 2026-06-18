@@ -242,8 +242,7 @@ function RunningIndicator() {
         <span className="running__title">
           <span>{title}</span>
         </span>
-        <span className="running__t">
-          {paused ? '⏸ ' : ''}
+        <span className={paused ? 'running__t is-paused' : 'running__t'}>
           {hms(activeElapsedSec(cur, now))}
         </span>
       </Link>
