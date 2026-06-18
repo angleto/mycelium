@@ -29,6 +29,15 @@ export function LlmProviderSettings() {
   const [msg, setMsg] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [tick, setTick] = useState(0)
+  // Gate interaction until the initial GET /llm-provider has populated the
+  // form. Otherwise a provider change made before the fetch returns is
+  // silently reverted when ``setProvider(data.provider)`` lands late (a
+  // real UX bug, and the deterministic CI-only e2e race: the slow fetch
+  // clobbers the test's ``selectOption('scaleway')`` back to the fresh
+  // org's 'local'). The controls auto-wait for ``loaded`` (and Playwright's
+  // actionability waits for the enabled select), so the late write can no
+  // longer race the user.
+  const [loaded, setLoaded] = useState(false)
 
   useEffect(() => {
     let active = true
@@ -39,9 +48,7 @@ export function LlmProviderSettings() {
       if (!active) return
       if (error) {
         setErr(errMessage(error))
-        return
-      }
-      if (data) {
+      } else if (data) {
         setCur(data)
         setProvider(data.provider)
         setModel(data.model ?? '')
@@ -54,6 +61,7 @@ export function LlmProviderSettings() {
           if (active && !r.error) setModels(r.data?.models ?? [])
         }
       }
+      if (active) setLoaded(true)
     })()
     return () => {
       active = false
@@ -132,7 +140,11 @@ export function LlmProviderSettings() {
 
       <label>
         {t('llmp.provider')}
-        <select value={provider} onChange={(e) => onProviderChange(e.target.value)}>
+        <select
+          value={provider}
+          disabled={!loaded}
+          onChange={(e) => onProviderChange(e.target.value)}
+        >
           {PROVIDERS.map((p) => (
             <option key={p} value={p}>
               {t(`llmp.provider_${p}`)}
@@ -212,7 +224,7 @@ export function LlmProviderSettings() {
       )}
 
       <div className="row">
-        <button type="button" disabled={busy} onClick={() => void save()}>
+        <button type="button" disabled={busy || !loaded} onClick={() => void save()}>
           {t('llmp.save')}
         </button>
       </div>

@@ -26,6 +26,10 @@ export function EmbedderProviderSettings() {
   const [msg, setMsg] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [tick, setTick] = useState(0)
+  // Gate interaction until the initial fetch populates the form, so a
+  // provider change made before it returns is not silently reverted by the
+  // late ``setProvider(data.provider)`` (same init race as LlmProviderSettings).
+  const [loaded, setLoaded] = useState(false)
 
   useEffect(() => {
     let active = true
@@ -36,9 +40,7 @@ export function EmbedderProviderSettings() {
       if (!active) return
       if (error) {
         setErr(errMessage(error))
-        return
-      }
-      if (data) {
+      } else if (data) {
         setCur(data)
         setProvider(data.provider)
         setModel(data.model ?? '')
@@ -51,6 +53,7 @@ export function EmbedderProviderSettings() {
           if (active && !r.error) setModels(r.data?.models ?? [])
         }
       }
+      if (active) setLoaded(true)
     })()
     return () => {
       active = false
@@ -124,7 +127,11 @@ export function EmbedderProviderSettings() {
 
       <label>
         {t('llmp.provider')}
-        <select value={provider} onChange={(e) => onProviderChange(e.target.value)}>
+        <select
+          value={provider}
+          disabled={!loaded}
+          onChange={(e) => onProviderChange(e.target.value)}
+        >
           {PROVIDERS.map((p) => (
             <option key={p} value={p}>
               {t(`llmp.provider_${p}`)}
@@ -202,7 +209,7 @@ export function EmbedderProviderSettings() {
       )}
 
       <div className="row">
-        <button type="button" disabled={busy} onClick={() => void save()}>
+        <button type="button" disabled={busy || !loaded} onClick={() => void save()}>
           {t('llmp.save')}
         </button>
       </div>
