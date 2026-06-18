@@ -1165,6 +1165,11 @@ button.btn--danger:hover {
   gap: 0.4rem;
   padding: 0.3rem 0.5rem;
   background: transparent;
+  /* The global ``button`` rule sets ``color: var(--accent-fg)`` (text for
+     an accent fill). On this transparent/--surface dropdown that is
+     ``readableOn(accent)`` over the surface -- white-on-white in light,
+     black-on-black in dark. Reset to the normal on-surface text colour. */
+  color: var(--text);
   border: 0;
   text-align: left;
   cursor: pointer;
