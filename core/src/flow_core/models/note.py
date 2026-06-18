@@ -119,6 +119,16 @@ class Note(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, Base):
     # eligibility predicate the LLM walk consults.
     humus_kind: Mapped[str | None] = mapped_column(String(32), nullable=True)
     humus_flag: Mapped[bool] = mapped_column(nullable=False, server_default="false")
+    # WS-D2 (ADR-0032 P4): autonomous, read-only classify-on-ingest. The
+    # garden sweep stamps a new note with the structural community the
+    # offline Leiden snapshot already computed for it (``auto_cluster``)
+    # and the time it was first auto-classified (``auto_classified_at``;
+    # NULL = not yet seen by the autonomous pass). The opinionated
+    # tag/link/maturity suggestions stay human-applied via the live panel.
+    auto_cluster: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    auto_classified_at: Mapped[datetime.datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
 
 class NoteTurn(UUIDPKMixin, OrgScopedMixin, Base):

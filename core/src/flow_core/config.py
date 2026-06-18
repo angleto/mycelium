@@ -208,6 +208,16 @@ class Settings(BaseSettings):
     # deployment opts in deliberately. FLOW_GARDEN_TIER_RECOMPUTE_ENABLED=true.
     garden_tier_recompute_enabled: bool = False
 
+    # Autonomous classify-on-ingest inside the garden sweep (task b8c60940 /
+    # WS-D2, ADR-0032 P4). When set, each garden tick stamps not-yet-seen
+    # notes with the structural Leiden community the graph snapshot already
+    # computed for them + an auto_classified_at marker, so new nodes are
+    # classified proactively instead of waiting for a human to open the
+    # classify panel. Read-only (no tag/link/maturity auto-apply). OFF by
+    # default and gated by ``garden_loop_enabled`` (rides the same sweep).
+    # FLOW_GARDEN_AUTOCLASSIFY_ENABLED=true.
+    garden_autoclassify_enabled: bool = False
+
     # Reminders + notification-dispatch worker. One periodic tick scans
     # due reminders into pending Notifications (idempotent by
     # dedupe_key) and then dispatches all pending notifications through

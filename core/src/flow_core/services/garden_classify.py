@@ -54,7 +54,7 @@ from flow_core.models.note import Note
 from flow_core.models.note_link import NoteNoteLink
 from flow_core.models.note_tag import NoteTag
 from flow_core.models.tag import Tag, TagKind
-from flow_core.services import audit, note_inert, note_links
+from flow_core.services import audit, graph_snapshot, note_inert, note_links
 from flow_core.services import graph as graph_svc
 from flow_core.services import link_prediction as linkpred_svc
 from flow_core.services import notes as notes_svc
@@ -547,6 +547,62 @@ async def auto_promote_mature(
     return promoted
 
 
+async def autoclassify_unprocessed(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    limit: int = 100,
+) -> int:
+    """Autonomous, read-only classify-on-ingest (WS-D2, ADR-0032 P4).
+
+    Stamps notes the autonomous pass has never seen (``auto_classified_at``
+    IS NULL) with the structural Leiden community the offline graph snapshot
+    ALREADY computed for them (read from ``graph_snapshot`` -- zero per-node
+    recompute, the O(V·E) Leiden run is not paid here) plus an
+    ``auto_classified_at`` marker. The opinionated tag/link/maturity
+    suggestions stay human-applied via the live ``classify_node`` panel; this
+    records only the cheap, objective community signal so a new node is
+    grouped without the user triggering classify per node. Bounded by
+    ``limit`` (drains over ticks, like the search backfills); returns the
+    count classified this pass. A note with no community in the snapshot
+    (isolated / clustering extra absent) is still marked seen, with
+    ``auto_cluster`` left NULL -- the marker distinguishes "processed,
+    singleton" from "not processed".
+
+    No ``require_role``: the caller is the worker's system actor on the
+    owner's tenant session (RLS-scoped), mirroring ``auto_promote_mature``.
+    """
+    snap = await graph_snapshot.get_graph_snapshot(session, org_id=org_id)
+    if snap is None:
+        return 0
+    clusters = snap.clusters or {}
+    rows = list(
+        (
+            await session.execute(
+                select(Note)
+                .where(
+                    Note.org_id == org_id,
+                    Note.deleted_at.is_(None),
+                    Note.auto_classified_at.is_(None),
+                )
+                .order_by(Note.created_at)
+                .limit(limit)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if not rows:
+        return 0
+    now = dt.datetime.now(dt.UTC)
+    for note in rows:
+        community = clusters.get(str(note.id))
+        note.auto_cluster = community if isinstance(community, int) else None
+        note.auto_classified_at = now
+    await session.flush()
+    return len(rows)
+
+
 __all__ = [
     "ClassifyResult",
     "ClusterSuggestion",
@@ -555,5 +611,6 @@ __all__ = [
     "TagSuggestion",
     "apply_suggestion",
     "auto_promote_mature",
+    "autoclassify_unprocessed",
     "classify_node",
 ]

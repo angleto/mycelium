@@ -115,6 +115,19 @@ async def run_once() -> int:
                         await memory.recompute_tier(ts, org_id=org_id)
                 except Exception:
                     _log.exception("memory tier recompute failed for org=%s", org_id)
+            # Autonomous classify-on-ingest (task b8c60940 / WS-D2, ADR-0032
+            # P4). Stamps not-yet-seen notes with the structural community the
+            # graph snapshot just computed + an auto_classified_at marker, so
+            # new nodes are classified proactively instead of waiting for a
+            # human to open the panel. Read-only (no tag/link/maturity
+            # auto-apply). Own session/try; sub-flagged. Runs AFTER the graph
+            # snapshot refresh above so it reads the fresh clusters.
+            if get_settings().garden_autoclassify_enabled:
+                try:
+                    async with tenant_session(str(org_id), str(owner), actor_kind="system") as cs:
+                        await garden_classify.autoclassify_unprocessed(cs, org_id=org_id)
+                except Exception:
+                    _log.exception("autoclassify pass failed for org=%s", org_id)
             n = sum(counters.values()) + auto_matured
             if n > 0:
                 _log.info(
