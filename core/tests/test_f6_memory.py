@@ -14,11 +14,13 @@ from decimal import Decimal
 import pytest
 from _fake_embedder import FakeEmbedder
 
+from flow_core.config import get_settings
 from flow_core.db import admin_session, tenant_session
 from flow_core.errors import DomainError
 from flow_core.services import billing
 from flow_core.services import memory as mem
 from flow_core.services.auth import signup
+from flow_worker import garden
 
 _FAKE = FakeEmbedder()
 
@@ -195,6 +197,72 @@ async def test_gdpr_erase_cascades() -> None:
         assert deleted == 1
         with pytest.raises(DomainError):
             await mem.get_blob(s, org_id=org, blob_id=b.id)
+
+
+async def _perturbed_blob(org: uuid.UUID, user: uuid.UUID) -> tuple[uuid.UUID, str, str]:
+    """Write a fresh blob, recompute its tier under default thresholds (the
+    value the garden sweep will reproduce -- deterministic since a fresh blob
+    has access_count=0, so the time-dependent decay term is 0), then perturb
+    the stored tier to a DIFFERENT one. Returns (blob_id, expected, perturbed)."""
+    proj = uuid.uuid4()
+    async with tenant_session(str(org), str(user)) as s:
+        await _seed_billing(s, org, user)
+        b = await mem.write_blob(
+            s,
+            org_id=org,
+            actor_id=user,
+            project_id=proj,
+            text_body="a stored memory whose tier the sweep should maintain",
+            operation_id="seed",
+            embedder=_FAKE,
+        )
+        await mem.recompute_tier(s, org_id=org)
+        expected = b.tier
+        perturbed = "hot" if expected != "hot" else "cold"
+        b.tier = perturbed
+        await s.flush()
+    return b.id, expected, perturbed
+
+
+async def test_garden_sweep_recomputes_tier_when_flag_on(monkeypatch: pytest.MonkeyPatch) -> None:
+    """WS-D4: with ``garden_tier_recompute_enabled`` on, the autonomous garden
+    sweep applies the access-decay tier recompute per workspace (ADR-0016:
+    demote-not-delete), restoring a stale tier WITHOUT an on-demand call.
+    ``_all_workspaces`` is pinned to the test org to keep the sweep isolated."""
+    org, user = await _org()
+    blob_id, expected, perturbed = await _perturbed_blob(org, user)
+    assert perturbed != expected
+
+    async def _only_this_org() -> list[uuid.UUID]:
+        return [org]
+
+    monkeypatch.setattr(garden, "_all_workspaces", _only_this_org)
+    monkeypatch.setattr(get_settings(), "garden_tier_recompute_enabled", True)
+    await garden.run_once()
+
+    async with tenant_session(str(org), str(user)) as s:
+        refreshed = await mem.get_blob(s, org_id=org, blob_id=blob_id)
+        assert refreshed.tier == expected  # the sweep re-ran recompute_tier
+
+
+async def test_garden_sweep_skips_tier_recompute_when_flag_off(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The recompute step is opt-in: with the flag off, the garden sweep leaves
+    the (perturbed) tier untouched."""
+    org, user = await _org()
+    blob_id, _expected, perturbed = await _perturbed_blob(org, user)
+
+    async def _only_this_org() -> list[uuid.UUID]:
+        return [org]
+
+    monkeypatch.setattr(garden, "_all_workspaces", _only_this_org)
+    monkeypatch.setattr(get_settings(), "garden_tier_recompute_enabled", False)
+    await garden.run_once()
+
+    async with tenant_session(str(org), str(user)) as s:
+        refreshed = await mem.get_blob(s, org_id=org, blob_id=blob_id)
+        assert refreshed.tier == perturbed  # untouched: the gated step did not run
 
 
 async def test_tier_recompute_keeps_cold_queryable() -> None:

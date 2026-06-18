@@ -199,6 +199,15 @@ class Settings(BaseSettings):
     # ``garden_auto_mature_enabled`` above.
     garden_loop_enabled: bool = False
 
+    # Memory tier recompute inside the garden sweep (task 09007016 / WS-D4;
+    # ADR-0016: tier = latency, NOT retention). When set, each garden tick
+    # also runs the per-workspace access-decay tier recompute, so cold blobs
+    # are demoted (never deleted, always queryable) in autonomy instead of
+    # only on an on-demand API/MCP call. OFF by default and gated by
+    # ``garden_loop_enabled`` above (it rides the same sweep), so a
+    # deployment opts in deliberately. FLOW_GARDEN_TIER_RECOMPUTE_ENABLED=true.
+    garden_tier_recompute_enabled: bool = False
+
     # Reminders + notification-dispatch worker. One periodic tick scans
     # due reminders into pending Notifications (idempotent by
     # dedupe_key) and then dispatches all pending notifications through

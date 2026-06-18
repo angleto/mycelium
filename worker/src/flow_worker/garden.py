@@ -29,7 +29,7 @@ from flow_core.config import get_settings
 from flow_core.db import admin_session, tenant_session
 from flow_core.models.membership import Membership, Role
 from flow_core.models.organization import Organization
-from flow_core.services import garden_classify, garden_health, graph_snapshot, note_links
+from flow_core.services import garden_classify, garden_health, graph_snapshot, memory, note_links
 
 _log = logging.getLogger("flow.worker.garden")
 
@@ -103,6 +103,18 @@ async def run_once() -> int:
                     await graph_snapshot.refresh_graph_snapshot(gs, org_id=org_id)
             except Exception:
                 _log.exception("graph snapshot refresh failed for org=%s", org_id)
+            # Memory tier recompute (task 09007016 / WS-D4, ADR-0016: tier =
+            # latency, not retention). Re-tiers blobs on access-decay, demoting
+            # cold ones (never deletes; they stay queryable). Own session + try
+            # for the same failure-isolation reason as the snapshots above, and
+            # sub-flagged so a deployment opts in independently of the maturity
+            # sweep.
+            if get_settings().garden_tier_recompute_enabled:
+                try:
+                    async with tenant_session(str(org_id), str(owner), actor_kind="system") as ts:
+                        await memory.recompute_tier(ts, org_id=org_id)
+                except Exception:
+                    _log.exception("memory tier recompute failed for org=%s", org_id)
             n = sum(counters.values()) + auto_matured
             if n > 0:
                 _log.info(
