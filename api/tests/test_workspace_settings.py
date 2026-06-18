@@ -197,3 +197,68 @@ async def test_attachment_max_bytes_roundtrip_merge_and_clamp() -> None:
             },
         )
         assert r.status_code == 422
+
+
+async def test_retrieval_grader_floor_roundtrip_and_merge() -> None:
+    """WS-B1: the per-org grader/abstain floor round-trips through the
+    workspace settings surface (default off, set, presets-only save must not
+    clobber it, out-of-range rejected) -- same contract as the semantic
+    floor, so the SPA can tune it live."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as c:
+        a = (
+            await c.post(
+                "/auth/signup",
+                json={"email": _email(), "password": "pw-strong-123"},
+            )
+        ).json()
+        h = {
+            "Authorization": f"Bearer {a['token']}",
+            "X-Workspace-Id": a["workspace_id"],
+            "X-Workspace-Role": "owner",
+        }
+
+        me = (await c.get("/workspaces/me", headers=h)).json()
+        assert me["settings"]["retrieval_grader_min_rrf"] == 0.0  # default off
+        ver = me["version"]
+
+        r = await c.patch(
+            "/workspaces/me/settings",
+            headers=h,
+            json={
+                "expected_version": ver,
+                "estimate_presets": [1],
+                "retrieval_grader_min_rrf": 0.03,
+            },
+        )
+        assert r.status_code == 200, r.text
+        me = (await c.get("/workspaces/me", headers=h)).json()
+        assert me["settings"]["retrieval_grader_min_rrf"] == 0.03
+
+        # A presets-only save must NOT clobber it (merge); the semantic
+        # floor and the grader floor coexist independently.
+        r = await c.patch(
+            "/workspaces/me/settings",
+            headers=h,
+            json={
+                "expected_version": me["version"],
+                "estimate_presets": [2, 4],
+                "retrieval_semantic_min_similarity": 0.5,
+            },
+        )
+        assert r.status_code == 200
+        me = (await c.get("/workspaces/me", headers=h)).json()
+        assert me["settings"]["retrieval_grader_min_rrf"] == 0.03
+        assert me["settings"]["retrieval_semantic_min_similarity"] == 0.5
+
+        # Out of range -> 422 (schema validator, le=1.0).
+        r = await c.patch(
+            "/workspaces/me/settings",
+            headers=h,
+            json={
+                "expected_version": me["version"],
+                "estimate_presets": [1],
+                "retrieval_grader_min_rrf": 1.5,
+            },
+        )
+        assert r.status_code == 422

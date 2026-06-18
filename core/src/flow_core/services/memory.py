@@ -73,24 +73,47 @@ _HUMUS_FOCUSED_CAP = 0.3
 # floor applied in SemanticDenseStage. 0.0 = disabled (historical
 # behaviour). Tuned live from the admin GUI; see services.retrieval.
 SEMANTIC_MIN_SIM_KEY = "retrieval_semantic_min_similarity"
+# Per-org key for the grader/abstain floor applied in GraderMinStage to
+# the fused RRF score (WS-B1). When the top hit's fused score falls below
+# it the search abstains ([]) instead of returning the first weak hit --
+# "decide what to ignore like a person". 0.0 = disabled (historical
+# behaviour). Sequenced after WS-A: a floor on pure-lexical scores would
+# suppress real hits, so it only earns its keep once the dense tier is
+# populated. Tuned live from the admin GUI like the semantic floor.
+GRADER_MIN_RRF_KEY = "retrieval_grader_min_rrf"
 
 
-async def semantic_min_similarity(session: AsyncSession, org_id: uuid.UUID) -> float:
-    """Read the per-org semantic-similarity floor from the workspace
-    settings bag, clamped to [0, 1]. Absent / malformed -> 0.0 (gate
-    off)."""
+async def _org_setting_float(session: AsyncSession, org_id: uuid.UUID, key: str) -> float | None:
+    """Read a numeric per-org setting from the workspace settings bag,
+    clamped to [0, 1]. Returns None when absent / malformed / <= 0 (the
+    gate-off sentinel shared by the retrieval floors)."""
     from flow_core.models.organization import Organization
 
     raw = (
         await session.execute(select(Organization.settings).where(Organization.id == org_id))
     ).scalar_one_or_none()
     if not isinstance(raw, dict):
-        return 0.0
+        return None
     try:
-        val = float(raw.get(SEMANTIC_MIN_SIM_KEY, 0.0))
+        val = float(raw.get(key, 0.0))
     except (TypeError, ValueError):
-        return 0.0
-    return max(0.0, min(1.0, val))
+        return None
+    val = max(0.0, min(1.0, val))
+    return val if val > 0.0 else None
+
+
+async def semantic_min_similarity(session: AsyncSession, org_id: uuid.UUID) -> float:
+    """Read the per-org semantic-similarity floor from the workspace
+    settings bag, clamped to [0, 1]. Absent / malformed -> 0.0 (gate
+    off)."""
+    return await _org_setting_float(session, org_id, SEMANTIC_MIN_SIM_KEY) or 0.0
+
+
+async def grader_min_rrf_floor(session: AsyncSession, org_id: uuid.UUID) -> float | None:
+    """Read the per-org grader/abstain floor (on the fused RRF score) from
+    the workspace settings bag, clamped to [0, 1]. Absent / malformed /
+    <= 0 -> None (no abstain, historical behaviour)."""
+    return await _org_setting_float(session, org_id, GRADER_MIN_RRF_KEY)
 
 
 # Sentinel model id recorded on a blob written while the embedder is
@@ -517,6 +540,13 @@ async def retrieve(
     settings = _get_settings()
     use_rerank = rerank or settings.reranker_enabled
     sem_min_sim = await semantic_min_similarity(session, org_id)
+    # The grader/abstain floor: an explicit caller value wins; otherwise
+    # fall back to the per-org setting (WS-B1). Resolving it here means
+    # every surface -- /search, MCP search, memory retrieve -- abstains
+    # consistently without exposing a per-call knob.
+    effective_grader_min = grader_min_rrf
+    if effective_grader_min is None:
+        effective_grader_min = await grader_min_rrf_floor(session, org_id)
     from flow_core.services.retrieval.types import Stage as _Stage
 
     stages: list[_Stage] = [
@@ -560,7 +590,7 @@ async def retrieve(
             # hits have set the top score. No-op for flat all-semantic
             # (conceptual) queries, so recall there is unchanged.
             RelativeFloorStage(ratio=_RELATIVE_FLOOR_RATIO),
-            GraderMinStage(min_score=grader_min_rrf),
+            GraderMinStage(min_score=effective_grader_min),
             # Hard cap on humus slots (ADR-0034): runs after ordering so the
             # kept humus are the most relevant; freed slots fall to live
             # candidates ranked just below, then LimitStage truncates.

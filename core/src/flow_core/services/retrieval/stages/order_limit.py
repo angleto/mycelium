@@ -70,7 +70,13 @@ class GraderMinStage(Stage):
     ) -> list[Candidate]:
         if self.min_score is None or not candidates:
             return candidates
-        if candidates[0].score < self.min_score:
+        # Floor on the FUSED RRF score, not the current ``score``: the
+        # optional reranker overwrites ``score`` with its own (differently
+        # scaled) value but preserves the fused score under "rrf", so the
+        # abstain threshold stays calibrated whether or not rerank ran.
+        top = candidates[0]
+        fused = top.scores_by_stage.get("rrf", top.score)
+        if fused < self.min_score:
             return []
         return candidates
 

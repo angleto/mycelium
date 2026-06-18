@@ -515,3 +515,101 @@ async def test_semantic_similarity_floor_drops_far_neighbours(
         ids_on = {h.blob.id for h in on}
         assert near.id in ids_on
         assert far.id not in ids_on
+
+
+async def test_grader_floor_abstains_when_top_below_per_org_floor() -> None:
+    """WS-B1: the per-org grader/abstain floor (``Organization.settings``)
+    makes retrieve return [] when even the best hit's fused RRF score sits
+    below the floor -- "no answer" over "weak answer" -- and is read live by
+    ``retrieve`` so /search + MCP search inherit it. The floor value is
+    calibrated off the hit's own reported ``rrf`` so the test is robust to
+    the absolute RRF magnitude."""
+    from sqlalchemy import update
+
+    from flow_core.models.organization import Organization
+
+    org, user = await _org("GRADER")
+    proj = uuid.uuid4()
+    async with tenant_session(str(org), str(user)) as s:
+        await _seed_billing(s, org, user)
+        blob = await mem.write_blob(
+            s,
+            org_id=org,
+            actor_id=user,
+            project_id=proj,
+            text_body="alpha alpha alpha",
+            operation_id="w",
+            embedder=_FAKE,
+        )
+        # Floor OFF (default): the genuine hit is returned; capture its
+        # fused score to calibrate the floor.
+        off = await mem.retrieve(
+            s,
+            org_id=org,
+            actor_id=user,
+            project_id=proj,
+            query="alpha",
+            operation_id="q0",
+            embedder=_FAKE,
+        )
+        assert blob.id in {h.blob.id for h in off}
+        top = off[0].rrf
+        assert top > 0.0
+
+        # Floor ABOVE the top fused score -> abstain ([]).
+        await s.execute(
+            update(Organization)
+            .where(Organization.id == org)
+            .values(settings={mem.GRADER_MIN_RRF_KEY: min(1.0, top * 2.0)})
+        )
+        high = await mem.retrieve(
+            s,
+            org_id=org,
+            actor_id=user,
+            project_id=proj,
+            query="alpha",
+            operation_id="q1",
+            embedder=_FAKE,
+        )
+        assert high == []
+
+        # Floor BELOW the top fused score -> the hit still comes back.
+        await s.execute(
+            update(Organization)
+            .where(Organization.id == org)
+            .values(settings={mem.GRADER_MIN_RRF_KEY: top * 0.5})
+        )
+        low = await mem.retrieve(
+            s,
+            org_id=org,
+            actor_id=user,
+            project_id=proj,
+            query="alpha",
+            operation_id="q2",
+            embedder=_FAKE,
+        )
+        assert blob.id in {h.blob.id for h in low}
+
+
+async def test_grader_floor_helper_off_sentinels() -> None:
+    """The helper returns None (no abstain) for absent / zero / malformed
+    settings, so an unconfigured workspace keeps its historical behaviour."""
+    org, user = await _org("GRADERH")
+    async with tenant_session(str(org), str(user)) as s:
+        assert await mem.grader_min_rrf_floor(s, org) is None  # absent
+        from sqlalchemy import update
+
+        from flow_core.models.organization import Organization
+
+        await s.execute(
+            update(Organization)
+            .where(Organization.id == org)
+            .values(settings={mem.GRADER_MIN_RRF_KEY: 0.0})
+        )
+        assert await mem.grader_min_rrf_floor(s, org) is None  # zero = off
+        await s.execute(
+            update(Organization)
+            .where(Organization.id == org)
+            .values(settings={mem.GRADER_MIN_RRF_KEY: 0.25})
+        )
+        assert await mem.grader_min_rrf_floor(s, org) == 0.25

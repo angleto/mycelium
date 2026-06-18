@@ -214,6 +214,10 @@ async def patch_my_workspace_settings(
     # in [0,1] by the schema.
     if body.retrieval_semantic_min_similarity is not None:
         merged[memory_svc.SEMANTIC_MIN_SIM_KEY] = body.retrieval_semantic_min_similarity
+    # Grader/abstain floor (fused RRF; 0 = off). Only written when present;
+    # validated in [0,1] by the schema.
+    if body.retrieval_grader_min_rrf is not None:
+        merged[memory_svc.GRADER_MIN_RRF_KEY] = body.retrieval_grader_min_rrf
     # Per-workspace buffered-attachment cap (bytes). Only written when
     # present; clamped to the runtime ceiling so the stored value never
     # exceeds what the in-memory buffered path can safely hold (the read
