@@ -230,3 +230,95 @@ async def test_telemetry_is_noop_when_unset(tmp_path, monkeypatch) -> None:
     monkeypatch.delenv("FLOW_MCP_TELEMETRY", raising=False)
     gw._record("execute", "create_tag", {"id": "x"})  # no-op, no exception
     assert not list(tmp_path.iterdir())
+
+
+# ── MCP gateway I/O metering (op='mcp_io', WS task e30d188e) ──────────
+
+
+def test_estimate_tokens_is_char_over_4() -> None:
+    """The coarse token estimate is ceil(compact-JSON-chars / 4)."""
+    payload = {"a": "x" * 40, "b": [1, 2, 3]}
+    n = len(json.dumps(payload, separators=(",", ":"), default=str))
+    assert gw._estimate_tokens(payload) == (n + 3) // 4
+    assert gw._estimate_tokens([]) == 1  # "[]" -> ceil(2/4)
+
+
+async def _seed_card(org_id: uuid.UUID, user_id: uuid.UUID, *, with_card: bool) -> None:
+    from decimal import Decimal
+
+    from flow_core.db import tenant_session
+    from flow_core.services import billing
+
+    async with tenant_session(str(org_id), str(user_id)) as s:
+        await billing.grant_credits(s, org_id=org_id, actor_id=user_id, amount=Decimal(100))
+        if with_card:
+            await billing.upsert_rate_card(
+                s,
+                org_id=org_id,
+                actor_id=user_id,
+                model_id=gw._MCP_IO_MODEL,
+                provider="platform",
+                values={
+                    "credits_per_input": Decimal("0.001"),
+                    "credits_per_output": Decimal("0.001"),
+                },
+            )
+
+
+async def _mcp_io_records(org_id: uuid.UUID, user_id: uuid.UUID) -> list:
+    from sqlalchemy import select
+
+    from flow_core.db import tenant_session
+    from flow_core.models.billing import UsageRecord
+
+    async with tenant_session(str(org_id), str(user_id)) as s:
+        return list(
+            (await s.execute(select(UsageRecord).where(UsageRecord.op == "mcp_io"))).scalars().all()
+        )
+
+
+async def test_mcp_io_meters_the_wallet_when_rate_card_configured() -> None:
+    """An MCP meta-tool call debits the wallet under op='mcp_io' /
+    model_id='mcp:gateway', attributed to actor_kind 'mcp_token' (NOT the
+    autonomous 'system' kind), once a rate card exists."""
+    from flow_core.db import tenant_session
+    from flow_core.services import billing
+
+    user_id, org_id = await _signup_principal()
+    await _seed_card(org_id, user_id, with_card=True)
+    async with tenant_session(str(org_id), str(user_id)) as s:
+        before = await billing.balance(s, org_id=org_id)
+    tok = _PRINCIPAL.set((user_id, org_id, None))
+    try:
+        await execute_tool(name="list_tags", arguments={})
+    finally:
+        _PRINCIPAL.reset(tok)
+    recs = await _mcp_io_records(org_id, user_id)
+    assert len(recs) == 1
+    rec = recs[0]
+    assert rec.model_id == gw._MCP_IO_MODEL
+    assert rec.actor_kind == "mcp_token"
+    assert rec.units_in > 0 and rec.units_out > 0
+    async with tenant_session(str(org_id), str(user_id)) as s:
+        after = await billing.balance(s, org_id=org_id)
+    assert after < before
+
+
+async def test_mcp_io_is_free_without_rate_card() -> None:
+    """Without a 'mcp:gateway' rate card the call is free: no usage row, no
+    debit -- so OSS/dev/CI (and any org that opts out) are unchanged."""
+    from flow_core.db import tenant_session
+    from flow_core.services import billing
+
+    user_id, org_id = await _signup_principal()
+    await _seed_card(org_id, user_id, with_card=False)
+    async with tenant_session(str(org_id), str(user_id)) as s:
+        before = await billing.balance(s, org_id=org_id)
+    tok = _PRINCIPAL.set((user_id, org_id, None))
+    try:
+        await execute_tool(name="list_tags", arguments={})
+    finally:
+        _PRINCIPAL.reset(tok)
+    assert await _mcp_io_records(org_id, user_id) == []
+    async with tenant_session(str(org_id), str(user_id)) as s:
+        assert await billing.balance(s, org_id=org_id) == before

@@ -30,18 +30,34 @@ import asyncio
 import datetime as dt
 import inspect
 import json
+import logging
 import math
 import os
+import uuid
+from decimal import Decimal
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
 from flow_core import __version__
+from flow_core.db import tenant_session
 from flow_core.embedder import embed_batch, embedder_available, get_embedder
 from flow_core.errors import DomainError, jsonable_params
+from flow_core.models.billing import CostBasis
+from flow_core.services import billing
+from flow_mcp.server import _PRINCIPAL
 from flow_mcp.server import mcp as _registry
 
+_log = logging.getLogger("flow.mcp.gateway")
+
 gateway: FastMCP = FastMCP("flow")
+
+# A platform usage fee denominated in payload tokens for the MCP gateway
+# path (decision 2026-06-02; 90e4db3e §6/§13.2, task e30d188e). It is NOT a
+# passthrough of the caller's model spend (Flow never observes that). Free
+# unless an org configures a rate card for this model_id, so OSS/dev/CI are
+# unchanged -- exactly like the bundled-embedder seam.
+_MCP_IO_MODEL = "mcp:gateway"
 
 # Opt-in usage telemetry. When ``FLOW_MCP_TELEMETRY`` names a writable
 # path, every meta-tool call appends one JSONL row recording only the
@@ -81,6 +97,56 @@ def _record(kind: str, tool: str, result: Any) -> None:
     except (OSError, TypeError, ValueError):
         # Telemetry is observational; never surface its failures.
         return
+
+
+def _estimate_tokens(payload: Any) -> int:
+    """Coarse char/4 token estimate of a JSON payload, consistent with the
+    22k->1k token measure already in the docs. Compact JSON, ``default=str``
+    for uuid/Decimal/datetime; a serialization failure counts as 0 (never
+    let estimation break a call)."""
+    try:
+        n = len(json.dumps(payload, separators=(",", ":"), default=str))
+    except (TypeError, ValueError):
+        return 0
+    return (n + 3) // 4  # ceil(chars / 4)
+
+
+async def _meter_io(tool: str, request: Any, result: Any) -> None:
+    """Charge the per-call MCP gateway usage fee (``op='mcp_io'``,
+    ``model_id='mcp:gateway'``) on the I/O token estimate.
+
+    Free unless the org configured a rate card for the model. Distinct
+    surface from ``op='llm'``: if a tool runs an internal LLM, those tokens
+    are metered there, so there is no double-count. Best-effort: the result
+    is already computed, so any metering failure is logged and swallowed --
+    billing must never break an MCP call.
+
+    operation_id is a fresh id per call: every MCP call is a distinct
+    billable usage event and is charged once. (A content hash, the other
+    candidate, would collapse repeated identical calls -- exactly the usage
+    the fee exists to bill -- so it is rejected here; the unique constraint
+    makes a per-call id idempotent against true duplicate delivery.)
+    """
+    principal = _PRINCIPAL.get()
+    if principal is None:
+        return  # stdio / unauthenticated: no gateway billing context
+    user_id, org_id, token_id = principal
+    operation_id = f"mcp_io:{token_id}:{uuid.uuid4().hex}"
+    try:
+        async with tenant_session(str(org_id), str(user_id), actor_kind="mcp_token") as s:
+            await billing.meter_if_billable(
+                s,
+                org_id=org_id,
+                actor_id=user_id,
+                operation_id=operation_id,
+                op="mcp_io",
+                model_id=_MCP_IO_MODEL,
+                units_in=Decimal(_estimate_tokens(request)),
+                units_out=Decimal(_estimate_tokens(result)),
+                basis=CostBasis.local,
+            )
+    except Exception:
+        _log.warning("mcp_io metering failed for tool=%s", tool, exc_info=True)
 
 
 # Tool args carried only for the legacy stdio flow; under HTTP/OAuth the
@@ -329,6 +395,7 @@ async def search_tools(
         m = cat[name]
         out.append({"name": name, "summary": m["summary"], "domain": m["domain"]})
     _record("search", "search_tools", out)
+    await _meter_io("search_tools", {"query": query, "limit": limit, "domain": domain}, out)
     return out
 
 
@@ -362,6 +429,7 @@ async def describe_tools(names: list[str], minimal: bool = True) -> list[dict[st
             }
         )
     _record("describe", "describe_tools", out)
+    await _meter_io("describe_tools", {"names": names, "minimal": minimal}, out)
     return out
 
 
@@ -418,6 +486,7 @@ async def execute_tool(name: str, arguments: dict[str, Any] | None = None) -> An
         if tool.is_async:
             result = await result
         _record("execute", name, result)
+        await _meter_io("execute_tool", {"name": name, "arguments": arguments}, result)
         return result
     except DomainError as exc:
         return {
