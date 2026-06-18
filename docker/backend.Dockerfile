@@ -26,9 +26,9 @@ COPY worker worker
 COPY sdi-inbound sdi-inbound
 
 RUN --mount=type=cache,target=/root/.cache/uv uv sync --no-dev
-# Local embedder (intfloat/multilingual-e5-small, 384-dim = FLOW
-# embed_dim). Explicit install is deterministic regardless of how the
-# optional extra propagates across the workspace.
+# Local embedder (BAAI/bge-m3, 1024-dim = FLOW embed_dim). Explicit
+# install is deterministic regardless of how the optional extra
+# propagates across the workspace.
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --python /app/.venv/bin/python "sentence-transformers>=3"
 
@@ -47,12 +47,15 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --python /app/.venv/bin/python "python-igraph>=0.11" "leidenalg>=0.10"
 
-# Pre-fetch the embedding + STT checkpoints so a freshly-rolled pod does
-# not pay an HF download (and does not depend on egress to
-# huggingface.co). STT size/quant mirror the LocalSTT defaults
-# (FLOW_STT_MODEL=small, FLOW_STT_COMPUTE_TYPE=int8, CPU).
+# Pre-fetch the STT checkpoint so a freshly-rolled pod does not pay an HF
+# download (and does not depend on egress to huggingface.co). STT
+# size/quant mirror the LocalSTT defaults (FLOW_STT_MODEL=small,
+# FLOW_STT_COMPUTE_TYPE=int8, CPU).
+# The bge-m3 embedding model is deliberately NOT baked (the bake exploded
+# node disk, 30c570c); it downloads at runtime to HF_HOME on first use.
+# (The previous prefetch pulled intfloat/multilingual-e5-small/384 — a
+# pre-cutover leftover never loaded at runtime, which uses bge-m3/1024.)
 ENV HF_HOME=/app/.cache/huggingface
-RUN /app/.venv/bin/python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('intfloat/multilingual-e5-small')"
 RUN /app/.venv/bin/python -c "from faster_whisper import WhisperModel; WhisperModel('small', device='cpu', compute_type='int8')"
 
 # ---

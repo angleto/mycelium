@@ -18,6 +18,7 @@ from sqlalchemy import select
 
 from flow_core.config import get_settings
 from flow_core.db import admin_session, tenant_session
+from flow_core.embedder import embedder_available
 from flow_core.models.membership import Membership, Role
 from flow_core.models.organization import Organization
 from flow_core.services import embedding_migration as svc
@@ -75,6 +76,18 @@ async def run_once(batch_size: int = 50) -> int:
 
 async def run_forever() -> None:
     interval = max(5, get_settings().embedding_migration_interval_seconds)
+    # Fail loud, not silent: without the local-embedder extra in this
+    # process image get_embedder().embed() raises and the LOCAL-tier
+    # backfill is a permanent no-op -- every keyword-only blob stays
+    # model_id='none' forever (the WS-A / 0a96ba96 failure mode). The
+    # per-row except logs at debug only, so surface it once at startup.
+    if not embedder_available():
+        _log.warning(
+            "embedding backfill: local embedder UNAVAILABLE in the worker process "
+            "(no 'sentence-transformers' extra) -- the dense tier will NOT be "
+            "backfilled and model_id='none' rows stay keyword-only. Build the "
+            "worker image with the embedder extra (task WS-A / 0a96ba96)."
+        )
     _log.info("embedding backfill worker started (interval=%ds)", interval)
     while True:
         await run_once()
