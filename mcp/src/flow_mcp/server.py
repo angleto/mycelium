@@ -66,6 +66,7 @@ from flow_core.services import dispatch_loop as dispatch_loop_svc
 from flow_core.services import email as email_svc
 from flow_core.services import entity_revisions as revisions_svc
 from flow_core.services import executors as executors_svc
+from flow_core.services import focus_context as focus_context_svc
 from flow_core.services import garden_classify as garden_classify_svc
 from flow_core.services import invoice as invoice_svc
 from flow_core.services import link_prediction as link_prediction_svc
@@ -3038,6 +3039,46 @@ async def memory_search(
         )
         tagmap = await memory_svc.tags_by_blob(s, blob_ids=[h.blob.id for h in hits])
         return [{"blob": _blob(h.blob, tagmap.get(h.blob.id)), "rrf": h.rrf} for h in hits]
+
+
+@mcp.tool()
+async def graph_focus_context(
+    token: str,
+    org_id: str,
+    seed: str,
+    budget: int = 24,
+    query: str | None = None,
+    project_id: str | None = None,
+) -> list[dict[str, Any]]:
+    """PPR-seeded reading set around a seed note: the relevant subgraph and
+    nothing else (ADR-0034). Returns up to ``budget`` notes ordered by
+    personalised-PageRank mass from ``seed`` (its "neighbourhood of
+    attention"), each with a title + snippet so you can decide what to read
+    without follow-up lookups. With ``query`` the neighbourhood is re-ranked
+    by late RRF fusion with hybrid retrieval, so the parts of the subgraph
+    that actually answer the question rise (graph proximity AND content
+    relevance). Read-only; vendor-neutral (no LLM)."""
+    async with _tenant(token, org_id) as (s, org, user):
+        nodes = await focus_context_svc.focus_context(
+            s,
+            org_id=org,
+            actor_id=user,
+            seed_id=uuid.UUID(seed),
+            budget=budget,
+            query=query,
+            project_id=uuid.UUID(project_id) if project_id else None,
+        )
+        return [
+            {
+                "note_id": str(n.note_id),
+                "title": n.title,
+                "snippet": n.snippet,
+                "ppr_mass": n.ppr_mass,
+                "score": n.score,
+                "provenance": n.provenance,
+            }
+            for n in nodes
+        ]
 
 
 @mcp.tool()
