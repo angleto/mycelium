@@ -90,6 +90,10 @@ class GardenHealth:
     leiden_modularity: Metric
     fungal_lag: Metric
     density_delta_7d: Metric
+    # WS-F5: today's autonomous (system) spend against the per-workspace
+    # daily cap. value=spend / floor=cap when capped; value=None + reason
+    # when the kill-switch is off or no cap is configured.
+    autonomous_spend_today: Metric
 
     def as_dict(self) -> dict[str, dict[str, Any]]:
         return {key: asdict(metric) for key, metric in vars(self).items()}
@@ -333,6 +337,15 @@ async def compute_health(
     modularity = (await graph_svc.compute_leiden_clusters(session, org_id=org_id)).modularity
     density = await _density_delta_7d(session, org_id=org_id, now=now)
     fungal_value, fungal_reason = await _fungal_lag(session, org_id=org_id)
+    from flow_core.services import autonomous_budget
+
+    budget = await autonomous_budget.status(session, org_id=org_id, now=now)
+    if not budget.enabled:
+        autonomous_metric = Metric(None, None, "autonomous jobs paused (kill switch)")
+    elif budget.cap is None:
+        autonomous_metric = Metric(None, None, "no autonomous budget cap configured")
+    else:
+        autonomous_metric = Metric(float(budget.spent_today), float(budget.cap), None)
     return GardenHealth(
         accept_rate_classify_7d=Metric(
             r7, ACCEPT_RATE_FLOOR, None if r7 is not None else _NO_DECISIONS
@@ -352,6 +365,7 @@ async def compute_health(
         ),
         fungal_lag=Metric(fungal_value, None, fungal_reason),
         density_delta_7d=Metric(density, None, None if density is not None else _NO_NOTES),
+        autonomous_spend_today=autonomous_metric,
     )
 
 

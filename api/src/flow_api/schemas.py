@@ -212,6 +212,11 @@ class WorkspaceSettings(BaseModel):
     # query with no real match abstain ([] / low-confidence) instead of
     # surfacing the top lexical noise. Tuned live here.
     retrieval_grader_min_rrf: float = 0.0
+    # Autonomous metabolism budget (WS-F5). The kill-switch (default on) and
+    # the daily system-spend cap (0 = unlimited) that pause the autonomous
+    # garden sweep + embedding backfill without touching user actions.
+    autonomous_jobs_enabled: bool = True
+    autonomous_daily_credit_cap: float = 0.0
     # Per-workspace buffered-attachment size cap (bytes), admin-tunable.
     # The /me handler fills these with the EFFECTIVE value (the override
     # or, absent one, the config default -- always clamped to the
@@ -271,6 +276,10 @@ class WorkspaceSettingsIn(BaseModel):
     # so an estimate-presets save does not restate it; only written when
     # present. Tuned live from the SPA settings page.
     retrieval_grader_min_rrf: float | None = Field(default=None, ge=0.0, le=1.0)
+    # Autonomous metabolism budget (WS-F5; both optional, written only when
+    # present). Kill-switch + daily system-spend cap (>= 0; 0 = unlimited).
+    autonomous_jobs_enabled: bool | None = None
+    autonomous_daily_credit_cap: float | None = Field(default=None, ge=0.0)
     # Per-workspace buffered-attachment size cap (bytes), admin-tunable.
     # Optional so an estimate-presets save does not restate it; only
     # written when present. ge=1 is the floor; the endpoint clamps to the

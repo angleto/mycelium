@@ -10,11 +10,12 @@ gateway is out of v1.
 
 from __future__ import annotations
 
+import datetime
 import uuid
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -95,6 +96,25 @@ async def get_billing_config(session: AsyncSession, org_id: uuid.UUID) -> Billin
 
 async def balance(session: AsyncSession, *, org_id: uuid.UUID) -> Decimal:
     return (await get_wallet(session, org_id)).balance
+
+
+async def system_spend_since(
+    session: AsyncSession, *, org_id: uuid.UUID, since: datetime.datetime
+) -> Decimal:
+    """Total credits the AUTONOMOUS metabolism (actor_kind='system') spent
+    in this org since ``since`` (WS-F5). RLS-scoped; the autonomous-budget
+    cap sums this so it can pause the system jobs without touching user
+    spend."""
+    total = (
+        await session.execute(
+            select(func.coalesce(func.sum(UsageRecord.credits), 0)).where(
+                UsageRecord.org_id == org_id,
+                UsageRecord.actor_kind == "system",
+                UsageRecord.created_at >= since,
+            )
+        )
+    ).scalar_one()
+    return Decimal(total)
 
 
 async def grant_credits(
@@ -283,6 +303,12 @@ async def meter(
             balance=str(locked.balance),
         )
     new_balance = locked.balance - credits
+    # Attribute the spend to the actor kind (WS-F5): 'system' for the
+    # autonomous metabolism, 'human_*' for user actions. Travels on the
+    # session GUC (set by tenant_session), same source as audit.log.
+    actor_kind = (
+        await session.execute(text("SELECT current_setting('app.current_actor_kind', true)"))
+    ).scalar_one() or None
     try:
         async with session.begin_nested():
             # Pessimistic FOR UPDATE lock holds; mutate the locked row
@@ -299,6 +325,7 @@ async def meter(
                 units_out=units_out,
                 credits=credits,
                 created_by=actor_id,
+                actor_kind=actor_kind,
             )
             session.add(record)
             session.add(
