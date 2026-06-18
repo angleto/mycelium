@@ -29,14 +29,21 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from flow_core.ai_providers import LLMProvider
 from flow_core.errors import DomainError
 from flow_core.i18n import MessageCode
+from flow_core.models.classification_feedback import ClassificationFeedback
 from flow_core.models.identity import Identity
 from flow_core.models.membership import Role
 from flow_core.models.note import Note, NoteKind
 from flow_core.models.note_link import NoteNoteLink
-from flow_core.services import note_inert
+from flow_core.services import audit, note_inert
 from flow_core.services import notes as notes_svc
 from flow_core.services.llm_resolver import resolve_llm
 from flow_core.services.rbac import require_role
+
+# Version tag for the inert-flip heuristic that decides a source becomes
+# humus. Recorded on the feedback row so the learning loop can tell which
+# policy produced the decision (the LLM model that distilled lives in the
+# signals snapshot, since the flip is decided by ``is_inert``, not the LLM).
+_HUMUS_MODEL_VERSION = "auto_humus_v1"
 
 _DISTILL_SYSTEM = (
     "You decompose a piece of finished thinking into reusable atoms. "
@@ -138,7 +145,44 @@ async def distill_note(
     # quiet window). A live source -- one being actively worked -- is left
     # untouched; only the derived distillation node is created.
     if await note_inert.is_inert(session, note=source):
+        prev_humus = bool(source.humus_flag)
         source.humus_flag = True
+        # §12 "every mutation is tracked" (WS-F2): this is the one autonomous
+        # note mutation that used to bypass _note_set entirely -- no revision,
+        # no audit, no feedback. Trace it explicitly with an audit row
+        # (action auto_humus) and an append-only classification_feedback row
+        # (action 'auto', the system-initiated kind) so the flip is auditable
+        # and replayable by the learning loop, exactly like auto_promote_mature.
+        # Only emitted when the flip actually happens (inert source); a live
+        # source leaves no trace because nothing mutated.
+        await audit.log(
+            session,
+            org_id=org_id,
+            actor_id=actor_id,
+            entity="note",
+            entity_id=source.id,
+            action="auto_humus",
+            diff={
+                "humus_flag": {"old": prev_humus, "new": True},
+                "distilled_note_id": str(distilled.id),
+            },
+        )
+        session.add(
+            ClassificationFeedback(
+                org_id=org_id,
+                user_id=actor_id,
+                node_id=source.id,
+                suggestion_type="humus",
+                suggestion_value={"humus_flag": True},
+                action="auto",
+                model_version=_HUMUS_MODEL_VERSION,
+                signals_snapshot={
+                    "trigger": "distill",
+                    "distilled_note_id": str(distilled.id),
+                    "distill_model_id": res.model_id,
+                },
+            )
+        )
     await session.flush()
     # Link: the distillation DERIVED FROM the source, so it is an
     # ordinary ``hypha_of`` (parent = source / origin, child = the new

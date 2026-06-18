@@ -30,7 +30,9 @@ from sqlalchemy import select, text  # noqa: E402
 
 from flow_core.ai_providers import set_llm_override  # noqa: E402
 from flow_core.db import admin_session, tenant_session  # noqa: E402
+from flow_core.models.activity_log import ActivityLog  # noqa: E402
 from flow_core.models.billing import CostBasis, UsageRecord  # noqa: E402
+from flow_core.models.classification_feedback import ClassificationFeedback  # noqa: E402
 from flow_core.models.note import Note, NoteKind  # noqa: E402
 from flow_core.models.note_link import NoteNoteLink  # noqa: E402
 from flow_core.services import billing  # noqa: E402
@@ -169,6 +171,115 @@ async def test_distill_note_meters_through_the_seam(_wire_llm: None) -> None:
         assert rec.basis is CostBasis.local
         assert rec.model_id == res.model_id  # the REAL model, not the 'cached' sentinel
         assert await billing.balance(s, org_id=org) < before
+
+
+async def _inert_source(s: object, org: uuid.UUID, user: uuid.UUID, *, title: str) -> Note:
+    """Create a note and make it inert (archived + aged past the quiet
+    window) so distilling it flips the source's ``humus_flag``."""
+    source = await nt.create_note(
+        s,  # type: ignore[arg-type]
+        org_id=org,
+        actor_id=user,
+        kind=NoteKind.text,
+        title=title,
+        text="a finished thought, archived and aged, worth distilling into atoms",
+    )
+    source.is_archived = True
+    await s.flush()  # type: ignore[attr-defined]
+    await s.execute(  # type: ignore[attr-defined]
+        text("UPDATE notes SET updated_at = :t WHERE id = :id"),
+        {"t": dt.datetime.now(dt.UTC) - dt.timedelta(days=30), "id": str(source.id)},
+    )
+    await s.refresh(source)  # type: ignore[attr-defined]
+    return source
+
+
+async def test_distill_traces_humus_flip_on_inert_source(_wire_llm: None) -> None:
+    """WS-F2 (§12 'every mutation is tracked'): the autonomous ``humus_flag``
+    flip on an inert source must leave a trace -- an ``auto_humus`` audit row
+    AND an append-only ``classification_feedback`` row (action 'auto')."""
+    org, user = await _org()
+    async with tenant_session(str(org), str(user)) as s:
+        await _seed_billing(s, org, user)
+        source = await _inert_source(s, org, user, title="inert thought")
+        res = await decomp.distill_note(s, org_id=org, actor_id=user, note_id=source.id)
+        await s.refresh(source)
+        assert source.humus_flag is True
+        # Audit trail.
+        log_rows = (
+            (
+                await s.execute(
+                    select(ActivityLog).where(
+                        ActivityLog.entity == "note",
+                        ActivityLog.entity_id == source.id,
+                        ActivityLog.action == "auto_humus",
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len(log_rows) == 1
+        assert log_rows[0].diff is not None
+        assert log_rows[0].diff["humus_flag"] == {"old": False, "new": True}
+        # Learning-loop feedback projection.
+        fb = (
+            await s.execute(
+                select(ClassificationFeedback).where(
+                    ClassificationFeedback.node_id == source.id,
+                    ClassificationFeedback.suggestion_type == "humus",
+                )
+            )
+        ).scalar_one()
+        assert fb.action == "auto"
+        assert fb.suggestion_value == {"humus_flag": True}
+        assert fb.signals_snapshot["trigger"] == "distill"
+        assert fb.signals_snapshot["distill_model_id"] == res.model_id
+
+
+async def test_distill_does_not_trace_humus_for_live_source(_wire_llm: None) -> None:
+    """A LIVE source is never flipped to humus, so it must leave NO trace:
+    no ``auto_humus`` audit row and no humus feedback row."""
+    org, user = await _org()
+    async with tenant_session(str(org), str(user)) as s:
+        await _seed_billing(s, org, user)
+        source = await nt.create_note(
+            s,
+            org_id=org,
+            actor_id=user,
+            kind=NoteKind.text,
+            title="live",
+            text="a non-trivial body the LLM will distill on the first pass",
+        )
+        await decomp.distill_note(s, org_id=org, actor_id=user, note_id=source.id)
+        await s.refresh(source)
+        assert source.humus_flag is False
+        log_rows = (
+            (
+                await s.execute(
+                    select(ActivityLog).where(
+                        ActivityLog.entity_id == source.id,
+                        ActivityLog.action == "auto_humus",
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert log_rows == []
+        fb_rows = (
+            (
+                await s.execute(
+                    select(ClassificationFeedback).where(
+                        ClassificationFeedback.node_id == source.id,
+                        ClassificationFeedback.suggestion_type == "humus",
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert fb_rows == []
 
 
 async def test_distill_note_is_idempotent(_wire_llm: None) -> None:

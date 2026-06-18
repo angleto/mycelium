@@ -28,8 +28,12 @@ from sqlalchemy.types import DateTime
 from flow_core.models.base import Base, OrgScopedMixin, UUIDPKMixin
 
 # The suggestion kinds and the actions a feedback row can carry. Mirrored
-# by the CHECK constraints in migration 0021 (single source: keep in sync).
-SUGGESTION_TYPES: frozenset[str] = frozenset({"tag", "link", "maturity", "cluster"})
+# by the CHECK constraints in migrations 0021 + 0045 (single source: keep
+# in sync). ``humus`` (0045, WS-F2) is system-only: the autonomous
+# ``humus_flag`` flip in ``distill_note`` records its decision here as
+# ``action='auto'``. Like ``cluster`` it is informational for the
+# user-facing garden_apply path (``_mutate`` no-ops on it).
+SUGGESTION_TYPES: frozenset[str] = frozenset({"tag", "link", "maturity", "cluster", "humus"})
 FEEDBACK_ACTIONS: frozenset[str] = frozenset({"accept", "reject", "override", "ignore", "auto"})
 
 
