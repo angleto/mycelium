@@ -21,6 +21,7 @@ from flow_core.db import admin_session, tenant_session
 from flow_core.embedder import embedder_available
 from flow_core.models.membership import Membership, Role
 from flow_core.models.organization import Organization
+from flow_core.services import autonomous_budget
 from flow_core.services import embedding_migration as svc
 
 _log = logging.getLogger("flow.worker.embedding_migration")
@@ -65,6 +66,12 @@ async def run_once(batch_size: int = 50) -> int:
             if owner is None:
                 continue
             async with tenant_session(str(org_id), str(owner), actor_kind="system") as s:
+                # WS-F5: re-embedding is autonomous spend; skip a workspace
+                # whose kill-switch is off or daily cap is reached.
+                bstatus = await autonomous_budget.status(s, org_id=org_id)
+                if bstatus.paused:
+                    _log.info("embedding backfill paused org=%s reason=%s", org_id, bstatus.reason)
+                    continue
                 count = await svc.run_embedding_backfill(s, org_id, batch_size=batch_size)
             if count:
                 _log.info("embedding backfill org=%s re_embedded=%d", org_id, count)

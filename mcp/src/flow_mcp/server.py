@@ -66,6 +66,7 @@ from flow_core.services import dispatch_loop as dispatch_loop_svc
 from flow_core.services import email as email_svc
 from flow_core.services import entity_revisions as revisions_svc
 from flow_core.services import executors as executors_svc
+from flow_core.services import focus_context as focus_context_svc
 from flow_core.services import garden_classify as garden_classify_svc
 from flow_core.services import invoice as invoice_svc
 from flow_core.services import link_prediction as link_prediction_svc
@@ -3041,6 +3042,46 @@ async def memory_search(
 
 
 @mcp.tool()
+async def graph_focus_context(
+    token: str,
+    org_id: str,
+    seed: str,
+    budget: int = 24,
+    query: str | None = None,
+    project_id: str | None = None,
+) -> list[dict[str, Any]]:
+    """PPR-seeded reading set around a seed note: the relevant subgraph and
+    nothing else (ADR-0034). Returns up to ``budget`` notes ordered by
+    personalised-PageRank mass from ``seed`` (its "neighbourhood of
+    attention"), each with a title + snippet so you can decide what to read
+    without follow-up lookups. With ``query`` the neighbourhood is re-ranked
+    by late RRF fusion with hybrid retrieval, so the parts of the subgraph
+    that actually answer the question rise (graph proximity AND content
+    relevance). Read-only; vendor-neutral (no LLM)."""
+    async with _tenant(token, org_id) as (s, org, user):
+        nodes = await focus_context_svc.focus_context(
+            s,
+            org_id=org,
+            actor_id=user,
+            seed_id=uuid.UUID(seed),
+            budget=budget,
+            query=query,
+            project_id=uuid.UUID(project_id) if project_id else None,
+        )
+        return [
+            {
+                "note_id": str(n.note_id),
+                "title": n.title,
+                "snippet": n.snippet,
+                "ppr_mass": n.ppr_mass,
+                "score": n.score,
+                "provenance": n.provenance,
+            }
+            for n in nodes
+        ]
+
+
+@mcp.tool()
 async def search(
     token: str,
     org_id: str,
@@ -4033,6 +4074,52 @@ async def distill_note(token: str, org_id: str, note_id: str) -> dict[str, Any]:
         return {
             "source_note_id": note_id,
             "distilled_note_id": str(res.distilled_note_id),
+            "model_id": res.model_id,
+            "created": res.created,
+        }
+
+
+@mcp.tool()
+async def extract_cluster_pattern(
+    token: str, org_id: str, source_note_ids: list[str]
+) -> dict[str, Any]:
+    """Phase-2 decomposition (ADR-0039): synthesise a ``pattern`` humus note
+    over a set of ARCHIVED source notes (a Leiden cluster, a cross-cluster
+    pick, a project window -- you choose the grouping). Reads the sources,
+    asks the per-org metered LLM for the through-lines, writes a new note
+    linked back to each source. A proposal, never a mutation of live notes;
+    needs >=2 archived sources. Idempotent on the source set (``created``
+    false on a re-run)."""
+    async with _tenant(token, org_id) as (s, org, user):
+        res = await decomposition_svc.extract_cluster_pattern(
+            s,
+            org_id=org,
+            actor_id=user,
+            source_note_ids=[uuid.UUID(n) for n in source_note_ids],
+        )
+        return {
+            "pattern_note_id": str(res.note_id),
+            "model_id": res.model_id,
+            "created": res.created,
+        }
+
+
+@mcp.tool()
+async def synthesize_season(token: str, org_id: str, year: int, quarter: int) -> dict[str, Any]:
+    """Phase-2 decomposition (ADR-0039): synthesise a ``season`` humus note
+    for one quarter -- "what I cultivated this season" -- over the notes
+    archived in it. ``quarter`` is 1-4. A proposal, never a mutation of live
+    notes; metered LLM call inside. Idempotent per (year, quarter)."""
+    async with _tenant(token, org_id) as (s, org, user):
+        res = await decomposition_svc.synthesize_season(
+            s,
+            org_id=org,
+            actor_id=user,
+            year=year,
+            quarter=quarter,
+        )
+        return {
+            "season_note_id": str(res.note_id),
             "model_id": res.model_id,
             "created": res.created,
         }

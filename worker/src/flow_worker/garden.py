@@ -29,7 +29,14 @@ from flow_core.config import get_settings
 from flow_core.db import admin_session, tenant_session
 from flow_core.models.membership import Membership, Role
 from flow_core.models.organization import Organization
-from flow_core.services import garden_classify, garden_health, graph_snapshot, memory, note_links
+from flow_core.services import (
+    autonomous_budget,
+    garden_classify,
+    garden_health,
+    graph_snapshot,
+    memory,
+    note_links,
+)
 
 _log = logging.getLogger("flow.worker.garden")
 
@@ -72,6 +79,26 @@ async def run_once() -> int:
         try:
             owner = await _owner_of(org_id)
             if owner is None:
+                continue
+            # WS-F5: the per-workspace kill-switch / daily budget cap. A
+            # paused workspace skips the metabolic work but still refreshes
+            # the health snapshot, so the paused state stays observable in
+            # the sensors dashboard.
+            async with tenant_session(str(org_id), str(owner), actor_kind="system") as bs:
+                bstatus = await autonomous_budget.status(bs, org_id=org_id)
+            if bstatus.paused:
+                _log.info(
+                    "garden sweep paused org=%s reason=%s spent=%s cap=%s",
+                    org_id,
+                    bstatus.reason,
+                    bstatus.spent_today,
+                    bstatus.cap,
+                )
+                try:
+                    async with tenant_session(str(org_id), str(owner), actor_kind="system") as hs:
+                        await garden_health.persist_snapshot(hs, org_id=org_id)
+                except Exception:
+                    _log.exception("garden health snapshot failed for org=%s", org_id)
                 continue
             async with tenant_session(str(org_id), str(owner), actor_kind="system") as s:
                 counters = await note_links.tick_maturity_transitions(

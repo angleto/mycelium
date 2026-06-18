@@ -187,6 +187,10 @@ class UsageRecord(UUIDPKMixin, OrgScopedMixin, Base):
     units_out: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, server_default="0")
     credits: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False)
     created_by: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
+    # Actor kind that incurred the spend (migration 0046, WS-F5): 'system'
+    # for the autonomous metabolism, 'human_*' for user actions, captured
+    # from the session GUC in meter(). NULL on rows predating the column.
+    actor_kind: Mapped[str | None] = mapped_column(String(32), nullable=True)
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

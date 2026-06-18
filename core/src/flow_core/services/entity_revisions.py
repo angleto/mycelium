@@ -744,6 +744,14 @@ async def hard_delete_soft_deleted(
     revisions. Returns ``(tasks_deleted, notes_deleted)``.
 
     Runs in the current tenant via RLS, same pattern as ``coarsen``.
+
+    WS-F1 / docs/adr/0041: this is the *autonomous* retention sweep, and
+    it must never destroy an "original" the system promised to keep. A
+    note that is humus (``humus_flag`` -- fertiliser the ADR-0034 walk
+    surfaces) or the SOURCE of a distillation (a ``hypha_of`` parent, so
+    it has derived nodes) is spared and stays soft-deleted indefinitely,
+    recoverable. Explicit user / GDPR erasure is a separate, sovereign
+    path and still cascades -- this guard only gates the timer.
     """
     tasks_res = await session.execute(
         text(
@@ -758,9 +766,14 @@ async def hard_delete_soft_deleted(
     notes_res = await session.execute(
         text(
             """
-            DELETE FROM notes
-            WHERE deleted_at IS NOT NULL
-              AND deleted_at < now() - make_interval(days => :d)
+            DELETE FROM notes n
+            WHERE n.deleted_at IS NOT NULL
+              AND n.deleted_at < now() - make_interval(days => :d)
+              AND n.humus_flag = false
+              AND NOT EXISTS (
+                SELECT 1 FROM note_note_link l
+                WHERE l.parent_note_id = n.id AND l.kind = 'hypha_of'
+              )
             """
         ),
         {"d": after_days},

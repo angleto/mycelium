@@ -865,3 +865,53 @@ async def test_note_update_writes_revision_and_restore_back() -> None:
 # conftest resets the async engine across loops. No explicit
 # ``pytestmark`` (using one would also mark the sync whitelist
 # tests, raising a warning).
+
+
+async def test_hard_delete_spares_humus_originals() -> None:
+    """WS-F1 / ADR-0041: the autonomous retention sweep never hard-deletes
+    an original. A humus source (a ``hypha_of`` parent) and a humus-flagged
+    note are spared past the cutoff; an ordinary soft-deleted note is purged.
+    """
+    from sqlalchemy import text
+
+    from flow_core.services import note_links
+
+    org, user = await _org("OrgRetain")
+    src, _ = await _make_note(org, user, title="source")
+    atom, _ = await _make_note(org, user, title="distillation")
+    plain, _ = await _make_note(org, user, title="plain")
+    async with tenant_session(str(org), str(user)) as s:
+        # src -> atom (hypha_of): src has a derived node. atom is humus.
+        await note_links.link_notes(
+            s, org_id=org, actor_id=user, parent_note_id=src, child_note_id=atom, kind="hypha_of"
+        )
+        await s.execute(
+            text("UPDATE notes SET humus_flag = true WHERE id = :id"), {"id": str(atom)}
+        )
+        # Soft-delete all three (re-read version each time to be safe).
+        for nid in (src, atom, plain):
+            note = await notes_svc.get_note(s, org_id=org, note_id=nid)
+            await notes_svc.soft_delete_note(
+                s, org_id=org, actor_id=user, note_id=nid, expected_version=note.version
+            )
+        # Backdate every soft-deleted note in the org past the cutoff.
+        await s.execute(
+            text(
+                "UPDATE notes SET deleted_at = now() - interval '120 days' "
+                "WHERE deleted_at IS NOT NULL"
+            )
+        )
+        _tasks_d, notes_d = await revs.hard_delete_soft_deleted(s, after_days=90)
+
+        async def _exists(nid: uuid.UUID) -> int:
+            return (
+                await s.execute(text("SELECT count(*) FROM notes WHERE id = :id"), {"id": str(nid)})
+            ).scalar_one()
+
+        plain_cnt = await _exists(plain)
+        src_cnt = await _exists(src)
+        atom_cnt = await _exists(atom)
+    assert notes_d == 1  # only the ordinary note
+    assert plain_cnt == 0  # purged
+    assert src_cnt == 1  # spared: hypha_of source (has derived nodes)
+    assert atom_cnt == 1  # spared: humus_flag

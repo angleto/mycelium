@@ -37,7 +37,7 @@ from flow_core.i18n import MessageCode
 from flow_core.models.membership import Role
 from flow_core.models.organization import Organization
 from flow_core.services import attachments as attachments_svc
-from flow_core.services import dispatch_loop, memberships, trash
+from flow_core.services import autonomous_budget, dispatch_loop, memberships, trash
 from flow_core.services import memory as memory_svc
 from flow_core.services.auth import (
     create_org_for_user,
@@ -214,6 +214,16 @@ async def patch_my_workspace_settings(
     # in [0,1] by the schema.
     if body.retrieval_semantic_min_similarity is not None:
         merged[memory_svc.SEMANTIC_MIN_SIM_KEY] = body.retrieval_semantic_min_similarity
+    # Grader/abstain floor (fused RRF; 0 = off). Only written when present;
+    # validated in [0,1] by the schema.
+    if body.retrieval_grader_min_rrf is not None:
+        merged[memory_svc.GRADER_MIN_RRF_KEY] = body.retrieval_grader_min_rrf
+    # Autonomous metabolism budget (WS-F5): kill-switch + daily spend cap.
+    # Each written only when present (no estimate-presets clobber).
+    if body.autonomous_jobs_enabled is not None:
+        merged[autonomous_budget.ENABLED_KEY] = body.autonomous_jobs_enabled
+    if body.autonomous_daily_credit_cap is not None:
+        merged[autonomous_budget.DAILY_CAP_KEY] = body.autonomous_daily_credit_cap
     # Per-workspace buffered-attachment cap (bytes). Only written when
     # present; clamped to the runtime ceiling so the stored value never
     # exceeds what the in-memory buffered path can safely hold (the read

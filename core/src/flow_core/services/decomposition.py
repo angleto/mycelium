@@ -20,6 +20,8 @@ distillation note is created). The caller decides when to trigger
 
 from __future__ import annotations
 
+import datetime as dt
+import hashlib
 import uuid
 from dataclasses import dataclass
 
@@ -256,4 +258,255 @@ async def distill_note(
     return DistillationResult(distilled_note_id=distilled.id, model_id=res.model_id, created=True)
 
 
-__all__ = ["DistillationResult", "distill_note"]
+# ── Phase 2: pattern extraction + season synthesis (e87daff4, ADR-0039) ──
+#
+# Beyond the 1:1 ``distill_note``, decomposition densifies the corpus with
+# two N:1 syntheses, both PROPOSALS (a new humus note + ``hypha_of`` links
+# back to every source), never mutations of live notes (§12). Idempotent on
+# ``humus_signature``; metered through the same per-org seam as distill so an
+# org on a strong summariser gets its quality and is charged. The (gated)
+# autonomous scheduler that computes the clusters/quarters and calls these is
+# a follow-up; on-demand callers (MCP, a future cron) drive them today.
+
+_PATTERN_SYSTEM = (
+    "You are a forester writing a retrospective across several finished, "
+    "archived notes. Identify the recurring patterns, tensions and "
+    "through-lines ACROSS them (not a summary of each). Reply with: (1) a "
+    "one-line theme, (2) three to five patterns as bullets, each naming what "
+    "recurs and where, (3) one open question the set leaves unresolved. No "
+    "filler, no restating the brief. Italian or English matching the input."
+)
+_SEASON_SYSTEM = (
+    "You are a forester writing a seasonal retrospective -- 'what I cultivated "
+    "this season'. Given the season's archived notes, synthesise: (1) the "
+    "season's headline, (2) three to five themes that grew, (3) what went "
+    "dormant or was abandoned, (4) one seed to plant next season. No filler. "
+    "Italian or English matching the input."
+)
+
+# Bounds so a synthesis stays one cheap LLM call regardless of corpus size.
+_MAX_PATTERN_SOURCES = 20
+_MAX_SEASON_SOURCES = 50
+_PER_SOURCE_CHARS = 1500
+
+
+@dataclass(frozen=True)
+class HumusResult:
+    note_id: uuid.UUID
+    model_id: str
+    # False when an existing synthesis was returned untouched (idempotent
+    # re-run); True when a new humus note was generated.
+    created: bool
+
+
+async def _existing_humus(
+    session: AsyncSession, *, org_id: uuid.UUID, kind: str, signature: str
+) -> uuid.UUID | None:
+    return (
+        await session.execute(
+            select(Note.id).where(
+                Note.org_id == org_id,
+                Note.humus_kind == kind,
+                Note.humus_signature == signature,
+                Note.deleted_at.is_(None),
+            )
+        )
+    ).scalar_one_or_none()
+
+
+async def _assemble_bodies(session: AsyncSession, notes: list[Note]) -> str:
+    """Title + head-of-body for each source, bounded per source, joined with
+    separators -- the LLM input for a synthesis."""
+    parts: list[str] = []
+    for n in notes:
+        body = await notes_svc.get_body(session, note_id=n.id)
+        head = (body or "").strip()[:_PER_SOURCE_CHARS]
+        title = (n.title or "").strip()
+        parts.append(f"## {title or 'untitled'}\n{head}".strip())
+    return "\n\n---\n\n".join(parts)
+
+
+async def _synthesise_humus(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    kind: str,
+    op: str,
+    signature: str,
+    title: str,
+    system_prompt: str,
+    sources: list[Note],
+    project_id: uuid.UUID | None,
+    llm: LLMProvider | None,
+) -> HumusResult:
+    """Shared core for pattern/season: idempotency check, metered LLM call,
+    create the humus note (``humus_kind``/``humus_flag``/``humus_signature``)
+    and a ``hypha_of`` link from every source. Sources are read-only; no live
+    note is mutated."""
+    existing = await _existing_humus(session, org_id=org_id, kind=kind, signature=signature)
+    if existing is not None:
+        return HumusResult(note_id=existing, model_id="cached", created=False)
+    body = await _assemble_bodies(session, sources)
+    if not body.strip():
+        raise DomainError(MessageCode.DOMAIN_ERROR)
+    provider = llm or await resolve_llm(
+        session,
+        org_id,
+        actor_id=actor_id,
+        operation_id=f"{op}:{org_id}:{signature}",
+        op=op,
+    )
+    res = await provider.complete(system=system_prompt, messages=[("user", body)])
+    note = await notes_svc.create_note(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        kind=NoteKind.text,
+        title=title[:300],
+        text=res.text,
+        project_id=project_id,
+    )
+    note.humus_kind = kind
+    note.humus_flag = True
+    note.humus_signature = signature
+    await session.flush()
+    identity_id = (
+        await session.execute(
+            select(Identity.id).where(Identity.org_id == org_id, Identity.user_id == actor_id)
+        )
+    ).scalar_one_or_none()
+    # N:1 derivation: every source is a hypha_of parent of the synthesis, so
+    # the walk can decompress the pattern/season back to the notes it grew
+    # from (ADR-0040; the humus facet lives on the node, not the link kind).
+    for src in sources:
+        session.add(
+            NoteNoteLink(
+                org_id=org_id,
+                parent_note_id=src.id,
+                child_note_id=note.id,
+                kind="hypha_of",
+                created_by=identity_id,
+            )
+        )
+    await session.flush()
+    return HumusResult(note_id=note.id, model_id=res.model_id, created=True)
+
+
+async def extract_cluster_pattern(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    source_note_ids: list[uuid.UUID],
+    llm: LLMProvider | None = None,
+) -> HumusResult:
+    """Synthesise a ``pattern`` humus note over a set of ARCHIVED source notes
+    (a Leiden cluster, a cross-cluster pick, a project window -- the caller
+    chooses the grouping). Reads the sources, asks the per-org metered LLM for
+    the through-lines, writes a new note linked back to each source. Idempotent
+    on the source set; never mutates a live note (only archived sources count).
+    """
+    await require_role(session, org_id, actor_id, Role.member)
+    sources = list(
+        (
+            await session.execute(
+                select(Note).where(
+                    Note.id.in_(source_note_ids),
+                    Note.org_id == org_id,
+                    Note.deleted_at.is_(None),
+                    Note.is_archived.is_(True),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    sources.sort(key=lambda n: str(n.id))
+    if len(sources) < 2:
+        # A pattern is a cross-note retrospective; one (or zero) archived
+        # source has no pattern to extract.
+        raise DomainError(MessageCode.DOMAIN_ERROR)
+    sources = sources[:_MAX_PATTERN_SOURCES]
+    signature = hashlib.sha256(",".join(str(n.id) for n in sources).encode("utf-8")).hexdigest()[
+        :32
+    ]
+    return await _synthesise_humus(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        kind="pattern",
+        op="pattern",
+        signature=signature,
+        title=f"Pattern · {len(sources)} notes",
+        system_prompt=_PATTERN_SYSTEM,
+        sources=sources,
+        project_id=None,  # a pattern may span projects
+        llm=llm,
+    )
+
+
+async def synthesize_season(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    year: int,
+    quarter: int,
+    llm: LLMProvider | None = None,
+) -> HumusResult:
+    """Synthesise a ``season`` humus note for one quarter -- "what I cultivated
+    this season" -- over the notes archived (created) in it. Idempotent per
+    (org, year, quarter); a proposal, never a mutation of live notes.
+    """
+    if quarter not in (1, 2, 3, 4):
+        raise DomainError(MessageCode.DOMAIN_ERROR)
+    await require_role(session, org_id, actor_id, Role.member)
+    start = dt.datetime(year, 3 * (quarter - 1) + 1, 1, tzinfo=dt.UTC)
+    end = (
+        dt.datetime(year + 1, 1, 1, tzinfo=dt.UTC)
+        if quarter == 4
+        else dt.datetime(year, 3 * quarter + 1, 1, tzinfo=dt.UTC)
+    )
+    sources = list(
+        (
+            await session.execute(
+                select(Note)
+                .where(
+                    Note.org_id == org_id,
+                    Note.deleted_at.is_(None),
+                    Note.is_archived.is_(True),
+                    Note.created_at >= start,
+                    Note.created_at < end,
+                )
+                .order_by(Note.created_at)
+                .limit(_MAX_SEASON_SOURCES)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if not sources:
+        raise DomainError(MessageCode.DOMAIN_ERROR)
+    return await _synthesise_humus(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        kind="season",
+        op="season",
+        signature=f"{year}Q{quarter}",
+        title=f"Season · {year} Q{quarter}",
+        system_prompt=_SEASON_SYSTEM,
+        sources=sources,
+        project_id=None,
+        llm=llm,
+    )
+
+
+__all__ = [
+    "DistillationResult",
+    "HumusResult",
+    "distill_note",
+    "extract_cluster_pattern",
+    "synthesize_season",
+]
