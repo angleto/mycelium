@@ -215,6 +215,51 @@ async def test_time_edit_reassign_interval_context_and_report() -> None:
         assert rep[0]["task_id"] == task_b["id"]
 
 
+async def test_time_edit_memo_set_and_clear() -> None:
+    """PATCH persists the entry memo and bumps the version; memo=null
+    clears it. Guards the exclude_unset contract the SPA relies on: the
+    memo key must be sent explicitly for an edit/clear to take effect."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as c:
+        a = (
+            await c.post(
+                "/auth/signup",
+                json={"email": _email(), "password": "pw-strong-123"},
+            )
+        ).json()
+        h = {
+            "Authorization": f"Bearer {a['token']}",
+            "X-Workspace-Id": a["workspace_id"],
+        }
+        task = (await c.post("/tasks", headers=h, json={"title": "T"})).json()
+        await c.post("/time/start", headers=h, json={"task_id": task["id"]})
+        stopped = (await c.post("/time/stop", headers=h, json={})).json()
+        eid = stopped["id"]
+        assert stopped["memo"] is None
+
+        # Set the memo.
+        r = await c.patch(
+            f"/time/entries/{eid}",
+            headers=h,
+            json={"expected_version": stopped["version"], "memo": "design"},
+        )
+        assert r.status_code == 200, r.text
+        v2 = r.json()["version"]
+        assert v2 == stopped["version"] + 1
+        ent = (await c.get(f"/time/entries/{eid}", headers=h)).json()
+        assert ent["memo"] == "design"
+
+        # Clear it with an explicit null.
+        r = await c.patch(
+            f"/time/entries/{eid}",
+            headers=h,
+            json={"expected_version": v2, "memo": None},
+        )
+        assert r.status_code == 200, r.text
+        ent = (await c.get(f"/time/entries/{eid}", headers=h)).json()
+        assert ent["memo"] is None
+
+
 async def test_delete_time_entry_stopped_running_and_isolation() -> None:
     """DELETE /time/entries/{id} (member-level): a stopped entry is
     removed (-> 404 on a later GET); deleting a STILL-RUNNING entry

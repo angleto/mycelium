@@ -19,6 +19,7 @@ import { Logo } from './Logo'
 import { Icon, type IconName } from './NavIcon'
 import { ThemeToggle } from './ThemeToggle'
 import { PomodoroTimer } from './PomodoroTimer'
+import { MemoPopover } from './MemoPopover'
 import { hms, activeElapsedSec, isPaused } from '../lib/time'
 import { useRunningTimers, refreshRunning } from '../lib/useRunningTimer'
 import { parseMentionHref, routeForMention } from '../lib/mentions'
@@ -163,15 +164,18 @@ function RunningIndicator() {
   const [idx, setIdx] = useState(0)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
+  // Pause the carousel while a memo popover is open so the entry being
+  // annotated is not swapped out from under the user mid-edit.
+  const [editing, setEditing] = useState(false)
 
   // Auto-advance every 5s when there is >1. Keyed on idx so a manual
   // advance (badge click) re-arms the full 5s window before the next
   // automatic step. (idx is bounded at render via safeIdx.)
   useEffect(() => {
-    if (runs.length <= 1) return
+    if (runs.length <= 1 || editing) return
     const c = setTimeout(() => setIdx((i) => (i + 1) % runs.length), 5000)
     return () => clearTimeout(c)
-  }, [runs.length, idx])
+  }, [runs.length, idx, editing])
 
   if (runs.length === 0) return null
   const ordered = [...runs].sort(
@@ -256,6 +260,11 @@ function RunningIndicator() {
       >
         {paused ? '▶' : '⏸'}
       </button>
+      <MemoPopover
+        entry={cur}
+        triggerClassName="running__ctl"
+        onOpenChange={setEditing}
+      />
       <button
         type="button"
         className="running__ctl"

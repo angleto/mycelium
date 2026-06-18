@@ -8787,7 +8787,7 @@ export interface components {
          * ReportGroup
          * @enum {string}
          */
-        ReportGroup: "project" | "client" | "generic" | "user" | "task";
+        ReportGroup: "project" | "client" | "generic" | "user" | "task" | "task_memo";
         /** ReportRowOut */
         ReportRowOut: {
             /** Key */

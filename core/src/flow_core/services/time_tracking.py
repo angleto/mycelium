@@ -98,6 +98,7 @@ class ReportGroup(enum.StrEnum):
     generic = "generic"
     user = "user"
     task = "task"
+    task_memo = "task_memo"
 
 
 @dataclass(frozen=True)
@@ -823,6 +824,37 @@ async def report(
             bump(
                 str(ent_id),
                 labels.get(ent_id),
+                e.duration_seconds or 0,
+                e.billable,
+                rate_for(e),
+                currency_for(e),
+            )
+    elif group_by is ReportGroup.task_memo:
+        # Phases within a task: one row per (task, memo). The memo
+        # ("design", "review", "meeting", ...) is the entry's free-text
+        # note. An empty / whitespace-only / NULL memo collapses into
+        # the task's no-comment bucket (label = the task title alone).
+        # Grouping is case-sensitive with surrounding whitespace trimmed:
+        # intentional capitalization is preserved, accidental spaces do
+        # not fork a label. The unit-separator (\x1f) keeps the composite
+        # key collision-free regardless of memo content.
+        memo_task_ids = {e.task_id for e in entries}
+        memo_titles: dict[uuid.UUID, str] = {}
+        if memo_task_ids:
+            memo_titles = {
+                tid: title
+                for tid, title in (
+                    await session.execute(
+                        select(Task.id, Task.title).where(Task.id.in_(memo_task_ids))
+                    )
+                ).all()
+            }
+        for e in entries:
+            memo = (e.memo or "").strip()
+            title = memo_titles.get(e.task_id)
+            bump(
+                f"{e.task_id}\x1f{memo}",
+                f"{title} · {memo}" if memo else title,
                 e.duration_seconds or 0,
                 e.billable,
                 rate_for(e),

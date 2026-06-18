@@ -826,6 +826,13 @@ button.btn--danger:hover {
   color: var(--muted);
   font-size: 0.82rem;
 }
+/* A "Task + comment" report row label can carry a long free-text memo;
+   cap the grid's max-content column so it wraps instead of stretching
+   the table. The full text stays available via the dt's title tooltip. */
+.kv dt.reportrow__label {
+  max-width: 32ch;
+  overflow-wrap: anywhere;
+}
 .kv dd {
   margin: 0;
   color: var(--text-h);

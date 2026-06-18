@@ -15,6 +15,7 @@ import {
   fromLocalInput,
 } from '../lib/tz'
 import { useLinkedClientProject } from '../lib/linkedClientProject'
+import { useIsDark } from '../lib/useIsDark'
 import { useWorkflowStates } from '../lib/useWorkflowStates'
 import { periodRange, type Period } from '../lib/period'
 import { PeriodPicker } from '../components/PeriodPicker'
@@ -32,7 +33,7 @@ type Project = components['schemas']['ProjectOut']
 type Scope = 'all' | 'mine' | 'ai'
 type BillableF = 'all' | 'yes' | 'no'
 
-const GROUPS: Group[] = ['project', 'client', 'generic', 'user', 'task']
+const GROUPS: Group[] = ['project', 'client', 'generic', 'user', 'task', 'task_memo']
 const ENT_PAGE = 50
 
 function hhmmss(sec: number): string {
@@ -42,21 +43,37 @@ function hhmmss(sec: number): string {
   return `${h}h ${String(m).padStart(2, '0')}m ${String(s % 60).padStart(2, '0')}s`
 }
 
-const PIE = [
+// Categorical donut palette. A fixed set cannot read against both a
+// near-white and a near-black surface, so there are two hand-tuned ramps
+// (each entry >=3:1 against its own surface for the data-viz boundary)
+// and the donut picks one from the resolved theme.
+const PIE_LIGHT = [
   '#4a6b3e',
   '#5b3fb8',
   '#6a4f33',
-  '#c97b9f',
-  '#0ea5e9',
+  '#a8456f',
+  '#0369a1',
   '#a13322',
-  '#d97706',
-  '#7fa56e',
+  '#b45309',
+  '#3f6b32',
   '#0891b2',
+]
+const PIE_DARK = [
+  '#7fa56e',
+  '#9a82e0',
+  '#a98963',
+  '#d99cb8',
+  '#38bdf8',
+  '#f08a76',
+  '#d97706',
+  '#a8d49a',
+  '#22d3ee',
 ]
 
 // Dependency-free SVG donut (stroke-dasharray technique) of the
 // time distribution per slice, with a legend.
 function Donut({ data }: { data: { label: string; secs: number }[] }) {
+  const PIE = useIsDark() ? PIE_DARK : PIE_LIGHT
   const total = data.reduce((s, d) => s + d.secs, 0) || 1
   const r = 42
   const C = 2 * Math.PI * r
@@ -204,6 +221,7 @@ export function TimeRoute() {
   const [eProject, setEProject] = useState('')
   const [eStart, setEStart] = useState('')
   const [eEnd, setEEnd] = useState('')
+  const [eMemo, setEMemo] = useState('')
 
   const titleOf = (id: string) => tasks.find((x) => x.id === id)?.title ?? id.slice(0, 8)
 
@@ -494,6 +512,7 @@ export function TimeRoute() {
     setETask(en.task_id)
     setEStart(toLocalInput(en.started_at))
     setEEnd(toLocalInput(en.ended_at))
+    setEMemo(en.memo ?? '')
   }
 
   async function saveEntry(en: Entry) {
@@ -525,6 +544,9 @@ export function TimeRoute() {
         task_id: eTask,
         started_at: eStart ? fromLocalInput(eStart) : undefined,
         ended_at: eEnd ? fromLocalInput(eEnd) : null,
+        // exclude_unset on the server: send memo explicitly so an edit
+        // (or a clear, via null) takes effect.
+        memo: eMemo.trim() || null,
       },
     })
     if (error) {
@@ -726,6 +748,12 @@ export function TimeRoute() {
                   {fmtClockTz(en.ended_at, en.client_timezone)}
                   {en.client_timezone ? ` (${en.client_timezone})` : ''}
                 </span>
+                {en.memo && editId !== en.id && (
+                  <span className="muted entryrow__memo" title={en.memo}>
+                    {' '}
+                    ✎ {en.memo}
+                  </span>
+                )}
                 {editId === en.id && (() => {
                   // Project dropdown = pure filter for the Task select
                   // below. Picking a project narrows the Task choices;
@@ -815,6 +843,14 @@ export function TimeRoute() {
                         type="datetime-local"
                         value={eEnd}
                         onChange={(e) => setEEnd(e.target.value)}
+                      />
+                      <input
+                        type="text"
+                        className="entryedit__memo"
+                        value={eMemo}
+                        onChange={(e) => setEMemo(e.target.value)}
+                        placeholder={t('time.memoPlaceholder')}
+                        title={t('time.memoEdit')}
                       />
                       <button
                         type="submit"
@@ -1222,7 +1258,9 @@ export function TimeRoute() {
       <dl className="kv">
         {report.map((r, i) => (
           <div key={i} style={{ display: 'contents' }}>
-            <dt>{r.label ?? r.key ?? '-'}</dt>
+            <dt className="reportrow__label" title={r.label ?? undefined}>
+              {r.label ?? r.key ?? '-'}
+            </dt>
             <dd>
               {hhmmss(r.seconds)} · {r.amount} {r.currency}
             </dd>

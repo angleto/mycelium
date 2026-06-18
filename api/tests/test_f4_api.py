@@ -120,9 +120,25 @@ async def test_f4_api_flow() -> None:
         )
         assert patched.status_code == 200 and patched.json()["version"] == me["version"] + 1
 
+        # Label the manual entry so it surfaces as a (task, memo) row below.
+        memoed = await c.patch(
+            f"/time/entries/{me['id']}",
+            headers=h,
+            json={"expected_version": patched.json()["version"], "memo": "design"},
+        )
+        assert memoed.status_code == 200, memoed.text
+
         rep = (await c.get("/time/report?group_by=project", headers=h)).json()
         prow = next(r for r in rep if r["key"] == proj["id"])
         assert prow["seconds"] == 3600 and prow["billable_seconds"] == 0  # now non-billable
+
+        # group_by=task_memo is accepted end-to-end (guards the report()
+        # branch ordering) and the memoed entry is its own (task, memo)
+        # row keyed "<task_id>\x1f<memo>", labelled "<title> · <memo>".
+        tm = (await c.get("/time/report?group_by=task_memo", headers=h)).json()
+        tmrow = next(r for r in tm if r["key"] == f"{t['id']}\x1fdesign")
+        assert tmrow["seconds"] == 3600
+        assert tmrow["label"].endswith("· design")
 
         csv_resp = await c.get("/time/report.csv?group_by=project", headers=h)
         assert csv_resp.status_code == 200

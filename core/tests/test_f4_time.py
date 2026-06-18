@@ -124,6 +124,49 @@ async def test_report_aggregation_billable_and_rate_snapshot() -> None:
         assert row.currency == "EUR"
 
 
+async def test_report_group_by_task_memo() -> None:
+    """task_memo groups one row per (task, memo): same memo merges (with
+    surrounding whitespace trimmed), empty/NULL memo collapses to the
+    task's no-comment bucket, and the label composes "Title · memo"."""
+    async with admin_session() as s:
+        a = await signup(s, email=_email(), password="pw-strong-123", org_name="MEMO")
+    org, user = a.org_id, a.user_id
+    async with tenant_session(str(org), str(user)) as s:
+        t = await tasks.create_task(s, org_id=org, actor_id=user, title="Build")
+        base = dt.datetime(2026, 2, 2, 9, 0, tzinfo=dt.UTC)
+
+        async def manual(offset_h: int, secs: int, memo: str | None) -> None:
+            await tt.add_manual_entry(
+                s,
+                org_id=org,
+                actor_id=user,
+                task_id=t.id,
+                started_at=base + dt.timedelta(hours=offset_h),
+                duration_seconds=secs,
+                memo=memo,
+            )
+
+        await manual(0, 3600, "design")
+        await manual(2, 1800, " design ")  # whitespace -> merges into "design"
+        await manual(4, 7200, "review")
+        await manual(6, 600, None)  # no comment
+
+        rows = await tt.report(s, org_id=org, actor_id=user, group_by=tt.ReportGroup.task_memo)
+        by_key = {r.key: r for r in rows}
+
+        design = by_key[f"{t.id}\x1fdesign"]
+        assert design.seconds == 5400  # 3600 + 1800 merged
+        assert design.label == "Build · design"
+
+        review = by_key[f"{t.id}\x1freview"]
+        assert review.seconds == 7200
+        assert review.label == "Build · review"
+
+        no_comment = by_key[f"{t.id}\x1f"]
+        assert no_comment.seconds == 600
+        assert no_comment.label == "Build"  # task title alone, no separator
+
+
 async def test_first_entry_feeds_scheduler_actual_start() -> None:
     async with admin_session() as s:
         a = await signup(s, email=_email(), password="pw-strong-123", org_name="FEED")

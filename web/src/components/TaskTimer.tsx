@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { api, errMessage, workspaceHeader } from '../api/client'
 import { hms, activeElapsedSec, isPaused } from '../lib/time'
 import { useRunningTimers, refreshRunning } from '../lib/useRunningTimer'
+import { MemoPopover } from './MemoPopover'
 
 // Start/stop the timer for ONE task, with a live elapsed readout.
 // Reused wherever you work "on a task" outside the time view — e.g.
@@ -103,6 +104,7 @@ export function TaskTimer({
             {paused ? '⏱▶' : '⏱⏸'}
             {labeled ? ` ${paused ? t('time.resume') : t('time.pause')}` : ''}
           </button>
+          <MemoPopover entry={entry} />
           <button
             type="button"
             className={`btn--sm tasktimer__stop${paused ? ' is-paused' : ''}`}
