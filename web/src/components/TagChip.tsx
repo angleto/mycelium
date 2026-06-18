@@ -17,7 +17,13 @@ export function TagChip({
   color?: string | null
   kind?: string
 }) {
-  const c = color || 'var(--accent)'
+  // The kind glyph keeps the tag's hue, but clamped toward the per-theme
+  // text color so an extreme user color (near-white or near-black) can
+  // never collapse into the chip's same-hue tint background. The chip's
+  // bg tint + border already carry the raw hue.
+  const glyphColor = color
+    ? `color-mix(in srgb, ${color} 55%, var(--text-h))`
+    : 'var(--accent)'
   const glyph = kindGlyph(kind)
   return (
     <span
@@ -30,7 +36,7 @@ export function TagChip({
     >
       <span
         className="chip__glyph"
-        style={{ color: c }}
+        style={{ color: glyphColor }}
         aria-hidden="true"
       >
         {glyph}

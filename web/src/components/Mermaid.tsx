@@ -1,4 +1,5 @@
 import { useEffect, useId, useState } from 'react'
+import { useEffectiveTheme } from '../lib/useIsDark'
 
 // Mermaid diagram rendering, shared by the read-side markdown renderer
 // (the ```mermaid fenced block in Markdown.tsx) and the write-side editor
@@ -18,39 +19,10 @@ function loadMermaid(): Promise<MermaidApi> {
   return mermaidPromise
 }
 
-// Effective light/dark, reacting both to the app's forced theme
-// (html[data-theme], set by lib/theme.ts) and — when on 'auto' (no
-// attribute) — the OS prefers-color-scheme. Diagrams re-render when it
-// flips so a graph never stays light-on-dark after a theme toggle.
-function readEffectiveTheme(): 'light' | 'dark' {
-  const forced = document.documentElement.getAttribute('data-theme')
-  if (forced === 'light' || forced === 'dark') return forced
-  return window.matchMedia('(prefers-color-scheme: dark)').matches
-    ? 'dark'
-    : 'light'
-}
-
-// File-private: only <Mermaid> consumes it. Keeping it unexported also
-// lets this module export solely the component, which react-refresh needs
-// for fast refresh to work.
-function useEffectiveTheme(): 'light' | 'dark' {
-  const [theme, setTheme] = useState(readEffectiveTheme)
-  useEffect(() => {
-    const update = () => setTheme(readEffectiveTheme())
-    const mq = window.matchMedia('(prefers-color-scheme: dark)')
-    mq.addEventListener('change', update)
-    const obs = new MutationObserver(update)
-    obs.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ['data-theme'],
-    })
-    return () => {
-      mq.removeEventListener('change', update)
-      obs.disconnect()
-    }
-  }, [])
-  return theme
-}
+// Effective light/dark detection (reacting to the forced theme and, on
+// 'auto', the OS preference) lives in lib/useIsDark so the Time donut and
+// any other per-theme palette share one implementation. Diagrams
+// re-render when it flips so a graph never stays light-on-dark.
 
 // `securityLevel: 'strict'` is mermaid's safe default: it runs the output
 // through DOMPurify, disables HTML labels and click handlers, so the SVG

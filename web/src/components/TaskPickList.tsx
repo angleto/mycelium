@@ -112,11 +112,14 @@ export function TaskPickList({
                 <span className="taskpicklist__title">{tk.title}</span>
                 <span className="muted taskpicklist__meta">
                   {proj && (
-                    <span
-                      className="chip__glyph"
-                      style={{ color: proj.color || 'currentColor' }}
-                    >
-                      ■ {proj.name}
+                    <span className="chip__glyph">
+                      <span
+                        aria-hidden="true"
+                        style={{ color: proj.color || 'currentColor' }}
+                      >
+                        ■
+                      </span>{' '}
+                      {proj.name}
                     </span>
                   )}
                   {st && (

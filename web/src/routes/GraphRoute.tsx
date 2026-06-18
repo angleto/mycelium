@@ -352,10 +352,12 @@ export function GraphRoute() {
                 <span
                   className="chip__glyph"
                   style={{
-                    // ON the chip is FILLED with the tag color: the
-                    // glyph must use the chip's computed foreground,
-                    // or it melts into its own background.
-                    color: on ? 'currentColor' : color || 'currentColor',
+                    // The glyph always uses the chip's computed
+                    // foreground: ON it would otherwise melt into the
+                    // tag-color fill; OFF a near-surface raw tag color
+                    // would be invisible on the chip body. The dot +
+                    // `${color}66` border already carry the hue cue.
+                    color: 'currentColor',
                   }}
                   aria-hidden="true"
                 >
