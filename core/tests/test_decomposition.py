@@ -30,6 +30,7 @@ from sqlalchemy import select, text  # noqa: E402
 
 from flow_core.ai_providers import LLMResult, set_llm_override  # noqa: E402
 from flow_core.db import admin_session, tenant_session  # noqa: E402
+from flow_core.errors import DomainError  # noqa: E402
 from flow_core.models.activity_log import ActivityLog  # noqa: E402
 from flow_core.models.billing import CostBasis, UsageRecord  # noqa: E402
 from flow_core.models.classification_feedback import ClassificationFeedback  # noqa: E402
@@ -416,3 +417,105 @@ async def test_distill_skips_humus_flip_when_source_changes_mid_call() -> None:
             .all()
         )
         assert fb_rows == []
+
+
+# ── Phase 2: pattern extraction + season synthesis (e87daff4) ──────────
+
+
+async def _archived(s: object, org: uuid.UUID, user: uuid.UUID, *, title: str, body: str) -> Note:
+    n = await nt.create_note(
+        s,  # type: ignore[arg-type]
+        org_id=org,
+        actor_id=user,
+        kind=NoteKind.text,
+        title=title,
+        text=body,
+    )
+    n.is_archived = True
+    await s.flush()  # type: ignore[attr-defined]
+    return n
+
+
+async def test_extract_cluster_pattern_creates_linked_humus(_wire_llm: None) -> None:
+    """A pattern note is synthesised over >=2 archived sources: humus_kind
+    'pattern', flag set, a stable signature, and a hypha_of link from EVERY
+    source -- and the sources themselves are never mutated. Re-running is
+    idempotent (the existing note is returned)."""
+    org, user = await _org()
+    async with tenant_session(str(org), str(user)) as s:
+        await _seed_billing(s, org, user)
+        a = await _archived(s, org, user, title="a", body="gardening notes on soil")
+        b = await _archived(s, org, user, title="b", body="more soil and compost ideas")
+        c = await _archived(s, org, user, title="c", body="compost turns into humus")
+        res = await decomp.extract_cluster_pattern(
+            s, org_id=org, actor_id=user, source_note_ids=[a.id, b.id, c.id]
+        )
+        assert res.created is True
+        note = (await s.execute(select(Note).where(Note.id == res.note_id))).scalar_one()
+        assert note.humus_kind == "pattern"
+        assert note.humus_flag is True
+        assert note.humus_signature
+        links = (
+            (
+                await s.execute(
+                    select(NoteNoteLink).where(
+                        NoteNoteLink.child_note_id == note.id, NoteNoteLink.kind == "hypha_of"
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert {lk.parent_note_id for lk in links} == {a.id, b.id, c.id}
+        # Sources are read-only inputs (§12): never flipped to humus.
+        for src in (a, b, c):
+            await s.refresh(src)
+            assert src.humus_flag is False
+        # Idempotent: same source set -> same note, no new synthesis.
+        again = await decomp.extract_cluster_pattern(
+            s, org_id=org, actor_id=user, source_note_ids=[c.id, a.id, b.id]
+        )
+        assert again.created is False
+        assert again.note_id == res.note_id
+
+
+async def test_extract_cluster_pattern_needs_two_archived_sources(_wire_llm: None) -> None:
+    """One archived source (or live sources) -> no pattern to extract."""
+    org, user = await _org()
+    async with tenant_session(str(org), str(user)) as s:
+        await _seed_billing(s, org, user)
+        only = await _archived(s, org, user, title="solo", body="a single archived note")
+        # A live (non-archived) note must not count toward the pattern.
+        live = await nt.create_note(
+            s, org_id=org, actor_id=user, kind=NoteKind.text, title="live", text="still working"
+        )
+        with pytest.raises(DomainError):
+            await decomp.extract_cluster_pattern(
+                s, org_id=org, actor_id=user, source_note_ids=[only.id, live.id]
+            )
+
+
+async def test_synthesize_season_creates_humus_idempotent(_wire_llm: None) -> None:
+    """The season synthesis gathers the quarter's archived notes into one
+    'season' humus note, keyed (idempotent) on year+quarter."""
+    org, user = await _org()
+    async with tenant_session(str(org), str(user)) as s:
+        await _seed_billing(s, org, user)
+        a = await _archived(s, org, user, title="winter a", body="a thought from the quarter")
+        b = await _archived(s, org, user, title="winter b", body="another from the quarter")
+        # Backdate both into 2025 Q1.
+        await s.execute(
+            text("UPDATE notes SET created_at = :t WHERE id IN (:a, :b)"),
+            {"t": dt.datetime(2025, 2, 1, tzinfo=dt.UTC), "a": str(a.id), "b": str(b.id)},
+        )
+        res = await decomp.synthesize_season(s, org_id=org, actor_id=user, year=2025, quarter=1)
+        assert res.created is True
+        note = (await s.execute(select(Note).where(Note.id == res.note_id))).scalar_one()
+        assert note.humus_kind == "season"
+        assert note.humus_signature == "2025Q1"
+        again = await decomp.synthesize_season(s, org_id=org, actor_id=user, year=2025, quarter=1)
+        assert again.created is False
+        assert again.note_id == res.note_id
+        # A quarter with nothing archived -> nothing to synthesise.
+        with pytest.raises(DomainError):
+            await decomp.synthesize_season(s, org_id=org, actor_id=user, year=2024, quarter=3)

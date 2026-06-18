@@ -119,6 +119,12 @@ class Note(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, Base):
     # eligibility predicate the LLM walk consults.
     humus_kind: Mapped[str | None] = mapped_column(String(32), nullable=True)
     humus_flag: Mapped[bool] = mapped_column(nullable=False, server_default="false")
+    # Idempotency key for synthesised humus (migration 0047, e87daff4):
+    # a hash of the source set for a 'pattern' note, "<year>Q<q>" for a
+    # 'season' note. NULL for ordinary notes and 1:1 distillations. A
+    # partial unique index on (org_id, humus_kind, humus_signature) makes
+    # a re-run return the existing synthesis instead of a duplicate.
+    humus_signature: Mapped[str | None] = mapped_column(String(80), nullable=True)
     # WS-D2 (ADR-0032 P4): autonomous, read-only classify-on-ingest. The
     # garden sweep stamps a new note with the structural community the
     # offline Leiden snapshot already computed for it (``auto_cluster``)

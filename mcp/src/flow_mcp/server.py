@@ -4080,6 +4080,52 @@ async def distill_note(token: str, org_id: str, note_id: str) -> dict[str, Any]:
 
 
 @mcp.tool()
+async def extract_cluster_pattern(
+    token: str, org_id: str, source_note_ids: list[str]
+) -> dict[str, Any]:
+    """Phase-2 decomposition (ADR-0039): synthesise a ``pattern`` humus note
+    over a set of ARCHIVED source notes (a Leiden cluster, a cross-cluster
+    pick, a project window -- you choose the grouping). Reads the sources,
+    asks the per-org metered LLM for the through-lines, writes a new note
+    linked back to each source. A proposal, never a mutation of live notes;
+    needs >=2 archived sources. Idempotent on the source set (``created``
+    false on a re-run)."""
+    async with _tenant(token, org_id) as (s, org, user):
+        res = await decomposition_svc.extract_cluster_pattern(
+            s,
+            org_id=org,
+            actor_id=user,
+            source_note_ids=[uuid.UUID(n) for n in source_note_ids],
+        )
+        return {
+            "pattern_note_id": str(res.note_id),
+            "model_id": res.model_id,
+            "created": res.created,
+        }
+
+
+@mcp.tool()
+async def synthesize_season(token: str, org_id: str, year: int, quarter: int) -> dict[str, Any]:
+    """Phase-2 decomposition (ADR-0039): synthesise a ``season`` humus note
+    for one quarter -- "what I cultivated this season" -- over the notes
+    archived in it. ``quarter`` is 1-4. A proposal, never a mutation of live
+    notes; metered LLM call inside. Idempotent per (year, quarter)."""
+    async with _tenant(token, org_id) as (s, org, user):
+        res = await decomposition_svc.synthesize_season(
+            s,
+            org_id=org,
+            actor_id=user,
+            year=year,
+            quarter=quarter,
+        )
+        return {
+            "season_note_id": str(res.note_id),
+            "model_id": res.model_id,
+            "created": res.created,
+        }
+
+
+@mcp.tool()
 async def garden_classify(
     token: str, org_id: str, node_id: str, kinds: str | None = None
 ) -> dict[str, Any]:
