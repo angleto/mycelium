@@ -23,7 +23,7 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from flow_core.ai_providers import LLMProvider
@@ -63,6 +63,34 @@ class DistillationResult:
     created: bool
 
 
+async def _flip_source_to_humus(
+    session: AsyncSession, *, note_id: uuid.UUID, expected_version: int
+) -> bool:
+    """Flip a source note's ``humus_flag`` to True under optimistic
+    concurrency (WS-F3, §12).
+
+    The UPDATE matches only when the version is still ``expected_version``
+    AND the flag is still False, and it bumps the version like every other
+    note mutation. So a concurrent edit/unarchive (version moved) or a
+    double-distill (flag already set) is a no-op. Returns True when the row
+    was flipped, False when it was skipped. Never raises: a race here is a
+    deliberate skip, not a 409 -- the distillation must stand regardless.
+    """
+    row = (
+        await session.execute(
+            update(Note)
+            .where(
+                Note.id == note_id,
+                Note.version == expected_version,
+                Note.humus_flag.is_(False),
+            )
+            .values(humus_flag=True, version=Note.version + 1)
+            .returning(Note.version)
+        )
+    ).first()
+    return row is not None
+
+
 async def distill_note(
     session: AsyncSession,
     *,
@@ -80,6 +108,11 @@ async def distill_note(
     """
     await require_role(session, org_id, actor_id, Role.member)
     source = await notes_svc.get_note(session, org_id=org_id, note_id=note_id)
+    # WS-F3: snapshot the source version BEFORE the slow LLM call, so the
+    # humus flip at the end can be guarded with optimistic concurrency -- a
+    # concurrent edit/unarchive in that window bumps the version and the
+    # flip is skipped instead of mutating a note that turned live.
+    source_version = source.version
     # Idempotency: look for an existing distillation derived from this
     # source (a hypha_of edge source -> a humus_kind='distillation' note).
     existing_row = (
@@ -144,17 +177,25 @@ async def distill_note(
     # only if it is inert (archived/dormant, no open linked work, past the
     # quiet window). A live source -- one being actively worked -- is left
     # untouched; only the derived distillation node is created.
-    if await note_inert.is_inert(session, note=source):
-        prev_humus = bool(source.humus_flag)
-        source.humus_flag = True
+    #
+    # WS-F3 (§12 concurrency): re-check inertia here, then flip under
+    # optimistic concurrency. The is_inert re-check catches a linked task
+    # reopening (which does not bump the note version); the version guard in
+    # _flip_source_to_humus catches a concurrent edit/unarchive (which does).
+    # On either race the flip is skipped -- the distillation still stands and
+    # a now-live source is never mutated.
+    flipped = await note_inert.is_inert(session, note=source) and await _flip_source_to_humus(
+        session, note_id=source.id, expected_version=source_version
+    )
+    if flipped:
         # §12 "every mutation is tracked" (WS-F2): this is the one autonomous
         # note mutation that used to bypass _note_set entirely -- no revision,
         # no audit, no feedback. Trace it explicitly with an audit row
         # (action auto_humus) and an append-only classification_feedback row
         # (action 'auto', the system-initiated kind) so the flip is auditable
         # and replayable by the learning loop, exactly like auto_promote_mature.
-        # Only emitted when the flip actually happens (inert source); a live
-        # source leaves no trace because nothing mutated.
+        # The guarded UPDATE only fires when humus_flag was still False, so the
+        # diff is always old=False; a live source leaves no trace.
         await audit.log(
             session,
             org_id=org_id,
@@ -163,7 +204,7 @@ async def distill_note(
             entity_id=source.id,
             action="auto_humus",
             diff={
-                "humus_flag": {"old": prev_humus, "new": True},
+                "humus_flag": {"old": False, "new": True},
                 "distilled_note_id": str(distilled.id),
             },
         )

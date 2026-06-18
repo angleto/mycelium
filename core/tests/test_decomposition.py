@@ -15,7 +15,7 @@ from __future__ import annotations
 import datetime as dt
 import sys
 import uuid
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from decimal import Decimal
 from pathlib import Path
 
@@ -28,7 +28,7 @@ if str(ROOT) not in sys.path:
 from _fake_ai import FakeLLM  # noqa: E402
 from sqlalchemy import select, text  # noqa: E402
 
-from flow_core.ai_providers import set_llm_override  # noqa: E402
+from flow_core.ai_providers import LLMResult, set_llm_override  # noqa: E402
 from flow_core.db import admin_session, tenant_session  # noqa: E402
 from flow_core.models.activity_log import ActivityLog  # noqa: E402
 from flow_core.models.billing import CostBasis, UsageRecord  # noqa: E402
@@ -310,3 +310,109 @@ async def test_distill_note_is_idempotent(_wire_llm: None) -> None:
             .all()
         )
         assert len(rows) == 1
+
+
+async def test_flip_source_to_humus_is_version_guarded() -> None:
+    """WS-F3: the guarded flip only fires when the version matches AND the
+    flag is still False, and it bumps the version. A stale version or an
+    already-set flag is a skip (returns False), never an exception."""
+    org, user = await _org()
+    async with tenant_session(str(org), str(user)) as s:
+        note = await nt.create_note(
+            s, org_id=org, actor_id=user, kind=NoteKind.text, title="v", text="body"
+        )
+        v0 = note.version
+        # Matching version + flag False -> flips and bumps the version.
+        assert await decomp._flip_source_to_humus(s, note_id=note.id, expected_version=v0) is True
+        await s.refresh(note)
+        assert note.humus_flag is True
+        assert note.version == v0 + 1
+        # Stale version -> skip.
+        assert await decomp._flip_source_to_humus(s, note_id=note.id, expected_version=v0) is False
+        # Current version but flag already set -> skip (double-distill no-op).
+        assert (
+            await decomp._flip_source_to_humus(s, note_id=note.id, expected_version=note.version)
+            is False
+        )
+
+
+class _RacingDistillLLM:
+    """A fake LLM that, mid-distillation, bumps the source note's version --
+    exactly the WS-F3 race window between snapshotting the version (before the
+    call) and the guarded humus flip (after). distill_note must have captured
+    the pre-call version, so the post-call flip finds the version moved and
+    skips. Driven on the live session so the test is deterministic; the
+    version-guard mechanism itself is proven independently against a real
+    version change in ``test_flip_source_to_humus_is_version_guarded``."""
+
+    model_id = "racing-llm"
+    session: object
+    note_id: uuid.UUID
+
+    async def complete(
+        self, *, system: str | None, messages: Sequence[tuple[str, str]]
+    ) -> LLMResult:
+        del system
+        await self.session.execute(  # type: ignore[attr-defined]
+            text("UPDATE notes SET version = version + 1 WHERE id = :id"),
+            {"id": str(self.note_id)},
+        )
+        last = messages[-1][1] if messages else ""
+        return LLMResult(text=f"echo: {last}", tokens_in=1, tokens_out=1, model_id=self.model_id)
+
+
+async def test_distill_skips_humus_flip_when_source_changes_mid_call() -> None:
+    """WS-F3 end-to-end: if the inert source's version moves during the LLM
+    call, the humus flip is skipped (check-and-skip) -- the source is NOT
+    marked humus and leaves no trace -- but the distillation still stands.
+    Guards against a regression that captures the version after the call."""
+    org, user = await _org()
+    async with tenant_session(str(org), str(user)) as s:
+        source = await _inert_source(s, org, user, title="raced")
+        _RacingDistillLLM.session = s
+        _RacingDistillLLM.note_id = source.id
+        set_llm_override(_RacingDistillLLM)
+        try:
+            res = await decomp.distill_note(s, org_id=org, actor_id=user, note_id=source.id)
+        finally:
+            set_llm_override(None)
+        # The distillation was still created.
+        distilled = (
+            await s.execute(select(Note).where(Note.id == res.distilled_note_id))
+        ).scalar_one()
+        assert distilled.humus_kind == "distillation"
+        # The source was NOT flipped to humus (the race lost the version guard).
+        # Read DB truth (the source ORM object would be the identity-mapped one).
+        db_flag = (
+            await s.execute(
+                text("SELECT humus_flag FROM notes WHERE id = :id"), {"id": str(source.id)}
+            )
+        ).scalar_one()
+        assert db_flag is False
+        # And it left no trace, because nothing mutated.
+        log_rows = (
+            (
+                await s.execute(
+                    select(ActivityLog).where(
+                        ActivityLog.entity_id == source.id,
+                        ActivityLog.action == "auto_humus",
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert log_rows == []
+        fb_rows = (
+            (
+                await s.execute(
+                    select(ClassificationFeedback).where(
+                        ClassificationFeedback.node_id == source.id,
+                        ClassificationFeedback.suggestion_type == "humus",
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert fb_rows == []
