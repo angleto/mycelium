@@ -20,16 +20,17 @@ test('health dashboard renders the live sensor cards + a not-yet-measured sectio
   await page.goto('/garden/health')
 
   await expect(page.locator('.ghealth h1')).toBeVisible()
-  // The six wired sensors render as cards; the two unwired ones live in
-  // their own section, not as permanently-empty cards.
-  await expect(page.locator('.ghealth__grid .ghealth__card')).toHaveCount(6)
+  // The eight live sensors render as cards (incl. embedding_coverage, WS-A,
+  // and recall_at_k once search-click logging unblocked it); the remaining
+  // not-yet-wired one lives in its own section, not as an empty card.
+  await expect(page.locator('.ghealth__grid .ghealth__card')).toHaveCount(8)
 
   // Headline sensor declares its health floor, formatted as a percentage
   // (not a raw 0.40 float).
   const accept = page.locator('.ghealth__card', { hasText: 'Accept rate (7d)' })
   await expect(accept.locator('.ghealth__floor')).toContainText('40%')
 
-  // A permanently-unwired sensor is listed apart with its blocker reason,
+  // A sensor still flagged not-yet-wired is listed apart with its reason,
   // never a faked number ("show, never judge").
   const pending = page.locator('.ghealth__pending')
   await expect(pending).toContainText('Fungal lag')
