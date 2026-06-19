@@ -54,12 +54,6 @@ RUN /app/.venv/bin/python -c "import sentence_transformers, igraph, leidenalg, f
 FROM python:3.12-slim
 LABEL org.opencontainers.image.source="https://github.com/angleto/flow"
 LABEL org.opencontainers.image.licenses="AGPL-3.0-or-later"
-ARG FLOW_VERSION=dev
-ARG FLOW_GIT_SHA=
-ARG FLOW_BUILD_AT=
-ENV FLOW_VERSION=${FLOW_VERSION} \
-    FLOW_GIT_SHA=${FLOW_GIT_SHA} \
-    FLOW_BUILD_AT=${FLOW_BUILD_AT}
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PATH="/app/.venv/bin:$PATH" \
@@ -74,15 +68,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends libpq5 libgomp1
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
-# Split the copy so an ordinary code commit does NOT re-push/re-pull the
-# multi-GB venv layer. A single `COPY /app /app` bundles the ~3 GB venv (torch)
-# with the few-MB workspace source into ONE layer, so any code change rebuilds
-# the whole 3 GB blob and every node re-pulls it on deploy (d11a0b0f: that
-# serialised the arm node's pull queue, ~hours). The workspace is installed
-# EDITABLE (.venv carries `_editable_impl_*.pth` -> /app/<member>/src), so the
-# venv is byte-stable across code-only changes when the builder deps layer is
-# cache-hit; copying it as its OWN layer keeps its digest stable and the node
-# re-pulls only the thin source layer below.
+# Split the copy so an ordinary code commit does NOT re-push/re-pull the multi-GB
+# venv layer. A single `COPY /app /app` bundles the ~3 GB venv (torch) with the
+# few-MB workspace source into ONE layer, so any code change rebuilds the whole
+# blob and every node re-pulls it on deploy (d11a0b0f: that serialised the arm
+# node's pull queue, ~hours). The workspace is installed EDITABLE (.venv carries
+# `_editable_impl_*.pth` -> /app/<member>/src), so the venv is byte-stable across
+# code-only changes; copying it as its OWN layer (with the volatile version stamp
+# moved BELOW, so this COPY stays cache-hit and keeps a stable digest) means the
+# node re-pulls only the thin source layer.
 COPY --from=builder /app/.venv /app/.venv
 COPY --from=builder /app/pyproject.toml /app/uv.lock /app/
 COPY --from=builder /app/core /app/core
@@ -90,5 +84,17 @@ COPY --from=builder /app/api /app/api
 COPY --from=builder /app/mcp /app/mcp
 COPY --from=builder /app/worker /app/worker
 COPY --from=builder /app/sdi-inbound /app/sdi-inbound
+
+# Build identity LAST. These args change EVERY build, so every layer after them
+# is cache-busted; keeping them below the COPYs lets buildkit reuse the cached
+# `COPY .venv` blob (stable digest) instead of re-executing it and stamping fresh
+# mtimes -> a new 3 GB layer the node would re-pull each deploy. ARG/ENV create
+# no filesystem layer, so placing them here costs nothing. Surfaced by /api/buildinfo.
+ARG FLOW_VERSION=dev
+ARG FLOW_GIT_SHA=
+ARG FLOW_BUILD_AT=
+ENV FLOW_VERSION=${FLOW_VERSION} \
+    FLOW_GIT_SHA=${FLOW_GIT_SHA} \
+    FLOW_BUILD_AT=${FLOW_BUILD_AT}
 
 CMD ["python", "-m", "flow_worker.main"]
