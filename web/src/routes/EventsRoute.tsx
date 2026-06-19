@@ -7,8 +7,20 @@ import type { components } from '../api/schema'
 
 type Calendar = components['schemas']['CalendarOut']
 type Task = components['schemas']['TaskOut']
+type State = components['schemas']['StateOut']
+type Wf = components['schemas']['WorkflowOut']
 
 const WEEK = ['mon', 'tue', 'wed', 'thu', 'fri']
+
+// Newest-first comparator for ISO datetime strings (empty sorts last).
+// Both the appointments list and the agenda use it so the most recent
+// item is always on top.
+function byWhenDesc(a: string, b: string): number {
+  if (a === b) return 0
+  if (!a) return 1
+  if (!b) return -1
+  return b.localeCompare(a)
+}
 
 // Calendar / appointments view. Appointments live on `tasks` since
 // migration 0094 (ADR-0008 addendum): a task with `start_at` +
@@ -29,6 +41,12 @@ export function EventsRoute() {
   const [evStart, setEvStart] = useState('')
   const [evEnd, setEvEnd] = useState('')
   const [err, setErr] = useState<string | null>(null)
+  // Default-workflow states, fetched once, so terminal (done/cancelled)
+  // appointments and reminders can be hidden. They are hidden by default
+  // to keep the calendar uncluttered; the toggle opts back into seeing
+  // them (off = hidden, matching the user's "enable to view" framing).
+  const [wfStates, setWfStates] = useState<State[]>([])
+  const [showTerminal, setShowTerminal] = useState(false)
 
   // Appointment-tasks (start_at + duration_minutes) and reminder /
   // deadline tasks (due_date only) are both fetched from /tasks; the
@@ -37,6 +55,21 @@ export function EventsRoute() {
   const dueOnlyTasks = tasks.filter(
     (x) => x.duration_minutes == null && x.due_date != null,
   )
+
+  // Terminal-state filtering. Until the states load `terminalStateIds`
+  // is empty, so nothing is hidden (safe default). The toggle is offered
+  // only when at least one item is actually terminal — gating on the
+  // state set alone would show the pill on every (even empty) calendar,
+  // and toggling it would then do nothing visible.
+  const terminalStateIds = new Set(
+    wfStates.filter((s) => s.is_terminal).map((s) => s.id),
+  )
+  const isTerminal = (tk: Task) => terminalStateIds.has(tk.state_id)
+  const isHidden = (tk: Task) => !showTerminal && isTerminal(tk)
+  const hasTerminalTasks =
+    appointmentTasks.some(isTerminal) || dueOnlyTasks.some(isTerminal)
+  const visibleAppointments = appointmentTasks.filter((tk) => !isHidden(tk))
+  const visibleDueTasks = dueOnlyTasks.filter((tk) => !isHidden(tk))
 
   const reload = useCallback(async () => {
     const h = workspaceHeader()
@@ -59,6 +92,28 @@ export function EventsRoute() {
       if (!active) return
       if (c.data) setCals(c.data)
       if (tk.data) setTasks(tk.data)
+    })()
+    return () => {
+      active = false
+    }
+  }, [activeId])
+
+  // Default-workflow states drive the "hide completed" filter. Loaded
+  // separately (and only on workspace change) because they never change
+  // when an appointment is added or deleted.
+  useEffect(() => {
+    let active = true
+    void (async () => {
+      const h = workspaceHeader()
+      const wfs = await api.GET('/workflows', { params: { header: h } })
+      if (!active || !wfs.data) return
+      const def = wfs.data.find((w: Wf) => w.is_default) ?? wfs.data[0]
+      if (!def) return
+      const st = await api.GET('/workflows/{workflow_id}/states', {
+        params: { header: h, path: { workflow_id: def.id } },
+      })
+      if (!active) return
+      if (st.data) setWfStates(st.data)
     })()
     return () => {
       active = false
@@ -215,13 +270,31 @@ export function EventsRoute() {
         />
         <button type="submit">{t('events.addEvent')}</button>
       </form>
-      {appointmentTasks.length === 0 ? (
-        <p className="hint">{t('events.none')}</p>
+      {hasTerminalTasks && (
+        <div className="row">
+          <button
+            type="button"
+            role="switch"
+            aria-checked={showTerminal}
+            className={'toggle-pill' + (showTerminal ? ' toggle-pill--on' : '')}
+            onClick={() => setShowTerminal((v) => !v)}
+          >
+            {t('events.showTerminal')}:{' '}
+            {showTerminal ? t('common.on') : t('common.off')}
+          </button>
+        </div>
+      )}
+      {visibleAppointments.length === 0 ? (
+        <p className="hint">
+          {appointmentTasks.length > 0
+            ? t('events.allHidden')
+            : t('events.none')}
+        </p>
       ) : (
         <ul className="list">
-          {appointmentTasks
+          {visibleAppointments
             .slice()
-            .sort((a, b) => (a.start_at ?? '').localeCompare(b.start_at ?? ''))
+            .sort((a, b) => byWhenDesc(a.start_at ?? '', b.start_at ?? ''))
             .map((ev) => (
               <li key={ev.id}>
                 <Link to={`/tasks/${ev.id}`}>{ev.title}</Link>{' '}
@@ -240,14 +313,14 @@ export function EventsRoute() {
       <p className="hint">{t('events.agendaHint')}</p>
       {(() => {
         const items = [
-          ...appointmentTasks.map((ev) => ({
+          ...visibleAppointments.map((ev) => ({
             key: `e${ev.id}`,
             when: ev.start_at ?? '',
             label: ev.title,
             to: `/tasks/${ev.id}`,
             kind: 'event' as const,
           })),
-          ...dueOnlyTasks.map((tk) => ({
+          ...visibleDueTasks.map((tk) => ({
             key: `t${tk.id}`,
             // Migration 0005: tk.due_date is already an ISO datetime,
             // so the agenda sort can use it directly (no fake T00:00
@@ -257,9 +330,12 @@ export function EventsRoute() {
             to: `/tasks/${tk.id}`,
             kind: 'reminder' as const,
           })),
-        ].sort((a, b) => a.when.localeCompare(b.when))
+        ].sort((a, b) => byWhenDesc(a.when, b.when))
+        const totalAgenda = appointmentTasks.length + dueOnlyTasks.length
         return items.length === 0 ? (
-          <p className="hint">{t('events.none')}</p>
+          <p className="hint">
+            {totalAgenda > 0 ? t('events.allHidden') : t('events.none')}
+          </p>
         ) : (
           <ul className="list">
             {items.map((it) => (

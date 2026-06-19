@@ -1251,7 +1251,9 @@ export const it: Catalog = {
     endAfterStart: 'La fine deve essere successiva all\'inizio.',
     overlapHint: 'Appuntamenti sovrapposti per la stessa persona sono rifiutati.',
     agenda: 'Agenda',
-    agendaHint: 'Eventi del calendario e task con scadenza, dai piu vicini.',
+    agendaHint: 'Eventi del calendario e task con scadenza, dai piu recenti.',
+    showTerminal: 'Mostra terminali',
+    allHidden: 'Solo elementi completati: attiva «Mostra terminali» per vederli.',
     loading: 'Caricamento...',
   },
   time: {

@@ -1251,7 +1251,9 @@ export const en = {
     endAfterStart: 'End must be after start.',
     overlapHint: 'Overlapping appointments for the same person are rejected.',
     agenda: 'Agenda',
-    agendaHint: 'Calendar events and tasks with a due date, soonest first.',
+    agendaHint: 'Calendar events and tasks with a due date, most recent first.',
+    showTerminal: 'Show terminal',
+    allHidden: 'Only completed items — turn on "Show terminal" to view them.',
     loading: 'Loading...',
   },
   time: {
