@@ -14,32 +14,37 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
 WORKDIR /app
+# --- Dependency layer: keyed on locks/manifests only, NOT app source ---
+# Install all third-party deps + the heavy ML extras BEFORE copying the app
+# code, so an ordinary commit does not rebuild / re-push / re-pull the
+# multi-GB torch layer on every deploy. (d11a0b0f: the huge worker image on
+# slow GHCR egress serialised the node's pull queue for ~hours.) This layer's
+# cache key is pyproject + uv.lock + the member manifests, which change rarely.
 COPY pyproject.toml uv.lock ./
+COPY core/pyproject.toml core/pyproject.toml
+COPY api/pyproject.toml api/pyproject.toml
+COPY mcp/pyproject.toml mcp/pyproject.toml
+COPY worker/pyproject.toml worker/pyproject.toml
+COPY sdi-inbound/pyproject.toml sdi-inbound/pyproject.toml
+RUN --mount=type=cache,target=/root/.cache/uv uv sync --no-dev --no-install-workspace
+# Heavy ML extras the worker's jobs need: bge-m3 (sentence-transformers) for
+# the embedding backfill (embedding_migration), igraph/leidenalg for the
+# garden loop's Leiden + auto-promote (gated by garden_loop_enabled). bge-m3
+# weights are NOT baked (download at runtime to HF_HOME; the bake exploded
+# node disk, 30c570c).
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --python /app/.venv/bin/python \
+      "sentence-transformers>=3" "python-igraph>=0.11" "leidenalg>=0.10"
+
+# --- App layer: workspace source; thin, rebuilt every commit ---
 COPY core core
 COPY api api
 COPY mcp mcp
 COPY worker worker
 COPY sdi-inbound sdi-inbound
-
-RUN --mount=type=cache,target=/root/.cache/uv uv sync --no-dev
-# Local embedder (BAAI/bge-m3, 1024-dim = FLOW embed_dim): the worker runs
-# the embedding backfill (embedding_migration.run_forever, always on) that
-# re-embeds rows written keyword-only (model_id='none'). Without this extra
-# get_embedder() raises and the backfill is a silent no-op, so the whole
-# dense tier stays empty (task WS-A / 0a96ba96). Explicit install mirrors
-# backend.Dockerfile; the lean `uv sync` omits the optional extra.
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install --python /app/.venv/bin/python "sentence-transformers>=3"
-# Graph clustering (python-igraph + leidenalg): the garden loop's Leiden +
-# auto-promote sweep (garden.run_forever, gated by garden_loop_enabled)
-# runs in THIS process. Without it the sweep degrades to "no clusters".
-# manylinux wheels, no model download (task 8c0a8f08 / 44b4c212).
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install --python /app/.venv/bin/python "python-igraph>=0.11" "leidenalg>=0.10"
-# NB: the bge-m3 weights are deliberately NOT baked here (the bake exploded
-# node disk, 30c570c); they download at runtime to HF_HOME. The resulting
-# image bloat + GHCR egress is tracked separately (task d11a0b0f → shared
-# ML base image for backend+worker).
+# ``--inexact`` so installing the workspace members does not prune the ML
+# extras added above (they are optional, not in the default lock resolution).
+RUN --mount=type=cache,target=/root/.cache/uv uv sync --no-dev --inexact
 
 # ---
 

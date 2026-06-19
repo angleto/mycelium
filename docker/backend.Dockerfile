@@ -17,46 +17,40 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
 WORKDIR /app
-# Whole uv workspace (members: core, api, mcp, worker, sdi-inbound).
+# --- Dependency layer: keyed on locks/manifests only, NOT app source ---
+# Install all third-party deps + the heavy ML extras BEFORE copying the app
+# code, so an ordinary commit does not rebuild / re-push / re-pull the
+# multi-GB torch layer on every deploy (d11a0b0f). Cache key = pyproject +
+# uv.lock + the member manifests, which change rarely.
 COPY pyproject.toml uv.lock ./
+COPY core/pyproject.toml core/pyproject.toml
+COPY api/pyproject.toml api/pyproject.toml
+COPY mcp/pyproject.toml mcp/pyproject.toml
+COPY worker/pyproject.toml worker/pyproject.toml
+COPY sdi-inbound/pyproject.toml sdi-inbound/pyproject.toml
+RUN --mount=type=cache,target=/root/.cache/uv uv sync --no-dev --no-install-workspace
+# Heavy ML extras: bge-m3 (sentence-transformers, embeddings); faster-whisper
+# / CTranslate2 (Telegram voice STT, task 44ba3f14); igraph/leidenalg (garden
+# /clusters Leiden + ADR-0035 modularity, task 8c0a8f08). bge-m3 weights are
+# NOT baked (download at runtime to HF_HOME; the bake exploded node disk,
+# 30c570c — a prior line wrongly prefetched e5-small/384 vs runtime bge-m3/1024).
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --python /app/.venv/bin/python \
+      "sentence-transformers>=3" "faster-whisper>=1.0" "python-igraph>=0.11" "leidenalg>=0.10"
+# Pre-fetch the STT checkpoint (small/int8/CPU) so a fresh pod does not pay an
+# HF download. Code-independent, so it stays in the cached prefix.
+ENV HF_HOME=/app/.cache/huggingface
+RUN /app/.venv/bin/python -c "from faster_whisper import WhisperModel; WhisperModel('small', device='cpu', compute_type='int8')"
+
+# --- App layer: workspace source; thin, rebuilt every commit ---
 COPY core core
 COPY api api
 COPY mcp mcp
 COPY worker worker
 COPY sdi-inbound sdi-inbound
-
-RUN --mount=type=cache,target=/root/.cache/uv uv sync --no-dev
-# Local embedder (BAAI/bge-m3, 1024-dim = FLOW embed_dim). Explicit
-# install is deterministic regardless of how the optional extra
-# propagates across the workspace.
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install --python /app/.venv/bin/python "sentence-transformers>=3"
-
-# Local STT (faster-whisper / CTranslate2): the Telegram voice webhook
-# transcribes inline in this (API) process, so the dep must live here.
-# Without it LocalSTT raises and voice notes save with no transcript
-# (task 44ba3f14). Explicit install, same rationale as the embedder.
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install --python /app/.venv/bin/python "faster-whisper>=1.0"
-
-# Graph clustering (python-igraph + leidenalg): the garden /clusters
-# endpoint runs Leiden in this (API) process. Without it the endpoint
-# degrades to "no clusters" (task 8c0a8f08); shipping it enables
-# cluster-colouring + the ADR-0035 modularity sensor. manylinux wheels,
-# no model download.
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install --python /app/.venv/bin/python "python-igraph>=0.11" "leidenalg>=0.10"
-
-# Pre-fetch the STT checkpoint so a freshly-rolled pod does not pay an HF
-# download (and does not depend on egress to huggingface.co). STT
-# size/quant mirror the LocalSTT defaults (FLOW_STT_MODEL=small,
-# FLOW_STT_COMPUTE_TYPE=int8, CPU).
-# The bge-m3 embedding model is deliberately NOT baked (the bake exploded
-# node disk, 30c570c); it downloads at runtime to HF_HOME on first use.
-# (The previous prefetch pulled intfloat/multilingual-e5-small/384 — a
-# pre-cutover leftover never loaded at runtime, which uses bge-m3/1024.)
-ENV HF_HOME=/app/.cache/huggingface
-RUN /app/.venv/bin/python -c "from faster_whisper import WhisperModel; WhisperModel('small', device='cpu', compute_type='int8')"
+# ``--inexact`` so installing the workspace members does not prune the ML
+# extras added above (optional, not in the default lock resolution).
+RUN --mount=type=cache,target=/root/.cache/uv uv sync --no-dev --inexact
 
 # ---
 

@@ -111,11 +111,20 @@ jobs:
           set -euo pipefail
           for c in backend worker frontend sdi-inbound; do
             echo "::group::build $c:$TAG"
+            # Registry layer cache (per component): the ephemeral runner has
+            # no local cache, so without this every build recompiles every
+            # layer from scratch. Combined with the Dockerfile layer-split
+            # (heavy ML deps before the code COPY), the stable torch layer is
+            # imported from :buildcache instead of rebuilt — fast builds, and
+            # a stable layer digest so nodes re-pull only the thin app layer
+            # (d11a0b0f). A missing :buildcache (first run) is a clean miss.
             docker buildx build --platform linux/arm64 \
               -f docker/$c.Dockerfile \
               --build-arg FLOW_VERSION="$TAG" \
               --build-arg FLOW_GIT_SHA="$GIT_SHA" \
               --build-arg FLOW_BUILD_AT="$BUILT_AT" \
+              --cache-from type=registry,ref=ghcr.io/angleto/flow/$c:buildcache \
+              --cache-to type=registry,ref=ghcr.io/angleto/flow/$c:buildcache,mode=max \
               -t ghcr.io/angleto/flow/$c:"$TAG" \
               --push .
             echo "::endgroup::"
