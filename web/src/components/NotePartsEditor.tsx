@@ -45,6 +45,11 @@ function truncate(s: string, n: number): string {
   return s.length <= n ? s : s.slice(0, n - 1) + '…'
 }
 
+// ``busyPid`` sentinel for the note-wide collapse-all / expand-all
+// request: no real part id collides with it, so the per-part rows
+// stay enabled while only the header's collapse-all button is gated.
+const ALL_PARTS = '__all_parts__'
+
 interface Props {
   noteId: string
   /** Surrounding note title; the parts editor forwards it (suffixed
@@ -184,6 +189,30 @@ export const NotePartsEditor = forwardRef<NotePartsEditorHandle, Props>(
         }
         const updated = (await res.json()) as NotePart
         setParts((cur) => cur.map((p) => (p.id === pid ? updated : p)))
+      } finally {
+        setBusyPid(null)
+      }
+    }
+
+    // Collapse-all / expand-all in one round-trip: the note-wide
+    // ``PUT /parts/ui-state`` upserts every part's collapse state for
+    // the caller in a single transaction (vs one PUT per part), and
+    // returns the full parts list so we refresh the whole editor from
+    // one response. Persisted per-user, exactly like the per-part
+    // toggle, so a folded note stays folded on reopen.
+    const setAllCollapsed = async (collapsed: boolean) => {
+      setBusyPid(ALL_PARTS)
+      try {
+        const res = await authFetch(`/notes/${noteId}/parts/ui-state`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ collapsed }),
+        })
+        if (!res.ok) {
+          setErr(errMessage(await res.json().catch(() => ({}))))
+          return
+        }
+        setParts((await res.json()) as NotePart[])
       } finally {
         setBusyPid(null)
       }
@@ -404,6 +433,9 @@ export const NotePartsEditor = forwardRef<NotePartsEditorHandle, Props>(
       [patchPart],
     )
 
+    // Every part folded → the header button flips to "Expand all".
+    const allCollapsed = parts.length > 0 && parts.every((p) => p.ui_collapsed)
+
     return (
       <section className="parts-editor">
         <header className="parts-editor__head">
@@ -418,6 +450,33 @@ export const NotePartsEditor = forwardRef<NotePartsEditorHandle, Props>(
           >
             + {t('notes.parts.add', { defaultValue: 'Add part' })}
           </button>
+          {/* Collapse-all / expand-all: only meaningful past one part.
+              The glyph mirrors the per-part toggle (▾ = currently
+              expanded → click collapses; ▸ = currently collapsed →
+              click expands). ``allCollapsed`` drives the action so a
+              partial state (some folded) still offers "Collapse all". */}
+          {parts.length > 1 && (
+            <button
+              type="button"
+              className="btn--sm btn--ghost"
+              disabled={busyPid !== null}
+              aria-expanded={!allCollapsed}
+              onClick={() => void setAllCollapsed(!allCollapsed)}
+              title={
+                allCollapsed
+                  ? t('notes.parts.expandAllHint', {
+                      defaultValue: 'Expand all parts',
+                    })
+                  : t('notes.parts.collapseAllHint', {
+                      defaultValue: 'Collapse all parts',
+                    })
+              }
+            >
+              {allCollapsed
+                ? `▸ ${t('notes.parts.expandAll', { defaultValue: 'Expand all' })}`
+                : `▾ ${t('notes.parts.collapseAll', { defaultValue: 'Collapse all' })}`}
+            </button>
+          )}
         </header>
         {err && <p className="error">{err}</p>}
         {loading && <p className="hint">{t('common.loading')}</p>}

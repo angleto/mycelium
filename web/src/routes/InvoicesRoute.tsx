@@ -539,6 +539,20 @@ export function InvoicesRoute() {
   }
 
   const tv = totals(lines)
+  // Select-all over the billable report rows. Only rows with a usable
+  // ``key`` are selectable (a null key has its per-row checkbox
+  // disabled too), so the master checkbox operates on exactly that
+  // set: all-selected → clear, otherwise → select every selectable
+  // row. ``triSomeSelected`` drives the indeterminate (dash) state.
+  const triSelectableKeys = triRows
+    .map((r) => r.key)
+    .filter((k): k is string => Boolean(k))
+  const triAllSelected =
+    triSelectableKeys.length > 0 &&
+    triSelectableKeys.every((k) => triSel.has(k))
+  const triSomeSelected = triSelectableKeys.some((k) => triSel.has(k))
+  const toggleSelectAllRows = () =>
+    setTriSel(triAllSelected ? new Set() : new Set(triSelectableKeys))
   const clientName = (id: string) => clients.find((c) => c.id === id)?.name ?? id
   const dField = <T,>(setter: (v: T) => void) => (v: T) => {
     setter(v)
@@ -1123,7 +1137,40 @@ export function InvoicesRoute() {
                   <table className="tbl">
                     <thead>
                       <tr>
-                        <th />
+                        <th>
+                          {/* Master select-all: tri-state (checked /
+                              indeterminate / empty). Saves picking
+                              every task or project row one by one. */}
+                          <input
+                            type="checkbox"
+                            checked={triAllSelected}
+                            disabled={triSelectableKeys.length === 0}
+                            ref={(el) => {
+                              if (el)
+                                el.indeterminate =
+                                  triSomeSelected && !triAllSelected
+                            }}
+                            onChange={toggleSelectAllRows}
+                            // Three-state label so the indeterminate
+                            // (dash) state, invisible to screen readers,
+                            // is spelled out: all → deselect, some →
+                            // select-all-(some), none → select all.
+                            aria-label={
+                              triAllSelected
+                                ? t('invoices.deselectAll')
+                                : triSomeSelected
+                                  ? t('invoices.selectAllSome')
+                                  : t('invoices.selectAll')
+                            }
+                            title={
+                              triAllSelected
+                                ? t('invoices.deselectAll')
+                                : triSomeSelected
+                                  ? t('invoices.selectAllSome')
+                                  : t('invoices.selectAll')
+                            }
+                          />
+                        </th>
                         <th>{t('invoices.lineDesc')}</th>
                         <th>{t('invoices.hours')}</th>
                         <th>{t('invoices.amount')}</th>

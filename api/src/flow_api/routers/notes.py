@@ -888,6 +888,35 @@ async def reorder_note_parts(
 
 
 @router.put(
+    "/{note_id}/parts/ui-state",
+    response_model=list[NotePartOut],
+    tags=["garden"],
+)
+async def set_all_note_parts_ui_state(
+    note_id: uuid.UUID,
+    body: NotePartUIStateIn,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+) -> list[NotePartOut]:
+    """Collapse / expand EVERY part of the note for the caller in one
+    round-trip (the parts editor's collapse-all / expand-all toggle).
+    User-scoped, last-write-wins. Returns the full parts list with the
+    new collapse state so the SPA refreshes from a single response —
+    same shape as the per-part endpoint, just note-wide.
+
+    Declared before ``/{part_id}/ui-state`` so the literal ``ui-state``
+    segment is never captured as a ``part_id``."""
+    ui = await parts_svc.set_ui_states_bulk(
+        ctx.session,
+        org_id=ctx.org_id,
+        user_id=ctx.user_id,
+        note_id=note_id,
+        collapsed=body.collapsed,
+    )
+    rows = await parts_svc.list_parts(ctx.session, org_id=ctx.org_id, note_id=note_id)
+    return [_part_out(p, ui_collapsed=ui.get(p.id, body.collapsed)) for p in rows]
+
+
+@router.put(
     "/{note_id}/parts/{part_id}/ui-state",
     response_model=NotePartOut,
     tags=["garden"],

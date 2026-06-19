@@ -181,6 +181,51 @@ async def test_ui_state_persists_collapse_per_user() -> None:
         assert post["parts"][0]["ui_collapsed"] is True
 
 
+async def test_ui_state_bulk_collapses_and_expands_all_parts() -> None:
+    """The note-wide ``PUT /parts/ui-state`` folds (and unfolds) every
+    part of the note for the caller in one round-trip. The response
+    carries the full parts list with the new state, and a fresh
+    GET /notes/{id} confirms it persisted per-user. Reuses the literal
+    ``ui-state`` segment that must not be mistaken for a part id."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as c:
+        h = await _signup(c)
+        note_id = await _make_note(c, h, "n")
+        for body in ("a", "b", "c"):
+            r = await c.post(f"/notes/{note_id}/parts", headers=h, json={"body": body})
+            assert r.status_code == 200, r.text
+
+        collapsed = await c.put(
+            f"/notes/{note_id}/parts/ui-state", headers=h, json={"collapsed": True}
+        )
+        assert collapsed.status_code == 200, collapsed.text
+        rows = collapsed.json()
+        assert len(rows) == 3
+        assert all(p["ui_collapsed"] is True for p in rows)
+        # Persisted per-user: a fresh read sees every part folded.
+        got = (await c.get(f"/notes/{note_id}", headers=h)).json()
+        assert all(p["ui_collapsed"] is True for p in got["parts"])
+
+        expanded = await c.put(
+            f"/notes/{note_id}/parts/ui-state", headers=h, json={"collapsed": False}
+        )
+        assert expanded.status_code == 200, expanded.text
+        assert all(p["ui_collapsed"] is False for p in expanded.json())
+
+
+async def test_ui_state_bulk_on_note_without_parts_is_noop() -> None:
+    """Collapse-all on a parts-less note returns an empty list rather
+    than erroring — the SPA shows the toggle only past one part, but
+    the endpoint must not 404/500 if called on an empty note."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as c:
+        h = await _signup(c)
+        note_id = await _make_note(c, h, "n")
+        r = await c.put(f"/notes/{note_id}/parts/ui-state", headers=h, json={"collapsed": True})
+        assert r.status_code == 200, r.text
+        assert r.json() == []
+
+
 async def test_patch_optimistic_version_conflict() -> None:
     """A stale ``expected_version`` raises stale_version; without
     optimistic concurrency the SPA autosave could silently overwrite

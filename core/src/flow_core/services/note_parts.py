@@ -614,6 +614,45 @@ async def set_ui_state(
     return row
 
 
+async def set_ui_states_bulk(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    user_id: uuid.UUID,
+    note_id: uuid.UUID,
+    collapsed: bool,
+) -> dict[uuid.UUID, bool]:
+    """Collapse-all / expand-all: set the caller's collapse state for
+    EVERY part of ``note_id`` in a single upsert, so a long note folds
+    or unfolds in one round-trip instead of one PUT per part. Returns
+    the resulting ``{part_id: collapsed}`` map. User-scoped,
+    last-write-wins, same semantics as :func:`set_ui_state` — just the
+    note-wide variant. A note with no parts is a no-op (empty map)."""
+    await require_role(session, org_id, user_id, Role.member)
+    await _get_note_in_org(session, org_id=org_id, note_id=note_id)
+    part_ids = list(
+        (
+            await session.execute(
+                select(NotePart.id).where(NotePart.note_id == note_id, NotePart.org_id == org_id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if not part_ids:
+        return {}
+    stmt = (
+        pg_insert(NotePartUIState)
+        .values([{"user_id": user_id, "part_id": pid, "collapsed": collapsed} for pid in part_ids])
+        .on_conflict_do_update(
+            index_elements=[NotePartUIState.user_id, NotePartUIState.part_id],
+            set_={"collapsed": collapsed, "updated_at": func.now()},
+        )
+    )
+    await session.execute(stmt)
+    return {pid: collapsed for pid in part_ids}
+
+
 async def get_ui_states_for_user(
     session: AsyncSession,
     *,
