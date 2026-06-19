@@ -16,7 +16,10 @@ with hosted rows.
 
 from __future__ import annotations
 
+import logging
+from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import Any
 
 from sqlalchemy import select, text
 
@@ -28,6 +31,8 @@ from flow_core.services.retrieval.types import (
     Stage,
     merge_candidates,
 )
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -53,6 +58,30 @@ class SemanticDenseStage(Stage):
         if self.min_similarity <= 0.0:
             return True
         return -float(distance) >= self.min_similarity
+
+    def _kept(self, rows: Sequence[Any], tier: str) -> list[Any]:
+        """Keep the kNN rows that clear the cosine floor, preserving order.
+
+        Fails LOUD when the floor rejects EVERY fetched neighbour: a floor
+        set above the model's achievable cosine band (e.g. 0.8 against
+        bge-m3's compressed ~0.35-0.65 range) silently disables the whole
+        dense branch -- no error, no log, just keyword-only retrieval. That
+        exact mis-calibration shipped to prod once; surface it instead of
+        no-opping invisibly."""
+        kept = [r for r in rows if self._keep(r[1])]
+        if rows and not kept and self.min_similarity > 0.0:
+            best_cos = -min(float(r[1]) for r in rows)
+            logger.warning(
+                "%s: semantic floor %.3f rejected all %d kNN neighbour(s) "
+                "(best cosine %.3f); dense branch contributing nothing -- "
+                "retrieval_semantic_min_similarity is likely mis-calibrated "
+                "for the active embedding model",
+                tier,
+                self.min_similarity,
+                len(rows),
+                best_cos,
+            )
+        return kept
 
     async def run(
         self,
@@ -92,7 +121,7 @@ class SemanticDenseStage(Stage):
                     blob_id=row[0],
                     scores_by_stage={f"{self.name}_hosted": float(rank)},
                 )
-                for rank, row in enumerate((r for r in rows_hosted if self._keep(r[1])), start=1)
+                for rank, row in enumerate(self._kept(rows_hosted, f"{self.name}_hosted"), start=1)
             )
         if local is not None:
             dist_local = MemoryBlob.embedding.max_inner_product(local.vector)
@@ -113,6 +142,6 @@ class SemanticDenseStage(Stage):
                     blob_id=row[0],
                     scores_by_stage={self.name: float(rank)},
                 )
-                for rank, row in enumerate((r for r in rows_local if self._keep(r[1])), start=1)
+                for rank, row in enumerate(self._kept(rows_local, self.name), start=1)
             )
         return merge_candidates(candidates, new)

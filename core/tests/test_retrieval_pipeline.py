@@ -242,6 +242,41 @@ def test_semantic_stage_keep_gate() -> None:
     assert gated._keep(0.0) is False  # cosine 0.0 < 0.5
 
 
+def test_semantic_stage_warns_when_floor_nukes_all(caplog) -> None:
+    """A floor above the model's achievable cosine band rejects every
+    kNN row and silently disables the dense branch. ``_kept`` must fail
+    LOUD (warning naming the floor + best cosine), not no-op invisibly --
+    the regression that shipped 0.8 against bge-m3's ~0.35-0.65 band."""
+    import logging
+
+    from flow_core.services.retrieval.stages.semantic import SemanticDenseStage
+
+    # rows are (blob_id, distance); distance = -cosine. Best cosine here 0.63.
+    rows = [(uuid.uuid4(), -0.63), (uuid.uuid4(), -0.51), (uuid.uuid4(), -0.40)]
+
+    nuked = SemanticDenseStage(min_similarity=0.8)
+    with caplog.at_level(logging.WARNING):
+        kept = nuked._kept(rows, "semantic")
+    assert kept == []
+    assert any("rejected all" in r.message and "0.800" in r.message for r in caplog.records)
+    assert any("0.630" in r.message for r in caplog.records)  # best cosine surfaced
+
+    # A floor inside the band keeps the strong neighbours and stays silent.
+    caplog.clear()
+    ok = SemanticDenseStage(min_similarity=0.4)
+    with caplog.at_level(logging.WARNING):
+        kept = ok._kept(rows, "semantic")
+    assert len(kept) == 3  # 0.63, 0.51, 0.40 all >= 0.4
+    assert not caplog.records
+
+    # Floor off (0.0): never warns even on an empty fetch.
+    caplog.clear()
+    off = SemanticDenseStage(min_similarity=0.0)
+    with caplog.at_level(logging.WARNING):
+        assert off._kept([], "semantic") == []
+    assert not caplog.records
+
+
 async def test_relative_floor_cuts_low_tail() -> None:
     """RelativeFloorStage drops candidates below ``ratio * top``; a flat
     profile (all near the top) is untouched; ratio 0 disables."""
