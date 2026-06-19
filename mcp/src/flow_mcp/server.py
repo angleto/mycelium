@@ -64,6 +64,7 @@ from flow_core.services import decomposition as decomposition_svc
 from flow_core.services import dependencies, scheduler, tasks, taxonomy
 from flow_core.services import dispatch_loop as dispatch_loop_svc
 from flow_core.services import email as email_svc
+from flow_core.services import embedding_migration as embedding_svc
 from flow_core.services import entity_revisions as revisions_svc
 from flow_core.services import executors as executors_svc
 from flow_core.services import focus_context as focus_context_svc
@@ -3256,6 +3257,34 @@ async def memory_recompute_tiers(
             hot_threshold=hot_threshold,
             warm_threshold=warm_threshold,
         )
+
+
+@mcp.tool()
+async def memory_migration_status(token: str, org_id: str) -> dict[str, int]:
+    """Embedding-backfill coverage for the workspace: ``{total, migrated,
+    pending, hosted}``. ``total`` = memory blobs with text; ``migrated`` =
+    those that already have a local dense vector; ``pending`` = local-tier
+    backfill still to do (rows written keyword-only, ``model_id='none'``);
+    ``hosted`` = blobs that also have the optional per-org hosted vector.
+    Member-level, read-only. Pair with ``memory_migrate`` to drain
+    ``pending`` to 0 and re-enable semantic recall over the back-catalogue."""
+    async with _tenant(token, org_id) as (s, _org, _user):
+        return await embedding_svc.migration_status(s)
+
+
+@mcp.tool()
+async def memory_migrate(token: str, org_id: str, batch_size: int = 100) -> dict[str, Any]:
+    """Backfill missing dense embeddings for this workspace's memory blobs
+    (rows written keyword-only, ``model_id='none'``) in ONE batch, then
+    report coverage. Incremental + idempotent: embeds up to ``batch_size``
+    rows under an IS-NULL guard and returns ``{embedded, status}``; re-call
+    until ``status.pending`` is 0. Runs in the API process (which has the
+    embedder), so it works even when the background worker image can't embed.
+    The autonomous worker loop does the same on a timer; this is the
+    on-demand escape hatch. Member-level."""
+    async with _tenant(token, org_id) as (s, org, _user):
+        embedded = await embedding_svc.run_embedding_backfill(s, org, batch_size=batch_size)
+        return {"embedded": embedded, "status": await embedding_svc.migration_status(s)}
 
 
 # --- Memory channels (controlled, seeded vocabulary; FR-8) ---------
