@@ -37,10 +37,11 @@ RUN --mount=type=cache,target=/root/.cache/uv uv sync --no-dev --no-install-work
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --python /app/.venv/bin/python \
       "sentence-transformers>=3" "faster-whisper>=1.0" "python-igraph>=0.11" "leidenalg>=0.10"
-# Pre-fetch the STT checkpoint (small/int8/CPU) so a fresh pod does not pay an
-# HF download. Code-independent, so it stays in the cached prefix.
-ENV HF_HOME=/app/.cache/huggingface
-RUN /app/.venv/bin/python -c "from faster_whisper import WhisperModel; WhisperModel('small', device='cpu', compute_type='int8')"
+# STT (faster-whisper) weights are NOT baked. Like bge-m3, the model downloads
+# at runtime to HF_HOME, which prod points at the shared model-cache PVC
+# (HF_HOME=/models, deploy 08174ab) so it persists across restarts/rollouts and
+# stays off the ephemeral imagefs. Baking it added ~460 MB of dead weight: the
+# runtime HF_HOME=/models never consulted the build-time /app/.cache copy.
 
 # --- App layer: workspace source; thin, rebuilt every commit ---
 COPY core core
@@ -99,17 +100,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
-# Split the copy so an ordinary code commit does NOT re-push/re-pull the
-# multi-GB venv + baked-model layers. A single `COPY /app /app` bundles the
-# ~3 GB venv (torch) and the prefetched faster-whisper model (/app/.cache,
-# ~460 MB) with the few-MB workspace source into ONE layer, so any code change
-# rebuilds the whole blob and every node re-pulls it on deploy (d11a0b0f). The
-# venv + model cache are code-independent (change only when deps change); the
-# workspace is installed EDITABLE (.venv `_editable_impl_*.pth` -> /app/<member>/src).
-# Copying the heavy code-independent dirs as their OWN layers keeps their digests
-# stable so the node re-pulls only the thin source layer below.
+# Split the copy so an ordinary code commit does NOT re-push/re-pull the multi-GB
+# venv layer. A single `COPY /app /app` bundles the ~3 GB venv (torch) with the
+# few-MB workspace source into ONE layer, so any code change rebuilds the whole
+# blob and every node re-pulls it on deploy (d11a0b0f). The venv is
+# code-independent (changes only when deps change); the workspace is installed
+# EDITABLE (.venv `_editable_impl_*.pth` -> /app/<member>/src). Copying the venv
+# as its OWN layer keeps its digest stable so the node re-pulls only the thin
+# source layer below. (No /app/.cache: STT/embedder weights download to the PVC
+# at runtime, not baked.)
 COPY --from=builder /app/.venv /app/.venv
-COPY --from=builder /app/.cache /app/.cache
 COPY --from=builder /app/pyproject.toml /app/uv.lock /app/
 COPY --from=builder /app/core /app/core
 COPY --from=builder /app/api /app/api
