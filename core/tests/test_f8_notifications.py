@@ -14,6 +14,7 @@ from decimal import Decimal
 from zoneinfo import ZoneInfo
 
 import pytest
+from sqlalchemy import select
 
 from flow_core.db import admin_session, tenant_session
 from flow_core.errors import DomainError
@@ -23,6 +24,7 @@ from flow_core.models.notification import (
     NotificationStatus,
     RecurrenceFreq,
 )
+from flow_core.models.workflow import WorkflowState
 from flow_core.notification_channel import set_sender_override
 from flow_core.services import dependencies as deps
 from flow_core.services import notifications as nf
@@ -136,6 +138,146 @@ async def test_dispatch_fault_isolation_and_missing_pref() -> None:
         )
         r = await nf.dispatch_pending(s, org_id=org, actor_id=user, sender=snd)
     assert r.failed == 2 and r.sent == 0  # one channel error, one no-pref
+
+
+async def _terminal_state_id(s) -> uuid.UUID:
+    return (
+        await s.execute(
+            select(WorkflowState.id).where(WorkflowState.is_terminal.is_(True)).limit(1)
+        )
+    ).scalar_one()
+
+
+async def test_dispatch_suppresses_notification_for_terminal_task() -> None:
+    """A reminder enqueued ahead of time must NOT fire once its task reaches
+    a terminal state. ``scan_reminders`` only filters terminal tasks at
+    ENQUEUE time; dispatch re-validates eligibility at SEND time and drops
+    the queued row (neither sent nor failed) so it never fires late."""
+    org, user = await _org()
+    snd = FakeSender()
+    async with tenant_session(str(org), str(user)) as s:
+        await nf.set_pref(
+            s,
+            org_id=org,
+            actor_id=user,
+            user_id=user,
+            channel=NotificationChannelKind.email,
+            enabled=True,
+            target="me@example.test",
+        )
+        t = await tasks_svc.create_task(
+            s, org_id=org, actor_id=user, title="close-me", assignee_ids=[user]
+        )
+        await nf.enqueue(
+            s,
+            org_id=org,
+            actor_id=user,
+            user_id=user,
+            channel=NotificationChannelKind.email,
+            kind="reminder",
+            title="R",
+            body="b",
+            dedupe_key="rem-1",
+            task_id=t.id,
+        )
+        # Task closes AFTER the reminder is already queued.
+        t.state_id = await _terminal_state_id(s)
+        await s.flush()
+        r = await nf.dispatch_pending(s, org_id=org, actor_id=user, sender=snd)
+        remaining = await nf.list_notifications(s, org_id=org, user_id=user)
+    assert (r.sent, r.failed, r.suppressed) == (0, 0, 1)
+    assert snd.sent == []  # never delivered
+    assert list(remaining) == []  # queued row dropped, not left pending forever
+
+
+async def test_dispatch_suppresses_for_archived_or_deleted_task() -> None:
+    """The dispatch gate also drops a notification whose task is archived or
+    soft-deleted -- not only terminal-state ones -- so the single
+    send-time check covers every way a task becomes ineligible."""
+    for mutate in ("archive", "delete"):
+        org, user = await _org()
+        snd = FakeSender()
+        async with tenant_session(str(org), str(user)) as s:
+            await nf.set_pref(
+                s,
+                org_id=org,
+                actor_id=user,
+                user_id=user,
+                channel=NotificationChannelKind.email,
+                enabled=True,
+                target="me@example.test",
+            )
+            t = await tasks_svc.create_task(
+                s, org_id=org, actor_id=user, title="x", assignee_ids=[user]
+            )
+            await nf.enqueue(
+                s,
+                org_id=org,
+                actor_id=user,
+                user_id=user,
+                channel=NotificationChannelKind.email,
+                kind="reminder",
+                title="R",
+                body="b",
+                dedupe_key="rem",
+                task_id=t.id,
+            )
+            if mutate == "archive":
+                t.is_archived = True
+            else:
+                t.deleted_at = dt.datetime.now(tz=dt.UTC)
+            await s.flush()
+            r = await nf.dispatch_pending(s, org_id=org, actor_id=user, sender=snd)
+        assert (r.sent, r.failed, r.suppressed) == (0, 0, 1), mutate
+        assert snd.sent == [], mutate
+
+
+async def test_dispatch_gate_does_not_over_suppress() -> None:
+    """The eligibility gate must leave alone a notification whose task is
+    still active, AND one with no task linkage (coordination offers/handoffs
+    carry ``task_id=None`` and fire immediately by design)."""
+    org, user = await _org()
+    snd = FakeSender()
+    async with tenant_session(str(org), str(user)) as s:
+        await nf.set_pref(
+            s,
+            org_id=org,
+            actor_id=user,
+            user_id=user,
+            channel=NotificationChannelKind.email,
+            enabled=True,
+            target="me@example.test",
+        )
+        t = await tasks_svc.create_task(
+            s, org_id=org, actor_id=user, title="live", assignee_ids=[user]
+        )
+        await nf.enqueue(
+            s,
+            org_id=org,
+            actor_id=user,
+            user_id=user,
+            channel=NotificationChannelKind.email,
+            kind="reminder",
+            title="R",
+            body="b",
+            dedupe_key="rem",
+            task_id=t.id,  # task still active
+        )
+        await nf.enqueue(
+            s,
+            org_id=org,
+            actor_id=user,
+            user_id=user,
+            channel=NotificationChannelKind.email,
+            kind="task_offer",
+            title="O",
+            body="b",
+            dedupe_key="off",
+            task_id=None,  # not task-gated
+        )
+        r = await nf.dispatch_pending(s, org_id=org, actor_id=user, sender=snd)
+    assert (r.sent, r.failed, r.suppressed) == (2, 0, 0)
+    assert {title for (_, title) in snd.sent} == {"R", "O"}
 
 
 async def test_recurrence_excludes_dependencies_and_spawns() -> None:

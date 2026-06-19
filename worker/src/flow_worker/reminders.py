@@ -87,13 +87,14 @@ async def run_once() -> tuple[int, int]:
             async with tenant_session(str(org_id), str(owner), actor_kind="system") as s:
                 enq = await notif_svc.scan_reminders(s, org_id=org_id, actor_id=owner)
                 res = await notif_svc.dispatch_pending(s, org_id=org_id, actor_id=owner)
-            if enq or res.sent or res.failed:
+            if enq or res.sent or res.failed or res.suppressed:
                 _log.info(
-                    "reminders tick org=%s enqueued=%d sent=%d failed=%d",
+                    "reminders tick org=%s enqueued=%d sent=%d failed=%d suppressed=%d",
                     org_id,
                     enq,
                     res.sent,
                     res.failed,
+                    res.suppressed,
                 )
             total_enq += enq
             total_sent += res.sent

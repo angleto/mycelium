@@ -77,6 +77,23 @@ class Notification(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, Ba
         nullable=False,
     )
     kind: Mapped[str] = mapped_column(String(40), nullable=False)
+    # The task this notification is ABOUT, when it is task-scoped (migration
+    # 0048). Lets ``dispatch_pending`` re-validate eligibility at SEND time:
+    # a reminder enqueued ahead of time (held by ``fire_at``) must NOT fire
+    # once its task has become terminal / archived / soft-deleted -- the
+    # ``scan_reminders`` filter only excludes those at ENQUEUE time, leaving
+    # an already-queued reminder to fire late. Encoding the id only inside
+    # ``dedupe_key`` (a string) was never queryable -- the same anti-pattern
+    # migration 0018 fixed for ``fire_at``. NULL = not gated at dispatch
+    # (non-reminder notifications: coordination offers/handoffs fire
+    # immediately by design and are never suppressed here). ON DELETE
+    # CASCADE: a hard-deleted task drops its notifications.
+    task_id: Mapped[uuid.UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("tasks.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
     title: Mapped[str] = mapped_column(String(300), nullable=False)
     body: Mapped[str] = mapped_column(Text, nullable=False)
     dedupe_key: Mapped[str | None] = mapped_column(String(200), nullable=True)

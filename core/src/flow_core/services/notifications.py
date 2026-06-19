@@ -53,6 +53,10 @@ from flow_core.timewindow import DEFAULT_DAY_START_MINUTE, day_start_anchor, res
 class DispatchResult:
     sent: int
     failed: int
+    # Pending notifications dropped at send time because their task is no
+    # longer eligible (terminal / archived / soft-deleted). Neither sent
+    # nor failed: the row is deleted rather than fired late.
+    suppressed: int = 0
 
 
 async def set_pref(
@@ -128,6 +132,7 @@ async def enqueue(
     body: str,
     dedupe_key: str | None = None,
     fire_at: dt.datetime | None = None,
+    task_id: uuid.UUID | None = None,
 ) -> Notification:
     """Idempotent by (org, dedupe_key).
 
@@ -155,6 +160,10 @@ async def enqueue(
             # Keep the firing moment current (also backfills NULL on rows
             # enqueued before migration 0018 added the column).
             existing.fire_at = fire_at
+            # Keep the task linkage current too (backfills NULL on rows
+            # enqueued before migration 0048 added the column) so the
+            # dispatch-time eligibility gate sees it.
+            existing.task_id = task_id
             # Refresh the content of a not-yet-sent row so a re-scan picks up
             # an improved title/body (e.g. the added task deep-link, dropped
             # redundant text) in place, instead of leaving a stale message
@@ -183,6 +192,7 @@ async def enqueue(
         body=body,
         dedupe_key=dedupe_key,
         fire_at=fire_at,
+        task_id=task_id,
         status=NotificationStatus.pending,
     )
     try:
@@ -308,8 +318,45 @@ async def dispatch_pending(
         .scalars()
         .all()
     )
-    sent = failed = 0
+    # Re-validate task eligibility at SEND time. ``scan_reminders`` excludes
+    # terminal / archived / soft-deleted tasks only at ENQUEUE time; a
+    # reminder enqueued earlier and HELD until its ``fire_at`` would
+    # otherwise fire even though its task has since closed. This is the
+    # single chokepoint that also catches paths a per-transition hook would
+    # miss: archiving, soft-deleting, or retroactively flipping a state's
+    # ``is_terminal`` flag (which never calls ``set_state``). Notifications
+    # with no ``task_id`` (coordination offers/handoffs) are never gated.
+    gated_task_ids = {n.task_id for n in rows if n.task_id is not None}
+    ineligible_task_ids: set[uuid.UUID] = set()
+    if gated_task_ids:
+        ineligible_task_ids = set(
+            (
+                await session.execute(
+                    select(Task.id)
+                    .join(WorkflowState, WorkflowState.id == Task.state_id)
+                    .where(
+                        Task.id.in_(gated_task_ids),
+                        or_(
+                            Task.deleted_at.is_not(None),
+                            Task.is_archived.is_(True),
+                            WorkflowState.is_terminal.is_(True),
+                        ),
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+    sent = failed = suppressed = 0
     for n in rows:
+        if n.task_id is not None and n.task_id in ineligible_task_ids:
+            # Task no longer eligible: drop the queued notification instead
+            # of firing it late. Deleting (vs. holding) is safe because a
+            # later scan re-creates the reminder only if the task returns to
+            # an active state and the moment is still in window.
+            await session.delete(n)
+            suppressed += 1
+            continue
         # webpush has no single per-pref target: fan out to every device.
         if n.channel == NotificationChannelKind.webpush:
             if await _dispatch_webpush(session, snd, n, org_id=org_id, now=now):
@@ -350,9 +397,9 @@ async def dispatch_pending(
         entity="notification",
         entity_id=None,
         action="dispatch",
-        diff={"sent": str(sent), "failed": str(failed)},
+        diff={"sent": str(sent), "failed": str(failed), "suppressed": str(suppressed)},
     )
-    return DispatchResult(sent=sent, failed=failed)
+    return DispatchResult(sent=sent, failed=failed, suppressed=suppressed)
 
 
 # --- recurring tasks ---
@@ -825,6 +872,11 @@ async def scan_reminders(
                             f"reminder:{t.id}:{uid}:{p.channel.value}:{fire_at.isoformat()}"
                         ),
                         fire_at=fire_at,
+                        # Gate this reminder on the task's live state at
+                        # dispatch: a reminder held until ``fire_at`` must be
+                        # dropped if the task reaches a terminal state (or is
+                        # archived / deleted) before it fires.
+                        task_id=t.id,
                     )
                     enqueued += 1
     return enqueued
