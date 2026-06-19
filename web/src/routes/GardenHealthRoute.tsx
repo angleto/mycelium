@@ -43,7 +43,7 @@ const META: Record<string, Meta> = {
   leiden_modularity: { kind: 'scalar', dir: 'trend', trendLead: true },
   density_delta_7d: { kind: 'delta', dir: 'signed' },
   embedding_coverage: { kind: 'pct', dir: 'higher' },
-  recall_at_k: { kind: 'pct', dir: 'higher', blocked: true },
+  recall_at_k: { kind: 'pct', dir: 'higher' },
   fungal_lag: { kind: 'duration', dir: 'lower', blocked: true },
 }
 const ORDER = Object.keys(META)

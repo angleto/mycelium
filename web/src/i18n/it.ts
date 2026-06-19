@@ -55,7 +55,7 @@ export const it: Catalog = {
       recall_at_k: {
         label: 'Recall@K',
         explain:
-          'Quota di ricerche reali il cui risultato cliccato era la prima predizione. Richiede i log di click, non ancora raccolti.',
+          'Quota di ricerche reali (non-probe) il cui risultato cliccato era il primo in classifica. Si popola man mano che clicchi i risultati di ricerca.',
       },
       tag_entropy_local: {
         label: 'Biodiversità dei tag',

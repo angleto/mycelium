@@ -56,7 +56,7 @@ export const en = {
       recall_at_k: {
         label: 'Recall@K',
         explain:
-          'Share of real searches whose clicked result was the top prediction. Needs search-click logs, not captured yet.',
+          'Share of real (non-probe) searches whose clicked result was the top-ranked one. Populates as you click search results.',
       },
       tag_entropy_local: {
         label: 'Tag biodiversity',
