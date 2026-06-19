@@ -25,7 +25,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from flow_core.config import get_settings
-from flow_core.embedder import Embedder, get_embedder
+from flow_core.embedder import Embedder, embed_batch, get_embedder
 from flow_core.models.memory_blob import MemoryBlob
 
 logger = logging.getLogger(__name__)
@@ -51,15 +51,33 @@ async def _backfill_tier(
             .limit(batch_size)
         )
     ).all()
+    # Skip empty/whitespace bodies (text IS NOT NULL still admits ""): they
+    # embed to nothing and would just churn the same rows every sweep.
+    candidates = [(bid, borg, txt) for bid, borg, txt in rows if txt and txt.strip()]
+    if not candidates:
+        return 0
+    # Embed the whole batch in ONE forward pass instead of N sequential
+    # ``embed`` calls: SentenceTransformer batches internally, ~an order of
+    # magnitude faster (per-call tokenizer/Python overhead dominates at
+    # small N). ``embed_batch`` falls back to a sequential loop for embedders
+    # without a batch method (e.g. the CI fake / a future hosted provider).
+    try:
+        results = await embed_batch(embedder, [txt for _, _, txt in candidates])
+    except Exception:
+        # Fail LOUD, not silent: a systemic embedder failure (e.g. the model
+        # extra missing from this process image) used to be swallowed at
+        # ``debug`` per row, so the backfill no-opped invisibly and the dense
+        # tier stayed empty with no signal. Surface it and skip this sweep.
+        logger.warning(
+            "%s backfill: embedder failed on %d eligible row(s) "
+            "(model unavailable in this process?); skipping this sweep",
+            tier,
+            len(candidates),
+            exc_info=True,
+        )
+        return 0
     done = 0
-    for blob_id, blob_org, text_body in rows:
-        if not text_body:
-            continue
-        try:
-            result = await embedder.embed(text_body)
-        except Exception as exc:
-            logger.debug("%s backfill failed for blob_id=%s: %s", tier, blob_id, exc)
-            continue
+    for (blob_id, blob_org, _), result in zip(candidates, results, strict=False):
         if not result.vector or len(result.vector) != expected_dim:
             logger.warning(
                 "%s backfill dim mismatch for blob_id=%s (got %d, expected %d)",
@@ -74,7 +92,7 @@ async def _backfill_tier(
             .where(MemoryBlob.id == blob_id, MemoryBlob.org_id == blob_org, is_null)
             .values(**set_values(result))
         )
-        if upd.rowcount > 0:  # type: ignore[attr-defined]
+        if (upd.rowcount or 0) > 0:  # type: ignore[attr-defined]
             done += 1
     return done
 
