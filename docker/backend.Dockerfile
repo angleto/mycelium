@@ -51,6 +51,9 @@ COPY sdi-inbound sdi-inbound
 # ``--inexact`` so installing the workspace members does not prune the ML
 # extras added above (optional, not in the default lock resolution).
 RUN --mount=type=cache,target=/root/.cache/uv uv sync --no-dev --inexact
+# Build-time guard: fail the build (not prod) if the final sync ever pruned
+# the ML extras or the workspace install broke their import.
+RUN /app/.venv/bin/python -c "import sentence_transformers, faster_whisper, igraph, leidenalg, flow_api; print('backend ml deps ok')"
 
 # ---
 
