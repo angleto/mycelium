@@ -24,6 +24,10 @@ until their data source lands -- explicit, never a faked number:
     long decomposition takes to turn an archived note into humus.
     ``value=None`` with a reason only when there are genuinely no
     distillations yet (or none from an archived source).
+  * ``embedding_coverage`` (WS-A): fraction of the embeddable memory
+    corpus carrying a local dense vector, floor-gated -- the visible alert
+    that the dense backfill stalled and semantic retrieval has decayed to
+    keyword-only. ``value=None`` only when nothing is embeddable yet.
 
 The nightly worker tick calls :func:`persist_snapshot` to write one
 ``garden_health_daily`` row per org per day; the live endpoint reads the
@@ -45,6 +49,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from flow_core.models.activity_log import ActivityLog
 from flow_core.models.classification_feedback import ClassificationFeedback
 from flow_core.models.garden_health import GardenHealthDaily
+from flow_core.models.memory_blob import MemoryBlob
 from flow_core.models.note import Note
 from flow_core.models.note_link import NoteNoteLink
 from flow_core.models.search_click import SearchClick
@@ -52,6 +57,14 @@ from flow_core.services import graph as graph_svc
 
 ACCEPT_RATE_FLOOR = 0.40
 TAG_ENTROPY_FLOOR = 1.2
+# Dense-tier embedding coverage floor (WS-A, task 38ac2bc0): the fraction of
+# the embeddable corpus that must carry a local dense vector before semantic
+# retrieval is considered materially complete. A *persistently* low reading
+# means the backfill is not keeping up or the embedder is unavailable -- the
+# "dense tier empty" failure this sensor guards. A tunable module constant,
+# not a verdict: per ADR-0035 "show, never judge", the card shows value vs
+# floor and the forester decides.
+EMBEDDING_COVERAGE_FLOOR = 0.80
 # Top-K window of the recall sensor: a click below this rank says the
 # ranking failed badly enough that "was it top-1?" is no longer the
 # interesting question, so it is excluded from the denominator.
@@ -81,6 +94,7 @@ _NO_TAGGED_NEIGHBOURHOOD = "no linked neighbourhood carries a generic tag yet"
 _NO_CLUSTERS = "clustering unavailable (needs the optional extra, or >=1 community)"
 _NO_NOTES = "no notes yet"
 _NO_CLICKS = "no real (non-probe) search clicks in window yet"
+_NO_EMBEDDABLE = "no embeddable blobs yet"
 _NO_DISTILLATIONS = "no distillation notes yet (decomposition has not produced humus)"
 _NO_ARCHIVED_DISTILLATIONS = "distillations exist but none derive from an archived source yet"
 
@@ -103,6 +117,11 @@ class GardenHealth:
     leiden_modularity: Metric
     fungal_lag: Metric
     density_delta_7d: Metric
+    # WS-A (task 38ac2bc0): fraction of the embeddable memory corpus that
+    # carries a local dense vector. Floor-gated -- a persistently low reading
+    # means the dense backfill has stalled (or the embedder is down), so
+    # semantic retrieval is degraded to keyword-only.
+    embedding_coverage: Metric
     # WS-F5: today's autonomous (system) spend against the per-workspace
     # daily cap. value=spend / floor=cap when capped; value=None + reason
     # when the kill-switch is off or no cap is configured.
@@ -282,6 +301,32 @@ async def _density_delta_7d(
     return round(links_now / notes_now - links_then / notes_then, 4)
 
 
+async def _embedding_coverage(session: AsyncSession, *, org_id: uuid.UUID) -> float | None:
+    """Fraction of the embeddable memory corpus carrying a local dense vector
+    (WS-A, task 38ac2bc0).
+
+    The denominator is the blobs the backfill can actually embed -- ``text``
+    present AND non-empty -- mirroring ``embedding_migration._backfill_tier``'s
+    ``txt.strip()`` eligibility, so empty-body rows (which the backfill skips
+    forever) never peg coverage below 1.0. The numerator is those whose local
+    ``embedding`` is populated (``model_id`` is then the producing model, never
+    the keyword-only 'none'). None when nothing is embeddable yet: an empty
+    denominator is "no signal", not "0% covered"."""
+    embeddable = MemoryBlob.text.is_not(None) & (func.trim(MemoryBlob.text) != "")
+    row = (
+        await session.execute(
+            select(
+                func.count().filter(embeddable),
+                func.count().filter(embeddable & MemoryBlob.embedding.is_not(None)),
+            ).where(MemoryBlob.org_id == org_id)
+        )
+    ).one()
+    total, embedded = int(row[0]), int(row[1])
+    if not total:
+        return None
+    return round(embedded / total, 4)
+
+
 async def _fungal_lag(
     session: AsyncSession, *, org_id: uuid.UUID
 ) -> tuple[float | None, str | None]:
@@ -361,6 +406,7 @@ async def compute_health(
     entropy = await graph_svc.compute_tag_neighborhood_entropy(session, org_id=org_id)
     modularity = (await graph_svc.compute_leiden_clusters(session, org_id=org_id)).modularity
     density = await _density_delta_7d(session, org_id=org_id, now=now)
+    coverage = await _embedding_coverage(session, org_id=org_id)
     fungal_value, fungal_reason = await _fungal_lag(session, org_id=org_id)
     from flow_core.services import autonomous_budget
 
@@ -390,6 +436,11 @@ async def compute_health(
         ),
         fungal_lag=Metric(fungal_value, None, fungal_reason),
         density_delta_7d=Metric(density, None, None if density is not None else _NO_NOTES),
+        embedding_coverage=Metric(
+            coverage,
+            EMBEDDING_COVERAGE_FLOOR,
+            None if coverage is not None else _NO_EMBEDDABLE,
+        ),
         autonomous_spend_today=autonomous_metric,
     )
 

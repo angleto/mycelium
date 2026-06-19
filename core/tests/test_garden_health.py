@@ -27,6 +27,7 @@ from flow_core.ai_providers import set_llm_override  # noqa: E402
 from flow_core.db import admin_session, tenant_session  # noqa: E402
 from flow_core.models.activity_log import ActivityLog  # noqa: E402
 from flow_core.models.classification_feedback import ClassificationFeedback  # noqa: E402
+from flow_core.models.memory_blob import EMBED_DIM, MemoryBlob  # noqa: E402
 from flow_core.models.note import Note, NoteKind  # noqa: E402
 from flow_core.models.note_tag import NoteTag  # noqa: E402
 from flow_core.models.tag import TagKind  # noqa: E402
@@ -304,6 +305,53 @@ async def test_fungal_lag_reason_when_distillation_from_live_source(_wire_llm: N
         health = await health_svc.compute_health(s, org_id=org)
     assert health.fungal_lag.value is None
     assert health.fungal_lag.reason == health_svc._NO_ARCHIVED_DISTILLATIONS
+
+
+# --- embedding coverage sensor (WS-A, task 38ac2bc0) ---
+
+
+def _blob(org: uuid.UUID, *, text: str | None, embedded: bool) -> MemoryBlob:
+    """A memory blob row. ``embedded`` populates the local dense vector (and a
+    real ``model_id``); otherwise it stays keyword-only (embedding NULL,
+    model_id 'none') -- the state the WS-A backfill exists to drain."""
+    return MemoryBlob(
+        org_id=org,
+        text=text,
+        embedding=[0.0] * EMBED_DIM if embedded else None,
+        model_id="bge-m3" if embedded else "none",
+    )
+
+
+async def test_embedding_coverage_fraction_over_embeddable_blobs() -> None:
+    org, user = await _org_user()
+    async with tenant_session(str(org), str(user)) as s:
+        s.add(_blob(org, text="alpha", embedded=True))
+        s.add(_blob(org, text="beta", embedded=True))
+        s.add(_blob(org, text="gamma", embedded=False))
+        # Blank-body blob: the backfill skips it forever (txt.strip() empty),
+        # so it must be excluded from the denominator -- otherwise coverage
+        # could never reach 1.0 and the floor alert would false-fire.
+        s.add(_blob(org, text="   ", embedded=False))
+        await s.flush()
+        health = await health_svc.compute_health(s, org_id=org)
+    m = health.embedding_coverage
+    assert m.value == round(2 / 3, 4)  # 2 embedded of 3 embeddable; blank excluded
+    assert m.floor == health_svc.EMBEDDING_COVERAGE_FLOOR
+    assert m.reason is None
+
+
+async def test_embedding_coverage_none_when_nothing_embeddable() -> None:
+    org, user = await _org_user()
+    async with tenant_session(str(org), str(user)) as s:
+        # Only a blank blob exists: nothing the backfill could embed, so the
+        # sensor reports "no signal" (None + reason), never a faked 0%.
+        s.add(_blob(org, text="", embedded=False))
+        await s.flush()
+        health = await health_svc.compute_health(s, org_id=org)
+    m = health.embedding_coverage
+    assert m.value is None
+    assert m.reason == health_svc._NO_EMBEDDABLE
+    assert m.floor == health_svc.EMBEDDING_COVERAGE_FLOOR
 
 
 # --- "what changed" timeline (ADR-0035 §84, task d0bada67) ---

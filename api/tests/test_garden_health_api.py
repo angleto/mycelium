@@ -23,6 +23,7 @@ _SENSORS = (
     "leiden_modularity",
     "fungal_lag",
     "density_delta_7d",
+    "embedding_coverage",
 )
 
 

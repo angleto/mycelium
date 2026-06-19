@@ -77,6 +77,11 @@ export const it: Catalog = {
         explain:
           'Variazione dei link per nodo in 7 giorni. Positivo = il micelio si sta infittendo.',
       },
+      embedding_coverage: {
+        label: 'Copertura embedding',
+        explain:
+          'Quota del corpus embeddabile con un vettore denso. Sotto la soglia, la ricerca semantica è degradata a sola parola-chiave: il backfill è fermo o l’embedder è giù.',
+      },
     },
     timeline: {
       title: 'Cosa è cambiato',

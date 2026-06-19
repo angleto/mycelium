@@ -78,6 +78,11 @@ export const en = {
         explain:
           'Change in links-per-node over 7 days. Positive means the mycelium is thickening.',
       },
+      embedding_coverage: {
+        label: 'Embedding coverage',
+        explain:
+          'Share of the embeddable corpus carrying a dense vector. Below the floor, semantic search has decayed toward keyword-only: the backfill stalled or the embedder is down.',
+      },
     },
     timeline: {
       title: 'What changed',
