@@ -33,6 +33,7 @@ from flow_core.services import (
     autonomous_budget,
     garden_classify,
     garden_health,
+    garden_learning,
     graph_snapshot,
     memory,
     note_links,
@@ -155,6 +156,23 @@ async def run_once() -> int:
                         await garden_classify.autoclassify_unprocessed(cs, org_id=org_id)
                 except Exception:
                     _log.exception("autoclassify pass failed for org=%s", org_id)
+            # Online-learning prior metabolism (task 49d24048, ADR-0037): decay
+            # stale per-user classification priors + prune the neutral ones, so
+            # old preferences fade. Own session/try (failure-isolated like the
+            # snapshots above); sub-flagged so a deployment can opt out.
+            if get_settings().garden_learning_decay_enabled:
+                try:
+                    async with tenant_session(str(org_id), str(owner), actor_kind="system") as ls:
+                        decayed, pruned = await garden_learning.decay_priors(ls, org_id=org_id)
+                        if decayed or pruned:
+                            _log.info(
+                                "garden learning decay org=%s decayed=%d pruned=%d",
+                                org_id,
+                                decayed,
+                                pruned,
+                            )
+                except Exception:
+                    _log.exception("learning prior decay failed for org=%s", org_id)
             n = sum(counters.values()) + auto_matured
             if n > 0:
                 _log.info(

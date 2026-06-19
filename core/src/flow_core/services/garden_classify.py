@@ -36,6 +36,7 @@ import datetime as dt
 import math
 import uuid
 from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -54,7 +55,14 @@ from flow_core.models.note import Note
 from flow_core.models.note_link import NoteNoteLink
 from flow_core.models.note_tag import NoteTag
 from flow_core.models.tag import Tag, TagKind
-from flow_core.services import audit, event_bus, graph_snapshot, note_inert, note_links
+from flow_core.services import (
+    audit,
+    event_bus,
+    garden_learning,
+    graph_snapshot,
+    note_inert,
+    note_links,
+)
 from flow_core.services import graph as graph_svc
 from flow_core.services import link_prediction as linkpred_svc
 from flow_core.services import notes as notes_svc
@@ -83,6 +91,23 @@ COLD_START_NODES = 20
 
 # The set of suggestion kinds the engine can produce.
 ALL_KINDS: frozenset[str] = frozenset({"tags", "links", "maturity", "cluster"})
+
+
+def _neutral_prior(_: uuid.UUID) -> float:
+    """The identity re-rank factor: no personalisation (no user, or the user
+    has no prior on this feature). Keeps ``classify_node`` structural-only and
+    bit-for-bit unchanged when called without a ``user_id``."""
+    return 1.0
+
+
+def _factor_lookup(priors: dict[str, float], prefix: str) -> Callable[[uuid.UUID], float]:
+    """Build the ``prior_of`` callable for a suggestion surface: map an
+    entity id to its ADR-0037 re-rank factor ``exp(prior)`` (1.0 when absent)."""
+
+    def _of(entity_id: uuid.UUID) -> float:
+        return garden_learning.prior_factor(priors.get(f"{prefix}{entity_id}", 0.0))
+
+    return _of
 
 
 @dataclass(frozen=True)
@@ -160,11 +185,17 @@ def _suggest_tags(
     tag_deg: dict[uuid.UUID, int],
     k: int,
     damping: float = 1.0,
+    prior_of: Callable[[uuid.UUID], float] = _neutral_prior,
 ) -> list[TagSuggestion]:
     """Candidate generic tags ranked by rarity-discounted co-occurrence
     with the node's existing generic tags. A tag found on many notes that
     share a (rare) tag with the node scores high; a near-ubiquitous tag is
-    damped by ``1 / log(2 + deg)``."""
+    damped by ``1 / log(2 + deg)``.
+
+    ``prior_of`` is the per-user re-rank factor (ADR-0037): it multiplies the
+    *structural* confidence to order/display candidates, but the floor is
+    checked on the structural value BEFORE the prior, so a strongly negative
+    prior never prunes a structurally-valid tag (it only sinks it)."""
     node_tags = by_note.get(node_id, set())
     if not node_tags:
         return []
@@ -175,21 +206,27 @@ def _suggest_tags(
         for t in other_tags:
             if t not in node_tags:
                 support[t] += 1
-    out: list[TagSuggestion] = []
+    scored: list[tuple[float, TagSuggestion]] = []
     for c, n in support.items():
         raw = n / math.log(2.0 + tag_deg.get(c, 0))
         conf = (1.0 - 1.0 / (1.0 + raw)) * damping  # squash to [0, 1), cold-start damped
-        if conf < TAG_FLOOR:
+        if conf < TAG_FLOOR:  # floor on the STRUCTURAL confidence (pre-prior)
             continue
-        out.append(
-            TagSuggestion(
-                tag_id=c,
-                confidence=conf,
-                rationale=f"co-occurs on {n} related note(s); rarity 1/log(2+{tag_deg.get(c, 0)})",
+        ranked = conf * prior_of(c)  # personalised re-rank score (uncapped)
+        scored.append(
+            (
+                ranked,
+                TagSuggestion(
+                    tag_id=c,
+                    confidence=min(1.0, ranked),
+                    rationale=(
+                        f"co-occurs on {n} related note(s); rarity 1/log(2+{tag_deg.get(c, 0)})"
+                    ),
+                ),
             )
         )
-    out.sort(key=lambda s: (-s.confidence, str(s.tag_id)))
-    return out[: max(0, k)]
+    scored.sort(key=lambda t: (-t[0], str(t[1].tag_id)))
+    return [s for _, s in scored[: max(0, k)]]
 
 
 async def _suggest_links(
@@ -199,18 +236,31 @@ async def _suggest_links(
     node_id: uuid.UUID,
     k: int,
     damping: float = 1.0,
+    prior_of: Callable[[uuid.UUID], float] = _neutral_prior,
 ) -> list[LinkCandidate]:
+    """Link candidates from ``link_prediction``, re-ranked by the user's
+    per-target prior (ADR-0037). Floor on the structural score (pre-prior),
+    so a muted target sinks but is never pruned below a structural pass."""
     rows = await linkpred_svc.suggest_links_for_note(session, org_id=org_id, note_id=node_id, k=k)
-    return [
-        LinkCandidate(
-            target_id=r.note_id,
-            link_kind="related",  # v1 default (neutral association); kind MLP is v2 (ADR-0032)
-            confidence=r.score * damping,
-            rationale=r.rationale,
+    scored: list[tuple[float, LinkCandidate]] = []
+    for r in rows:
+        conf = r.score * damping  # structural
+        if conf < LINK_FLOOR:
+            continue
+        ranked = conf * prior_of(r.note_id)
+        scored.append(
+            (
+                ranked,
+                LinkCandidate(
+                    target_id=r.note_id,
+                    link_kind="related",  # v1 default; kind MLP is v2 (ADR-0032)
+                    confidence=min(1.0, ranked),
+                    rationale=r.rationale,
+                ),
+            )
         )
-        for r in rows
-        if r.score * damping >= LINK_FLOOR
-    ]
+    scored.sort(key=lambda t: (-t[0], str(t[1].target_id)))
+    return [c for _, c in scored]
 
 
 def _pr_percentile(pageranks: dict[uuid.UUID, float], node_id: uuid.UUID) -> float:
@@ -323,12 +373,19 @@ async def classify_node(
     node_id: uuid.UUID,
     kinds: frozenset[str] | None = None,
     k: int = DEFAULT_K,
+    user_id: uuid.UUID | None = None,
 ) -> ClassifyResult:
     """Return the structured enrichment proposal for ``node_id``.
 
     Read-only. RLS-scoped (every underlying query filters ``org_id`` and
     runs on the caller's tenant session). v1 classifies **notes**; tasks
     (tags-only per ADR-0032) and note_part/blob are a follow-up.
+
+    When ``user_id`` is given, the user's learned priors (ADR-0037) re-rank
+    the tag and link candidates toward what they have accepted before; the
+    confidence floors stay on the structural signal, so the prior re-ranks
+    but never prunes. Omitting ``user_id`` is the pure structural path
+    (system callers, tests), unchanged.
     """
     wanted = kinds if kinds is not None else ALL_KINDS
     note = (
@@ -362,18 +419,43 @@ async def classify_node(
         raw["cold_start_damping"] = damping
         raw["node_count"] = float(node_count)
 
+    personalized = False
+
     tags: list[TagSuggestion] = []
     if "tags" in wanted:
         by_note, tag_deg = await _note_generic_tags(session, org_id=org_id)
+        tag_prior_of: Callable[[uuid.UUID], float] = _neutral_prior
+        if user_id is not None:
+            tp = await garden_learning.personal_priors(
+                session, org_id=org_id, user_id=user_id, suggestion_type="tag"
+            )
+            if tp:
+                personalized = True
+                tag_prior_of = _factor_lookup(tp, "tag:")
         tags = _suggest_tags(
-            node_id=node_id, by_note=by_note, tag_deg=tag_deg, k=k, damping=damping
+            node_id=node_id,
+            by_note=by_note,
+            tag_deg=tag_deg,
+            k=k,
+            damping=damping,
+            prior_of=tag_prior_of,
         )
         if tags:
             signals.append("tag_cooccur_adamic_adar")
 
     links: list[LinkCandidate] = []
     if "links" in wanted:
-        links = await _suggest_links(session, org_id=org_id, node_id=node_id, k=k, damping=damping)
+        link_prior_of: Callable[[uuid.UUID], float] = _neutral_prior
+        if user_id is not None:
+            lp = await garden_learning.personal_priors(
+                session, org_id=org_id, user_id=user_id, suggestion_type="link"
+            )
+            if lp:
+                personalized = True
+                link_prior_of = _factor_lookup(lp, "link_target:")
+        links = await _suggest_links(
+            session, org_id=org_id, node_id=node_id, k=k, damping=damping, prior_of=link_prior_of
+        )
         if links:
             signals.append("linkpred_ppr")
 
@@ -392,6 +474,11 @@ async def classify_node(
             session, org_id=org_id, node_id=node_id, damping=damping
         )
         signals.append(cluster_signal)
+
+    # Transparency (ADR-0037): record when a personal prior actually moved
+    # the ranking, so the rationale upstream can say "ranked for you".
+    if personalized:
+        signals.append("personal_prior_applied")
 
     return ClassifyResult(
         node_id=node_id,
@@ -540,6 +627,18 @@ async def apply_suggestion(
         action=action,
         model_version=model_version,
         signals_snapshot=signals_snapshot or {},
+        override_value=override_value,
+    )
+    # ADR-0037: fold the decision into the actor's personal priors, in the
+    # SAME transaction as the feedback row so the prior stays a coherent
+    # projection of the log. A no-op for ``auto`` and non-learnable types.
+    await garden_learning.record_decision(
+        session,
+        org_id=org_id,
+        user_id=actor_id,
+        suggestion_type=suggestion_type,
+        suggestion_value=suggestion_value,
+        action=action,
         override_value=override_value,
     )
     return feedback

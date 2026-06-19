@@ -46,6 +46,7 @@ from flow_core.models.calendar import (
 )
 from flow_core.models.capability_token import CapabilityToken
 from flow_core.models.classification_feedback import ClassificationFeedback
+from flow_core.models.classification_personal_prior import ClassificationPersonalPrior
 from flow_core.models.client_profile import ClientProfile
 from flow_core.models.dependency import DependencyType, TaskDependency
 from flow_core.models.dispatch_request import (
@@ -182,6 +183,7 @@ __all__ = [
     "CalendarSubscription",
     "CapabilityToken",
     "ClassificationFeedback",
+    "ClassificationPersonalPrior",
     "ClientProfile",
     "ConservationAdhesion",
     "ConservationStatus",

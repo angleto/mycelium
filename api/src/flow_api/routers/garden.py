@@ -234,7 +234,7 @@ async def garden_classify(
         requested = {k.strip() for k in kinds.split(",") if k.strip()}
         wanted = frozenset(requested & classify_svc.ALL_KINDS) or classify_svc.ALL_KINDS
     res = await classify_svc.classify_node(
-        ctx.session, org_id=ctx.org_id, node_id=node_id, kinds=wanted
+        ctx.session, org_id=ctx.org_id, node_id=node_id, kinds=wanted, user_id=ctx.user_id
     )
     return GardenClassifyOut(
         node_id=res.node_id,

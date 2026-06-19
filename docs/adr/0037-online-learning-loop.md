@@ -1,6 +1,6 @@
 # ADR-0037 — Online learning loop on garden suggestions
 
-Status: Proposed
+Status: Accepted — implemented v1 2026-06-19 (task `49d24048`); see "Implementation notes (v1)".
 Date: 2026-05-27
 Tracks: task `756e078e-404f-406e-bae7-f7238c4d5014`
 Depends on: ADR-0032 (`garden_classify`), ADR-0033 (anti-monoculture), ADR-0036 (event bus)
@@ -123,6 +123,46 @@ the user picks "don't suggest again" explicitly, never silently.
 - Performance: per-request prior lookup is a sparse SELECT; we
   cache per (user_id, suggestion_type) for the duration of a
   request.
+
+## Implementation notes (v1, 2026-06-19, task 49d24048)
+
+What shipped (`services/garden_learning.py`, `classification_personal_prior`
+table, read-back in `classify_node`, decay in the garden worker):
+
+- **Update rule corrected.** The formula above,
+  `prior += eta*(1 - 2*sigmoid(prior))*sign`, has its delta term equal to 0
+  at `prior=0` and drives the prior *toward* 0 from both sides — a
+  contraction to the origin, not learning, contradicting this ADR's own
+  intent ("asymptotes around ±2.5", runaway prevention). The implementation
+  uses the intended saturating-growth form
+  `prior += eta*sign*(1 - sigmoid(sign*prior))`: aligned feedback moves the
+  prior in-sign with diminishing steps (saturates), opposing feedback makes
+  a large correction; a hard clamp at ±2.5 is the explicit ceiling. Factor
+  `exp(value)` ∈ [0.082, 12.2] as specified.
+
+- **Which features learn (v1).** Only the surfaces where a per-feature prior
+  actually re-ranks a candidate list: `tag` (per `tag_id`) and `link` (per
+  link target id). `maturity` and `cluster` create no prior — maturity's
+  auto-promotion is a *structural* decision that must not be moved by a
+  personal prior (the "never suppress a legitimate candidate" constraint),
+  and a Leiden cluster id is ephemeral. Their feedback still lands in
+  `classification_feedback` for telemetry. `auto` is never a personal signal.
+
+- **Read-back is floor-preserving.** `classify_node(user_id=...)` multiplies
+  each candidate's confidence by its prior factor and re-sorts, but the
+  confidence floor is checked on the *structural* confidence, so a
+  structurally-valid candidate is always shown (re-ranked, never pruned).
+
+- **Reversibility = rebuild-from-log.** The prior table is a deterministic
+  projection of the append-only `classification_feedback` log;
+  `rebuild_from_feedback` reconstructs it. The daily-snapshot table +
+  `POST /garden/learning/rollback` endpoint + the drift/reject-hotspot
+  visualisations are deferred to a follow-up (the reversibility *guarantee*
+  holds without them).
+
+- **Activation.** Decay runs in the garden worker behind
+  `garden_loop_enabled` (OFF in prod today) + `garden_learning_decay_enabled`
+  (default ON). Read-back is always live on the interactive classify path.
 
 ## Alternatives rejected
 

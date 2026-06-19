@@ -218,6 +218,15 @@ class Settings(BaseSettings):
     # FLOW_GARDEN_AUTOCLASSIFY_ENABLED=true.
     garden_autoclassify_enabled: bool = False
 
+    # Online-learning prior decay inside the garden sweep (task 49d24048,
+    # ADR-0037 "Time decay"). When set, each garden tick applies the nightly
+    # geometric decay + consolidation to the per-user classification priors,
+    # so stale preferences fade and neutral rows are pruned. ON by default
+    # (it is part of the loop's correctness, like ``garden_auto_mature``) but
+    # still gated by ``garden_loop_enabled`` -- it only runs when the sweep
+    # runs. FLOW_GARDEN_LEARNING_DECAY_ENABLED=false to disable.
+    garden_learning_decay_enabled: bool = True
+
     # Reminders + notification-dispatch worker. One periodic tick scans
     # due reminders into pending Notifications (idempotent by
     # dedupe_key) and then dispatches all pending notifications through
