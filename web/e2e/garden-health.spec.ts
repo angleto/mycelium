@@ -54,6 +54,22 @@ test('clicking a sensor opens the per-metric drill-down', async ({ page }) => {
   await expect(drill).toBeHidden()
 })
 
+test('health dashboard renders the "what changed" timeline below the cards', async ({ page }) => {
+  await login(page)
+  await page.goto('/garden/health')
+
+  // The timeline section renders below the cards (ADR-0035 §84) with its
+  // heading; it shows either the empty state or a list of factual events,
+  // never an error. Robust to whatever history the shared account carries.
+  const timeline = page.locator('.ghealth__timeline')
+  await expect(timeline).toBeVisible()
+  await expect(timeline.locator('.ghealth__timeline-head')).toContainText('What changed')
+  await expect(
+    timeline.locator('.ghealth__timeline-empty, .ghealth__timeline-list'),
+  ).toBeVisible()
+  await expect(timeline.locator('.error')).toHaveCount(0)
+})
+
 test('garden page links to the health dashboard', async ({ page }) => {
   await login(page)
   await page.goto('/garden')

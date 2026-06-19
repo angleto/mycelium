@@ -4227,6 +4227,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/garden/health/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Garden Health Events
+         * @description The "what changed" timeline (ADR-0035 §84, task d0bada67): discrete
+         *     events that plausibly explain a shift in the sensors -- a classifier
+         *     bump or a bulk corpus edit -- so a reading is interpreted, not
+         *     guessed. Newest first. Derived live from the existing audit +
+         *     feedback streams (no separate event store), workspace-scoped by RLS.
+         *     "Show, never judge": facts, never a verdict.
+         */
+        get: operations["garden_health_events_garden_health_events_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/garden/graph": {
         parameters: {
             query?: never;
@@ -6744,6 +6769,31 @@ export interface components {
             };
             /** Analytics Computed At */
             analytics_computed_at?: string | null;
+        };
+        /**
+         * GardenHealthEventOut
+         * @description One entry of the "what changed" timeline (ADR-0035 §84): a factual
+         *     record correlating a sensor shift with a cause -- a classifier bump
+         *     or a bulk corpus edit. ``detail`` is a small kind-specific bag:
+         *     ``{"version": ...}`` for ``classifier_version``; ``{"action",
+         *     "count"}`` for ``corpus_edit``. "Show, never judge": it states that
+         *     something happened, never whether it was good.
+         */
+        GardenHealthEventOut: {
+            /**
+             * At
+             * Format: date-time
+             */
+            at: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "classifier_version" | "corpus_edit";
+            /** Detail */
+            detail: {
+                [key: string]: unknown;
+            };
         };
         /**
          * GardenHealthMetricOut
@@ -10246,6 +10296,21 @@ export interface components {
              */
             retrieval_semantic_min_similarity?: number;
             /**
+             * Retrieval Grader Min Rrf
+             * @default 0
+             */
+            retrieval_grader_min_rrf?: number;
+            /**
+             * Autonomous Jobs Enabled
+             * @default true
+             */
+            autonomous_jobs_enabled?: boolean;
+            /**
+             * Autonomous Daily Credit Cap
+             * @default 0
+             */
+            autonomous_daily_credit_cap?: number;
+            /**
              * Attachment Max Bytes
              * @default 0
              */
@@ -10265,6 +10330,12 @@ export interface components {
             autonomous_dispatch?: components["schemas"]["AutonomousDispatch"] | null;
             /** Retrieval Semantic Min Similarity */
             retrieval_semantic_min_similarity?: number | null;
+            /** Retrieval Grader Min Rrf */
+            retrieval_grader_min_rrf?: number | null;
+            /** Autonomous Jobs Enabled */
+            autonomous_jobs_enabled?: boolean | null;
+            /** Autonomous Daily Credit Cap */
+            autonomous_daily_credit_cap?: number | null;
             /** Attachment Max Bytes */
             attachment_max_bytes?: number | null;
         };
@@ -20541,6 +20612,42 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["GardenHealthSnapshotOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    garden_health_events_garden_health_events_get: {
+        parameters: {
+            query?: {
+                days?: number;
+            };
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GardenHealthEventOut"][];
                 };
             };
             /** @description Validation Error */

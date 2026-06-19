@@ -36,7 +36,7 @@ from __future__ import annotations
 import datetime
 import uuid
 from dataclasses import asdict, dataclass
-from typing import Any
+from typing import Any, Literal
 
 from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -56,6 +56,19 @@ TAG_ENTROPY_FLOOR = 1.2
 # ranking failed badly enough that "was it top-1?" is no longer the
 # interesting question, so it is excluded from the denominator.
 RECALL_K = 10
+
+# "what changed" timeline (ADR-0035 §84) ------------------------------
+# A UTC day whose note create/archive/delete count reaches this is
+# surfaced as a "big corpus edit": enough to plausibly move density /
+# note count, not the everyday one-off capture. A module constant, not a
+# per-org setting (YAGNI): promote to Organization.settings only if a
+# workspace ever needs to tune it.
+BULK_EDIT_THRESHOLD = 10
+# Note lifecycle actions that change the *shape* of the corpus (count /
+# density) -- the bursts that plausibly explain a sensor shift. Content
+# edits (update / attach_tag) are excluded: they don't move the
+# structural sensors and would only add noise to the timeline.
+_CORPUS_SHAPE_ACTIONS: tuple[str, ...] = ("create", "archive", "delete")
 
 # A human decision on a proposal. ``auto`` (the worker's system
 # promotion) is excluded so the ratio reflects what the *person* chose.
@@ -97,6 +110,18 @@ class GardenHealth:
 
     def as_dict(self) -> dict[str, dict[str, Any]]:
         return {key: asdict(metric) for key, metric in vars(self).items()}
+
+
+@dataclass(frozen=True)
+class HealthEvent:
+    """One entry on the "what changed" timeline (ADR-0035 §84): when it
+    happened, its kind, and a small kind-specific detail bag. Read-only
+    and factual ("show, never judge"): it records *that* something
+    happened, never whether it was good."""
+
+    at: datetime.datetime
+    kind: Literal["classifier_version", "corpus_edit"]
+    detail: dict[str, Any]
 
 
 def _utcnow() -> datetime.datetime:
@@ -408,3 +433,83 @@ async def recent_snapshots(
         )
     ).scalars()
     return list(rows)
+
+
+async def recent_events(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    days: int = 90,
+    now: datetime.datetime | None = None,
+) -> list[HealthEvent]:
+    """The "what changed" timeline (ADR-0035 §84): discrete events that
+    plausibly explain a shift in the sensors, so a reading is interpreted
+    ("the model changed" vs "I archived 200 notes") instead of guessed.
+
+    DERIVED, not a separate event store: both sources are existing
+    RLS-scoped append-only streams, so the timeline is consistent with
+    the source of truth by construction and needs no new write path or
+    migration. New sources are additive -- a new branch here.
+
+      * ``classifier_version`` -- first appearance of each distinct
+        ``classification_feedback.model_version`` inside the window (a
+        classifier "bump"). One entry today (``MODEL_VERSION`` is a
+        constant); more once the classifier is actually versioned.
+      * ``corpus_edit`` -- a UTC day whose note create/archive/delete
+        count reached ``BULK_EDIT_THRESHOLD`` (a bulk archive/import/
+        cleanup that moves density or note count). One entry per
+        (day, action).
+
+    Learning-loop snapshots (ADR-0035 §84's third source) are deferred:
+    ADR-0037 has no snapshot stream to derive from yet.
+
+    Returned newest-first, matching the snapshot trend.
+    """
+    now = now or _utcnow()
+    since = now - datetime.timedelta(days=days)
+    events: list[HealthEvent] = []
+
+    # Classifier bumps: first ts per distinct model_version, kept only
+    # when that first appearance falls inside the window.
+    ver_rows = (
+        await session.execute(
+            select(
+                ClassificationFeedback.model_version,
+                func.min(ClassificationFeedback.ts),
+            )
+            .where(ClassificationFeedback.org_id == org_id)
+            .group_by(ClassificationFeedback.model_version)
+            .having(func.min(ClassificationFeedback.ts) >= since)
+        )
+    ).all()
+    for version, first_ts in ver_rows:
+        events.append(
+            HealthEvent(at=first_ts, kind="classifier_version", detail={"version": version})
+        )
+
+    # Big corpus edits: a UTC day with a burst of shape-changing note
+    # actions, one entry per (day, action) at/above the threshold. The
+    # ``archive`` action counts both archive and unarchive flips (they
+    # share the action name); the count is still an honest "N notes had
+    # their archived flag flipped that day".
+    day = func.date_trunc("day", ActivityLog.ts)
+    edit_rows = (
+        await session.execute(
+            select(day, ActivityLog.action, func.count())
+            .where(
+                ActivityLog.org_id == org_id,
+                ActivityLog.entity == "note",
+                ActivityLog.action.in_(_CORPUS_SHAPE_ACTIONS),
+                ActivityLog.ts >= since,
+            )
+            .group_by(day, ActivityLog.action)
+            .having(func.count() >= BULK_EDIT_THRESHOLD)
+        )
+    ).all()
+    for day_ts, action, n in edit_rows:
+        events.append(
+            HealthEvent(at=day_ts, kind="corpus_edit", detail={"action": action, "count": int(n)})
+        )
+
+    events.sort(key=lambda e: e.at, reverse=True)
+    return events

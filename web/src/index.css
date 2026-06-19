@@ -2208,6 +2208,53 @@ button.btn--danger:hover {
   color: var(--muted);
   font-style: italic;
 }
+/* "What changed" timeline (ADR-0035 §84): factual events below the cards
+   that may explain a sensor shift. Show, never judge. */
+.ghealth__timeline {
+  margin-top: 1.4rem;
+  border-top: 1px solid var(--border);
+  padding-top: 0.9rem;
+}
+.ghealth__timeline-head {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text-h);
+  margin: 0 0 0.2rem;
+}
+.ghealth__timeline-intro {
+  font-size: 0.8rem;
+  color: var(--muted);
+  margin: 0 0 0.6rem;
+}
+.ghealth__timeline-empty {
+  font-size: 0.8rem;
+  color: var(--muted);
+  font-style: italic;
+}
+.ghealth__timeline-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 0.4rem;
+}
+.ghealth__timeline-item {
+  display: grid;
+  grid-template-columns: 7.5rem 1fr;
+  gap: 0.6rem;
+  align-items: baseline;
+  padding: 0.35rem 0.7rem;
+  border-left: 2px solid var(--border);
+}
+.ghealth__timeline-date {
+  font-size: 0.74rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.ghealth__timeline-label {
+  font-size: 0.82rem;
+  line-height: 1.35;
+}
 /* A live card is clickable: it opens the 90-day per-metric drill-down. */
 .ghealth__card--clickable {
   cursor: pointer;
@@ -2926,6 +2973,13 @@ button.btn--danger:hover {
 }
 .kanban__card-head {
   display: flex;
+  /* Wrap so a RUNNING timer's wide actions cluster (pause + memo +
+     stop-with-live-readout ⏱■ H:MM:SS) drops onto its own line below the
+     title instead of crushing it. On a 16rem card the title + a running
+     timer can't share one row; without wrap the title was squeezed below
+     a single word's width and wrapped one-character-per-line, while the
+     non-shrinkable IdentityBadge spilled over the actions. */
+  flex-wrap: wrap;
   align-items: flex-start;
   gap: 0.4rem;
 }
@@ -2945,8 +2999,17 @@ button.btn--danger:hover {
   color: inherit;
   text-decoration: none;
   word-break: break-word;
-  flex: 1 1 auto;
-  min-width: 0;
+  /* flex-basis 0 makes the line-break decision depend on min-width
+     alone, not on title length: the title's packing width is always the
+     6rem floor, so the two idle start glyphs (⏱▶ ⏱▶▶) always fit beside
+     it while the wider running-timer cluster (pause+memo+stop readout)
+     always wraps below it (see .kanban__card-head) — regardless of how
+     long the title is. The floor also keeps the title at least a word
+     wide, so it never wraps one-character-per-line nor lets the
+     non-shrinkable IdentityBadge overflow the actions. flex-grow then
+     expands the title to fill whatever space its line has left. */
+  flex: 1 1 0;
+  min-width: 6rem;
 }
 .kanban__title:hover { text-decoration: underline; }
 .kanban__meta {

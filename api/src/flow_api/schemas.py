@@ -1166,6 +1166,19 @@ class GardenHealthOut(BaseModel):
     trend: list[GardenHealthSnapshotOut]
 
 
+class GardenHealthEventOut(BaseModel):
+    """One entry of the "what changed" timeline (ADR-0035 §84): a factual
+    record correlating a sensor shift with a cause -- a classifier bump
+    or a bulk corpus edit. ``detail`` is a small kind-specific bag:
+    ``{"version": ...}`` for ``classifier_version``; ``{"action",
+    "count"}`` for ``corpus_edit``. "Show, never judge": it states that
+    something happened, never whether it was good."""
+
+    at: datetime.datetime
+    kind: Literal["classifier_version", "corpus_edit"]
+    detail: dict[str, Any]
+
+
 class GardenApplyIn(BaseModel):
     """Apply (or decline) one suggestion. ``accept``/``override`` mutate
     via the existing services; ``reject``/``ignore`` only record the

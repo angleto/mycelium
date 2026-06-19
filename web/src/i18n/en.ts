@@ -79,6 +79,17 @@ export const en = {
           'Change in links-per-node over 7 days. Positive means the mycelium is thickening.',
       },
     },
+    timeline: {
+      title: 'What changed',
+      intro: 'Recent events that may explain a shift in the readings above.',
+      empty: 'Nothing notable has changed recently.',
+      classifierVersion: 'Classifier updated to {{version}}',
+      action: {
+        create: '{{count}} notes created',
+        archive: '{{count}} notes archived',
+        delete: '{{count}} notes deleted',
+      },
+    },
   },
   common: {
     on: 'on',

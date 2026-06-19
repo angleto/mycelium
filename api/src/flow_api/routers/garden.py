@@ -36,6 +36,7 @@ from flow_api.schemas import (
     GardenClusterSuggestionOut,
     GardenGraphEdge,
     GardenGraphOut,
+    GardenHealthEventOut,
     GardenHealthMetricOut,
     GardenHealthOut,
     GardenHealthSnapshotOut,
@@ -95,6 +96,21 @@ async def garden_health_timeseries(
         )
         for s in snaps
     ]
+
+
+@router.get("/health/events", response_model=list[GardenHealthEventOut])
+async def garden_health_events(
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+    days: Annotated[int, Query(ge=1, le=365)] = 90,
+) -> list[GardenHealthEventOut]:
+    """The "what changed" timeline (ADR-0035 §84, task d0bada67): discrete
+    events that plausibly explain a shift in the sensors -- a classifier
+    bump or a bulk corpus edit -- so a reading is interpreted, not
+    guessed. Newest first. Derived live from the existing audit +
+    feedback streams (no separate event store), workspace-scoped by RLS.
+    "Show, never judge": facts, never a verdict."""
+    events = await health_svc.recent_events(ctx.session, org_id=ctx.org_id, days=days)
+    return [GardenHealthEventOut(at=e.at, kind=e.kind, detail=e.detail) for e in events]
 
 
 @router.get("/graph", response_model=GardenGraphOut)

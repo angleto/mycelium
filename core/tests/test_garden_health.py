@@ -69,6 +69,23 @@ def _fb(org: uuid.UUID, user: uuid.UUID, action: str) -> ClassificationFeedback:
     )
 
 
+def _archive_row(
+    org: uuid.UUID, user: uuid.UUID, ts: datetime.datetime | None = None
+) -> ActivityLog:
+    """A note-archive audit row (append-only log; the what-changed
+    timeline derives 'big corpus edits' from these). ``ts`` pins the day
+    so a burst aggregates into one group deterministically."""
+    return ActivityLog(
+        org_id=org,
+        actor_id=user,
+        actor_kind="human_direct",
+        entity="note",
+        entity_id=uuid.uuid4(),
+        action="archive",
+        ts=ts,
+    )
+
+
 async def test_accept_rate_counts_human_decisions_excludes_auto() -> None:
     org, user = await _org_user()
     async with tenant_session(str(org), str(user)) as s:
@@ -287,3 +304,99 @@ async def test_fungal_lag_reason_when_distillation_from_live_source(_wire_llm: N
         health = await health_svc.compute_health(s, org_id=org)
     assert health.fungal_lag.value is None
     assert health.fungal_lag.reason == health_svc._NO_ARCHIVED_DISTILLATIONS
+
+
+# --- "what changed" timeline (ADR-0035 §84, task d0bada67) ---
+
+
+async def test_events_empty_on_fresh_workspace() -> None:
+    org, user = await _org_user()
+    async with tenant_session(str(org), str(user)) as s:
+        events = await health_svc.recent_events(s, org_id=org)
+    assert events == []
+
+
+async def test_events_classifier_version_one_entry_per_version() -> None:
+    org, user = await _org_user()
+    async with tenant_session(str(org), str(user)) as s:
+        # Two feedback rows, same model_version -> a single bump event
+        # (first appearance), not one per row.
+        s.add(_fb(org, user, "accept"))
+        s.add(_fb(org, user, "reject"))
+        await s.flush()
+        events = await health_svc.recent_events(s, org_id=org)
+    versions = [e for e in events if e.kind == "classifier_version"]
+    assert len(versions) == 1
+    assert versions[0].detail == {"version": "garden-classify-v1"}
+
+
+async def test_events_corpus_edit_at_threshold_not_below() -> None:
+    org, user = await _org_user()
+    ts = datetime.datetime.now(datetime.UTC) - datetime.timedelta(days=1)
+    async with tenant_session(str(org), str(user)) as s:
+        # One short of the threshold -> no corpus_edit (everyday churn,
+        # not a deliberate batch).
+        for _ in range(health_svc.BULK_EDIT_THRESHOLD - 1):
+            s.add(_archive_row(org, user, ts=ts))
+        await s.flush()
+        below = await health_svc.recent_events(s, org_id=org)
+        assert [e for e in below if e.kind == "corpus_edit"] == []
+        # Reaching the threshold surfaces exactly one (day, action) entry.
+        s.add(_archive_row(org, user, ts=ts))
+        await s.flush()
+        at = await health_svc.recent_events(s, org_id=org)
+    edits = [e for e in at if e.kind == "corpus_edit"]
+    assert len(edits) == 1
+    assert edits[0].detail == {"action": "archive", "count": health_svc.BULK_EDIT_THRESHOLD}
+
+
+async def test_events_corpus_edit_from_real_note_creates() -> None:
+    """End-to-end: a burst of real create_note calls feeds the timeline
+    through the production audit path, not just hand-inserted rows."""
+    org, user = await _org_user()
+    async with tenant_session(str(org), str(user)) as s:
+        for i in range(health_svc.BULK_EDIT_THRESHOLD):
+            await _make_note(s, org, user, f"n{i}")
+        events = await health_svc.recent_events(s, org_id=org)
+    creates = [e for e in events if e.kind == "corpus_edit" and e.detail["action"] == "create"]
+    assert len(creates) == 1
+    assert creates[0].detail["count"] >= health_svc.BULK_EDIT_THRESHOLD
+
+
+async def test_events_sorted_newest_first() -> None:
+    org, user = await _org_user()
+    now = datetime.datetime.now(datetime.UTC)
+    older = now - datetime.timedelta(days=5)
+    newer = now - datetime.timedelta(days=1)
+    async with tenant_session(str(org), str(user)) as s:
+        for ts in (older, newer):
+            for _ in range(health_svc.BULK_EDIT_THRESHOLD):
+                s.add(_archive_row(org, user, ts=ts))
+        await s.flush()
+        events = await health_svc.recent_events(s, org_id=org)
+    edits = [e for e in events if e.kind == "corpus_edit"]
+    assert len(edits) == 2
+    assert edits[0].at > edits[1].at  # newest first
+
+
+async def test_events_window_excludes_out_of_range() -> None:
+    org, user = await _org_user()
+    now = datetime.datetime.now(datetime.UTC)
+    async with tenant_session(str(org), str(user)) as s:
+        # A bulk archive 2 days ago (inside a 7-day window).
+        for _ in range(health_svc.BULK_EDIT_THRESHOLD):
+            s.add(_archive_row(org, user, ts=now - datetime.timedelta(days=2)))
+        # Classifier feedback whose first appearance is 30 days ago
+        # (outside the 7-day window).
+        s.add(_fb(org, user, "accept"))
+        await s.flush()
+        await s.execute(
+            update(ClassificationFeedback)
+            .where(ClassificationFeedback.org_id == org)
+            .values(ts=now - datetime.timedelta(days=30))
+        )
+        await s.flush()
+        windowed = await health_svc.recent_events(s, org_id=org, days=7)
+    kinds = {e.kind for e in windowed}
+    assert "corpus_edit" in kinds  # 2 days ago -> inside the window
+    assert "classifier_version" not in kinds  # 30 days ago -> excluded

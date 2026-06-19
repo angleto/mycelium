@@ -78,6 +78,17 @@ export const it: Catalog = {
           'Variazione dei link per nodo in 7 giorni. Positivo = il micelio si sta infittendo.',
       },
     },
+    timeline: {
+      title: 'Cosa è cambiato',
+      intro: 'Eventi recenti che possono spiegare uno spostamento delle letture qui sopra.',
+      empty: 'Niente di rilevante è cambiato di recente.',
+      classifierVersion: 'Classificatore aggiornato a {{version}}',
+      action: {
+        create: '{{count}} note create',
+        archive: '{{count}} note archiviate',
+        delete: '{{count}} note eliminate',
+      },
+    },
   },
   common: {
     on: 'sì',

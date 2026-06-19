@@ -80,3 +80,40 @@ async def test_garden_health_timeseries_contract() -> None:
         # The window is bounded (1..365).
         r3 = await c.get("/garden/health/timeseries?days=0", headers=h)
         assert r3.status_code == 422
+
+
+async def test_garden_health_events_empty_and_bounds() -> None:
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as c:
+        h = await _signup(c)
+        # Fresh workspace: nothing has changed yet -> empty timeline.
+        r = await c.get("/garden/health/events", headers=h)
+        assert r.status_code == 200, r.text
+        assert r.json() == []
+        # Window is bounded (1..365).
+        r2 = await c.get("/garden/health/events?days=0", headers=h)
+        assert r2.status_code == 422
+
+
+async def test_garden_health_events_surfaces_bulk_create() -> None:
+    """End-to-end: a burst of note creations over the API shows up on the
+    what-changed timeline as a single corpus_edit, with the fields the
+    SPA renders (at / kind / detail)."""
+    from flow_core.services.garden_health import BULK_EDIT_THRESHOLD
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as c:
+        h = await _signup(c)
+        for i in range(BULK_EDIT_THRESHOLD):
+            rc = await c.post("/notes", headers=h, json={"kind": "text", "title": f"n{i}"})
+            assert rc.status_code == 200, rc.text
+        r = await c.get("/garden/health/events", headers=h)
+        assert r.status_code == 200, r.text
+        events = r.json()
+
+    creates = [
+        e for e in events if e["kind"] == "corpus_edit" and e["detail"]["action"] == "create"
+    ]
+    assert len(creates) == 1
+    assert creates[0]["detail"]["count"] >= BULK_EDIT_THRESHOLD
+    assert "at" in creates[0]

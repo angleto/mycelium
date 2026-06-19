@@ -20,6 +20,7 @@ import type { components } from '../api/schema'
 
 type Health = components['schemas']['GardenHealthOut']
 type Metric = components['schemas']['GardenHealthMetricOut']
+type HealthEvent = components['schemas']['GardenHealthEventOut']
 
 type Kind = 'pct' | 'duration' | 'bits' | 'scalar' | 'delta'
 type Dir = 'higher' | 'lower' | 'trend' | 'signed'
@@ -379,6 +380,72 @@ function MetricDrillDown({
   )
 }
 
+// "What changed" timeline (ADR-0035 §84, task d0bada67): discrete events
+// that may explain a shift in the sensors above -- a classifier bump or a
+// bulk corpus edit -- so a reading is interpreted, not guessed. Derived
+// live from the audit + feedback streams; empty until something actually
+// changed. "Show, never judge": facts, never a verdict.
+function WhatChangedTimeline() {
+  const { t, i18n } = useTranslation()
+  const [events, setEvents] = useState<HealthEvent[] | null | undefined>(undefined)
+
+  useEffect(() => {
+    let active = true
+    void api
+      .GET('/garden/health/events', {
+        params: { header: workspaceHeader(), query: { days: 90 } },
+      })
+      .then((r) => {
+        if (active) setEvents(r.data ?? null)
+      })
+    return () => {
+      active = false
+    }
+  }, [])
+
+  const describe = (e: HealthEvent): string => {
+    if (e.kind === 'classifier_version') {
+      const version = String((e.detail as { version?: unknown }).version ?? '?')
+      return t('gardenHealth.timeline.classifierVersion', { version })
+    }
+    const d = e.detail as { action?: unknown; count?: unknown }
+    const action = String(d.action ?? '')
+    const count = typeof d.count === 'number' ? d.count : 0
+    return t(`gardenHealth.timeline.action.${action}`, { count, defaultValue: `${count}` })
+  }
+
+  const fmtDay = (iso: string): string =>
+    new Date(iso).toLocaleDateString(i18n.language, {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+    })
+
+  return (
+    <section className="ghealth__timeline">
+      <h2 className="ghealth__timeline-head">{t('gardenHealth.timeline.title')}</h2>
+      <p className="ghealth__timeline-intro">{t('gardenHealth.timeline.intro')}</p>
+      {events === undefined && <p className="hint">{t('common.loading')}</p>}
+      {events === null && <p className="error">{t('gardenHealth.loadError')}</p>}
+      {events && events.length === 0 && (
+        <p className="ghealth__timeline-empty">{t('gardenHealth.timeline.empty')}</p>
+      )}
+      {events && events.length > 0 && (
+        <ul className="ghealth__timeline-list">
+          {events.map((e, i) => (
+            <li key={`${e.kind}-${e.at}-${i}`} className="ghealth__timeline-item">
+              <time className="ghealth__timeline-date" dateTime={e.at}>
+                {fmtDay(e.at)}
+              </time>
+              <span className="ghealth__timeline-label">{describe(e)}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  )
+}
+
 export function GardenHealthRoute() {
   const { t } = useTranslation()
   const [data, setData] = useState<Health | null | undefined>(undefined)
@@ -457,6 +524,8 @@ export function GardenHealthRoute() {
               </ul>
             </section>
           )}
+
+          <WhatChangedTimeline />
 
           {drill && data.metrics[drill] && (
             <MetricDrillDown
