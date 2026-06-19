@@ -99,7 +99,23 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
-COPY --from=builder /app /app
+# Split the copy so an ordinary code commit does NOT re-push/re-pull the
+# multi-GB venv + baked-model layers. A single `COPY /app /app` bundles the
+# ~3 GB venv (torch) and the prefetched faster-whisper model (/app/.cache,
+# ~460 MB) with the few-MB workspace source into ONE layer, so any code change
+# rebuilds the whole blob and every node re-pulls it on deploy (d11a0b0f). The
+# venv + model cache are code-independent (change only when deps change); the
+# workspace is installed EDITABLE (.venv `_editable_impl_*.pth` -> /app/<member>/src).
+# Copying the heavy code-independent dirs as their OWN layers keeps their digests
+# stable so the node re-pulls only the thin source layer below.
+COPY --from=builder /app/.venv /app/.venv
+COPY --from=builder /app/.cache /app/.cache
+COPY --from=builder /app/pyproject.toml /app/uv.lock /app/
+COPY --from=builder /app/core /app/core
+COPY --from=builder /app/api /app/api
+COPY --from=builder /app/mcp /app/mcp
+COPY --from=builder /app/worker /app/worker
+COPY --from=builder /app/sdi-inbound /app/sdi-inbound
 
 EXPOSE 8000
 # --proxy-headers + --forwarded-allow-ips so uvicorn trusts the

@@ -74,6 +74,21 @@ RUN apt-get update && apt-get install -y --no-install-recommends libpq5 libgomp1
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
-COPY --from=builder /app /app
+# Split the copy so an ordinary code commit does NOT re-push/re-pull the
+# multi-GB venv layer. A single `COPY /app /app` bundles the ~3 GB venv (torch)
+# with the few-MB workspace source into ONE layer, so any code change rebuilds
+# the whole 3 GB blob and every node re-pulls it on deploy (d11a0b0f: that
+# serialised the arm node's pull queue, ~hours). The workspace is installed
+# EDITABLE (.venv carries `_editable_impl_*.pth` -> /app/<member>/src), so the
+# venv is byte-stable across code-only changes when the builder deps layer is
+# cache-hit; copying it as its OWN layer keeps its digest stable and the node
+# re-pulls only the thin source layer below.
+COPY --from=builder /app/.venv /app/.venv
+COPY --from=builder /app/pyproject.toml /app/uv.lock /app/
+COPY --from=builder /app/core /app/core
+COPY --from=builder /app/api /app/api
+COPY --from=builder /app/mcp /app/mcp
+COPY --from=builder /app/worker /app/worker
+COPY --from=builder /app/sdi-inbound /app/sdi-inbound
 
 CMD ["python", "-m", "flow_worker.main"]
