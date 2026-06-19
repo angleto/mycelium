@@ -1,6 +1,6 @@
 # ADR-0036 — Event bus for multi-agent coordination on the graph
 
-Status: Proposed
+Status: Accepted (ratified 2026-06-19; amended for the is_inert gate + commit quota, task c19b5489)
 Date: 2026-05-27
 Tracks: task `f1801a47-eefd-484d-9c25-241fb42eefed`
 Depends on: ADR-0025 (executor registry), ADR-0027 (adjudication), ADR-0028 (identity-first addressing)
@@ -138,6 +138,25 @@ No accept/reject can reach the learning loop except as a bus event.
   `event_quota_per_day`. The gateway counts events at insert time
   and 429s past quota.
 - Human actors share the org's default quota.
+
+### Inert-gate on autonomous commits (amendment 2026-06-19, task c19b5489)
+
+ADR-0036 as first written specifies propose → commit but never names the
+`is_inert` predicate: an autonomous/agent `commit` could mutate a *live*
+note — the §12 "changes under your feet" race. Amendment: every `commit`
+whose `actor_kind = 'agent'` re-checks the target note's `is_inert`
+predicate **inside the apply transaction**, before any mutation. If the
+note is not inert (live: not archived/dormant, recently edited, or
+carrying open work), the commit is refused with a `ConflictError` (HTTP
+409) and the mutation never happens — the agent operates on inert notes,
+or `propose`s and lets a human/adjudicator commit. `human` commits bypass
+the gate (the human is the authority on their own live note); `system`
+batch jobs (e.g. `auto_promote_mature`, which works on *growing* notes
+where `is_inert` is moot) keep their own `open_work_exists` guard rather
+than the full inert predicate. Combined with the per-actor event quota
+(429, §Agent registry & quotas) this closes both the runaway-write and
+the clobber-live-note failure modes. (Persisting refused attempts on the
+audit stream needs an autonomous side-transaction; deferred.)
 
 ### Subscribers
 

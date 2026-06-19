@@ -91,6 +91,31 @@ export const en = {
       },
     },
   },
+  gardenAudit: {
+    title: 'Event stream',
+    back: '← Garden',
+    intro:
+      'The coordinated events on this workspace’s graph (ADR-0036): read, propose, commit, reject. Shown, never judged.',
+    empty: 'No events yet.',
+    loadError: 'Could not load the event stream.',
+    kind: {
+      read: 'read',
+      propose: 'proposed',
+      commit: 'committed',
+      reject: 'rejected',
+      snapshot: 'snapshot',
+    },
+    actor: {
+      human: 'human',
+      agent: 'agent',
+      system: 'system',
+    },
+    applied: {
+      committed: 'applied',
+      rejected: 'refused',
+      merged: 'merged',
+    },
+  },
   common: {
     on: 'on',
     off: 'off',

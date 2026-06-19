@@ -86,3 +86,9 @@ class Executor(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, Base):
     capability_tags: Mapped[list[str]] = mapped_column(
         ARRAY(Text()), nullable=False, server_default=text("'{}'")
     )
+    # ADR-0036 event-bus quotas (anti-runaway, task c19b5489). Max bus
+    # events this executor may emit per minute / per day; 0 = unlimited
+    # (opt-in cap, same convention as autonomous_daily_credit_cap, so
+    # nothing is silently throttled). Enforced at emit time (429 past cap).
+    event_quota_per_min: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    event_quota_per_day: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")

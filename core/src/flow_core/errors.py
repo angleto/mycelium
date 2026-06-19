@@ -43,6 +43,11 @@ class LockedError(DomainError):
     Distinct from AuthError so clients can stop retrying (ADR-0024)."""
 
 
+class QuotaExceededError(DomainError):
+    """Rate/volume quota exhausted: HTTP 429. The event-bus anti-runaway
+    cap on an actor's emissions (ADR-0036 / c19b5489)."""
+
+
 def jsonable_params(params: dict[str, Any]) -> dict[str, Any]:
     """Coerce ``DomainError.params`` to JSON-safe values so an adapter
     can embed them in a structured error envelope without the serializer

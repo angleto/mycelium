@@ -322,6 +322,9 @@ export function GardenRoute() {
         <Link to="/garden/health" className="garden__health-link">
           {t('gardenHealth.title')} →
         </Link>
+        <Link to="/garden/audit" className="garden__health-link">
+          {t('gardenAudit.title')} →
+        </Link>
       </div>
 
       {err && <p className="err">{err}</p>}

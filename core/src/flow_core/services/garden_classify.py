@@ -42,7 +42,7 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from flow_core.errors import DomainError, NotFoundError
+from flow_core.errors import ConflictError, DomainError, NotFoundError
 from flow_core.i18n import MessageCode
 from flow_core.models.classification_feedback import (
     FEEDBACK_ACTIONS,
@@ -54,7 +54,7 @@ from flow_core.models.note import Note
 from flow_core.models.note_link import NoteNoteLink
 from flow_core.models.note_tag import NoteTag
 from flow_core.models.tag import Tag, TagKind
-from flow_core.services import audit, graph_snapshot, note_inert, note_links
+from flow_core.services import audit, event_bus, graph_snapshot, note_inert, note_links
 from flow_core.services import graph as graph_svc
 from flow_core.services import link_prediction as linkpred_svc
 from flow_core.services import notes as notes_svc
@@ -484,8 +484,17 @@ async def apply_suggestion(
             valid=", ".join(sorted(FEEDBACK_ACTIONS)),
         )
     await require_role(session, org_id, actor_id, Role.member)
+    actor_kind = await event_bus.session_actor_kind(session)
 
     if action in {"accept", "override", "auto"}:
+        # ADR-0036 amendment (c19b5489): an autonomous AGENT must not
+        # commit over a live note. Human actors are the authority on their
+        # own live notes; system batch jobs carry their own open-work guard
+        # (auto_promote_mature), so the gate is agent-only.
+        if actor_kind == "agent":
+            note = await session.get(Note, node_id)
+            if note is not None and not await note_inert.is_inert(session, note=note):
+                raise ConflictError(MessageCode.EVENT_NODE_NOT_INERT)
         effective = override_value if action == "override" else suggestion_value
         await _mutate(
             session,
@@ -516,6 +525,22 @@ async def apply_suggestion(
         entity="note",
         entity_id=node_id,
         action=f"garden_apply:{suggestion_type}:{action}",
+    )
+    # ADR-0036: the decision rides the bus too (synthetic propose -> commit
+    # /reject), in the SAME transaction as the feedback row so the audit
+    # stream and the learning loop can never disagree.
+    await event_bus.record_classification_decision(
+        session,
+        actor_kind=actor_kind,
+        org_id=org_id,
+        actor_id=actor_id,
+        node_id=node_id,
+        suggestion_type=suggestion_type,
+        suggestion_value=suggestion_value,
+        action=action,
+        model_version=model_version,
+        signals_snapshot=signals_snapshot or {},
+        override_value=override_value,
     )
     return feedback
 
@@ -578,6 +603,11 @@ async def auto_promote_mature(
         await note_links.set_maturity(
             session, org_id=org_id, actor_id=actor_id, note_id=note.id, maturity="mature"
         )
+        signals = {
+            "pr_pct": pr_pct,
+            "manual_degree": float(degree.get(note.id, 0)),
+            "conf_mature": conf,
+        }
         session.add(
             ClassificationFeedback(
                 org_id=org_id,
@@ -587,12 +617,23 @@ async def auto_promote_mature(
                 suggestion_value={"value": "mature"},
                 action="auto",
                 model_version=MODEL_VERSION,
-                signals_snapshot={
-                    "pr_pct": pr_pct,
-                    "manual_degree": float(degree.get(note.id, 0)),
-                    "conf_mature": conf,
-                },
+                signals_snapshot=signals,
             )
+        )
+        # ADR-0036 §123: the worker's auto-promotion is a system commit on
+        # the bus (no inert gate -- a growing note is never inert; the
+        # open_work_exists guard above already protects active work).
+        await event_bus.record_classification_decision(
+            session,
+            actor_kind="system",
+            org_id=org_id,
+            actor_id=actor_id,
+            node_id=note.id,
+            suggestion_type="maturity",
+            suggestion_value={"value": "mature"},
+            action="auto",
+            model_version=MODEL_VERSION,
+            signals_snapshot=signals,
         )
         promoted += 1
     await session.flush()

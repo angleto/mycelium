@@ -165,6 +165,8 @@ class MessageCode(enum.StrEnum):
     NOTE_PART_ANCHOR_REQUIRED = "note.part.anchor_required"
     GARDEN_SUGGESTION_TYPE_INVALID = "garden.suggestion_type_invalid"
     GARDEN_ACTION_INVALID = "garden.action_invalid"
+    EVENT_QUOTA_EXCEEDED = "event.quota_exceeded"
+    EVENT_NODE_NOT_INERT = "event.node_not_inert"
     IDENTITY_HANDLE_REQUIRED = "identity.handle_required"
     IDENTITY_NOT_FOUND = "identity.not_found"
     ANNOTATION_NOT_FOUND = "annotation.not_found"
@@ -438,6 +440,13 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
             "Invalid suggestion type '{suggestion_type}'. Allowed: {valid}."
         ),
         MessageCode.GARDEN_ACTION_INVALID: "Invalid apply action '{action}'. Allowed: {valid}.",
+        MessageCode.EVENT_QUOTA_EXCEEDED: (
+            "Event quota exceeded for this actor: {limit} per {window}. Try again later."
+        ),
+        MessageCode.EVENT_NODE_NOT_INERT: (
+            "Autonomous commit rejected: the target note is live (not inert); "
+            "refusing to overwrite active work."
+        ),
         MessageCode.NOTE_TASK_LINK_KIND_INVALID: (
             "Invalid note-task link kind '{kind}'. Allowed: {valid}."
         ),

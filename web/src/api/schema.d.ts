@@ -4252,6 +4252,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/garden/audit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Garden Audit
+         * @description The workspace event stream (ADR-0036 audit panel): the coordinated
+         *     read/propose/commit/reject/snapshot events, newest first, RLS-scoped.
+         *     ``days`` bounds the window (replay-from-cursor for subscribers).
+         *     "Show, never judge": the verbatim events, never a verdict.
+         */
+        get: operations["garden_audit_garden_audit_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/garden/graph": {
         parameters: {
             query?: never;
@@ -6713,6 +6736,54 @@ export interface components {
             modularity: number | null;
             /** Count */
             count: number;
+        };
+        /**
+         * GardenEventOut
+         * @description One ``event_outbox`` row on the workspace event stream (ADR-0036
+         *     audit panel): the verbatim coordinated read/propose/commit/reject/
+         *     snapshot event. ``applied_state`` is null until the adjudicator decides
+         *     a propose. "Show, never judge": the event, not a verdict.
+         */
+        GardenEventOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Actor Id
+             * Format: uuid
+             */
+            actor_id: string;
+            /**
+             * Actor Kind
+             * @enum {string}
+             */
+            actor_kind: "human" | "agent" | "system";
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "read" | "propose" | "commit" | "reject" | "snapshot";
+            /** Node Kind */
+            node_kind?: string | null;
+            /** Node Id */
+            node_id?: string | null;
+            /** Parent Event Id */
+            parent_event_id?: string | null;
+            /** Payload */
+            payload: {
+                [key: string]: unknown;
+            };
+            /**
+             * Ts
+             * Format: date-time
+             */
+            ts: string;
+            /** Applied At */
+            applied_at?: string | null;
+            /** Applied State */
+            applied_state?: string | null;
         };
         /**
          * GardenGraphEdge
@@ -20648,6 +20719,43 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["GardenHealthEventOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    garden_audit_garden_audit_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                days?: number | null;
+            };
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GardenEventOut"][];
                 };
             };
             /** @description Validation Error */

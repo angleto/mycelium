@@ -62,6 +62,7 @@ from flow_core.models.email import (
     EmailProvider,
 )
 from flow_core.models.entity_revision import EntityRevision
+from flow_core.models.event_outbox import EventOutbox
 from flow_core.models.executor import Executor, ExecutorKind
 from flow_core.models.garden_graph_snapshot import GardenGraphSnapshot
 from flow_core.models.garden_health import GardenHealthDaily
@@ -199,6 +200,7 @@ __all__ = [
     "EmailVerificationToken",
     "EmbedderProviderKind",
     "EntityRevision",
+    "EventOutbox",
     "ExecKind",
     "Executor",
     "ExecutorKind",

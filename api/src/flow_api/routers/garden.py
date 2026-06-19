@@ -34,6 +34,7 @@ from flow_api.schemas import (
     GardenClassifyOut,
     GardenClustersOut,
     GardenClusterSuggestionOut,
+    GardenEventOut,
     GardenGraphEdge,
     GardenGraphOut,
     GardenHealthEventOut,
@@ -48,6 +49,7 @@ from flow_api.schemas import (
     GardenWalkOut,
     GardenWalkStep,
 )
+from flow_core.services import event_bus
 from flow_core.services import garden_classify as classify_svc
 from flow_core.services import garden_health as health_svc
 from flow_core.services import graph as svc
@@ -111,6 +113,40 @@ async def garden_health_events(
     "Show, never judge": facts, never a verdict."""
     events = await health_svc.recent_events(ctx.session, org_id=ctx.org_id, days=days)
     return [GardenHealthEventOut(at=e.at, kind=e.kind, detail=e.detail) for e in events]
+
+
+@router.get("/audit", response_model=list[GardenEventOut])
+async def garden_audit(
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+    limit: Annotated[int, Query(ge=1, le=500)] = 100,
+    days: Annotated[int | None, Query(ge=1, le=365)] = None,
+) -> list[GardenEventOut]:
+    """The workspace event stream (ADR-0036 audit panel): the coordinated
+    read/propose/commit/reject/snapshot events, newest first, RLS-scoped.
+    ``days`` bounds the window (replay-from-cursor for subscribers).
+    "Show, never judge": the verbatim events, never a verdict."""
+    since = (
+        None
+        if days is None
+        else datetime.datetime.now(datetime.UTC) - datetime.timedelta(days=days)
+    )
+    events = await event_bus.recent_events(ctx.session, org_id=ctx.org_id, limit=limit, since=since)
+    return [
+        GardenEventOut(
+            id=e.id,
+            actor_id=e.actor_id,
+            actor_kind=e.actor_kind,
+            kind=e.kind,
+            node_kind=e.node_kind,
+            node_id=e.node_id,
+            parent_event_id=e.parent_event_id,
+            payload=e.payload,
+            ts=e.ts,
+            applied_at=e.applied_at,
+            applied_state=e.applied_state,
+        )
+        for e in events
+    ]
 
 
 @router.get("/graph", response_model=GardenGraphOut)

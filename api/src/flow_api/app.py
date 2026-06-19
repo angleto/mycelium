@@ -65,6 +65,7 @@ from flow_core.errors import (
     ForbiddenError,
     LockedError,
     NotFoundError,
+    QuotaExceededError,
 )
 from flow_core.i18n import DEFAULT_LOCALE, render
 from flow_core.llm_ollama import OllamaLLM
@@ -78,6 +79,7 @@ _STATUS: dict[type[DomainError], int] = {
     NotFoundError: 404,
     ConflictError: 409,
     LockedError: 423,
+    QuotaExceededError: 429,
     DomainError: 400,
 }
 

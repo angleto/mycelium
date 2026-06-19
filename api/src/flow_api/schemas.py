@@ -1179,6 +1179,25 @@ class GardenHealthEventOut(BaseModel):
     detail: dict[str, Any]
 
 
+class GardenEventOut(BaseModel):
+    """One ``event_outbox`` row on the workspace event stream (ADR-0036
+    audit panel): the verbatim coordinated read/propose/commit/reject/
+    snapshot event. ``applied_state`` is null until the adjudicator decides
+    a propose. "Show, never judge": the event, not a verdict."""
+
+    id: uuid.UUID
+    actor_id: uuid.UUID
+    actor_kind: Literal["human", "agent", "system"]
+    kind: Literal["read", "propose", "commit", "reject", "snapshot"]
+    node_kind: str | None = None
+    node_id: uuid.UUID | None = None
+    parent_event_id: uuid.UUID | None = None
+    payload: dict[str, Any]
+    ts: datetime.datetime
+    applied_at: datetime.datetime | None = None
+    applied_state: str | None = None
+
+
 class GardenApplyIn(BaseModel):
     """Apply (or decline) one suggestion. ``accept``/``override`` mutate
     via the existing services; ``reject``/``ignore`` only record the

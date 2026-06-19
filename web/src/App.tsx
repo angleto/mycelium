@@ -27,6 +27,7 @@ import { MemoryRoute } from './routes/MemoryRoute'
 import { NotesRoute } from './routes/NotesRoute'
 import { GardenRoute } from './routes/GardenRoute'
 import { GardenHealthRoute } from './routes/GardenHealthRoute'
+import { GardenAuditRoute } from './routes/GardenAuditRoute'
 import { InvoicesRoute } from './routes/InvoicesRoute'
 import { NotificationsRoute } from './routes/NotificationsRoute'
 import { TagManagerRoute } from './routes/TagManagerRoute'
@@ -82,6 +83,7 @@ function App() {
             <Route path="/n/:prefix" element={<PrefixResolver kind="note" />} />
             <Route path="/garden" element={<GardenRoute />} />
             <Route path="/garden/health" element={<GardenHealthRoute />} />
+            <Route path="/garden/audit" element={<GardenAuditRoute />} />
             <Route path="/invoices" element={<InvoicesRoute />} />
             <Route path="/notifications" element={<NotificationsRoute />} />
             <Route path="/tags" element={<TagManagerRoute />} />

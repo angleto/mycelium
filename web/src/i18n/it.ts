@@ -90,6 +90,31 @@ export const it: Catalog = {
       },
     },
   },
+  gardenAudit: {
+    title: 'Flusso eventi',
+    back: '← Giardino',
+    intro:
+      'Gli eventi coordinati sul grafo di questo workspace (ADR-0036): lettura, proposta, commit, rifiuto. Mostrati, non giudicati.',
+    empty: 'Nessun evento ancora.',
+    loadError: 'Impossibile caricare il flusso eventi.',
+    kind: {
+      read: 'lettura',
+      propose: 'proposta',
+      commit: 'commit',
+      reject: 'rifiuto',
+      snapshot: 'snapshot',
+    },
+    actor: {
+      human: 'umano',
+      agent: 'agente',
+      system: 'sistema',
+    },
+    applied: {
+      committed: 'applicato',
+      rejected: 'rifiutato',
+      merged: 'unito',
+    },
+  },
   common: {
     on: 'sì',
     off: 'no',
