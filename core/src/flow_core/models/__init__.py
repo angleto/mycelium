@@ -46,6 +46,7 @@ from flow_core.models.calendar import (
 )
 from flow_core.models.capability_token import CapabilityToken
 from flow_core.models.classification_feedback import ClassificationFeedback
+from flow_core.models.classification_job import ClassificationJob
 from flow_core.models.classification_personal_prior import ClassificationPersonalPrior
 from flow_core.models.classification_personal_prior_snapshot import (
     ClassificationPersonalPriorSnapshot,
@@ -120,6 +121,7 @@ from flow_core.models.notification import (
 from flow_core.models.org_embedder_provider import EmbedderProviderKind, OrgEmbedderProvider
 from flow_core.models.org_llm_provider import LLMProviderKind, OrgLLMProvider
 from flow_core.models.organization import Organization
+from flow_core.models.precomputed_suggestion import PrecomputedSuggestion
 from flow_core.models.project_profile import ProjectProfile
 from flow_core.models.push_subscription import PushSubscription
 from flow_core.models.schedule import Schedule
@@ -187,6 +189,7 @@ __all__ = [
     "CalendarSubscription",
     "CapabilityToken",
     "ClassificationFeedback",
+    "ClassificationJob",
     "ClassificationPersonalPrior",
     "ClassificationPersonalPriorSnapshot",
     "ClientProfile",
@@ -250,6 +253,7 @@ __all__ = [
     "Organization",
     "PasswordResetToken",
     "PaymentStatus",
+    "PrecomputedSuggestion",
     "ProjectProfile",
     "PushSubscription",
     "RateCard",

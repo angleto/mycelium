@@ -35,6 +35,7 @@ from flow_core.config import get_settings
 from flow_core.errors import DomainError, NotFoundError
 from flow_core.i18n import MessageCode
 from flow_core.models.billing import CostBasis
+from flow_core.models.classification_job import ClassificationJob
 from flow_core.models.membership import Role
 from flow_core.models.note import Note, NoteKind, NoteStatus, NoteTurn, TurnRole
 from flow_core.models.note_tag import NoteTag
@@ -868,6 +869,12 @@ async def create_note(
         channel=channel,
         edit_session_id=edit_session_id,
     )
+    # On-create auto-classify (ADR-0042 D5): enqueue in THIS transaction so a
+    # rolled-back create enqueues nothing; the garden worker drains it
+    # (classify + cache the suggestions). Read-only proposals, gated off by
+    # default — this does NOT gate the note, which is live now as always.
+    if get_settings().garden_autoclassify_on_creation_enabled:
+        session.add(ClassificationJob(org_id=org_id, node_kind="note", node_id=note.id))
     return note
 
 

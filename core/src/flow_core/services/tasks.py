@@ -16,9 +16,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import defer
 
 from flow_core.concurrency import optimistic_update
+from flow_core.config import get_settings
 from flow_core.errors import ConflictError, DomainError, NotFoundError
 from flow_core.i18n import MessageCode
 from flow_core.models.annotation import Annotation
+from flow_core.models.classification_job import ClassificationJob
 from flow_core.models.identity import Identity, IdentityKind
 from flow_core.models.membership import Role
 from flow_core.models.project_profile import ProjectProfile
@@ -413,6 +415,12 @@ async def create_task(
         channel=channel,
         edit_session_id=edit_session_id,
     )
+    # On-create auto-classify (ADR-0042 D5): same-transaction enqueue, drained
+    # by the garden worker. Gated off by default; for TASKS it also requires
+    # the unified-task-graph flag (classify_node accepts a task only then).
+    _cfg = get_settings()
+    if _cfg.garden_autoclassify_on_creation_enabled and _cfg.garden_unified_task_graph_enabled:
+        session.add(ClassificationJob(org_id=org_id, node_kind="task", node_id=task.id))
     return task
 
 

@@ -17,15 +17,25 @@ the tiers are pinned by the manual-link degree alone.
 
 from __future__ import annotations
 
+import datetime
 import uuid
 
+import pytest
+from sqlalchemy import select, update
+
+from flow_core.config import get_settings
 from flow_core.db import admin_session, tenant_session
+from flow_core.errors import NotFoundError
 from flow_core.models.note import Note, NoteKind
 from flow_core.models.note_tag import NoteTag
+from flow_core.models.precomputed_suggestion import PrecomputedSuggestion
 from flow_core.models.tag import TagKind
+from flow_core.models.task import Task
+from flow_core.models.task_tag import TaskTag
 from flow_core.services import garden_classify as gc
 from flow_core.services import note_links, taxonomy
 from flow_core.services import notes as notes_svc
+from flow_core.services import tasks as tasks_svc
 from flow_core.services.auth import signup
 
 
@@ -91,6 +101,22 @@ async def _warm_corpus(s: object, org: uuid.UUID) -> None:
     await s.flush()  # type: ignore[attr-defined]
 
 
+async def _make_task(s: object, org: uuid.UUID, user: uuid.UUID, title: str) -> Task:
+    return await tasks_svc.create_task(
+        s,  # type: ignore[arg-type]
+        org_id=org,
+        actor_id=user,
+        title=title,
+    )
+
+
+async def _attach_task_tag(
+    s: object, org: uuid.UUID, task_id: uuid.UUID, tag_id: uuid.UUID
+) -> None:
+    s.add(TaskTag(org_id=org, task_id=task_id, tag_id=tag_id))  # type: ignore[attr-defined]
+    await s.flush()  # type: ignore[attr-defined]
+
+
 # ---------------------------------------------------------------------------
 # Shape + kinds filter
 # ---------------------------------------------------------------------------
@@ -149,6 +175,141 @@ async def test_tag_suggestion_picks_cooccurring_tag() -> None:
     assert y in suggested
     assert x not in suggested  # already on A
     assert "tag_cooccur_adamic_adar" in res.signals_used
+
+
+# ---------------------------------------------------------------------------
+# Tasks as graph nodes (ADR-0042, flag-gated)
+# ---------------------------------------------------------------------------
+
+
+async def test_classify_task_not_found_when_flag_off() -> None:
+    """With the unified-task-graph flag off (default), classify_node is
+    notes-only: a task id is 'not found' exactly as before -- the surface
+    stays byte-identical until a workspace opts in (ADR-0042)."""
+    org, user = await _make_workspace()
+    async with tenant_session(str(org), str(user)) as s:
+        t = await _make_task(s, org, user, "a task")
+        with pytest.raises(NotFoundError):
+            await gc.classify_node(s, org_id=org, node_id=t.id)
+
+
+async def test_classify_task_suggests_cooccurring_tag_when_unified(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ADR-0042 D2: with the flag on, a task is classifiable and its tag
+    co-occurrence spans notes + tasks. Task A has {X}; a note B and a task C
+    both have {X, Y}, so Y is a strong candidate for A. cluster + links are
+    pending the task graph (D1); maturity is N/A for tasks (D3)."""
+    monkeypatch.setattr(get_settings(), "garden_unified_task_graph_enabled", True)
+    org, user = await _make_workspace()
+    async with tenant_session(str(org), str(user)) as s:
+        a = await _make_task(s, org, user, "task-a")
+        b = await _make_note(s, org, user, "note-b")
+        c = await _make_task(s, org, user, "task-c")
+        x = await _generic_tag(s, org, user, "x-tag")
+        y = await _generic_tag(s, org, user, "y-tag")
+        await _attach_task_tag(s, org, a.id, x)
+        await _attach(s, org, b.id, x)
+        await _attach(s, org, b.id, y)
+        await _attach_task_tag(s, org, c.id, x)
+        await _attach_task_tag(s, org, c.id, y)
+        await _warm_corpus(s, org)  # past cold-start: damping = 1.0
+        res = await gc.classify_node(s, org_id=org, node_id=a.id)
+    assert res.node_kind == "task"
+    suggested = {t.tag_id for t in res.tags}
+    assert y in suggested
+    assert x not in suggested  # already on the task
+    assert "tag_cooccur_adamic_adar" in res.signals_used
+    # Cluster + links need tasks in the Leiden/PPR graph (ADR-0042 D1):
+    # surfaced honestly as pending, never a faked empty.
+    assert res.cluster is None
+    assert "task_cluster_pending_graph" in res.signals_used
+    assert res.links == []
+    assert "task_links_pending_graph" in res.signals_used
+    # Maturity is a note lifecycle; tasks have workflow states (ADR-0042 D3).
+    assert res.maturity is None
+
+
+async def test_apply_task_tag_attaches_and_records() -> None:
+    """ADR-0042 D2: accepting a tag suggestion on a TASK routes to the task
+    tag service (a TaskTag row) and records the classification feedback, the
+    same audited/reversible path as the note branch."""
+    org, user = await _make_workspace()
+    async with tenant_session(str(org), str(user)) as s:
+        t = await _make_task(s, org, user, "task-z")
+        tag_id = await _generic_tag(s, org, user, "z-tag")
+        fb = await gc.apply_suggestion(
+            s,
+            org_id=org,
+            actor_id=user,
+            node_id=t.id,
+            suggestion_type="tag",
+            suggestion_value={"tag_id": str(tag_id)},
+            action="accept",
+        )
+        assert fb.action == "accept"
+        row = (
+            await s.execute(
+                select(TaskTag).where(TaskTag.task_id == t.id, TaskTag.tag_id == tag_id)
+            )
+        ).scalar_one_or_none()
+        assert row is not None
+
+
+# ---------------------------------------------------------------------------
+# Precomputed-suggestion cache (ADR-0042 D4)
+# ---------------------------------------------------------------------------
+
+
+async def test_precomputed_suggestion_cache_roundtrip_and_ttl() -> None:
+    """ADR-0042 D4: persist caches a node's suggestions (replacing any prior
+    cache), read returns them while fresh, and a stale cache reads as None so
+    the caller recomputes live."""
+    org, user = await _make_workspace()
+    async with tenant_session(str(org), str(user)) as s:
+        a = await _make_note(s, org, user, "a")
+        b = await _make_note(s, org, user, "b")
+        c = await _make_note(s, org, user, "c")
+        x = await _generic_tag(s, org, user, "x-tag")
+        y = await _generic_tag(s, org, user, "y-tag")
+        for nid in (a.id, b.id, c.id):
+            await _attach(s, org, nid, x)
+        await _attach(s, org, b.id, y)
+        await _attach(s, org, c.id, y)  # y co-occurs on TWO related notes -> clears the floor
+        await _warm_corpus(s, org)
+        res = await gc.classify_node(s, org_id=org, node_id=a.id, kinds=frozenset({"tags"}))
+        assert res.tags  # the co-occurring tag is suggested
+
+        written = await gc.persist_classification(
+            s, org_id=org, node_kind="note", node_id=a.id, result=res
+        )
+        assert written == len(res.tags)
+        fresh = await gc.read_classification(s, org_id=org, node_id=a.id)
+        assert fresh is not None
+        assert {r.suggestion_value["tag_id"] for r in fresh} == {str(t.tag_id) for t in res.tags}
+
+        # Backdate the cache past the TTL -> read is None (recompute live).
+        await s.execute(
+            update(PrecomputedSuggestion)
+            .where(PrecomputedSuggestion.org_id == org, PrecomputedSuggestion.node_id == a.id)
+            .values(computed_at=datetime.datetime.now(datetime.UTC) - datetime.timedelta(hours=2))
+        )
+        assert await gc.read_classification(s, org_id=org, node_id=a.id) is None
+
+        # Re-persist replaces (cache, not log): exactly len(res.tags) rows again.
+        written2 = await gc.persist_classification(
+            s, org_id=org, node_kind="note", node_id=a.id, result=res
+        )
+        assert written2 == len(res.tags)
+        again = await gc.read_classification(s, org_id=org, node_id=a.id)
+        assert again is not None and len(again) == len(res.tags)
+
+
+async def test_read_classification_absent_is_none() -> None:
+    """No cache for a node -> read returns None (the caller recomputes live)."""
+    org, user = await _make_workspace()
+    async with tenant_session(str(org), str(user)) as s:
+        assert await gc.read_classification(s, org_id=org, node_id=uuid.uuid4()) is None
 
 
 # ---------------------------------------------------------------------------

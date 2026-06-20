@@ -174,6 +174,17 @@ async def run_once() -> int:
                         await garden_classify.autoclassify_unprocessed(cs, org_id=org_id)
                 except Exception:
                     _log.exception("autoclassify pass failed for org=%s", org_id)
+            # On-create classification drain (task b8c60940 / WS-D2, ADR-0042
+            # D5): classify the nodes enqueued at creation + cache the
+            # suggestions (precomputed_suggestions). Own session/try; sub-
+            # flagged so a deployment opts in independently. Runs AFTER the
+            # graph snapshot refresh above so classify reads fresh clusters.
+            if get_settings().garden_autoclassify_on_creation_enabled:
+                try:
+                    async with tenant_session(str(org_id), str(owner), actor_kind="system") as js:
+                        await garden_classify.process_classification_jobs(js, org_id=org_id)
+                except Exception:
+                    _log.exception("classification job drain failed for org=%s", org_id)
             # Online-learning prior metabolism (task 49d24048, ADR-0037): decay
             # stale per-user classification priors + prune the neutral ones, so
             # old preferences fade. Own session/try (failure-isolated like the

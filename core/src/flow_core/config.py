@@ -218,6 +218,17 @@ class Settings(BaseSettings):
     # FLOW_GARDEN_AUTOCLASSIFY_ENABLED=true.
     garden_autoclassify_enabled: bool = False
 
+    # On-CREATE classification queue (task b8c60940 / WS-D2, ADR-0042 D5).
+    # When set, create_note / create_task enqueue a classification_job in the
+    # create's own transaction; the garden sweep drains it (classify_node +
+    # cache the suggestions in precomputed_suggestions). This is the proactive
+    # "classify new nodes at birth" path, distinct from the periodic
+    # autoclassify sweep above. Read-only proposals; NEVER gates the node. OFF
+    # by default; the drain rides the garden loop. For TASKS the enqueue also
+    # requires ``garden_unified_task_graph_enabled`` (classify_node accepts a
+    # task only then). FLOW_GARDEN_AUTOCLASSIFY_ON_CREATION_ENABLED=true.
+    garden_autoclassify_on_creation_enabled: bool = False
+
     # Online-learning prior decay inside the garden sweep (task 49d24048,
     # ADR-0037 "Time decay"). When set, each garden tick applies the nightly
     # geometric decay + consolidation to the per-user classification priors,
@@ -226,6 +237,16 @@ class Settings(BaseSettings):
     # still gated by ``garden_loop_enabled`` -- it only runs when the sweep
     # runs. FLOW_GARDEN_LEARNING_DECAY_ENABLED=false to disable.
     garden_learning_decay_enabled: bool = True
+
+    # Tasks as first-class graph nodes + complete auto-classify (ADR-0042,
+    # task b8c60940 / WS-D2). When set, ``garden_classify`` accepts TASK ids
+    # (the engine is notes-only today) and the tag co-occurrence corpus spans
+    # notes AND tasks; the unified graph (task cluster/link) is layered on
+    # behind this same flag as ADR-0042 D1 lands. OFF by default so the
+    # notes-only behaviour and the existing mindmap / clusters stay
+    # byte-identical until a workspace opts in.
+    # FLOW_GARDEN_UNIFIED_TASK_GRAPH_ENABLED=true.
+    garden_unified_task_graph_enabled: bool = False
 
     # Daily prior snapshot inside the garden sweep (task ea2156df, ADR-0037
     # "Snapshots and rollback"). When set, each garden tick checkpoints each
