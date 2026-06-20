@@ -2,7 +2,7 @@
 
 Thin-adapter test: the metric computations are unit-tested in
 ``core/tests/test_garden_health.py``; here we pin the HTTP contract --
-all seven sensors present, the headline sensor's floor, the explicit
+all sensors present, the headline sensor's floor, the explicit
 null+reason on a fresh workspace (never a faked number), and the empty
 trend before any daily snapshot exists.
 """
@@ -24,6 +24,7 @@ _SENSORS = (
     "fungal_lag",
     "density_delta_7d",
     "embedding_coverage",
+    "autonomous_spend_today",
 )
 
 

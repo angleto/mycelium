@@ -34,6 +34,10 @@ interface Meta {
   trendLead?: boolean
   // Not yet wired to a data source: listed apart, never a faked empty.
   blocked?: boolean
+  // A budget gauge (value vs a cap), not a health sensor: being BELOW the
+  // floor is GOOD (under budget), so the alarm styling inverts (alarm when
+  // at/over the cap) and the floor line reads as a "cap".
+  gauge?: boolean
 }
 
 // Display order (ADR-0035), with per-metric presentation.
@@ -46,7 +50,12 @@ const META: Record<string, Meta> = {
   density_delta_7d: { kind: 'delta', dir: 'signed' },
   embedding_coverage: { kind: 'pct', dir: 'higher' },
   recall_at_k: { kind: 'pct', dir: 'higher' },
-  fungal_lag: { kind: 'duration', dir: 'lower', blocked: true },
+  // fungal_lag is now wired (WS-C6): a real median, or null+reason when
+  // there are no distillations yet -- a live sensor, no longer "pending".
+  fungal_lag: { kind: 'duration', dir: 'lower' },
+  // Operational budget gauge (WS-F5): autonomous credits spent today vs the
+  // daily cap. value/floor only when a cap is set; otherwise null+reason.
+  autonomous_spend_today: { kind: 'scalar', dir: 'lower', gauge: true },
 }
 const ORDER = Object.keys(META)
 
@@ -161,7 +170,10 @@ function SensorCard({
   const meta = META[keyName]
   const v = metric.value
   const floor = metric.floor
-  const below = v != null && floor != null && v < floor
+  // Health sensors alarm BELOW the floor; a budget gauge alarms AT/OVER the
+  // cap (being under is good). Either way the muted-red styling reuses
+  // ghealth__value--below.
+  const alarm = v != null && floor != null && (meta.gauge ? v >= floor : v < floor)
   const hasTrend = series.length >= 2
   const change = hasTrend ? series[series.length - 1] - series[0] : null
   const lo = hasTrend ? Math.min(...series) : null
@@ -198,7 +210,7 @@ function SensorCard({
           </p>
         </>
       ) : (
-        <p className={'ghealth__value' + (below ? ' ghealth__value--below' : '')}>
+        <p className={'ghealth__value' + (alarm ? ' ghealth__value--below' : '')}>
           {meta.kind === 'delta' ? `${arrow(v)} ` : ''}
           {fmtValue(meta.kind, v)}
           <span className="ghealth__dir">{dir}</span>
@@ -221,7 +233,7 @@ function SensorCard({
       )}
       {floor != null && (
         <p className="ghealth__floor">
-          {t('gardenHealth.floor')}: {fmtValue(meta.kind, floor)}
+          {t(meta.gauge ? 'gardenHealth.cap' : 'gardenHealth.floor')}: {fmtValue(meta.kind, floor)}
         </p>
       )}
       <p className="ghealth__explain">{t(`gardenHealth.sensor.${keyName}.explain`)}</p>

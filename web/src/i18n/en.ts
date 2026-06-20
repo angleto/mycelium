@@ -22,6 +22,7 @@ export const en = {
       'Structural sensors of the memory–mycelium symbiosis: readings and their health floors, shown, never judged.',
     noReading: 'No reading yet',
     floor: 'floor',
+    cap: 'cap',
     loadError: 'Could not load the health sensors.',
     now: 'now',
     over30: '30d',
@@ -82,6 +83,11 @@ export const en = {
         label: 'Embedding coverage',
         explain:
           'Share of the embeddable corpus carrying a dense vector. Below the floor, semantic search has decayed toward keyword-only: the backfill stalled or the embedder is down.',
+      },
+      autonomous_spend_today: {
+        label: 'Autonomous spend today',
+        explain:
+          'Credits the autonomous jobs (distillation, re-embedding) spent today against the daily cap. Lower is calmer; at the cap the metabolism pauses until tomorrow. Empty until you set a cap or while the kill switch is off.',
       },
     },
     timeline: {

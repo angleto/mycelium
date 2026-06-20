@@ -21,6 +21,7 @@ export const it: Catalog = {
       'Sensori strutturali della simbiosi memoria–micelio: letture e relative soglie di salute, mostrate, mai giudicate.',
     noReading: 'Nessuna lettura ancora',
     floor: 'soglia',
+    cap: 'tetto',
     loadError: 'Impossibile caricare i sensori di salute.',
     now: 'ora',
     over30: '30g',
@@ -81,6 +82,11 @@ export const it: Catalog = {
         label: 'Copertura embedding',
         explain:
           'Quota del corpus embeddabile con un vettore denso. Sotto la soglia, la ricerca semantica è degradata a sola parola-chiave: il backfill è fermo o l’embedder è giù.',
+      },
+      autonomous_spend_today: {
+        label: 'Spesa autonoma oggi',
+        explain:
+          'Crediti spesi oggi dai job autonomi (distillazione, re-embedding) rispetto al tetto giornaliero. Più basso = più tranquillo; al tetto il metabolismo si ferma fino a domani. Vuoto finché non imposti un tetto o mentre l’interruttore è spento.',
       },
     },
     timeline: {
