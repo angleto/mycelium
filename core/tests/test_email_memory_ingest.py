@@ -202,3 +202,30 @@ async def test_email_channel_is_listed_after_unblock() -> None:
         chans = await taxonomy.list_memory_channels(s, org_id=org)
         keys = {c.system_key for c in chans}
     assert "email" in keys
+
+
+async def test_ingest_failure_is_isolated_and_surfaced(monkeypatch) -> None:
+    """An ingest failure must NOT roll back the synced messages (savepoint
+    isolation) and must surface on the account, not commit a clean sync."""
+
+    async def _boom(*_a, **_k):
+        raise RuntimeError("embedder down")
+
+    monkeypatch.setattr("flow_core.services.email.memory_svc.write_blob", _boom)
+
+    org, user = await _signup_org()
+    conn = FakeConnector([_msg("1", "Keeper")])
+    async with tenant_session(str(org), str(user)) as s:
+        acc = await _account(s, org, user, ingest=True)
+        r = await svc.sync_account(s, org_id=org, actor_id=user, account_id=acc.id, connector=conn)
+        msgs = await svc.list_messages(s, org_id=org)
+        acc2 = await svc.get_account(s, org_id=org, account_id=acc.id)
+        blobs = await _blob_ids_for(s, org, msgs[0].id)
+    # The message survived the ingest failure (FR-7 isolation).
+    assert r.created == 1
+    assert r.ingested == 0
+    assert len(msgs) == 1
+    assert blobs == []  # ingest savepoint rolled back, no blob
+    # The failure is recorded, not masked as a clean active sync.
+    assert acc2.status.value == "active"
+    assert acc2.last_error is not None and "embedder down" in acc2.last_error

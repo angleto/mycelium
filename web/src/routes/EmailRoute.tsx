@@ -25,6 +25,7 @@ export function EmailRoute() {
   const [replyBody, setReplyBody] = useState('')
   const [msg, setMsg] = useState<string | null>(null)
   const [err, setErr] = useState<string | null>(null)
+  const [pendingIngest, setPendingIngest] = useState<string | null>(null)
 
   const reload = useCallback(async () => {
     const h = workspaceHeader()
@@ -94,15 +95,23 @@ export function EmailRoute() {
 
   async function onToggleIngest(a: Account, enabled: boolean) {
     setErr(null)
-    const { error } = await api.PATCH('/email/accounts/{account_id}', {
-      params: { header: workspaceHeader(), path: { account_id: a.id } },
-      body: { expected_version: a.version, ingest_to_memory: enabled },
-    })
-    if (error) {
-      setErr(errMessage(error))
-      return
+    // Guard against a rapid re-toggle reusing the now-stale a.version (which
+    // would 409 on optimistic concurrency): the checkbox is disabled while
+    // its PATCH is in flight, cleared in finally.
+    setPendingIngest(a.id)
+    try {
+      const { error } = await api.PATCH('/email/accounts/{account_id}', {
+        params: { header: workspaceHeader(), path: { account_id: a.id } },
+        body: { expected_version: a.version, ingest_to_memory: enabled },
+      })
+      if (error) {
+        setErr(errMessage(error))
+        return
+      }
+      await reload()
+    } finally {
+      setPendingIngest(null)
     }
-    await reload()
   }
 
   async function onToTask(id: string) {
@@ -185,6 +194,7 @@ export function EmailRoute() {
               <input
                 type="checkbox"
                 checked={a.ingest_to_memory}
+                disabled={pendingIngest === a.id}
                 onChange={(e) => void onToggleIngest(a, e.target.checked)}
               />
               {t('email.ingestToMemory')}

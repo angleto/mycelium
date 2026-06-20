@@ -10,6 +10,7 @@ external IMAP/SMTP boundary is a seam (tests pass a fake).
 from __future__ import annotations
 
 import datetime as dt
+import logging
 import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -42,6 +43,8 @@ from flow_core.services import audit
 from flow_core.services import memory as memory_svc
 from flow_core.services import tasks as tasks_svc
 from flow_core.services.rbac import require_role
+
+_log = logging.getLogger("flow.email")
 
 _ACCOUNT_UPDATABLE = frozenset(
     {
@@ -328,24 +331,41 @@ async def sync_account(
         )
         known.add(m.provider_message_id)
         created += 1
+    # Persist the new messages before ingest queries them.
+    await session.flush()
+    # Memory ingest (task 2a901dee): per-account opt-in, after the messages
+    # are persisted. Wrapped in a SAVEPOINT + broad catch so an ingest
+    # failure (a transient DB error, an INSUFFICIENT_CREDITS / RateCard /
+    # dim-mismatch DomainError from write_blob's billing/embed path, ...)
+    # rolls back ONLY the ingest's own writes and never the synced messages
+    # -- neither this account's nor, under the worker's one-session sweep,
+    # the other accounts' already-flushed rows (FR-7 per-account isolation).
+    # The failure is surfaced on the account (last_error), never masked as a
+    # clean sync.
+    ingested = 0
+    ingest_error: str | None = None
+    if account.ingest_to_memory:
+        try:
+            async with session.begin_nested():
+                ingested = await ingest_account_to_memory(
+                    session, org_id=org_id, actor_id=actor_id, account_id=account_id
+                )
+        except Exception as exc:  # savepoint rolled back; isolate from the sync
+            ingest_error = str(exc)
+            _log.warning("email ingest failed for account=%s: %s", account_id, exc)
+    # Status reflects the OUTCOME: the fetch+persist succeeded (active), and
+    # an ingest failure (if any) is recorded in last_error rather than
+    # committing a green "no error" row over a silently failed ingest.
     await session.execute(
         update(EmailAccount)
         .where(EmailAccount.id == account_id)
         .values(
             status=EmailAccountStatus.active,
-            last_error=None,
+            last_error=ingest_error,
             last_sync_at=dt.datetime.now(tz=dt.UTC),
         )
     )
     await session.flush()
-    # Memory ingest (task 2a901dee): per-account opt-in, after the messages
-    # are persisted. Own concern, gated on the account flag; idempotent and
-    # capped so it never clogs.
-    ingested = 0
-    if account.ingest_to_memory:
-        ingested = await ingest_account_to_memory(
-            session, org_id=org_id, actor_id=actor_id, account_id=account_id
-        )
     await audit.log(
         session,
         org_id=org_id,

@@ -205,6 +205,56 @@ async def test_reject_hotspots_rank_most_declined_first() -> None:
     assert [(h.feature_key, h.declines) for h in hot] == [("tag:X", 2), ("tag:Y", 1)]
 
 
+async def test_rollback_coerces_naive_to_and_clamps_future() -> None:
+    """A naive `to` is treated as UTC (not silently shifted) and a future
+    `to` is clamped to now (a rebuild-to-now, never a forward jump)."""
+    org, user = await _org_user()
+    now = datetime.datetime.now(datetime.UTC)
+    async with tenant_session(str(org), str(user)) as s:
+        _fb(s, org=org, user=user, tag_id="X", action="accept", ts=now - datetime.timedelta(days=1))
+        await s.flush()
+        # Naive + far-future `to`: must not raise (coerced) and must clamp.
+        res = await learn.rollback_priors(
+            s,
+            org_id=org,
+            user_id=user,
+            to=datetime.datetime(2099, 1, 1, 12, 0),  # naive, future
+            now=now,
+        )
+    assert res.rolled_back_to == now  # coerced aware + clamped to now
+
+
+async def test_rollback_restores_decay_clock_to_rollback_era_not_now() -> None:
+    """A rolled-back base prior keeps a rollback-era updated_at (the decay
+    gate), not a reset-to-now, so decay resumes instead of taking a holiday."""
+    org, user = await _org_user()
+    now = datetime.datetime.now(datetime.UTC)
+    t0 = now - datetime.timedelta(days=40)
+    t_snap = now - datetime.timedelta(days=39)
+    async with tenant_session(str(org), str(user)) as s:
+        _fb(s, org=org, user=user, tag_id="X", action="accept", ts=t0)
+        await s.flush()
+        await learn.rebuild_from_feedback(s, org_id=org, user_id=user)
+        await learn.snapshot_priors(s, org_id=org, now=t_snap)  # blob captures X
+        # A later reject (AFTER the rollback cut) so the rollback restores base.
+        _fb(s, org=org, user=user, tag_id="X", action="reject", ts=now - datetime.timedelta(days=1))
+        await s.flush()
+        await learn.rollback_priors(
+            s, org_id=org, user_id=user, to=t_snap + datetime.timedelta(hours=1), now=now
+        )
+        row = (
+            await s.execute(
+                select(_Prior).where(
+                    _Prior.org_id == org, _Prior.user_id == user, _Prior.feature_key == "tag:X"
+                )
+            )
+        ).scalar_one()
+        ua = row.updated_at
+    # updated_at restored to the snapshot era (base_at), NOT stamped at now.
+    assert abs((ua - t_snap).total_seconds()) < 5
+    assert (now - ua).total_seconds() > 86400  # decisively older than now
+
+
 async def test_prior_drift_measures_move_vs_old_snapshot_else_empty() -> None:
     org, user = await _org_user()
     now = datetime.datetime.now(datetime.UTC)

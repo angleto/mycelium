@@ -238,28 +238,34 @@ async def decay_priors(
     return int(decayed.rowcount or 0), int(pruned.rowcount or 0)  # type: ignore[attr-defined]
 
 
-def _fold_decision(priors: dict[str, float], fb: ClassificationFeedback) -> None:
+def _fold_decision(priors: dict[str, float], fb: ClassificationFeedback) -> list[str]:
     """Replay one feedback row into ``priors`` in place, using the exact
     ``record_decision`` maths. Single source of the replay logic, shared by
-    ``rebuild_from_feedback`` and ``rollback_priors``."""
+    ``rebuild_from_feedback`` and ``rollback_priors``. Returns the feature
+    keys this decision touched, so a caller can track per-key recency (the
+    rollback decay-clock restore)."""
     if fb.action == "auto":
-        return
+        return []
     eta = _ETA.get(fb.suggestion_type)
     if eta is None:
-        return
+        return []
     if fb.action == "override":
+        touched: list[str] = []
         suggested = feature_key(fb.suggestion_type, fb.suggestion_value)
         chosen = feature_key(fb.suggestion_type, fb.override_value)
         if suggested:
             priors[suggested] = _saturating_update(priors.get(suggested, 0.0), eta, -1)
+            touched.append(suggested)
         if chosen and chosen != suggested:
             priors[chosen] = _saturating_update(priors.get(chosen, 0.0), eta, 1)
-        return
+            touched.append(chosen)
+        return touched
     key = feature_key(fb.suggestion_type, fb.suggestion_value)
     if not key:
-        return
+        return []
     sign = 1 if fb.action == "accept" else -1
     priors[key] = _saturating_update(priors.get(key, 0.0), eta, sign)
+    return [key]
 
 
 async def _overwrite_priors(
@@ -269,17 +275,32 @@ async def _overwrite_priors(
     user_id: uuid.UUID,
     priors: dict[str, float],
     now: datetime.datetime,
+    clocks: dict[str, datetime.datetime] | None = None,
 ) -> int:
     """Replace a user's live prior rows with ``priors`` (neutral ones
     pruned, since a factor ~= 1 is indistinguishable from absent). Returns
-    rows written."""
+    rows written.
+
+    ``clocks`` optionally maps feature_key -> the ``updated_at`` to stamp
+    (its last-feedback time). ``updated_at`` is the decay gate ("no feedback
+    for N days"), so a caller restoring a past state (rollback) passes the
+    rolled-back-era timestamps to keep decay resuming correctly; keys absent
+    from ``clocks`` (or when it is None) get ``now`` -- the rebuild/normal
+    behaviour."""
+    clocks = clocks or {}
     await session.execute(delete(_Prior).where(_Prior.org_id == org_id, _Prior.user_id == user_id))
     written = 0
     for key, value in priors.items():
         if abs(value) < PRUNE_EPSILON:
             continue
         session.add(
-            _Prior(org_id=org_id, user_id=user_id, feature_key=key, value=value, updated_at=now)
+            _Prior(
+                org_id=org_id,
+                user_id=user_id,
+                feature_key=key,
+                value=value,
+                updated_at=clocks.get(key, now),
+            )
         )
         written += 1
     await session.flush()
@@ -411,8 +432,30 @@ async def rollback_priors(
     overwrites the live priors and writes a fresh snapshot at ``now``. With
     no snapshot before ``to`` it degrades to a truncated rebuild-from-log
     (decay-unaware, the best possible without a checkpoint). Returns a diff
-    summarising the largest-moved feature."""
+    summarising the largest-moved feature.
+
+    ``to`` is normalised to an aware UTC instant and clamped to ``<= now``
+    (a future cut is a rebuild-to-now, never a forward jump). The restored
+    rows carry rolled-back-era ``updated_at`` (base keys at the snapshot
+    time, replayed keys at their feedback ts) so decay resumes correctly
+    instead of being reset to now.
+
+    Known limitation (narrow, gated): the replay boundary is the snapshot's
+    wall-clock ``snapshot_at``, while feedback ``ts`` is the DB clock. A
+    feedback row that was in-flight (uncommitted) when the daily snapshot's
+    SELECT ran, yet whose ``ts`` precedes ``snapshot_at``, is neither in the
+    blob nor in the strict ``ts > base_at`` replay window, so a rollback to
+    that exact window can miss it. Live priors are unaffected (they are
+    correct once committed); only this point-in-time reconstruction is. A
+    committed-watermark in the snapshot would close it; deferred as a LOW on
+    the loop-gated rollback path."""
     now = now or datetime.datetime.now(datetime.UTC)
+    # Aware-UTC + clamp: tolerate a naive client value (asyncpg would
+    # silently shift it against the timestamptz columns) and never accept a
+    # future cut (it would degenerate to a misleading rebuild-to-now).
+    if to.tzinfo is None:
+        to = to.replace(tzinfo=datetime.UTC)
+    to = min(to, now)
     before = await _all_priors(session, org_id=org_id, user_id=user_id)
 
     snap = (
@@ -451,10 +494,21 @@ async def rollback_priors(
         .all()
     )
     priors = dict(base)
+    # Decay-clock restore: a base key was last fed at-or-before the snapshot,
+    # so clock it at base_at (the rollback era); a key the replay re-touches
+    # is clocked at its feedback ts. Without this, _overwrite_priors stamps
+    # now and a rolled-back stale prior would skip a full decay window.
+    clocks: dict[str, datetime.datetime] = {}
+    if base_at is not None:
+        for k in base:
+            clocks[k] = base_at
     for fb in fb_rows:
-        _fold_decision(priors, fb)
+        for k in _fold_decision(priors, fb):
+            clocks[k] = fb.ts
 
-    await _overwrite_priors(session, org_id=org_id, user_id=user_id, priors=priors, now=now)
+    await _overwrite_priors(
+        session, org_id=org_id, user_id=user_id, priors=priors, now=now, clocks=clocks
+    )
     after = {k: v for k, v in priors.items() if abs(v) >= PRUNE_EPSILON}
     # A fresh snapshot pins the rolled-back state as the new checkpoint.
     session.add(_Snapshot(org_id=org_id, user_id=user_id, snapshot_at=now, blob=after))
