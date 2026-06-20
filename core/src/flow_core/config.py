@@ -227,6 +227,27 @@ class Settings(BaseSettings):
     # runs. FLOW_GARDEN_LEARNING_DECAY_ENABLED=false to disable.
     garden_learning_decay_enabled: bool = True
 
+    # Daily prior snapshot inside the garden sweep (task ea2156df, ADR-0037
+    # "Snapshots and rollback"). When set, each garden tick checkpoints each
+    # user's learned priors into classification_personal_prior_snapshot
+    # (daily-idempotent), so POST /garden/learning/rollback is decay-aware
+    # point-in-time and the drift bar chart has a baseline. Runs after the
+    # decay step. ON by default (part of the loop's reversibility story) but
+    # still gated by ``garden_loop_enabled``.
+    # FLOW_GARDEN_LEARNING_SNAPSHOT_ENABLED=false to disable.
+    garden_learning_snapshot_enabled: bool = True
+
+    # Co-activity edge materialisation inside the garden sweep (task
+    # f0a15247, ADR-0031 w_coact). When set, each garden tick aggregates
+    # the activity log into pairwise co-activity session counts
+    # (note_coactivity), the third soft-OR source of the unified note edge
+    # weight. Runs before the graph snapshot so the materialised centrality
+    # reflects the fresh co-activity edges. ON by default (it is part of
+    # the edge-weight's correctness) but still gated by
+    # ``garden_loop_enabled`` -- it only runs when the sweep runs.
+    # FLOW_GARDEN_COACTIVITY_ENABLED=false to disable.
+    garden_coactivity_enabled: bool = True
+
     # Reminders + notification-dispatch worker. One periodic tick scans
     # due reminders into pending Notifications (idempotent by
     # dedupe_key) and then dispatches all pending notifications through

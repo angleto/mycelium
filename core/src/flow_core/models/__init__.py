@@ -47,6 +47,9 @@ from flow_core.models.calendar import (
 from flow_core.models.capability_token import CapabilityToken
 from flow_core.models.classification_feedback import ClassificationFeedback
 from flow_core.models.classification_personal_prior import ClassificationPersonalPrior
+from flow_core.models.classification_personal_prior_snapshot import (
+    ClassificationPersonalPriorSnapshot,
+)
 from flow_core.models.client_profile import ClientProfile
 from flow_core.models.dependency import DependencyType, TaskDependency
 from flow_core.models.dispatch_request import (
@@ -96,6 +99,7 @@ from flow_core.models.note import (
     NoteTurn,
     TurnRole,
 )
+from flow_core.models.note_coactivity import NoteCoactivity
 from flow_core.models.note_link import (
     NOTE_NOTE_LINK_KINDS,
     NOTE_TASK_LINK_KINDS,
@@ -184,6 +188,7 @@ __all__ = [
     "CapabilityToken",
     "ClassificationFeedback",
     "ClassificationPersonalPrior",
+    "ClassificationPersonalPriorSnapshot",
     "ClientProfile",
     "ConservationAdhesion",
     "ConservationStatus",
@@ -225,6 +230,7 @@ __all__ = [
     "MemoryBlob",
     "Necessity",
     "Note",
+    "NoteCoactivity",
     "NoteKind",
     "NoteMaturity",
     "NoteNoteLink",

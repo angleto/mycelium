@@ -35,16 +35,21 @@ from flow_api.schemas import (
     GardenClustersOut,
     GardenClusterSuggestionOut,
     GardenEventOut,
+    GardenFeatureDeltaOut,
     GardenGraphEdge,
     GardenGraphOut,
     GardenHealthEventOut,
     GardenHealthMetricOut,
     GardenHealthOut,
     GardenHealthSnapshotOut,
+    GardenLearningRollbackIn,
+    GardenLearningRollbackOut,
+    GardenLearningTelemetryOut,
     GardenLinkCandidateOut,
     GardenLinkSuggestion,
     GardenLinkSuggestionsOut,
     GardenMaturitySuggestionOut,
+    GardenRejectHotspotOut,
     GardenTagSuggestionOut,
     GardenWalkOut,
     GardenWalkStep,
@@ -52,6 +57,7 @@ from flow_api.schemas import (
 from flow_core.services import event_bus
 from flow_core.services import garden_classify as classify_svc
 from flow_core.services import garden_health as health_svc
+from flow_core.services import garden_learning as learning_svc
 from flow_core.services import graph as svc
 from flow_core.services import graph_snapshot as graph_snapshot_svc
 from flow_core.services import link_prediction as linkpred_svc
@@ -155,10 +161,10 @@ async def garden_graph(
 ) -> GardenGraphOut:
     """Materialise the workspace note-graph in one round-trip:
 
-    - ``edges``: undirected ``(src, dst, weight)`` rows with the v1
+    - ``edges``: undirected ``(src, dst, weight)`` rows with the
       ``note_edge_strength`` aggregation (soft-OR of per-kind base
-      contributions + Adamic-Adar tag overlap). Co-activity from
-      Proposal A is Phase 2.
+      contributions + Adamic-Adar tag overlap + co-activity from the
+      worker-materialised ``note_coactivity``, task f0a15247).
     - ``centrality``: ``{note_id: pagerank}`` over the manual
       directed link graph (damping=0.85, power iteration). The map
       sums to 1.0 across the workspace.
@@ -305,6 +311,81 @@ async def garden_apply(
         suggestion_type=body.suggestion_type,
         action=body.action,
         applied=body.action in ("accept", "override"),
+    )
+
+
+def _delta_out(d: learning_svc.FeatureDelta) -> GardenFeatureDeltaOut:
+    return GardenFeatureDeltaOut(
+        feature_key=d.feature_key, before=d.before, after=d.after, delta=d.delta
+    )
+
+
+@router.post("/learning/rollback", response_model=GardenLearningRollbackOut)
+async def garden_learning_rollback(
+    body: GardenLearningRollbackIn,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+) -> GardenLearningRollbackOut:
+    """Rewind the caller's own learned priors to their state at ``to``
+    (ADR-0037 "Snapshots and rollback"): restores the closest daily
+    snapshot at-or-before the cut, replays the feedback delta on top, and
+    writes a fresh checkpoint — decay-aware and fully reproducible. Returns
+    a one-line diff of the largest-moved feature. Per-user: a member can
+    only rewind their own priors (``ctx.user_id``)."""
+    res = await learning_svc.rollback_priors(
+        ctx.session, org_id=ctx.org_id, user_id=ctx.user_id, to=body.to
+    )
+    if res.top_change is None:
+        summary = "No prior changed: the priors already matched that point in time."
+    else:
+        tc = res.top_change
+        direction = "less" if tc.delta < 0 else "more"
+        summary = (
+            f"Rewound {res.features_changed} feature(s); the system is now {direction} "
+            f"biased toward {tc.feature_key} ({tc.before:+.2f} -> {tc.after:+.2f})."
+        )
+    return GardenLearningRollbackOut(
+        rolled_back_to=res.rolled_back_to,
+        snapshot_at=res.snapshot_at,
+        replayed_events=res.replayed_events,
+        features_changed=res.features_changed,
+        top_change=_delta_out(res.top_change) if res.top_change is not None else None,
+        summary=summary,
+    )
+
+
+@router.get("/learning/telemetry", response_model=GardenLearningTelemetryOut)
+async def garden_learning_telemetry(
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+    reject_days: Annotated[int, Query(ge=1, le=365)] = 90,
+    drift_days: Annotated[int, Query(ge=1, le=365)] = 30,
+    limit: Annotated[int, Query(ge=1, le=50)] = 10,
+) -> GardenLearningTelemetryOut:
+    """The caller's learning telemetry for the sensors dashboard (ADR-0037):
+
+    - ``reject_hotspots``: the suggestion features they decline most, so
+      they can mute at the source.
+    - ``drift``: which priors moved the most over ``drift_days`` (vs the
+      snapshot that old; empty until a snapshot that old exists).
+
+    Read-only, the caller's own history only (ADR-0037 privacy: no
+    cross-user comparison). "Show, never judge"."""
+    hotspots = await learning_svc.reject_hotspots(
+        ctx.session, org_id=ctx.org_id, user_id=ctx.user_id, days=reject_days, limit=limit
+    )
+    drift = await learning_svc.prior_drift(
+        ctx.session, org_id=ctx.org_id, user_id=ctx.user_id, days=drift_days, limit=limit
+    )
+    return GardenLearningTelemetryOut(
+        reject_hotspots=[
+            GardenRejectHotspotOut(
+                suggestion_type=h.suggestion_type,
+                feature_key=h.feature_key,
+                declines=h.declines,
+                last_declined_at=h.last_declined_at,
+            )
+            for h in hotspots
+        ],
+        drift=[_delta_out(d) for d in drift],
     )
 
 

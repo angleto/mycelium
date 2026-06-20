@@ -2683,6 +2683,7 @@ def _email_account(a: EmailAccount) -> dict[str, Any]:
         "status": a.status.value,
         "last_sync_at": a.last_sync_at.isoformat() if a.last_sync_at else None,
         "last_error": a.last_error,
+        "ingest_to_memory": a.ingest_to_memory,
         "version": a.version,
     }
 
@@ -2735,6 +2736,26 @@ async def list_email_accounts(token: str, org_id: str) -> list[dict[str, Any]]:
     """List email accounts (no secrets)."""
     async with _tenant(token, org_id) as (s, org, _user):
         return [_email_account(a) for a in await email_svc.list_accounts(s, org_id=org)]
+
+
+@mcp.tool()
+async def set_email_ingest_to_memory(
+    token: str, org_id: str, account_id: str, expected_version: int, enabled: bool
+) -> dict[str, Any]:
+    """Toggle whether this account's synced (non-bulk) messages are
+    ingested into the 'email' memory channel (task 2a901dee). OFF by
+    default: enabling ingests third-party PII into searchable memory, so
+    it is an explicit per-account opt-in. Returns the new version."""
+    async with _tenant(token, org_id) as (s, org, user):
+        version = await email_svc.update_account(
+            s,
+            org_id=org,
+            actor_id=user,
+            account_id=uuid.UUID(account_id),
+            expected_version=expected_version,
+            values={"ingest_to_memory": enabled},
+        )
+        return {"id": account_id, "version": version}
 
 
 @mcp.tool()

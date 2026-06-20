@@ -73,6 +73,11 @@ class EmailAccount(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, Ba
         DateTime(timezone=True), nullable=True
     )
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Per-account opt-in: when true, synced (non-bulk) messages are
+    # ingested into the 'email' memory channel (task 2a901dee). OFF by
+    # default — ingesting third-party PII into searchable memory is an
+    # explicit per-account decision, never automatic.
+    ingest_to_memory: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
 
 
 class EmailMessage(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, Base):
@@ -102,6 +107,10 @@ class EmailMessage(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, Ba
     snippet: Mapped[str | None] = mapped_column(String(500), nullable=True)
     received_at: Mapped[datetime.datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     is_read: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
+    # Automated / list / bulk mail (List-Id / Precedence / Auto-Submitted),
+    # decided at fetch time. The memory-ingest filter skips these (task
+    # 2a901dee); the row is still kept (email-to-task etc. stay available).
+    is_bulk: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     raw_size: Mapped[int | None] = mapped_column(Integer, nullable=True)
     linked_task_id: Mapped[uuid.UUID | None] = mapped_column(
         PG_UUID(as_uuid=True),

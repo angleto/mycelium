@@ -15,7 +15,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from sqlalchemy import select, update
+from sqlalchemy import String, cast, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -37,7 +37,9 @@ from flow_core.models.email import (
     EmailProvider,
 )
 from flow_core.models.membership import Role
+from flow_core.models.memory_blob import BlobSource
 from flow_core.services import audit
+from flow_core.services import memory as memory_svc
 from flow_core.services import tasks as tasks_svc
 from flow_core.services.rbac import require_role
 
@@ -49,8 +51,21 @@ _ACCOUNT_UPDATABLE = frozenset(
         "smtp_host",
         "smtp_port",
         "status",
+        "ingest_to_memory",
     }
 )
+
+# Memory-ingest constants (task 2a901dee, ADR-0023 + memory channel).
+# The BlobSource (source_kind, source_id) IS the idempotency map
+# email_message -> blob, so no separate mapping table is needed.
+_INGEST_SOURCE_KIND = "email_message"
+# Per-sync ingest cap = natural backpressure: a first opt-in with a large
+# backlog drains over several sweeps instead of one burst (the steer is
+# "process everything without ever clogging"). New mail is newest-first so
+# it is never starved by the backlog.
+_INGEST_BATCH_CAP = 50
+# Bound the embedded text per message (cost + the embedder's window).
+_INGEST_BODY_MAX = 8000
 
 
 @dataclass(frozen=True)
@@ -60,6 +75,7 @@ class SyncResult:
     created: int
     ok: bool
     error: str | None = None
+    ingested: int = 0
 
 
 async def get_account(
@@ -306,6 +322,7 @@ async def sync_account(
                 body_text=m.body_text,
                 snippet=(m.body_text or "")[:500] or None,
                 received_at=m.received_at,
+                is_bulk=m.is_bulk,
                 raw_size=m.raw_size,
             )
         )
@@ -321,6 +338,14 @@ async def sync_account(
         )
     )
     await session.flush()
+    # Memory ingest (task 2a901dee): per-account opt-in, after the messages
+    # are persisted. Own concern, gated on the account flag; idempotent and
+    # capped so it never clogs.
+    ingested = 0
+    if account.ingest_to_memory:
+        ingested = await ingest_account_to_memory(
+            session, org_id=org_id, actor_id=actor_id, account_id=account_id
+        )
     await audit.log(
         session,
         org_id=org_id,
@@ -328,14 +353,83 @@ async def sync_account(
         entity="email_account",
         entity_id=account_id,
         action="sync",
-        diff={"fetched": str(len(fetched)), "created": str(created)},
+        diff={"fetched": str(len(fetched)), "created": str(created), "ingested": str(ingested)},
     )
     return SyncResult(
         account_id=account_id,
         fetched=len(fetched),
         created=created,
         ok=True,
+        ingested=ingested,
     )
+
+
+def _ingest_body(m: EmailMessage) -> str:
+    """The text materialised into the memory blob: a normalised header
+    preamble (searchable) + the body, truncated. ``from_addr`` is NOT NULL
+    so this is never empty even for a bodyless message."""
+    lines = [
+        f"Subject: {m.subject}" if m.subject else "Subject: (no subject)",
+        f"From: {m.from_addr}",
+    ]
+    if m.to_addrs:
+        lines.append(f"To: {m.to_addrs}")
+    lines.append("")
+    lines.append((m.body_text or "").strip())
+    return "\n".join(lines).strip()[:_INGEST_BODY_MAX]
+
+
+async def ingest_account_to_memory(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    account_id: uuid.UUID,
+    cap: int = _INGEST_BATCH_CAP,
+) -> int:
+    """Materialise the account's non-bulk, not-yet-ingested messages as
+    memory blobs on the 'email' channel (newest first, capped). Idempotent
+    via the BlobSource natural key, so a re-sync never duplicates a blob
+    and a first opt-in backfills the history a batch per sweep. Returns the
+    number of messages ingested this call."""
+    not_ingested = ~(
+        select(BlobSource.blob_id)
+        .where(
+            BlobSource.org_id == org_id,
+            BlobSource.source_kind == _INGEST_SOURCE_KIND,
+            BlobSource.source_id == cast(EmailMessage.id, String),
+        )
+        .exists()
+    )
+    rows = (
+        (
+            await session.execute(
+                select(EmailMessage)
+                .where(
+                    EmailMessage.account_id == account_id,
+                    EmailMessage.is_bulk.is_(False),
+                    not_ingested,
+                )
+                .order_by(EmailMessage.received_at.desc())
+                .limit(cap)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    for m in rows:
+        await memory_svc.write_blob(
+            session,
+            org_id=org_id,
+            actor_id=actor_id,
+            project_id=None,
+            text_body=_ingest_body(m),
+            operation_id=f"email-ingest:{m.id}",
+            namespace="email",
+            channel_key="email",
+            sources=[(_INGEST_SOURCE_KIND, str(m.id))],
+        )
+    return len(rows)
 
 
 async def sync_all_accounts(

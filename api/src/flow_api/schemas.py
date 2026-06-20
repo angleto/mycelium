@@ -1221,6 +1221,54 @@ class GardenApplyOut(BaseModel):
     applied: bool  # True when the action mutated (accept / override)
 
 
+class GardenLearningRollbackIn(BaseModel):
+    """Rewind the caller's own learned priors to their state at ``to``
+    (ADR-0037 "Snapshots and rollback")."""
+
+    to: datetime.datetime
+
+
+class GardenFeatureDeltaOut(BaseModel):
+    """One feature's prior value before vs after (rollback diff / drift)."""
+
+    feature_key: str
+    before: float
+    after: float
+    delta: float
+
+
+class GardenLearningRollbackOut(BaseModel):
+    """Result of a rollback: the restored window + a one-line diff
+    (ADR-0037: "the system was slightly more biased toward tag X")."""
+
+    rolled_back_to: datetime.datetime
+    snapshot_at: datetime.datetime | None
+    replayed_events: int
+    features_changed: int
+    top_change: GardenFeatureDeltaOut | None
+    summary: str
+
+
+class GardenRejectHotspotOut(BaseModel):
+    """A suggestion feature the caller keeps declining (ADR-0037 reject-
+    hotspot view). ``feature_key`` is type-prefixed; the SPA resolves the
+    human label from its tag/note context."""
+
+    suggestion_type: str
+    feature_key: str
+    declines: int
+    last_declined_at: datetime.datetime
+
+
+class GardenLearningTelemetryOut(BaseModel):
+    """Read-only learning telemetry for the sensors dashboard (ADR-0037):
+    the reject-hotspots and the prior-drift bars, the caller's own history
+    only. "Show, never judge"."""
+
+    reject_hotspots: list[GardenRejectHotspotOut]
+    drift: list[GardenFeatureDeltaOut]
+
+
 # --- F3: calendars, events, schedule (FR-4, docs/adr/0004, 0008) ---
 
 
@@ -1721,6 +1769,7 @@ class EmailAccountPatchIn(BaseModel):
     smtp_host: str | None = Field(default=None, max_length=255)
     smtp_port: int | None = None
     status: EmailAccountStatus | None = None
+    ingest_to_memory: bool | None = None
 
 
 class EmailSecretIn(BaseModel):
@@ -1742,6 +1791,7 @@ class EmailAccountOut(BaseModel):
     status: EmailAccountStatus
     last_sync_at: datetime.datetime | None
     last_error: str | None
+    ingest_to_memory: bool
     version: int
 
 

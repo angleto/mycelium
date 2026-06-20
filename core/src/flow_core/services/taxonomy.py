@@ -779,14 +779,15 @@ CANONICAL_MEMORY_CHANNELS: tuple[tuple[str, str], ...] = (
 _CANONICAL_KEYS: frozenset[str] = frozenset(k for k, _ in CANONICAL_MEMORY_CHANNELS)
 
 # Channels actually usable today. ``manual``/``agent``/``note``/``task``
-# are intrinsically usable; ``email``/``telegram`` are seeded but excluded
-# from the listing until their integration ships. A custom channel
-# added by a platform admin is not in this set but IS configured (it
-# was deliberately created), so the membership test is
+# are intrinsically usable; ``email`` is now wired (task 2a901dee: synced
+# messages ingest into this channel per-account). ``telegram`` stays
+# seeded-but-hidden until its integration ships. A custom channel added by
+# a platform admin is not in this set but IS configured (it was
+# deliberately created), so the membership test is
 # "system_key in _CONFIGURED_KEYS OR not a canonical (seeded) key".
 # ``task`` is written by the task-search resync listener (one blob per
 # task, rendered from title + description + checklist).
-_CONFIGURED_KEYS: frozenset[str] = frozenset({"manual", "agent", "note", "task"})
+_CONFIGURED_KEYS: frozenset[str] = frozenset({"manual", "agent", "note", "task", "email"})
 
 # Short English description per seeded channel (rendered read-only in
 # the channel picker). Custom channels have no description (None).
@@ -795,6 +796,7 @@ _CHANNEL_DESCRIPTIONS: dict[str, str] = {
     "agent": "Written by the assistant",
     "note": "Captured from your notes",
     "task": "Indexed from your tasks",
+    "email": "Ingested from your synced email",
 }
 
 
@@ -810,8 +812,8 @@ def _channel_configured(system_key: str | None) -> bool:
     """A channel is exposed in the list/select surface when it is one
     of the intrinsically-usable seeded keys, OR it is not a canonical
     (seeded) key at all -- i.e. a custom channel a platform admin
-    deliberately created. Seeded-but-not-yet-implemented channels
-    (email/telegram) are filtered out."""
+    deliberately created. The seeded-but-not-yet-implemented ``telegram``
+    channel is filtered out."""
     if system_key in _CONFIGURED_KEYS:
         return True
     return system_key not in _CANONICAL_KEYS

@@ -31,6 +31,7 @@ from flow_core.models.membership import Membership, Role
 from flow_core.models.organization import Organization
 from flow_core.services import (
     autonomous_budget,
+    coactivity,
     garden_classify,
     garden_health,
     garden_learning,
@@ -121,6 +122,23 @@ async def run_once() -> int:
                     await garden_health.persist_snapshot(hs, org_id=org_id)
             except Exception:
                 _log.exception("garden health snapshot failed for org=%s", org_id)
+            # Co-activity edge materialisation (task f0a15247, ADR-0031
+            # w_coact). Aggregates the activity log into pairwise session
+            # counts in note_coactivity, the third soft-OR source of
+            # compute_note_edge_weights. MUST run before the graph snapshot
+            # below so the materialised centrality/betweenness/Leiden see
+            # the fresh co-activity edges (the snapshot signature folds in
+            # the co-activity fingerprint). Own session/try for the same
+            # failure-isolation reason as the snapshots; sub-flagged so a
+            # deployment can opt out independently.
+            if get_settings().garden_coactivity_enabled:
+                try:
+                    async with tenant_session(str(org_id), str(owner), actor_kind="system") as cas:
+                        n_pairs = await coactivity.refresh_coactivity(cas, org_id=org_id)
+                        if n_pairs:
+                            _log.info("coactivity refresh org=%s pairs=%d", org_id, n_pairs)
+                except Exception:
+                    _log.exception("coactivity refresh failed for org=%s", org_id)
             # Graph-analytics materialisation (task d8664631): PageRank +
             # Leiden + betweenness into garden_graph_snapshot. Signature-
             # gated, so an unchanged graph costs three COUNT queries; only
@@ -173,6 +191,20 @@ async def run_once() -> int:
                             )
                 except Exception:
                     _log.exception("learning prior decay failed for org=%s", org_id)
+            # Daily prior snapshot (task ea2156df, ADR-0037 "Snapshots and
+            # rollback"): checkpoint each user's priors so rollback is
+            # decay-aware point-in-time and drift has a baseline. Runs AFTER
+            # decay so the checkpoint is the actual post-decay live state;
+            # daily-idempotent (skips users checkpointed in the last ~20h).
+            # Own session/try, sub-flagged like the decay above.
+            if get_settings().garden_learning_snapshot_enabled:
+                try:
+                    async with tenant_session(str(org_id), str(owner), actor_kind="system") as ss:
+                        n_snap = await garden_learning.snapshot_priors(ss, org_id=org_id)
+                        if n_snap:
+                            _log.info("garden learning snapshot org=%s users=%d", org_id, n_snap)
+                except Exception:
+                    _log.exception("learning prior snapshot failed for org=%s", org_id)
             n = sum(counters.values()) + auto_matured
             if n > 0:
                 _log.info(

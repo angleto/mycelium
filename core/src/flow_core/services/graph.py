@@ -7,17 +7,21 @@ same query traversal:
 
 - ``compute_note_edge_weights`` exposes the materialised v1 of the
   ``note_edge_strength`` model. The weight per pair ``(a, b)`` is a
-  soft-OR of two evidence sources:
+  soft-OR of three evidence sources:
     - a per-kind base contribution (hypha_of > supersedes > contradicts
       > related), aggregated soft-OR across every typed link between the
       pair;
     - an Adamic-Adar style overlap of shared generic tags (a rare
       tag contributes more than a common one, ``1 / log(1 + deg(t))``),
       then squashed to [0, 1] via ``1 - 1 / (1 + sum)`` so multiple
-      rare tags saturate gently instead of exploding.
-  The third source documented in ADR-0031 (co-activity via Proposal
-  A) is deferred to Phase 2 (the activity log carries the shape but
-  no aggregation worker exists yet).
+      rare tags saturate gently instead of exploding;
+    - co-activity (ADR-0031's ``w_coact``, Proposal A): how often the
+      pair was touched in the same working session, read from the
+      ``note_coactivity`` table the offline worker materialises
+      (``services/coactivity``) and squashed the same saturating way.
+      Absent (the worker never ran / the pair never co-occurred) it
+      contributes nothing, so the function is a byte-for-byte no-op
+      versus the two-source version on a garden with no co-activity.
 
 - ``compute_pagerank`` runs a deterministic power iteration on the
   UNDIRECTED, weighted weave (the edges of ``compute_note_edge_weights``).
@@ -48,6 +52,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from flow_core.models.note import Note
+from flow_core.models.note_coactivity import NoteCoactivity
 from flow_core.models.note_link import NoteNoteLink
 from flow_core.models.note_tag import NoteTag
 from flow_core.models.tag import Tag, TagKind
@@ -61,6 +66,23 @@ _KIND_WEIGHT: dict[str, float] = {
     "contradicts": 0.65,
     "related": 0.45,
 }
+
+# Co-activity source scale (ADR-0031 ``w_coact``). The session count from
+# ``note_coactivity`` is squashed via ``1 - 1 / (1 + scale * count)`` --
+# the same saturating shape as the shared-tag overlap. At 0.4: one shared
+# session ~0.29, two ~0.44, five ~0.67; the pair never reaches 1 on
+# co-activity alone, so a manual link or shared tag still dominates.
+# Tunable like ``_KIND_WEIGHT``; a per-workspace weighting profile is a
+# future knob (ADR-0031 roadmap), not v1.
+_COACTIVITY_SCALE = 0.4
+
+
+def _coactivity_weight(session_count: int) -> float:
+    """Saturating [0, 1] contribution of a pair's co-activity session
+    count. Zero (no co-activity) is neutral in the soft-OR."""
+    if session_count <= 0:
+        return 0.0
+    return 1.0 - 1.0 / (1.0 + _COACTIVITY_SCALE * session_count)
 
 
 @dataclass(frozen=True)
@@ -233,6 +255,29 @@ async def compute_note_edge_weights(
                 w_tag = _adamic_adar_pair(note_tags[pk[0]], note_tags[pk[1]], tag_deg)
                 if w_tag > 0:
                     by_pair[pk].append(w_tag)
+
+    # Co-activity (ADR-0031 ``w_coact``, task f0a15247): the third source.
+    # One cheap SELECT of the worker-materialised pairwise session counts;
+    # each becomes a saturating contribution in the same soft-OR. Pairs
+    # with co-activity but no link/tag surface here too (independent
+    # evidence), exactly like the tag-overlap pairs above. Empty table ->
+    # nothing appended -> identical to the link+tag-only result.
+    coact_rows = (
+        await session.execute(
+            select(
+                NoteCoactivity.note_a_id,
+                NoteCoactivity.note_b_id,
+                NoteCoactivity.session_count,
+            ).where(NoteCoactivity.org_id == org_id)
+        )
+    ).all()
+    for note_a_id, note_b_id, session_count in coact_rows:
+        w_coact = _coactivity_weight(session_count)
+        if w_coact <= 0:
+            continue
+        # Rows are stored canonical, but fold through _pair_key anyway so a
+        # mismatch can never split a pair into two undirected edges.
+        by_pair[_pair_key(note_a_id, note_b_id)].append(w_coact)
 
     out: list[EdgeWeight] = []
     for (a, b), contribs in by_pair.items():
@@ -761,6 +806,12 @@ def adamic_adar_pair(
     return _adamic_adar_pair(a_tags, b_tags, tag_degrees)
 
 
+def coactivity_weight(session_count: int) -> float:
+    """Public re-export of the co-activity squash so tests / future MCP
+    tools can pin the policy without importing the private helper."""
+    return _coactivity_weight(session_count)
+
+
 def softor(values: Iterable[float]) -> float:
     """Public ``softor`` re-export. Same semantics as the SPA's
     ``softOr`` (task 7e99c724) so a unit test can pin the formula on
@@ -773,6 +824,7 @@ __all__ = [
     "EdgeWeight",
     "adamic_adar_pair",
     "biased_random_walk",
+    "coactivity_weight",
     "compute_betweenness",
     "compute_note_edge_weights",
     "compute_pagerank",

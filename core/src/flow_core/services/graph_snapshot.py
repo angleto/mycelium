@@ -27,6 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from flow_core.models.garden_graph_snapshot import GardenGraphSnapshot
 from flow_core.models.note import Note
+from flow_core.models.note_coactivity import NoteCoactivity
 from flow_core.models.note_link import NoteNoteLink
 from flow_core.models.note_tag import NoteTag
 from flow_core.services import graph as graph_svc
@@ -36,10 +37,20 @@ _log = logging.getLogger("flow.graph_snapshot")
 
 async def graph_signature(session: AsyncSession, *, org_id: uuid.UUID) -> str:
     """Cheap fingerprint of everything the analytics derive from: the
-    note set, the typed link set and the note↔tag assignments. Count +
-    latest-link-timestamp catches every add/remove (a delete changes
-    the count, an add changes both). Note-body edits don't change the
-    graph and correctly don't change the signature."""
+    note set, the typed link set, the note↔tag assignments and the
+    co-activity edges. Count + latest-link-timestamp catches every
+    add/remove (a delete changes the count, an add changes both).
+    Note-body edits don't change the graph and correctly don't change the
+    signature.
+
+    Co-activity feeds ``compute_note_edge_weights`` (a third soft-OR
+    source), so it must be in the fingerprint or the materialised
+    centrality/betweenness/Leiden would ignore fresh co-activity edges
+    until some unrelated note/link/tag change happened to bump the
+    signature. The fingerprint uses the row count + session-count sum +
+    latest co-active timestamp — all content, none of them the
+    per-recompute ``computed_at`` — so a no-op re-materialise of the same
+    window leaves the signature (and thus the snapshot) untouched."""
     notes = (
         await session.execute(select(func.count()).select_from(Note).where(Note.org_id == org_id))
     ).scalar_one()
@@ -55,8 +66,18 @@ async def graph_signature(session: AsyncSession, *, org_id: uuid.UUID) -> str:
             select(func.count()).select_from(NoteTag).where(NoteTag.org_id == org_id)
         )
     ).scalar_one()
+    coact_n, coact_sum, max_coact_ts = (
+        await session.execute(
+            select(
+                func.count(),
+                func.coalesce(func.sum(NoteCoactivity.session_count), 0),
+                func.max(NoteCoactivity.last_coactive_at),
+            ).where(NoteCoactivity.org_id == org_id)
+        )
+    ).one()
     ts = max_link_ts.isoformat() if max_link_ts is not None else "-"
-    return f"n{notes}:l{links}:t{note_tags}:{ts}"
+    cts = max_coact_ts.isoformat() if max_coact_ts is not None else "-"
+    return f"n{notes}:l{links}:t{note_tags}:{ts}:c{coact_n}/{coact_sum}/{cts}"
 
 
 async def get_graph_snapshot(

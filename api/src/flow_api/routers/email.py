@@ -43,6 +43,7 @@ def _account_out(a: EmailAccount) -> EmailAccountOut:
         status=a.status,
         last_sync_at=a.last_sync_at,
         last_error=a.last_error,
+        ingest_to_memory=a.ingest_to_memory,
         version=a.version,
     )
 

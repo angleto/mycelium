@@ -37,6 +37,10 @@ class FetchedMessage:
     subject: str | None = None
     body_text: str | None = None
     raw_size: int | None = None
+    # Automated / list / bulk mail, decided from RFC headers at fetch time
+    # (the raw message is only available here). The memory-ingest hygiene
+    # filter drops these upstream; everything else flows through.
+    is_bulk: bool = False
 
 
 @dataclass(frozen=True)
@@ -62,6 +66,20 @@ def _xoauth2(user: str, token: str) -> str:
 
 def _addr_list(value: str) -> list[str]:
     return [a.strip() for a in value.split(",") if a.strip()]
+
+
+def _is_bulk(msg: email.message.Message) -> bool:
+    """True for automated / mailing-list / bulk mail, from the standard
+    headers: ``List-Id`` (any list), ``Precedence: bulk|list|junk``, or
+    ``Auto-Submitted`` other than ``no`` (RFC 3834). The one upstream
+    ingest filter: it removes the bulk of the noise (and the embedding
+    cost) before paying for it; content hygiene stays downstream."""
+    if msg.get("List-Id"):
+        return True
+    if (msg.get("Precedence") or "").strip().lower() in {"bulk", "list", "junk"}:
+        return True
+    auto = (msg.get("Auto-Submitted") or "").strip().lower()
+    return bool(auto) and auto != "no"
 
 
 def _body_text(msg: email.message.Message) -> str | None:
@@ -142,6 +160,7 @@ class ImapSmtpConnector:
                         body_text=_body_text(msg),
                         received_at=received_at,
                         raw_size=len(raw[0][1]),
+                        is_bulk=_is_bulk(msg),
                     )
                 )
         return out
