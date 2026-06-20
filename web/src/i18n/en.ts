@@ -95,6 +95,23 @@ export const en = {
         delete: '{{count}} notes deleted',
       },
     },
+    learning: {
+      title: 'Learning signals',
+      intro: 'How your accept/reject feedback is shaping suggestions — your own history only.',
+      rejectTitle: 'Most-declined suggestions',
+      rejectIntro:
+        'Features you decline most often. Mute them at the source if they are wrong for you.',
+      rejectEmpty: 'No declined suggestions yet.',
+      declined: 'declined {{count}}×',
+      driftTitle: 'Biggest prior shifts (30d)',
+      driftIntro: 'Which of your preferences moved the most recently.',
+      driftEmpty: 'Not enough history yet (a 30-day snapshot is needed).',
+      loadError: 'Could not load the learning signals.',
+      type: {
+        tag: 'Tag',
+        link: 'Link',
+      },
+    },
   },
   gardenAudit: {
     title: 'Event stream',
@@ -1463,6 +1480,9 @@ export const en = {
     addAccount: 'Add account',
     accounts: 'Accounts',
     sync: 'Sync',
+    ingestToMemory: 'Ingest to memory',
+    ingestToMemoryHint:
+      'Non-bulk messages from this account become searchable memory on the Email channel.',
     synced: 'Fetched {{fetched}}, created {{created}}.',
     messages: 'Messages',
     filterAcct: 'Account',

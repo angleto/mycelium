@@ -2255,6 +2255,78 @@ button.btn--danger:hover {
   font-size: 0.82rem;
   line-height: 1.35;
 }
+/* ADR-0037 learning signals: reject-hotspots + 30-day prior drift.
+   Theme-safe (vars only); the signed drift bars carry their own hues. */
+.ghealth__learning {
+  margin-top: 1.5rem;
+}
+.ghealth__learning-intro {
+  color: var(--muted);
+  font-size: 0.85rem;
+  margin: 0.2rem 0 0.8rem;
+}
+.ghealth__learning-cols {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  gap: 1.2rem;
+}
+.ghealth__learning-sub-head {
+  font-size: 0.92rem;
+  margin: 0 0 0.2rem;
+}
+.ghealth__learning-sub {
+  color: var(--muted);
+  font-size: 0.78rem;
+  margin: 0 0 0.5rem;
+}
+.ghealth__learning-empty {
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-style: italic;
+}
+.ghealth__hotspot-list,
+.ghealth__drift-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+.ghealth__hotspot-item,
+.ghealth__drift-item {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  font-size: 0.82rem;
+}
+.ghealth__hotspot-type {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 0.4rem;
+  padding: 0 0.3rem;
+}
+.ghealth__hotspot-id {
+  font-family: var(--mono, monospace);
+  font-size: 0.74rem;
+  color: var(--muted);
+}
+.ghealth__hotspot-count {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+}
+.ghealth__drift-delta {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+.ghealth__drift-chart {
+  display: block;
+  margin: 0.2rem 0 0.6rem;
+}
 /* ADR-0036 event-bus audit panel: the coordinated event stream. Theme-safe
    (no hardcoded colours): actor class reads from its label, not a hue. */
 .ghaudit__head {

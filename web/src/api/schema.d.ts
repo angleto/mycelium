@@ -3720,6 +3720,33 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/notes/{note_id}/parts/ui-state": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set All Note Parts Ui State
+         * @description Collapse / expand EVERY part of the note for the caller in one
+         *     round-trip (the parts editor's collapse-all / expand-all toggle).
+         *     User-scoped, last-write-wins. Returns the full parts list with the
+         *     new collapse state so the SPA refreshes from a single response —
+         *     same shape as the per-part endpoint, just note-wide.
+         *
+         *     Declared before ``/{part_id}/ui-state`` so the literal ``ui-state``
+         *     segment is never captured as a ``part_id``.
+         */
+        put: operations["set_all_note_parts_ui_state_notes__note_id__parts_ui_state_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/notes/{note_id}/parts/{part_id}/ui-state": {
         parameters: {
             query?: never;
@@ -4286,10 +4313,10 @@ export interface paths {
          * Garden Graph
          * @description Materialise the workspace note-graph in one round-trip:
          *
-         *     - ``edges``: undirected ``(src, dst, weight)`` rows with the v1
+         *     - ``edges``: undirected ``(src, dst, weight)`` rows with the
          *       ``note_edge_strength`` aggregation (soft-OR of per-kind base
-         *       contributions + Adamic-Adar tag overlap). Co-activity from
-         *       Proposal A is Phase 2.
+         *       contributions + Adamic-Adar tag overlap + co-activity from the
+         *       worker-materialised ``note_coactivity``, task f0a15247).
          *     - ``centrality``: ``{note_id: pagerank}`` over the manual
          *       directed link graph (damping=0.85, power iteration). The map
          *       sums to 1.0 across the workspace.
@@ -4387,6 +4414,59 @@ export interface paths {
          *     written — the audit trail behind the learning loop and rollback.
          */
         post: operations["garden_apply_garden_apply_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/garden/learning/rollback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Garden Learning Rollback
+         * @description Rewind the caller's own learned priors to their state at ``to``
+         *     (ADR-0037 "Snapshots and rollback"): restores the closest daily
+         *     snapshot at-or-before the cut, replays the feedback delta on top, and
+         *     writes a fresh checkpoint — decay-aware and fully reproducible. Returns
+         *     a one-line diff of the largest-moved feature. Per-user: a member can
+         *     only rewind their own priors (``ctx.user_id``).
+         */
+        post: operations["garden_learning_rollback_garden_learning_rollback_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/garden/learning/telemetry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Garden Learning Telemetry
+         * @description The caller's learning telemetry for the sensors dashboard (ADR-0037):
+         *
+         *     - ``reject_hotspots``: the suggestion features they decline most, so
+         *       they can mute at the source.
+         *     - ``drift``: which priors moved the most over ``drift_days`` (vs the
+         *       snapshot that old; empty until a snapshot that old exists).
+         *
+         *     Read-only, the caller's own history only (ADR-0037 privacy: no
+         *     cross-user comparison). "Show, never judge".
+         */
+        get: operations["garden_learning_telemetry_garden_learning_telemetry_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -6293,6 +6373,8 @@ export interface components {
             last_sync_at: string | null;
             /** Last Error */
             last_error: string | null;
+            /** Ingest To Memory */
+            ingest_to_memory: boolean;
             /** Version */
             version: number;
         };
@@ -6311,6 +6393,8 @@ export interface components {
             /** Smtp Port */
             smtp_port?: number | null;
             status?: components["schemas"]["EmailAccountStatus"] | null;
+            /** Ingest To Memory */
+            ingest_to_memory?: boolean | null;
         };
         /**
          * EmailAccountStatus
@@ -6786,6 +6870,20 @@ export interface components {
             applied_state?: string | null;
         };
         /**
+         * GardenFeatureDeltaOut
+         * @description One feature's prior value before vs after (rollback diff / drift).
+         */
+        GardenFeatureDeltaOut: {
+            /** Feature Key */
+            feature_key: string;
+            /** Before */
+            before: number;
+            /** After */
+            after: number;
+            /** Delta */
+            delta: number;
+        };
+        /**
          * GardenGraphEdge
          * @description One undirected weighted edge between two notes. ``src`` and
          *     ``dst`` are canonically ordered (sorted by string repr) so two
@@ -6911,6 +7009,51 @@ export interface components {
                 [key: string]: components["schemas"]["GardenHealthMetricOut"];
             };
         };
+        /**
+         * GardenLearningRollbackIn
+         * @description Rewind the caller's own learned priors to their state at ``to``
+         *     (ADR-0037 "Snapshots and rollback").
+         */
+        GardenLearningRollbackIn: {
+            /**
+             * To
+             * Format: date-time
+             */
+            to: string;
+        };
+        /**
+         * GardenLearningRollbackOut
+         * @description Result of a rollback: the restored window + a one-line diff
+         *     (ADR-0037: "the system was slightly more biased toward tag X").
+         */
+        GardenLearningRollbackOut: {
+            /**
+             * Rolled Back To
+             * Format: date-time
+             */
+            rolled_back_to: string;
+            /** Snapshot At */
+            snapshot_at: string | null;
+            /** Replayed Events */
+            replayed_events: number;
+            /** Features Changed */
+            features_changed: number;
+            top_change: components["schemas"]["GardenFeatureDeltaOut"] | null;
+            /** Summary */
+            summary: string;
+        };
+        /**
+         * GardenLearningTelemetryOut
+         * @description Read-only learning telemetry for the sensors dashboard (ADR-0037):
+         *     the reject-hotspots and the prior-drift bars, the caller's own history
+         *     only. "Show, never judge".
+         */
+        GardenLearningTelemetryOut: {
+            /** Reject Hotspots */
+            reject_hotspots: components["schemas"]["GardenRejectHotspotOut"][];
+            /** Drift */
+            drift: components["schemas"]["GardenFeatureDeltaOut"][];
+        };
         /** GardenLinkCandidateOut */
         GardenLinkCandidateOut: {
             /**
@@ -6961,6 +7104,25 @@ export interface components {
             rationale: string;
             /** Auto Apply */
             auto_apply: boolean;
+        };
+        /**
+         * GardenRejectHotspotOut
+         * @description A suggestion feature the caller keeps declining (ADR-0037 reject-
+         *     hotspot view). ``feature_key`` is type-prefixed; the SPA resolves the
+         *     human label from its tag/note context.
+         */
+        GardenRejectHotspotOut: {
+            /** Suggestion Type */
+            suggestion_type: string;
+            /** Feature Key */
+            feature_key: string;
+            /** Declines */
+            declines: number;
+            /**
+             * Last Declined At
+             * Format: date-time
+             */
+            last_declined_at: string;
         };
         /** GardenTagSuggestionOut */
         GardenTagSuggestionOut: {
@@ -19538,6 +19700,46 @@ export interface operations {
             };
         };
     };
+    set_all_note_parts_ui_state_notes__note_id__parts_ui_state_put: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                note_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NotePartUIStateIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotePartOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     set_note_part_ui_state_notes__note_id__parts__part_id__ui_state_put: {
         parameters: {
             query?: never;
@@ -20901,6 +21103,82 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["GardenApplyOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    garden_learning_rollback_garden_learning_rollback_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GardenLearningRollbackIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GardenLearningRollbackOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    garden_learning_telemetry_garden_learning_telemetry_get: {
+        parameters: {
+            query?: {
+                reject_days?: number;
+                drift_days?: number;
+                limit?: number;
+            };
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GardenLearningTelemetryOut"];
                 };
             };
             /** @description Validation Error */

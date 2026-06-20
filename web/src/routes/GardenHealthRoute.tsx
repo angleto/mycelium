@@ -21,6 +21,8 @@ import type { components } from '../api/schema'
 type Health = components['schemas']['GardenHealthOut']
 type Metric = components['schemas']['GardenHealthMetricOut']
 type HealthEvent = components['schemas']['GardenHealthEventOut']
+type Telemetry = components['schemas']['GardenLearningTelemetryOut']
+type Drift = components['schemas']['GardenFeatureDeltaOut']
 
 type Kind = 'pct' | 'duration' | 'bits' | 'scalar' | 'delta'
 type Dir = 'higher' | 'lower' | 'trend' | 'signed'
@@ -447,6 +449,156 @@ function WhatChangedTimeline() {
   )
 }
 
+// A feature key is type-prefixed (``tag:<id>`` / ``link_target:<id>``);
+// split it into a type tag + the raw id (the SPA owns label rendering).
+function featureParts(key: string): { typeKey: 'tag' | 'link' | null; id: string } {
+  if (key.startsWith('tag:')) return { typeKey: 'tag', id: key.slice(4) }
+  if (key.startsWith('link_target:'))
+    return { typeKey: 'link', id: key.slice('link_target:'.length) }
+  return { typeKey: null, id: key }
+}
+
+// Signed horizontal bars for the 30-day prior drift: right/green = the
+// preference strengthened, left/red = weakened, around a zero baseline.
+// Dependency-free SVG, same idiom as Sparkline/TrendChart.
+function DriftBars({ items }: { items: Drift[] }) {
+  const w = 260
+  const rowH = 22
+  const pad = 4
+  const h = items.length * rowH
+  const maxAbs = Math.max(...items.map((d) => Math.abs(d.delta)), 1e-4)
+  const xOf = (v: number) => pad + ((v + maxAbs) / (2 * maxAbs)) * (w - 2 * pad)
+  const x0 = xOf(0)
+  return (
+    <svg
+      className="ghealth__drift-chart"
+      width="100%"
+      height={h}
+      viewBox={`0 0 ${w} ${h}`}
+      preserveAspectRatio="none"
+      aria-hidden="true"
+    >
+      <line x1={x0} x2={x0} y1={0} y2={h} stroke="currentColor" strokeWidth="0.5" opacity="0.3" />
+      {items.map((d, i) => {
+        const xv = xOf(d.delta)
+        const y = i * rowH + 5
+        return (
+          <rect
+            key={d.feature_key}
+            x={Math.min(x0, xv)}
+            y={y}
+            width={Math.max(1, Math.abs(xv - x0))}
+            height={rowH - 10}
+            fill={d.delta >= 0 ? '#4a8f6b' : '#b0553f'}
+          />
+        )
+      })}
+    </svg>
+  )
+}
+
+// Learning signals (ADR-0037 telemetry, task 8aff04b9): the user's own
+// reject-hotspots (suggestions they decline most, to mute at the source)
+// + the biggest 30-day prior shifts. Read-only, "show, never judge";
+// the user's own history only (no cross-user comparison, ADR-0037). Its
+// own fetch, like WhatChangedTimeline; empty/error states are explicit.
+function LearningPanel() {
+  const { t } = useTranslation()
+  const [data, setData] = useState<Telemetry | null | undefined>(undefined)
+
+  useEffect(() => {
+    let active = true
+    void api
+      .GET('/garden/learning/telemetry', {
+        params: {
+          header: workspaceHeader(),
+          query: { reject_days: 90, drift_days: 30, limit: 10 },
+        },
+      })
+      .then((r) => {
+        if (active) setData(r.data ?? null)
+      })
+    return () => {
+      active = false
+    }
+  }, [])
+
+  const hotspots = data?.reject_hotspots ?? []
+  const drift = data?.drift ?? []
+
+  return (
+    <section className="ghealth__learning">
+      <h2 className="ghealth__learning-head">{t('gardenHealth.learning.title')}</h2>
+      <p className="ghealth__learning-intro">{t('gardenHealth.learning.intro')}</p>
+      {data === undefined && <p className="hint">{t('common.loading')}</p>}
+      {data === null && <p className="error">{t('gardenHealth.learning.loadError')}</p>}
+      {data && (
+        <div className="ghealth__learning-cols">
+          <div className="ghealth__hotspots">
+            <h3 className="ghealth__learning-sub-head">
+              {t('gardenHealth.learning.rejectTitle')}
+            </h3>
+            <p className="ghealth__learning-sub">{t('gardenHealth.learning.rejectIntro')}</p>
+            {hotspots.length === 0 ? (
+              <p className="ghealth__learning-empty">{t('gardenHealth.learning.rejectEmpty')}</p>
+            ) : (
+              <ul className="ghealth__hotspot-list">
+                {hotspots.map((hsp) => {
+                  const f = featureParts(hsp.feature_key)
+                  return (
+                    <li key={hsp.feature_key} className="ghealth__hotspot-item">
+                      {f.typeKey && (
+                        <span className="ghealth__hotspot-type">
+                          {t(`gardenHealth.learning.type.${f.typeKey}`)}
+                        </span>
+                      )}
+                      <code className="ghealth__hotspot-id">{f.id.slice(0, 8)}</code>
+                      <span className="ghealth__hotspot-count">
+                        {t('gardenHealth.learning.declined', { count: hsp.declines })}
+                      </span>
+                    </li>
+                  )
+                })}
+              </ul>
+            )}
+          </div>
+          <div className="ghealth__drift">
+            <h3 className="ghealth__learning-sub-head">{t('gardenHealth.learning.driftTitle')}</h3>
+            <p className="ghealth__learning-sub">{t('gardenHealth.learning.driftIntro')}</p>
+            {drift.length === 0 ? (
+              <p className="ghealth__learning-empty">{t('gardenHealth.learning.driftEmpty')}</p>
+            ) : (
+              <>
+                <DriftBars items={drift} />
+                <ul className="ghealth__drift-list">
+                  {drift.map((d) => {
+                    const f = featureParts(d.feature_key)
+                    return (
+                      <li key={d.feature_key} className="ghealth__drift-item">
+                        {f.typeKey && (
+                          <span className="ghealth__hotspot-type">
+                            {t(`gardenHealth.learning.type.${f.typeKey}`)}
+                          </span>
+                        )}
+                        <code className="ghealth__hotspot-id">{f.id.slice(0, 8)}</code>
+                        <span className="ghealth__drift-delta">
+                          {d.before.toFixed(2)} {'→'} {d.after.toFixed(2)} (
+                          {d.delta >= 0 ? '+' : ''}
+                          {d.delta.toFixed(2)})
+                        </span>
+                      </li>
+                    )
+                  })}
+                </ul>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+    </section>
+  )
+}
+
 export function GardenHealthRoute() {
   const { t } = useTranslation()
   const [data, setData] = useState<Health | null | undefined>(undefined)
@@ -527,6 +679,8 @@ export function GardenHealthRoute() {
           )}
 
           <WhatChangedTimeline />
+
+          <LearningPanel />
 
           {drill && data.metrics[drill] && (
             <MetricDrillDown

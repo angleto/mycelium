@@ -94,6 +94,23 @@ export const it: Catalog = {
         delete: '{{count}} note eliminate',
       },
     },
+    learning: {
+      title: 'Segnali di apprendimento',
+      intro: 'Come i tuoi accept/reject stanno modellando i suggerimenti — solo la tua storia.',
+      rejectTitle: 'Suggerimenti più rifiutati',
+      rejectIntro:
+        'Le feature che rifiuti più spesso. Silenziale alla fonte se sono sbagliate per te.',
+      rejectEmpty: 'Ancora nessun suggerimento rifiutato.',
+      declined: 'rifiutato {{count}}×',
+      driftTitle: 'Maggiori spostamenti dei prior (30g)',
+      driftIntro: 'Quali tue preferenze si sono mosse di più di recente.',
+      driftEmpty: 'Storico insufficiente (serve uno snapshot di 30 giorni).',
+      loadError: 'Impossibile caricare i segnali di apprendimento.',
+      type: {
+        tag: 'Tag',
+        link: 'Link',
+      },
+    },
   },
   gardenAudit: {
     title: 'Flusso eventi',
@@ -1463,6 +1480,9 @@ export const it: Catalog = {
     addAccount: 'Aggiungi account',
     accounts: 'Account',
     sync: 'Sincronizza',
+    ingestToMemory: 'Ingerisci in memoria',
+    ingestToMemoryHint:
+      'I messaggi non-bulk di questo account diventano memoria ricercabile sul canale Email.',
     synced: 'Recuperate {{fetched}}, create {{created}}.',
     messages: 'Messaggi',
     filterAcct: 'Account',

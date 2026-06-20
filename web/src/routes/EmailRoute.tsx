@@ -92,6 +92,19 @@ export function EmailRoute() {
     await reload()
   }
 
+  async function onToggleIngest(a: Account, enabled: boolean) {
+    setErr(null)
+    const { error } = await api.PATCH('/email/accounts/{account_id}', {
+      params: { header: workspaceHeader(), path: { account_id: a.id } },
+      body: { expected_version: a.version, ingest_to_memory: enabled },
+    })
+    if (error) {
+      setErr(errMessage(error))
+      return
+    }
+    await reload()
+  }
+
   async function onToTask(id: string) {
     setErr(null)
     const { error } = await api.POST('/email/messages/{message_id}/to-task', {
@@ -168,6 +181,14 @@ export function EmailRoute() {
             <button type="button" onClick={() => void onSync(a.id)}>
               {t('email.sync')}
             </button>
+            <label className="email__ingest" title={t('email.ingestToMemoryHint')}>
+              <input
+                type="checkbox"
+                checked={a.ingest_to_memory}
+                onChange={(e) => void onToggleIngest(a, e.target.checked)}
+              />
+              {t('email.ingestToMemory')}
+            </label>
           </li>
         ))}
       </ul>
