@@ -355,3 +355,55 @@ async def test_soft_deleted_note_hidden_unless_include_deleted(_fake_embedder: N
         assert any(x.get("note_id") == nid for x in hits), (
             f"include_deleted=true should expose the soft-deleted note: {hits}"
         )
+
+
+async def test_grader_floor_abstains_through_unified_search(_fake_embedder: None) -> None:
+    """WS-B1 end-to-end: the per-org grader/abstain floor flows through the
+    unified /search path (``search_unified`` -> ``memory.retrieve``), not only
+    ``memory.retrieve`` in isolation. /search exposes no per-call knob, so it
+    inherits the workspace floor: a ceiling floor makes /search abstain ("no
+    answer" over "weak answer"), and a tiny positive floor lets the genuine
+    hit back -- proving the floor is a real threshold applied on the unified
+    surface that the SPA and the MCP agents share."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as c:
+        h = await _signup(c)
+        await _grant_and_rate(c, h)
+        task = (
+            await c.post(
+                "/tasks",
+                headers=h,
+                json={"title": "Quarterly budget review for alpha"},
+            )
+        ).json()
+        tid = task["id"]
+        body = {"q": "quarterly budget", "kinds": ["task"], "limit": 10}
+
+        def _found(hits: list[dict]) -> bool:
+            return any(x["kind"] == "task" and x["task_id"] == tid for x in hits)
+
+        async def _set_floor(value: float) -> None:
+            me = (await c.get("/workspaces/me", headers=h)).json()
+            r = await c.patch(
+                "/workspaces/me/settings",
+                headers=h,
+                json={
+                    "expected_version": me["version"],
+                    # estimate_presets is a required field on the settings PATCH;
+                    # echo the current value so we only move the grader floor.
+                    "estimate_presets": me["settings"]["estimate_presets"],
+                    "retrieval_grader_min_rrf": value,
+                },
+            )
+            assert r.status_code == 200, r.text
+
+        # Floor off (default): the genuine hit comes back through /search.
+        assert _found((await c.post("/search", headers=h, json=body)).json())
+
+        # Floor at the ceiling (>= any fused RRF score) -> /search abstains.
+        await _set_floor(1.0)
+        assert (await c.post("/search", headers=h, json=body)).json() == []
+
+        # A tiny positive floor (a real threshold, not on/off) -> hit returns.
+        await _set_floor(0.001)
+        assert _found((await c.post("/search", headers=h, json=body)).json())
