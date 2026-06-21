@@ -135,6 +135,20 @@ class Note(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, Base):
     auto_classified_at: Mapped[datetime.datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # ADR-0043 (task e87daff4): human-gated review state for AUTONOMOUSLY-
+    # generated nodes. ``origin_model_id`` records the LLM that produced a
+    # synthesised note (NULL for human-authored), so the model is on the
+    # artifact, not only in the transient MCP response. ``review_state`` is
+    # orthogonal to ``maturity``/``humus_flag``: NULL for every human/legacy
+    # note AND every user-initiated creation (always effective, unchanged
+    # from today); ``'proposed'`` is set ONLY by the autonomous garden sweep
+    # when it generates a summary unsolicited (withheld from every retrieval
+    # surface); ``'approved'`` once a human accepts it. There is no stored
+    # ``'rejected'`` -- a reject soft-deletes the node. A note is EFFECTIVE
+    # (eligible for retrieval/listing) iff ``review_state IS DISTINCT FROM
+    # 'proposed'`` AND ``deleted_at IS NULL``.
+    origin_model_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    review_state: Mapped[str | None] = mapped_column(String(16), nullable=True)
 
 
 class NoteTurn(UUIDPKMixin, OrgScopedMixin, Base):
