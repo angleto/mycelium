@@ -835,7 +835,14 @@ async def humus_note_ids(session: AsyncSession, *, org_id: uuid.UUID) -> set[uui
     pipeline, ADR-0039). Read-side predicate for the walk bias and the
     walk-step provenance marker; uses the partial index ix_notes_humus_flag."""
     rows = await session.execute(
-        select(Note.id).where(Note.org_id == org_id, Note.humus_flag.is_(True))
+        select(Note.id).where(
+            Note.org_id == org_id,
+            Note.humus_flag.is_(True),
+            # ADR-0043 D2/D1: a humus note still awaiting human review
+            # (``review_state='proposed'``) is withheld from the free-wander
+            # bias until approved; NULL/'approved' pass via IS DISTINCT FROM.
+            Note.review_state.is_distinct_from("proposed"),
+        )
     )
     return {r[0] for r in rows}
 

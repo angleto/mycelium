@@ -170,6 +170,10 @@ async def list_notes(
         stmt = stmt.where(Note.deleted_at.is_(None))
     if not include_archived:
         stmt = stmt.where(Note.is_archived.is_(False))
+    # ADR-0043 D2: an autonomously-generated proposal awaiting human review is
+    # never listed here (only the review inbox surfaces it). NULL/'approved'
+    # pass via IS DISTINCT FROM; a no-op until a proposed note exists.
+    stmt = stmt.where(Note.review_state.is_distinct_from("proposed"))
     if project_id is not None:
         # Project lives in the junction (migration 0016): a project
         # focus is just a tag filter against the project tag.
@@ -204,9 +208,19 @@ async def get_note(
     org_id: uuid.UUID,
     note_id: uuid.UUID,
     include_deleted: bool = False,
+    include_proposed: bool = False,
 ) -> Note:
+    # ADR-0043 D2: a 'proposed' note (autonomously generated, pending human
+    # review) is not openable through the normal read path -- it is visible
+    # only via the review inbox. ``include_proposed`` is the inbox/approve
+    # bypass (the review service loads via session.get and does not depend on
+    # this), mirroring ``include_deleted``.
     n = (await session.execute(select(Note).where(Note.id == note_id))).scalar_one_or_none()
-    if n is None or (n.deleted_at is not None and not include_deleted):
+    if (
+        n is None
+        or (n.deleted_at is not None and not include_deleted)
+        or (n.review_state == "proposed" and not include_proposed)
+    ):
         raise NotFoundError(MessageCode.NOTE_NOT_FOUND)
     return n
 

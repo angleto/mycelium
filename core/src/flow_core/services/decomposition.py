@@ -29,6 +29,7 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from flow_core.ai_providers import LLMProvider
+from flow_core.config import get_settings
 from flow_core.errors import DomainError
 from flow_core.i18n import MessageCode
 from flow_core.models.classification_feedback import ClassificationFeedback
@@ -46,6 +47,25 @@ from flow_core.services.rbac import require_role
 # policy produced the decision (the LLM model that distilled lives in the
 # signals snapshot, since the flip is decided by ``is_inert``, not the LLM).
 _HUMUS_MODEL_VERSION = "auto_humus_v1"
+
+
+def _review_state_for(autonomous: bool) -> str | None:
+    """ADR-0043 review state for a freshly synthesised humus note.
+
+    A summary the garden generates AUTONOMOUSLY (the unsolicited background
+    sweep, ``autonomous=True``) is born ``'proposed'`` -- withheld from every
+    retrieval surface until a human approves it -- but ONLY when the review
+    gate is enabled. A USER-initiated synthesis (MCP / SPA / on-demand, the
+    default ``autonomous=False``) is always effective (``None``), byte-
+    identical to pre-ADR-0043 behaviour. ``origin_model_id`` is stamped on the
+    note regardless of this function (transparency is unconditional). The
+    per-model "earned autonomy" auto-approve policy (ADR-0043 D4) is a
+    deferred follow-up; until it lands the gate is always approval-required.
+    """
+    if autonomous and get_settings().garden_review_gate_enabled:
+        return "proposed"
+    return None
+
 
 _DISTILL_SYSTEM = (
     "You decompose a piece of finished thinking into reusable atoms. "
@@ -100,6 +120,7 @@ async def distill_note(
     actor_id: uuid.UUID,
     note_id: uuid.UUID,
     llm: LLMProvider | None = None,
+    autonomous: bool = False,
 ) -> DistillationResult:
     """Read the source note's body, generate a distillation via the
     LLM provider, and persist it as a new note linked to the source.
@@ -107,6 +128,11 @@ async def distill_note(
     Idempotent: if a distillation note already derives from this source
     (a ``hypha_of`` link to a note marked ``humus_kind='distillation'``),
     the existing one is returned untouched.
+
+    ``autonomous`` (ADR-0043): set True only by the unsolicited background
+    sweep, so the distillation is born ``review_state='proposed'`` (gated)
+    instead of effective. User-initiated callers leave it False (the default,
+    byte-identical to pre-gate behaviour).
     """
     await require_role(session, org_id, actor_id, Role.member)
     source = await notes_svc.get_note(session, org_id=org_id, note_id=note_id)
@@ -175,6 +201,11 @@ async def distill_note(
     )
     distilled.humus_kind = "distillation"
     distilled.humus_flag = True
+    # ADR-0043: the generating model on the artifact (transparency,
+    # unconditional) + the review gate (proposed only for an autonomous,
+    # gate-enabled run; NULL/effective otherwise).
+    distilled.origin_model_id = res.model_id
+    distilled.review_state = _review_state_for(autonomous)
     # Anti-mutation invariant (task 8a26c000): the source becomes humus
     # only if it is inert (archived/dormant, no open linked work, past the
     # quiet window). A live source -- one being actively worked -- is left
@@ -339,11 +370,13 @@ async def _synthesise_humus(
     sources: list[Note],
     project_id: uuid.UUID | None,
     llm: LLMProvider | None,
+    autonomous: bool,
 ) -> HumusResult:
     """Shared core for pattern/season: idempotency check, metered LLM call,
     create the humus note (``humus_kind``/``humus_flag``/``humus_signature``)
     and a ``hypha_of`` link from every source. Sources are read-only; no live
-    note is mutated."""
+    note is mutated. ``autonomous`` (ADR-0043) decides the review gate (see
+    ``_review_state_for``)."""
     existing = await _existing_humus(session, org_id=org_id, kind=kind, signature=signature)
     if existing is not None:
         return HumusResult(note_id=existing, model_id="cached", created=False)
@@ -370,6 +403,9 @@ async def _synthesise_humus(
     note.humus_kind = kind
     note.humus_flag = True
     note.humus_signature = signature
+    # ADR-0043: model provenance on the artifact + the review gate.
+    note.origin_model_id = res.model_id
+    note.review_state = _review_state_for(autonomous)
     await session.flush()
     identity_id = (
         await session.execute(
@@ -400,12 +436,17 @@ async def extract_cluster_pattern(
     actor_id: uuid.UUID,
     source_note_ids: list[uuid.UUID],
     llm: LLMProvider | None = None,
+    autonomous: bool = False,
 ) -> HumusResult:
     """Synthesise a ``pattern`` humus note over a set of ARCHIVED source notes
     (a Leiden cluster, a cross-cluster pick, a project window -- the caller
     chooses the grouping). Reads the sources, asks the per-org metered LLM for
     the through-lines, writes a new note linked back to each source. Idempotent
     on the source set; never mutates a live note (only archived sources count).
+
+    ``autonomous`` (ADR-0043): True only for the unsolicited background sweep
+    (the note is born ``review_state='proposed'``); user-initiated callers
+    leave it False (effective immediately, as today).
     """
     await require_role(session, org_id, actor_id, Role.member)
     sources = list(
@@ -443,6 +484,7 @@ async def extract_cluster_pattern(
         sources=sources,
         project_id=None,  # a pattern may span projects
         llm=llm,
+        autonomous=autonomous,
     )
 
 
@@ -454,10 +496,14 @@ async def synthesize_season(
     year: int,
     quarter: int,
     llm: LLMProvider | None = None,
+    autonomous: bool = False,
 ) -> HumusResult:
     """Synthesise a ``season`` humus note for one quarter -- "what I cultivated
     this season" -- over the notes archived (created) in it. Idempotent per
     (org, year, quarter); a proposal, never a mutation of live notes.
+
+    ``autonomous`` (ADR-0043): True only for the unsolicited background sweep
+    (born ``review_state='proposed'``); user-initiated callers leave it False.
     """
     if quarter not in (1, 2, 3, 4):
         raise DomainError(MessageCode.DOMAIN_ERROR)
@@ -500,6 +546,7 @@ async def synthesize_season(
         sources=sources,
         project_id=None,
         llm=llm,
+        autonomous=autonomous,
     )
 
 

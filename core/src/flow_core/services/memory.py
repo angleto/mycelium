@@ -496,6 +496,7 @@ async def retrieve(
         RerankGate,
         RRFFusionStage,
         SemanticDenseStage,
+        proposed_note_blob_exclusion,
     )
 
     pred = _project_pred(project_id)
@@ -507,7 +508,12 @@ async def retrieve(
     wanted = set(tag_ids or ())
     if channel_id is not None:
         wanted.add(channel_id)
-    tag_clauses: tuple[ColumnElement[bool], ...] = ()
+    # ADR-0043 D2: withhold autonomously-generated, not-yet-approved notes
+    # (``review_state='proposed'``) from every retrieval stage at once -- the
+    # lexical/semantic stages fold ``tag_clauses`` into their WHERE, and the
+    # humus stage inherits this base context. Unconditional + a no-op when no
+    # proposed note exists, so behaviour is byte-identical until the gate runs.
+    tag_clauses: tuple[ColumnElement[bool], ...] = (proposed_note_blob_exclusion(org_id),)
     if wanted:
         tagged = (
             select(MemoryBlobTag.blob_id)
@@ -518,7 +524,7 @@ async def retrieve(
             .group_by(MemoryBlobTag.blob_id)
             .having(func.count(func.distinct(MemoryBlobTag.tag_id)) == len(wanted))
         )
-        tag_clauses = (MemoryBlob.id.in_(tagged),)
+        tag_clauses = (*tag_clauses, MemoryBlob.id.in_(tagged))
 
     ctx = RetrievalContext(
         session=session,

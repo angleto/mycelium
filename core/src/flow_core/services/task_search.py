@@ -798,15 +798,20 @@ async def _note_filter_meta(
     hidden note is not surfaced even if its part blob ranked high."""
     if not note_ids:
         return {}
-    stmt = select(Note.id, Note.title, Note.deleted_at, Note.is_archived).where(
+    stmt = select(Note.id, Note.title, Note.deleted_at, Note.is_archived, Note.review_state).where(
         Note.id.in_(note_ids)
     )
     rows = (await session.execute(stmt)).all()
     out: dict[uuid.UUID, _NoteMeta] = {}
-    for nid, title, deleted_at, is_archived in rows:
+    for nid, title, deleted_at, is_archived, review_state in rows:
         if deleted_at is not None and not include_deleted:
             continue
         if is_archived and not include_archived:
+            continue
+        # ADR-0043 D2: a 'proposed' note (autonomously generated, pending
+        # review) is never surfaced through unified search, even if its part
+        # blob ranked high (belt-and-suspenders with the retrieve-level filter).
+        if review_state == "proposed":
             continue
         out[nid] = _NoteMeta(title=title)
     return out

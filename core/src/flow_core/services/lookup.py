@@ -149,6 +149,9 @@ async def resolve_prefix(
         )
         if not include_deleted:
             qn = qn.where(Note.deleted_at.is_(None))
+        # ADR-0043 D2: a 'proposed' note (autonomously generated, pending
+        # review) is not offered in the @-mention / lookup picker.
+        qn = qn.where(Note.review_state.is_distinct_from("proposed"))
         qn = qn.order_by(Note.updated_at.desc()).limit(limit - len(out))
         note_rows = (await session.execute(qn)).all()
         for nid, title, deleted_at in note_rows:

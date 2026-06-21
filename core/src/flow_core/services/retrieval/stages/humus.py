@@ -69,6 +69,29 @@ def humus_blob_predicate(org_id: uuid.UUID) -> ColumnElement[bool]:
             BlobSource.source_kind == "note_part",
             BlobSource.org_id == org_id,
             Note.humus_flag.is_(True),
+            # ADR-0043 D2: an autonomously-generated humus note awaiting
+            # human review (``review_state='proposed'``) is withheld from the
+            # walk until approved. NULL/'approved' both pass (IS DISTINCT FROM).
+            Note.review_state.is_distinct_from("proposed"),
+        )
+    )
+
+
+def proposed_note_blob_exclusion(org_id: uuid.UUID) -> ColumnElement[bool]:
+    """SQL predicate EXCLUDING blobs whose source note is an autonomously-
+    generated proposal awaiting human review (``review_state='proposed'``,
+    ADR-0043 D2). ANDed into ``memory.retrieve``'s base ``tag_clauses`` so the
+    lexical, dense AND humus stages all withhold a proposed note in one place.
+    Unconditional: when no proposed note exists the subquery is empty and the
+    ``NOT IN`` is a no-op, so behaviour is byte-identical."""
+    return MemoryBlob.id.notin_(
+        select(BlobSource.blob_id)
+        .join(NotePart, cast(NotePart.id, String) == BlobSource.source_id)
+        .join(Note, Note.id == NotePart.note_id)
+        .where(
+            BlobSource.source_kind == "note_part",
+            BlobSource.org_id == org_id,
+            Note.review_state == "proposed",
         )
     )
 
