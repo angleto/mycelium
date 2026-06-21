@@ -131,6 +131,25 @@ async def get_part(session: AsyncSession, *, org_id: uuid.UUID, part_id: uuid.UU
     return await _get_part(session, org_id=org_id, part_id=part_id)
 
 
+async def _assert_not_promoted(
+    session: AsyncSession, *, org_id: uuid.UUID, note_id: uuid.UUID
+) -> None:
+    """Enforce the read-only invariant of a transplanted note (docs/adr/0029
+    D2): a note promoted to a task (``promoted_at IS NOT NULL``) is read-only
+    at the service layer, so every CONTENT mutation (note title/body + any
+    part create/update/append/prepend/replace/delete/reorder/merge) is
+    refused with ``NOTE_PROMOTED_READONLY`` -- mirroring the existing
+    ``set_maturity`` / link guards in ``note_links``. A missing note resolves
+    to ``None`` here and is left to the mutator's own ``NOT_FOUND`` path."""
+    promoted_at = (
+        await session.execute(
+            select(Note.promoted_at).where(Note.id == note_id, Note.org_id == org_id)
+        )
+    ).scalar_one_or_none()
+    if promoted_at is not None:
+        raise DomainError(MessageCode.NOTE_PROMOTED_READONLY)
+
+
 async def create_part(
     session: AsyncSession,
     *,
@@ -149,6 +168,7 @@ async def create_part(
     against the deferred-unique constraint."""
     await require_role(session, org_id, actor_id, Role.member)
     await _get_note_in_org(session, org_id=org_id, note_id=note_id)
+    await _assert_not_promoted(session, org_id=org_id, note_id=note_id)
     if ord is None:
         max_ord = (
             await session.execute(select(func.max(NotePart.ord)).where(NotePart.note_id == note_id))
@@ -217,6 +237,7 @@ async def update_part(
     revision row coalesces."""
     await require_role(session, org_id, actor_id, Role.member)
     part = await _get_part(session, org_id=org_id, part_id=part_id)
+    await _assert_not_promoted(session, org_id=org_id, note_id=part.note_id)
     values: dict[str, Any] = {}
     if body is not None:
         values["body"] = body
@@ -311,6 +332,7 @@ async def append_to_part(
     """
     await require_role(session, org_id, actor_id, Role.member)
     part = await _get_part(session, org_id=org_id, part_id=part_id)
+    await _assert_not_promoted(session, org_id=org_id, note_id=part.note_id)
     body = part.body or ""
     # Idempotent replay: cursor advanced by exactly one and the tail is
     # already this chunk -> the previous attempt landed; treat as no-op.
@@ -382,6 +404,7 @@ async def prepend_to_part(
     """
     await require_role(session, org_id, actor_id, Role.member)
     part = await _get_part(session, org_id=org_id, part_id=part_id)
+    await _assert_not_promoted(session, org_id=org_id, note_id=part.note_id)
     body = part.body or ""
     new_body = text + body
     max_bytes = get_settings().note_body_max_bytes
@@ -451,6 +474,7 @@ async def replace_in_part(
     """
     await require_role(session, org_id, actor_id, Role.member)
     part = await _get_part(session, org_id=org_id, part_id=part_id)
+    await _assert_not_promoted(session, org_id=org_id, note_id=part.note_id)
     body = part.body or ""
     occurrences = body.count(find) if find else 0
     if occurrences == 0:
@@ -509,6 +533,7 @@ async def delete_part(
     is an explicit operation."""
     await require_role(session, org_id, actor_id, Role.member)
     part = await _get_part(session, org_id=org_id, part_id=part_id)
+    await _assert_not_promoted(session, org_id=org_id, note_id=part.note_id)
     # Drop the part's search blob inline first: the index pointer cascades
     # with the part row (FK ON DELETE CASCADE), so a deferred flush would
     # no longer resolve the blob to delete. Deleting the blob now cascades
@@ -550,6 +575,7 @@ async def reorder_parts(
     """
     await require_role(session, org_id, actor_id, Role.member)
     await _get_note_in_org(session, org_id=org_id, note_id=note_id)
+    await _assert_not_promoted(session, org_id=org_id, note_id=note_id)
     existing = await list_parts(session, org_id=org_id, note_id=note_id)
     if {p.id for p in existing} != set(part_ids):
         raise DomainError(MessageCode.DOMAIN_ERROR)
@@ -716,6 +742,11 @@ async def merge_notes(
         return target
     if target.deleted_at is not None:
         raise DomainError(MessageCode.DOMAIN_ERROR)
+    # A transplanted note is read-only (docs/adr/0029 D2): block a merge that
+    # would mutate a promoted source (its parts move out + soft-delete) or a
+    # promoted target (it gains the source's parts).
+    await _assert_not_promoted(session, org_id=org_id, note_id=source_note_id)
+    await _assert_not_promoted(session, org_id=org_id, note_id=target_note_id)
 
     source_parts = await list_parts(session, org_id=org_id, note_id=source_note_id)
     target_parts = await list_parts(session, org_id=org_id, note_id=target_note_id)

@@ -570,6 +570,12 @@ async def update_note(
     clears ``notes.task_id`` (an explicit ``None`` unlinks). A target
     task is validated in-org (RLS scopes the lookup); TASK_NOT_FOUND if
     absent. Omitting the argument leaves the existing link untouched."""
+    # A transplanted note is read-only (docs/adr/0029 D2): reject title/body
+    # edits with the same guard the part mutators use. Lazy import avoids the
+    # notes <-> note_parts cycle (note_parts already imports notes lazily).
+    from flow_core.services.note_parts import _assert_not_promoted
+
+    await _assert_not_promoted(session, org_id=org_id, note_id=note_id)
     # Phase 6 final: ``text`` lands in note_part(ord=0), not in a
     # ``transcript`` column. The Note row's ``values`` carries only
     # the still-on-row fields (title, audio_ref, ...); the part write
