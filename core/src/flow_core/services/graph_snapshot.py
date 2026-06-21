@@ -25,17 +25,23 @@ from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from flow_core.config import get_settings
 from flow_core.models.garden_graph_snapshot import GardenGraphSnapshot
 from flow_core.models.note import Note
 from flow_core.models.note_coactivity import NoteCoactivity
-from flow_core.models.note_link import NoteNoteLink
+from flow_core.models.note_link import NoteNoteLink, NoteTaskLink
 from flow_core.models.note_tag import NoteTag
+from flow_core.models.task import Task
+from flow_core.models.task_relation import TaskRelation
+from flow_core.models.task_tag import TaskTag
 from flow_core.services import graph as graph_svc
 
 _log = logging.getLogger("flow.graph_snapshot")
 
 
-async def graph_signature(session: AsyncSession, *, org_id: uuid.UUID) -> str:
+async def graph_signature(
+    session: AsyncSession, *, org_id: uuid.UUID, include_tasks: bool = False
+) -> str:
     """Cheap fingerprint of everything the analytics derive from: the
     note set, the typed link set, the note↔tag assignments and the
     co-activity edges. Count + latest-link-timestamp catches every
@@ -50,7 +56,16 @@ async def graph_signature(session: AsyncSession, *, org_id: uuid.UUID) -> str:
     signature. The fingerprint uses the row count + session-count sum +
     latest co-active timestamp — all content, none of them the
     per-recompute ``computed_at`` — so a no-op re-materialise of the same
-    window leaves the signature (and thus the snapshot) untouched."""
+    window leaves the signature (and thus the snapshot) untouched.
+
+    When ``include_tasks`` (ADR-0042 D1) the snapshot's centrality /
+    clusters / betweenness span notes + tasks, so the signature folds in
+    the task node + task-edge + task-tag counts; otherwise a task change
+    would not invalidate the stored unified analytics. With it off the
+    suffix is omitted and the signature is byte-identical to the notes-only
+    fingerprint (no spurious recompute on an existing snapshot). The caller
+    (``refresh_graph_snapshot``) passes the fleet flag in.
+    """
     notes = (
         await session.execute(select(func.count()).select_from(Note).where(Note.org_id == org_id))
     ).scalar_one()
@@ -77,7 +92,32 @@ async def graph_signature(session: AsyncSession, *, org_id: uuid.UUID) -> str:
     ).one()
     ts = max_link_ts.isoformat() if max_link_ts is not None else "-"
     cts = max_coact_ts.isoformat() if max_coact_ts is not None else "-"
-    return f"n{notes}:l{links}:t{note_tags}:{ts}:c{coact_n}/{coact_sum}/{cts}"
+    sig = f"n{notes}:l{links}:t{note_tags}:{ts}:c{coact_n}/{coact_sum}/{cts}"
+    if not include_tasks:
+        return sig
+    tasks_n = (
+        await session.execute(
+            select(func.count())
+            .select_from(Task)
+            .where(Task.org_id == org_id, Task.deleted_at.is_(None))
+        )
+    ).scalar_one()
+    rels = (
+        await session.execute(
+            select(func.count()).select_from(TaskRelation).where(TaskRelation.org_id == org_id)
+        )
+    ).scalar_one()
+    ntl = (
+        await session.execute(
+            select(func.count()).select_from(NoteTaskLink).where(NoteTaskLink.org_id == org_id)
+        )
+    ).scalar_one()
+    task_tags = (
+        await session.execute(
+            select(func.count()).select_from(TaskTag).where(TaskTag.org_id == org_id)
+        )
+    ).scalar_one()
+    return f"{sig}:T{tasks_n}/R{rels}/NT{ntl}/TT{task_tags}"
 
 
 async def get_graph_snapshot(
@@ -95,14 +135,27 @@ async def refresh_graph_snapshot(
 ) -> bool:
     """Recompute and upsert the org's analytics snapshot when the graph
     changed since the stored one (or ``force``). Returns True when a
-    recomputation actually ran. Idempotent: same graph -> same row."""
-    sig = await graph_signature(session, org_id=org_id)
+    recomputation actually ran. Idempotent: same graph -> same row.
+
+    This is one of the unified surfaces (ADR-0042 D1): it reads the fleet
+    ``garden_unified_task_graph_enabled`` flag once and threads it into the
+    signature and every analytic, so the stored centrality / clusters /
+    betweenness span notes + tasks iff the workspace opted in. Flag off ->
+    notes-only, byte-identical to before tasks were graph nodes."""
+    include_tasks = get_settings().garden_unified_task_graph_enabled
+    sig = await graph_signature(session, org_id=org_id, include_tasks=include_tasks)
     existing = await get_graph_snapshot(session, org_id=org_id)
     if not force and existing is not None and existing.signature == sig:
         return False
-    centrality = await graph_svc.compute_pagerank(session, org_id=org_id)
-    betweenness = await graph_svc.compute_betweenness(session, org_id=org_id)
-    cluster_res = await graph_svc.compute_leiden_clusters(session, org_id=org_id)
+    centrality = await graph_svc.compute_pagerank(
+        session, org_id=org_id, include_tasks=include_tasks
+    )
+    betweenness = await graph_svc.compute_betweenness(
+        session, org_id=org_id, include_tasks=include_tasks
+    )
+    cluster_res = await graph_svc.compute_leiden_clusters(
+        session, org_id=org_id, include_tasks=include_tasks
+    )
     values = {
         "org_id": org_id,
         "signature": sig,

@@ -53,9 +53,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from flow_core.models.note import Note
 from flow_core.models.note_coactivity import NoteCoactivity
-from flow_core.models.note_link import NoteNoteLink
+from flow_core.models.note_link import NoteNoteLink, NoteTaskLink
 from flow_core.models.note_tag import NoteTag
 from flow_core.models.tag import Tag, TagKind
+from flow_core.models.task import Task
+from flow_core.models.task_relation import TaskRelation
+from flow_core.models.task_tag import TaskTag
 
 # Per-kind base contribution. Mirrors the SPA's ``edgeWeightV1`` so the
 # server-side authoritative weight reads identically when the client
@@ -66,6 +69,24 @@ _KIND_WEIGHT: dict[str, float] = {
     "contradicts": 0.65,
     "related": 0.45,
 }
+
+# Per-kind base contribution for note<->task links (ADR-0042 D1, the
+# unified task graph). The four flow relations carry different structural
+# strength: a derivation (``promoted_from`` / ``derived_from``) is a
+# stronger tie than a loose ``subject`` / ``artifact`` association. Only
+# read when ``include_tasks`` is on; tunable v1, same spirit as
+# ``_KIND_WEIGHT``.
+_NOTE_TASK_KIND_WEIGHT: dict[str, float] = {
+    "promoted_from": 0.70,
+    "derived_from": 0.65,
+    "artifact": 0.55,
+    "subject": 0.50,
+}
+
+# Task<->task ``related`` edge weight (``TaskRelation``). Reuses the note
+# ``related`` base so a task relation reads at the same strength as a note
+# relation in the unified weave.
+_TASK_RELATION_WEIGHT: float = _KIND_WEIGHT["related"]
 
 # Co-activity source scale (ADR-0031 ``w_coact``). The session count from
 # ``note_coactivity`` is squashed via ``1 - 1 / (1 + scale * count)`` --
@@ -129,13 +150,39 @@ def _pair_key(a: uuid.UUID, b: uuid.UUID) -> tuple[uuid.UUID, uuid.UUID]:
     return (a, b) if str(a) <= str(b) else (b, a)
 
 
-async def _generic_tag_degrees(session: AsyncSession, *, org_id: uuid.UUID) -> dict[uuid.UUID, int]:
-    """Count how many in-org notes carry each generic tag. The Adamic-
+async def _node_ids(
+    session: AsyncSession, *, org_id: uuid.UUID, include_tasks: bool
+) -> list[uuid.UUID]:
+    """The graph's node set. Notes only by default; notes + live tasks when
+    ``include_tasks`` (ADR-0042 D1). With it off this runs the exact same
+    ``select(Note.id)`` the centrality helpers used inline, so the order and
+    the resulting analytics are byte-identical. Note and task ids never
+    collide (distinct UUIDs), so a bare UUID stays a sufficient node key."""
+    note_rows = (await session.execute(select(Note.id).where(Note.org_id == org_id))).all()
+    nodes: list[uuid.UUID] = [r[0] for r in note_rows]
+    if include_tasks:
+        task_rows = (
+            await session.execute(
+                select(Task.id).where(Task.org_id == org_id, Task.deleted_at.is_(None))
+            )
+        ).all()
+        nodes.extend(r[0] for r in task_rows)
+    return nodes
+
+
+async def _generic_tag_degrees(
+    session: AsyncSession, *, org_id: uuid.UUID, include_tasks: bool = False
+) -> dict[uuid.UUID, int]:
+    """Count how many in-org NODES carry each generic tag. The Adamic-
     Adar denominator depends on the degree of each tag in the bipartite
-    note↔tag graph; we restrict to ``kind='generic'`` because client
-    and project tags are coarse buckets (every note in the workspace
+    node↔tag graph; we restrict to ``kind='generic'`` because client
+    and project tags are coarse buckets (every node in the workspace
     has one), so they contribute zero discriminative power and would
-    flatten the score."""
+    flatten the score.
+
+    ``include_tasks`` (ADR-0042 D1) extends the corpus over ``task_tags``
+    too, so the rarity denominator reflects the unified foresta. Default
+    false keeps the notes-only degree counts byte-identical."""
     rows = (
         await session.execute(
             select(NoteTag.tag_id, Tag.kind)
@@ -147,14 +194,31 @@ async def _generic_tag_degrees(session: AsyncSession, *, org_id: uuid.UUID) -> d
     for tag_id, kind in rows:
         if kind is TagKind.generic:
             deg[tag_id] += 1
+    if include_tasks:
+        # Join tasks + exclude soft-deleted: a deleted task is not a graph
+        # node (``_node_ids`` excludes it), so its tags must not inflate the
+        # rarity denominator either.
+        task_rows = (
+            await session.execute(
+                select(TaskTag.tag_id, Tag.kind)
+                .join(Tag, Tag.id == TaskTag.tag_id)
+                .join(Task, Task.id == TaskTag.task_id)
+                .where(TaskTag.org_id == org_id, Task.deleted_at.is_(None))
+            )
+        ).all()
+        for tag_id, kind in task_rows:
+            if kind is TagKind.generic:
+                deg[tag_id] += 1
     return deg
 
 
 async def _note_generic_tags(
-    session: AsyncSession, *, org_id: uuid.UUID
+    session: AsyncSession, *, org_id: uuid.UUID, include_tasks: bool = False
 ) -> dict[uuid.UUID, set[uuid.UUID]]:
-    """``{note_id: {generic_tag_id, ...}}`` for every visible note in
-    the org. Single batched query."""
+    """``{node_id: {generic_tag_id, ...}}`` for every visible node in the
+    org. Single batched query (one extra when ``include_tasks`` folds
+    ``task_tags`` in, ADR-0042 D1). Keys are note ids by default, notes +
+    tasks when unified; the two id spaces never collide."""
     rows = (
         await session.execute(
             select(NoteTag.note_id, NoteTag.tag_id, Tag.kind)
@@ -166,6 +230,19 @@ async def _note_generic_tags(
     for note_id, tag_id, kind in rows:
         if kind is TagKind.generic:
             out[note_id].add(tag_id)
+    if include_tasks:
+        # Exclude soft-deleted tasks (not graph nodes, see ``_node_ids``).
+        task_rows = (
+            await session.execute(
+                select(TaskTag.task_id, TaskTag.tag_id, Tag.kind)
+                .join(Tag, Tag.id == TaskTag.tag_id)
+                .join(Task, Task.id == TaskTag.task_id)
+                .where(TaskTag.org_id == org_id, Task.deleted_at.is_(None))
+            )
+        ).all()
+        for task_id, tag_id, kind in task_rows:
+            if kind is TagKind.generic:
+                out[task_id].add(tag_id)
     return out
 
 
@@ -194,14 +271,24 @@ def _adamic_adar_pair(
 
 
 async def compute_note_edge_weights(
-    session: AsyncSession, *, org_id: uuid.UUID
+    session: AsyncSession, *, org_id: uuid.UUID, include_tasks: bool = False
 ) -> list[EdgeWeight]:
     """Materialise the v1 ``note_edge_strength`` over the org's manual
     note↔note link graph. Returns one row per *undirected* pair (the
     typed kind is collapsed; ``A hypha_of B`` and ``B related A``
     fold into the same weighted edge). Cost: two batched SELECTs
     (links + tags), O(L + N·avgTags) Python aggregation.
+
+    When ``include_tasks`` (ADR-0042 D1) the weave spans notes + tasks: the
+    tag corpus folds in ``task_tags`` (so note↔task and task↔task co-tag
+    edges surface), ``TaskRelation`` adds undirected task↔task ``related``
+    edges, and ``NoteTaskLink`` adds note↔task edges with a per-kind
+    weight. Task co-activity (the working-session source) is a separate
+    additive follow-up; absent, the soft-OR leaves it neutral. With
+    ``include_tasks`` off the result is byte-identical to the notes-only
+    weave (the caller — a unified surface — passes the fleet flag in).
     """
+    inc = include_tasks
     link_rows = (
         await session.execute(
             select(
@@ -232,8 +319,8 @@ async def compute_note_edge_weights(
     # link still surface here because tag overlap is independent
     # evidence the v2 design wants to expose. The SPA can filter by
     # ``weight >= threshold`` to keep the visual layer clean.
-    tag_deg = await _generic_tag_degrees(session, org_id=org_id)
-    note_tags = await _note_generic_tags(session, org_id=org_id)
+    tag_deg = await _generic_tag_degrees(session, org_id=org_id, include_tasks=inc)
+    note_tags = await _note_generic_tags(session, org_id=org_id, include_tasks=inc)
     note_ids: list[uuid.UUID] = sorted(note_tags.keys(), key=str)
     by_tag_to_notes: dict[uuid.UUID, list[uuid.UUID]] = defaultdict(list)
     for nid in note_ids:
@@ -278,6 +365,50 @@ async def compute_note_edge_weights(
         # Rows are stored canonical, but fold through _pair_key anyway so a
         # mismatch can never split a pair into two undirected edges.
         by_pair[_pair_key(note_a_id, note_b_id)].append(w_coact)
+
+    # Task edges (ADR-0042 D1), only when the weave is unified. Both tables
+    # carry their own uniqueness (TaskRelation unique per pair, NoteTaskLink
+    # unique per (note, task, kind)), so a plain append is enough -- no
+    # cross-direction dedup like the note-link loop needs. Empty / not
+    # included -> nothing appended -> the notes-only result is untouched.
+    if inc:
+        # Soft-deleted tasks are not graph nodes (``_node_ids`` excludes
+        # them), so their lingering relation / note-link rows must not emit
+        # edges -- otherwise ``compute_betweenness`` (which derives its node
+        # set from the edges) would resurrect a deleted task as a phantom.
+        live_task_ids = {
+            r[0]
+            for r in (
+                await session.execute(
+                    select(Task.id).where(Task.org_id == org_id, Task.deleted_at.is_(None))
+                )
+            ).all()
+        }
+        rel_rows = (
+            await session.execute(
+                select(TaskRelation.task_a_id, TaskRelation.task_b_id).where(
+                    TaskRelation.org_id == org_id
+                )
+            )
+        ).all()
+        for task_a_id, task_b_id in rel_rows:
+            if task_a_id in live_task_ids and task_b_id in live_task_ids:
+                by_pair[_pair_key(task_a_id, task_b_id)].append(_TASK_RELATION_WEIGHT)
+        ntl_rows = (
+            await session.execute(
+                select(
+                    NoteTaskLink.note_id,
+                    NoteTaskLink.task_id,
+                    NoteTaskLink.kind,
+                ).where(NoteTaskLink.org_id == org_id)
+            )
+        ).all()
+        for note_id, task_id, kind in ntl_rows:
+            if task_id not in live_task_ids:
+                continue
+            w_nt = _NOTE_TASK_KIND_WEIGHT.get(kind, 0.0)
+            if w_nt > 0:
+                by_pair[_pair_key(note_id, task_id)].append(w_nt)
 
     out: list[EdgeWeight] = []
     for (a, b), contribs in by_pair.items():
@@ -340,6 +471,7 @@ async def compute_pagerank(
     damping: float = 0.85,
     max_iter: int = 100,
     tol: float = 1e-6,
+    include_tasks: bool = False,
 ) -> dict[uuid.UUID, float]:
     """Deterministic power-iteration PageRank over the org's note weave,
     treated as an UNDIRECTED, weighted graph (the edges of
@@ -360,8 +492,8 @@ async def compute_pagerank(
     probability mass per note, summing to 1; an empty workspace returns
     ``{}``.
     """
-    note_rows = (await session.execute(select(Note.id).where(Note.org_id == org_id))).all()
-    nodes: list[uuid.UUID] = [r[0] for r in note_rows]
+    inc = include_tasks
+    nodes = await _node_ids(session, org_id=org_id, include_tasks=inc)
     n = len(nodes)
     if n == 0:
         return {}
@@ -370,7 +502,7 @@ async def compute_pagerank(
     # Each edge is added in both directions; out-strength is its weight
     # sum, so rank spreads proportionally to how strongly two ideas are
     # woven together, regardless of who linked to whom.
-    edges = await compute_note_edge_weights(session, org_id=org_id)
+    edges = await compute_note_edge_weights(session, org_id=org_id, include_tasks=inc)
     neighbours: list[list[tuple[int, float]]] = [[] for _ in range(n)]
     out_strength = [0.0] * n
     for e in edges:
@@ -417,6 +549,7 @@ async def compute_personalized_pagerank(
     damping: float = 0.85,
     max_iter: int = 100,
     tol: float = 1e-6,
+    include_tasks: bool = False,
 ) -> dict[uuid.UUID, float]:
     """Personalised PageRank seeded at ``seed_ids`` (task 5bf31b63).
 
@@ -429,8 +562,8 @@ async def compute_personalized_pagerank(
     by ``graph_walk`` in focused mode to rank the subgraph around the
     seed.
     """
-    note_rows = (await session.execute(select(Note.id).where(Note.org_id == org_id))).all()
-    nodes: list[uuid.UUID] = [r[0] for r in note_rows]
+    inc = include_tasks
+    nodes = await _node_ids(session, org_id=org_id, include_tasks=inc)
     n = len(nodes)
     if n == 0:
         return {}
@@ -460,6 +593,32 @@ async def compute_personalized_pagerank(
         # Undirected: walk the filament both ways.
         out_neighbours[pi].append(ci)
         out_neighbours[ci].append(pi)
+    if inc:
+        # The task-side structural filaments the pollinator can wander
+        # (ADR-0042 D1): task↔task relations and note↔task typed links.
+        # Unweighted like the note links above (PPR adjacency is a plain
+        # neighbour list; edge strength is PageRank's axis, not the walk's).
+        rel_rows = (
+            await session.execute(
+                select(TaskRelation.task_a_id, TaskRelation.task_b_id).where(
+                    TaskRelation.org_id == org_id
+                )
+            )
+        ).all()
+        ntl_rows = (
+            await session.execute(
+                select(NoteTaskLink.note_id, NoteTaskLink.task_id).where(
+                    NoteTaskLink.org_id == org_id
+                )
+            )
+        ).all()
+        for a_id, b_id in [*rel_rows, *ntl_rows]:
+            ai = idx.get(a_id)
+            bi = idx.get(b_id)
+            if ai is None or bi is None or ai == bi:
+                continue
+            out_neighbours[ai].append(bi)
+            out_neighbours[bi].append(ai)
     rank = list(teleport_dist)
     for _ in range(max_iter):
         nxt = [(1.0 - damping) * teleport_dist[u] for u in range(n)]
@@ -490,7 +649,7 @@ async def compute_personalized_pagerank(
 
 
 async def compute_betweenness(
-    session: AsyncSession, *, org_id: uuid.UUID
+    session: AsyncSession, *, org_id: uuid.UUID, include_tasks: bool = False
 ) -> dict[uuid.UUID, float]:
     """Betweenness centrality over the org's note weave (task d8664631,
     Phase 2 of 8c0a8f08): the cluster-bridge detector. A note that sits
@@ -509,8 +668,14 @@ async def compute_betweenness(
     pair count times two, folding Brandes' double count), with ``n``
     the number of connected notes. Isolated notes are omitted (their
     betweenness is zero by definition).
+
+    With ``include_tasks`` (ADR-0042 D1) the bridge set spans the unified
+    weave: a task that sits on shortest paths between glades is a bridge
+    too. Nodes are derived from the (now unified) edge set, so an isolated
+    task is omitted exactly like an isolated note.
     """
-    edges = await compute_note_edge_weights(session, org_id=org_id)
+    inc = include_tasks
+    edges = await compute_note_edge_weights(session, org_id=org_id, include_tasks=inc)
     adj: dict[uuid.UUID, list[uuid.UUID]] = defaultdict(list)
     for e in edges:
         if e.src == e.dst or e.weight <= 0:
@@ -590,6 +755,7 @@ async def compute_leiden_clusters(
     *,
     org_id: uuid.UUID,
     seed: int = 0,
+    include_tasks: bool = False,
 ) -> ClusterResult:
     """Partition the workspace note graph into communities with the
     Leiden algorithm (task 8c0a8f08, ADR-0031 v2). Runs over the same
@@ -617,13 +783,13 @@ async def compute_leiden_clusters(
     except ImportError:
         return ClusterResult(clusters={}, modularity=None)
 
-    note_rows = (await session.execute(select(Note.id).where(Note.org_id == org_id))).all()
-    nodes: list[uuid.UUID] = [r[0] for r in note_rows]
+    inc = include_tasks
+    nodes = await _node_ids(session, org_id=org_id, include_tasks=inc)
     if not nodes:
         return ClusterResult(clusters={}, modularity=None)
     idx = {nid: i for i, nid in enumerate(nodes)}
 
-    edges = await compute_note_edge_weights(session, org_id=org_id)
+    edges = await compute_note_edge_weights(session, org_id=org_id, include_tasks=inc)
     ig_edges: list[tuple[int, int]] = []
     weights: list[float] = []
     for e in edges:

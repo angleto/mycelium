@@ -54,6 +54,7 @@ from flow_api.schemas import (
     GardenWalkOut,
     GardenWalkStep,
 )
+from flow_core.config import get_settings
 from flow_core.services import event_bus
 from flow_core.services import garden_classify as classify_svc
 from flow_core.services import garden_health as health_svc
@@ -181,8 +182,15 @@ async def garden_graph(
     flip once latency/volume demand it (the snapshot already stores
     them).
     """
-    edges = await svc.compute_note_edge_weights(ctx.session, org_id=ctx.org_id)
-    centrality = await svc.compute_pagerank(ctx.session, org_id=ctx.org_id)
+    # Unified surface (ADR-0042 D1): the mindmap spans notes + tasks when the
+    # fleet opts in. Recency stays a note axis (tasks have no maturity clock).
+    include_tasks = get_settings().garden_unified_task_graph_enabled
+    edges = await svc.compute_note_edge_weights(
+        ctx.session, org_id=ctx.org_id, include_tasks=include_tasks
+    )
+    centrality = await svc.compute_pagerank(
+        ctx.session, org_id=ctx.org_id, include_tasks=include_tasks
+    )
     recency = await svc.compute_recency(ctx.session, org_id=ctx.org_id)
     snap = await graph_snapshot_svc.get_graph_snapshot(ctx.session, org_id=ctx.org_id)
     betweenness: dict[uuid.UUID, float] = {}
@@ -212,7 +220,11 @@ async def garden_clusters(
     map with ``modularity=null`` — the mindmap simply renders no cluster
     colours rather than erroring.
     """
-    res = await svc.compute_leiden_clusters(ctx.session, org_id=ctx.org_id)
+    res = await svc.compute_leiden_clusters(
+        ctx.session,
+        org_id=ctx.org_id,
+        include_tasks=get_settings().garden_unified_task_graph_enabled,
+    )
     return GardenClustersOut(
         clusters=res.clusters,
         modularity=res.modularity,
