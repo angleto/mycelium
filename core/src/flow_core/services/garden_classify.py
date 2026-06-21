@@ -186,11 +186,15 @@ async def _note_generic_tags(
             by_node[node_id].add(tag_id)
             deg[tag_id] += 1
     if include_tasks:
+        # Exclude soft-deleted tasks: they are not graph nodes (graph.py
+        # filters them everywhere), so they must not become phantom
+        # co-occurrence nodes here nor inflate the rarity denominator.
         task_rows = (
             await session.execute(
                 select(TaskTag.task_id, TaskTag.tag_id, Tag.kind)
                 .join(Tag, Tag.id == TaskTag.tag_id)
-                .where(TaskTag.org_id == org_id)
+                .join(Task, Task.id == TaskTag.task_id)
+                .where(TaskTag.org_id == org_id, Task.deleted_at.is_(None))
             )
         ).all()
         for node_id, tag_id, kind in task_rows:
@@ -285,6 +289,43 @@ async def _suggest_links(
     return [c for _, c in scored]
 
 
+async def _suggest_task_links(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    node_id: uuid.UUID,
+    k: int,
+    damping: float = 1.0,
+    prior_of: Callable[[uuid.UUID], float] = _neutral_prior,
+) -> list[LinkCandidate]:
+    """Task-arm of link suggestion (ADR-0042 D2): related-task candidates
+    from ``link_prediction.suggest_links_for_task`` (PPR over the unified
+    graph + shared task-tag Adamic-Adar), re-ranked by the user's per-target
+    prior. Same floor-on-structural-score discipline as ``_suggest_links``
+    so a muted target sinks but is never pruned below a structural pass. The
+    only task↔task kind is ``related``."""
+    rows = await linkpred_svc.suggest_links_for_task(session, org_id=org_id, task_id=node_id, k=k)
+    scored: list[tuple[float, LinkCandidate]] = []
+    for r in rows:
+        conf = r.score * damping  # structural
+        if conf < LINK_FLOOR:
+            continue
+        ranked = conf * prior_of(r.task_id)
+        scored.append(
+            (
+                ranked,
+                LinkCandidate(
+                    target_id=r.task_id,
+                    link_kind="related",
+                    confidence=min(1.0, ranked),
+                    rationale=r.rationale,
+                ),
+            )
+        )
+    scored.sort(key=lambda t: (-t[0], str(t[1].target_id)))
+    return [c for _, c in scored]
+
+
 def _pr_percentile(pageranks: dict[uuid.UUID, float], node_id: uuid.UUID) -> float:
     """Rank percentile of ``node_id`` in the workspace PageRank
     distribution, in [0, 1]. The unique maximum scores 1.0 regardless of
@@ -369,9 +410,19 @@ async def _manual_link_degree(
 
 
 async def _suggest_cluster(
-    session: AsyncSession, *, org_id: uuid.UUID, node_id: uuid.UUID, damping: float = 1.0
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    node_id: uuid.UUID,
+    damping: float = 1.0,
+    include_tasks: bool = False,
 ) -> tuple[ClusterSuggestion | None, str]:
-    res = await graph_svc.compute_leiden_clusters(session, org_id=org_id)
+    # ``include_tasks`` (ADR-0042 D1) runs Leiden over the unified weave so a
+    # task lands in a community; for a note it is the same partition the
+    # note-only path produced when the flag is off (byte-identical).
+    res = await graph_svc.compute_leiden_clusters(
+        session, org_id=org_id, include_tasks=include_tasks
+    )
     if res.modularity is None:
         # The optional ``clustering`` extra is absent; degrade explicitly.
         return None, "leiden_extra_absent"
@@ -400,8 +451,11 @@ async def classify_node(
     """Return the structured enrichment proposal for ``node_id``.
 
     Read-only. RLS-scoped (every underlying query filters ``org_id`` and
-    runs on the caller's tenant session). v1 classifies **notes**; tasks
-    (tags-only per ADR-0032) and note_part/blob are a follow-up.
+    runs on the caller's tenant session). Classifies **notes**, and **tasks**
+    when ``garden_unified_task_graph_enabled`` (ADR-0042): a task gets tags +
+    cluster + related-task links from the unified graph; maturity stays
+    note-only (D3). With the flag off a non-note id is NOT_FOUND, exactly as
+    before. note_part/blob remain a follow-up.
 
     When ``user_id`` is given, the user's learned priors (ADR-0037) re-rank
     the tag and link candidates toward what they have accepted before; the
@@ -493,20 +547,29 @@ async def classify_node(
 
     links: list[LinkCandidate] = []
     if "links" in wanted:
+        link_prior_of: Callable[[uuid.UUID], float] = _neutral_prior
+        if user_id is not None:
+            lp = await garden_learning.personal_priors(
+                session, org_id=org_id, user_id=user_id, suggestion_type="link"
+            )
+            if lp:
+                personalized = True
+                link_prior_of = _factor_lookup(lp, "link_target:")
         if node_kind == "task":
-            # Task link-prediction needs tasks in the graph (ADR-0042 D1);
-            # until that lands a task gets no link suggestions, surfaced
-            # honestly rather than as a silent empty.
-            signals.append("task_links_pending_graph")
+            # ADR-0042 D2/D1: tasks now join the graph, so a task gets
+            # related-task suggestions (PPR over the unified weave + shared
+            # task-tag overlap), no longer surfaced as pending.
+            links = await _suggest_task_links(
+                session,
+                org_id=org_id,
+                node_id=node_id,
+                k=k,
+                damping=damping,
+                prior_of=link_prior_of,
+            )
+            if links:
+                signals.append("linkpred_task_ppr")
         else:
-            link_prior_of: Callable[[uuid.UUID], float] = _neutral_prior
-            if user_id is not None:
-                lp = await garden_learning.personal_priors(
-                    session, org_id=org_id, user_id=user_id, suggestion_type="link"
-                )
-                if lp:
-                    personalized = True
-                    link_prior_of = _factor_lookup(lp, "link_target:")
             links = await _suggest_links(
                 session,
                 org_id=org_id,
@@ -532,14 +595,13 @@ async def classify_node(
 
     cluster: ClusterSuggestion | None = None
     if "cluster" in wanted:
-        if node_kind == "task":
-            # Leiden runs on the note graph; tasks join it in ADR-0042 D1.
-            signals.append("task_cluster_pending_graph")
-        else:
-            cluster, cluster_signal = await _suggest_cluster(
-                session, org_id=org_id, node_id=node_id, damping=damping
-            )
-            signals.append(cluster_signal)
+        # ADR-0042 D1: with the unified graph the Leiden partition spans
+        # notes + tasks, so a task lands in a community too. For a note with
+        # the flag off this is the byte-identical notes-only partition.
+        cluster, cluster_signal = await _suggest_cluster(
+            session, org_id=org_id, node_id=node_id, damping=damping, include_tasks=unified
+        )
+        signals.append(cluster_signal)
 
     # Transparency (ADR-0037): record when a personal prior actually moved
     # the ranking, so the rationale upstream can say "ranked for you".
@@ -725,8 +787,10 @@ async def _mutate(
     """Perform the accepted mutation via the existing services (each is
     idempotent and audited on its own). ``cluster`` is informational in v1
     (clusters are computed, not stored on the node) so it is a no-op. A
-    ``tag`` routes to the note- or task-tag service by ``node_kind``
-    (ADR-0042); ``link`` / ``maturity`` are note-only in v1."""
+    ``tag`` routes to the note- or task-tag service by ``node_kind``; a
+    ``link`` routes to the note-link service (note↔note) or the task-relation
+    service (task↔task ``related``) by ``node_kind`` (ADR-0042); ``maturity``
+    is note-only (a note lifecycle, D3)."""
     if not value:
         return
     if suggestion_type == "tag":
@@ -743,14 +807,25 @@ async def _mutate(
                 session, org_id=org_id, actor_id=actor_id, note_id=node_id, tag_id=tag_id
             )
     elif suggestion_type == "link":
-        await note_links.link_notes(
-            session,
-            org_id=org_id,
-            actor_id=actor_id,
-            parent_note_id=node_id,
-            child_note_id=uuid.UUID(str(value["target_id"])),
-            kind=str(value.get("link_kind", "related")),
-        )
+        target_id = uuid.UUID(str(value["target_id"]))
+        if node_kind == "task":
+            # A task link suggestion is a task↔task ``related`` edge: route to
+            # the task-relation service, never note_links (whose FKs are
+            # notes.id -- a task id there would violate the FK, ADR-0042 D2).
+            from flow_core.services import task_relations
+
+            await task_relations.add_relation(
+                session, org_id=org_id, actor_id=actor_id, task_id=node_id, other_id=target_id
+            )
+        else:
+            await note_links.link_notes(
+                session,
+                org_id=org_id,
+                actor_id=actor_id,
+                parent_note_id=node_id,
+                child_note_id=target_id,
+                kind=str(value.get("link_kind", "related")),
+            )
     elif suggestion_type == "maturity":
         await note_links.set_maturity(
             session,

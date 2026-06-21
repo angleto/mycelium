@@ -27,10 +27,12 @@ from flow_core.config import get_settings
 from flow_core.db import admin_session, tenant_session
 from flow_core.errors import NotFoundError
 from flow_core.models.note import Note, NoteKind
+from flow_core.models.note_link import NoteTaskLink
 from flow_core.models.note_tag import NoteTag
 from flow_core.models.precomputed_suggestion import PrecomputedSuggestion
 from flow_core.models.tag import TagKind
 from flow_core.models.task import Task
+from flow_core.models.task_relation import TaskRelation
 from flow_core.models.task_tag import TaskTag
 from flow_core.services import garden_classify as gc
 from flow_core.services import note_links, taxonomy
@@ -198,8 +200,9 @@ async def test_classify_task_suggests_cooccurring_tag_when_unified(
 ) -> None:
     """ADR-0042 D2: with the flag on, a task is classifiable and its tag
     co-occurrence spans notes + tasks. Task A has {X}; a note B and a task C
-    both have {X, Y}, so Y is a strong candidate for A. cluster + links are
-    pending the task graph (D1); maturity is N/A for tasks (D3)."""
+    both have {X, Y}, so Y is a strong candidate for A. Cluster + links are
+    now computed over the unified graph (D1), never the old pending markers;
+    maturity is N/A for tasks (D3)."""
     monkeypatch.setattr(get_settings(), "garden_unified_task_graph_enabled", True)
     org, user = await _make_workspace()
     async with tenant_session(str(org), str(user)) as s:
@@ -220,14 +223,113 @@ async def test_classify_task_suggests_cooccurring_tag_when_unified(
     assert y in suggested
     assert x not in suggested  # already on the task
     assert "tag_cooccur_adamic_adar" in res.signals_used
-    # Cluster + links need tasks in the Leiden/PPR graph (ADR-0042 D1):
-    # surfaced honestly as pending, never a faked empty.
-    assert res.cluster is None
-    assert "task_cluster_pending_graph" in res.signals_used
-    assert res.links == []
-    assert "task_links_pending_graph" in res.signals_used
+    # The old pending markers are gone: the task is a first-class graph node.
+    assert "task_cluster_pending_graph" not in res.signals_used
+    assert "task_links_pending_graph" not in res.signals_used
+    # Cluster comes from the unified Leiden partition (or degrades explicitly
+    # when the clustering extra is absent), exactly like the note path.
+    if res.cluster is None:
+        assert "leiden_extra_absent" in res.signals_used
+    else:
+        assert "leiden_cluster" in res.signals_used
+        assert res.cluster.modularity is not None
     # Maturity is a note lifecycle; tasks have workflow states (ADR-0042 D3).
     assert res.maturity is None
+
+
+async def test_classify_task_gets_cluster_from_unified_graph(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ADR-0042 D1/step 5: a task lands in a Leiden community over the unified
+    graph. Three tasks tied by ``related`` edges form a triangle -> one
+    community, so classifying one returns its cluster (or degrades explicitly
+    when the clustering extra is absent)."""
+    monkeypatch.setattr(get_settings(), "garden_unified_task_graph_enabled", True)
+    org, user = await _make_workspace()
+    async with tenant_session(str(org), str(user)) as s:
+        t1 = await _make_task(s, org, user, "t1")
+        t2 = await _make_task(s, org, user, "t2")
+        t3 = await _make_task(s, org, user, "t3")
+        for a, b in [(t1.id, t2.id), (t2.id, t3.id), (t1.id, t3.id)]:
+            lo, hi = (a, b) if a < b else (b, a)
+            s.add(TaskRelation(org_id=org, task_a_id=lo, task_b_id=hi))
+        await s.flush()
+        await _warm_corpus(s, org)
+        res = await gc.classify_node(s, org_id=org, node_id=t1.id, kinds=frozenset({"cluster"}))
+    assert res.node_kind == "task"
+    if res.cluster is None:
+        assert "leiden_extra_absent" in res.signals_used
+    else:
+        assert "leiden_cluster" in res.signals_used
+        assert res.cluster.leiden_id is not None
+        assert res.cluster.modularity is not None
+
+
+async def test_classify_task_suggests_related_task_via_unified_graph(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ADR-0042 D2/step 5: two tasks bound to the same note (a task -> note ->
+    task PPR path) and sharing a rare tag surface each other as ``related``
+    candidates, with no pre-existing direct relation."""
+    monkeypatch.setattr(get_settings(), "garden_unified_task_graph_enabled", True)
+    org, user = await _make_workspace()
+    async with tenant_session(str(org), str(user)) as s:
+        t1 = await _make_task(s, org, user, "t1")
+        t2 = await _make_task(s, org, user, "t2")
+        n = await _make_note(s, org, user, "shared-note")
+        z = await _generic_tag(s, org, user, "z-tag")
+        s.add(NoteTaskLink(org_id=org, note_id=n.id, task_id=t1.id, kind="subject"))
+        s.add(NoteTaskLink(org_id=org, note_id=n.id, task_id=t2.id, kind="subject"))
+        await _attach_task_tag(s, org, t1.id, z)
+        await _attach_task_tag(s, org, t2.id, z)
+        await s.flush()
+        await _warm_corpus(s, org)
+        res = await gc.classify_node(s, org_id=org, node_id=t1.id, kinds=frozenset({"links"}))
+    assert res.node_kind == "task"
+    targets = {link.target_id for link in res.links}
+    assert t2.id in targets
+    assert all(link.link_kind == "related" for link in res.links)
+    assert "linkpred_task_ppr" in res.signals_used
+
+
+async def test_classify_task_tags_ignore_soft_deleted_tasks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A soft-deleted task is not a graph node, so its tags must not enter the
+    classify tag corpus: the suggestions for a live task are identical whether
+    or not a soft-deleted task carrying overlapping tags exists."""
+    monkeypatch.setattr(get_settings(), "garden_unified_task_graph_enabled", True)
+    org, user = await _make_workspace()
+    async with tenant_session(str(org), str(user)) as s:
+        a = await _make_task(s, org, user, "task-a")
+        b = await _make_note(s, org, user, "note-b")
+        c = await _make_task(s, org, user, "task-c")
+        x = await _generic_tag(s, org, user, "x-tag")
+        y = await _generic_tag(s, org, user, "y-tag")
+        await _attach_task_tag(s, org, a.id, x)
+        await _attach(s, org, b.id, x)
+        await _attach(s, org, b.id, y)
+        await _attach_task_tag(s, org, c.id, x)
+        await _attach_task_tag(s, org, c.id, y)
+        await _warm_corpus(s, org)
+        before = await gc.classify_node(s, org_id=org, node_id=a.id, kinds=frozenset({"tags"}))
+        # A soft-deleted task that shares X (would inflate co-occurrence) and
+        # carries a private tag Z (would be a phantom candidate) if it leaked.
+        z = await _generic_tag(s, org, user, "z-tag")
+        d = await _make_task(s, org, user, "task-d")
+        await _attach_task_tag(s, org, d.id, x)
+        await _attach_task_tag(s, org, d.id, z)
+        await s.execute(
+            update(Task)
+            .where(Task.id == d.id)
+            .values(deleted_at=datetime.datetime.now(datetime.UTC))
+        )
+        await s.flush()
+        after = await gc.classify_node(s, org_id=org, node_id=a.id, kinds=frozenset({"tags"}))
+    before_tags = {(t.tag_id, round(t.confidence, 6)) for t in before.tags}
+    after_tags = {(t.tag_id, round(t.confidence, 6)) for t in after.tags}
+    assert before_tags == after_tags  # the dead task changed nothing
+    assert z not in {t.tag_id for t in after.tags}  # its private tag never surfaced
 
 
 async def test_apply_task_tag_attaches_and_records() -> None:
@@ -254,6 +356,35 @@ async def test_apply_task_tag_attaches_and_records() -> None:
             )
         ).scalar_one_or_none()
         assert row is not None
+
+
+async def test_apply_task_link_creates_task_relation() -> None:
+    """ADR-0042 D2: accepting a ``link`` suggestion on a TASK creates a
+    TaskRelation (task↔task ``related``), NOT a NoteNoteLink — whose FK is
+    notes.id and would reject a task id."""
+    org, user = await _make_workspace()
+    async with tenant_session(str(org), str(user)) as s:
+        t1 = await _make_task(s, org, user, "t1")
+        t2 = await _make_task(s, org, user, "t2")
+        fb = await gc.apply_suggestion(
+            s,
+            org_id=org,
+            actor_id=user,
+            node_id=t1.id,
+            suggestion_type="link",
+            suggestion_value={"target_id": str(t2.id), "link_kind": "related"},
+            action="accept",
+        )
+        assert fb.action == "accept"
+        lo, hi = (t1.id, t2.id) if t1.id < t2.id else (t2.id, t1.id)
+        rel = (
+            await s.execute(
+                select(TaskRelation).where(
+                    TaskRelation.task_a_id == lo, TaskRelation.task_b_id == hi
+                )
+            )
+        ).scalar_one_or_none()
+        assert rel is not None
 
 
 # ---------------------------------------------------------------------------
