@@ -29,6 +29,7 @@ from _fake_ai import FakeLLM  # noqa: E402
 from sqlalchemy import select, text  # noqa: E402
 
 from flow_core.ai_providers import LLMResult, set_llm_override  # noqa: E402
+from flow_core.config import get_settings  # noqa: E402
 from flow_core.db import admin_session, tenant_session  # noqa: E402
 from flow_core.errors import DomainError  # noqa: E402
 from flow_core.models.activity_log import ActivityLog  # noqa: E402
@@ -519,3 +520,125 @@ async def test_synthesize_season_creates_humus_idempotent(_wire_llm: None) -> No
         # A quarter with nothing archived -> nothing to synthesise.
         with pytest.raises(DomainError):
             await decomp.synthesize_season(s, org_id=org, actor_id=user, year=2024, quarter=3)
+
+
+# ── Fidelity: grounding + verify pass (task a44e72a4) ──────────────────────
+
+
+class _TwoPassLLM:
+    """Distinguishes the draft call from the verify call by the verify
+    prompt's ``DRAFT:`` marker, so a test can assert WHICH text is persisted
+    without depending on a real model's fact-checking."""
+
+    model_id = "two-pass-llm"
+
+    def __init__(self, *, draft: str, verified: str) -> None:
+        self._draft = draft
+        self._verified = verified
+
+    async def complete(
+        self, *, system: str | None, messages: Sequence[tuple[str, str]]
+    ) -> LLMResult:
+        del system
+        user = messages[-1][1] if messages else ""
+        text = self._verified if "DRAFT:" in user else self._draft
+        return LLMResult(text=text, tokens_in=1, tokens_out=1, model_id=self.model_id)
+
+
+def test_distill_prompt_grounds_claims_in_the_source() -> None:
+    """The grounding guardrail (always on) lives in the system prompt: it must
+    forbid inventing/inferring beyond the source and preserve the language."""
+    p = decomp._DISTILL_SYSTEM.lower()
+    assert "ground every claim" in p
+    assert "not explicitly stated" in p or "do not infer" in p
+    assert "preserve the input language" in p
+
+
+async def test_verify_pass_drops_unsupported_claims_when_enabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Flag ON: the persisted distillation is the VERIFIED text (unsupported
+    claim dropped), not the raw draft."""
+    monkeypatch.setattr(get_settings(), "distill_verify_pass_enabled", True)
+    fake = _TwoPassLLM(
+        draft="Lesson.\n- supported claim\n- HALLUCINATED claim",
+        verified="Lesson.\n- supported claim",
+    )
+    org, user = await _org()
+    async with tenant_session(str(org), str(user)) as s:
+        source = await nt.create_note(
+            s, org_id=org, actor_id=user, kind=NoteKind.text, title="t", text="a finished thought"
+        )
+        res = await decomp.distill_note(s, org_id=org, actor_id=user, note_id=source.id, llm=fake)
+        body = await nt.get_body(s, note_id=res.distilled_note_id)
+        assert "HALLUCINATED" not in (body or "")
+        assert "supported claim" in (body or "")
+
+
+async def test_verify_pass_off_by_default_persists_the_draft() -> None:
+    """Flag OFF (default): one pass, the draft is persisted verbatim --
+    byte-identical to pre-a44e72a4 behaviour."""
+    fake = _TwoPassLLM(
+        draft="Lesson.\n- supported claim\n- HALLUCINATED claim",
+        verified="Lesson.\n- supported claim",
+    )
+    org, user = await _org()
+    async with tenant_session(str(org), str(user)) as s:
+        source = await nt.create_note(
+            s, org_id=org, actor_id=user, kind=NoteKind.text, title="t", text="a finished thought"
+        )
+        res = await decomp.distill_note(s, org_id=org, actor_id=user, note_id=source.id, llm=fake)
+        body = await nt.get_body(s, note_id=res.distilled_note_id)
+        assert "HALLUCINATED" in (body or "")
+
+
+async def test_verify_pass_falls_back_to_draft_on_blank(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Robustness: an over-aggressive/empty verifier never erases the
+    distillation -- a blank verify output falls back to the draft."""
+    monkeypatch.setattr(get_settings(), "distill_verify_pass_enabled", True)
+    fake = _TwoPassLLM(draft="Lesson.\n- supported claim", verified="   ")
+    org, user = await _org()
+    async with tenant_session(str(org), str(user)) as s:
+        source = await nt.create_note(
+            s, org_id=org, actor_id=user, kind=NoteKind.text, title="t", text="a finished thought"
+        )
+        res = await decomp.distill_note(s, org_id=org, actor_id=user, note_id=source.id, llm=fake)
+        body = await nt.get_body(s, note_id=res.distilled_note_id)
+        assert "supported claim" in (body or "")
+
+
+async def test_verify_pass_meters_a_second_call(
+    _wire_llm: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Flag ON through the metered seam: the verify pass is charged separately
+    under its own ``op='distill_verify'`` operation id (no double-charge of
+    the draft)."""
+    monkeypatch.setattr(get_settings(), "distill_verify_pass_enabled", True)
+    org, user = await _org()
+    async with tenant_session(str(org), str(user)) as s:
+        await _seed_billing(s, org, user)
+        source = await nt.create_note(
+            s,
+            org_id=org,
+            actor_id=user,
+            kind=NoteKind.text,
+            title="meter",
+            text="a non-trivial finished thought worth distilling and verifying",
+        )
+        await decomp.distill_note(s, org_id=org, actor_id=user, note_id=source.id)
+        draft_rec = (
+            await s.execute(
+                select(UsageRecord).where(UsageRecord.operation_id == f"distill:{org}:{source.id}")
+            )
+        ).scalar_one()
+        verify_rec = (
+            await s.execute(
+                select(UsageRecord).where(
+                    UsageRecord.operation_id == f"distill_verify:{org}:{source.id}"
+                )
+            )
+        ).scalar_one()
+        assert draft_rec.op == "distill"
+        assert verify_rec.op == "distill_verify"

@@ -71,8 +71,26 @@ _DISTILL_SYSTEM = (
     "You decompose a piece of finished thinking into reusable atoms. "
     "Read the note and reply with: (1) one-sentence lesson, (2) up to "
     "five concrete claims as bullet points, (3) up to three keywords. "
-    "No filler, no apology, no restate of the brief. Italian or English "
-    "matching the input."
+    # Fidelity grounding (task a44e72a4): the distillation must never add
+    # information the source does not contain.
+    "Ground every claim strictly in the source text: do not infer, "
+    "generalise beyond it, or invent anything not explicitly stated; if a "
+    "point is uncertain or unsupported by the source, omit it. "
+    "No filler, no apology, no restate of the brief. Preserve the input "
+    "language (Italian or English matching the input)."
+)
+# Fidelity verify pass (task a44e72a4): a second model reads the SOURCE and
+# the DRAFT distillation and returns a corrected distillation that keeps ONLY
+# the claims the source supports. Conservative toward the source: dropping an
+# invented claim is the goal; the source note itself is never touched, so no
+# real information is lost.
+_VERIFY_SYSTEM = (
+    "You are a strict fact-checker for a distillation. You are given a SOURCE "
+    "note and a DRAFT distillation derived from it. Return a corrected "
+    "distillation that keeps ONLY the claims explicitly supported by the "
+    "SOURCE; drop any claim that is inferred, generalised beyond, or not "
+    "stated in the SOURCE. Keep the same structure and the input language. "
+    "Output only the corrected distillation, nothing else."
 )
 
 
@@ -111,6 +129,36 @@ async def _flip_source_to_humus(
         )
     ).first()
     return row is not None
+
+
+async def _verify_against_source(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    note_id: uuid.UUID,
+    source: str,
+    draft: str,
+    llm: LLMProvider | None,
+) -> str:
+    """Fidelity verify pass (task a44e72a4): a second metered LLM call that
+    returns a corrected distillation keeping ONLY the claims ``source``
+    supports. Falls back to ``draft`` when the verifier returns blank, so the
+    distillation is never lost to an over-aggressive/empty check. Metered on a
+    distinct deterministic ``operation_id`` so it is charged separately from
+    the draft and never double-charges on a retry."""
+    verifier = llm or await resolve_llm(
+        session,
+        org_id,
+        actor_id=actor_id,
+        operation_id=f"distill_verify:{org_id}:{note_id}",
+        op="distill_verify",
+    )
+    res = await verifier.complete(
+        system=_VERIFY_SYSTEM,
+        messages=[("user", f"SOURCE:\n{source}\n\nDRAFT:\n{draft}")],
+    )
+    return (res.text or "").strip() or draft
 
 
 async def distill_note(
@@ -185,6 +233,20 @@ async def distill_note(
         system=_DISTILL_SYSTEM,
         messages=[("user", body)],
     )
+    # Fidelity verify pass (task a44e72a4): keep only the claims the source
+    # supports before persisting. Gated (cost-doubling second LLM call); off
+    # by default leaves ``res.text`` as the draft, byte-identical.
+    distilled_text = res.text
+    if get_settings().distill_verify_pass_enabled:
+        distilled_text = await _verify_against_source(
+            session,
+            org_id=org_id,
+            actor_id=actor_id,
+            note_id=note_id,
+            source=body,
+            draft=res.text,
+            llm=llm,
+        )
     title = (source.title or "").strip()
     distill_title = f"Distillation · {title or 'untitled'}"[:300]
     # Migration 0016: the source's project lives in the junction;
@@ -196,7 +258,7 @@ async def distill_note(
         actor_id=actor_id,
         kind=NoteKind.text,
         title=distill_title,
-        text=res.text,
+        text=distilled_text,
         project_id=source_project_id,
     )
     distilled.humus_kind = "distillation"
