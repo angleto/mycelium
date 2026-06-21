@@ -1,11 +1,52 @@
 # ADR-0043 — Human-gated review state for AUTONOMOUSLY-generated nodes
 
-Status: Proposed (2026-06-20). Task: e87daff4 (pattern/season + distill
-human-approval gate). Driven by Angelo's requirement: a summary the system
-generates AUTONOMOUSLY (unsolicited) must NOT enter the corpus until a human
-approves it; the model that produced it must be visible; reject must never
-pollute; autonomy is *earned* once a model proves reliable. "L'architettura
-migliore e più solida, niente accrocchi."
+Status: Accepted (2026-06-21) — D1–D3 + D5 implemented behind
+`garden_review_gate_enabled` (default off). Task: e87daff4 (pattern/season +
+distill human-approval gate). Driven by Angelo's requirement: a summary the
+system generates AUTONOMOUSLY (unsolicited) must NOT enter the corpus until a
+human approves it; the model that produced it must be visible; reject must
+never pollute; autonomy is *earned* once a model proves reliable.
+"L'architettura migliore e più solida, niente accrocchi."
+
+## Implementation status (2026-06-21)
+
+Shipped behind `garden_review_gate_enabled` (default off, so byte-identical
+until a workspace opts in):
+
+- **D1** — `notes.origin_model_id` + `notes.review_state` (migration 0056,
+  NULL-default, partial index on the rare `proposed` rows).
+- **D2** — the `review_state IS DISTINCT FROM 'proposed'` exclusion on every
+  retrieval/listing surface: the `HumusStage` source, the `memory.retrieve`
+  base predicate (covers lexical + dense + humus in one place), `list_notes`,
+  `get_note` (with an `include_proposed` inbox bypass), the `task_search`
+  note branch, the `@`-lookup picker, and the free-wander `humus_note_ids`
+  set. Regression-tested absent-then-present-after-approve.
+- **D3** — `decomposition.distill_note` / `extract_cluster_pattern` /
+  `synthesize_season` take `autonomous: bool = False` and stamp
+  `origin_model_id` always + `review_state='proposed'` only for an
+  autonomous, gate-enabled run; `services/garden_review.py` owns
+  `approve_node` (→ `commit` event), `reject_node` (soft-delete + `reject`
+  event carrying `origin_model_id`), `list_pending`. Audited + idempotent.
+- **D5** — MCP `garden_review_pending|approve|reject` + REST
+  `GET /garden/review/pending`, `POST /garden/review/approve|reject`.
+
+Deferred (each a tracked follow-up, none on the closure path for e87daff4):
+
+- **The autonomous scheduler** that calls the generators with
+  `autonomous=True` (no caller passes it today, so no `proposed` note is born
+  in practice yet). It rides the garden loop and is gated separately; per
+  Angelo it is the *last* step, after the gate + a model proven reliable.
+- **D4 earned autonomy** — the per-model `accept_ratio` health sensor and the
+  per-workspace auto-approve policy (`approval_required | auto | off`,
+  mirroring `AutonomousDispatch`). The `reject` event already carries
+  `origin_model_id` so the ratio is derivable. Until D4 lands the gate is
+  always approval-required.
+- **D5 SPA review inbox** — the "Proposed by the garden" panel.
+- **Graph-centrality node-set exclusion** — proposed humus is withheld from
+  the *walk* (`humus_note_ids`) and all direct-visibility surfaces; excluding
+  it from PageRank/Leiden centrality math (`compute_recency`, the Leiden node
+  set, the classify corpus) is a second-order refinement (it skews ranking,
+  not visibility) and is gated/offline, so it is a follow-up.
 
 ## Scope — what is gated, and what is NOT (critical)
 

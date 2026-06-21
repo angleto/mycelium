@@ -69,6 +69,7 @@ from flow_core.services import entity_revisions as revisions_svc
 from flow_core.services import executors as executors_svc
 from flow_core.services import focus_context as focus_context_svc
 from flow_core.services import garden_classify as garden_classify_svc
+from flow_core.services import garden_review as garden_review_svc
 from flow_core.services import invoice as invoice_svc
 from flow_core.services import link_prediction as link_prediction_svc
 from flow_core.services import lookup as lookup_svc
@@ -4172,6 +4173,65 @@ async def synthesize_season(token: str, org_id: str, year: int, quarter: int) ->
             "season_note_id": str(res.note_id),
             "model_id": res.model_id,
             "created": res.created,
+        }
+
+
+@mcp.tool()
+async def garden_review_pending(token: str, org_id: str, limit: int = 50) -> dict[str, Any]:
+    """Review inbox (ADR-0043): the workspace's AUTONOMOUSLY-generated humus
+    notes awaiting human approval (``review_state='proposed'``), newest first.
+    Each row carries ``origin_model_id`` -- the model that produced the summary
+    (a local 3B != GPT != Scaleway) -- so you can see WHICH model wrote it
+    before deciding. A pure read. Member role; RLS-scoped."""
+    async with _tenant(token, org_id) as (s, org, _user):
+        pending = await garden_review_svc.list_pending(s, org_id=org, limit=limit)
+        return {
+            "pending": [
+                {
+                    "note_id": str(p.note_id),
+                    "title": p.title,
+                    "humus_kind": p.humus_kind,
+                    "origin_model_id": p.origin_model_id,
+                    "preview": p.preview,
+                    "created_at": p.created_at.isoformat(),
+                }
+                for p in pending
+            ]
+        }
+
+
+@mcp.tool()
+async def garden_review_approve(token: str, org_id: str, note_id: str) -> dict[str, Any]:
+    """Approve a proposed humus note (ADR-0043): it becomes effective and
+    re-enters the retrieval walk / search / listings. Audited; emits a bus
+    ``commit`` event. Idempotent (a re-approve is a no-op). Member role."""
+    async with _tenant(token, org_id) as (s, org, user):
+        note = await garden_review_svc.approve_node(
+            s, org_id=org, actor_id=user, note_id=uuid.UUID(note_id)
+        )
+        return {
+            "note_id": str(note.id),
+            "review_state": note.review_state,
+            "origin_model_id": note.origin_model_id,
+        }
+
+
+@mcp.tool()
+async def garden_review_reject(
+    token: str, org_id: str, note_id: str, reason: str | None = None
+) -> dict[str, Any]:
+    """Reject a proposed humus note (ADR-0043): soft-delete it so a weak
+    summary never pollutes the corpus (reversible via the trash/restore path).
+    Audited; emits a bus ``reject`` event carrying ``origin_model_id``.
+    Idempotent (a re-reject is a no-op). Member role."""
+    async with _tenant(token, org_id) as (s, org, user):
+        note = await garden_review_svc.reject_node(
+            s, org_id=org, actor_id=user, note_id=uuid.UUID(note_id), reason=reason
+        )
+        return {
+            "note_id": str(note.id),
+            "rejected": note.deleted_at is not None,
+            "origin_model_id": note.origin_model_id,
         }
 
 

@@ -50,6 +50,9 @@ from flow_api.schemas import (
     GardenLinkSuggestionsOut,
     GardenMaturitySuggestionOut,
     GardenRejectHotspotOut,
+    GardenReviewActionIn,
+    GardenReviewActionOut,
+    GardenReviewPendingItem,
     GardenTagSuggestionOut,
     GardenWalkOut,
     GardenWalkStep,
@@ -60,6 +63,7 @@ from flow_core.services import event_bus
 from flow_core.services import garden_classify as classify_svc
 from flow_core.services import garden_health as health_svc
 from flow_core.services import garden_learning as learning_svc
+from flow_core.services import garden_review as review_svc
 from flow_core.services import graph as svc
 from flow_core.services import graph_snapshot as graph_snapshot_svc
 from flow_core.services import link_prediction as linkpred_svc
@@ -406,6 +410,72 @@ async def garden_apply(
         suggestion_type=body.suggestion_type,
         action=body.action,
         applied=body.action in ("accept", "override"),
+    )
+
+
+@router.get("/review/pending", response_model=list[GardenReviewPendingItem])
+async def garden_review_pending(
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+) -> list[GardenReviewPendingItem]:
+    """The review inbox (ADR-0043): AUTONOMOUSLY-generated humus notes awaiting
+    human approval (``review_state='proposed'``), newest first, each with the
+    model that produced it (``origin_model_id``) so the reviewer sees WHICH
+    model wrote the summary. A pure read; RLS-scoped."""
+    pending = await review_svc.list_pending(ctx.session, org_id=ctx.org_id, limit=limit)
+    return [
+        GardenReviewPendingItem(
+            note_id=p.note_id,
+            title=p.title,
+            humus_kind=p.humus_kind,
+            origin_model_id=p.origin_model_id,
+            preview=p.preview,
+            created_at=p.created_at,
+        )
+        for p in pending
+    ]
+
+
+@router.post("/review/approve", response_model=GardenReviewActionOut)
+async def garden_review_approve(
+    body: GardenReviewActionIn,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+) -> GardenReviewActionOut:
+    """Approve a proposed humus note (ADR-0043): it becomes effective and
+    re-enters retrieval/search/listings. Audited; emits a bus ``commit``
+    event. Idempotent. Member role."""
+    note = await review_svc.approve_node(
+        ctx.session, org_id=ctx.org_id, actor_id=ctx.user_id, note_id=body.note_id
+    )
+    return GardenReviewActionOut(
+        note_id=note.id,
+        review_state=note.review_state,
+        origin_model_id=note.origin_model_id,
+        rejected=False,
+    )
+
+
+@router.post("/review/reject", response_model=GardenReviewActionOut)
+async def garden_review_reject(
+    body: GardenReviewActionIn,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+) -> GardenReviewActionOut:
+    """Reject a proposed humus note (ADR-0043): soft-delete it so a weak
+    summary never pollutes the corpus (reversible via trash/restore). Audited;
+    emits a bus ``reject`` event carrying ``origin_model_id``. Idempotent.
+    Member role."""
+    note = await review_svc.reject_node(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        note_id=body.note_id,
+        reason=body.reason,
+    )
+    return GardenReviewActionOut(
+        note_id=note.id,
+        review_state=note.review_state,
+        origin_model_id=note.origin_model_id,
+        rejected=note.deleted_at is not None,
     )
 
 

@@ -1227,6 +1227,34 @@ class GardenApplyOut(BaseModel):
     applied: bool  # True when the action mutated (accept / override)
 
 
+class GardenReviewPendingItem(BaseModel):
+    """One AUTONOMOUSLY-generated humus note awaiting human review (ADR-0043
+    review inbox). ``origin_model_id`` is the transparency requirement: the
+    reviewer sees the producing model before approving/rejecting."""
+
+    note_id: uuid.UUID
+    title: str | None = None
+    humus_kind: str | None = None
+    origin_model_id: str | None = None
+    preview: str
+    created_at: datetime.datetime
+
+
+class GardenReviewActionIn(BaseModel):
+    """Approve, or reject, one proposed node by id (ADR-0043). ``reason`` is
+    an optional note recorded on a reject (ignored by approve)."""
+
+    note_id: uuid.UUID
+    reason: str | None = None
+
+
+class GardenReviewActionOut(BaseModel):
+    note_id: uuid.UUID
+    review_state: str | None  # 'approved' after approve; null after a reject
+    origin_model_id: str | None = None
+    rejected: bool  # True when the action soft-deleted the node
+
+
 class GardenLearningRollbackIn(BaseModel):
     """Rewind the caller's own learned priors to their state at ``to``
     (ADR-0037 "Snapshots and rollback")."""
