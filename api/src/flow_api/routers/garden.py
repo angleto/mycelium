@@ -55,6 +55,7 @@ from flow_api.schemas import (
     GardenWalkStep,
 )
 from flow_core.config import get_settings
+from flow_core.models.precomputed_suggestion import PrecomputedSuggestion
 from flow_core.services import event_bus
 from flow_core.services import garden_classify as classify_svc
 from flow_core.services import garden_health as health_svc
@@ -232,28 +233,7 @@ async def garden_clusters(
     )
 
 
-@router.get("/classify/{node_id}", response_model=GardenClassifyOut)
-async def garden_classify(
-    node_id: uuid.UUID,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
-    kinds: Annotated[
-        str | None,
-        Query(description="CSV subset of tags,links,maturity,cluster (default: all)"),
-    ] = None,
-) -> GardenClassifyOut:
-    """The proposal engine (ADR-0032): a structured enrichment proposal
-    ``{tags, links, maturity, cluster}`` for a note, each with confidence
-    + rationale, plus ``signals_used`` for transparency. **Read-only** —
-    nothing is mutated; the user (or an agent) applies a suggestion via
-    ``POST /garden/apply``. v1 classifies notes (404 otherwise). Unknown
-    ``kinds`` tokens are dropped; an all-unknown set falls back to all."""
-    wanted: frozenset[str] | None = None
-    if kinds is not None:
-        requested = {k.strip() for k in kinds.split(",") if k.strip()}
-        wanted = frozenset(requested & classify_svc.ALL_KINDS) or classify_svc.ALL_KINDS
-    res = await classify_svc.classify_node(
-        ctx.session, org_id=ctx.org_id, node_id=node_id, kinds=wanted, user_id=ctx.user_id
-    )
+def _classify_out_from_live(res: classify_svc.ClassifyResult) -> GardenClassifyOut:
     return GardenClassifyOut(
         node_id=res.node_id,
         node_kind=res.node_kind,
@@ -292,7 +272,110 @@ async def garden_classify(
         signals_used=res.signals_used,
         model_version=res.model_version,
         generated_at=res.generated_at,
+        source="live",
     )
+
+
+def _classify_out_from_cache(
+    node_id: uuid.UUID,
+    rows: list[PrecomputedSuggestion],
+    wanted: frozenset[str],
+) -> GardenClassifyOut:
+    """Rebuild the response from the persisted ``precomputed_suggestions``
+    cache (ADR-0042 D4/D6). Cached rows carry the apply-shape value + the
+    confidence + rationale; the two display-only extras the cache does not
+    keep (maturity ``auto_apply`` / cluster ``modularity``) default to a safe
+    value — the live ``refresh`` path renders them faithfully."""
+    tags: list[GardenTagSuggestionOut] = []
+    links: list[GardenLinkCandidateOut] = []
+    maturity: GardenMaturitySuggestionOut | None = None
+    cluster: GardenClusterSuggestionOut | None = None
+    for row in rows:
+        v = row.suggestion_value
+        if row.suggestion_type == "tag" and "tags" in wanted:
+            tags.append(
+                GardenTagSuggestionOut(
+                    tag_id=uuid.UUID(str(v["tag_id"])),
+                    confidence=row.confidence,
+                    rationale=row.rationale or "",
+                )
+            )
+        elif row.suggestion_type == "link" and "links" in wanted:
+            links.append(
+                GardenLinkCandidateOut(
+                    target_id=uuid.UUID(str(v["target_id"])),
+                    link_kind=str(v.get("link_kind", "related")),
+                    confidence=row.confidence,
+                    rationale=row.rationale or "",
+                )
+            )
+        elif row.suggestion_type == "maturity" and "maturity" in wanted:
+            maturity = GardenMaturitySuggestionOut(
+                value=str(v["value"]),
+                confidence=row.confidence,
+                rationale=row.rationale or "",
+                auto_apply=bool(v.get("auto_apply", False)),
+            )
+        elif row.suggestion_type == "cluster" and "cluster" in wanted:
+            cluster = GardenClusterSuggestionOut(
+                leiden_id=v.get("leiden_id"),
+                modularity=v.get("modularity"),
+                confidence=row.confidence,
+            )
+    return GardenClassifyOut(
+        node_id=node_id,
+        node_kind=rows[0].node_kind,
+        tags=tags,
+        links=links,
+        maturity=maturity,
+        cluster=cluster,
+        signals_used=["precomputed"],
+        model_version=classify_svc.MODEL_VERSION,
+        generated_at=rows[0].computed_at,
+        source="precomputed",
+    )
+
+
+@router.get("/classify/{node_id}", response_model=GardenClassifyOut)
+async def garden_classify(
+    node_id: uuid.UUID,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+    kinds: Annotated[
+        str | None,
+        Query(description="CSV subset of tags,links,maturity,cluster (default: all)"),
+    ] = None,
+    refresh: Annotated[
+        bool,
+        Query(description="Bypass the persisted cache and recompute live (ADR-0042 D6)."),
+    ] = False,
+) -> GardenClassifyOut:
+    """The proposal engine (ADR-0032 / ADR-0042): a structured enrichment
+    proposal ``{tags, links, maturity, cluster}`` for a note or task, each
+    with confidence + rationale, plus ``signals_used`` for transparency.
+    **Read-only** — nothing is mutated; the user (or an agent) applies a
+    suggestion via ``POST /garden/apply``.
+
+    Serves the persisted on-create suggestions when fresh (``source =
+    precomputed``); otherwise — or when ``refresh`` is set — recomputes live
+    (``source = live``). The cache is populated by the on-create queue, so a
+    read never writes. Tasks are classifiable only when the unified-task-graph
+    flag is on (404 otherwise). Unknown ``kinds`` tokens are dropped; an
+    all-unknown set falls back to all."""
+    wanted: frozenset[str] | None = None
+    if kinds is not None:
+        requested = {k.strip() for k in kinds.split(",") if k.strip()}
+        wanted = frozenset(requested & classify_svc.ALL_KINDS) or classify_svc.ALL_KINDS
+    effective = wanted if wanted is not None else classify_svc.ALL_KINDS
+    if not refresh:
+        cached = await classify_svc.read_classification(
+            ctx.session, org_id=ctx.org_id, node_id=node_id
+        )
+        if cached is not None:
+            return _classify_out_from_cache(node_id, cached, effective)
+    res = await classify_svc.classify_node(
+        ctx.session, org_id=ctx.org_id, node_id=node_id, kinds=wanted, user_id=ctx.user_id
+    )
+    return _classify_out_from_live(res)
 
 
 @router.post("/apply", response_model=GardenApplyOut)

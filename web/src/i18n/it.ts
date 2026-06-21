@@ -196,6 +196,11 @@ export const it: Catalog = {
     basedOn: 'Segnali: {{signals}}',
     unknownTag: '(tag)',
     unknownNote: '(nota)',
+    unknownTarget: '(elemento)',
+    refresh: 'Aggiorna',
+    sourcePrecomputed: 'precalcolati',
+    sourceLive: 'live',
+    computedAt: 'calcolati {{when}}',
   },
   notePicker: {
     search: 'Filtra le note per titolo…',

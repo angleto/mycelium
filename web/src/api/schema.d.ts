@@ -6792,6 +6792,11 @@ export interface components {
              * Format: date-time
              */
             generated_at: string;
+            /**
+             * Source
+             * @default live
+             */
+            source: "precomputed" | "live";
         };
         /** GardenClusterSuggestionOut */
         GardenClusterSuggestionOut: {
@@ -21044,6 +21049,8 @@ export interface operations {
             query?: {
                 /** @description CSV subset of tags,links,maturity,cluster (default: all) */
                 kinds?: string | null;
+                /** @description Bypass the persisted cache and recompute live (ADR-0042 D6). */
+                refresh?: boolean;
             };
             header: {
                 "x-workspace-id": string;

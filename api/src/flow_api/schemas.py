@@ -1125,10 +1125,15 @@ class GardenClusterSuggestionOut(BaseModel):
 
 
 class GardenClassifyOut(BaseModel):
-    """Response of GET /garden/classify/{node_id} (ADR-0032). A block is
-    null/empty when its signal was not requested or produced nothing;
+    """Response of GET /garden/classify/{node_id} (ADR-0032 / ADR-0042). A
+    block is null/empty when its signal was not requested or produced nothing;
     ``signals_used`` names the signals that actually fired (and records
-    ``leiden_extra_absent`` when clustering degraded gracefully)."""
+    ``leiden_extra_absent`` when clustering degraded gracefully).
+
+    ``source`` (ADR-0042 D4/D6) tells the SPA whether these are the persisted
+    on-create suggestions (``precomputed``) or a fresh live recompute
+    (``live``); ``generated_at`` dates them so the panel can show freshness and
+    offer a refresh."""
 
     node_id: uuid.UUID
     node_kind: str
@@ -1139,6 +1144,7 @@ class GardenClassifyOut(BaseModel):
     signals_used: list[str]
     model_version: str
     generated_at: datetime.datetime
+    source: Literal["precomputed", "live"] = "live"
 
 
 class GardenHealthMetricOut(BaseModel):

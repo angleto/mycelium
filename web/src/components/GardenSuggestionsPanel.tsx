@@ -9,7 +9,7 @@ type SuggestionType = 'tag' | 'link' | 'maturity'
 
 // ADR-0040 4-verb note<->note link model: each kind maps to its own
 // forest glyph in GardenIcon; unknown kinds fall back to 'related'
-// (the neutral undirected connector).
+// (the neutral undirected connector). Task links are always 'related'.
 const LINK_ICON_KINDS: readonly GardenIconName[] = [
   'hypha_of',
   'related',
@@ -23,51 +23,68 @@ function linkIcon(kind: string): GardenIconName {
     : 'related'
 }
 
-// ADR-0032 proposal engine, consumer side. Read-only suggestions
-// {tags, links, maturity, cluster} surfaced as accept/dismiss chips on
-// the open note; hover shows the rationale + confidence. Accept/dismiss
-// POST /garden/apply, which mutates (accept) or just records the
-// decision (dismiss=reject) and writes the classification_feedback
-// event. Cluster is informational in v1 (clusters are computed, not
-// stored), so it is shown read-only with no action.
+// ADR-0032 / ADR-0042 proposal engine, consumer side. Read-only suggestions
+// {tags, links, maturity, cluster} surfaced as accept/dismiss chips on the
+// open NOTE or TASK; hover shows the rationale + confidence. Accept/dismiss
+// POST /garden/apply, which mutates (accept) or just records the decision
+// (dismiss=reject) and writes the classification_feedback event. Cluster is
+// informational (clusters are computed, not stored), shown read-only.
+//
+// The panel serves the persisted on-create suggestions when fresh
+// (source='precomputed') or a live recompute (source='live'); the head shows
+// the source + freshness and a refresh control (ADR-0042 D6).
 export function GardenSuggestionsPanel({
-  noteId,
+  nodeId,
+  nodeKind = 'note',
   onApplied,
 }: {
-  noteId: string
+  nodeId: string
+  nodeKind?: 'note' | 'task'
   onApplied?: () => void
 }) {
   const { t } = useTranslation()
   const [data, setData] = useState<Classify | null>(null)
   const [tagsById, setTagsById] = useState<Record<string, string>>({})
-  const [notesById, setNotesById] = useState<Record<string, string>>({})
+  // Link targets resolve to the node's OWN kind: a note suggests note links,
+  // a task suggests related-task links (ADR-0042 D2).
+  const [targetsById, setTargetsById] = useState<Record<string, string>>({})
   const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
   const [busy, setBusy] = useState<string | null>(null)
   const [err, setErr] = useState<string | null>(null)
 
-  const reload = useCallback(async () => {
-    setErr(null)
-    const { data: res, error } = await api.GET('/garden/classify/{node_id}', {
-      params: { path: { node_id: noteId }, header: workspaceHeader() },
-    })
-    if (error) {
-      setErr(errMessage(error))
-      setData(null)
-    } else {
-      setData(res ?? null)
-    }
-  }, [noteId])
+  const reload = useCallback(
+    async (refresh = false) => {
+      setErr(null)
+      const { data: res, error } = await api.GET('/garden/classify/{node_id}', {
+        params: {
+          path: { node_id: nodeId },
+          query: refresh ? { refresh: true } : {},
+          header: workspaceHeader(),
+        },
+      })
+      if (error) {
+        setErr(errMessage(error))
+        setData(null)
+      } else {
+        setData(res ?? null)
+      }
+    },
+    [nodeId],
+  )
 
   useEffect(() => {
     let active = true
     void (async () => {
       setLoading(true)
-      const [cls, tags, notes] = await Promise.all([
+      const [cls, tags, targets] = await Promise.all([
         api.GET('/garden/classify/{node_id}', {
-          params: { path: { node_id: noteId }, header: workspaceHeader() },
+          params: { path: { node_id: nodeId }, header: workspaceHeader() },
         }),
         api.GET('/tags', { params: { header: workspaceHeader() } }),
-        api.GET('/notes', { params: { header: workspaceHeader() } }),
+        nodeKind === 'task'
+          ? api.GET('/tasks', { params: { header: workspaceHeader() } })
+          : api.GET('/notes', { params: { header: workspaceHeader() } }),
       ])
       if (!active) return
       if (cls.error) setErr(errMessage(cls.error))
@@ -75,10 +92,10 @@ export function GardenSuggestionsPanel({
       if (tags.data) {
         setTagsById(Object.fromEntries(tags.data.map((x) => [x.id, x.name])))
       }
-      if (notes.data) {
-        setNotesById(
+      if (targets.data) {
+        setTargetsById(
           Object.fromEntries(
-            notes.data.map((n) => [n.id, n.title?.trim() || t('notes.untitled')]),
+            targets.data.map((x) => [x.id, x.title?.trim() || t('gardenSuggest.unknownTarget')]),
           ),
         )
       }
@@ -87,7 +104,7 @@ export function GardenSuggestionsPanel({
     return () => {
       active = false
     }
-  }, [noteId, t])
+  }, [nodeId, nodeKind, t])
 
   const apply = useCallback(
     async (
@@ -101,7 +118,7 @@ export function GardenSuggestionsPanel({
       const { error } = await api.POST('/garden/apply', {
         params: { header: workspaceHeader() },
         body: {
-          node_id: noteId,
+          node_id: nodeId,
           suggestion_type: suggestionType,
           suggestion_value: suggestionValue,
           action,
@@ -115,8 +132,13 @@ export function GardenSuggestionsPanel({
       await reload()
       onApplied?.()
     },
-    [noteId, reload, onApplied],
+    [nodeId, reload, onApplied],
   )
+
+  const doRefresh = useCallback(() => {
+    setRefreshing(true)
+    void reload(true).finally(() => setRefreshing(false))
+  }, [reload])
 
   const pct = (c: number) => Math.round(c * 100)
 
@@ -140,6 +162,29 @@ export function GardenSuggestionsPanel({
       <div className="linkedpanel__head">
         <strong>{t('gardenSuggest.title')}</strong>
         <span className="muted">{t('gardenSuggest.headHint')}</span>
+        {data && (
+          <span
+            className="muted"
+            title={t('gardenSuggest.computedAt', {
+              when: new Date(data.generated_at).toLocaleString(),
+            })}
+          >
+            {t(
+              data.source === 'precomputed'
+                ? 'gardenSuggest.sourcePrecomputed'
+                : 'gardenSuggest.sourceLive',
+            )}
+          </span>
+        )}
+        <button
+          type="button"
+          className="btn--ghost btn--sm"
+          disabled={refreshing}
+          title={t('gardenSuggest.refresh')}
+          onClick={doRefresh}
+        >
+          {refreshing ? '…' : '⟳'}
+        </button>
       </div>
       {err && <p className="error">{err}</p>}
       {!hasAny && !err && !data?.cluster && (
@@ -213,7 +258,7 @@ export function GardenSuggestionsPanel({
                 >
                   <GardenIcon name={linkIcon(s.link_kind)} size={14} />
                   <span className="linkedpanel__title">
-                    {notesById[s.target_id] ?? t('gardenSuggest.unknownNote')}
+                    {targetsById[s.target_id] ?? t('gardenSuggest.unknownTarget')}
                   </span>
                   <span
                     className="muted"

@@ -9,11 +9,14 @@ non-note id, accept/reject round-trip, and the Pydantic guard that an
 
 from __future__ import annotations
 
+import datetime
 import uuid
 
 from httpx import ASGITransport, AsyncClient
 
 from flow_api.main import app
+from flow_core.db import tenant_session
+from flow_core.services import garden_classify as gc
 
 
 def _email() -> str:
@@ -124,6 +127,59 @@ async def test_apply_reject_does_not_apply() -> None:
         assert r.json()["applied"] is False
         note = (await c.get(f"/notes/{nid}", headers=h)).json()
     assert not any(t["id"] == tid for t in note.get("tags", []))
+
+
+async def test_classify_source_is_live_without_cache() -> None:
+    """ADR-0042 D6: with no persisted cache the read recomputes live and
+    labels the response ``source = live``."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as c:
+        h = await _signup(c)
+        nid = await _make_note(c, h, "n")
+        body = (await c.get(f"/garden/classify/{nid}", headers=h)).json()
+    assert body["source"] == "live"
+
+
+async def test_classify_serves_precomputed_then_refresh_forces_live() -> None:
+    """ADR-0042 D6: a fresh persisted cache is served as ``source =
+    precomputed``; ``refresh=true`` bypasses it and recomputes live."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as c:
+        signup = (
+            await c.post(
+                "/auth/signup",
+                json={"email": _email(), "password": "pw-strong-123", "workspace_name": "GC"},
+            )
+        ).json()
+        h = {"Authorization": f"Bearer {signup['token']}", "X-Workspace-Id": signup["workspace_id"]}
+        org = uuid.UUID(signup["workspace_id"])
+        user = uuid.UUID(signup["user_id"])
+        nid = await _make_note(c, h, "n")
+        tid = await _tag(c, h, "topic")
+        # Seed the cache with a hand-built result so the precomputed path is
+        # deterministic (an empty note would cache zero rows -> read None).
+        seeded = gc.ClassifyResult(
+            node_id=uuid.UUID(nid),
+            node_kind="note",
+            tags=[gc.TagSuggestion(tag_id=uuid.UUID(tid), confidence=0.9, rationale="seed")],
+            links=[],
+            maturity=None,
+            cluster=None,
+            signals_used=["seed"],
+            model_version=gc.MODEL_VERSION,
+            generated_at=datetime.datetime.now(datetime.UTC),
+        )
+        async with tenant_session(str(org), str(user)) as s:
+            await gc.persist_classification(
+                s, org_id=org, node_kind="note", node_id=uuid.UUID(nid), result=seeded
+            )
+        precomputed = (await c.get(f"/garden/classify/{nid}", headers=h)).json()
+        live = (
+            await c.get(f"/garden/classify/{nid}", headers=h, params={"refresh": "true"})
+        ).json()
+    assert precomputed["source"] == "precomputed"
+    assert [t["tag_id"] for t in precomputed["tags"]] == [tid]  # served from the cache
+    assert live["source"] == "live"
 
 
 async def test_apply_rejects_auto_action_at_boundary() -> None:

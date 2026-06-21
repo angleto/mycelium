@@ -197,6 +197,11 @@ export const en = {
     basedOn: 'Signals: {{signals}}',
     unknownTag: '(tag)',
     unknownNote: '(note)',
+    unknownTarget: '(item)',
+    refresh: 'Refresh',
+    sourcePrecomputed: 'precomputed',
+    sourceLive: 'live',
+    computedAt: 'computed {{when}}',
   },
   notePicker: {
     search: 'Filter notes by title…',

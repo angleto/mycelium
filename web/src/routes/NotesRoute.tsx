@@ -1125,7 +1125,8 @@ export function NotesRoute() {
                 <LinkedTasksPanel noteId={sel.id} />
                 <NoteLinksPanel noteId={sel.id} />
                 <GardenSuggestionsPanel
-                  noteId={sel.id}
+                  nodeId={sel.id}
+                  nodeKind="note"
                   onApplied={() => void refreshSel()}
                 />
                 <RevisionsPanel
