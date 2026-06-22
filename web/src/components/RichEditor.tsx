@@ -559,6 +559,18 @@ export interface AnnotationViewHandle {
   scrollToAnnotation: (a: Annotation) => boolean
 }
 
+// An annotation the toolbar ▲/▼ walks: OPEN only (resolved comments and
+// accepted/rejected suggestions are excluded — they carry no live mark in
+// the prose), not deleted, and with anchor text to locate. The panel's
+// per-card ⌖ is separate and still jumps to resolved/rejected ones.
+function isNavigableAnnotation(a: Annotation): boolean {
+  return (
+    !a.deleted_at &&
+    a.status === 'open' &&
+    (a.kind === 'suggestion' ? !!a.original_text : !!a.anchor_quote)
+  )
+}
+
 // Map an annotation row to the minimal shape locateAnchor needs.
 function anchorOf(a: Annotation): AnchorQuery {
   return {
@@ -931,7 +943,7 @@ export function RichEditor({
     const ed = editorRef.current
     if (!ed) return [] as { row: Annotation; from: number; to: number }[]
     return (inlineAnnotations?.rows ?? [])
-      .filter((r) => !r.deleted_at && (r.kind === 'suggestion' ? r.original_text : r.anchor_quote))
+      .filter(isNavigableAnnotation)
       .map((row) => ({ row, r: locateAnchor(ed.state.doc, anchorOf(row)) }))
       .flatMap((x) => (x.r ? [{ row: x.row, from: x.r.from, to: x.r.to }] : []))
       .sort((a, b) => a.from - b.from)
@@ -976,10 +988,8 @@ export function RichEditor({
     [orderedAnchored, flashRange],
   )
 
-  // Any anchored annotation to navigate? Gates the toolbar prev/next.
-  const hasAnchoredAnnotations = (inlineAnnotations?.rows ?? []).some(
-    (r) => !r.deleted_at && (r.kind === 'suggestion' ? r.original_text : r.anchor_quote),
-  )
+  // Any OPEN anchored annotation to navigate? Gates the toolbar prev/next.
+  const hasAnchoredAnnotations = (inlineAnnotations?.rows ?? []).some(isNavigableAnnotation)
 
   // Scroll the editor to a fraction of the part: 0 = start, 1 = end, and
   // anything in between maps to that proportion of the document (by
