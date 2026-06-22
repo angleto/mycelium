@@ -31,11 +31,12 @@ import datetime as dt
 import uuid
 from dataclasses import dataclass
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from flow_core.errors import NotFoundError
 from flow_core.i18n import MessageCode
+from flow_core.models.event_outbox import EventOutbox
 from flow_core.models.membership import Role
 from flow_core.models.note import Note
 from flow_core.services import audit, event_bus
@@ -207,4 +208,84 @@ async def reject_node(
     return note
 
 
-__all__ = ["PendingNode", "approve_node", "list_pending", "reject_node"]
+# ── D4 earned-autonomy telemetry: per-model accept ratio ───────────────────
+
+
+@dataclass(frozen=True)
+class ModelAcceptRatio:
+    """How reliably a model's AUTONOMOUSLY-generated proposals were accepted
+    (ADR-0043 D4): ``approved / (approved + rejected)`` for one
+    ``origin_model_id``. ``ratio`` is None when there are no decisions yet --
+    an empty denominator is "no signal", not 0%. This is the reliability
+    signal that a future per-workspace policy can use to *earn* a model
+    auto-approve (never assumed)."""
+
+    model_id: str
+    approved: int
+    rejected: int
+    ratio: float | None
+
+
+async def accept_ratio_by_model(
+    session: AsyncSession, *, org_id: uuid.UUID
+) -> list[ModelAcceptRatio]:
+    """Per-model accept ratio over the review bus events. Reads the durable
+    approve/reject events ``approve_node`` / ``reject_node`` emit (each
+    carrying ``origin_model_id`` in its payload): a reject soft-deletes the
+    node, so the EVENTS -- not the note table -- are the complete record of
+    both outcomes. Most-decided model first. RLS-scoped."""
+    model = EventOutbox.payload["origin_model_id"].astext
+    review = EventOutbox.payload["review"].astext
+    rows = (
+        await session.execute(
+            select(
+                model,
+                func.count().filter(review == "approve"),
+                func.count().filter(review == "reject"),
+            )
+            .where(
+                EventOutbox.org_id == org_id,
+                review.in_(("approve", "reject")),
+                model.isnot(None),
+            )
+            .group_by(model)
+        )
+    ).all()
+    out: list[ModelAcceptRatio] = []
+    for model_id, approved, rejected in rows:
+        a, r = int(approved), int(rejected)
+        total = a + r
+        out.append(
+            ModelAcceptRatio(
+                model_id=model_id,
+                approved=a,
+                rejected=r,
+                ratio=round(a / total, 4) if total else None,
+            )
+        )
+    out.sort(key=lambda m: m.approved + m.rejected, reverse=True)
+    return out
+
+
+async def accept_ratio_overall(session: AsyncSession, *, org_id: uuid.UUID) -> float | None:
+    """The workspace-wide accept ratio over every model's autonomous proposals
+    (the aggregate of :func:`accept_ratio_by_model`). None when there are no
+    decisions yet -- the garden-health sensor renders that as "no signal"."""
+    by_model = await accept_ratio_by_model(session, org_id=org_id)
+    approved = sum(m.approved for m in by_model)
+    rejected = sum(m.rejected for m in by_model)
+    total = approved + rejected
+    if not total:
+        return None
+    return round(approved / total, 4)
+
+
+__all__ = [
+    "ModelAcceptRatio",
+    "PendingNode",
+    "accept_ratio_by_model",
+    "accept_ratio_overall",
+    "approve_node",
+    "list_pending",
+    "reject_node",
+]

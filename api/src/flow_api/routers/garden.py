@@ -29,6 +29,7 @@ from fastapi import APIRouter, Depends, Query
 
 from flow_api.deps import TenantCtx, tenant_ctx
 from flow_api.schemas import (
+    GardenAcceptRatioOut,
     GardenApplyIn,
     GardenApplyOut,
     GardenClassifyOut,
@@ -477,6 +478,23 @@ async def garden_review_reject(
         origin_model_id=note.origin_model_id,
         rejected=note.deleted_at is not None,
     )
+
+
+@router.get("/review/accept-ratio", response_model=list[GardenAcceptRatioOut])
+async def garden_review_accept_ratio(
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+) -> list[GardenAcceptRatioOut]:
+    """Per-model accept ratio of the garden's AUTONOMOUSLY-generated proposals
+    (ADR-0043 D4): the earned-autonomy reliability signal, most-decided model
+    first. Derived from the durable approve/reject bus events; a pure read.
+    "Show, never judge": counts + ratio, never a verdict."""
+    rows = await review_svc.accept_ratio_by_model(ctx.session, org_id=ctx.org_id)
+    return [
+        GardenAcceptRatioOut(
+            model_id=r.model_id, approved=r.approved, rejected=r.rejected, ratio=r.ratio
+        )
+        for r in rows
+    ]
 
 
 def _delta_out(d: learning_svc.FeatureDelta) -> GardenFeatureDeltaOut:

@@ -25,6 +25,7 @@ _SENSORS = (
     "density_delta_7d",
     "embedding_coverage",
     "autonomous_spend_today",
+    "autonomous_accept_ratio",
 )
 
 

@@ -134,3 +134,18 @@ async def test_review_of_a_plain_note_is_404(_wire: None) -> None:
         n = (await c.post("/notes", headers=h, json={"kind": "text", "text": "ordinary"})).json()
         r = await c.post("/garden/review/approve", headers=h, json={"note_id": n["id"]})
         assert r.status_code == 404
+
+
+async def test_accept_ratio_endpoint_reflects_an_approval(_wire: None) -> None:
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as c:
+        h, org, user = await _signup(c)
+        # No reviews yet -> empty per-model breakdown.
+        assert (await c.get("/garden/review/accept-ratio", headers=h)).json() == []
+        nid = str(await _seed_proposed(org, user))
+        await c.post("/garden/review/approve", headers=h, json={"note_id": nid})
+        rows = (await c.get("/garden/review/accept-ratio", headers=h)).json()
+        row = next(r for r in rows if r["model_id"] == "fake-llm")
+        assert row["approved"] == 1
+        assert row["rejected"] == 0
+        assert row["ratio"] == 1.0

@@ -1267,6 +1267,17 @@ class GardenReviewActionOut(BaseModel):
     rejected: bool  # True when the action soft-deleted the node
 
 
+class GardenAcceptRatioOut(BaseModel):
+    """Per-model reliability of AUTONOMOUSLY-generated proposals (ADR-0043
+    D4): how often a human approved vs rejected this model's output. ``ratio``
+    is null when there are no decisions yet (no signal, not 0%)."""
+
+    model_id: str
+    approved: int
+    rejected: int
+    ratio: float | None = None
+
+
 class GardenLearningRollbackIn(BaseModel):
     """Rewind the caller's own learned priors to their state at ``to``
     (ADR-0037 "Snapshots and rollback")."""

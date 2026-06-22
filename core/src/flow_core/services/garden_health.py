@@ -65,6 +65,12 @@ TAG_ENTROPY_FLOOR = 1.2
 # not a verdict: per ADR-0035 "show, never judge", the card shows value vs
 # floor and the forester decides.
 EMBEDDING_COVERAGE_FLOOR = 0.80
+# Earned-autonomy reliability floor (ADR-0043 D4): the rate at or above which
+# a model's AUTONOMOUSLY-generated proposals are accepted by a human often
+# enough to be considered reliable. A reference line, not a verdict ("show,
+# never judge"); a future per-workspace policy MAY use it to earn a model
+# auto-approve, never assumed.
+AUTONOMOUS_ACCEPT_RATIO_FLOOR = 0.70
 # Top-K window of the recall sensor: a click below this rank says the
 # ranking failed badly enough that "was it top-1?" is no longer the
 # interesting question, so it is excluded from the denominator.
@@ -97,6 +103,7 @@ _NO_CLICKS = "no real (non-probe) search clicks in window yet"
 _NO_EMBEDDABLE = "no embeddable blobs yet"
 _NO_DISTILLATIONS = "no distillation notes yet (decomposition has not produced humus)"
 _NO_ARCHIVED_DISTILLATIONS = "distillations exist but none derive from an archived source yet"
+_NO_REVIEWS = "no autonomous proposals reviewed yet"
 
 
 @dataclass(frozen=True)
@@ -126,6 +133,10 @@ class GardenHealth:
     # daily cap. value=spend / floor=cap when capped; value=None + reason
     # when the kill-switch is off or no cap is configured.
     autonomous_spend_today: Metric
+    # ADR-0043 D4: how often a human approved (vs rejected) the garden's
+    # AUTONOMOUSLY-generated proposals, workspace-wide. The earned-autonomy
+    # reliability signal; value=None + reason until any proposal is reviewed.
+    autonomous_accept_ratio: Metric
 
     def as_dict(self) -> dict[str, dict[str, Any]]:
         return {key: asdict(metric) for key, metric in vars(self).items()}
@@ -408,8 +419,9 @@ async def compute_health(
     density = await _density_delta_7d(session, org_id=org_id, now=now)
     coverage = await _embedding_coverage(session, org_id=org_id)
     fungal_value, fungal_reason = await _fungal_lag(session, org_id=org_id)
-    from flow_core.services import autonomous_budget
+    from flow_core.services import autonomous_budget, garden_review
 
+    review_ratio = await garden_review.accept_ratio_overall(session, org_id=org_id)
     budget = await autonomous_budget.status(session, org_id=org_id, now=now)
     if not budget.enabled:
         autonomous_metric = Metric(None, None, "autonomous jobs paused (kill switch)")
@@ -442,6 +454,11 @@ async def compute_health(
             None if coverage is not None else _NO_EMBEDDABLE,
         ),
         autonomous_spend_today=autonomous_metric,
+        autonomous_accept_ratio=Metric(
+            review_ratio,
+            AUTONOMOUS_ACCEPT_RATIO_FLOOR,
+            None if review_ratio is not None else _NO_REVIEWS,
+        ),
     )
 
 

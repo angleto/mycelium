@@ -356,3 +356,71 @@ async def test_review_of_non_proposed_note_is_404(_wire: None, _gate_on: None) -
             await review.reject_node(s, org_id=org, actor_id=user, note_id=live.id)
         with pytest.raises(NotFoundError):
             await review.approve_node(s, org_id=org, actor_id=user, note_id=uuid.uuid4())
+
+
+# ── D4: per-model accept ratio (earned-autonomy telemetry, 27f7726e) ───────
+
+
+async def _proposed(s: object, org: uuid.UUID, user: uuid.UUID, *, model: str) -> uuid.UUID:
+    """A 'proposed' node stamped with a given ``origin_model_id`` -- the gate
+    column the review events carry (no decomposition needed to test the
+    ratio)."""
+    note = await nt.create_note(
+        s,  # type: ignore[arg-type]
+        org_id=org,
+        actor_id=user,
+        kind=NoteKind.text,
+        title="p",
+        text="a proposed body",
+    )
+    note.origin_model_id = model
+    note.review_state = "proposed"
+    await s.flush()  # type: ignore[attr-defined]
+    return note.id
+
+
+async def test_accept_ratio_by_model_counts_approve_and_reject() -> None:
+    org, user = await _org()
+    async with tenant_session(str(org), str(user)) as s:
+        # model-x: 1 approve + 1 reject -> 0.5 ; model-y: 1 approve -> 1.0
+        await review.approve_node(
+            s, org_id=org, actor_id=user, note_id=await _proposed(s, org, user, model="model-x")
+        )
+        await review.reject_node(
+            s, org_id=org, actor_id=user, note_id=await _proposed(s, org, user, model="model-x")
+        )
+        await review.approve_node(
+            s, org_id=org, actor_id=user, note_id=await _proposed(s, org, user, model="model-y")
+        )
+        ratios = await review.accept_ratio_by_model(s, org_id=org)
+        by = {m.model_id: m for m in ratios}
+        assert (by["model-x"].approved, by["model-x"].rejected, by["model-x"].ratio) == (1, 1, 0.5)
+        assert (by["model-y"].approved, by["model-y"].rejected, by["model-y"].ratio) == (1, 0, 1.0)
+        # most-decided model first (model-x has 2 decisions, model-y has 1).
+        assert ratios[0].model_id == "model-x"
+        assert await review.accept_ratio_overall(s, org_id=org) == round(2 / 3, 4)
+
+
+async def test_accept_ratio_is_none_without_reviews() -> None:
+    org, user = await _org()
+    async with tenant_session(str(org), str(user)) as s:
+        assert await review.accept_ratio_overall(s, org_id=org) is None
+        assert await review.accept_ratio_by_model(s, org_id=org) == []
+
+
+async def test_garden_health_surfaces_the_accept_ratio_sensor() -> None:
+    from flow_core.services import garden_health
+
+    org, user = await _org()
+    async with tenant_session(str(org), str(user)) as s:
+        # No reviews yet -> the sensor reads "no signal", not 0%.
+        h0 = await garden_health.compute_health(s, org_id=org)
+        assert h0.autonomous_accept_ratio.value is None
+        assert h0.autonomous_accept_ratio.reason
+        # One approval -> ratio 1.0, with the reference floor attached.
+        await review.approve_node(
+            s, org_id=org, actor_id=user, note_id=await _proposed(s, org, user, model="m")
+        )
+        h1 = await garden_health.compute_health(s, org_id=org)
+        assert h1.autonomous_accept_ratio.value == 1.0
+        assert h1.autonomous_accept_ratio.floor == garden_health.AUTONOMOUS_ACCEPT_RATIO_FLOOR
