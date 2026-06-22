@@ -5358,6 +5358,15 @@ button.btn--danger:hover {
   font-style: italic;
   color: color-mix(in srgb, var(--text) 55%, transparent);
 }
+/* Per-card "this suggestion's target text drifted" badge: a stale Accept
+   would just 400 again, so the card shows this instead and offers the ⌖
+   manual-apply path. Warn-toned, readable in both themes. */
+.anno__stale {
+  align-self: center;
+  font-size: 0.72rem;
+  font-style: italic;
+  color: var(--err);
+}
 /* In-flight spinner for a busy action button (accept/reject/resolve/
    reopen): inherits the button's text colour so it reads in both themes,
    reusing the running-spin keyframes. */

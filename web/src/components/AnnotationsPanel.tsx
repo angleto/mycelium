@@ -65,12 +65,20 @@ export function AnnotationsPanel({
 }: Props) {
   const { t } = useTranslation()
   const [err, setErr] = useState('')
-  const [includeResolved, setIncludeResolved] = useState(true)
+  // Resolved comments and accepted/rejected suggestions are hidden by
+  // default: on a heavily-annotated doc the open ones are what needs
+  // attention, and the toggle brings the rest back when wanted.
+  const [includeResolved, setIncludeResolved] = useState(false)
   // Accept/reject/resolve/reopen are async (accept also splices the body
   // server-side then refetches the prose, which takes a beat): track the
   // in-flight ``${id}:${verb}`` so the buttons disable + spin instead of
   // letting a double-click fire the mutation twice.
   const [pending, setPending] = useState<string | null>(null)
+  // Suggestions whose last Accept came back SUGGESTION_STALE (the target
+  // text can no longer be faithfully located in the live body): flagged
+  // per-card so the user sees WHICH one failed — instead of one generic
+  // line at the panel top — and gets the manual-apply affordance.
+  const [staleIds, setStaleIds] = useState<Set<string>>(new Set())
   // Id of the card whose last "go to text" found no target (passage edited
   // away, or the editor is in raw mode): shows a brief hint, auto-clears.
   const [jumpMiss, setJumpMiss] = useState<string | null>(null)
@@ -130,25 +138,26 @@ export function AnnotationsPanel({
       path: string,
       method: 'POST' | 'PATCH' | 'DELETE',
       payload?: Record<string, unknown>,
-    ): Promise<boolean> => {
+    ): Promise<{ ok: boolean; code: string | null }> => {
       const res = await authFetch(path, {
         method,
         headers: payload ? { 'Content-Type': 'application/json' } : undefined,
         body: payload ? JSON.stringify(payload) : undefined,
       })
       if (!res.ok) {
-        setErr(errMessage(await res.json().catch(() => ({}))))
-        return false
+        const errBody = await res.json().catch(() => ({}))
+        setErr(errMessage(errBody))
+        return { ok: false, code: (errBody as { code?: string }).code ?? null }
       }
       setErr('')
-      return true
+      return { ok: true, code: null }
     },
     [],
   )
 
   const addComment = async () => {
     if (!body.trim()) return
-    const ok = await send('/annotations/comment', 'POST', {
+    const { ok } = await send('/annotations/comment', 'POST', {
       doc_kind: docKind,
       doc_id: docId,
       body,
@@ -167,7 +176,7 @@ export function AnnotationsPanel({
 
   const addSuggestion = async () => {
     if (!sugOrig.trim()) return
-    const ok = await send('/annotations/suggestion', 'POST', {
+    const { ok } = await send('/annotations/suggestion', 'POST', {
       doc_kind: docKind,
       doc_id: docId,
       original_text: sugOrig,
@@ -191,12 +200,27 @@ export function AnnotationsPanel({
     if (pending) return
     setPending(`${a.id}:${verb}`)
     try {
-      if (await send(`/annotations/${a.id}/${verb}`, 'POST', { expected_version: a.version })) {
+      const { ok, code } = await send(`/annotations/${a.id}/${verb}`, 'POST', {
+        expected_version: a.version,
+      })
+      if (ok) {
+        // A later successful action clears any prior stale flag on the card.
+        setStaleIds((s) => {
+          if (!s.has(a.id)) return s
+          const n = new Set(s)
+          n.delete(a.id)
+          return n
+        })
         await reload()
         // Accepting a suggestion splices the proposed text into the body
         // server-side; ask the host to refetch the prose so the editor
         // reflects it (resolve/reopen/reject leave the body untouched).
         if (verb === 'accept') await onDocMutated?.()
+      } else if (verb === 'accept' && code === 'annotation.suggestion_stale') {
+        // The proposed edit can no longer be located faithfully in the live
+        // body (drifted or ambiguous): flag THIS card so the failure is
+        // attributable, not just a generic line at the panel top.
+        setStaleIds((s) => new Set(s).add(a.id))
       }
     } finally {
       setPending(null)
@@ -224,7 +248,7 @@ export function AnnotationsPanel({
 
   const sendReply = async (parent: Annotation) => {
     if (!replyBody.trim()) return
-    const ok = await send('/annotations/comment', 'POST', {
+    const { ok } = await send('/annotations/comment', 'POST', {
       doc_kind: docKind,
       doc_id: docId,
       body: replyBody,
@@ -239,7 +263,7 @@ export function AnnotationsPanel({
 
   const saveEdit = async (a: Annotation) => {
     if (!editBody.trim()) return
-    const ok = await send(`/annotations/${a.id}`, 'PATCH', {
+    const { ok } = await send(`/annotations/${a.id}`, 'PATCH', {
       body: editBody,
       expected_version: a.version,
     })
@@ -257,7 +281,7 @@ export function AnnotationsPanel({
       )
     )
       return
-    if (await send(`/annotations/${a.id}?expected_version=${a.version}`, 'DELETE'))
+    if ((await send(`/annotations/${a.id}?expected_version=${a.version}`, 'DELETE')).ok)
       await reload()
   }
 
@@ -355,12 +379,26 @@ export function AnnotationsPanel({
               })}
             </span>
           )}
-          {isSuggestion && open && (
-            <>
-              {actBtn(a, 'accept', t('annotations.accept', { defaultValue: 'Accept' }))}
-              {actBtn(a, 'reject', t('annotations.reject', { defaultValue: 'Reject' }), true)}
-            </>
-          )}
+          {isSuggestion &&
+            open &&
+            (staleIds.has(a.id) ? (
+              // Accept already came back stale for this card: drop the button
+              // that would just 400 again, explain why, and leave Reject + the
+              // ⌖ "go to text" above so the user can apply it by hand.
+              <>
+                <span className="anno__stale" role="status">
+                  {t('annotations.staleHint', {
+                    defaultValue: 'Target text changed — apply by hand',
+                  })}
+                </span>
+                {actBtn(a, 'reject', t('annotations.reject', { defaultValue: 'Reject' }), true)}
+              </>
+            ) : (
+              <>
+                {actBtn(a, 'accept', t('annotations.accept', { defaultValue: 'Accept' }))}
+                {actBtn(a, 'reject', t('annotations.reject', { defaultValue: 'Reject' }), true)}
+              </>
+            ))}
           {!isSuggestion && open &&
             actBtn(a, 'resolve', t('annotations.resolve', { defaultValue: 'Resolve' }), true)}
           {!isSuggestion && !open &&

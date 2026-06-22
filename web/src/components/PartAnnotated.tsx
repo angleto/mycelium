@@ -40,6 +40,9 @@ export function PartAnnotated({
   const { rows, reload, error } = useAnnotations('note_part', partId)
   const [open, setOpen] = useState(false)
   const anchors = useMemo(() => toAnchors(rows), [rows])
+  // Open (non-resolved) count over the total, so the toggle reads e.g.
+  // "💬 Comments (5/69)" — what still needs attention vs the whole thread.
+  const openCount = useMemo(() => rows.filter((r) => r.status === 'open').length, [rows])
   // Shared with the panel below so its "go to text" button can scroll
   // this editor to a comment/suggestion's anchored passage.
   const viewRef = useRef<AnnotationViewHandle>(null)
@@ -63,7 +66,7 @@ export function PartAnnotated({
           onClick={() => setOpen((v) => !v)}
           aria-expanded={open}
         >
-          {t('notes.parts.comments', { defaultValue: '💬 Comments' })} ({rows.length})
+          {t('notes.parts.comments', { defaultValue: '💬 Comments' })} ({openCount}/{rows.length})
         </button>
         {open && (
           <AnnotationsPanel

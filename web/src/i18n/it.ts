@@ -1629,6 +1629,7 @@ export const it: Catalog = {
     anchorPlaceholder: 'Ancora a un passaggio (opzionale)',
     goToAnchor: 'Vai al testo evidenziato',
     anchorNotFound: 'Testo non trovato nel documento',
+    staleHint: 'Il testo di riferimento è cambiato — applica a mano',
     suggestToggle: 'Suggerisci una modifica',
     original: 'Testo originale',
     proposed: 'Sostituzione proposta (vuoto = elimina)',

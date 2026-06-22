@@ -1628,6 +1628,7 @@ export const en = {
     anchorPlaceholder: 'Anchor to a passage (optional)',
     goToAnchor: 'Go to the highlighted text',
     anchorNotFound: 'Text not found in the document',
+    staleHint: 'Target text changed — apply by hand',
     suggestToggle: 'Suggest an edit',
     original: 'Original text',
     proposed: 'Proposed replacement (empty = delete)',
