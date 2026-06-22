@@ -13,20 +13,17 @@ async function login(page: Page) {
   await page.waitForURL('**/notes', { timeout: 15_000 })
 }
 
-test('health dashboard renders the live sensor cards + a not-yet-measured section', async ({
+test('health dashboard renders the live sensor cards, unmeasured ones showing a reason not a number', async ({
   page,
 }) => {
   await login(page)
   await page.goto('/garden/health')
 
   await expect(page.locator('.ghealth h1')).toBeVisible()
-  // One card per live (non-blocked) sensor; not-yet-wired sensors live in
-  // the pending section, never as empty cards. The live set GROWS as
-  // sensors are wired (was 8, now 10 with embedding_coverage + recall_at_k),
-  // so assert the grid is populated past the core suite rather than pinning
-  // an exact count that drifts on every new sensor. The specific-sensor
-  // anchors below (Accept rate card present, Fungal lag in pending) carry
-  // the real signal that the live/pending split is correct.
+  // One card per live (non-blocked) sensor. The live set GROWS as sensors
+  // are wired (was 8, now 10 with embedding_coverage + recall_at_k; fungal_lag
+  // went live in WS-C6), so assert the grid is populated past the core suite
+  // rather than pinning an exact count that drifts on every new sensor.
   const cards = page.locator('.ghealth__grid .ghealth__card')
   await expect(cards.first()).toBeVisible()
   expect(await cards.count()).toBeGreaterThanOrEqual(8)
@@ -36,11 +33,15 @@ test('health dashboard renders the live sensor cards + a not-yet-measured sectio
   const accept = page.locator('.ghealth__card', { hasText: 'Accept rate (7d)' })
   await expect(accept.locator('.ghealth__floor')).toContainText('40%')
 
-  // A sensor still flagged not-yet-wired is listed apart with its reason,
-  // never a faked number ("show, never judge").
-  const pending = page.locator('.ghealth__pending')
-  await expect(pending).toContainText('Fungal lag')
-  await expect(pending.locator('.ghealth__pending-reason').first()).toBeVisible()
+  // "Show, never judge" (ADR-0035): every sensor is now wired, so there is
+  // no separate not-yet-measured section -- a sensor with no reading yet
+  // (e.g. autonomous_spend with no cap set, fungal_lag with no distillations
+  // on a fresh workspace) states its reason in-card instead of a fabricated
+  // number, and the dashboard never renders an error.
+  await expect(
+    page.locator('.ghealth__grid .ghealth__card .ghealth__reason').first(),
+  ).toBeVisible()
+  await expect(page.locator('.ghealth__grid .error')).toHaveCount(0)
 })
 
 test('clicking a sensor opens the per-metric drill-down', async ({ page }) => {
