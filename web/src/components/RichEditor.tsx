@@ -1224,6 +1224,9 @@ export function RichEditor({
               >
                 ↓
               </button>
+              {/* Divider: annotation navigation (left) vs document position
+                  navigation (right). */}
+              <span className="rte__sep" aria-hidden="true" />
               {/* Position navigation, handy on long note parts: jump to the
                   start / end, or type a percentage (e.g. 30) to land ~30%
                   through the part. */}
