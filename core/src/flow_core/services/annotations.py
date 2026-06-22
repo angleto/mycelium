@@ -38,6 +38,7 @@ from flow_core.models.membership import Role
 from flow_core.models.note_part import NotePart
 from flow_core.models.task import Task
 from flow_core.services import audit, md_anchor
+from flow_core.services import identities as identities_svc
 from flow_core.services.rbac import require_role
 
 
@@ -314,6 +315,28 @@ async def get_annotation(
     return await _get(session, org_id=org_id, annotation_id=annotation_id)
 
 
+async def list_assigned(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    assignee_identity_id: uuid.UUID,
+    include_resolved: bool = False,
+    limit: int = 100,
+) -> list[Annotation]:
+    """The "assigned to me" inbox: annotations assigned to
+    ``assignee_identity_id`` across the workspace, newest first. Excludes
+    soft-deleted; ``include_resolved=False`` keeps only ``open`` items (the
+    actionable inbox). RLS scopes the SELECT to the tenant."""
+    stmt = select(Annotation).where(
+        Annotation.assigned_to_identity_id == assignee_identity_id,
+        Annotation.deleted_at.is_(None),
+    )
+    if not include_resolved:
+        stmt = stmt.where(Annotation.status == "open")
+    stmt = stmt.order_by(Annotation.created_at.desc()).limit(limit)
+    return list((await session.execute(stmt)).scalars().all())
+
+
 # --------------------------------------------------------------------------
 # mutate
 # --------------------------------------------------------------------------
@@ -348,6 +371,70 @@ async def edit(
         entity="annotation",
         entity_id=annotation_id,
         action="edit",
+    )
+    return new_version
+
+
+async def assign(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    annotation_id: uuid.UUID,
+    expected_version: int,
+    assignee_identity_id: uuid.UUID | None = None,
+    assignee_handle: str | None = None,
+    clear: bool = False,
+) -> int:
+    """Assign the annotation to a workspace identity (the person responsible
+    for acting on it) or clear it (``clear=True``).
+
+    Assigning is *coordination*, not authorship, so ANY member may do it --
+    unlike ``edit`` / ``soft_delete`` (author-or-admin). ``assignee_handle``
+    resolves via ``identities.lookup_by_handle`` (bare handle, ``@handle``, or
+    login email); a passed ``assignee_identity_id`` is validated to belong to
+    this org. An unresolved/foreign identity raises ``IDENTITY_NOT_FOUND``.
+    Optimistic-versioned + audited like every other annotation mutation."""
+    await require_role(session, org_id, actor_id, Role.member)
+    await _get(session, org_id=org_id, annotation_id=annotation_id)
+    target: uuid.UUID | None
+    if clear:
+        target = None
+    elif assignee_identity_id is not None:
+        found = (
+            await session.execute(
+                select(Identity.id).where(
+                    Identity.id == assignee_identity_id, Identity.org_id == org_id
+                )
+            )
+        ).scalar_one_or_none()
+        if found is None:
+            raise NotFoundError(MessageCode.IDENTITY_NOT_FOUND)
+        target = assignee_identity_id
+    elif assignee_handle:
+        ident = await identities_svc.lookup_by_handle(
+            session, org_id=org_id, handle=assignee_handle
+        )
+        if ident is None:
+            raise NotFoundError(MessageCode.IDENTITY_NOT_FOUND)
+        target = ident.id
+    else:
+        # No target and no explicit clear: nothing to do.
+        raise DomainError(MessageCode.DOMAIN_ERROR)
+    new_version = await optimistic_update(
+        session,
+        Annotation,
+        pk=annotation_id,
+        expected_version=expected_version,
+        values={"assigned_to_identity_id": target},
+    )
+    await audit.log(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        entity="annotation",
+        entity_id=annotation_id,
+        action="unassign" if target is None else "assign",
     )
     return new_version
 

@@ -145,3 +145,14 @@ class Annotation(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, Base
         ForeignKey("identities.id", ondelete="SET NULL"),
         nullable=True,
     )
+    # --- assignment (task 861b360b / 1f161485 #1) --------------------
+    # The person responsible for acting on this annotation (Google-Docs
+    # "assign to @someone"). NULL = unassigned. ``SET NULL`` on identity
+    # delete (like author/resolved_by); indexed for the "assigned to me"
+    # inbox. Assigning is coordination (member role), not authorship.
+    assigned_to_identity_id: Mapped[uuid.UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("identities.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )

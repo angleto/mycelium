@@ -1121,6 +1121,9 @@ def _annotation_dict(a: Any) -> dict[str, Any]:
         "proposed_text": a.proposed_text,
         "parent_id": str(a.parent_id) if a.parent_id else None,
         "author_identity_id": (str(a.author_identity_id) if a.author_identity_id else None),
+        "assigned_to_identity_id": (
+            str(a.assigned_to_identity_id) if a.assigned_to_identity_id else None
+        ),
         "version": a.version,
         "created_at": a.created_at.isoformat(),
     }
@@ -1246,6 +1249,58 @@ async def delete_annotation(
             actor_identity_id=ident,
         )
         return {"id": annotation_id, "version": v, "deleted": True}
+
+
+@mcp.tool()
+async def assign_annotation(
+    token: str,
+    org_id: str,
+    annotation_id: str,
+    expected_version: int,
+    assignee_handle: str | None = None,
+    clear: bool = False,
+) -> dict[str, Any]:
+    """Assign an annotation to a workspace identity (``assignee_handle``: a
+    bare handle, ``@handle``, or login email), or clear it (``clear=true``).
+    Any member may assign -- it is coordination, not authorship. An unknown
+    handle returns ``identity.not_found``. Returns the new version."""
+    async with _tenant(token, org_id) as (s, org, user):
+        v = await annotations_svc.assign(
+            s,
+            org_id=org,
+            actor_id=user,
+            annotation_id=uuid.UUID(annotation_id),
+            expected_version=expected_version,
+            assignee_handle=assignee_handle,
+            clear=clear,
+        )
+        return {"id": annotation_id, "version": v, "cleared": clear}
+
+
+@mcp.tool()
+async def list_assigned_annotations(
+    token: str,
+    org_id: str,
+    assignee_handle: str | None = None,
+    include_resolved: bool = False,
+) -> list[dict[str, Any]]:
+    """The "assigned to me" inbox: annotations assigned to ``assignee_handle``
+    (defaults to the calling identity), newest first. Open-only unless
+    ``include_resolved=true``. An unknown handle yields an empty list."""
+    from flow_core.services import identities as identities_svc
+
+    async with _tenant(token, org_id) as (s, org, user):
+        if assignee_handle:
+            ident_row = await identities_svc.lookup_by_handle(s, org_id=org, handle=assignee_handle)
+            if ident_row is None:
+                return []
+            ident_id = ident_row.id
+        else:
+            ident_id = (await identities_svc.ensure_for_user(s, org_id=org, user_id=user)).id
+        rows = await annotations_svc.list_assigned(
+            s, org_id=org, assignee_identity_id=ident_id, include_resolved=include_resolved
+        )
+        return [_annotation_dict(a) for a in rows]
 
 
 @mcp.tool()

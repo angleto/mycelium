@@ -855,12 +855,24 @@ class AnnotationOut(BaseModel):
     parent_id: uuid.UUID | None = None
     author_identity_id: uuid.UUID | None = None
     resolved_by_identity_id: uuid.UUID | None = None
+    assigned_to_identity_id: uuid.UUID | None = None
     resolved_at: datetime.datetime | None = None
     edited_at: datetime.datetime | None = None
     deleted_at: datetime.datetime | None = None
     version: int
     created_at: datetime.datetime
     updated_at: datetime.datetime
+
+
+class AnnotationAssignIn(BaseModel):
+    """Assign an annotation to a workspace identity, or clear it. Pass an
+    ``assignee_identity_id`` OR an ``assignee_handle`` (bare / ``@handle`` /
+    login email), or ``clear=true`` to unassign. Optimistic-versioned."""
+
+    expected_version: int = Field(ge=1)
+    assignee_identity_id: uuid.UUID | None = None
+    assignee_handle: str | None = None
+    clear: bool = False
 
 
 class AnnotationCommentIn(BaseModel):

@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from flow_api.deps import TenantCtx, current_claims, tenant_ctx
 from flow_api.schemas import (
+    AnnotationAssignIn,
     AnnotationCommentIn,
     AnnotationEditIn,
     AnnotationOut,
@@ -29,6 +30,7 @@ from flow_core.i18n import MessageCode
 from flow_core.models.annotation import Annotation
 from flow_core.models.identity import Identity
 from flow_core.services import annotations as svc
+from flow_core.services import identities as identities_svc
 
 router = APIRouter(prefix="/annotations", tags=["annotations"])
 
@@ -74,6 +76,7 @@ def annotation_out(a: Annotation) -> AnnotationOut:
         parent_id=a.parent_id,
         author_identity_id=a.author_identity_id,
         resolved_by_identity_id=a.resolved_by_identity_id,
+        assigned_to_identity_id=a.assigned_to_identity_id,
         resolved_at=a.resolved_at,
         edited_at=a.edited_at,
         deleted_at=a.deleted_at,
@@ -217,6 +220,36 @@ async def propose_suggestion_stream(
     return annotation_out(a)
 
 
+@router.get("/assigned", response_model=list[AnnotationOut])
+async def list_assigned_annotations(
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+    handle: Annotated[str | None, Query()] = None,
+    include_resolved: Annotated[bool, Query()] = False,
+) -> list[AnnotationOut]:
+    """The "assigned to me" inbox: annotations assigned to ``handle``
+    (defaults to the calling user's identity), newest first. Open-only unless
+    ``include_resolved=true``. An unknown handle yields an empty list.
+    Declared before ``/{annotation_id}`` so the static path wins."""
+    if handle:
+        ident = await identities_svc.lookup_by_handle(ctx.session, org_id=ctx.org_id, handle=handle)
+        if ident is None:
+            return []
+        ident_id = ident.id
+    else:
+        ident_id = (
+            await identities_svc.ensure_for_user(
+                ctx.session, org_id=ctx.org_id, user_id=ctx.user_id
+            )
+        ).id
+    rows = await svc.list_assigned(
+        ctx.session,
+        org_id=ctx.org_id,
+        assignee_identity_id=ident_id,
+        include_resolved=include_resolved,
+    )
+    return [annotation_out(a) for a in rows]
+
+
 @router.get("/{annotation_id}", response_model=AnnotationOut)
 async def get_annotation(
     annotation_id: uuid.UUID,
@@ -349,5 +382,27 @@ async def reject_suggestion(
         actor_id=ctx.user_id,
         annotation_id=annotation_id,
         expected_version=body.expected_version,
+    )
+    return VersionOut(id=annotation_id, version=v)
+
+
+@router.post("/{annotation_id}/assign", response_model=VersionOut)
+async def assign_annotation(
+    annotation_id: uuid.UUID,
+    body: AnnotationAssignIn,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+) -> VersionOut:
+    """Assign an annotation to a workspace identity (by id or handle), or
+    clear it (``clear=true``). Any member may assign -- it is coordination,
+    not authorship."""
+    v = await svc.assign(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        annotation_id=annotation_id,
+        expected_version=body.expected_version,
+        assignee_identity_id=body.assignee_identity_id,
+        assignee_handle=body.assignee_handle,
+        clear=body.clear,
     )
     return VersionOut(id=annotation_id, version=v)
