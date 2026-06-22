@@ -1059,6 +1059,8 @@ export const it: Catalog = {
     toolbarShow: 'Mostra barra',
     annotateComment: 'Commenta il testo selezionato',
     annotateSuggest: 'Suggerisci una modifica al testo selezionato',
+    annotatePrev: 'Vai al commento / suggerimento precedente',
+    annotateNext: 'Vai al commento / suggerimento successivo',
   },
   pomodoro: {
     title: 'Pomodoro',
@@ -1622,6 +1624,8 @@ export const it: Catalog = {
     comment: 'Commenta',
     commentPlaceholder: 'Aggiungi un commento…',
     anchorPlaceholder: 'Ancora a un passaggio (opzionale)',
+    goToAnchor: 'Vai al testo evidenziato',
+    anchorNotFound: 'Testo non trovato nel documento',
     suggestToggle: 'Suggerisci una modifica',
     original: 'Testo originale',
     proposed: 'Sostituzione proposta (vuoto = elimina)',

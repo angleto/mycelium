@@ -3,7 +3,7 @@ import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { api, authFetch, errMessage, workspaceHeader } from '../api/client'
 import { AnnotationsPanel } from '../components/AnnotationsPanel'
-import { RichEditor } from '../components/RichEditor'
+import { RichEditor, type AnnotationViewHandle } from '../components/RichEditor'
 import { toAnchors, useAnnotations } from '../lib/useAnnotations'
 import { AssigneePicker } from '../components/AssigneePicker'
 import { OwnerPicker } from '../components/OwnerPicker'
@@ -47,6 +47,9 @@ export function TaskDetailRoute() {
     error: descAnnoError,
   } = useAnnotations('task_description', id)
   const descAnchors = useMemo(() => toAnchors(descAnnotations), [descAnnotations])
+  // Shared with the AnnotationsPanel below so its "go to text" button can
+  // scroll the description editor to an annotation's anchored passage.
+  const descViewRef = useRef<AnnotationViewHandle>(null)
   // "Add & Open" from TasksRoute hands us the freshly-created TaskOut
   // via router state. We hydrate from it on the very first render so
   // the user lands on the editable surface without a GET round-trip
@@ -982,6 +985,7 @@ export function TaskDetailRoute() {
                 reload: reloadDescAnnotations,
                 onDocMutated: reload,
               }}
+              viewRef={descViewRef}
             />
             <AnnotationsPanel
               docKind="task_description"
@@ -994,6 +998,7 @@ export function TaskDetailRoute() {
               title={t('annotations.diaryTitle', {
                 defaultValue: 'Work diary, comments & suggestions',
               })}
+              onJumpToAnchor={(a) => descViewRef.current?.scrollToAnnotation(a) ?? false}
             />
           </div>
           <div role="tabpanel" hidden={activeTab !== 'checklist'}>

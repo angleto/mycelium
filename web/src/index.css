@@ -5292,6 +5292,76 @@ button.btn--danger:hover {
   border-bottom-color: var(--bark);
 }
 
+/* "Go to text": the panel's locate button (.anno__locate) scrolls the
+   editor to the anchored passage and adds this class for a short pulse so
+   the eye lands on it. Pulses box-shadow only (never the mark's own amber
+   / strikethrough), so it reads in either theme without clobbering the
+   mark underneath. */
+@keyframes anno-flash {
+  0% {
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 75%, transparent);
+  }
+  70% {
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
+.anno-mark--flash {
+  animation: anno-flash 1.4s ease-out;
+  border-radius: 3px;
+  /* The mark is an inline span; without this a passage that wraps across
+     lines gets ONE box-shadow rectangle around the union box (slice),
+     cutting through unrelated text. clone gives each line fragment its
+     own ring. */
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+/* No pulse under reduced motion: hold a steady ring instead (the host
+   removes the class after ~1.5s either way). */
+@media (prefers-reduced-motion: reduce) {
+  .anno-mark--flash {
+    animation: none;
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 45%, transparent);
+    border-radius: 3px;
+    box-decoration-break: clone;
+    -webkit-box-decoration-break: clone;
+  }
+}
+.anno__locate {
+  /* Nudge the crosshair glyph up to optical size among the text buttons. */
+  font-size: 0.95rem;
+  line-height: 1;
+}
+/* Transient hint when "go to text" finds no target (passage edited away
+   or the editor is in source/raw mode). Muted, reads in both themes. */
+.anno__locate-miss {
+  align-self: center;
+  font-size: 0.72rem;
+  font-style: italic;
+  color: color-mix(in srgb, var(--text) 55%, transparent);
+}
+/* In-flight spinner for a busy action button (accept/reject/resolve/
+   reopen): inherits the button's text colour so it reads in both themes,
+   reusing the running-spin keyframes. */
+.btn-spinner {
+  display: inline-block;
+  width: 0.85em;
+  height: 0.85em;
+  margin-right: 0.35em;
+  vertical-align: -0.1em;
+  border: 2px solid color-mix(in srgb, currentColor 30%, transparent);
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: running-spin 0.7s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .btn-spinner {
+    animation-duration: 2s;
+  }
+}
+
 /* Inline annotation UX: compose + action popovers (InlineAnnotator).
    Both are position:fixed, anchored to viewport coordinates computed
    from the editor selection / clicked mark. The Comment / Suggest

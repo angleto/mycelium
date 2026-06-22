@@ -104,6 +104,11 @@ export const InlineAnnotator = forwardRef<InlineAnnotatorHandle, Props>(
   const [compose, setCompose] = useState<{ kind: 'comment' | 'suggest'; sel: Sel } | null>(null)
   const [active, setActive] = useState<ActiveAt | null>(null)
   const [err, setErr] = useState('')
+  // Verb of the in-flight accept/reject/resolve/reopen (accept also
+  // splices the body server-side then refetches, which takes a beat): the
+  // footer buttons disable + spin while it runs, so a slow accept can't be
+  // fired twice and the click visibly registers.
+  const [pending, setPending] = useState<string | null>(null)
 
   // Compose form fields.
   const [cBody, setCBody] = useState('')
@@ -267,15 +272,39 @@ export const InlineAnnotator = forwardRef<InlineAnnotatorHandle, Props>(
   const current = active ? rows.find((r) => r.id === active.id) ?? null : null
 
   const doAct = async (a: Annotation, verb: string) => {
-    const r = await annoApi.act(a.id, verb, a.version)
-    if (!r.ok) {
-      setErr(r.error ?? 'Error')
-      return
+    if (pending) return
+    setPending(verb)
+    try {
+      const r = await annoApi.act(a.id, verb, a.version)
+      if (!r.ok) {
+        setErr(r.error ?? 'Error')
+        return
+      }
+      setErr('')
+      await reload()
+      if (verb === 'accept') await onDocMutated?.()
+      if (verb === 'accept' || verb === 'reject') setActive(null)
+    } finally {
+      setPending(null)
     }
-    setErr('')
-    await reload()
-    if (verb === 'accept') await onDocMutated?.()
-    if (verb === 'accept' || verb === 'reject') setActive(null)
+  }
+
+  // Accept/reject/resolve/reopen button with an in-flight spinner. All
+  // such buttons disable while one runs; the clicked one shows the spinner.
+  const actBtn = (a: Annotation, verb: string, label: string, ghost = false) => {
+    const busy = pending === verb
+    return (
+      <button
+        type="button"
+        className={`btn--sm${ghost ? ' btn--ghost' : ''}`}
+        disabled={pending !== null}
+        aria-busy={busy}
+        onClick={() => void doAct(a, verb)}
+      >
+        {busy && <span className="btn-spinner" aria-hidden="true" />}
+        {label}
+      </button>
+    )
   }
 
   const doDelete = async (a: Annotation) => {
@@ -491,36 +520,14 @@ export const InlineAnnotator = forwardRef<InlineAnnotatorHandle, Props>(
               <div className="anno-pop__actions anno-pop__footer">
                 {current.kind === 'suggestion' && current.status === 'open' && (
                   <>
-                    <button type="button" className="btn--sm" onClick={() => void doAct(current, 'accept')}>
-                      {t('annotations.accept', { defaultValue: 'Accept' })}
-                    </button>
-                    <button
-                      type="button"
-                      className="btn--sm btn--ghost"
-                      onClick={() => void doAct(current, 'reject')}
-                    >
-                      {t('annotations.reject', { defaultValue: 'Reject' })}
-                    </button>
+                    {actBtn(current, 'accept', t('annotations.accept', { defaultValue: 'Accept' }))}
+                    {actBtn(current, 'reject', t('annotations.reject', { defaultValue: 'Reject' }), true)}
                   </>
                 )}
-                {current.kind === 'comment' && current.status === 'open' && (
-                  <button
-                    type="button"
-                    className="btn--sm btn--ghost"
-                    onClick={() => void doAct(current, 'resolve')}
-                  >
-                    {t('annotations.resolve', { defaultValue: 'Resolve' })}
-                  </button>
-                )}
-                {current.kind === 'comment' && current.status !== 'open' && (
-                  <button
-                    type="button"
-                    className="btn--sm btn--ghost"
-                    onClick={() => void doAct(current, 'reopen')}
-                  >
-                    {t('annotations.reopen', { defaultValue: 'Reopen' })}
-                  </button>
-                )}
+                {current.kind === 'comment' && current.status === 'open' &&
+                  actBtn(current, 'resolve', t('annotations.resolve', { defaultValue: 'Resolve' }), true)}
+                {current.kind === 'comment' && current.status !== 'open' &&
+                  actBtn(current, 'reopen', t('annotations.reopen', { defaultValue: 'Reopen' }), true)}
                 {current.kind === 'comment' && (
                   <button
                     type="button"

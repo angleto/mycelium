@@ -1059,6 +1059,8 @@ export const en = {
     toolbarShow: 'Show toolbar',
     annotateComment: 'Comment on the selected text',
     annotateSuggest: 'Suggest an edit to the selected text',
+    annotatePrev: 'Go to the previous comment / suggestion',
+    annotateNext: 'Go to the next comment / suggestion',
   },
   pomodoro: {
     title: 'Pomodoro',
@@ -1621,6 +1623,8 @@ export const en = {
     comment: 'Comment',
     commentPlaceholder: 'Add a comment…',
     anchorPlaceholder: 'Anchor to a passage (optional)',
+    goToAnchor: 'Go to the highlighted text',
+    anchorNotFound: 'Text not found in the document',
     suggestToggle: 'Suggest an edit',
     original: 'Original text',
     proposed: 'Proposed replacement (empty = delete)',

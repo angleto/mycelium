@@ -27,17 +27,26 @@ export interface AnnotationAnchor {
   proposedText: string | null
 }
 
-interface AnnoState {
-  anchors: AnnotationAnchor[]
-  deco: DecorationSet
-}
-
-export const annotationKey = new PluginKey<AnnoState>('annotationDecorations')
-
 interface Range {
   from: number
   to: number
 }
+
+interface AnnoState {
+  anchors: AnnotationAnchor[]
+  // Transient "go to text" highlight pulse over a located range, driven by
+  // a meta transaction (annotationFlashKey) and cleared by the host after
+  // ~1.5s. Rendered as a real PM decoration (NOT a hand-mutated DOM class,
+  // which ProseMirror reverts on its next view reconciliation).
+  flash: Range | null
+  deco: DecorationSet
+}
+
+export const annotationKey = new PluginKey<AnnoState>('annotationDecorations')
+// Meta channel for the flash pulse: payload is a {from,to} range, or null
+// to clear. See RichEditor.flashRange / the panel's "go to text" + the
+// toolbar's prev/next annotation navigation.
+export const annotationFlashKey = new PluginKey<Range | null>('annotationFlash')
 
 function overlaps(r: Range, used: Range[]): boolean {
   return used.some((u) => r.from < u.to && u.from < r.to)
@@ -120,9 +129,58 @@ function findRange(
   return null
 }
 
-function buildDeco(doc: PMNode, anchors: AnnotationAnchor[]): DecorationSet {
+// Minimal anchor shape needed to locate an annotation's passage in the
+// live prose (a structural subset of AnnotationAnchor).
+export interface AnchorQuery {
+  kind: 'comment' | 'suggestion'
+  anchorQuote: string | null
+  anchorPrefix: string | null
+  anchorSuffix: string | null
+  originalText: string | null
+}
+
+// Live PM range of an annotation's anchored passage, computed with the
+// SAME projection + match logic that draws the inline marks, so "where I
+// jump" == "what is highlighted". Used by the panel's "go to text" action
+// for annotations whose mark is not currently drawn (resolved comments,
+// rejected suggestions): there is no decoration DOM to scroll to, so the
+// host falls back to selecting this range. ``used`` is empty here, so it
+// returns the FIRST prefix/suffix-disambiguated occurrence (the open-mark
+// path queries the decoration's own DOM node instead, which is exact even
+// when several annotations quote the same passage). Returns null when the
+// passage no longer exists (e.g. an accepted suggestion spliced it away).
+// If the prefix/suffix-anchored match fails but the quoted passage itself
+// survived (only its surroundings changed, common once a doc is edited),
+// it retries on the bare needle as a best-effort — fallback-path only, so
+// buildDeco's strict matching for live marks is untouched.
+export function locateAnchor(
+  doc: PMNode,
+  a: AnchorQuery,
+): { from: number; to: number } | null {
+  const needle = a.kind === 'suggestion' ? a.originalText : a.anchorQuote
+  if (!needle) return null
+  const map = renderDocWithMap(doc)
+  return (
+    findRange(map, needle, a.anchorPrefix, a.anchorSuffix, []) ??
+    findRange(map, needle, null, null, [])
+  )
+}
+
+function buildDeco(
+  doc: PMNode,
+  anchors: AnnotationAnchor[],
+  flash: Range | null,
+): DecorationSet {
   const decos: Decoration[] = []
   const used: Range[] = []
+  // The flash pulse layers over whatever mark (if any) sits at the range;
+  // PM merges the inline classes. ``anno-mark--flash`` carries the CSS
+  // animation; it is its own decoration so it composes with — and is
+  // independent of — the comment/suggestion marks (a resolved annotation
+  // has no mark, yet still pulses).
+  if (flash && flash.to > flash.from) {
+    decos.push(Decoration.inline(flash.from, flash.to, { class: 'anno-mark--flash' }))
+  }
   const map = renderDocWithMap(doc)
   for (const a of anchors) {
     if (a.status !== 'open') continue
@@ -187,13 +245,17 @@ export const AnnotationDecorations = Extension.create<{ anchors: AnnotationAncho
         key: annotationKey,
         state: {
           init(_config, state) {
-            return { anchors: initial, deco: buildDeco(state.doc, initial) }
+            return { anchors: initial, flash: null, deco: buildDeco(state.doc, initial, null) }
           },
           apply(tr, value, _old, newState) {
             const meta = tr.getMeta(annotationKey) as AnnotationAnchor[] | undefined
-            if (!tr.docChanged && meta === undefined) return value
+            const flashMeta = tr.getMeta(annotationFlashKey) as Range | null | undefined
+            if (!tr.docChanged && meta === undefined && flashMeta === undefined) return value
             const anchors = meta ?? value.anchors
-            return { anchors, deco: buildDeco(newState.doc, anchors) }
+            // The flash range is for the current doc; a doc edit invalidates
+            // it, so drop it rather than try to map a transient highlight.
+            const flash = tr.docChanged ? null : flashMeta !== undefined ? flashMeta : value.flash
+            return { anchors, flash, deco: buildDeco(newState.doc, anchors, flash) }
           },
         },
         props: {

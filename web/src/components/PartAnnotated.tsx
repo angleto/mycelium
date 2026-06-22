@@ -1,9 +1,9 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { toAnchors, useAnnotations } from '../lib/useAnnotations'
 import { AnnotationsPanel } from './AnnotationsPanel'
-import { RichEditor } from './RichEditor'
+import { RichEditor, type AnnotationViewHandle } from './RichEditor'
 
 // One note part's editor with its inline annotation layer. Owns the
 // shared useAnnotations fetch for this part so the editor's inline UX
@@ -40,6 +40,9 @@ export function PartAnnotated({
   const { rows, reload, error } = useAnnotations('note_part', partId)
   const [open, setOpen] = useState(false)
   const anchors = useMemo(() => toAnchors(rows), [rows])
+  // Shared with the panel below so its "go to text" button can scroll
+  // this editor to a comment/suggestion's anchored passage.
+  const viewRef = useRef<AnnotationViewHandle>(null)
 
   return (
     <>
@@ -51,6 +54,7 @@ export function PartAnnotated({
         imageUploadParent={imageUploadParent}
         annotations={anchors}
         inlineAnnotations={{ docKind: 'note_part', docId: partId, rows, reload, onDocMutated }}
+        viewRef={viewRef}
       />
       <div className="parts-editor__comments">
         <button
@@ -70,6 +74,7 @@ export function PartAnnotated({
             loadError={error}
             onDocMutated={onDocMutated}
             imageUploadParent={imageUploadParent}
+            onJumpToAnchor={(a) => viewRef.current?.scrollToAnnotation(a) ?? false}
           />
         )}
       </div>

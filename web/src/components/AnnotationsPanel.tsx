@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { authFetch, errMessage } from '../api/client'
@@ -38,6 +38,12 @@ interface Props {
    * and into MarkdownView so a comment's `![alt](file)` reference resolves
    * against that entity's attachments. */
   imageUploadParent?: ImageUploadParent
+  /** Scroll the sibling editor to an annotation's anchored passage. Wired
+   * by the host (PartAnnotated / TaskDetailRoute) to the RichEditor's
+   * viewRef handle. When omitted, the per-card "go to text" button is
+   * hidden. Returns false when there was nothing to jump to (raw mode, or
+   * the passage was edited away) so the panel can show a brief hint. */
+  onJumpToAnchor?: (a: Annotation) => boolean
 }
 
 function shortId(id: string | null | undefined): string {
@@ -55,10 +61,38 @@ export function AnnotationsPanel({
   title,
   allowSuggest = true,
   imageUploadParent,
+  onJumpToAnchor,
 }: Props) {
   const { t } = useTranslation()
   const [err, setErr] = useState('')
   const [includeResolved, setIncludeResolved] = useState(true)
+  // Accept/reject/resolve/reopen are async (accept also splices the body
+  // server-side then refetches the prose, which takes a beat): track the
+  // in-flight ``${id}:${verb}`` so the buttons disable + spin instead of
+  // letting a double-click fire the mutation twice.
+  const [pending, setPending] = useState<string | null>(null)
+  // Id of the card whose last "go to text" found no target (passage edited
+  // away, or the editor is in raw mode): shows a brief hint, auto-clears.
+  const [jumpMiss, setJumpMiss] = useState<string | null>(null)
+  const missTimer = useRef<number | null>(null)
+  useEffect(
+    () => () => {
+      if (missTimer.current !== null) window.clearTimeout(missTimer.current)
+    },
+    [],
+  )
+
+  const jumpTo = (a: Annotation) => {
+    setJumpMiss(null)
+    if (onJumpToAnchor?.(a) === false) {
+      setJumpMiss(a.id)
+      if (missTimer.current !== null) window.clearTimeout(missTimer.current)
+      missTimer.current = window.setTimeout(() => {
+        setJumpMiss(null)
+        missTimer.current = null
+      }, 3000)
+    }
+  }
 
   const [body, setBody] = useState('')
   const [quote, setQuote] = useState('')
@@ -154,13 +188,38 @@ export function AnnotationsPanel({
   }
 
   const act = async (a: Annotation, verb: string) => {
-    if (await send(`/annotations/${a.id}/${verb}`, 'POST', { expected_version: a.version })) {
-      await reload()
-      // Accepting a suggestion splices the proposed text into the body
-      // server-side; ask the host to refetch the prose so the editor
-      // reflects it (resolve/reopen/reject leave the body untouched).
-      if (verb === 'accept') await onDocMutated?.()
+    if (pending) return
+    setPending(`${a.id}:${verb}`)
+    try {
+      if (await send(`/annotations/${a.id}/${verb}`, 'POST', { expected_version: a.version })) {
+        await reload()
+        // Accepting a suggestion splices the proposed text into the body
+        // server-side; ask the host to refetch the prose so the editor
+        // reflects it (resolve/reopen/reject leave the body untouched).
+        if (verb === 'accept') await onDocMutated?.()
+      }
+    } finally {
+      setPending(null)
     }
+  }
+
+  // Action button (accept/reject/resolve/reopen) with an in-flight spinner.
+  // Disables every act button on the card while one is running, and shows
+  // the spinner on the one that was clicked, so the click clearly "took".
+  const actBtn = (a: Annotation, verb: string, label: string, ghost = false) => {
+    const busy = pending === `${a.id}:${verb}`
+    return (
+      <button
+        type="button"
+        className={`btn--sm${ghost ? ' btn--ghost' : ''}`}
+        disabled={pending !== null}
+        aria-busy={busy}
+        onClick={() => void act(a, verb)}
+      >
+        {busy && <span className="btn-spinner" aria-hidden="true" />}
+        {label}
+      </button>
+    )
   }
 
   const sendReply = async (parent: Annotation) => {
@@ -268,38 +327,44 @@ export function AnnotationsPanel({
         )}
 
         <div className="anno__actions">
+          {onJumpToAnchor &&
+            (isSuggestion
+              ? // An accepted suggestion's original text was spliced away,
+                // so there is nothing left to jump to; a rejected one (or
+                // a still-open one) keeps it.
+                a.original_text && a.status !== 'accepted'
+              : a.anchor_quote) && (
+            <button
+              type="button"
+              className="btn--sm btn--ghost anno__locate"
+              title={t('annotations.goToAnchor', {
+                defaultValue: 'Go to the highlighted text',
+              })}
+              aria-label={t('annotations.goToAnchor', {
+                defaultValue: 'Go to the highlighted text',
+              })}
+              onClick={() => jumpTo(a)}
+            >
+              ⌖
+            </button>
+          )}
+          {jumpMiss === a.id && (
+            <span className="anno__locate-miss" role="status">
+              {t('annotations.anchorNotFound', {
+                defaultValue: 'Text not found in the document',
+              })}
+            </span>
+          )}
           {isSuggestion && open && (
             <>
-              <button type="button" className="btn--sm" onClick={() => void act(a, 'accept')}>
-                {t('annotations.accept', { defaultValue: 'Accept' })}
-              </button>
-              <button
-                type="button"
-                className="btn--sm btn--ghost"
-                onClick={() => void act(a, 'reject')}
-              >
-                {t('annotations.reject', { defaultValue: 'Reject' })}
-              </button>
+              {actBtn(a, 'accept', t('annotations.accept', { defaultValue: 'Accept' }))}
+              {actBtn(a, 'reject', t('annotations.reject', { defaultValue: 'Reject' }), true)}
             </>
           )}
-          {!isSuggestion && open && (
-            <button
-              type="button"
-              className="btn--sm btn--ghost"
-              onClick={() => void act(a, 'resolve')}
-            >
-              {t('annotations.resolve', { defaultValue: 'Resolve' })}
-            </button>
-          )}
-          {!isSuggestion && !open && (
-            <button
-              type="button"
-              className="btn--sm btn--ghost"
-              onClick={() => void act(a, 'reopen')}
-            >
-              {t('annotations.reopen', { defaultValue: 'Reopen' })}
-            </button>
-          )}
+          {!isSuggestion && open &&
+            actBtn(a, 'resolve', t('annotations.resolve', { defaultValue: 'Resolve' }), true)}
+          {!isSuggestion && !open &&
+            actBtn(a, 'reopen', t('annotations.reopen', { defaultValue: 'Reopen' }), true)}
           {!isReply && !isSuggestion && (
             <button
               type="button"

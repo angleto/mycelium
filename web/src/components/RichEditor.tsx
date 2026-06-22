@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type Ref } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Editor as CoreEditor, Extension, Node } from '@tiptap/core'
 import {
@@ -24,6 +24,9 @@ import { InlineMath, BlockMath } from './MarkdownMath'
 import {
   AnnotationDecorations,
   annotationKey,
+  annotationFlashKey,
+  locateAnchor,
+  type AnchorQuery,
   type AnnotationAnchor,
 } from '../lib/annotationDecorations'
 import { InlineAnnotator, type InlineAnnotatorHandle } from './InlineAnnotator'
@@ -545,6 +548,28 @@ const ImageExt = Node.create({
   },
 })
 
+// Imperative surface for navigating to an annotation's anchored passage
+// from outside the editor (the AnnotationsPanel's "go to text" button).
+// The host shares one ref between the editor and the panel; see
+// PartAnnotated / TaskDetailRoute.
+export interface AnnotationViewHandle {
+  /** Scroll the editor so the annotation's anchored text is in view and
+   * briefly flash it. Returns false when there is nothing to jump to
+   * (raw mode, editor not ready, or the passage no longer exists). */
+  scrollToAnnotation: (a: Annotation) => boolean
+}
+
+// Map an annotation row to the minimal shape locateAnchor needs.
+function anchorOf(a: Annotation): AnchorQuery {
+  return {
+    kind: a.kind === 'suggestion' ? 'suggestion' : 'comment',
+    anchorQuote: a.anchor_quote ?? null,
+    anchorPrefix: a.anchor_prefix ?? null,
+    anchorSuffix: a.anchor_suffix ?? null,
+    originalText: a.original_text ?? null,
+  }
+}
+
 export function RichEditor({
   value,
   onChange,
@@ -554,6 +579,7 @@ export function RichEditor({
   filename,
   annotations,
   inlineAnnotations,
+  viewRef,
 }: {
   value: string
   onChange: (v: string) => void
@@ -581,6 +607,10 @@ export function RichEditor({
     onDocMutated?: () => void | Promise<void>
     allowSuggest?: boolean
   }
+  // Shared by the host with its AnnotationsPanel so the panel can scroll
+  // the editor to a comment/suggestion's anchored text. Populated below
+  // via useImperativeHandle.
+  viewRef?: Ref<AnnotationViewHandle>
 }) {
   const { t } = useTranslation()
   // Drop to a plain markdown textarea (paste long blocks, fix a bad
@@ -611,6 +641,21 @@ export function RichEditor({
   const [pdfErr, setPdfErr] = useState<string | null>(null)
   const imgInput = useRef<HTMLInputElement>(null)
   const rawRef = useRef<HTMLTextAreaElement>(null)
+  // Latest rawMode for the scroll handle (built once, must see the live
+  // value): in raw mode the WYSIWYG DOM is detached, so there is nothing
+  // to scroll to.
+  const rawModeRef = useRef(rawMode)
+  useEffect(() => {
+    rawModeRef.current = rawMode
+  }, [rawMode])
+  // Single coalesced timer that clears the flash decoration; a new flash
+  // (repeat click or prev/next step) cancels the prior clear before
+  // re-arming so the pulse always runs its full duration.
+  const flashClearRef = useRef<number | null>(null)
+  // Cursor into the document-ordered annotation list for the toolbar's
+  // prev/next navigation; -1 means "not started" (first ▼ lands on the
+  // first annotation).
+  const navIdxRef = useRef(-1)
 
   // Keep the latest parent in a ref so the editorProps handlers below
   // (created once when the editor is built) see the live value even if
@@ -858,6 +903,91 @@ export function RichEditor({
     editorRef.current = editor
   }, [editor])
 
+  // Scroll the located range into view (without disturbing the selection /
+  // caret) and pulse it via a real PM decoration. A decoration survives
+  // ProseMirror's view reconciliation, unlike a class hand-added to a
+  // decoration node (which PM reverts on its next update). The clear is
+  // coalesced so a rapid repeat / prev-next sequence always pulses fully.
+  const flashRange = useCallback((ed: CoreEditor, r: { from: number; to: number }) => {
+    const dom = ed.view.domAtPos(r.from)
+    // nodeType 3 = Text; ``Node`` is shadowed by @tiptap/core's import here,
+    // so use the numeric constant.
+    const el = dom.node.nodeType === 3 ? dom.node.parentElement : (dom.node as HTMLElement)
+    el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    ed.view.dispatch(ed.state.tr.setMeta(annotationFlashKey, r))
+    if (flashClearRef.current !== null) window.clearTimeout(flashClearRef.current)
+    flashClearRef.current = window.setTimeout(() => {
+      const e = editorRef.current
+      if (e) e.view.dispatch(e.state.tr.setMeta(annotationFlashKey, null))
+      flashClearRef.current = null
+    }, 1500)
+  }, [])
+
+  // Annotations that have a locatable passage, in document order — the
+  // domain both the panel's "go to text" and the toolbar prev/next walk.
+  const orderedAnchored = useCallback(() => {
+    const ed = editorRef.current
+    if (!ed) return [] as { row: Annotation; from: number; to: number }[]
+    return (inlineAnnotations?.rows ?? [])
+      .filter((r) => !r.deleted_at && (r.kind === 'suggestion' ? r.original_text : r.anchor_quote))
+      .map((row) => ({ row, r: locateAnchor(ed.state.doc, anchorOf(row)) }))
+      .flatMap((x) => (x.r ? [{ row: x.row, from: x.r.from, to: x.r.to }] : []))
+      .sort((a, b) => a.from - b.from)
+  }, [inlineAnnotations?.rows])
+
+  // Step to the next/previous anchored annotation in document order and
+  // flash it; wraps at the ends. ``dir`` is +1 (▼, first→last) or -1 (▲).
+  const navigateAnnotations = useCallback(
+    (dir: 1 | -1) => {
+      const ed = editorRef.current
+      if (!ed || rawModeRef.current) return
+      const items = orderedAnchored()
+      if (!items.length) return
+      let idx = navIdxRef.current + dir
+      if (idx < 0) idx = items.length - 1
+      if (idx >= items.length) idx = 0
+      navIdxRef.current = idx
+      flashRange(ed, items[idx])
+    },
+    [orderedAnchored, flashRange],
+  )
+
+  // Imperative "go to this annotation" for the panel's per-card button:
+  // locate the passage (live marks or resolved/rejected alike), scroll +
+  // flash, and sync the toolbar nav cursor so a subsequent ▼/▲ continues
+  // from here. Returns false when there is nothing to jump to.
+  useImperativeHandle(
+    viewRef,
+    () => ({
+      scrollToAnnotation: (a: Annotation) => {
+        const ed = editorRef.current
+        if (!ed || rawModeRef.current) return false
+        const r = locateAnchor(ed.state.doc, anchorOf(a))
+        if (!r) return false
+        const items = orderedAnchored()
+        const at = items.findIndex((x) => x.row.id === a.id)
+        if (at >= 0) navIdxRef.current = at
+        flashRange(ed, r)
+        return true
+      },
+    }),
+    [orderedAnchored, flashRange],
+  )
+
+  // Any anchored annotation to navigate? Gates the toolbar prev/next.
+  const hasAnchoredAnnotations = (inlineAnnotations?.rows ?? []).some(
+    (r) => !r.deleted_at && (r.kind === 'suggestion' ? r.original_text : r.anchor_quote),
+  )
+
+  // Drop a pending flash-clear on unmount so it can't fire against a torn
+  // down editor.
+  useEffect(
+    () => () => {
+      if (flashClearRef.current !== null) window.clearTimeout(flashClearRef.current)
+    },
+    [],
+  )
+
   // Push the current annotation anchors into the decoration plugin
   // whenever they change. This is a meta-only transaction (no doc
   // change), so it never affects the markdown round-trip or the caret.
@@ -1010,6 +1140,39 @@ export function RichEditor({
                   ✎
                 </button>
               )}
+              {/* Walk the document's comments/suggestions in order: ▲ to the
+                  previous anchored annotation, ▼ to the next (first→last).
+                  Enabled only when there is at least one to jump to. */}
+              <button
+                type="button"
+                className="btn--ghost btn--sm rte__fmt rte__annotate rte__annotate--nav"
+                title={t('editor.annotatePrev', {
+                  defaultValue: 'Go to the previous comment / suggestion',
+                })}
+                aria-label={t('editor.annotatePrev', {
+                  defaultValue: 'Go to the previous comment / suggestion',
+                })}
+                disabled={!hasAnchoredAnnotations}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => navigateAnnotations(-1)}
+              >
+                ↑
+              </button>
+              <button
+                type="button"
+                className="btn--ghost btn--sm rte__fmt rte__annotate rte__annotate--nav"
+                title={t('editor.annotateNext', {
+                  defaultValue: 'Go to the next comment / suggestion',
+                })}
+                aria-label={t('editor.annotateNext', {
+                  defaultValue: 'Go to the next comment / suggestion',
+                })}
+                disabled={!hasAnchoredAnnotations}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => navigateAnnotations(1)}
+              >
+                ↓
+              </button>
               <span className="rte__sep" aria-hidden="true" />
             </>
           )}
