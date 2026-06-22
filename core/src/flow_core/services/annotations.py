@@ -262,7 +262,12 @@ async def propose_suggestion(
         anchor_prefix=anchor_prefix,
         anchor_suffix=anchor_suffix,
         original_text=original_text,
-        proposed_text=proposed_text,
+        # Normalise edge whitespace: a proposed replacement for an inline
+        # rendered span carries no meaning in leading/trailing spaces (the
+        # markdown renderer strips them), yet an un-stripped value makes the
+        # accept-time re-render gate asymmetric and STALEs an otherwise
+        # valid suggestion. One source point covers web/CLI/MCP authors.
+        proposed_text=proposed_text.strip(),
         status="open",
         author_identity_id=author,
     )

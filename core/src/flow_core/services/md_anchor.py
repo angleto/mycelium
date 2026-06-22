@@ -186,6 +186,18 @@ class _Char:
     src_end: int
 
 
+# Source spans of an inline run's paired delimiters: the opening
+# (``open_start``..``open_end``, e.g. ``**`` or ``[``) and the closing
+# (``close_start``..``close_end``, e.g. ``**`` or ``](url)``). Used to detect
+# and repair a splice span that straddles a run edge.
+@dataclass(frozen=True)
+class _Region:
+    open_start: int
+    open_end: int
+    close_start: int
+    close_end: int
+
+
 # Mark/atom token types and how much source they consume; handled in
 # _render_inline below.
 _MARK_OPEN_CLOSE = {
@@ -198,15 +210,26 @@ _MARK_OPEN_CLOSE = {
 }
 
 
-def _render_inline(content: str, children: list[Token], base: int) -> list[_Char]:
+def _render_inline(
+    content: str, children: list[Token], base: int
+) -> tuple[list[_Char], list[_Region]]:
     """Render one block's inline ``content`` to ``_Char`` cells, mirroring
     ProseMirror textBetween: marks contribute only their text, links only
     their link-text, images/math nothing, softbreak a single space,
     hardbreak nothing. ``base`` is the source offset of ``content`` within
     the body. Where the cursor cannot be tracked exactly the cells drift;
     the re-render gate in resolve_anchor turns any drift into a safe STALE,
-    never a corrupting splice."""
+    never a corrupting splice.
+
+    Also returns the source spans of each inline RUN's paired delimiters
+    (``**``/``*``/``~~`` for marks, ``[`` + ``](url)`` for links, the fence
+    backticks for inline code), so resolve_anchor can detect a selection that
+    straddles a run edge (one delimiter inside the splice span, its partner
+    outside) and extend the span to swallow the whole run rather than leave
+    an orphaned delimiter that would corrupt the body."""
     out: list[_Char] = []
+    regions: list[_Region] = []
+    stack: list[tuple[int, int]] = []  # open (src_start, src_end) for marks/links
     c = 0  # cursor into content
     n = len(content)
 
@@ -234,16 +257,30 @@ def _render_inline(content: str, children: list[Token], base: int) -> list[_Char
                     out.append(_Char(char, base + c, base + min(c + 1, n)))
                     c = min(c + 1, n)
         elif t in _MARK_OPEN_CLOSE:
-            skip(child.markup or "")
+            mk = child.markup or ""
+            if t.endswith("_open"):
+                o_start = base + c
+                skip(mk)
+                stack.append((o_start, base + c))
+            else:
+                cl_start = base + c
+                skip(mk)
+                if stack:
+                    o0, o1 = stack.pop()
+                    regions.append(_Region(o0, o1, cl_start, base + c))
         elif t == "code_inline":
             mk = child.markup or "`"
+            o_start = base + c
             skip(mk)
+            o_end = base + c
             close = content.find(mk, c)
             region_end = close if close >= 0 else n
             span = max(1, region_end - c)
             for k, char in enumerate(child.content):
                 off = c + min(k, span - 1)
                 out.append(_Char(char, base + off, base + off + 1))
+            if close >= 0:
+                regions.append(_Region(o_start, o_end, base + close, base + close + len(mk)))
             c = (close + len(mk)) if close >= 0 else n
         elif t == "softbreak":
             nl = content.find("\n", c)
@@ -256,14 +293,23 @@ def _render_inline(content: str, children: list[Token], base: int) -> list[_Char
         elif t == "link_open":
             idx = content.find("[", c)
             if idx >= 0:
+                stack.append((base + idx, base + idx + 1))
                 c = idx + 1
         elif t == "link_close":
             br = content.find("]", c)
             par = content.find(")", br if br >= 0 else c)
+            cl_start = base + (br if br >= 0 else c)
             if par >= 0:
                 c = par + 1
+                cl_end = base + par + 1
             elif br >= 0:
                 c = br + 1
+                cl_end = base + br + 1
+            else:
+                cl_end = base + c
+            if stack:
+                o0, o1 = stack.pop()
+                regions.append(_Region(o0, o1, cl_start, cl_end))
         elif t == "image":
             par = content.find(")", c)
             c = (par + 1) if par >= 0 else n
@@ -273,7 +319,7 @@ def _render_inline(content: str, children: list[Token], base: int) -> list[_Char
             c = (d2 + 1) if d2 >= 0 else n
         # html_inline / unknown: emit nothing, leave cursor (html:false in
         # the editor means raw HTML arrives as text tokens, handled above).
-    return out
+    return out, regions
 
 
 def _base_for_inline(body: str, line_off: list[int], tok: Token) -> int:
@@ -291,21 +337,32 @@ def _base_for_inline(body: str, line_off: list[int], tok: Token) -> int:
     return idx if idx >= 0 else line_start
 
 
-def _render_with_map(body: str) -> tuple[str, list[_Char]]:
+def _render_with_map(body: str) -> tuple[str, list[_Char], list[_Region]]:
     """Render ``body`` (assumed LF-normalised) to the flat text domain that
     equals ``textBetween(0, end, ' ')`` over the editor's ProseMirror doc,
-    with a per-character source map."""
+    with a per-character source map and the inline-run delimiter spans."""
     tokens = _MD.parse(body)
     line_off = _line_offsets(body)
     chars: list[_Char] = []
+    regions: list[_Region] = []
+    # A block separator is owed only AFTER a block that actually produced
+    # rendered text — mirroring prosemirror ``Fragment.textBetween``, whose
+    # ``separated`` flag is reset by real text/leaf output, never latched on
+    # by an empty block. A paragraph that renders to zero chars (image-only
+    # ``![](x)`` or inline-math-only ``$x$``) must NOT make ``emitted`` true,
+    # or the next block emits a SECOND space where the editor's capture put
+    # one, and every cross-figure suggestion then STALEs on accept.
     emitted = False
     for tok in tokens:
         if tok.type == "inline":
             base = _base_for_inline(body, line_off, tok)
             if emitted:
                 chars.append(_Char(" ", base, base))
-            chars.extend(_render_inline(tok.content, tok.children or [], base))
-            emitted = True
+            before = len(chars)
+            cells, regs = _render_inline(tok.content, tok.children or [], base)
+            chars.extend(cells)
+            regions.extend(regs)
+            emitted = len(chars) > before
         elif tok.type in ("fence", "code_block"):
             # textBetween emits a code block's literal text (interior
             # newlines kept, trailing newline dropped) as one textblock.
@@ -316,12 +373,13 @@ def _render_with_map(body: str) -> tuple[str, list[_Char]]:
                 base = start
             if emitted:
                 chars.append(_Char(" ", base, base))
+            before = len(chars)
             for k, ch in enumerate(text):
                 chars.append(_Char(ch, base + k, base + k + 1))
-            emitted = True
+            emitted = len(chars) > before
         # horizontal_rule / math_block and other non-text blocks: emit
         # nothing and NO separator (matches textBetween).
-    return "".join(c.ch for c in chars), chars
+    return "".join(c.ch for c in chars), chars, regions
 
 
 def render_text(body: str) -> str:
@@ -378,7 +436,7 @@ def resolve_anchor(
     if not original:
         return None
     norm, omap = _normalize(body)
-    full, chars = _render_with_map(norm)
+    full, chars, regions = _render_with_map(norm)
     if len(chars) != len(full):  # invariant; defensive
         return None
     loc = _locate(full, original, prefix, suffix)
@@ -389,6 +447,29 @@ def resolve_anchor(
         return None
     src_start = chars[s].src_start
     src_end = chars[e - 1].src_end
+    if not (0 <= src_start <= src_end <= len(norm)):
+        return None
+    # Edge-of-mark straddle repair: when the located source span covers exactly
+    # one delimiter of an inline run (e.g. the opening ``**`` of a bold whose
+    # content ends the selection, or the ``[`` of a link whose text starts it)
+    # a naive contiguous splice leaves the partner delimiter orphaned, and the
+    # re-render gate below would reject the (otherwise valid) edit. Grow the
+    # span to swallow the whole run, dropping the now-meaningless formatting
+    # (faithful in the rendered domain), until no run is half-covered. The gate
+    # remains the arbiter, so an over-reach can only decline (STALE), never
+    # corrupt.
+    changed = True
+    while changed:
+        changed = False
+        for reg in regions:
+            open_in = src_start <= reg.open_start and reg.open_end <= src_end
+            close_in = src_start <= reg.close_start and reg.close_end <= src_end
+            if open_in != close_in:
+                ns = min(src_start, reg.open_start)
+                ne = max(src_end, reg.close_end)
+                if ns != src_start or ne != src_end:
+                    src_start, src_end = ns, ne
+                    changed = True
     if not (0 <= src_start <= src_end <= len(norm)):
         return None
     prop_norm, _ = _normalize(proposed)

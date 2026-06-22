@@ -43,6 +43,12 @@ def _sp(body: str, original: str, proposed: str, prefix=None, suffix=None) -> st
         ("> quoted\n\nplain", "quoted plain"),  # blockquote
         ("| a | b |\n|---|---|\n| one | two |", "a b one two"),  # table cells
         ("intro\n\n```\nx = 1\n```\n\nend", "intro x = 1 end"),  # fenced code
+        # a standalone zero-char block (image-only / inline-math-only
+        # paragraph) joins its neighbours with a SINGLE separator, like
+        # textBetween — not the double space an unconditional separator gave.
+        ("Alpha.\n\n![](img.png)\n\nBravo.", "Alpha. Bravo."),
+        ("Alpha.\n\n$x$\n\nBravo.", "Alpha. Bravo."),
+        ("![](a.png)\n\nBravo.", "Bravo."),  # leading zero-char block: no sep
     ],
 )
 def test_render_text_matches_oracle(body: str, expected: str) -> None:
@@ -113,8 +119,6 @@ def test_splice_repeated_text_disambiguated_by_suffix() -> None:
         ("hello world", "not here", "X"),
         # repeated text with no disambiguating anchor
         ("see the report\n\nsee the report", "report", "X"),
-        # straddle across a mark boundary would orphan the ** -> refuse
-        ("a **b** c", "b c", "X Y"),
         # the quote is inside the URL, not the rendered text -> refuse
         ("visit [here](http://example.com/foobar) ok", "foobar", "X"),
         # empty original is never a valid suggestion target
@@ -123,6 +127,34 @@ def test_splice_repeated_text_disambiguated_by_suffix() -> None:
 )
 def test_splice_declines_to_stale(body: str, original: str, proposed: str) -> None:
     assert _sp(body, original, proposed) is None
+
+
+# --------------------------------------------------------------------------
+# splice: a selection straddling an inline-run edge (one delimiter inside the
+# span, its partner outside) used to STALE; it now applies by swallowing the
+# whole run, dropping the now-meaningless formatting — faithful in the
+# rendered domain (the gate still proves render(out) == head+proposed+tail).
+# --------------------------------------------------------------------------
+@pytest.mark.parametrize(
+    ("body", "original", "proposed", "expected"),
+    [
+        ("a **b** c", "b c", "X Y", "a X Y"),  # ends at bold close edge
+        ("x a **bold** y", "a bold", "A BOLD", "x A BOLD y"),  # opening ** orphaned
+        ("a _em_ b", "a em", "AE", "AE b"),  # italic
+        ("a ~~s~~ b", "s b", "Z W", "a Z W"),  # strikethrough
+        ("a `code` b", "a code", "XX", "XX b"),  # inline code fence
+        ("See [docs](http://x) now", "docs now", "Q", "See Q"),  # link straddle
+    ],
+)
+def test_splice_straddle_drops_formatting(
+    body: str, original: str, proposed: str, expected: str
+) -> None:
+    out = _sp(body, original, proposed)
+    assert out is not None
+    assert out == expected
+    # And the result is render-faithful: it renders to head + proposed + tail.
+    head, _, tail = md_anchor.render_text(body).partition(original)
+    assert md_anchor.render_text(out) == head + proposed + tail
 
 
 def test_splice_never_corrupts_on_unmodellable_input() -> None:
