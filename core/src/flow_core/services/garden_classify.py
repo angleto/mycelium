@@ -501,7 +501,14 @@ async def classify_node(
             await session.execute(
                 select(func.count())
                 .select_from(Note)
-                .where(Note.org_id == org_id, Note.deleted_at.is_(None))
+                .where(
+                    Note.org_id == org_id,
+                    Note.deleted_at.is_(None),
+                    # ADR-0043: a proposed (un-approved) note is not yet an
+                    # effective corpus member, so it does not count toward the
+                    # cold-start maturity damping.
+                    Note.review_state.is_distinct_from("proposed"),
+                )
             )
         ).scalar_one()
     )

@@ -70,7 +70,17 @@ async def suggest_links_for_note(
     queries are RLS-scoped). Empty list when the workspace has
     fewer than 2 notes or the source has no signal.
     """
-    note_rows = (await session.execute(select(Note.id).where(Note.org_id == org_id))).all()
+    # ADR-0043: never suggest linking to a proposed (un-approved, hidden)
+    # note -- it is excluded from every listing, so a candidate pointing at it
+    # would surface an invisible node. NULL/'approved' pass via IS DISTINCT
+    # FROM; byte-identical until a proposed note exists.
+    note_rows = (
+        await session.execute(
+            select(Note.id).where(
+                Note.org_id == org_id, Note.review_state.is_distinct_from("proposed")
+            )
+        )
+    ).all()
     all_ids: set[uuid.UUID] = {r[0] for r in note_rows}
     if note_id not in all_ids or len(all_ids) < 2:
         return []

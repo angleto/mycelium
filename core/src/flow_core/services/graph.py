@@ -158,7 +158,17 @@ async def _node_ids(
     ``select(Note.id)`` the centrality helpers used inline, so the order and
     the resulting analytics are byte-identical. Note and task ids never
     collide (distinct UUIDs), so a bare UUID stays a sufficient node key."""
-    note_rows = (await session.execute(select(Note.id).where(Note.org_id == org_id))).all()
+    # ADR-0043: a proposed (autonomously-generated, un-approved) note is not
+    # an effective graph node -- it must not enter centrality/clustering until
+    # a human approves it. NULL/'approved' pass via IS DISTINCT FROM, so the
+    # set is byte-identical until a proposed note exists.
+    note_rows = (
+        await session.execute(
+            select(Note.id).where(
+                Note.org_id == org_id, Note.review_state.is_distinct_from("proposed")
+            )
+        )
+    ).all()
     nodes: list[uuid.UUID] = [r[0] for r in note_rows]
     if include_tasks:
         task_rows = (
@@ -289,6 +299,21 @@ async def compute_note_edge_weights(
     weave (the caller — a unified surface — passes the fleet flag in).
     """
     inc = include_tasks
+    # ADR-0043: a proposed (un-approved) note is not a graph node
+    # (``_node_ids`` excludes it), so its ``hypha_of`` links (and any tag /
+    # co-activity rows) must not emit edges -- otherwise ``compute_betweenness``
+    # (node set derived from the edges) would resurrect it as a phantom,
+    # exactly the soft-deleted-task case the ``live_task_ids`` guard below
+    # handles. The (usually empty) set keeps the weave byte-identical until a
+    # proposed note exists.
+    proposed_note_ids = {
+        r[0]
+        for r in (
+            await session.execute(
+                select(Note.id).where(Note.org_id == org_id, Note.review_state == "proposed")
+            )
+        ).all()
+    }
     link_rows = (
         await session.execute(
             select(
@@ -302,6 +327,8 @@ async def compute_note_edge_weights(
     by_pair: dict[tuple[uuid.UUID, uuid.UUID], list[float]] = defaultdict(list)
     seen_kind: dict[tuple[uuid.UUID, uuid.UUID, str], bool] = {}
     for parent_id, child_id, kind in link_rows:
+        if parent_id in proposed_note_ids or child_id in proposed_note_ids:
+            continue
         pk = _pair_key(parent_id, child_id)
         # Dedupe (parent, child, kind) so duplicate-by-direction rows
         # (a future B→A added on top of A→B) don't double-count: the
@@ -321,6 +348,10 @@ async def compute_note_edge_weights(
     # ``weight >= threshold`` to keep the visual layer clean.
     tag_deg = await _generic_tag_degrees(session, org_id=org_id, include_tasks=inc)
     note_tags = await _note_generic_tags(session, org_id=org_id, include_tasks=inc)
+    if proposed_note_ids:
+        # A proposed note carries no tags today, but drop it defensively so it
+        # can never seed a tag-overlap edge regardless of future flows.
+        note_tags = {nid: tags for nid, tags in note_tags.items() if nid not in proposed_note_ids}
     note_ids: list[uuid.UUID] = sorted(note_tags.keys(), key=str)
     by_tag_to_notes: dict[uuid.UUID, list[uuid.UUID]] = defaultdict(list)
     for nid in note_ids:
@@ -359,6 +390,8 @@ async def compute_note_edge_weights(
         )
     ).all()
     for note_a_id, note_b_id, session_count in coact_rows:
+        if note_a_id in proposed_note_ids or note_b_id in proposed_note_ids:
+            continue
         w_coact = _coactivity_weight(session_count)
         if w_coact <= 0:
             continue
@@ -740,7 +773,13 @@ async def compute_recency(
     now = now or datetime.datetime.now(datetime.UTC)
     rows = (
         await session.execute(
-            select(Note.id, Note.created_at).where(Note.org_id == org_id, Note.deleted_at.is_(None))
+            select(Note.id, Note.created_at).where(
+                Note.org_id == org_id,
+                Note.deleted_at.is_(None),
+                # ADR-0043: an un-approved proposal gets no recency score (it
+                # is not an effective node; no centrality to combine it with).
+                Note.review_state.is_distinct_from("proposed"),
+            )
         )
     ).all()
     out: dict[uuid.UUID, float] = {}
