@@ -666,10 +666,19 @@ export function RichEditor({
   // (repeat click or prev/next step) cancels the prior clear before
   // re-arming so the pulse always runs its full duration.
   const flashClearRef = useRef<number | null>(null)
-  // Cursor into the document-ordered annotation list for the toolbar's
-  // prev/next navigation; -1 means "not started" (first ▼ lands on the
-  // first annotation).
-  const navIdxRef = useRef(-1)
+  // Cursor for the toolbar's prev/next navigation, tracked by annotation
+  // ID (not a raw index): the ordered list is rebuilt on every step from
+  // the live rows, so after a resolve/accept/delete/reload the previous
+  // index would point into a stale, possibly shorter list and jump to the
+  // wrong annotation. Re-finding the current ID keeps the step relative to
+  // where the user actually is; null means "not started".
+  const navIdRef = useRef<string | null>(null)
+  // Transient "the open annotation's passage is gone" hint for the toolbar
+  // prev/next, mirroring the panel's per-card ⌖ miss: shown when there are
+  // open annotations to walk but none can be located in the live prose
+  // (their quoted text was edited away), so the click isn't a silent no-op.
+  const [navMiss, setNavMiss] = useState(false)
+  const navMissTimer = useRef<number | null>(null)
 
   // Keep the latest parent in a ref so the editorProps handlers below
   // (created once when the editor is built) see the live value even if
@@ -956,14 +965,37 @@ export function RichEditor({
       const ed = editorRef.current
       if (!ed || rawModeRef.current) return
       const items = orderedAnchored()
-      if (!items.length) return
-      let idx = navIdxRef.current + dir
+      if (!items.length) {
+        // No locatable passage to jump to. If open annotations exist but
+        // their anchored text drifted away, surface the same "not found"
+        // hint the panel shows instead of a silent dead click.
+        if ((inlineAnnotations?.rows ?? []).some(isNavigableAnnotation)) {
+          setNavMiss(true)
+          if (navMissTimer.current !== null) window.clearTimeout(navMissTimer.current)
+          navMissTimer.current = window.setTimeout(() => {
+            setNavMiss(false)
+            navMissTimer.current = null
+          }, 2500)
+        }
+        return
+      }
+      setNavMiss(false)
+      // Re-find the current annotation by ID in the freshly rebuilt list,
+      // then step relative to it; -1 (gone / not started) makes ▼ land on
+      // the first and ▲ on the last.
+      const cur = navIdRef.current
+        ? items.findIndex((x) => x.row.id === navIdRef.current)
+        : -1
+      let idx = cur + dir
       if (idx < 0) idx = items.length - 1
       if (idx >= items.length) idx = 0
-      navIdxRef.current = idx
+      navIdRef.current = items[idx].row.id
       flashRange(ed, items[idx])
+      // Reveal the comment/suggestion body, not just its passage: the
+      // toolbar buttons read "go to the next comment", so show it.
+      annoRef.current?.openAnnotation(items[idx].row.id)
     },
-    [orderedAnchored, flashRange],
+    [orderedAnchored, flashRange, inlineAnnotations?.rows],
   )
 
   // Imperative "go to this annotation" for the panel's per-card button:
@@ -978,14 +1010,15 @@ export function RichEditor({
         if (!ed || rawModeRef.current) return false
         const r = locateAnchor(ed.state.doc, anchorOf(a))
         if (!r) return false
-        const items = orderedAnchored()
-        const at = items.findIndex((x) => x.row.id === a.id)
-        if (at >= 0) navIdxRef.current = at
+        // Sync the toolbar nav cursor so a subsequent ▼/▲ continues from
+        // the card the user jumped to (by ID; if it's resolved and thus
+        // outside the open-only walk, the next step restarts from the end).
+        navIdRef.current = a.id
         flashRange(ed, r)
         return true
       },
     }),
-    [orderedAnchored, flashRange],
+    [flashRange],
   )
 
   // Any OPEN anchored annotation to navigate? Gates the toolbar prev/next.
@@ -1021,20 +1054,12 @@ export function RichEditor({
     goToFraction(Math.max(0, Math.min(100, n)) / 100)
   }
 
-  // Drop a pending flash-clear on unmount so it can't fire against a torn
-  // down editor.
+  // Drop pending flash-clear / nav-miss timers on unmount so they can't
+  // fire against a torn down editor.
   useEffect(
     () => () => {
       if (flashClearRef.current !== null) window.clearTimeout(flashClearRef.current)
-    },
-    [],
-  )
-
-  // Drop a pending flash-clear on unmount so it can't fire against a torn
-  // down editor.
-  useEffect(
-    () => () => {
-      if (flashClearRef.current !== null) window.clearTimeout(flashClearRef.current)
+      if (navMissTimer.current !== null) window.clearTimeout(navMissTimer.current)
     },
     [],
   )
@@ -1224,6 +1249,13 @@ export function RichEditor({
               >
                 ↓
               </button>
+              {navMiss && (
+                <span className="anno__locate-miss" role="status">
+                  {t('annotations.anchorNotFound', {
+                    defaultValue: 'Text not found in the document',
+                  })}
+                </span>
+              )}
               {/* Divider: annotation navigation (left) vs document position
                   navigation (right). */}
               <span className="rte__sep" aria-hidden="true" />

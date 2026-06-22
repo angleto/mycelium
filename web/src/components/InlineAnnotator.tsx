@@ -75,6 +75,11 @@ interface Props {
 export interface InlineAnnotatorHandle {
   openComment: () => void
   openSuggest: () => void
+  // Open the action popover (body + replies + actions) for an existing
+  // annotation by id. Driven by the toolbar prev/next so a navigation
+  // step reveals the comment/suggestion content, not just flashes the
+  // anchored passage in the prose.
+  openAnnotation: (id: string) => void
 }
 
 // Keep a popover within the viewport horizontally.
@@ -234,6 +239,14 @@ export const InlineAnnotator = forwardRef<InlineAnnotatorHandle, Props>(
       openComment: () => openCompose('comment'),
       openSuggest: () => {
         if (allowSuggest) openCompose('suggest')
+      },
+      openAnnotation: (id: string) => {
+        setCompose(null)
+        setSel(null)
+        setEditing(false)
+        setReplying(false)
+        setErr('')
+        setActive({ id })
       },
     }),
     [openCompose, allowSuggest],
