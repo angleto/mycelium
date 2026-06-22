@@ -1061,6 +1061,9 @@ export const en = {
     annotateSuggest: 'Suggest an edit to the selected text',
     annotatePrev: 'Go to the previous comment / suggestion',
     annotateNext: 'Go to the next comment / suggestion',
+    goToStart: 'Go to the start',
+    goToEnd: 'Go to the end',
+    goToPercent: 'Go to a percentage of the part (press Enter)',
   },
   pomodoro: {
     title: 'Pomodoro',

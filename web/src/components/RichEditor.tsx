@@ -633,6 +633,8 @@ export function RichEditor({
   // non-empty selection, so the toolbar's Comment / Suggest buttons
   // enable only when there is something to annotate.
   const [canAnnotate, setCanAnnotate] = useState(false)
+  // "Go to %" toolbar field (note-part position navigation).
+  const [pctInput, setPctInput] = useState('')
   const annoRef = useRef<InlineAnnotatorHandle>(null)
   const [uploadErr, setUploadErr] = useState<string | null>(null)
   const [uploading, setUploading] = useState(false)
@@ -979,6 +981,45 @@ export function RichEditor({
     (r) => !r.deleted_at && (r.kind === 'suggestion' ? r.original_text : r.anchor_quote),
   )
 
+  // Scroll the editor to a fraction of the part: 0 = start, 1 = end, and
+  // anything in between maps to that proportion of the document (by
+  // position, a robust proxy for "N% through the note" that works whether
+  // the editor scrolls the page or a modal body). Selection/caret left
+  // untouched. Powers the toolbar's start / end / "go to %" controls,
+  // handy on long note parts.
+  const goToFraction = useCallback((f: number) => {
+    const ed = editorRef.current
+    if (!ed || rawModeRef.current) return
+    if (f <= 0) {
+      ed.view.dom.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      return
+    }
+    if (f >= 1) {
+      ed.view.dom.scrollIntoView({ behavior: 'smooth', block: 'end' })
+      return
+    }
+    const size = ed.state.doc.content.size
+    const pos = Math.max(1, Math.min(size - 1, Math.round(f * size)))
+    const dom = ed.view.domAtPos(pos)
+    const el = dom.node.nodeType === 3 ? dom.node.parentElement : (dom.node as HTMLElement)
+    el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  }, [])
+
+  const goToPercent = () => {
+    const n = Number(pctInput)
+    if (!Number.isFinite(n) || pctInput.trim() === '') return
+    goToFraction(Math.max(0, Math.min(100, n)) / 100)
+  }
+
+  // Drop a pending flash-clear on unmount so it can't fire against a torn
+  // down editor.
+  useEffect(
+    () => () => {
+      if (flashClearRef.current !== null) window.clearTimeout(flashClearRef.current)
+    },
+    [],
+  )
+
   // Drop a pending flash-clear on unmount so it can't fire against a torn
   // down editor.
   useEffect(
@@ -1173,6 +1214,51 @@ export function RichEditor({
               >
                 ↓
               </button>
+              {/* Position navigation, handy on long note parts: jump to the
+                  start / end, or type a percentage (e.g. 30) to land ~30%
+                  through the part. */}
+              <button
+                type="button"
+                className="btn--ghost btn--sm rte__fmt rte__annotate rte__goto"
+                title={t('editor.goToStart', { defaultValue: 'Go to the start' })}
+                aria-label={t('editor.goToStart', { defaultValue: 'Go to the start' })}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => goToFraction(0)}
+              >
+                ⤒
+              </button>
+              <button
+                type="button"
+                className="btn--ghost btn--sm rte__fmt rte__annotate rte__goto"
+                title={t('editor.goToEnd', { defaultValue: 'Go to the end' })}
+                aria-label={t('editor.goToEnd', { defaultValue: 'Go to the end' })}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => goToFraction(1)}
+              >
+                ⤓
+              </button>
+              <input
+                type="number"
+                min={0}
+                max={100}
+                className="rte__goto-pct"
+                value={pctInput}
+                placeholder="%"
+                title={t('editor.goToPercent', {
+                  defaultValue: 'Go to a percentage of the part (press Enter)',
+                })}
+                aria-label={t('editor.goToPercent', {
+                  defaultValue: 'Go to a percentage of the part (press Enter)',
+                })}
+                onMouseDown={(e) => e.stopPropagation()}
+                onChange={(e) => setPctInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault()
+                    goToPercent()
+                  }
+                }}
+              />
               <span className="rte__sep" aria-hidden="true" />
             </>
           )}

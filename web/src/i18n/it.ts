@@ -1061,6 +1061,9 @@ export const it: Catalog = {
     annotateSuggest: 'Suggerisci una modifica al testo selezionato',
     annotatePrev: 'Vai al commento / suggerimento precedente',
     annotateNext: 'Vai al commento / suggerimento successivo',
+    goToStart: "Vai all'inizio",
+    goToEnd: 'Vai alla fine',
+    goToPercent: 'Vai a una percentuale della parte (premi Invio)',
   },
   pomodoro: {
     title: 'Pomodoro',

@@ -2604,6 +2604,22 @@ button.btn--danger:hover {
   color: var(--accent-fg);
   border-color: var(--accent);
 }
+/* Compact "go to %" field in the toolbar; trims the number spinners so
+   it stays the width of a couple of digits next to the goto arrows. */
+.rte__goto-pct {
+  width: 3.2rem;
+  font: inherit;
+  padding: 0.1rem 0.3rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--text);
+}
+.rte__goto-pct::-webkit-outer-spin-button,
+.rte__goto-pct::-webkit-inner-spin-button {
+  appearance: none;
+  margin: 0;
+}
 .rte__raw {
   width: 100%;
   min-height: 7rem;
