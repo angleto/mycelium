@@ -30,6 +30,13 @@ class ConflictError(DomainError):
     """Write on a stale version: optimistic concurrency (409)."""
 
 
+class UnprocessableError(DomainError):
+    """Well-formed request the server cannot act on (HTTP 422). The base
+    gate passed but the unified diff is malformed or does not apply to the
+    live body; re-downloading the body would not help (unlike a stale
+    ConflictError). See services/text_patch.py."""
+
+
 class AuthError(DomainError):
     """Invalid credentials or missing/expired token (401)."""
 

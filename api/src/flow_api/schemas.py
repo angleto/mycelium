@@ -2574,11 +2574,34 @@ class AttachmentCapabilityOut(BaseModel):
     # ``token`` is the raw ``flow_cap_`` value, returned exactly once. The
     # caller builds a ``GET /attachments/{id}/download`` per listed attachment
     # with ``Authorization: Bearer <token>`` (no PAT, no X-Workspace-Id).
+    # ``attachments`` is empty for a write grant (nothing to enumerate; the
+    # caller POSTs the upload), populated for a read grant.
     token: str
     expires_at: datetime.datetime
     parent_kind: str
     parent_id: uuid.UUID
-    attachments: list[AttachmentOut]
+    attachments: list[AttachmentOut] = Field(default_factory=list)
+
+
+class TextBlockCapabilityIn(BaseModel):
+    # Mint a flow_cap_ token for a text block (note part body / task
+    # description / comment body). ``verb`` picks read (multi-use) vs write
+    # / patch (single-use); ``kind`` + ``resource_id`` pin the exact target.
+    kind: Literal["note_part", "task_description", "annotation"]
+    resource_id: uuid.UUID
+    verb: Literal["read", "write", "patch"]
+    ttl_seconds: int = Field(default=300, ge=1, le=3600)
+
+
+class TextBlockCapabilityOut(BaseModel):
+    # ``token`` is the raw ``flow_cap_`` value, returned exactly once. The
+    # caller hits the matching raw / stream / patch route with
+    # ``Authorization: Bearer <token>`` (no PAT, no X-Workspace-Id).
+    token: str
+    expires_at: datetime.datetime
+    kind: str
+    resource_id: uuid.UUID
+    verb: str
 
 
 # --- F7: electronic invoicing (FR-9, docs/adr/0009, 0010, 0011) ---

@@ -55,6 +55,85 @@ ACTION_ATTACHMENT_READ = "attachment:read"
 RESOURCE_NOTE = "note"
 RESOURCE_TASK = "task"
 
+# Symmetric block surface (token-free upload / download / patch over MCP).
+# The literal scheme stays "<resource>:<verb>" so the verifier keeps its
+# one-line `action == ... and resource_kind == ...` triple-check and a
+# token can never be replayed across resources. All literals fit the
+# action String(64) / resource_kind String(32) columns (migration 0038),
+# so NO migration is needed.
+#
+# Scope semantics:
+# - attachment write is PARENT-scoped (resource_id = note/task id), like
+#   attachment read; single-use.
+# - the three text blocks are EXACT-resource-scoped (resource_id = the
+#   part / task / annotation id). read = multi-use (idempotent); write and
+#   patch = single-use (consumed on first successful write).
+ACTION_ATTACHMENT_WRITE = "attachment:write"
+
+ACTION_NOTE_PART_BODY_READ = "note_part_body:read"
+ACTION_NOTE_PART_BODY_PATCH = "note_part_body:patch"
+
+ACTION_TASK_DESCRIPTION_READ = "task_description:read"
+ACTION_TASK_DESCRIPTION_WRITE = "task_description:write"
+ACTION_TASK_DESCRIPTION_PATCH = "task_description:patch"
+
+ACTION_ANNOTATION_BODY_READ = "annotation_body:read"
+ACTION_ANNOTATION_BODY_WRITE = "annotation_body:write"
+ACTION_ANNOTATION_BODY_PATCH = "annotation_body:patch"
+
+# The annotation (comment / suggestion) row is its own resource kind so a
+# body token cannot be confused with the note_part / task it hangs off.
+RESOURCE_ANNOTATION = "annotation"
+
+# A text block is one of the three patch/read/write targets, addressed by
+# (kind, verb). One mapping so HTTP mint, MCP tools and the deps agree.
+TEXT_BLOCK_KINDS = ("note_part", "task_description", "annotation")
+TEXT_BLOCK_VERBS = ("read", "write", "patch")
+
+_TEXT_BLOCK_ACTIONS: dict[tuple[str, str], str] = {
+    ("note_part", "read"): ACTION_NOTE_PART_BODY_READ,
+    ("note_part", "write"): ACTION_NOTE_PART_BODY_WRITE,
+    ("note_part", "patch"): ACTION_NOTE_PART_BODY_PATCH,
+    ("task_description", "read"): ACTION_TASK_DESCRIPTION_READ,
+    ("task_description", "write"): ACTION_TASK_DESCRIPTION_WRITE,
+    ("task_description", "patch"): ACTION_TASK_DESCRIPTION_PATCH,
+    ("annotation", "read"): ACTION_ANNOTATION_BODY_READ,
+    ("annotation", "write"): ACTION_ANNOTATION_BODY_WRITE,
+    ("annotation", "patch"): ACTION_ANNOTATION_BODY_PATCH,
+}
+
+# The resource_kind a text-block token is scoped to, per kind. note_part
+# -> RESOURCE_NOTE_PART (part id); task_description -> RESOURCE_TASK (task
+# id); annotation -> RESOURCE_ANNOTATION (annotation id).
+TEXT_BLOCK_RESOURCE_KIND: dict[str, str] = {
+    "note_part": RESOURCE_NOTE_PART,
+    "task_description": RESOURCE_TASK,
+    "annotation": RESOURCE_ANNOTATION,
+}
+
+
+def text_block_action(kind: str, verb: str) -> str:
+    """Map a (kind, verb) pair to its capability action literal. Raises
+    ValueError on an unknown pair so the HTTP/MCP mint surfaces fail loud
+    rather than mint a token no dep will ever accept."""
+    try:
+        return _TEXT_BLOCK_ACTIONS[(kind, verb)]
+    except KeyError:
+        raise ValueError(
+            f"unknown text block (kind={kind!r}, verb={verb!r}); "
+            f"kind in {TEXT_BLOCK_KINDS}, verb in {TEXT_BLOCK_VERBS}"
+        ) from None
+
+
+def text_block_resource_kind(kind: str) -> str:
+    """Map a text-block kind to the capability resource_kind it scopes to."""
+    try:
+        return TEXT_BLOCK_RESOURCE_KIND[kind]
+    except KeyError:
+        raise ValueError(
+            f"unknown text block kind={kind!r}; expected one of {TEXT_BLOCK_KINDS}"
+        ) from None
+
 
 def _hash(raw: str) -> bytes:
     return hashlib.sha256(raw.encode("utf-8")).digest()
@@ -198,17 +277,32 @@ async def consume(session: AsyncSession, *, token_id: uuid.UUID) -> bool:
 
 
 __all__ = [
+    "ACTION_ANNOTATION_BODY_PATCH",
+    "ACTION_ANNOTATION_BODY_READ",
+    "ACTION_ANNOTATION_BODY_WRITE",
     "ACTION_ATTACHMENT_READ",
+    "ACTION_ATTACHMENT_WRITE",
+    "ACTION_NOTE_PART_BODY_PATCH",
+    "ACTION_NOTE_PART_BODY_READ",
     "ACTION_NOTE_PART_BODY_WRITE",
+    "ACTION_TASK_DESCRIPTION_PATCH",
+    "ACTION_TASK_DESCRIPTION_READ",
+    "ACTION_TASK_DESCRIPTION_WRITE",
     "DEFAULT_TTL_SECONDS",
     "RAW_PREFIX",
+    "RESOURCE_ANNOTATION",
     "RESOURCE_NOTE",
     "RESOURCE_NOTE_PART",
     "RESOURCE_TASK",
+    "TEXT_BLOCK_KINDS",
+    "TEXT_BLOCK_RESOURCE_KIND",
+    "TEXT_BLOCK_VERBS",
     "AuthenticatedCapability",
     "MintResult",
     "authenticate",
     "consume",
     "is_capability_token",
     "mint",
+    "text_block_action",
+    "text_block_resource_kind",
 ]

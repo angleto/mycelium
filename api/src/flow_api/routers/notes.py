@@ -9,11 +9,18 @@ import datetime
 import uuid
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
-from flow_api.deps import TenantCtx, part_body_write_ctx, tenant_ctx
+from flow_api.deps import (
+    TenantCtx,
+    note_attachment_write_ctx,
+    part_body_patch_ctx,
+    part_body_read_ctx,
+    part_body_write_ctx,
+    tenant_ctx,
+)
 from flow_api.routers.attachments import att_out, read_capped, upload_file_field
 from flow_api.schemas import (
     AppendMessageIn,
@@ -65,7 +72,7 @@ from flow_api.schemas import (
     TaskChecklistReorderIn,
     VersionOut,
 )
-from flow_api.textstream import read_capped_text
+from flow_api.textstream import read_capped_text, read_patch_payload, text_block_headers
 from flow_core.config import get_settings
 from flow_core.db import admin_session
 from flow_core.models.note import Note, NoteKind, NoteTurn
@@ -514,12 +521,16 @@ async def detach_note_tag(
 @router.post("/{note_id}/attachments", response_model=AttachmentOut)
 async def upload_note_attachment(
     note_id: uuid.UUID,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+    ctx: Annotated[TenantCtx, Depends(note_attachment_write_ctx, scope="function")],
     file: upload_file_field,
 ) -> AttachmentOut:
     # Size is enforced BEFORE the bytes are stored (guarded read here +
     # a re-check in the service), against the workspace's effective cap.
-    # Member-level, org-scoped (RLS).
+    # Member-level, org-scoped (RLS). Auth accepts a normal bearer or a
+    # single-use ``attachment:write`` capability scoped to this note
+    # (minted by the MCP ``upload_attachment_capability`` tool), consumed
+    # on success. Backend-agnostic: ``add_attachment`` works on the default
+    # ``pg`` store, so no S3 is required.
     data = await read_capped(file, ctx)
     att = await att_svc.add_attachment(
         ctx.session,
@@ -530,6 +541,8 @@ async def upload_note_attachment(
         mime_type=file.content_type,
         data=data,
     )
+    if ctx.capability_token_id is not None:
+        await capability_tokens_svc.consume(ctx.session, token_id=ctx.capability_token_id)
     return att_out(att)
 
 
@@ -840,6 +853,67 @@ async def replace_note_part_body_stream(
     if ctx.capability_token_id is not None:
         # One-time: burn the capability now that the guarded write
         # committed (same transaction; a rolled-back write un-burns it).
+        await capability_tokens_svc.consume(ctx.session, token_id=ctx.capability_token_id)
+    return VersionOut(id=part_id, version=v)
+
+
+@router.get("/{note_id}/parts/{part_id}/body/raw", tags=["garden"])
+async def download_note_part_body_raw(
+    note_id: uuid.UUID,
+    part_id: uuid.UUID,
+    ctx: Annotated[TenantCtx, Depends(part_body_read_ctx, scope="function")],
+) -> Response:
+    """Token-free raw download of a note part's markdown body. Returns the
+    body as ``text/markdown`` with ``X-Version`` + ``X-Body-SHA256`` headers
+    (the base gate the patch route checks). Bearer or a multi-use
+    ``note_part_body:read`` capability for this part; the bytes never ride a
+    tool argument. Use the MCP ``get_note_part_body_capability`` tool for the
+    matching ``curl -D-``."""
+    part = await parts_svc.get_part(ctx.session, org_id=ctx.org_id, part_id=part_id)
+    body = part.body or ""
+    return Response(
+        content=body,
+        media_type="text/markdown; charset=utf-8",
+        headers=text_block_headers(version=part.version, body=body),
+    )
+
+
+@router.post(
+    "/{note_id}/parts/{part_id}/body/patch",
+    response_model=VersionOut,
+    tags=["garden"],
+)
+async def patch_note_part_body(
+    note_id: uuid.UUID,
+    part_id: uuid.UUID,
+    request: Request,
+    ctx: Annotated[TenantCtx, Depends(part_body_patch_ctx, scope="function")],
+    expected_version: Annotated[int, Query(ge=1)],
+    base_sha256: Annotated[str, Query(min_length=64, max_length=64)],
+    edit_session_id: Annotated[str | None, Header(alias="X-Edit-Session-Id")] = None,
+) -> VersionOut:
+    """Apply a strict unified diff (the raw request body) to a note part's
+    markdown body. The base gate (``expected_version`` + ``base_sha256``,
+    taken from the ``body/raw`` headers) refuses to apply if the live body
+    drifted (409 ``patch.stale``); a diff that does not apply cleanly is 422
+    (``patch.does_not_apply`` / ``patch.malformed``); nothing mutates on
+    failure. Bearer or a single-use ``note_part_body:patch`` capability,
+    consumed on success. Use the MCP ``patch_note_part_body_capability`` tool
+    for the matching ``curl``."""
+    patch = await read_patch_payload(request)
+    channel = "web" if edit_session_id else "api"
+    v = await parts_svc.apply_patch_to_part(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        part_id=part_id,
+        expected_version=expected_version,
+        patch=patch,
+        base_sha256=base_sha256,
+        channel=channel,
+        edit_session_id=edit_session_id,
+    )
+    if ctx.capability_token_id is not None:
         await capability_tokens_svc.consume(ctx.session, token_id=ctx.capability_token_id)
     return VersionOut(id=part_id, version=v)
 

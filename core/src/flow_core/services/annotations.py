@@ -30,6 +30,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from flow_core.concurrency import optimistic_update
+from flow_core.config import get_settings
 from flow_core.errors import DomainError, NotFoundError
 from flow_core.i18n import MessageCode
 from flow_core.models.annotation import ANNOTATION_DOC_KINDS, Annotation
@@ -37,7 +38,7 @@ from flow_core.models.identity import Identity, IdentityKind
 from flow_core.models.membership import Role
 from flow_core.models.note_part import NotePart
 from flow_core.models.task import Task
-from flow_core.services import audit, md_anchor
+from flow_core.services import audit, md_anchor, text_patch
 from flow_core.services import identities as identities_svc
 from flow_core.services.rbac import require_role
 
@@ -378,6 +379,40 @@ async def edit(
         action="edit",
     )
     return new_version
+
+
+async def apply_patch_to_body(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    annotation_id: uuid.UUID,
+    expected_version: int,
+    patch: str,
+    base_sha256: str,
+    actor_identity_id: uuid.UUID | None = None,
+) -> int:
+    """Apply a strict unified diff to a comment/annotation body and persist
+    via :func:`edit` (author-or-admin gate, ``edited_at`` stamp). Symmetric
+    to the note-part and task-description patch helpers: sha256 base gate
+    (409 PATCH_STALE) plus the version gate in ``edit``'s
+    ``optimistic_update``, one transaction."""
+    ann = await _get(session, org_id=org_id, annotation_id=annotation_id)
+    new_body = text_patch.apply_patch_text(
+        ann.body or "",
+        patch,
+        expected_sha256=base_sha256,
+        max_result_bytes=get_settings().note_body_max_bytes,
+    )
+    return await edit(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        annotation_id=annotation_id,
+        body=new_body,
+        expected_version=expected_version,
+        actor_identity_id=actor_identity_id,
+    )
 
 
 async def assign(

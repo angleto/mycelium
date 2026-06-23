@@ -9,11 +9,19 @@ from __future__ import annotations
 import uuid
 from typing import Annotated, Any, cast
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, Query, Request, Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from flow_api.deps import TenantCtx, current_claims, tenant_ctx
+from flow_api.deps import (
+    TenantCtx,
+    annotation_body_patch_ctx,
+    annotation_body_read_ctx,
+    annotation_body_write_ctx,
+    current_claims,
+    current_claims_optional,
+    tenant_ctx,
+)
 from flow_api.schemas import (
     AnnotationAssignIn,
     AnnotationCommentIn,
@@ -23,13 +31,14 @@ from flow_api.schemas import (
     SuggestionIn,
     VersionOut,
 )
-from flow_api.textstream import read_capped_text
+from flow_api.textstream import read_capped_text, read_patch_payload, text_block_headers
 from flow_core.config import get_settings
 from flow_core.errors import DomainError
 from flow_core.i18n import MessageCode
 from flow_core.models.annotation import Annotation
 from flow_core.models.identity import Identity
 from flow_core.services import annotations as svc
+from flow_core.services import capability_tokens as capability_tokens_svc
 from flow_core.services import identities as identities_svc
 
 router = APIRouter(prefix="/annotations", tags=["annotations"])
@@ -280,16 +289,19 @@ async def edit_annotation(
 async def edit_annotation_body_stream(
     annotation_id: uuid.UUID,
     request: Request,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
-    claims: Annotated[dict[str, Any], Depends(current_claims)],
+    ctx: Annotated[TenantCtx, Depends(annotation_body_write_ctx, scope="function")],
+    claims: Annotated[dict[str, Any], Depends(current_claims_optional)],
     expected_version: Annotated[int, Query(ge=1)],
 ) -> VersionOut:
     """Token-free replace of an annotation's body (a comment's text or a
     suggestion's rationale): the new text is the raw request body,
     streamed in instead of riding a tool argument. ``expected_version``
     is the optimistic cursor (a mismatch is ``stale_version`` -> 409);
-    author-or-admin only. Use the MCP ``edit_annotation_body_instructions``
-    tool for the matching ``curl``."""
+    author-or-admin only. Bearer (assistant identity preserved) or a
+    single-use ``annotation_body:write`` capability (attributed to the
+    token's user), consumed on success. Use the MCP
+    ``edit_annotation_body_instructions`` /
+    ``set_text_block_capability`` tools for the matching ``curl``."""
     body_text = await read_capped_text(request, max_bytes=get_settings().note_body_max_bytes)
     if not body_text:
         raise DomainError(MessageCode.ANNOTATION_BODY_REQUIRED)
@@ -303,6 +315,61 @@ async def edit_annotation_body_stream(
         expected_version=expected_version,
         actor_identity_id=ident,
     )
+    if ctx.capability_token_id is not None:
+        await capability_tokens_svc.consume(ctx.session, token_id=ctx.capability_token_id)
+    return VersionOut(id=annotation_id, version=v)
+
+
+@router.get("/{annotation_id}/body/raw")
+async def download_annotation_body_raw(
+    annotation_id: uuid.UUID,
+    ctx: Annotated[TenantCtx, Depends(annotation_body_read_ctx, scope="function")],
+) -> Response:
+    """Token-free raw download of a comment/annotation body. Returns it as
+    ``text/markdown`` with ``X-Version`` + ``X-Body-SHA256`` headers (the
+    base gate the patch route checks). Bearer or a multi-use
+    ``annotation_body:read`` capability for this annotation. Use the MCP
+    ``get_text_block_capability`` tool (kind=``annotation``) for the
+    matching ``curl -D-``."""
+    ann = await svc.get_annotation(ctx.session, org_id=ctx.org_id, annotation_id=annotation_id)
+    body = ann.body or ""
+    return Response(
+        content=body,
+        media_type="text/markdown; charset=utf-8",
+        headers=text_block_headers(version=ann.version, body=body),
+    )
+
+
+@router.post("/{annotation_id}/body/patch", response_model=VersionOut)
+async def patch_annotation_body(
+    annotation_id: uuid.UUID,
+    request: Request,
+    ctx: Annotated[TenantCtx, Depends(annotation_body_patch_ctx, scope="function")],
+    claims: Annotated[dict[str, Any], Depends(current_claims_optional)],
+    expected_version: Annotated[int, Query(ge=1)],
+    base_sha256: Annotated[str, Query(min_length=64, max_length=64)],
+) -> VersionOut:
+    """Apply a strict unified diff (the raw request body) to a
+    comment/annotation body. Base gate (``expected_version`` +
+    ``base_sha256`` from the ``body/raw`` headers): 409 ``patch.stale`` on
+    drift, 422 on a diff that does not apply, nothing mutates on failure.
+    Author-or-admin only. Bearer or a single-use ``annotation_body:patch``
+    capability, consumed on success. Use the MCP
+    ``patch_text_block_capability`` tool (kind=``annotation``)."""
+    patch = await read_patch_payload(request)
+    ident = await _author_identity_id(ctx.session, org_id=ctx.org_id, claims=claims)
+    v = await svc.apply_patch_to_body(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        annotation_id=annotation_id,
+        expected_version=expected_version,
+        patch=patch,
+        base_sha256=base_sha256,
+        actor_identity_id=ident,
+    )
+    if ctx.capability_token_id is not None:
+        await capability_tokens_svc.consume(ctx.session, token_id=ctx.capability_token_id)
     return VersionOut(id=annotation_id, version=v)
 
 

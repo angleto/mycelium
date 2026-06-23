@@ -185,12 +185,13 @@ _DOMAIN_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
             "conversation",
             "message",
             "turn",
+            "text_block",
         ),
     ),
     ("billing", ("rate", "credit", "budget", "invoice", "usage", "meter")),
     ("email", ("email",)),
     ("taxonomy", ("tag", "client", "project")),
-    ("tasks", ("task", "comment", "checklist", "item", "revision")),
+    ("tasks", ("task", "comment", "checklist", "item", "revision", "attachment")),
 )
 
 # Lazily built once: name -> (meta, normalized embedding). The index is

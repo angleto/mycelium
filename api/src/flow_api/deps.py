@@ -59,6 +59,21 @@ async def current_claims(
     return await decode_token_async(token)
 
 
+async def current_claims_optional(
+    token: Annotated[str, Depends(_bearer_token)],
+) -> dict[str, Any]:
+    """Like :func:`current_claims` but tolerates a capability token
+    (``flow_cap_``): returns ``{}`` instead of trying to decode it as a JWT
+    / agent token (which would 401). Used by routes that accept BOTH a
+    normal bearer and a ``flow_cap_`` token and only need the bearer's
+    claims for identity attribution -- on the capability branch the write
+    is attributed to the token's user (no assistant badge), matching the
+    note-part capability path."""
+    if capability_tokens.is_capability_token(token):
+        return {}
+    return await decode_token_async(token)
+
+
 async def current_user_id(
     claims: Annotated[dict[str, Any], Depends(current_claims)],
 ) -> uuid.UUID:
@@ -278,33 +293,44 @@ async def tenant_ctx(
         yield ctx
 
 
-async def part_body_write_ctx(
-    part_id: uuid.UUID,
-    token: Annotated[str, Depends(_bearer_token)],
-    x_workspace_id: Annotated[str | None, Header()] = None,
-    x_project_id: Annotated[str | None, Header()] = None,
-    x_workspace_role: Annotated[str | None, Header()] = None,
-    x_admin_mode: Annotated[str | None, Header()] = None,
-) -> AsyncIterator[TenantCtx]:
-    """Tenant context for the note-part body stream, accepting EITHER a
-    normal bearer (JWT / agent token, exactly like ``tenant_ctx``) OR a
-    capability token (``flow_cap_``) scoped to ``note_part_body:write``
-    on this very ``part_id``.
+@asynccontextmanager
+async def _capability_or_bearer(
+    token: str,
+    *,
+    expected_actions: tuple[str, ...],
+    expected_resource_kinds: tuple[str, ...],
+    resource_id: uuid.UUID | None,
+    single_use: bool,
+    x_workspace_id: str | None,
+    x_project_id: str | None,
+    x_workspace_role: str | None,
+    x_admin_mode: str | None,
+) -> AsyncIterator[tuple[TenantCtx, capability_tokens.AuthenticatedCapability | None]]:
+    """Shared capability-or-bearer tenant context for every block route.
 
-    The capability path is confined to this endpoint:
-    ``decode_token_async`` does not know ``flow_cap_``, so such a token
-    is rejected everywhere else. On the capability branch the request
-    runs as the token's user with a fixed ``member`` role, and
-    ``capability_token_id`` is set so the endpoint consumes the token
-    after the write commits."""
+    On the ``flow_cap_`` branch: authenticate, validate
+    ``action in expected_actions`` AND ``resource_kind in
+    expected_resource_kinds`` AND (when ``resource_id`` is given)
+    ``princ.resource_id == resource_id``, then open an ``mcp_token`` tenant
+    session fixed to ``Role.member`` and yield ``(ctx, princ)``. Pass
+    ``resource_id=None`` for a PARENT-scoped token whose exact target the
+    caller re-checks against ``princ`` inside the session (e.g. an
+    attachment row's parent FK). ``single_use=True`` sets
+    ``capability_token_id`` so the endpoint consumes the token after the
+    write commits. On the normal-bearer branch yield ``(ctx, None)`` with
+    the same contract as ``tenant_ctx`` (``X-Workspace-Id`` required).
+
+    The capability path is confined to the routes that depend on this:
+    ``decode_token_async`` does not know ``flow_cap_``, so such a token is
+    rejected everywhere else."""
     if capability_tokens.is_capability_token(token):
         princ = await capability_tokens.authenticate(token)
         if princ is None:
             raise AuthError(MessageCode.CAPABILITY_TOKEN_INVALID)
         if (
-            princ.action != capability_tokens.ACTION_NOTE_PART_BODY_WRITE
-            or princ.resource_kind != capability_tokens.RESOURCE_NOTE_PART
-            or princ.resource_id != part_id
+            princ.action not in expected_actions
+            or princ.resource_kind not in expected_resource_kinds
+            or (resource_id is not None and princ.resource_id != resource_id)
         ):
             raise ForbiddenError(MessageCode.CAPABILITY_TOKEN_SCOPE)
         user = await _active_user(princ.user_id)
@@ -318,13 +344,16 @@ async def part_body_write_ctx(
                 text("SELECT set_config('app.current_role', :r, true)"),
                 {"r": Role.member.value},
             )
-            yield TenantCtx(
-                session=session,
-                user_id=user.id,
-                org_id=princ.org_id,
-                project_id=None,
-                role=Role.member,
-                capability_token_id=princ.token_id,
+            yield (
+                TenantCtx(
+                    session=session,
+                    user_id=user.id,
+                    org_id=princ.org_id,
+                    project_id=None,
+                    role=Role.member,
+                    capability_token_id=princ.token_id if single_use else None,
+                ),
+                princ,
             )
         return
     # Normal bearer: same contract as tenant_ctx (X-Workspace-Id required).
@@ -340,6 +369,55 @@ async def part_body_write_ctx(
         x_workspace_role=x_workspace_role,
         x_admin_mode=x_admin_mode,
     ) as ctx:
+        yield ctx, None
+
+
+async def _assert_attachment_parent(
+    session: AsyncSession,
+    attachment_id: uuid.UUID,
+    princ: capability_tokens.AuthenticatedCapability,
+) -> None:
+    """Confine a parent-scoped attachment capability: the attachment must
+    exist in the token's org (RLS) AND hang off the exact note/task the
+    token is scoped to. Selects only the parent ids, never the ``data``
+    blob."""
+    row = (
+        await session.execute(
+            select(Attachment.note_id, Attachment.task_id).where(Attachment.id == attachment_id)
+        )
+    ).first()
+    if row is None:
+        raise NotFoundError(MessageCode.ATTACHMENT_NOT_FOUND)
+    parent_ok = (
+        princ.resource_kind == capability_tokens.RESOURCE_NOTE and row.note_id == princ.resource_id
+    ) or (
+        princ.resource_kind == capability_tokens.RESOURCE_TASK and row.task_id == princ.resource_id
+    )
+    if not parent_ok:
+        raise ForbiddenError(MessageCode.CAPABILITY_TOKEN_SCOPE)
+
+
+async def part_body_write_ctx(
+    part_id: uuid.UUID,
+    token: Annotated[str, Depends(_bearer_token)],
+    x_workspace_id: Annotated[str | None, Header()] = None,
+    x_project_id: Annotated[str | None, Header()] = None,
+    x_workspace_role: Annotated[str | None, Header()] = None,
+    x_admin_mode: Annotated[str | None, Header()] = None,
+) -> AsyncIterator[TenantCtx]:
+    """Note-part body stream: bearer OR a single-use ``note_part_body:write``
+    capability scoped to this ``part_id`` (consumed on success)."""
+    async with _capability_or_bearer(
+        token,
+        expected_actions=(capability_tokens.ACTION_NOTE_PART_BODY_WRITE,),
+        expected_resource_kinds=(capability_tokens.RESOURCE_NOTE_PART,),
+        resource_id=part_id,
+        single_use=True,
+        x_workspace_id=x_workspace_id,
+        x_project_id=x_project_id,
+        x_workspace_role=x_workspace_role,
+        x_admin_mode=x_admin_mode,
+    ) as (ctx, _princ):
         yield ctx
 
 
@@ -351,82 +429,276 @@ async def attachment_read_ctx(
     x_workspace_role: Annotated[str | None, Header()] = None,
     x_admin_mode: Annotated[str | None, Header()] = None,
 ) -> AsyncIterator[TenantCtx]:
-    """Tenant context for the attachment binary download, accepting
-    EITHER a normal bearer (JWT / agent token, exactly like
-    ``tenant_ctx``) OR a capability token (``flow_cap_``) scoped to
-    ``attachment:read`` on the attachment's PARENT (a note or task).
-
-    The capability is parent-scoped and multi-use within its TTL, not
-    single-use: one mint downloads every attachment of that note/task
-    until it expires, so this dep does NOT consume it (``download`` is a
-    read and an agent typically fetches several files). It still confines
-    access: the token authorises only attachments whose ``note_id`` /
-    ``task_id`` matches the token's ``resource_id``, and only this
-    download endpoint understands ``flow_cap_`` at all (``decode_token_async``
-    rejects it everywhere else). The capability branch runs as the token's
-    user with a fixed ``member`` role."""
-    if capability_tokens.is_capability_token(token):
-        princ = await capability_tokens.authenticate(token)
-        if princ is None:
-            raise AuthError(MessageCode.CAPABILITY_TOKEN_INVALID)
-        if princ.action != capability_tokens.ACTION_ATTACHMENT_READ or princ.resource_kind not in (
+    """Attachment binary download: bearer OR a parent-scoped, multi-use
+    ``attachment:read`` capability (one mint downloads every attachment of
+    the note/task until it expires; NOT consumed, a download is
+    idempotent). The token authorises only attachments whose parent FK
+    matches its ``resource_id``."""
+    async with _capability_or_bearer(
+        token,
+        expected_actions=(capability_tokens.ACTION_ATTACHMENT_READ,),
+        expected_resource_kinds=(
             capability_tokens.RESOURCE_NOTE,
             capability_tokens.RESOURCE_TASK,
-        ):
-            raise ForbiddenError(MessageCode.CAPABILITY_TOKEN_SCOPE)
-        user = await _active_user(princ.user_id)
-        async with tenant_session(
-            str(princ.org_id),
-            str(user.id),
-            actor_kind="mcp_token",
-            actor_subject_id=str(princ.token_id),
-        ) as session:
-            await session.execute(
-                text("SELECT set_config('app.current_role', :r, true)"),
-                {"r": Role.member.value},
-            )
-            # The attachment must exist in the token's org (RLS) AND hang
-            # off the exact parent the token is scoped to. Select only the
-            # parent ids -- never the ``data`` blob -- for the check.
-            row = (
-                await session.execute(
-                    select(Attachment.note_id, Attachment.task_id).where(
-                        Attachment.id == attachment_id
-                    )
-                )
-            ).first()
-            if row is None:
-                raise NotFoundError(MessageCode.ATTACHMENT_NOT_FOUND)
-            parent_ok = (
-                princ.resource_kind == capability_tokens.RESOURCE_NOTE
-                and row.note_id == princ.resource_id
-            ) or (
-                princ.resource_kind == capability_tokens.RESOURCE_TASK
-                and row.task_id == princ.resource_id
-            )
-            if not parent_ok:
-                raise ForbiddenError(MessageCode.CAPABILITY_TOKEN_SCOPE)
-            yield TenantCtx(
-                session=session,
-                user_id=user.id,
-                org_id=princ.org_id,
-                project_id=None,
-                role=Role.member,
-            )
-        return
-    # Normal bearer: same contract as tenant_ctx (X-Workspace-Id required).
-    if not x_workspace_id:
-        raise AuthError(MessageCode.AUTH_WORKSPACE_REQUIRED)
-    user = await _resolve_user(token)
-    org_id = uuid.UUID(x_workspace_id)
-    project_id = uuid.UUID(x_project_id) if x_project_id else None
-    async with _tenant_scope(
-        user,
-        org_id,
-        project_id,
+        ),
+        resource_id=None,  # parent-scoped: re-check the attachment's parent below
+        single_use=False,
+        x_workspace_id=x_workspace_id,
+        x_project_id=x_project_id,
         x_workspace_role=x_workspace_role,
         x_admin_mode=x_admin_mode,
-    ) as ctx:
+    ) as (ctx, princ):
+        if princ is not None:
+            await _assert_attachment_parent(ctx.session, attachment_id, princ)
+        yield ctx
+
+
+# Exact-resource-scoped block deps. Each accepts a normal bearer OR a
+# flow_cap_ token whose action+resource match the route. read = multi-use
+# (idempotent, NOT consumed); write/patch = single-use (consumed after the
+# write commits). The attachment-write deps key on the parent note/task in
+# the path -- itself the scoped resource -- so they need no extra row read.
+
+
+async def note_attachment_write_ctx(
+    note_id: uuid.UUID,
+    token: Annotated[str, Depends(_bearer_token)],
+    x_workspace_id: Annotated[str | None, Header()] = None,
+    x_project_id: Annotated[str | None, Header()] = None,
+    x_workspace_role: Annotated[str | None, Header()] = None,
+    x_admin_mode: Annotated[str | None, Header()] = None,
+) -> AsyncIterator[TenantCtx]:
+    """Note attachment upload: bearer OR a single-use ``attachment:write``
+    capability scoped to this note."""
+    async with _capability_or_bearer(
+        token,
+        expected_actions=(capability_tokens.ACTION_ATTACHMENT_WRITE,),
+        expected_resource_kinds=(capability_tokens.RESOURCE_NOTE,),
+        resource_id=note_id,
+        single_use=True,
+        x_workspace_id=x_workspace_id,
+        x_project_id=x_project_id,
+        x_workspace_role=x_workspace_role,
+        x_admin_mode=x_admin_mode,
+    ) as (ctx, _princ):
+        yield ctx
+
+
+async def task_attachment_write_ctx(
+    task_id: uuid.UUID,
+    token: Annotated[str, Depends(_bearer_token)],
+    x_workspace_id: Annotated[str | None, Header()] = None,
+    x_project_id: Annotated[str | None, Header()] = None,
+    x_workspace_role: Annotated[str | None, Header()] = None,
+    x_admin_mode: Annotated[str | None, Header()] = None,
+) -> AsyncIterator[TenantCtx]:
+    """Task attachment upload: bearer OR a single-use ``attachment:write``
+    capability scoped to this task."""
+    async with _capability_or_bearer(
+        token,
+        expected_actions=(capability_tokens.ACTION_ATTACHMENT_WRITE,),
+        expected_resource_kinds=(capability_tokens.RESOURCE_TASK,),
+        resource_id=task_id,
+        single_use=True,
+        x_workspace_id=x_workspace_id,
+        x_project_id=x_project_id,
+        x_workspace_role=x_workspace_role,
+        x_admin_mode=x_admin_mode,
+    ) as (ctx, _princ):
+        yield ctx
+
+
+async def part_body_read_ctx(
+    part_id: uuid.UUID,
+    token: Annotated[str, Depends(_bearer_token)],
+    x_workspace_id: Annotated[str | None, Header()] = None,
+    x_project_id: Annotated[str | None, Header()] = None,
+    x_workspace_role: Annotated[str | None, Header()] = None,
+    x_admin_mode: Annotated[str | None, Header()] = None,
+) -> AsyncIterator[TenantCtx]:
+    """Note-part body raw download: bearer OR a multi-use
+    ``note_part_body:read`` capability scoped to this part."""
+    async with _capability_or_bearer(
+        token,
+        expected_actions=(capability_tokens.ACTION_NOTE_PART_BODY_READ,),
+        expected_resource_kinds=(capability_tokens.RESOURCE_NOTE_PART,),
+        resource_id=part_id,
+        single_use=False,
+        x_workspace_id=x_workspace_id,
+        x_project_id=x_project_id,
+        x_workspace_role=x_workspace_role,
+        x_admin_mode=x_admin_mode,
+    ) as (ctx, _princ):
+        yield ctx
+
+
+async def part_body_patch_ctx(
+    part_id: uuid.UUID,
+    token: Annotated[str, Depends(_bearer_token)],
+    x_workspace_id: Annotated[str | None, Header()] = None,
+    x_project_id: Annotated[str | None, Header()] = None,
+    x_workspace_role: Annotated[str | None, Header()] = None,
+    x_admin_mode: Annotated[str | None, Header()] = None,
+) -> AsyncIterator[TenantCtx]:
+    """Note-part body patch: bearer OR a single-use ``note_part_body:patch``
+    capability scoped to this part (consumed on success)."""
+    async with _capability_or_bearer(
+        token,
+        expected_actions=(capability_tokens.ACTION_NOTE_PART_BODY_PATCH,),
+        expected_resource_kinds=(capability_tokens.RESOURCE_NOTE_PART,),
+        resource_id=part_id,
+        single_use=True,
+        x_workspace_id=x_workspace_id,
+        x_project_id=x_project_id,
+        x_workspace_role=x_workspace_role,
+        x_admin_mode=x_admin_mode,
+    ) as (ctx, _princ):
+        yield ctx
+
+
+async def task_description_read_ctx(
+    task_id: uuid.UUID,
+    token: Annotated[str, Depends(_bearer_token)],
+    x_workspace_id: Annotated[str | None, Header()] = None,
+    x_project_id: Annotated[str | None, Header()] = None,
+    x_workspace_role: Annotated[str | None, Header()] = None,
+    x_admin_mode: Annotated[str | None, Header()] = None,
+) -> AsyncIterator[TenantCtx]:
+    """Task description raw download: bearer OR a multi-use
+    ``task_description:read`` capability scoped to this task."""
+    async with _capability_or_bearer(
+        token,
+        expected_actions=(capability_tokens.ACTION_TASK_DESCRIPTION_READ,),
+        expected_resource_kinds=(capability_tokens.RESOURCE_TASK,),
+        resource_id=task_id,
+        single_use=False,
+        x_workspace_id=x_workspace_id,
+        x_project_id=x_project_id,
+        x_workspace_role=x_workspace_role,
+        x_admin_mode=x_admin_mode,
+    ) as (ctx, _princ):
+        yield ctx
+
+
+async def task_description_write_ctx(
+    task_id: uuid.UUID,
+    token: Annotated[str, Depends(_bearer_token)],
+    x_workspace_id: Annotated[str | None, Header()] = None,
+    x_project_id: Annotated[str | None, Header()] = None,
+    x_workspace_role: Annotated[str | None, Header()] = None,
+    x_admin_mode: Annotated[str | None, Header()] = None,
+) -> AsyncIterator[TenantCtx]:
+    """Task description full-replace stream: bearer OR a single-use
+    ``task_description:write`` capability scoped to this task."""
+    async with _capability_or_bearer(
+        token,
+        expected_actions=(capability_tokens.ACTION_TASK_DESCRIPTION_WRITE,),
+        expected_resource_kinds=(capability_tokens.RESOURCE_TASK,),
+        resource_id=task_id,
+        single_use=True,
+        x_workspace_id=x_workspace_id,
+        x_project_id=x_project_id,
+        x_workspace_role=x_workspace_role,
+        x_admin_mode=x_admin_mode,
+    ) as (ctx, _princ):
+        yield ctx
+
+
+async def task_description_patch_ctx(
+    task_id: uuid.UUID,
+    token: Annotated[str, Depends(_bearer_token)],
+    x_workspace_id: Annotated[str | None, Header()] = None,
+    x_project_id: Annotated[str | None, Header()] = None,
+    x_workspace_role: Annotated[str | None, Header()] = None,
+    x_admin_mode: Annotated[str | None, Header()] = None,
+) -> AsyncIterator[TenantCtx]:
+    """Task description patch: bearer OR a single-use
+    ``task_description:patch`` capability scoped to this task (consumed on
+    success)."""
+    async with _capability_or_bearer(
+        token,
+        expected_actions=(capability_tokens.ACTION_TASK_DESCRIPTION_PATCH,),
+        expected_resource_kinds=(capability_tokens.RESOURCE_TASK,),
+        resource_id=task_id,
+        single_use=True,
+        x_workspace_id=x_workspace_id,
+        x_project_id=x_project_id,
+        x_workspace_role=x_workspace_role,
+        x_admin_mode=x_admin_mode,
+    ) as (ctx, _princ):
+        yield ctx
+
+
+async def annotation_body_read_ctx(
+    annotation_id: uuid.UUID,
+    token: Annotated[str, Depends(_bearer_token)],
+    x_workspace_id: Annotated[str | None, Header()] = None,
+    x_project_id: Annotated[str | None, Header()] = None,
+    x_workspace_role: Annotated[str | None, Header()] = None,
+    x_admin_mode: Annotated[str | None, Header()] = None,
+) -> AsyncIterator[TenantCtx]:
+    """Comment/annotation body raw download: bearer OR a multi-use
+    ``annotation_body:read`` capability scoped to this annotation."""
+    async with _capability_or_bearer(
+        token,
+        expected_actions=(capability_tokens.ACTION_ANNOTATION_BODY_READ,),
+        expected_resource_kinds=(capability_tokens.RESOURCE_ANNOTATION,),
+        resource_id=annotation_id,
+        single_use=False,
+        x_workspace_id=x_workspace_id,
+        x_project_id=x_project_id,
+        x_workspace_role=x_workspace_role,
+        x_admin_mode=x_admin_mode,
+    ) as (ctx, _princ):
+        yield ctx
+
+
+async def annotation_body_write_ctx(
+    annotation_id: uuid.UUID,
+    token: Annotated[str, Depends(_bearer_token)],
+    x_workspace_id: Annotated[str | None, Header()] = None,
+    x_project_id: Annotated[str | None, Header()] = None,
+    x_workspace_role: Annotated[str | None, Header()] = None,
+    x_admin_mode: Annotated[str | None, Header()] = None,
+) -> AsyncIterator[TenantCtx]:
+    """Comment/annotation body stream edit: bearer OR a single-use
+    ``annotation_body:write`` capability scoped to this annotation."""
+    async with _capability_or_bearer(
+        token,
+        expected_actions=(capability_tokens.ACTION_ANNOTATION_BODY_WRITE,),
+        expected_resource_kinds=(capability_tokens.RESOURCE_ANNOTATION,),
+        resource_id=annotation_id,
+        single_use=True,
+        x_workspace_id=x_workspace_id,
+        x_project_id=x_project_id,
+        x_workspace_role=x_workspace_role,
+        x_admin_mode=x_admin_mode,
+    ) as (ctx, _princ):
+        yield ctx
+
+
+async def annotation_body_patch_ctx(
+    annotation_id: uuid.UUID,
+    token: Annotated[str, Depends(_bearer_token)],
+    x_workspace_id: Annotated[str | None, Header()] = None,
+    x_project_id: Annotated[str | None, Header()] = None,
+    x_workspace_role: Annotated[str | None, Header()] = None,
+    x_admin_mode: Annotated[str | None, Header()] = None,
+) -> AsyncIterator[TenantCtx]:
+    """Comment/annotation body patch: bearer OR a single-use
+    ``annotation_body:patch`` capability scoped to this annotation (consumed
+    on success)."""
+    async with _capability_or_bearer(
+        token,
+        expected_actions=(capability_tokens.ACTION_ANNOTATION_BODY_PATCH,),
+        expected_resource_kinds=(capability_tokens.RESOURCE_ANNOTATION,),
+        resource_id=annotation_id,
+        single_use=True,
+        x_workspace_id=x_workspace_id,
+        x_project_id=x_project_id,
+        x_workspace_role=x_workspace_role,
+        x_admin_mode=x_admin_mode,
+    ) as (ctx, _princ):
         yield ctx
 
 

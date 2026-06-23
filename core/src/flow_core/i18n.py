@@ -179,6 +179,13 @@ class MessageCode(enum.StrEnum):
     SUGGESTION_TEXT_REQUIRED = "annotation.suggestion_text_required"
     ANNOTATION_BODY_REQUIRED = "annotation.body_required"
     BODY_INVALID_ENCODING = "body.invalid_encoding"
+    # Unified-diff patch apply (services/text_patch.py). STALE = the base
+    # drifted (409, re-download body/raw and rebuild the diff);
+    # DOES_NOT_APPLY / MALFORMED = the diff itself is wrong against an
+    # agreed base (422, re-downloading will not help).
+    PATCH_STALE = "patch.stale"
+    PATCH_DOES_NOT_APPLY = "patch.does_not_apply"
+    PATCH_MALFORMED = "patch.malformed"
     DOMAIN_ERROR = "domain.error"
     PROVIDER_KEY_INVALID = "provider.key_invalid"
     # Worker-generated reminder text (localised per recipient, see
@@ -299,6 +306,12 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
             "Append would exceed the maximum body size ({max_bytes} bytes)"
         ),
         MessageCode.BODY_INVALID_ENCODING: "Request body is not valid UTF-8 text",
+        MessageCode.PATCH_STALE: (
+            "The document changed since you downloaded it; "
+            "re-download body/raw and rebuild the diff."
+        ),
+        MessageCode.PATCH_DOES_NOT_APPLY: ("The patch does not apply to the current document."),
+        MessageCode.PATCH_MALFORMED: "The patch is not a valid unified diff.",
         MessageCode.ANNOTATION_BODY_REQUIRED: "A comment needs a non-empty body",
         MessageCode.INTENT_UNRECOGNIZED: ("Command not recognized: {raw}"),
         MessageCode.INVOICE_NOT_FOUND: "Invoice not found",

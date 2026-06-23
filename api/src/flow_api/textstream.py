@@ -13,8 +13,34 @@ from __future__ import annotations
 
 from fastapi import Request
 
+from flow_core.config import get_settings
 from flow_core.errors import DomainError
 from flow_core.i18n import MessageCode
+from flow_core.services import text_patch
+
+
+def text_block_headers(*, version: int, body: str) -> dict[str, str]:
+    """The base-gate contract emitted by every raw-text download
+    (``GET .../body/raw`` and friends): ``X-Version`` plus ``X-Body-SHA256``
+    (the hex sha256 of the exact UTF-8 body via the shared
+    :func:`text_patch.body_sha256`). The client passes both back as
+    ``expected_version`` + ``base_sha256`` to the patch route, which hashes
+    the LIVE body the same way -- so client and server compare digests of
+    byte-identical input. ``X-Content-Type-Options: nosniff`` mirrors the
+    attachment-download hardening."""
+    return {
+        "X-Version": str(version),
+        "X-Body-SHA256": text_patch.body_sha256(body),
+        "X-Content-Type-Options": "nosniff",
+    }
+
+
+async def read_patch_payload(request: Request) -> str:
+    """Read a POSTed unified diff off the request body, capped at
+    ``note_patch_max_bytes`` (a full-replace diff carries both the old and
+    new body, so it can exceed the body cap). Streamed + UTF-8 guarded like
+    :func:`read_capped_text`."""
+    return await read_capped_text(request, max_bytes=get_settings().note_patch_max_bytes)
 
 
 async def read_capped_text(request: Request, *, max_bytes: int) -> str:

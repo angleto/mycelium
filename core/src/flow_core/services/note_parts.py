@@ -39,7 +39,7 @@ from flow_core.i18n import MessageCode
 from flow_core.models.membership import Role
 from flow_core.models.note import Note
 from flow_core.models.note_part import NotePart, NotePartUIState
-from flow_core.services import audit, note_search
+from flow_core.services import audit, note_search, text_patch
 from flow_core.services.rbac import require_role
 
 
@@ -210,6 +210,44 @@ async def create_part(
         diff={"note_id": str(note_id), "ord": str(target_ord)},
     )
     return part
+
+
+async def apply_patch_to_part(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    part_id: uuid.UUID,
+    expected_version: int,
+    patch: str,
+    base_sha256: str,
+    channel: str = "api",
+    edit_session_id: str | None = None,
+) -> int:
+    """Apply a strict unified diff to a part's body and persist via
+    :func:`update_part`. The sha256 base gate (``base_sha256`` against the
+    live body) raises ConflictError(PATCH_STALE) on drift; the version gate
+    is re-asserted by ``update_part``'s ``optimistic_update``. Both the
+    body write and the caller's capability-token consume share the session
+    transaction, so any raise rolls everything back (the token is not
+    burned)."""
+    part = await _get_part(session, org_id=org_id, part_id=part_id)
+    new_body = text_patch.apply_patch_text(
+        part.body or "",
+        patch,
+        expected_sha256=base_sha256,
+        max_result_bytes=get_settings().note_body_max_bytes,
+    )
+    return await update_part(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        part_id=part_id,
+        expected_version=expected_version,
+        body=new_body,
+        channel=channel,
+        edit_session_id=edit_session_id,
+    )
 
 
 async def update_part(

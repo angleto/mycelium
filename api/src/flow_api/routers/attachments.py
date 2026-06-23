@@ -166,6 +166,38 @@ async def mint_download_capability(
     )
 
 
+@router.post("/capability/write", status_code=status.HTTP_201_CREATED)
+async def mint_upload_capability(
+    payload: AttachmentCapabilityIn,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+) -> AttachmentCapabilityOut:
+    """Mint a parent-scoped, single-use ``attachment:write`` capability
+    token (``flow_cap_``) that authorises ONE upload to a note or task with
+    no PAT and no X-Workspace-Id. Member-gated (the same floor an upload
+    enforces, so the token grants nothing the caller did not already hold).
+    The raw token is returned once and consumed on the first successful
+    upload. Symmetric to ``POST /attachments/capability`` (read); powers the
+    MCP ``upload_attachment_capability`` tool. ``attachments`` is empty -- a
+    write grant enumerates nothing, the caller POSTs the file."""
+    is_note = payload.parent_kind == "note"
+    resource_kind = capability_tokens.RESOURCE_NOTE if is_note else capability_tokens.RESOURCE_TASK
+    grant = await capability_tokens.mint(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        action=capability_tokens.ACTION_ATTACHMENT_WRITE,
+        resource_kind=resource_kind,
+        resource_id=payload.parent_id,
+        ttl_seconds=payload.ttl_seconds,
+    )
+    return AttachmentCapabilityOut(
+        token=grant.raw,
+        expires_at=grant.expires_at,
+        parent_kind=payload.parent_kind,
+        parent_id=payload.parent_id,
+    )
+
+
 @router.get("/{attachment_id}/download")
 async def download_attachment(
     attachment_id: uuid.UUID,

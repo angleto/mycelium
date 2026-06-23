@@ -4933,6 +4933,374 @@ async def download_attachment_capability(
     }
 
 
+def _capability_curl(
+    *,
+    url: str,
+    method: str,
+    raw_token: str,
+    mode: str,
+    expires_at: str,
+    max_bytes: int | None = None,
+) -> dict[str, Any]:
+    """Shared shape for the capability-token block recipes: a ready ``curl``
+    with the ephemeral ``flow_cap_`` token baked into the Authorization
+    header (no ``$FLOW_TOKEN`` placeholder, no ``X-Workspace-Id`` -- the org
+    is in the token), mirroring ``set_note_part_body_capability`` /
+    ``download_attachment_capability``.
+
+    ``mode``: ``download`` (GET the raw body to a file, dumping headers so
+    the caller captures ``X-Version`` + ``X-Body-SHA256`` for a later
+    patch), ``markdown`` (full-body replace via ``--data-binary``), or
+    ``diff`` (apply a strict unified diff via ``--data-binary``)."""
+    auth = f"Bearer {raw_token}"
+    if mode == "download":
+        curl = f"curl -fsS -D - '{url}' -H 'Authorization: {auth}' -o <path-to-file>"
+        headers = {"Authorization": auth}
+        note = (
+            "Multi-use read capability baked into the Authorization header "
+            "(NOT consumed; expires at expires_at). '-D -' dumps the response "
+            "headers so you capture X-Version and X-Body-SHA256 -- the base "
+            "gate inputs for a later patch. No PAT and no X-Workspace-Id. The "
+            "body is written to <path-to-file>."
+        )
+    else:
+        content_type = "text/markdown; charset=utf-8" if mode == "markdown" else "text/x-diff"
+        target = "<path-to-file>" if mode == "markdown" else "<path-to-patch.diff>"
+        curl = (
+            f"curl -fsS -X {method} '{url}' \\\n"
+            f"  -H 'Authorization: {auth}' \\\n"
+            f"  -H 'Content-Type: {content_type}' \\\n"
+            f"  --data-binary @{target}"
+        )
+        headers = {"Authorization": auth, "Content-Type": content_type}
+        if mode == "markdown":
+            note = (
+                "Single-use write capability baked into the Authorization "
+                "header; consumed on first success, expires at expires_at. "
+                "Fill <path-to-file> with the local UTF-8 markdown. A retried "
+                "409 (stale expected_version) does not burn it. No PAT and no "
+                "X-Workspace-Id."
+            )
+        else:
+            note = (
+                "Single-use patch capability for a STRICT unified diff. "
+                "Workflow: first GET .../raw (the matching get_* capability "
+                "tool) to capture X-Version and X-Body-SHA256, edit the file "
+                "locally, produce a unified diff (diff -u / git diff), then run "
+                "this. The base gate refuses to apply if the body drifted (409 "
+                "patch.stale, nothing mutates); a diff that does not apply is "
+                "422. Consumed on first success; expires at expires_at. No PAT "
+                "and no X-Workspace-Id."
+            )
+    out: dict[str, Any] = {
+        "endpoint": url,
+        "method": method,
+        "curl": curl,
+        "headers": headers,
+        "expires_at": expires_at,
+        "notes": note,
+    }
+    if max_bytes is not None:
+        out["max_bytes"] = max_bytes
+    return out
+
+
+# Single-id text blocks reachable via the generic *_text_block_capability
+# tools. Note parts live under a two-id path (/notes/{id}/parts/{id}) and
+# keep dedicated tools. Per kind: (collection, leaf segment, write method).
+_TEXT_BLOCK_ROUTES: dict[str, tuple[str, str, str]] = {
+    "task_description": ("tasks", "description", "PUT"),
+    "annotation": ("annotations", "body", "PATCH"),
+}
+
+
+def _text_block_segment(kind: str, resource_id: str) -> str:
+    route = _TEXT_BLOCK_ROUTES.get(kind)
+    if route is None:
+        raise ValueError(
+            "kind must be 'task_description' or 'annotation' "
+            "(note parts use the dedicated get/set/patch_note_part_body_capability tools)"
+        )
+    collection, leaf, _ = route
+    return f"{collection}/{resource_id}/{leaf}"
+
+
+@mcp.tool()
+async def upload_attachment_capability(
+    token: str,
+    org_id: str,
+    parent_kind: str,
+    parent_id: str,
+    ttl_seconds: int = 300,
+) -> dict[str, Any]:
+    """Mint ONE single-use capability token that UPLOADS a file to a note or
+    task with NO long-lived PAT and NO ``X-Workspace-Id`` (the org is baked
+    into the token), and return a ready multipart ``curl``. The symmetric
+    counterpart of ``download_attachment_capability``.
+
+    ``parent_kind`` is ``"task"`` or ``"note"``; ``parent_id`` its id. The
+    token is scoped to ``attachment:write`` on that parent and consumed on
+    the first successful upload; it expires in ``ttl_seconds`` (default
+    300). Backend-agnostic: the upload lands through the backend gateway on
+    the default ``pg`` store, so no S3 is needed and the file bytes never
+    ride a tool argument. If the agent DOES have the Flow CLI, prefer it:
+    there the credential never leaves the machine."""
+    from flow_core.config import get_settings
+    from flow_core.services import capability_tokens as cap_svc
+
+    kind = parent_kind.strip().lower()
+    if kind not in ("note", "task"):
+        raise ValueError("parent_kind must be 'note' or 'task'")
+    pid = uuid.UUID(parent_id)
+    resource_kind = cap_svc.RESOURCE_NOTE if kind == "note" else cap_svc.RESOURCE_TASK
+    async with _tenant(token, org_id) as (session, org, user):
+        grant = await cap_svc.mint(
+            session,
+            org_id=org,
+            actor_id=user,
+            action=cap_svc.ACTION_ATTACHMENT_WRITE,
+            resource_kind=resource_kind,
+            resource_id=pid,
+            ttl_seconds=ttl_seconds,
+        )
+    settings = get_settings()
+    base = settings.frontend_base_url.rstrip("/")
+    collection = "notes" if kind == "note" else "tasks"
+    url = f"{base}/api/{collection}/{pid}/attachments"
+    auth = f"Bearer {grant.raw}"
+    curl = (
+        f"curl -fsS -X POST '{url}' \\\n"
+        f"  -H 'Authorization: {auth}' \\\n"
+        f"  -F 'file=@<path-to-file>'"
+    )
+    return {
+        "endpoint": url,
+        "method": "POST",
+        "curl": curl,
+        "headers": {"Authorization": auth},
+        "max_bytes": settings.attachment_max_bytes,
+        "expires_at": grant.expires_at.isoformat(),
+        "notes": (
+            "multipart/form-data upload (field 'file'); the Authorization "
+            "header carries a single-use attachment:write capability scoped to "
+            "this " + kind + ", consumed on first success. No PAT and no "
+            "X-Workspace-Id. Fill <path-to-file> with the local path. "
+            "Backend-agnostic (works on the default pg store; no S3 needed). "
+            "The bytes never pass through MCP."
+        ),
+    }
+
+
+@mcp.tool()
+async def get_note_part_body_capability(
+    token: str,
+    org_id: str,
+    note_id: str,
+    part_id: str,
+    ttl_seconds: int = 300,
+) -> dict[str, Any]:
+    """Mint a multi-use ``note_part_body:read`` capability and return a
+    ``curl`` that downloads THIS part's markdown body to a file. ``-D -``
+    dumps the response headers so you capture ``X-Version`` +
+    ``X-Body-SHA256`` (the base-gate inputs a later
+    ``patch_note_part_body_capability`` needs). No PAT, no X-Workspace-Id;
+    not consumed; expires in ``ttl_seconds`` (default 300)."""
+    from flow_core.config import get_settings
+    from flow_core.services import capability_tokens as cap_svc
+
+    async with _tenant(token, org_id) as (session, org, user):
+        grant = await cap_svc.mint(
+            session,
+            org_id=org,
+            actor_id=user,
+            action=cap_svc.ACTION_NOTE_PART_BODY_READ,
+            resource_kind=cap_svc.RESOURCE_NOTE_PART,
+            resource_id=uuid.UUID(part_id),
+            ttl_seconds=ttl_seconds,
+        )
+    base = get_settings().frontend_base_url.rstrip("/")
+    url = f"{base}/api/notes/{note_id}/parts/{part_id}/body/raw"
+    return _capability_curl(
+        url=url,
+        method="GET",
+        raw_token=grant.raw,
+        mode="download",
+        expires_at=grant.expires_at.isoformat(),
+    )
+
+
+@mcp.tool()
+async def patch_note_part_body_capability(
+    token: str,
+    org_id: str,
+    note_id: str,
+    part_id: str,
+    expected_version: int,
+    base_sha256: str,
+    ttl_seconds: int = 300,
+) -> dict[str, Any]:
+    """Mint a single-use ``note_part_body:patch`` capability and return a
+    ``curl`` that applies a STRICT unified diff to THIS part's body. Get the
+    body first with ``get_note_part_body_capability`` to obtain
+    ``expected_version`` + ``base_sha256`` (the ``X-Version`` /
+    ``X-Body-SHA256`` headers). The base gate refuses to apply if the body
+    drifted (409, nothing mutates); a diff that does not apply cleanly is
+    422. Consumed on first success; expires in ``ttl_seconds``."""
+    from flow_core.config import get_settings
+    from flow_core.services import capability_tokens as cap_svc
+
+    async with _tenant(token, org_id) as (session, org, user):
+        grant = await cap_svc.mint(
+            session,
+            org_id=org,
+            actor_id=user,
+            action=cap_svc.ACTION_NOTE_PART_BODY_PATCH,
+            resource_kind=cap_svc.RESOURCE_NOTE_PART,
+            resource_id=uuid.UUID(part_id),
+            ttl_seconds=ttl_seconds,
+        )
+    settings = get_settings()
+    base = settings.frontend_base_url.rstrip("/")
+    url = (
+        f"{base}/api/notes/{note_id}/parts/{part_id}/body/patch"
+        f"?expected_version={expected_version}&base_sha256={base_sha256}"
+    )
+    return _capability_curl(
+        url=url,
+        method="POST",
+        raw_token=grant.raw,
+        mode="diff",
+        max_bytes=settings.note_patch_max_bytes,
+        expires_at=grant.expires_at.isoformat(),
+    )
+
+
+@mcp.tool()
+async def get_text_block_capability(
+    token: str,
+    org_id: str,
+    kind: str,
+    resource_id: str,
+    ttl_seconds: int = 300,
+) -> dict[str, Any]:
+    """Mint a multi-use ``<kind>:read`` capability for a task description
+    (``kind='task_description'``, ``resource_id`` = task id) or a comment
+    body (``kind='annotation'``, ``resource_id`` = annotation id), and return
+    a ``curl`` that downloads it to a file. ``-D -`` dumps headers so you
+    capture ``X-Version`` + ``X-Body-SHA256`` for a later patch. Note parts
+    use ``get_note_part_body_capability`` (two-id path). No PAT, no
+    X-Workspace-Id; not consumed."""
+    from flow_core.config import get_settings
+    from flow_core.services import capability_tokens as cap_svc
+
+    seg = _text_block_segment(kind, resource_id)
+    async with _tenant(token, org_id) as (session, org, user):
+        grant = await cap_svc.mint(
+            session,
+            org_id=org,
+            actor_id=user,
+            action=cap_svc.text_block_action(kind, "read"),
+            resource_kind=cap_svc.text_block_resource_kind(kind),
+            resource_id=uuid.UUID(resource_id),
+            ttl_seconds=ttl_seconds,
+        )
+    base = get_settings().frontend_base_url.rstrip("/")
+    url = f"{base}/api/{seg}/raw"
+    return _capability_curl(
+        url=url,
+        method="GET",
+        raw_token=grant.raw,
+        mode="download",
+        expires_at=grant.expires_at.isoformat(),
+    )
+
+
+@mcp.tool()
+async def set_text_block_capability(
+    token: str,
+    org_id: str,
+    kind: str,
+    resource_id: str,
+    expected_version: int,
+    ttl_seconds: int = 300,
+) -> dict[str, Any]:
+    """Mint a single-use ``<kind>:write`` capability for a task description
+    or comment body and return a ``curl`` that REPLACES it with a local file
+    (``--data-binary``). ``expected_version`` is the optimistic cursor (409
+    on mismatch). Consumed on first success. Note parts use
+    ``set_note_part_body_capability``."""
+    from flow_core.config import get_settings
+    from flow_core.services import capability_tokens as cap_svc
+
+    seg = _text_block_segment(kind, resource_id)
+    method = _TEXT_BLOCK_ROUTES[kind][2]
+    async with _tenant(token, org_id) as (session, org, user):
+        grant = await cap_svc.mint(
+            session,
+            org_id=org,
+            actor_id=user,
+            action=cap_svc.text_block_action(kind, "write"),
+            resource_kind=cap_svc.text_block_resource_kind(kind),
+            resource_id=uuid.UUID(resource_id),
+            ttl_seconds=ttl_seconds,
+        )
+    settings = get_settings()
+    base = settings.frontend_base_url.rstrip("/")
+    url = f"{base}/api/{seg}/stream?expected_version={expected_version}"
+    return _capability_curl(
+        url=url,
+        method=method,
+        raw_token=grant.raw,
+        mode="markdown",
+        max_bytes=settings.note_body_max_bytes,
+        expires_at=grant.expires_at.isoformat(),
+    )
+
+
+@mcp.tool()
+async def patch_text_block_capability(
+    token: str,
+    org_id: str,
+    kind: str,
+    resource_id: str,
+    expected_version: int,
+    base_sha256: str,
+    ttl_seconds: int = 300,
+) -> dict[str, Any]:
+    """Mint a single-use ``<kind>:patch`` capability for a task description
+    or comment body and return a ``curl`` that applies a STRICT unified diff
+    (``--data-binary``). Get the body first with ``get_text_block_capability``
+    to obtain ``expected_version`` + ``base_sha256``. 409 if the body
+    drifted, 422 if the diff does not apply, nothing mutates on failure.
+    Consumed on first success. Note parts use
+    ``patch_note_part_body_capability``."""
+    from flow_core.config import get_settings
+    from flow_core.services import capability_tokens as cap_svc
+
+    seg = _text_block_segment(kind, resource_id)
+    async with _tenant(token, org_id) as (session, org, user):
+        grant = await cap_svc.mint(
+            session,
+            org_id=org,
+            actor_id=user,
+            action=cap_svc.text_block_action(kind, "patch"),
+            resource_kind=cap_svc.text_block_resource_kind(kind),
+            resource_id=uuid.UUID(resource_id),
+            ttl_seconds=ttl_seconds,
+        )
+    settings = get_settings()
+    base = settings.frontend_base_url.rstrip("/")
+    url = f"{base}/api/{seg}/patch?expected_version={expected_version}&base_sha256={base_sha256}"
+    return _capability_curl(
+        url=url,
+        method="POST",
+        raw_token=grant.raw,
+        mode="diff",
+        max_bytes=settings.note_patch_max_bytes,
+        expires_at=grant.expires_at.isoformat(),
+    )
+
+
 @mcp.tool()
 async def add_comment_instructions(
     token: str,

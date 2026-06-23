@@ -6,10 +6,17 @@ import datetime
 import uuid
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response, status
 from sqlalchemy import select
 
-from flow_api.deps import TenantCtx, tenant_ctx
+from flow_api.deps import (
+    TenantCtx,
+    task_attachment_write_ctx,
+    task_description_patch_ctx,
+    task_description_read_ctx,
+    task_description_write_ctx,
+    tenant_ctx,
+)
 from flow_api.routers.annotations import annotation_out
 from flow_api.routers.attachments import att_out, read_capped, upload_file_field
 from flow_api.schemas import (
@@ -50,6 +57,8 @@ from flow_api.schemas import (
     TaskStateIn,
     VersionOut,
 )
+from flow_api.textstream import read_capped_text, read_patch_payload, text_block_headers
+from flow_core.config import get_settings
 from flow_core.models.identity import IdentityKind
 from flow_core.models.note import Note
 from flow_core.models.tag import Tag
@@ -58,6 +67,7 @@ from flow_core.models.task_checklist_item import TaskChecklistItem
 from flow_core.models.task_handoff import TaskHandoff
 from flow_core.models.workflow import WorkflowState
 from flow_core.services import attachments as att_svc
+from flow_core.services import capability_tokens as capability_tokens_svc
 from flow_core.services import coordination as coord_svc
 from flow_core.services import entity_revisions as rev_svc
 from flow_core.services import note_links as note_links_svc
@@ -578,6 +588,92 @@ async def prepend_description(
     return AppendOut(id=task_id, version=new_version, appended_chars=prepended)
 
 
+@router.get("/{task_id}/description/raw")
+async def download_task_description_raw(
+    task_id: uuid.UUID,
+    ctx: Annotated[TenantCtx, Depends(task_description_read_ctx, scope="function")],
+) -> Response:
+    """Token-free raw download of a task's ``description`` markdown. Returns
+    it as ``text/markdown`` with ``X-Version`` + ``X-Body-SHA256`` headers
+    (the base gate the patch route checks). Bearer or a multi-use
+    ``task_description:read`` capability for this task. Use the MCP
+    ``get_text_block_capability`` tool (kind=``task_description``) for the
+    matching ``curl -D-``."""
+    task = await svc.get_task(ctx.session, org_id=ctx.org_id, task_id=task_id)
+    body = task.description or ""
+    return Response(
+        content=body,
+        media_type="text/markdown; charset=utf-8",
+        headers=text_block_headers(version=task.version, body=body),
+    )
+
+
+@router.put("/{task_id}/description/stream", response_model=VersionOut)
+async def replace_task_description_stream(
+    task_id: uuid.UUID,
+    request: Request,
+    ctx: Annotated[TenantCtx, Depends(task_description_write_ctx, scope="function")],
+    expected_version: Annotated[int, Query(ge=1)],
+    edit_session_id: Annotated[str | None, Header(alias="X-Edit-Session-Id")] = None,
+) -> VersionOut:
+    """Token-free full-body replace of a task's ``description``: the new
+    markdown is the raw request body, size-capped (``note_body_max_bytes``)
+    and UTF-8. ``expected_version`` is the optimistic cursor (mismatch ->
+    409). An empty body clears the description. For incremental growth use
+    ``/description/append``. Bearer or a single-use
+    ``task_description:write`` capability, consumed on success. Use the MCP
+    ``set_text_block_capability`` tool (kind=``task_description``)."""
+    body_text = await read_capped_text(request, max_bytes=get_settings().note_body_max_bytes)
+    channel = "web" if edit_session_id else "api"
+    v = await svc.update_task(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        task_id=task_id,
+        expected_version=expected_version,
+        values={"description": body_text},
+        channel=channel,
+        edit_session_id=edit_session_id,
+    )
+    if ctx.capability_token_id is not None:
+        await capability_tokens_svc.consume(ctx.session, token_id=ctx.capability_token_id)
+    return VersionOut(id=task_id, version=v)
+
+
+@router.post("/{task_id}/description/patch", response_model=VersionOut)
+async def patch_task_description(
+    task_id: uuid.UUID,
+    request: Request,
+    ctx: Annotated[TenantCtx, Depends(task_description_patch_ctx, scope="function")],
+    expected_version: Annotated[int, Query(ge=1)],
+    base_sha256: Annotated[str, Query(min_length=64, max_length=64)],
+    edit_session_id: Annotated[str | None, Header(alias="X-Edit-Session-Id")] = None,
+) -> VersionOut:
+    """Apply a strict unified diff (the raw request body) to a task's
+    ``description``. Base gate (``expected_version`` + ``base_sha256`` from
+    the ``description/raw`` headers): 409 ``patch.stale`` on drift, 422 on a
+    diff that does not apply, nothing mutates on failure. Bearer or a
+    single-use ``task_description:patch`` capability, consumed on success.
+    Use the MCP ``patch_text_block_capability`` tool
+    (kind=``task_description``)."""
+    patch = await read_patch_payload(request)
+    channel = "web" if edit_session_id else "api"
+    v = await svc.apply_patch_to_description(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        task_id=task_id,
+        expected_version=expected_version,
+        patch=patch,
+        base_sha256=base_sha256,
+        channel=channel,
+        edit_session_id=edit_session_id,
+    )
+    if ctx.capability_token_id is not None:
+        await capability_tokens_svc.consume(ctx.session, token_id=ctx.capability_token_id)
+    return VersionOut(id=task_id, version=v)
+
+
 @router.post("/{task_id}/state", response_model=VersionOut)
 async def set_state(
     task_id: uuid.UUID,
@@ -872,12 +968,16 @@ async def remove_participant_endpoint(
 @router.post("/{task_id}/attachments", response_model=AttachmentOut)
 async def upload_task_attachment(
     task_id: uuid.UUID,
-    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+    ctx: Annotated[TenantCtx, Depends(task_attachment_write_ctx, scope="function")],
     file: upload_file_field,
 ) -> AttachmentOut:
     # Size enforced BEFORE storing (guarded read + service re-check),
     # against the workspace's effective cap. Member-level (notes/tasks
-    # are member-level), org-scoped via RLS.
+    # are member-level), org-scoped via RLS. Auth accepts a normal bearer
+    # or a single-use ``attachment:write`` capability scoped to this task
+    # (minted by the MCP ``upload_attachment_capability`` tool), consumed
+    # on success. Backend-agnostic via ``add_attachment`` (default ``pg``
+    # store, no S3 required).
     data = await read_capped(file, ctx)
     att = await att_svc.add_attachment(
         ctx.session,
@@ -888,6 +988,8 @@ async def upload_task_attachment(
         mime_type=file.content_type,
         data=data,
     )
+    if ctx.capability_token_id is not None:
+        await capability_tokens_svc.consume(ctx.session, token_id=ctx.capability_token_id)
     return att_out(att)
 
 

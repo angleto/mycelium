@@ -89,6 +89,14 @@ class Settings(BaseSettings):
     # NOT gated by this -- they replace, not extend).
     note_body_max_bytes: int = 1 * 1024 * 1024
 
+    # Cap on a POSTed unified-diff patch body (services/text_patch.py).
+    # A full-replace diff carries both the old and the new body, so it can
+    # legitimately exceed note_body_max_bytes; ~2x + headroom. The applier
+    # ALSO caps the resulting body at note_body_max_bytes, so this only
+    # bounds the transport size of the diff itself. Override via
+    # FLOW_NOTE_PATCH_MAX_BYTES.
+    note_patch_max_bytes: int = 2 * 1024 * 1024 + 64 * 1024
+
     # Pluggable attachment storage backend (mirrors the LLM/embedder
     # seam). "pg" (default) keeps today's behaviour exactly: bytes live
     # in the attachments.data BYTEA column, atomic with the row, no

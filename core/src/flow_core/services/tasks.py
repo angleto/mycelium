@@ -31,7 +31,7 @@ from flow_core.models.task_tag import TaskTag
 from flow_core.models.user import User
 from flow_core.models.workflow import WorkflowState
 from flow_core.services import annotations as _annotations
-from flow_core.services import audit, lifecycle, taxonomy
+from flow_core.services import audit, lifecycle, taxonomy, text_patch
 from flow_core.services import entity_revisions as _revisions
 from flow_core.services import identities as identities_svc
 from flow_core.services import task_search as _task_search
@@ -538,6 +538,42 @@ async def collaborator_counts(
         )
     ).all()
     return {tid: int(n) for tid, n in rows}
+
+
+async def apply_patch_to_description(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    task_id: uuid.UUID,
+    expected_version: int,
+    patch: str,
+    base_sha256: str,
+    channel: str = "api",
+    edit_session_id: str | None = None,
+) -> int:
+    """Apply a strict unified diff to a task's ``description`` and persist
+    via :func:`update_task`. Symmetric to
+    :func:`flow_core.services.note_parts.apply_patch_to_part`: sha256 base
+    gate (409 PATCH_STALE on drift) plus the version gate in
+    ``update_task``'s ``optimistic_update``, all in one transaction."""
+    task = await get_task(session, org_id=org_id, task_id=task_id)
+    new_body = text_patch.apply_patch_text(
+        task.description or "",
+        patch,
+        expected_sha256=base_sha256,
+        max_result_bytes=get_settings().note_body_max_bytes,
+    )
+    return await update_task(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        task_id=task_id,
+        expected_version=expected_version,
+        values={"description": new_body},
+        channel=channel,
+        edit_session_id=edit_session_id,
+    )
 
 
 async def update_task(

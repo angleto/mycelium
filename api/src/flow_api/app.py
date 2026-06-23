@@ -25,6 +25,7 @@ from flow_api.routers import (
     budgets,
     buildinfo,
     calendars,
+    capabilities,
     dependencies,
     dispatch,
     email,
@@ -66,6 +67,7 @@ from flow_core.errors import (
     LockedError,
     NotFoundError,
     QuotaExceededError,
+    UnprocessableError,
 )
 from flow_core.i18n import DEFAULT_LOCALE, render
 from flow_core.llm_ollama import OllamaLLM
@@ -79,6 +81,7 @@ _STATUS: dict[type[DomainError], int] = {
     NotFoundError: 404,
     ConflictError: 409,
     LockedError: 423,
+    UnprocessableError: 422,
     QuotaExceededError: 429,
     DomainError: 400,
 }
@@ -259,6 +262,7 @@ def create_app() -> FastAPI:
     app.include_router(notes.router)
     app.include_router(garden.router)
     app.include_router(attachments.router)
+    app.include_router(capabilities.router)
     app.include_router(invoices.router)
     app.include_router(received_invoices.router)
     app.include_router(notifications.router)
