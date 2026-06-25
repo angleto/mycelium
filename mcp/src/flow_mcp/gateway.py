@@ -158,7 +158,13 @@ _AUTH_PARAMS: tuple[str, ...] = ("token", "org_id")
 # ``search_tools``. Embeddings carry the real semantic match; tags are a
 # cheap, deterministic narrowing (first matching rule wins, else "misc").
 _DOMAIN_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
-    # Navigation/relations must come FIRST: link/relation/resolve tools
+    # Cross-cutting retrieval primitives. Listed FIRST and surfaced by
+    # ``search_tools`` regardless of any ``domain`` prefilter: a discovery
+    # goal scoped to e.g. domain='tasks' must still find ``search`` (the
+    # only tool exposing a task tag / free-text facet) and its siblings.
+    # Matches ``search`` / ``memory_search`` / ``graph_focus_context``.
+    ("search", ("search", "focus_context")),
+    # Navigation/relations must come next: link/relation/resolve tools
     # also contain "note"/"task" in their names, so they would otherwise
     # be swallowed by the notes/tasks rules below.
     (
@@ -374,11 +380,21 @@ async def search_tools(
     the entry point of the dynamic-toolset flow: search here, then call
     ``describe_tools`` for the schemas of the ones you want, then
     ``execute_tool`` to run them. ``domain`` optionally narrows to one
-    of: tasks, notes, navigation, time, calendar, memory, orchestration,
-    workflow, taxonomy, billing, email, misc.
+    of: tasks, notes, search, navigation, time, calendar, memory,
+    orchestration, workflow, taxonomy, billing, email, misc. The
+    cross-cutting search tools (``search`` / ``memory_search`` /
+    ``graph_focus_context``) are always returned regardless of ``domain``,
+    so a domain-scoped query still discovers them (ranking still decides
+    whether they make the cut).
     """
     cat = {m["name"]: m for m in _catalog()}
-    names = [n for n, m in cat.items() if domain is None or m["domain"] == domain]
+    # Cross-cutting search tools (domain 'search') bypass the prefilter so
+    # a domain-scoped discovery still reaches them; ranking then decides.
+    names = [
+        n
+        for n, m in cat.items()
+        if domain is None or m["domain"] == domain or m["domain"] == "search"
+    ]
     if embedder_available():
         await _ensure_index()
         index = _index or {}

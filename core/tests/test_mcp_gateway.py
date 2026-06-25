@@ -81,7 +81,47 @@ async def test_search_domain_filter() -> None:
         hits = await search_tools(query="anything", limit=50, domain="calendar")
     finally:
         set_embedder_override(None)
-    assert hits and all(h["domain"] == "calendar" for h in hits)
+    # The domain prefilter keeps only the requested domain, with one
+    # deliberate carve-out: the cross-cutting search tools (domain
+    # 'search') always survive so a domain-scoped discovery still finds
+    # them. Everything else must be 'calendar'.
+    assert hits and all(h["domain"] in {"calendar", "search"} for h in hits)
+
+
+async def test_cross_cutting_search_survives_domain_prefilter() -> None:
+    # Regression for the discovery defect that drove an agent to enumerate
+    # tasks instead of filtering: ``search`` (domain 'search') is the only
+    # tool exposing a task tag/free-text facet, and an agent scoping to
+    # domain='tasks' must still reach it. Lexical path (CI has no embedder)
+    # with a query that matches the search() docstring, so it ranks even
+    # without semantics; the point under test is that it is ELIGIBLE at all.
+    from flow_core.embedder import embedder_available
+
+    if embedder_available():
+        pytest.skip("real embedder present; lexical eligibility path not exercised")
+    hits = await search_tools(
+        query="unified search across tasks notes and memory blobs",
+        limit=8,
+        domain="tasks",
+    )
+    names = [h["name"] for h in hits]
+    assert "search" in names  # cross-cutting tool not hard-excluded by domain='tasks'
+
+
+async def test_list_tools_expose_service_filters_in_schema() -> None:
+    # list_tasks must forward the service/REST filters it used to drop
+    # (tag/parent/assignee/archived/deleted), and list_notes must expose the
+    # whole-corpus free-text ``q``. Schema-level so it needs no DB.
+    out = {d["name"]: d for d in await describe_tools(names=["list_tasks", "list_notes"])}
+    lt = set(out["list_tasks"]["inputSchema"]["properties"])
+    assert {
+        "tag_id",
+        "parent_task_id",
+        "assignee_id",
+        "include_archived",
+        "include_deleted",
+    } <= lt
+    assert "q" in out["list_notes"]["inputSchema"]["properties"]
 
 
 async def test_describe_strips_auth_and_keeps_real_params() -> None:

@@ -606,20 +606,36 @@ async def list_tasks(
     token: str,
     org_id: str,
     state_id: str | None = None,
+    tag_id: str | None = None,
+    parent_task_id: str | None = None,
     assignee_kind: str | None = None,
     assignee_handles: list[str] | None = None,
     owner_handles: list[str] | None = None,
+    assignee_id: str | None = None,
+    include_archived: bool = False,
+    include_deleted: bool = False,
     fields: list[str] | None = None,
     limit: int = 50,
 ) -> list[dict[str, Any]]:
-    """List tasks, optionally filtered by workflow state id. Rows are
-    ordered most-prioritary-first (Eisenhower priority, 1 = top), so the
-    default keeps the top tasks; raise ``limit`` to page further (default
-    50). ``fields`` opt-in keeps only the named columns (``id`` always
-    kept) for a lean picker; full per-task detail is on ``get_task``."""
-    # docs/adr/0028 Punto 4: identity-axis filters. ``assignee_kind``
-    # accepts ``user`` or ``ai_assistant``; ``assignee_handles`` /
-    # ``owner_handles`` are multi-select on the respective handles.
+    """List tasks by workflow state, tag, parent, or assignee/owner
+    identity, most-prioritary first (Eisenhower priority, 1 = top). All
+    filters are optional and ANDed; ``limit`` caps the rows (default 50).
+
+    This tool has NO free-text or date/due filter: for "everything
+    mentioning X" use ``search(kinds=['task'], q=..., tag_ids=[...])``, and
+    for a feasibility-ranked agenda of YOUR OWN tasks in a free window use
+    ``what_can_i_do_now``.
+
+    Filters: ``state_id`` (a workflow state); ``tag_id`` (a single
+    project/client/label tag); ``parent_task_id`` (direct children of a
+    task). ``assignee_kind`` (``user``/``ai_assistant``) and
+    ``assignee_handles`` match the PRIMARY assignee identity;
+    ``owner_handles`` match the owner; ``assignee_id`` matches collaborator
+    membership (docs/adr/0028: a user involved beyond the assignee).
+    ``include_archived`` / ``include_deleted`` widen past the default
+    live-only view. ``fields`` opt-in keeps only the named columns (``id``
+    always kept) for a lean picker; full per-task detail is on
+    ``get_task``."""
     from flow_core.models.identity import IdentityKind
 
     kind: IdentityKind | None = IdentityKind(assignee_kind) if assignee_kind else None
@@ -628,9 +644,15 @@ async def list_tasks(
             s,
             org_id=org,
             state_id=uuid.UUID(state_id) if state_id else None,
+            tag_id=uuid.UUID(tag_id) if tag_id else None,
+            parent_task_id=uuid.UUID(parent_task_id) if parent_task_id else None,
             assignee_kind=kind,
             assignee_handles=assignee_handles,
             owner_handles=owner_handles,
+            assignee_id=uuid.UUID(assignee_id) if assignee_id else None,
+            include_archived=include_archived,
+            include_deleted=include_deleted,
+            with_description=False,
         )
         if limit > 0:
             rows = rows[:limit]
@@ -3591,6 +3613,7 @@ async def list_notes(
     org_id: str,
     project_id: str | None = None,
     tag_id: str | None = None,
+    q: str | None = None,
     include_archived: bool = False,
     include_deleted: bool = False,
     include_transcript: bool = False,
@@ -3598,7 +3621,11 @@ async def list_notes(
     limit: int = 50,
 ) -> list[dict[str, Any]]:
     """List notes (newest first); for the @note picker. Optional
-    project/tag focus and archive/trash views. ``include_transcript``
+    project/tag focus and archive/trash views. ``q`` is a case-insensitive
+    free-text filter applied server-side over the WHOLE corpus (note title,
+    part bodies, part titles and tag names, ANDed) BEFORE ``limit``, so it
+    is a reliable lexical find rather than a re-rank of the newest page; for
+    semantic or cross-kind retrieval use ``search``. ``include_transcript``
     opt-in (default False) keeps picker payloads small; ``fields``
     keeps only the named columns (``id`` always kept); ``limit`` caps
     rows at the DB level (default 50; raise it to page further)."""
@@ -3608,6 +3635,7 @@ async def list_notes(
             org_id=org,
             project_id=uuid.UUID(project_id) if project_id else None,
             tag_id=uuid.UUID(tag_id) if tag_id else None,
+            q=q,
             include_archived=include_archived,
             include_deleted=include_deleted,
             limit=limit,
