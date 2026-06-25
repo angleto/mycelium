@@ -152,6 +152,12 @@ export const it: Catalog = {
     no: 'No',
     dashEmpty: '—',
     loading: 'Caricamento…',
+    changedElsewhere: 'Modificato altrove.',
+    changedElsewhereDirty:
+      'Modificato altrove. Ricaricando perderai le modifiche non salvate.',
+    reload: 'Ricarica',
+    reloadAnyway: 'Ricarica comunque',
+    dismiss: 'Ignora',
   },
   taskLinkKind: {
     subject: 'oggetto',

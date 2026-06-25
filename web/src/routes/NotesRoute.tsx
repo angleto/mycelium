@@ -20,6 +20,7 @@ import {
   type NotePartsEditorHandle,
 } from '../components/NotePartsEditor'
 import { RichEditor } from '../components/RichEditor'
+import { RefreshHint } from '../components/RefreshHint'
 import { MarkdownView } from '../components/Markdown'
 import { NoteListItem } from '../components/NoteListItem'
 import { TagPicker } from '../components/TagPicker'
@@ -35,6 +36,7 @@ import { ChecklistPanel } from '../components/ChecklistPanel'
 import { RevisionsPanel } from '../components/RevisionsPanel'
 import { useFocus } from '../lib/focus'
 import { useEditSession } from '../lib/useEditSession'
+import { useStaleWatch } from '../lib/useStaleWatch'
 import type { components } from '../api/schema'
 
 type Note = components['schemas']['NoteOut']
@@ -107,6 +109,13 @@ export function NotesRoute() {
   // row itself hasn't.
   const [partsDirty, setPartsDirty] = useState(false)
   const partsEditorRef = useRef<NotePartsEditorHandle>(null)
+  // Version signature of the open note's parts, lifted from the editor.
+  // A part-body patch (e.g. an MCP capability write) bumps the PART
+  // version, not the note row, so the focus-staleness probe compares
+  // this too. ``null`` = not loaded yet for the current note: skip the
+  // comparison to avoid a false positive in the gap right after opening
+  // or switching notes (the editor refetches and re-lifts the sig).
+  const knownPartsSig = useRef<string | null>(null)
   const savedSnap = useRef<{ title: string; text: string }>({
     title: '',
     text: '',
@@ -518,6 +527,63 @@ export function NotesRoute() {
     })
     if (data) setSel(data)
     await loadNotes()
+  }
+
+  // Out-of-band change detection: an MCP tool / CLI / another device can
+  // write to the open note while the modal shows a stale snapshot (the
+  // server bumps ``version`` on every write but never pushes). On tab
+  // focus we re-probe and, if the server is ahead, raise a
+  // non-destructive "changed elsewhere" banner instead of silently
+  // overwriting the editor. The known parts signature is reset on note
+  // switch so a signal from the previous note never bleeds over.
+  useEffect(() => {
+    knownPartsSig.current = null
+  }, [sel?.id])
+
+  // Stable so NotePartsEditor's lift effect doesn't re-run on every
+  // parent keystroke (it only writes a ref, but no need to churn it).
+  const liftPartsSig = useCallback((s: string) => {
+    knownPartsSig.current = s
+  }, [])
+
+  const noteStaleProbe = useCallback(async (): Promise<boolean> => {
+    if (!sel) return false
+    const { data, error } = await api.GET('/notes/{note_id}', {
+      params: { header: workspaceHeader(), path: { note_id: sel.id } },
+    })
+    if (error || !data) return false
+    // Note row: title / text / meta writes bump the note version.
+    if (data.version !== sel.version) return true
+    // Part bodies: a body/title patch (incl. the MCP capability route)
+    // bumps only the PART version, so the note-level check above misses
+    // it. Compare the lifted signature; skip until the parts have loaded
+    // for this note (``null``) to avoid a false positive on open.
+    const res = await authFetch(`/notes/${sel.id}/parts`)
+    if (!res.ok) return false
+    const parts = (await res.json()) as { id: string; version: number }[]
+    const sig = parts.map((p) => `${p.id}:${p.version}`).join(',')
+    return knownPartsSig.current !== null && sig !== knownPartsSig.current
+  }, [sel])
+
+  const { stale: noteStale, reset: resetNoteStale } = useStaleWatch({
+    enabled: !!sel && !creating && sel.kind !== 'conversation',
+    resetKey: sel?.id ?? '',
+    probe: noteStaleProbe,
+  })
+
+  // Reload the open note from server truth, discarding local drafts (the
+  // user accepted that when clicking Reload on the banner). ``openEdit``
+  // resets the note-row drafts + snapshot; ``discardAndReload`` clears
+  // the part drafts and refetches the parts.
+  async function reloadStaleNote() {
+    if (!sel) return
+    const { data } = await api.GET('/notes/{note_id}', {
+      params: { header: workspaceHeader(), path: { note_id: sel.id } },
+    })
+    if (data) await openEdit(data)
+    await loadNotes()
+    await partsEditorRef.current?.discardAndReload()
+    resetNoteStale()
   }
 
   // Link / unlink the task this note logs work against. task_id null
@@ -959,6 +1025,14 @@ export function NotesRoute() {
               </button>
             </div>
 
+            {!creating && sel && noteStale && (
+              <RefreshHint
+                dirty={anyDirty}
+                onReload={() => void reloadStaleNote()}
+                onDismiss={resetNoteStale}
+              />
+            )}
+
             {creating && (
               <div className="modal__body">
                 <div className="row">
@@ -1111,6 +1185,7 @@ export function NotesRoute() {
                   noteTitle={sel.title ?? eTitle ?? ''}
                   editSession={editSession}
                   onDirtyChange={setPartsDirty}
+                  onPartsSig={liftPartsSig}
                 />
                 <Attachments noteId={sel.id} />
                 <section className="note-checklist">

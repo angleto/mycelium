@@ -153,6 +153,12 @@ export const en = {
     no: 'No',
     dashEmpty: '—',
     loading: 'Loading…',
+    changedElsewhere: 'This was changed elsewhere.',
+    changedElsewhereDirty:
+      'Changed elsewhere. Reloading discards your unsaved edits.',
+    reload: 'Reload',
+    reloadAnyway: 'Reload anyway',
+    dismiss: 'Dismiss',
   },
   taskLinkKind: {
     subject: 'subject',

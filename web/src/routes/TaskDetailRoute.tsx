@@ -3,8 +3,10 @@ import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { api, authFetch, errMessage, workspaceHeader } from '../api/client'
 import { AnnotationsPanel } from '../components/AnnotationsPanel'
+import { RefreshHint } from '../components/RefreshHint'
 import { RichEditor, type AnnotationViewHandle } from '../components/RichEditor'
 import { toAnchors, useAnnotations } from '../lib/useAnnotations'
+import { useStaleWatch } from '../lib/useStaleWatch'
 import { AssigneePicker } from '../components/AssigneePicker'
 import { OwnerPicker } from '../components/OwnerPicker'
 import { ParticipantsSection } from '../components/ParticipantsSection'
@@ -32,6 +34,25 @@ type State = components['schemas']['StateOut']
 type Tag = components['schemas']['TagOut']
 type Dep = components['schemas']['DependencyOut']
 type Rel = components['schemas']['TaskRelationOut']
+
+// Stable signature of an annotation set: id + version + status +
+// soft-delete flag, sorted so member order never matters. Powers the
+// focus-staleness probe — out-of-band comments / suggestions (e.g. added
+// by an MCP tool) don't bump the task version, so the description
+// annotations are checked separately.
+function annoSig(
+  rows: {
+    id: string
+    version: number
+    status: string
+    deleted_at?: string | null
+  }[],
+): string {
+  return rows
+    .map((r) => `${r.id}:${r.version}:${r.status}:${r.deleted_at ? 1 : 0}`)
+    .sort()
+    .join(',')
+}
 
 // Task detail with optimistic concurrency: edits send expected_version;
 // a stale write yields 409 and we reload the canonical task.
@@ -544,6 +565,58 @@ export function TaskDetailRoute() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [title, description, task?.version])
 
+  // Out-of-band change detection: an MCP tool / CLI / another device can
+  // write to this task while the view shows a stale snapshot (the server
+  // bumps ``version`` on every write but never pushes). On tab focus we
+  // re-probe: the task ``version`` covers title / description / fields,
+  // and the description annotation set covers comments & suggestions
+  // added out of band (those don't bump the task version). A newer
+  // server state raises a non-destructive "changed elsewhere" banner; we
+  // never overwrite an in-progress edit.
+  const knownAnnoSig = useRef('')
+  useEffect(() => {
+    knownAnnoSig.current = annoSig(descAnnotations)
+  }, [descAnnotations])
+
+  const taskStaleProbe = useCallback(async (): Promise<boolean> => {
+    const { data, error } = await api.GET('/tasks/{task_id}', {
+      params: { header: workspaceHeader(), path: { task_id: id } },
+    })
+    if (error || !data) return false
+    if (latestVersion.current !== null && data.version !== latestVersion.current)
+      return true
+    const qs = new URLSearchParams({
+      doc_kind: 'task_description',
+      doc_id: id,
+      include_resolved: 'true',
+    })
+    const ares = await authFetch(`/annotations?${qs.toString()}`)
+    if (!ares.ok) return false
+    const rows = (await ares.json()) as {
+      id: string
+      version: number
+      status: string
+      deleted_at?: string | null
+    }[]
+    return annoSig(rows) !== knownAnnoSig.current
+  }, [id])
+
+  const { stale, reset: resetStale } = useStaleWatch({
+    enabled: !!task,
+    resetKey: id,
+    probe: taskStaleProbe,
+  })
+
+  // Reload from server truth, discarding local title/description drafts
+  // (the user accepted that when clicking Reload on the banner):
+  // ``reload`` -> ``apply`` rehydrates every field, and the annotations
+  // are refetched alongside.
+  async function reloadStale() {
+    await reload()
+    await reloadDescAnnotations()
+    resetStale()
+  }
+
   // Send only the changed axis: if the other axis was unset (NULL in
   // the DB) we must not silently push the local default. The backend
   // re-derives ``priority`` whenever both axes end up non-NULL after
@@ -857,6 +930,13 @@ export function TaskDetailRoute() {
 
   return (
     <section className="card">
+      {stale && (
+        <RefreshHint
+          dirty={dirty}
+          onReload={() => void reloadStale()}
+          onDismiss={resetStale}
+        />
+      )}
       <div className="taskdetail__top">
         <p className="hint">
           <Link to={`/tasks${tasksBackSearch}`}>{t('tasks.back')}</Link>

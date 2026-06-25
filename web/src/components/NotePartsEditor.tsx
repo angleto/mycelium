@@ -31,6 +31,11 @@ export interface NotePartsEditorHandle {
    * PATCH succeeded (used by the modal Save button to chain into
    * the note PATCH only on a clean parts save). */
   saveAllDirty: () => Promise<boolean>
+  /** Discard every in-progress draft and refetch from the server. The
+   * parent's "changed elsewhere → reload" action calls this so the
+   * editor truly reflects server truth; a plain reload() keeps local
+   * drafts, which would mask the out-of-band change. */
+  discardAndReload: () => Promise<void>
 }
 
 function firstNonEmptyLine(s: string): string {
@@ -61,11 +66,16 @@ interface Props {
   /** Called whenever the dirty-set of parts changes so the parent
    * modal can enable / disable its single Save button. */
   onDirtyChange?: (dirty: boolean) => void
+  /** Lift a cheap ``id:version`` signature of the parts up so the parent
+   * can detect an out-of-band part-body change on focus: a body / title
+   * patch (incl. the MCP capability route) bumps the PART version, not
+   * the note row, so a note-level version check alone would miss it. */
+  onPartsSig?: (sig: string) => void
 }
 
 export const NotePartsEditor = forwardRef<NotePartsEditorHandle, Props>(
   function NotePartsEditor(
-    { noteId, noteTitle, editSession, onDirtyChange },
+    { noteId, noteTitle, editSession, onDirtyChange, onPartsSig },
     ref,
   ) {
     const { t } = useTranslation()
@@ -134,6 +144,15 @@ export const NotePartsEditor = forwardRef<NotePartsEditorHandle, Props>(
       })
       onDirtyChange(anyDirty)
     }, [editingBody, editingTitle, parts, onDirtyChange])
+
+    // Lift the parts' version signature so the parent's focus-staleness
+    // probe can spot an out-of-band part edit (a body/title patch bumps
+    // only the PART version). Fires on load and on each autosave (which
+    // syncs ``version`` into ``parts``), never on a plain keystroke.
+    useEffect(() => {
+      if (!onPartsSig) return
+      onPartsSig(parts.map((p) => `${p.id}:${p.version}`).join(','))
+    }, [parts, onPartsSig])
 
     // ``ord``: when supplied, the new part lands at that index and
     // every part with ord ≥ value is shifted forward by one (the
@@ -429,8 +448,24 @@ export const NotePartsEditor = forwardRef<NotePartsEditorHandle, Props>(
           // (fresh fetch) the next time the note is opened.
           return allOk
         },
+        discardAndReload: async () => {
+          // Drop every in-progress draft and any pending autosave, then
+          // refetch: this is the "reload — changed elsewhere" path, so
+          // the user has chosen to discard local edits in favour of the
+          // out-of-band server state. Without clearing the drafts,
+          // ``draft = editingBody[p.id] ?? p.body`` would keep masking
+          // the change we just pulled.
+          const timers = autosaveTimers.current
+          for (const key of Object.keys(timers)) {
+            window.clearTimeout(timers[key])
+            delete timers[key]
+          }
+          setEditingBody({})
+          setEditingTitle({})
+          await reload()
+        },
       }),
-      [patchPart],
+      [patchPart, reload],
     )
 
     // Every part folded → the header button flips to "Expand all".
