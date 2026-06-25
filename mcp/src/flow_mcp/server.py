@@ -617,25 +617,14 @@ async def list_tasks(
     fields: list[str] | None = None,
     limit: int = 50,
 ) -> list[dict[str, Any]]:
-    """List tasks by workflow state, tag, parent, or assignee/owner
-    identity, most-prioritary first (Eisenhower priority, 1 = top). All
-    filters are optional and ANDed; ``limit`` caps the rows (default 50).
+    """List tasks by state, tag, parent, assignee or owner (no free-text/date filter).
 
-    This tool has NO free-text or date/due filter: for "everything
-    mentioning X" use ``search(kinds=['task'], q=..., tag_ids=[...])``, and
-    for a feasibility-ranked agenda of YOUR OWN tasks in a free window use
-    ``what_can_i_do_now``.
-
-    Filters: ``state_id`` (a workflow state); ``tag_id`` (a single
-    project/client/label tag); ``parent_task_id`` (direct children of a
-    task). ``assignee_kind`` (``user``/``ai_assistant``) and
-    ``assignee_handles`` match the PRIMARY assignee identity;
-    ``owner_handles`` match the owner; ``assignee_id`` matches collaborator
-    membership (docs/adr/0028: a user involved beyond the assignee).
-    ``include_archived`` / ``include_deleted`` widen past the default
-    live-only view. ``fields`` opt-in keeps only the named columns (``id``
-    always kept) for a lean picker; full per-task detail is on
-    ``get_task``."""
+    Use ``search(kinds=['task'])`` or ``what_can_i_do_now`` for those.
+    Filters ANDed; ``limit`` caps rows (default 50).
+    ``assignee_handles`` / ``owner_handles`` match identities,
+    ``assignee_id`` is collaborator membership;
+    ``include_archived`` / ``include_deleted`` widen the view.
+    ``fields`` keeps named columns; full detail on ``get_task``."""
     from flow_core.models.identity import IdentityKind
 
     kind: IdentityKind | None = IdentityKind(assignee_kind) if assignee_kind else None
