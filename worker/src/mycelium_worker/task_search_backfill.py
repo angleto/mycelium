@@ -26,7 +26,7 @@ from mycelium_core.models.membership import Membership, Role
 from mycelium_core.models.organization import Organization
 from mycelium_core.services import task_search
 
-_log = logging.getLogger("flow.worker.task_search")
+_log = logging.getLogger("mycelium.worker.task_search")
 
 
 async def _all_workspaces() -> list[uuid.UUID]:

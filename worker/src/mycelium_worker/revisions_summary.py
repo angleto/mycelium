@@ -33,7 +33,7 @@ from mycelium_core.models.organization import Organization
 from mycelium_core.services import entity_revisions as revisions_svc
 from mycelium_core.services.llm_resolver import MeteredLLM, resolve_provider
 
-_log = logging.getLogger("flow.worker.revisions_summary")
+_log = logging.getLogger("mycelium.worker.revisions_summary")
 
 _SYSTEM_PROMPT = (
     "You write short labels (4 to 10 words) summarizing an edit to a "

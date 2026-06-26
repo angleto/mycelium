@@ -26,7 +26,7 @@ from typing import TYPE_CHECKING, Protocol
 if TYPE_CHECKING:
     from mycelium_core.config import Settings
 
-logger = logging.getLogger("flow.mailer")
+logger = logging.getLogger("mycelium.mailer")
 
 
 @dataclass(frozen=True, slots=True)

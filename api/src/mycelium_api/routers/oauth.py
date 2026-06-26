@@ -55,7 +55,7 @@ from mycelium_core.db import admin_session
 from mycelium_core.services import agent_tokens as agent_tokens_svc
 from mycelium_core.services import oauth_codes as codes_svc
 
-logger = logging.getLogger("flow.oauth_shim")
+logger = logging.getLogger("mycelium.oauth_shim")
 
 # Two routers: the well-known ones live at the host root (RFC 8414 /
 # 9728 are explicit about the path); the authorize/token pair lives

@@ -1,7 +1,7 @@
 """Minimal Ollama HTTP client implementing the ``LLMProvider`` Protocol.
 
 Used by the worker's revision-summary sweep when ``MYCELIUM_OLLAMA_URL``
-is configured (in-cluster service ``flow-ollama:11434``); the same
+is configured (in-cluster service ``mycelium-ollama:11434``); the same
 provider can be reused by other call sites via
 ``ai_providers.set_llm_override``. CI keeps the stub
 ``ai_providers.LocalLLM`` (no network); production wires this class
@@ -22,7 +22,7 @@ import httpx
 
 from mycelium_core.ai_providers import LLMResult
 
-_log = logging.getLogger("flow.llm.ollama")
+_log = logging.getLogger("mycelium.llm.ollama")
 
 
 class OllamaLLM:

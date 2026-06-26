@@ -2,7 +2,7 @@
 
 Decoupled from the app Settings: the URL (sync, psycopg) is read
 directly from MYCELIUM_DATABASE_URL_SYNC, so migrations do not require the
-JWT secret. Migrations run as the owner role (`flow`), not as
+JWT secret. Migrations run as the owner role (`mycelium`), not as
 `mycelium_app` (see docs/adr/0015).
 """
 

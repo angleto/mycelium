@@ -66,7 +66,7 @@ from mycelium_core.models.user import User
 from mycelium_core.services import lookup as lookup_svc
 from mycelium_core.services import note_parts as parts_svc
 
-logger = logging.getLogger("flow.normalize_note_uuids")
+logger = logging.getLogger("mycelium.normalize_note_uuids")
 
 # A fenced code block delimiter (``` or ~~~) at line start.
 _FENCE_RE = re.compile(r"^\s*(?:```|~~~)")

@@ -34,7 +34,7 @@ from mycelium_core.models.attachment import Attachment
 from mycelium_core.models.membership import Membership, Role
 from mycelium_core.models.organization import Organization
 
-logger = logging.getLogger("flow.migrate_attachments")
+logger = logging.getLogger("mycelium.migrate_attachments")
 
 _DEFAULT_BATCH = 50
 

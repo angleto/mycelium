@@ -4,13 +4,15 @@ See ``models/agent_token.py`` and migration 0056 for the rationale.
 
 Raw token format
 ----------------
-``flow_at_<43 url-safe chars>``: a fixed ``flow_at_`` discriminator
-prefix that makes the type identifiable to the verifier without trying
-JWT decode first, followed by ``secrets.token_urlsafe(32)`` (256 bits
-of entropy, URL-safe alphabet, no padding).
+``mycelium_at_<43 url-safe chars>``: a fixed ``mycelium_at_``
+discriminator prefix that makes the type identifiable to the verifier
+without trying JWT decode first, followed by ``secrets.token_urlsafe(32)``
+(256 bits of entropy, URL-safe alphabet, no padding). Tokens minted
+before the Flow -> Mycelium rename carry the legacy ``flow_at_`` prefix
+and are still accepted on read (lookup is by hash).
 
-The stored ``prefix`` column is the first 16 characters of the raw
-value (``flow_at_`` + 8 chars of random material) -- enough to give a
+The stored ``prefix`` column is the first 20 characters of the raw
+value (``mycelium_at_`` + 8 chars of random material) -- enough to give a
 UI an unambiguous handle and short enough that it does not weaken the
 secret.
 

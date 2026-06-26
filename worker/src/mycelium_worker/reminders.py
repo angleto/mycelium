@@ -34,7 +34,7 @@ from mycelium_core.models.membership import Membership, Role
 from mycelium_core.models.organization import Organization
 from mycelium_core.services import notifications as notif_svc
 
-_log = logging.getLogger("flow.worker.reminders")
+_log = logging.getLogger("mycelium.worker.reminders")
 
 
 async def _all_workspaces() -> list[uuid.UUID]:

@@ -25,6 +25,7 @@ import { TaskTimer } from '../components/TaskTimer'
 import { formatHours } from '../lib/estimate'
 import { TASKS_LASTSEARCH_KEY } from '../lib/taskFilter'
 import { useEditSession } from '../lib/useEditSession'
+import { useMediaQuery, MOBILE_QUERY } from '../lib/useMediaQuery'
 import { pushRecent } from '../lib/recents'
 
 import type { components } from '../api/schema'
@@ -141,8 +142,6 @@ export function TaskDetailRoute() {
   const [rels, setRels] = useState<Rel[]>([])
   const [relQuery, setRelQuery] = useState('')
   const [relOpen, setRelOpen] = useState(false)
-  const [busy, setBusy] = useState(false)
-  const [msg, setMsg] = useState<string | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const [workNotes, setWorkNotes] = useState<
     { id: string; title: string | null }[]
@@ -170,6 +169,34 @@ export function TaskDetailRoute() {
       /* ignore */
     }
   }, [tabKey, activeTab])
+  // Unified "Connections" group: subtasks / dependencies / related /
+  // notes share one tabbed surface. Active tab remembered per task
+  // (mycelium.* localStorage namespace; brand rename Flow -> Mycelium).
+  const connKey = `mycelium.task.${id}.connTab`
+  const [connTab, setConnTab] = useState<
+    'subtasks' | 'deps' | 'related' | 'notes'
+  >(() => {
+    try {
+      const v = localStorage.getItem(connKey)
+      if (v === 'subtasks' || v === 'deps' || v === 'related' || v === 'notes')
+        return v
+    } catch {
+      /* private mode / quota */
+    }
+    return 'subtasks'
+  })
+  useEffect(() => {
+    try {
+      localStorage.setItem(connKey, connTab)
+    } catch {
+      /* ignore */
+    }
+  }, [connKey, connTab])
+  // Responsive: below the layout breakpoint the properties rail can't
+  // sit beside the content, so it becomes a collapsible panel (closed
+  // by default) above the body. Desktop renders it as a sticky rail.
+  const isMobile = useMediaQuery(MOBILE_QUERY)
+  const [propsOpen, setPropsOpen] = useState(false)
   // Feed the Cmd+K palette's "Recent" section. Write-only side effect:
   // it touches localStorage, never the render, so it cannot regress the
   // task view. Records once the task (and its title) have loaded.
@@ -335,32 +362,14 @@ export function TaskDetailRoute() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, apply])
 
-  async function onSave(e: FormEvent) {
+  // Form submit (Enter in the title input) flushes the pending text
+  // edit immediately rather than waiting for the 1s debounce. The
+  // autosave path (flushText -> autosave) already carries optimistic
+  // concurrency and edit-session coalescing, so there is no separate
+  // save PATCH here anymore — the explicit "Save" button is gone.
+  function onSave(e: FormEvent) {
     e.preventDefault()
-    if (!task) return
-    setBusy(true)
-    setMsg(null)
-    setErr(null)
-    const { error, response } = await api.PATCH('/tasks/{task_id}', {
-      params: { header: workspaceHeader(), path: { task_id: id } },
-      body: {
-        expected_version: task.version,
-        title,
-        description: description || null,
-      },
-    })
-    setBusy(false)
-    if (response.status === 409) {
-      setErr(t('tasks.conflict'))
-      await reload()
-      return
-    }
-    if (error) {
-      setErr(errMessage(error))
-      return
-    }
-    await reload()
-    setMsg(t('tasks.saved'))
+    flushText()
   }
 
   async function onNewChild() {
@@ -541,6 +550,42 @@ export function TaskDetailRoute() {
   // importance + a click on urgency 100ms apart resolve in order,
   // each seeing the version bump from the previous.
   const autosaveChain = useRef<Promise<void> | null>(null)
+  // Flush the pending title/description edit *now*, bypassing the 1s
+  // debounce. Centralises the diff so every flush path (debounce, blur,
+  // Enter, tab-hide, navigation/unmount, page unload) is identical.
+  // ``keepalive`` routes through a bare fetch so an in-flight PATCH
+  // survives the page being torn down (beforeunload / tab hidden);
+  // otherwise it goes through the serialized autosave chain.
+  function flushText(keepalive = false) {
+    const prev = lastSentText.current
+    if (!prev || !task) return
+    const curDescr = description ?? ''
+    const patch: Record<string, unknown> = {}
+    if (title !== prev.title) patch.title = title
+    if (curDescr !== prev.description) patch.description = curDescr || null
+    if (Object.keys(patch).length === 0) return
+    lastSentText.current = { title, description: curDescr }
+    if (keepalive) {
+      const v = latestVersion.current ?? task.version
+      const sessionId = editSession.current() ?? editSession.touch()
+      void authFetch(`/tasks/${id}`, {
+        method: 'PATCH',
+        keepalive: true,
+        headers: {
+          'content-type': 'application/json',
+          'X-Edit-Session-Id': sessionId,
+        },
+        body: JSON.stringify({ expected_version: v, ...patch }),
+      })
+    } else {
+      void autosave(patch)
+    }
+  }
+  // Keep a ref to the latest ``flushText`` closure so the mount-once
+  // listeners below always flush the current draft, not a stale one.
+  const flushRef = useRef(flushText)
+  flushRef.current = flushText
+
   useEffect(() => {
     if (!task) return
     if (lastSentText.current === null) {
@@ -553,17 +598,30 @@ export function TaskDetailRoute() {
     const prev = lastSentText.current
     const curDescr = description ?? ''
     if (prev.title === title && prev.description === curDescr) return
-    const handle = window.setTimeout(() => {
-      const patch: Record<string, unknown> = {}
-      if (title !== prev.title) patch.title = title
-      if (curDescr !== prev.description) patch.description = curDescr || null
-      if (Object.keys(patch).length === 0) return
-      lastSentText.current = { title, description: curDescr }
-      void autosave(patch)
-    }, 1000)
+    const handle = window.setTimeout(() => flushText(), 1000)
     return () => window.clearTimeout(handle)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [title, description, task?.version])
+
+  // Data-loss guard. The debounced flush above is cancelled on unmount
+  // (its cleanup clears the timer), so an edit made <1s before leaving
+  // would otherwise be dropped — the failure the manual Save button was
+  // standing in for. Flush on tab-hide and page unload (keepalive, so
+  // the PATCH outlives a closing page) and on unmount = SPA navigation.
+  useEffect(() => {
+    const onVis = () => {
+      if (document.visibilityState === 'hidden') flushRef.current(true)
+    }
+    const onUnload = () => flushRef.current(true)
+    document.addEventListener('visibilitychange', onVis)
+    window.addEventListener('beforeunload', onUnload)
+    return () => {
+      document.removeEventListener('visibilitychange', onVis)
+      window.removeEventListener('beforeunload', onUnload)
+      flushRef.current()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // Out-of-band change detection: an MCP tool / CLI / another device can
   // write to this task while the view shows a stale snapshot (the server
@@ -929,7 +987,7 @@ export function TaskDetailRoute() {
     title !== task.title || description !== (task.description ?? '')
 
   return (
-    <section className="card">
+    <section className="card card--wide taskdetail">
       {stale && (
         <RefreshHint
           dirty={dirty}
@@ -937,19 +995,21 @@ export function TaskDetailRoute() {
           onDismiss={resetStale}
         />
       )}
-      <div className="taskdetail__top">
-        <p className="hint">
+      <header className="taskdetail__header">
+        <p className="hint taskdetail__back">
           <Link to={`/tasks${tasksBackSearch}`}>{t('tasks.back')}</Link>
         </p>
-        {/* State select sits immediately left of the timer: the two
-            most-used actions on this surface (advance the state,
-            start/stop the clock) are now adjacent in the same top row
-            instead of buried below the form. Server-authoritative
-            timer stays in sync with the work-notes timer below. The
-            visible "State" caption is dropped — the dropdown's options
-            (the state names themselves) already identify the control,
-            so the aria-label carries the semantic for screen readers. */}
-        <div className="taskdetail__topright">
+        {/* The two most-used controls (advance the state, start/stop the
+            clock) plus the autosave status live in the header so they
+            stay visible on every breakpoint — never behind the mobile
+            properties accordion. The structural actions (new child,
+            archive, delete) sit here too, no longer buried at the bottom
+            of the form. The "State" caption is dropped; the options name
+            the control and the aria-label carries it for screen readers. */}
+        <div className="taskdetail__headeractions">
+          <span className="taskdetail__savestate hint" aria-live="polite">
+            {dirty ? t('tasks.unsaved') : t('tasks.saved')}
+          </span>
           <select
             aria-label={t('tasks.state')}
             value={stateId}
@@ -962,8 +1022,31 @@ export function TaskDetailRoute() {
             ))}
           </select>
           <TaskTimer taskId={id} />
+          <span className="taskdetail__headersep" aria-hidden="true" />
+          <button
+            type="button"
+            className="btn--sm"
+            onClick={() => void onNewChild()}
+            title={t('tasks.newChildHint')}
+          >
+            {t('tasks.newChild')}
+          </button>
+          <button
+            type="button"
+            className="btn--ghost btn--sm"
+            onClick={() => void onArchive()}
+          >
+            {t('tasks.archive')}
+          </button>
+          <button
+            type="button"
+            className="btn--danger btn--sm"
+            onClick={() => void onDelete()}
+          >
+            {t('tasks.delete')}
+          </button>
         </div>
-      </div>
+      </header>
       {task.deleted_at != null && (
         <p className="banner">
           {t('trash.deleted')}
@@ -981,7 +1064,7 @@ export function TaskDetailRoute() {
         </p>
       )}
       {task.assignee_kind ? (
-        <p>
+        <p className="taskdetail__badges">
           <IdentityBadge
             kind={task.assignee_kind}
             handle={task.assignee_handle ?? null}
@@ -989,7 +1072,7 @@ export function TaskDetailRoute() {
         </p>
       ) : task.created_by_kind === 'ai_assistant' ||
         task.created_by_kind === 'mcp_token' ? (
-        <p>
+        <p className="taskdetail__badges">
           <IdentityBadge
             kind={task.created_by_kind}
             handle={task.created_by_handle ?? null}
@@ -1001,21 +1084,29 @@ export function TaskDetailRoute() {
           />
         </p>
       ) : task.executor_kind === 'llm_agent' ? (
-        <p>
+        <p className="taskdetail__badges">
           <span className="aibadge" title={t('tasks.aiTitle')}>
             {t('tasks.aiBadge')}
           </span>
         </p>
       ) : null}
-      <form onSubmit={(e) => void onSave(e)}>
-        <label>
+      {/* Title spans full width above the two-pane grid (issue-tracker
+          layout). Its own <form> keeps Enter-to-flush; onBlur flushes
+          too, so the title is never lost on a quick exit. */}
+      <form className="taskdetail__titleform" onSubmit={(e) => void onSave(e)}>
+        <label className="taskdetail__titlelabel">
           {t('tasks.newTitle')}
           <input
             required
+            className="taskdetail__title"
             value={title}
             onChange={(e) => setTitle(e.target.value)}
+            onBlur={() => flushText()}
           />
         </label>
+      </form>
+      <div className="taskdetail__grid">
+        <main className="taskdetail__main">
         <div className="field taskdetail__body">
           {/* Two tabs side by side: markdown body and structured checklist.
               Both fields live on every task; the user picks what to use.

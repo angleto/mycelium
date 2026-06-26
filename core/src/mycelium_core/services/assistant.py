@@ -57,7 +57,7 @@ from mycelium_core.services import tasks as tasks_svc
 from mycelium_core.services import workflow as workflow_svc
 from mycelium_core.telegram_client import get_telegram_api
 
-logger = logging.getLogger("flow.assistant")
+logger = logging.getLogger("mycelium.assistant")
 
 # Cap on conversation turns kept per chat (role+text pairs). ~6 exchanges
 # of context is enough for follow-ups without unbounded prompt growth.

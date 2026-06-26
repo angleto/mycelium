@@ -41,7 +41,7 @@ from mycelium_core.services import telegram_link as svc
 from mycelium_core.services.notifications_telegram import disable_pref_on_unlink
 from mycelium_core.telegram_client import get_telegram_api
 
-logger = logging.getLogger("flow.telegram")
+logger = logging.getLogger("mycelium.telegram")
 
 router = APIRouter(prefix="/telegram", tags=["telegram"])
 

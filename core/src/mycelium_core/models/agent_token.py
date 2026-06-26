@@ -38,7 +38,7 @@ class AgentToken(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, Base
     )
     # Human-readable label ("Claude Desktop", "Cron uploader", ...).
     name: Mapped[str] = mapped_column(String(120), nullable=False)
-    # First chars of the raw value (e.g. ``flow_at_AbCdEfGh``); not a
+    # First chars of the raw value (e.g. ``mycelium_at_AbCdEfGh``); not a
     # secret -- shown in the UI so an operator can identify which
     # rotation of a long-lived credential is which.
     prefix: Mapped[str] = mapped_column(String(20), nullable=False)

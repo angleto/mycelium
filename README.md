@@ -78,7 +78,7 @@ Three commitments fall out of this:
   and an inbound (passive) router that ingests received invoices.
 - **MCP server** (100+ tools) mirroring the API for agent control.
 - **Keyboard-first CLI + Neovim plugin.** `brew install
-  angleto/mycelium/mycelium-cli` for the terminal client (`mycelium today`, `flow
+  angleto/mycelium/mycelium-cli` for the terminal client (`mycelium today`, `mycelium
   task add`, `mycelium timer start`, `mycelium note voice`, …) and
   [`nvim/mycelium-nvim`](nvim/mycelium-nvim/README.md) for the in-editor
   surface. Both shell out to the same REST API; see

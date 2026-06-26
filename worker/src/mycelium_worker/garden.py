@@ -40,7 +40,7 @@ from mycelium_core.services import (
     note_links,
 )
 
-_log = logging.getLogger("flow.worker.garden")
+_log = logging.getLogger("mycelium.worker.garden")
 
 
 async def _all_workspaces() -> list[uuid.UUID]:
