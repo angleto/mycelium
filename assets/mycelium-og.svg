@@ -17,8 +17,8 @@
     <path d="M940 110 C960 220 920 330 960 470"/>
   </g>
 
-  <!-- Mark: mycelial network badge, 12x from the 32-unit grid -->
-  <g transform="translate(150 123) scale(12)">
+  <!-- Mark: mycelial network badge, 11x from the 32-unit grid -->
+  <g transform="translate(120 139) scale(11)">
     <rect width="32" height="32" rx="7" fill="#4a6b3e"/>
     <g fill="none" stroke="#fdfcf7" stroke-width="1" stroke-linecap="round">
       <path d="M16 16.5 C13.5 14.5 12 12 11 8.5"/>
@@ -44,6 +44,6 @@
   </g>
 
   <!-- Tagline (no wordmark) -->
-  <text x="600" y="300" font-family="Georgia, 'Iowan Old Style', ui-serif, serif" font-size="72" font-weight="600" fill="#f0eee5" letter-spacing="-1.5">the forest of memory</text>
-  <text x="600" y="372" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="28" fill="#a3aba0" letter-spacing="0.3">notes • tasks • time • garden</text>
+  <text x="516" y="300" font-family="Georgia, 'Iowan Old Style', ui-serif, serif" font-size="54" font-weight="600" fill="#f0eee5" letter-spacing="-1">the forest of memory</text>
+  <text x="518" y="348" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="26" fill="#a3aba0" letter-spacing="0.3">notes • tasks • time • garden</text>
 </svg>
