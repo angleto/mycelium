@@ -23,7 +23,7 @@ brew install angleto/mycelium/mycelium-cli
 
 | Formula | Source | Notes |
 | --- | --- | --- |
-| `Formula/mycelium-cli.rb` | `cli/` (monorepo) | **Template**. Installs the `flow` binary in an isolated Python venv under `libexec`. Requires `rust` as a build-only dep (for `pydantic-core`). |
+| `Formula/mycelium-cli.rb` | `cli/` (monorepo) | **Template**. Installs the `mycelium` binary in an isolated Python venv under `libexec`. Requires `rust` as a build-only dep (for `pydantic-core`). |
 | `bin/render-formula` | — | Resolves the template against a concrete `v*` tag (downloads the tarball, fills in `__TAG__` + `__SHA256__`). |
 
 ## Versioning
@@ -93,7 +93,7 @@ Recent `setuptools` (>=81) dropped `pkg_resources`, so pin it:
 ```sh
 uv venv /tmp/poet-env --python 3.12
 VIRTUAL_ENV=/tmp/poet-env uv pip install \
-  homebrew-pypi-poet 'setuptools<81' /path/to/flow/cli
+  homebrew-pypi-poet 'setuptools<81' /path/to/mycelium/cli
 /tmp/poet-env/bin/poet --resources typer \
   --also rich --also httpx --also platformdirs \
   --also tomli-w --also pydantic > /tmp/mycelium-cli-resources.rb

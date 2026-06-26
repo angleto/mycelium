@@ -26,7 +26,7 @@ import httpx
 
 from mycelium_core.config import get_settings
 
-logger = logging.getLogger("flow.telegram")
+logger = logging.getLogger("mycelium.telegram")
 
 
 @dataclass(frozen=True, slots=True)

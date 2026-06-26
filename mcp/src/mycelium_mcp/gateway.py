@@ -48,7 +48,7 @@ from mycelium_core.services import billing
 from mycelium_mcp.server import _PRINCIPAL
 from mycelium_mcp.server import mcp as _registry
 
-_log = logging.getLogger("flow.mcp.gateway")
+_log = logging.getLogger("mycelium.mcp.gateway")
 
 gateway: FastMCP = FastMCP("mycelium")
 

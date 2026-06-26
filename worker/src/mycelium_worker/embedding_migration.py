@@ -24,7 +24,7 @@ from mycelium_core.models.organization import Organization
 from mycelium_core.services import autonomous_budget
 from mycelium_core.services import embedding_migration as svc
 
-_log = logging.getLogger("flow.worker.embedding_migration")
+_log = logging.getLogger("mycelium.worker.embedding_migration")
 
 
 async def _all_workspaces() -> list[uuid.UUID]:

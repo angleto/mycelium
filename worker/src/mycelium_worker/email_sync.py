@@ -47,7 +47,7 @@ from mycelium_core.models.membership import Membership, Role
 from mycelium_core.models.organization import Organization
 from mycelium_core.services import email as email_svc
 
-_log = logging.getLogger("flow.worker.email_sync")
+_log = logging.getLogger("mycelium.worker.email_sync")
 
 
 async def _all_workspaces() -> list[uuid.UUID]:

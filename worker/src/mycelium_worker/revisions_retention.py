@@ -31,7 +31,7 @@ from mycelium_core.models.membership import Membership, Role
 from mycelium_core.models.organization import Organization
 from mycelium_core.services import entity_revisions as revisions_svc
 
-_log = logging.getLogger("flow.worker.revisions_retention")
+_log = logging.getLogger("mycelium.worker.revisions_retention")
 
 
 async def _all_workspaces() -> list[uuid.UUID]:

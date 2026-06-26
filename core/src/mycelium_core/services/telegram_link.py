@@ -43,7 +43,7 @@ from mycelium_core.services import notes as notes_svc
 from mycelium_core.services import tasks as tasks_svc
 from mycelium_core.telegram_client import get_telegram_api
 
-logger = logging.getLogger("flow.telegram")
+logger = logging.getLogger("mycelium.telegram")
 
 # Single-use deep-link code lifetime. Short on purpose: the code is
 # the only authentication factor in the linking handshake -- whoever

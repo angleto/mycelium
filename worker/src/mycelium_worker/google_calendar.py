@@ -27,7 +27,7 @@ from mycelium_core.models.google_calendar import (
 )
 from mycelium_core.services import google_calendar as gcal_svc
 
-_log = logging.getLogger("flow.worker.google_calendar")
+_log = logging.getLogger("mycelium.worker.google_calendar")
 
 
 async def _active_subscriptions() -> list[tuple[uuid.UUID, uuid.UUID, uuid.UUID]]:

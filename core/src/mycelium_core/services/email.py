@@ -44,7 +44,7 @@ from mycelium_core.services import memory as memory_svc
 from mycelium_core.services import tasks as tasks_svc
 from mycelium_core.services.rbac import require_role
 
-_log = logging.getLogger("flow.email")
+_log = logging.getLogger("mycelium.email")
 
 _ACCOUNT_UPDATABLE = frozenset(
     {

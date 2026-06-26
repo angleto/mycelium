@@ -15,7 +15,7 @@ import logging
 from mycelium_core.config import get_settings
 from mycelium_core.services import assistant as assistant_svc
 
-_log = logging.getLogger("flow.worker.assistant")
+_log = logging.getLogger("mycelium.worker.assistant")
 
 
 async def run_once() -> int:

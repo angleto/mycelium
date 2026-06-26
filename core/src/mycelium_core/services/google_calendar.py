@@ -36,7 +36,7 @@ from mycelium_core.services import workflow as wf_svc
 from mycelium_core.services.rbac import require_role
 
 _EXTERNAL_PROVIDER = "google"
-_log = logging.getLogger("flow.google_calendar")
+_log = logging.getLogger("mycelium.google_calendar")
 
 
 @dataclass(frozen=True)

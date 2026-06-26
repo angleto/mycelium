@@ -7,7 +7,7 @@ Two token kinds share the verifier surface (v1.1 onwards):
 - **JWT** (default): minted by ``/auth/login`` / ``/auth/signup`` etc.
   Short-lived (``jwt_ttl_seconds``). ``decode_token`` returns its
   claims dict and is the only function the SPA bearer path needs.
-- **Agent token**: a long-lived bearer credential (``flow_at_...``)
+- **Agent token**: a long-lived bearer credential (``mycelium_at_...``)
   for MCP / external automation. Stored as ``sha256`` only; verified
   by a DB lookup. The async helper ``decode_token_async`` accepts
   *either* kind and returns a claims dict shaped like the JWT one
@@ -80,7 +80,7 @@ async def decode_token_async(
     *,
     session: AsyncSession | None = None,
 ) -> dict[str, Any]:
-    """Decode either a session JWT or an agent token (``flow_at_...``).
+    """Decode either a session JWT or an agent token (``mycelium_at_...``).
 
     Branch on the cheap discriminator prefix BEFORE attempting JWT
     decode, so a valid agent token never pays the cost of a failed

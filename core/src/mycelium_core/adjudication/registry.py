@@ -112,7 +112,7 @@ class StrategyRegistry:
         """
         if self._entry_points_loaded and not force:
             return
-        eps = importlib.metadata.entry_points(group="flow.adjudication.strategies")
+        eps = importlib.metadata.entry_points(group="mycelium.adjudication.strategies")
         for ep in eps:
             obj = ep.load()
             strategy = obj() if callable(obj) else obj

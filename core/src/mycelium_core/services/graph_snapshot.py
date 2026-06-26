@@ -36,7 +36,7 @@ from mycelium_core.models.task_relation import TaskRelation
 from mycelium_core.models.task_tag import TaskTag
 from mycelium_core.services import graph as graph_svc
 
-_log = logging.getLogger("flow.graph_snapshot")
+_log = logging.getLogger("mycelium.graph_snapshot")
 
 
 async def graph_signature(

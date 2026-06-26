@@ -48,7 +48,7 @@ async def current_claims(
     token: Annotated[str, Depends(_bearer_token)],
 ) -> dict[str, Any]:
     """Decoded bearer claims. Accepts both session JWTs (SPA / login
-    flow) and agent tokens (``flow_at_...``) used by the CLI / MCP.
+    flow) and agent tokens (``mycelium_at_...``) used by the CLI / MCP.
 
     For JWTs the dict carries ``sub``, ``jti``, ``iat``, ``exp``.
     For agent tokens ``sub``, ``org_id``, ``scope``, ``typ='agent'``.

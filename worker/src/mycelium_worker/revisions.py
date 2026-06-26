@@ -31,7 +31,7 @@ from mycelium_core.models.membership import Membership, Role
 from mycelium_core.models.organization import Organization
 from mycelium_core.services import entity_revisions as revisions_svc
 
-_log = logging.getLogger("flow.worker.revisions")
+_log = logging.getLogger("mycelium.worker.revisions")
 
 # Tick faster than the safety-net cutoff so an abandoned window
 # closes within roughly one extra cutoff. The cutoff is 60s; a 30s

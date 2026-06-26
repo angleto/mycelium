@@ -42,7 +42,7 @@ from mycelium_core.models.organization import Organization
 from mycelium_core.services import dispatch_loop
 from mycelium_core.services.dispatch_loop import resolve_policy
 
-_log = logging.getLogger("flow.worker.dispatch")
+_log = logging.getLogger("mycelium.worker.dispatch")
 
 
 async def _enabled_workspaces() -> list[uuid.UUID]:

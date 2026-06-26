@@ -70,17 +70,17 @@ image is built alongside backend / worker / frontend in CI.
 
 `mycelium-cli` is now a first-class workspace member with editing surface,
 MFA enrolment, browse / search / advisory commands, time report and a
-dynamic completion. `flow.nvim` ships Telescope pickers, `:Mycelium`
+dynamic completion. `mycelium-nvim` ships Telescope pickers, `:Mycelium`
 commands, writable task / note buffers (`PATCH` on `:w`), live timer
 and refreshing pickers. Both surfaces shell out to the same REST API.
 
-`mycelium-cli` and `flow.nvim` are **tagged in lockstep with Mycelium itself**
+`mycelium-cli` and `mycelium-nvim` are **tagged in lockstep with Mycelium itself**
 (currently `v2.0.x`): a tag push on this repo mirrors the CLI to the
 Homebrew tap and re-tags the nvim plugin mirror, so `brew upgrade
-mycelium-cli` and `:Lazy update flow.nvim` always land on a version that
+mycelium-cli` and `:Lazy update mycelium-nvim` always land on a version that
 matches the running backend.
 
-Defaults updated: `flow login` targets `https://mycelium.xeno.garden/api`
+Defaults updated: `mycelium login` targets `https://mycelium.xeno.garden/api`
 out of the box (no more bare hostname or `localhost:8000`).
 
 ## Governance

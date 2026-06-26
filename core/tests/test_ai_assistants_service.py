@@ -32,8 +32,8 @@ async def test_create_assistant_returns_secret_once_and_persists_metadata() -> N
     org, user = await _org()
     async with tenant_session(str(org), str(user)) as s:
         res = await svc.create_assistant(s, org_id=org, actor_id=user, label="Claude")
-        assert res.raw_secret.startswith("flow_at_")
-        assert res.token_prefix.startswith("flow_at_")
+        assert res.raw_secret.startswith("mycelium_at_")
+        assert res.token_prefix.startswith("mycelium_at_")
         assert res.assistant.label == "Claude"
         # Default scope = everything except 'danger'.
         assert set(res.assistant.scope_list()) == set(DEFAULT_SCOPES)

@@ -37,7 +37,7 @@ from mycelium_core.models.notification import (
 from mycelium_core.notification_channel import NotificationSender
 from mycelium_core.telegram_client import TelegramApi, get_telegram_api
 
-logger = logging.getLogger("flow.telegram")
+logger = logging.getLogger("mycelium.telegram")
 
 
 class TelegramNotificationSender:

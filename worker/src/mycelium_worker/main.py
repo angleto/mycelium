@@ -108,7 +108,7 @@ def main() -> None:
         ollama_url = settings.ollama_url
         open_model = settings.open_model
         set_llm_override(lambda: OllamaLLM(base_url=ollama_url, model=open_model))
-    logging.getLogger("flow.worker").info(
+    logging.getLogger("mycelium.worker").info(
         "worker started (env=%s); jobs: dispatch-loop, google-calendar-sync, "
         "email-sync, telegram-assistant; garden-loop=%s",
         settings.env,

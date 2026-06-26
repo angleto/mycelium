@@ -5,7 +5,7 @@ the REST API** (no business logic):
 
 | Surface | Source | Install |
 | --- | --- | --- |
-| `flow` CLI | [`cli/`](../cli/README.md) | `brew install angleto/mycelium/mycelium-cli` |
+| `mycelium` CLI | [`cli/`](../cli/README.md) | `brew install angleto/mycelium/mycelium-cli` |
 | `mycelium-nvim` plugin | [`nvim/mycelium-nvim/`](../nvim/mycelium-nvim/README.md) | `lazy.nvim` block, see plugin README |
 
 ## Why a CLI
@@ -23,7 +23,7 @@ the REST API** (no business logic):
   token via `POST /agent-tokens` after a normal email/password login,
   then uses it like any other client.
 - **No client-side i18n catalog.** The CLI follows
-  [flow-english-i18n-rule](../README.md#i18n): user-facing strings live
+  [mycelium-english-i18n-rule](../README.md#i18n): user-facing strings live
   in English; server errors surface their MessageCode + message
   verbatim. The Neovim plugin renders strings from the CLI's `--json`
   output, so they inherit the same policy.
