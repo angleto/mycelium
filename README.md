@@ -31,6 +31,19 @@ configurable workflows, and Italian electronic invoicing (SDI). Every
 surface is also exposed over **MCP**, so an AI agent can drive the whole
 system exactly like the web UI.
 
+## A look inside
+
+<table>
+<tr>
+<td width="50%"><img src="assets/screenshots/garden.png" alt="Garden — memory decomposition" /><br/><sub><b>Garden</b> — finished thoughts decompose through Nursery &rarr; Garden &rarr; Deadwood &rarr; Mycelium, feeding the next cycle.</sub></td>
+<td width="50%"><img src="assets/screenshots/tasks.png" alt="Tasks — kanban + priority" /><br/><sub><b>Tasks</b> — kanban and list views, priority quadrants, human and agent assignees.</sub></td>
+</tr>
+<tr>
+<td width="50%"><img src="assets/screenshots/notes.png" alt="Notes" /><br/><sub><b>Notes</b> — hierarchical memory with semantic retrieval, one click to promote a note into a task.</sub></td>
+<td width="50%"><img src="assets/screenshots/time.png" alt="Time tracking" /><br/><sub><b>Time</b> — a live timer over the same tasks, with per-task and per-client reporting.</sub></td>
+</tr>
+</table>
+
 ## What makes Mycelium different
 
 Most knowledge tools keep your notes intact and let them sediment until
