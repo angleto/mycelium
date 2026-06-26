@@ -8,9 +8,9 @@ from __future__ import annotations
 import uuid
 from unittest.mock import AsyncMock, MagicMock
 
-from flow_core.services.retrieval import Candidate
-from flow_core.services.retrieval.stages import DedupeBySourceStage
-from flow_core.services.retrieval.types import RetrievalContext
+from mycelium_core.services.retrieval import Candidate
+from mycelium_core.services.retrieval.stages import DedupeBySourceStage
+from mycelium_core.services.retrieval.types import RetrievalContext
 
 
 def _ctx_stub(*, empty_select: bool = True) -> RetrievalContext:

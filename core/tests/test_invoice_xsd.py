@@ -11,14 +11,14 @@ from __future__ import annotations
 import datetime as dt
 from decimal import Decimal
 
-from flow_core.models.client_profile import ClientProfile
-from flow_core.models.invoice import DocumentType, Invoice, InvoiceLine, IssuerProfile
-from flow_core.services.invoice_format import (
+from mycelium_core.models.client_profile import ClientProfile
+from mycelium_core.models.invoice import DocumentType, Invoice, InvoiceLine, IssuerProfile
+from mycelium_core.services.invoice_format import (
     FORFETTARIO_RIFERIMENTO_NORMATIVO,
     _bare_id_codice,
     _build_xml,
 )
-from flow_core.services.invoice_xsd import validate_fatturapa
+from mycelium_core.services.invoice_xsd import validate_fatturapa
 
 
 def _valid_xml() -> str:

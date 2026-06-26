@@ -8,8 +8,8 @@ import uuid
 
 from httpx import ASGITransport, AsyncClient
 
-from flow_api.main import app
-from flow_core.bootstrap_admin import ensure_admin
+from mycelium_api.main import app
+from mycelium_core.bootstrap_admin import ensure_admin
 
 
 def _email() -> str:

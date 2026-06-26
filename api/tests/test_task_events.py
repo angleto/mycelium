@@ -22,13 +22,13 @@ import uuid
 
 import pytest
 
-from flow_core.db import admin_session, tenant_session
-from flow_core.errors import ConflictError, DomainError
-from flow_core.i18n import MessageCode
-from flow_core.services import actors as actors_svc
-from flow_core.services import identities as identities_svc
-from flow_core.services import tasks
-from flow_core.services.auth import signup
+from mycelium_core.db import admin_session, tenant_session
+from mycelium_core.errors import ConflictError, DomainError
+from mycelium_core.i18n import MessageCode
+from mycelium_core.services import actors as actors_svc
+from mycelium_core.services import identities as identities_svc
+from mycelium_core.services import tasks
+from mycelium_core.services.auth import signup
 
 
 async def _mint_identity(s, *, org, user, seed: str = "user"):
@@ -148,7 +148,7 @@ async def test_event_task_overlap_different_assignee_allowed() -> None:
     """Two overlapping events whose assignees are different identities
     (e.g. the human user vs an AI assistant) do not conflict — the
     EXCLUDE constraint is keyed by ``assignee_id``."""
-    from flow_core.services import ai_assistants as ai_svc
+    from mycelium_core.services import ai_assistants as ai_svc
 
     async with admin_session() as s:
         a = await signup(s, email=_email(), password="pw-strong-123", org_name="EV")
@@ -190,7 +190,7 @@ async def test_event_task_overlap_two_human_collaborators_allowed() -> None:
     """Two human users in the same org with overlapping events do not
     conflict: the EXCLUDE keys on ``assignee_id`` (one identity per
     user-membership), so distinct human assignees never collide."""
-    from flow_core.services import memberships as mem_svc
+    from mycelium_core.services import memberships as mem_svc
 
     a_email = _email()
     b_email = _email()

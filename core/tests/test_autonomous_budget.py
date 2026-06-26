@@ -8,12 +8,12 @@ from decimal import Decimal
 
 from sqlalchemy import update
 
-from flow_core.db import admin_session, tenant_session
-from flow_core.models.billing import CostBasis, UsageRecord
-from flow_core.models.organization import Organization
-from flow_core.services import autonomous_budget as ab
-from flow_core.services import billing
-from flow_core.services.auth import signup
+from mycelium_core.db import admin_session, tenant_session
+from mycelium_core.models.billing import CostBasis, UsageRecord
+from mycelium_core.models.organization import Organization
+from mycelium_core.services import autonomous_budget as ab
+from mycelium_core.services import billing
+from mycelium_core.services.auth import signup
 
 
 async def _org() -> tuple[uuid.UUID, uuid.UUID]:

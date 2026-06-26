@@ -1,7 +1,7 @@
-# Flow sdi-inbound (FastAPI on uvicorn) — production image.
-# Build from the Flow repo root:
+# Mycelium sdi-inbound (FastAPI on uvicorn) — production image.
+# Build from the Mycelium repo root:
 #   docker build -f docker/sdi-inbound.Dockerfile \
-#     -t ghcr.io/angleto/flow/sdi-inbound:<tag> .
+#     -t ghcr.io/angleto/mycelium/sdi-inbound:<tag> .
 #
 # Always-on SOAP endpoint SdI POSTs RC/MC/NS/AT notifications to
 # (docs/adr/0011). Mutual TLS terminates at the edge (Traefik
@@ -31,14 +31,14 @@ RUN --mount=type=cache,target=/root/.cache/uv uv sync --no-dev
 # ---
 
 FROM python:3.12-slim
-LABEL org.opencontainers.image.source="https://github.com/angleto/flow"
+LABEL org.opencontainers.image.source="https://github.com/angleto/mycelium"
 LABEL org.opencontainers.image.licenses="AGPL-3.0-or-later"
-ARG FLOW_VERSION=dev
-ARG FLOW_GIT_SHA=
-ARG FLOW_BUILD_AT=
-ENV FLOW_VERSION=${FLOW_VERSION} \
-    FLOW_GIT_SHA=${FLOW_GIT_SHA} \
-    FLOW_BUILD_AT=${FLOW_BUILD_AT}
+ARG MYCELIUM_VERSION=dev
+ARG MYCELIUM_GIT_SHA=
+ARG MYCELIUM_BUILD_AT=
+ENV MYCELIUM_VERSION=${MYCELIUM_VERSION} \
+    MYCELIUM_GIT_SHA=${MYCELIUM_GIT_SHA} \
+    MYCELIUM_BUILD_AT=${MYCELIUM_BUILD_AT}
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PATH="/app/.venv/bin:$PATH"
@@ -54,4 +54,4 @@ COPY --from=builder /app /app
 EXPOSE 8000
 # --proxy-headers + --forwarded-allow-ips so uvicorn trusts the
 # X-Forwarded-* that Traefik sets after terminating mTLS at the edge.
-CMD ["uvicorn", "flow_sdi_inbound.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--forwarded-allow-ips", "*"]
+CMD ["uvicorn", "mycelium_sdi_inbound.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--forwarded-allow-ips", "*"]

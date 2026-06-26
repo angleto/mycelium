@@ -7,10 +7,10 @@ import uuid
 
 import pytest
 
-from flow_core.db import admin_session
-from flow_core.errors import DomainError, NotFoundError
-from flow_core.services.auth import signup
-from flow_mcp.server import (
+from mycelium_core.db import admin_session
+from mycelium_core.errors import DomainError, NotFoundError
+from mycelium_core.services.auth import signup
+from mycelium_mcp.server import (
     add_time_entry,
     create_task,
     delete_time_entry,

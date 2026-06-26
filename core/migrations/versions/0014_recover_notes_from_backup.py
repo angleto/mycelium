@@ -7,7 +7,7 @@ The backup payload is **not** in the repo: it contains personal note
 bodies. It is mounted into the migrate-job at
 ``/var/lib/flow/recovery/notes_backup.json`` from a ConfigMap created
 ad-hoc from the local pg_dump export. The path can be overridden via
-``FLOW_NOTES_RECOVERY_PATH``. When the file is absent the migration
+``MYCELIUM_NOTES_RECOVERY_PATH``. When the file is absent the migration
 is a no-op (which is the case for any environment except the one we
 patched, and for re-runs after the ConfigMap is torn down).
 
@@ -44,7 +44,7 @@ _log = logging.getLogger("alembic.runtime.migration")
 
 
 def upgrade() -> None:
-    path = Path(os.environ.get("FLOW_NOTES_RECOVERY_PATH", _DEFAULT_PATH))
+    path = Path(os.environ.get("MYCELIUM_NOTES_RECOVERY_PATH", _DEFAULT_PATH))
     if not path.exists():
         _log.info("0014: recovery payload %s not present, skipping", path)
         return

@@ -51,28 +51,28 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from tests_helpers import seed_ai_assistant_identity
 
-from flow_api.main import app
-from flow_core.ai_providers import LLMResult, set_llm_override
-from flow_core.db import admin_session, tenant_session
-from flow_core.embedder import set_embedder_override
-from flow_core.errors import DomainError, ForbiddenError
-from flow_core.models.dependency import DependencyType
-from flow_core.models.executor import Executor, ExecutorKind
-from flow_core.models.membership import Membership, Role
-from flow_core.models.notification import Notification
-from flow_core.models.schedule import Schedule
-from flow_core.models.task_collaborator import TaskCollaborator
-from flow_core.models.task_handoff import HandoffStatus, TaskHandoff
-from flow_core.security import decode_token
-from flow_core.services import agent_runtime as runtime
-from flow_core.services import coordination as coord
-from flow_core.services import dependencies as deps
-from flow_core.services import executors as exec_svc
-from flow_core.services import notes as notes_svc
-from flow_core.services import scheduler as sch
-from flow_core.services import tasks as tasks_svc
-from flow_core.services import workflow as wf
-from flow_core.services.auth import signup
+from mycelium_api.main import app
+from mycelium_core.ai_providers import LLMResult, set_llm_override
+from mycelium_core.db import admin_session, tenant_session
+from mycelium_core.embedder import set_embedder_override
+from mycelium_core.errors import DomainError, ForbiddenError
+from mycelium_core.models.dependency import DependencyType
+from mycelium_core.models.executor import Executor, ExecutorKind
+from mycelium_core.models.membership import Membership, Role
+from mycelium_core.models.notification import Notification
+from mycelium_core.models.schedule import Schedule
+from mycelium_core.models.task_collaborator import TaskCollaborator
+from mycelium_core.models.task_handoff import HandoffStatus, TaskHandoff
+from mycelium_core.security import decode_token
+from mycelium_core.services import agent_runtime as runtime
+from mycelium_core.services import coordination as coord
+from mycelium_core.services import dependencies as deps
+from mycelium_core.services import executors as exec_svc
+from mycelium_core.services import notes as notes_svc
+from mycelium_core.services import scheduler as sch
+from mycelium_core.services import tasks as tasks_svc
+from mycelium_core.services import workflow as wf
+from mycelium_core.services.auth import signup
 
 _AS_OF = dt.datetime(2026, 1, 12, 8, 0, tzinfo=dt.UTC)
 
@@ -261,7 +261,7 @@ async def test_human_to_human_handoff_delivered_with_artifact_link(
         # for the human) -- ADR-0029 P3 stores this as a polymorphic
         # ``NoteTaskLink`` of kind=artifact. The predecessor keeps its
         # own artifact link to the same note; both coexist.
-        from flow_core.models.note_link import NoteTaskLink
+        from mycelium_core.models.note_link import NoteTaskLink
 
         link = (
             await s.execute(
@@ -824,7 +824,7 @@ async def test_handoff_not_found_message_code_registered() -> None:
     """The new HANDOFF_NOT_FOUND / TASK_NOT_OFFERED /
     TASK_ALREADY_CLAIMED codes render English (catalog completeness;
     docs/adr/0017 -- no hardcoded user strings)."""
-    from flow_core.i18n import MessageCode, render
+    from mycelium_core.i18n import MessageCode, render
 
     assert render(MessageCode.HANDOFF_NOT_FOUND) == "Handoff not found"
     assert "offered" in render(MessageCode.TASK_NOT_OFFERED)

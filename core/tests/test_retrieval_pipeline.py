@@ -13,14 +13,14 @@ from dataclasses import dataclass
 
 import pytest
 
-from flow_core.services.retrieval import (
+from mycelium_core.services.retrieval import (
     Candidate,
     RetrievalContext,
     RetrievalPipeline,
     Stage,
     merge_candidates,
 )
-from flow_core.services.retrieval.stages import (
+from mycelium_core.services.retrieval.stages import (
     GraderMinStage,
     LimitStage,
     OrderingStage,
@@ -201,7 +201,7 @@ async def test_humus_cap_limits_slots_and_keeps_live() -> None:
     """ADR-0034 hard cap: at most floor(limit*ratio) humus candidates kept
     (the most relevant, since this runs after ordering); every live
     candidate kept; freed slots fall to live ranked just below."""
-    from flow_core.services.retrieval.stages import HumusCapStage
+    from mycelium_core.services.retrieval.stages import HumusCapStage
 
     humus = [
         Candidate(blob_id=uuid.uuid4(), score=1.0 - i * 0.01, provenance="humus") for i in range(5)
@@ -215,7 +215,7 @@ async def test_humus_cap_limits_slots_and_keeps_live() -> None:
 
 async def test_humus_cap_zero_budget_drops_all_humus() -> None:
     """A small limit whose 30% floors to 0 drops humus entirely (hard cap)."""
-    from flow_core.services.retrieval.stages import HumusCapStage
+    from mycelium_core.services.retrieval.stages import HumusCapStage
 
     humus = Candidate(blob_id=uuid.uuid4(), score=1.0, provenance="humus")
     live = Candidate(blob_id=uuid.uuid4(), score=0.5)
@@ -227,7 +227,7 @@ def test_semantic_stage_keep_gate() -> None:
     """``SemanticDenseStage._keep`` gates on cosine = -distance. Floor 0
     is a no-op (keeps everything, even negative cosine); a positive floor
     keeps only neighbours at/above it."""
-    from flow_core.services.retrieval.stages.semantic import SemanticDenseStage
+    from mycelium_core.services.retrieval.stages.semantic import SemanticDenseStage
 
     off = SemanticDenseStage(min_similarity=0.0)
     # distance = -cosine. Floor off keeps every row, including a
@@ -249,7 +249,7 @@ def test_semantic_stage_warns_when_floor_nukes_all(caplog) -> None:
     the regression that shipped 0.8 against bge-m3's ~0.35-0.65 band."""
     import logging
 
-    from flow_core.services.retrieval.stages.semantic import SemanticDenseStage
+    from mycelium_core.services.retrieval.stages.semantic import SemanticDenseStage
 
     # rows are (blob_id, distance); distance = -cosine. Best cosine here 0.63.
     rows = [(uuid.uuid4(), -0.63), (uuid.uuid4(), -0.51), (uuid.uuid4(), -0.40)]
@@ -280,7 +280,7 @@ def test_semantic_stage_warns_when_floor_nukes_all(caplog) -> None:
 async def test_relative_floor_cuts_low_tail() -> None:
     """RelativeFloorStage drops candidates below ``ratio * top``; a flat
     profile (all near the top) is untouched; ratio 0 disables."""
-    from flow_core.services.retrieval.stages import RelativeFloorStage
+    from mycelium_core.services.retrieval.stages import RelativeFloorStage
 
     top = Candidate(blob_id=uuid.uuid4(), score=0.020)
     mid = Candidate(blob_id=uuid.uuid4(), score=0.016)

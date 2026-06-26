@@ -16,7 +16,7 @@ producing differing answers, how to arbitrate between them, when to
 ask for a second opinion, how to surface dissent, how to escalate to
 the user only when warranted.
 
-Today Flow handles the multi-agent case implicitly: either one agent
+Today Mycelium handles the multi-agent case implicitly: either one agent
 runs and its artifact is the answer (single-shot), or `approval_required`
 forces a human decision. The middle band, "let the agents argue and
 converge, escalate only on irreducible deadlock", does not exist.
@@ -32,7 +32,7 @@ concrete implementations we inspected
 cross-visibility deliberation loop. The reusable design ideas are
 coherence-energy via embedding similarity and quorum-threshold voting,
 not the code (different stack: TypeScript + WASM, not portable as a
-dependency into Flow's Python/FastAPI).
+dependency into Mycelium's Python/FastAPI).
 
 Constraints discovered (see `services/agent_runtime.py`,
 `services/coordination.py`, `services/dispatch_loop.py`,
@@ -95,7 +95,7 @@ The registry validates at load time: every strategy declares its
 entry-points group `flow.adjudication.strategies` so out-of-tree
 strategies can ship in separate packages without touching core.
 
-Same pattern Flow already uses for `LLMProvider`/`EmbedderProvider`
+Same pattern Mycelium already uses for `LLMProvider`/`EmbedderProvider`
 (ADR-0012): `typing.Protocol`, DB/env-driven factory, neutral DTOs.
 
 ### D3. Policy router, declarative, with explicit override
@@ -237,7 +237,7 @@ RLS on all three tables per ADR-0002 (`org_id`-scoped, optimistic
 concurrency via `version`). Indexes: `(org_id, task_id)`,
 `(adjudication_id, step_no)`, `(org_id, status)`.
 
-## Integration points (existing Flow code)
+## Integration points (existing Mycelium code)
 
 - `services/agent_runtime.py` → strategies that need an LLM call
   invoke `start_run` (or a lighter sibling) per turn; bounded loop,
@@ -259,7 +259,7 @@ concurrency via `version`). Indexes: `(org_id, task_id)`,
 ## Phasing
 
 - **P1 (this ADR)**: design, schema, contract. No code.
-- **P2** (figlio ticket 2): `flow_core/adjudication/` skeleton:
+- **P2** (figlio ticket 2): `mycelium_core/adjudication/` skeleton:
   `base.py` (Protocol + DTOs), `registry.py` (entry-points discovery),
   `policy.py` (declarative router), `store.py` (StepStore against
   DB), `composition.py` (`FallbackChain`, `Cap`, `Filter`, `Race`),

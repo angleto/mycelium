@@ -1,7 +1,7 @@
-# Flow backend (FastAPI) — production image.
-# Build from the Flow repo root:
+# Mycelium backend (FastAPI) — production image.
+# Build from the Mycelium repo root:
 #   docker build -f deploy/prod/dockerfiles/backend.Dockerfile \
-#     -t ghcr.io/angleto/flow/backend:<tag> .
+#     -t ghcr.io/angleto/mycelium/backend:<tag> .
 #
 # Also used by the Alembic migrate Job (alembic + core/migrations are
 # inside; core/alembic.ini -> script_location core/migrations,
@@ -54,7 +54,7 @@ COPY sdi-inbound sdi-inbound
 RUN --mount=type=cache,target=/root/.cache/uv uv sync --no-dev --inexact
 # Build-time guard: fail the build (not prod) if the final sync ever pruned
 # the ML extras or the workspace install broke their import.
-RUN /app/.venv/bin/python -c "import sentence_transformers, faster_whisper, igraph, leidenalg, flow_api; print('backend ml deps ok')"
+RUN /app/.venv/bin/python -c "import sentence_transformers, faster_whisper, igraph, leidenalg, mycelium_api; print('backend ml deps ok')"
 
 # ---
 
@@ -62,7 +62,7 @@ FROM python:3.12-slim
 # OCI image-source label: GHCR uses it to auto-link the package to the
 # source repo on first push from a workflow GITHUB_TOKEN, which gates
 # write permission on subsequent pushes.
-LABEL org.opencontainers.image.source="https://github.com/angleto/flow"
+LABEL org.opencontainers.image.source="https://github.com/angleto/mycelium"
 LABEL org.opencontainers.image.licenses="AGPL-3.0-or-later"
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -76,7 +76,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 #                          needs GTK/Cairo, only Pango + HarfBuzz +
 #                          a font path that resolves generic families.
 #                          KaTeX fonts are bundled in
-#                          flow_api/static/katex/ and loaded via
+#                          mycelium_api/static/katex/ and loaded via
 #                          file:// @font-face, but body text needs at
 #                          least one serif/sans/mono installed so
 #                          fontconfig has something to map to.
@@ -113,12 +113,12 @@ COPY --from=builder /app/sdi-inbound /app/sdi-inbound
 # `COPY .venv` blob (stable digest) instead of re-executing it with fresh mtimes
 # -> a new 3 GB layer the node re-pulls each deploy. ARG/ENV add no filesystem
 # layer. Empty in local `docker build` (the endpoint then reports "dev").
-ARG FLOW_VERSION=dev
-ARG FLOW_GIT_SHA=
-ARG FLOW_BUILD_AT=
-ENV FLOW_VERSION=${FLOW_VERSION} \
-    FLOW_GIT_SHA=${FLOW_GIT_SHA} \
-    FLOW_BUILD_AT=${FLOW_BUILD_AT}
+ARG MYCELIUM_VERSION=dev
+ARG MYCELIUM_GIT_SHA=
+ARG MYCELIUM_BUILD_AT=
+ENV MYCELIUM_VERSION=${MYCELIUM_VERSION} \
+    MYCELIUM_GIT_SHA=${MYCELIUM_GIT_SHA} \
+    MYCELIUM_BUILD_AT=${MYCELIUM_BUILD_AT}
 
 EXPOSE 8000
 # --proxy-headers + --forwarded-allow-ips so uvicorn trusts the
@@ -127,4 +127,4 @@ EXPOSE 8000
 # redirect Location headers with scheme=http — e.g. the MCP mount's
 # /mcp -> /mcp/ 307 pointed at http://, which Claude Desktop refuses
 # to follow (downgrade), breaking the connector handshake.
-CMD ["uvicorn", "flow_api.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--forwarded-allow-ips", "*"]
+CMD ["uvicorn", "mycelium_api.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--forwarded-allow-ips", "*"]

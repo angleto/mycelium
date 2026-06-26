@@ -15,13 +15,13 @@ import uuid
 import pytest
 from sqlalchemy import select
 
-from flow_core.config import get_settings
-from flow_core.db import admin_session, tenant_session
-from flow_core.models.note import Note, NoteKind
-from flow_core.services import garden_classify, graph_snapshot
-from flow_core.services import notes as nt
-from flow_core.services.auth import signup
-from flow_worker import garden
+from mycelium_core.config import get_settings
+from mycelium_core.db import admin_session, tenant_session
+from mycelium_core.models.note import Note, NoteKind
+from mycelium_core.services import garden_classify, graph_snapshot
+from mycelium_core.services import notes as nt
+from mycelium_core.services.auth import signup
+from mycelium_worker import garden
 
 
 def _email() -> str:

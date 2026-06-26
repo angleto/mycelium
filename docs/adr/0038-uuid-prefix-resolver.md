@@ -4,7 +4,7 @@ Status: Accepted (v1 shipped)
 Date: 2026-05-28
 Relates to: ADR-0015 (RLS two-role), ADR-0028 (identity-first
 addressing), ADR-0029 (note garden ecosystem). Implements the analysis
-recorded in Flow task `b9924a0d` (Note → task / note ID prefixes:
+recorded in Mycelium task `b9924a0d` (Note → task / note ID prefixes:
 resolver + UI linking). Shipped in commits 9d6c016 (backend resolver),
 04360e7 (markdown chips + short routes).
 
@@ -23,7 +23,7 @@ were inert:
 - the Notes screen had no quick-switcher accepting a prefix.
 
 A note that cites 30 tasks was therefore not navigable: the user had to
-search title-by-title or rebuild the full URL outside Flow. This
+search title-by-title or rebuild the full URL outside Mycelium. This
 violates *Resilienza progettata* (dirty signals teach the user that
 synthesis notes are useless) and *Tutto è connesso* (the textual
 mycelium never becomes a navigable mycelium).

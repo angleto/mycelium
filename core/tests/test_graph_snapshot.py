@@ -12,13 +12,13 @@ import uuid
 
 import pytest
 
-from flow_core.db import admin_session, tenant_session
-from flow_core.models.note import Note, NoteKind
-from flow_core.services import graph as graph_svc
-from flow_core.services import graph_snapshot as snap_svc
-from flow_core.services import note_links
-from flow_core.services import notes as notes_svc
-from flow_core.services.auth import signup
+from mycelium_core.db import admin_session, tenant_session
+from mycelium_core.models.note import Note, NoteKind
+from mycelium_core.services import graph as graph_svc
+from mycelium_core.services import graph_snapshot as snap_svc
+from mycelium_core.services import note_links
+from mycelium_core.services import notes as notes_svc
+from mycelium_core.services.auth import signup
 
 
 async def _org_user() -> tuple[uuid.UUID, uuid.UUID]:

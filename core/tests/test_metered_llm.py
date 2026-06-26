@@ -15,15 +15,15 @@ from decimal import Decimal
 
 from sqlalchemy import select
 
-from flow_core.ai_providers import LLMResult, set_llm_override
-from flow_core.db import admin_session, tenant_session
-from flow_core.models.billing import CostBasis, UsageRecord
-from flow_core.models.note import NoteKind
-from flow_core.services import billing
-from flow_core.services import notes as notes_svc
-from flow_core.services.auth import signup
-from flow_core.services.llm_resolver import MeteredLLM
-from flow_worker import revisions_summary
+from mycelium_core.ai_providers import LLMResult, set_llm_override
+from mycelium_core.db import admin_session, tenant_session
+from mycelium_core.models.billing import CostBasis, UsageRecord
+from mycelium_core.models.note import NoteKind
+from mycelium_core.services import billing
+from mycelium_core.services import notes as notes_svc
+from mycelium_core.services.auth import signup
+from mycelium_core.services.llm_resolver import MeteredLLM
+from mycelium_worker import revisions_summary
 
 
 def _email() -> str:

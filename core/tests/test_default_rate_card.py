@@ -17,10 +17,10 @@ from __future__ import annotations
 import uuid
 from decimal import Decimal
 
-from flow_core.db import admin_session, tenant_session
-from flow_core.models.billing import CostBasis, DefaultRateCard
-from flow_core.services import billing
-from flow_core.services.auth import signup
+from mycelium_core.db import admin_session, tenant_session
+from mycelium_core.models.billing import CostBasis, DefaultRateCard
+from mycelium_core.services import billing
+from mycelium_core.services.auth import signup
 
 
 def _email() -> str:

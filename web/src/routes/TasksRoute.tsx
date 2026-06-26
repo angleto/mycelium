@@ -20,9 +20,9 @@ import {
 import type { components } from '../api/schema'
 
 type View = 'kanban' | 'list'
-const VIEW_KEY = 'flow.tasks.view'
-const SCOPE_KEY = 'flow.tasks.scope'
-const DATEFOCUS_KEY = 'flow.tasks.dateFocus'
+const VIEW_KEY = 'mycelium.tasks.view'
+const SCOPE_KEY = 'mycelium.tasks.scope'
+const DATEFOCUS_KEY = 'mycelium.tasks.dateFocus'
 
 type Scope = 'all' | 'today' | 'week' | 'month'
 const SCOPES: ReadonlyArray<Scope> = ['all', 'today', 'week', 'month'] as const

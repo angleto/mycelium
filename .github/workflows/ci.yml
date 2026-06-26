@@ -1,7 +1,7 @@
 name: CI
 
 # Trigger policy (per operator request): fire only on tag pushes,
-# not on every branch commit. The release flow is tag-driven (each
+# not on every branch commit. The release mycelium is tag-driven (each
 # v1.X.Y goes through tag-push -> build-images -> deploy), so the
 # CI gate runs at the same boundary the operator already cares
 # about. ``workflow_dispatch`` is kept for manual ad-hoc runs.
@@ -22,7 +22,7 @@ jobs:
       - run: uv sync --all-packages
       - run: uv run ruff check .
       - run: uv run ruff format --check .
-      - run: uv run mypy -p flow_core -p flow_api -p flow_mcp -p flow_worker -p flow_sdi_inbound
+      - run: uv run mypy -p mycelium_core -p mycelium_api -p mycelium_mcp -p mycelium_worker -p mycelium_sdi_inbound
       - name: Validate compose
         run: docker compose -f deploy/local/docker-compose.yml config -q
 
@@ -32,32 +32,32 @@ jobs:
       db:
         image: pgvector/pgvector:pg16
         env:
-          POSTGRES_USER: flow
-          POSTGRES_PASSWORD: flow
-          POSTGRES_DB: flow
+          POSTGRES_USER: mycelium
+          POSTGRES_PASSWORD: mycelium
+          POSTGRES_DB: mycelium
         ports:
           - "5432:5432"
         options: >-
-          --health-cmd "pg_isready -U flow -d flow"
+          --health-cmd "pg_isready -U mycelium -d mycelium"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 20
     env:
-      FLOW_JWT_SECRET: ci-only-secret-minimum-32-bytes-xxxxxxxx
-      FLOW_SECRET_KEY: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
-      FLOW_DATABASE_URL_SYNC: postgresql+psycopg://flow:flow@localhost:5432/flow
-      FLOW_DATABASE_URL: postgresql+asyncpg://flow_app:flow_app@localhost:5432/flow
-      FLOW_DB_APP_PASSWORD: flow_app
+      MYCELIUM_JWT_SECRET: ci-only-secret-minimum-32-bytes-xxxxxxxx
+      MYCELIUM_SECRET_KEY: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+      MYCELIUM_DATABASE_URL_SYNC: postgresql+psycopg://mycelium:mycelium@localhost:5432/mycelium
+      MYCELIUM_DATABASE_URL: postgresql+asyncpg://mycelium_app:mycelium_app@localhost:5432/mycelium
+      MYCELIUM_DB_APP_PASSWORD: mycelium_app
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
       - run: uv sync --all-packages
-      - name: Bootstrap runtime role (flow_app)
+      - name: Bootstrap runtime role (mycelium_app)
         run: |
-          PGPASSWORD=flow psql -h localhost -U flow -d flow \
-            -v ON_ERROR_STOP=1 -v app_pw="$FLOW_DB_APP_PASSWORD" \
+          PGPASSWORD=mycelium psql -h localhost -U mycelium -d mycelium \
+            -v ON_ERROR_STOP=1 -v app_pw="$MYCELIUM_DB_APP_PASSWORD" \
             -f deploy/local/bootstrap_roles.sql
       - name: Apply migrations
         run: uv run alembic -c core/alembic.ini upgrade head
@@ -97,32 +97,32 @@ jobs:
       db:
         image: pgvector/pgvector:pg16
         env:
-          POSTGRES_USER: flow
-          POSTGRES_PASSWORD: flow
-          POSTGRES_DB: flow
+          POSTGRES_USER: mycelium
+          POSTGRES_PASSWORD: mycelium
+          POSTGRES_DB: mycelium
         ports:
           - "5432:5432"
         options: >-
-          --health-cmd "pg_isready -U flow -d flow"
+          --health-cmd "pg_isready -U mycelium -d mycelium"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 20
     env:
-      FLOW_JWT_SECRET: ci-only-secret-minimum-32-bytes-xxxxxxxx
-      FLOW_SECRET_KEY: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
-      FLOW_DATABASE_URL_SYNC: postgresql+psycopg://flow:flow@localhost:5432/flow
-      FLOW_DATABASE_URL: postgresql+asyncpg://flow_app:flow_app@localhost:5432/flow
-      FLOW_DB_APP_PASSWORD: flow_app
+      MYCELIUM_JWT_SECRET: ci-only-secret-minimum-32-bytes-xxxxxxxx
+      MYCELIUM_SECRET_KEY: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+      MYCELIUM_DATABASE_URL_SYNC: postgresql+psycopg://mycelium:mycelium@localhost:5432/mycelium
+      MYCELIUM_DATABASE_URL: postgresql+asyncpg://mycelium_app:mycelium_app@localhost:5432/mycelium
+      MYCELIUM_DB_APP_PASSWORD: mycelium_app
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
       - run: uv sync --all-packages
-      - name: Bootstrap runtime role (flow_app)
+      - name: Bootstrap runtime role (mycelium_app)
         run: |
-          PGPASSWORD=flow psql -h localhost -U flow -d flow \
-            -v ON_ERROR_STOP=1 -v app_pw="$FLOW_DB_APP_PASSWORD" \
+          PGPASSWORD=mycelium psql -h localhost -U mycelium -d mycelium \
+            -v ON_ERROR_STOP=1 -v app_pw="$MYCELIUM_DB_APP_PASSWORD" \
             -f deploy/local/bootstrap_roles.sql
       - name: Apply migrations
         run: uv run alembic -c core/alembic.ini upgrade head
@@ -145,7 +145,7 @@ jobs:
         run: |
           set -euo pipefail
           # Start the API and the Vite dev server, tear both down on exit.
-          ( cd .. && uv run uvicorn flow_api.main:app --host 0.0.0.0 --port 8000 ) &
+          ( cd .. && uv run uvicorn mycelium_api.main:app --host 0.0.0.0 --port 8000 ) &
           api_pid=$!
           pnpm dev --host 0.0.0.0 --port 5173 --strictPort &
           web_pid=$!

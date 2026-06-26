@@ -6,7 +6,7 @@ Tracks: task `1d081395`
 
 ## Context
 
-Flow uses pgvector dense embeddings as the semantic branch of its
+Mycelium uses pgvector dense embeddings as the semantic branch of its
 hybrid retrieval (alongside FTS, fused via RRF). The legacy default
 is `intfloat/multilingual-e5-small` (384d, ~118 MB, multilingual,
 CPU-cheap). Two pressures push for migration:
@@ -46,12 +46,12 @@ Five phases:
    COLUMN embedding_v2 vector(D) NULL + model_id_v2 + dim_v2 + HNSW
    index on the new column with `vector_ip_ops` (matches the v1 op
    class post-migration 0007). D is parameterised via
-   `FLOW_EMBED_DIM_V2` (default 1024 for bge-m3).
+   `MYCELIUM_EMBED_DIM_V2` (default 1024 for bge-m3).
 2. **Provider abstraction** (`core/embedder.py`): factory
    `get_embedder_v2()` returns the v2 instance when
-   `FLOW_EMBED_MODEL_V2` is set, else None. Independent override seam
+   `MYCELIUM_EMBED_MODEL_V2` is set, else None. Independent override seam
    for tests (`set_embedder_v2_override`). The v1 factory
-   (`get_embedder()`) reads the model name from `FLOW_EMBED_MODEL`
+   (`get_embedder()`) reads the model name from `MYCELIUM_EMBED_MODEL`
    (default keeps `multilingual-e5-small`) — no fork required.
 3. **Dual write** (`memory.write_blob`): when v2 is configured, every
    new write populates both columns. Cost is 2x embed per write,

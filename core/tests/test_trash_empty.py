@@ -12,16 +12,16 @@ import uuid
 import pytest
 from sqlalchemy import func, select
 
-from flow_core.db import admin_session, tenant_session
-from flow_core.errors import ForbiddenError
-from flow_core.models.activity_log import ActivityLog
-from flow_core.models.note import Note, NoteKind
-from flow_core.models.task import Task
-from flow_core.services import notes as notes_svc
-from flow_core.services import tasks as tasks_svc
-from flow_core.services import trash
-from flow_core.services.auth import signup
-from flow_core.services.memberships import add_member
+from mycelium_core.db import admin_session, tenant_session
+from mycelium_core.errors import ForbiddenError
+from mycelium_core.models.activity_log import ActivityLog
+from mycelium_core.models.note import Note, NoteKind
+from mycelium_core.models.task import Task
+from mycelium_core.services import notes as notes_svc
+from mycelium_core.services import tasks as tasks_svc
+from mycelium_core.services import trash
+from mycelium_core.services.auth import signup
+from mycelium_core.services.memberships import add_member
 
 
 async def _owner_org() -> tuple[uuid.UUID, uuid.UUID]:
@@ -44,7 +44,7 @@ async def _member(org_id: uuid.UUID, owner_id: uuid.UUID, role: str) -> uuid.UUI
             org_name="Other",
         )
     async with admin_session() as s:
-        from flow_core.models.user import User as UserModel
+        from mycelium_core.models.user import User as UserModel
 
         u = (await s.execute(select(UserModel).where(UserModel.id == r.user_id))).scalar_one()
         email = u.email

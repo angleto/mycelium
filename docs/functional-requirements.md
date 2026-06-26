@@ -162,7 +162,7 @@ single GUI/REST/MCP choke point).
   final N; fusion within (org, project).
 - Pluggable Embedder/LLM (bitvision_phoenix pattern: Protocol +
   DB-driven factory + neutral DTOs + env settings + model registry).
-  Flow adds `EmbedderProvider`. Default a small multilingual CPU/ARM
+  Mycelium adds `EmbedderProvider`. Default a small multilingual CPU/ARM
   model; concrete choice at implementation (BGE-M3, multilingual-E5,
   GTE-multilingual, Qwen3-Embedding on the current MTEB).
 - Re-embedding: a new column/table for the new model (fixed dim),
@@ -177,7 +177,7 @@ single GUI/REST/MCP choke point).
 
 ## FR-9 SDI electronic invoicing (v1 B2B/B2C)
 
-- Legal role: in multi-tenant, Flow transmits on the tenant's behalf
+- Legal role: in multi-tenant, Mycelium transmits on the tenant's behalf
   and is therefore a transmitter/intermediary. An explicit per-Org
   `SdiMandate` model. A single shared channel; the tenant's identity in
   the payload (`CedentePrestatore`,
@@ -186,13 +186,13 @@ single GUI/REST/MCP choke point).
   - `ManualExportChannel` (immediately): downloadable XML; invoices
     issued this way are already legally issued.
   - `SdICoopChannel` test: an always-on inbound SOAP endpoint exposed
-    by Flow (SdI pushes, not polling), server-side mutual TLS;
+    by Mycelium (SdI pushes, not polling), server-side mutual TLS;
     interoperability tests.
   - `SdICoopChannel` production: after the service agreement and
     accreditation (a heavy item, not a minor final step).
 - Compliant conservation (obligation art. 39 DPR 633/72, 10 years):
   strategy = free AdE service. `ConservationProvider =
-  AdeFreeConservation`: Flow does not conserve in-house, it tracks and
+  AdeFreeConservation`: Mycelium does not conserve in-house, it tracks and
   guides per-tenant adhesion in the tax portal; AdE conserves only what
   passes through SdI; invoices from `ManualExportChannel` in F7a are
   marked "out of AdE coverage, the tenant's responsibility". Effective
@@ -217,7 +217,7 @@ single GUI/REST/MCP choke point).
   reused.
 - History search; mark paid (manual reconciliation in v1); TD04 credit
   note.
-- Implemented (F7b, config-gated on `FLOW_SDI_CHANNEL=sdicoop`): official
+- Implemented (F7b, config-gated on `MYCELIUM_SDI_CHANNEL=sdicoop`): official
   FatturaPA XSD validation at transmit (`Schema_VFPA12_V1.2.3`); the per-issuer
   `SdiMandate` + `TerzoIntermediarioOSoggettoEmittente` /
   `SoggettoEmittente=TZ`; the SdICoop `RiceviFile` SOAP transport (mutual TLS) +

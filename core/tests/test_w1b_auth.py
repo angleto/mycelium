@@ -1,6 +1,6 @@
 """W1b (DB-backed): email verification, password reset, JWT revocation.
 
-Ported from bitvision_phoenix, adapted to Flow's DomainError + i18n.
+Ported from bitvision_phoenix, adapted to Mycelium's DomainError + i18n.
 The SystemMailer seam is replaced by a capturing fake so the one-shot
 token (which only ever leaves via email) can be asserted.
 """
@@ -13,11 +13,11 @@ import uuid
 
 import pytest
 
-from flow_core.config import get_settings
-from flow_core.db import admin_session
-from flow_core.errors import AuthError, ForbiddenError
-from flow_core.services import auth as A
-from flow_core.services.mailer import LogMailer, OutboundEmail, set_mailer
+from mycelium_core.config import get_settings
+from mycelium_core.db import admin_session
+from mycelium_core.errors import AuthError, ForbiddenError
+from mycelium_core.services import auth as A
+from mycelium_core.services.mailer import LogMailer, OutboundEmail, set_mailer
 
 
 class _FakeMailer:

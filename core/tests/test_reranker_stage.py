@@ -14,10 +14,10 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from flow_core.reranker import NoopReranker, RerankResult, set_reranker_override
-from flow_core.services.retrieval import Candidate
-from flow_core.services.retrieval.stages import CrossEncoderRerankerStage, RerankGate
-from flow_core.services.retrieval.types import RetrievalContext
+from mycelium_core.reranker import NoopReranker, RerankResult, set_reranker_override
+from mycelium_core.services.retrieval import Candidate
+from mycelium_core.services.retrieval.stages import CrossEncoderRerankerStage, RerankGate
+from mycelium_core.services.retrieval.types import RetrievalContext
 
 
 class _StaticReranker:
@@ -159,7 +159,7 @@ def test_provider_override_seam() -> None:
     test seam pattern used by embedder)."""
     sentinel = NoopReranker()
     set_reranker_override(lambda: sentinel)
-    from flow_core.reranker import get_reranker
+    from mycelium_core.reranker import get_reranker
 
     assert get_reranker() is sentinel
     _ = cast(NoopReranker, get_reranker())  # type narrows

@@ -1,8 +1,8 @@
 """MCP capability-token block tools: upload / get / set / patch recipes.
 
-Each tool mints a real ``flow_cap_`` token (so it touches the DB via
+Each tool mints a real ``mycelium_cap_`` token (so it touches the DB via
 ``_tenant`` + ``cap_svc.mint``) and returns a ready ``curl`` with that
-ephemeral token baked into the Authorization header -- no ``$FLOW_TOKEN``
+ephemeral token baked into the Authorization header -- no ``$MYCELIUM_TOKEN``
 placeholder and no ``X-Workspace-Id`` (the org is in the token). The
 caller's session ``token`` must never leak into the recipe. Synthetic
 target ids are enough: ``mint`` does not require the resource to exist.
@@ -15,10 +15,10 @@ from typing import Any
 
 import pytest
 
-from flow_core.config import get_settings
-from flow_core.db import admin_session
-from flow_core.services.auth import signup
-from flow_mcp import server as mcp_server
+from mycelium_core.config import get_settings
+from mycelium_core.db import admin_session
+from mycelium_core.services.auth import signup
+from mycelium_mcp import server as mcp_server
 
 
 async def _signup() -> tuple[uuid.UUID, uuid.UUID, str]:
@@ -34,21 +34,21 @@ async def _signup() -> tuple[uuid.UUID, uuid.UUID, str]:
 
 
 def _assert_capability_curl(out: dict[str, Any], *, method: str, token: str) -> None:
-    """Shared invariants: the recipe carries an ephemeral flow_cap_ token
+    """Shared invariants: the recipe carries an ephemeral mycelium_cap_ token
     in the Authorization header, never the caller's session token, never a
-    $FLOW_TOKEN placeholder or an X-Workspace-Id (the org is in the token),
+    $MYCELIUM_TOKEN placeholder or an X-Workspace-Id (the org is in the token),
     and never an S3 URL (gateway rule)."""
     base = get_settings().frontend_base_url.rstrip("/")
     assert out["endpoint"].startswith(f"{base}/api/")
     assert out["method"] == method
-    assert out["headers"]["Authorization"].startswith("Bearer flow_cap_")
-    assert "flow_cap_" in out["curl"]
+    assert out["headers"]["Authorization"].startswith("Bearer mycelium_cap_")
+    assert "mycelium_cap_" in out["curl"]
     assert "expires_at" in out
     # The caller's secret session token never leaks.
     assert token not in out["curl"]
     assert token not in repr(out)
     # Capability recipes bake the token in: no placeholder, no workspace header.
-    assert "$FLOW_TOKEN" not in out["curl"]
+    assert "$MYCELIUM_TOKEN" not in out["curl"]
     assert "X-Workspace-Id" not in out["curl"]
     assert "X-Workspace-Id" not in out["headers"]
     # Gateway rule: never an object-store URL.

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
-from flow_api.app import create_app
+from mycelium_api.app import create_app
 
 
 def test_healthz() -> None:

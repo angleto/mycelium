@@ -24,15 +24,15 @@ from decimal import Decimal
 import pytest
 from sqlalchemy import select, text
 
-from flow_core.db import admin_session, tenant_session
-from flow_core.errors import DomainError, NotFoundError
-from flow_core.i18n import MessageCode
-from flow_core.models.note import Note, NoteKind, NoteMaturity
-from flow_core.models.note_link import NoteNoteLink, NoteTaskLink
-from flow_core.services import note_links
-from flow_core.services import notes as notes_svc
-from flow_core.services import tasks as tasks_svc
-from flow_core.services.auth import signup
+from mycelium_core.db import admin_session, tenant_session
+from mycelium_core.errors import DomainError, NotFoundError
+from mycelium_core.i18n import MessageCode
+from mycelium_core.models.note import Note, NoteKind, NoteMaturity
+from mycelium_core.models.note_link import NoteNoteLink, NoteTaskLink
+from mycelium_core.services import note_links
+from mycelium_core.services import notes as notes_svc
+from mycelium_core.services import tasks as tasks_svc
+from mycelium_core.services.auth import signup
 
 
 def _email() -> str:
@@ -407,9 +407,9 @@ async def test_work_note_inherits_task_tags() -> None:
     /focus in sync between the task and its work note."""
     from sqlalchemy import select as _select
 
-    from flow_core.models.tag import Tag, TagKind
-    from flow_core.models.task_tag import TaskTag
-    from flow_core.services import taxonomy
+    from mycelium_core.models.tag import Tag, TagKind
+    from mycelium_core.models.task_tag import TaskTag
+    from mycelium_core.services import taxonomy
 
     org, user = await _make_workspace()
     async with tenant_session(str(org), str(user)) as s:

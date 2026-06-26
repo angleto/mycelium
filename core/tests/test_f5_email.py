@@ -13,13 +13,13 @@ import uuid
 
 import pytest
 
-from flow_core.crypto import decrypt_secret
-from flow_core.db import admin_session, tenant_session
-from flow_core.email_connector import FetchedMessage, OutgoingMessage
-from flow_core.errors import DomainError
-from flow_core.models.email import EmailAccountStatus, EmailProvider
-from flow_core.services import email as svc
-from flow_core.services.auth import signup
+from mycelium_core.crypto import decrypt_secret
+from mycelium_core.db import admin_session, tenant_session
+from mycelium_core.email_connector import FetchedMessage, OutgoingMessage
+from mycelium_core.errors import DomainError
+from mycelium_core.models.email import EmailAccountStatus, EmailProvider
+from mycelium_core.services import email as svc
+from mycelium_core.services.auth import signup
 
 
 class FakeConnector:
@@ -35,7 +35,7 @@ class FakeConnector:
 
     async def send(self, message: OutgoingMessage) -> str:
         self.sent.append(message)
-        return "<sent-1@flow>"
+        return "<sent-1@mycelium>"
 
 
 def _email() -> str:

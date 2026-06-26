@@ -8,7 +8,7 @@ the ``CostBasis`` the metering seam charges on. No row => local.
 
 RLS pattern mirrors 0025 (garden_health_daily): ENABLE + FORCE row level
 security, an org-predicate policy for USING and WITH CHECK, and the
-``flow_app`` grant. ``org_id`` is the primary key (one row per org).
+``mycelium_app`` grant. ``org_id`` is the primary key (one row per org).
 
 Revision ID: 0026
 Revises: 0025
@@ -68,7 +68,7 @@ def upgrade() -> None:
         f"CREATE POLICY p_org_llm_provider ON org_llm_provider "
         f"USING ({_ORG_PRED}) WITH CHECK ({_ORG_PRED})"
     )
-    op.execute("GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE org_llm_provider TO flow_app")
+    op.execute("GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE org_llm_provider TO mycelium_app")
 
 
 def downgrade() -> None:

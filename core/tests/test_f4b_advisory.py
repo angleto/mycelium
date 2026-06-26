@@ -16,17 +16,17 @@ from typing import Any
 
 from sqlalchemy import select
 
-from flow_core.db import admin_session, tenant_session
-from flow_core.models.budget import BudgetPeriod
-from flow_core.models.dependency import DependencyType
-from flow_core.models.tag import TagKind
-from flow_core.models.task import Necessity
-from flow_core.models.workflow import WorkflowState
-from flow_core.services import actors as actors_svc
-from flow_core.services import advisory, budgets, tasks, taxonomy
-from flow_core.services import dependencies as deps
-from flow_core.services import identities as identities_svc
-from flow_core.services.auth import signup
+from mycelium_core.db import admin_session, tenant_session
+from mycelium_core.models.budget import BudgetPeriod
+from mycelium_core.models.dependency import DependencyType
+from mycelium_core.models.tag import TagKind
+from mycelium_core.models.task import Necessity
+from mycelium_core.models.workflow import WorkflowState
+from mycelium_core.services import actors as actors_svc
+from mycelium_core.services import advisory, budgets, tasks, taxonomy
+from mycelium_core.services import dependencies as deps
+from mycelium_core.services import identities as identities_svc
+from mycelium_core.services.auth import signup
 
 _WIN = dt.datetime(2026, 1, 12, 9, 0, tzinfo=dt.UTC)
 

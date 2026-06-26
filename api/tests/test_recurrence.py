@@ -22,17 +22,17 @@ import uuid
 import pytest
 from sqlalchemy import select
 
-from flow_core.db import admin_session, tenant_session
-from flow_core.models.task import Task
-from flow_core.models.task_participant import TaskParticipant
-from flow_core.models.workflow import WorkflowState
-from flow_core.services import actors as actors_svc
-from flow_core.services import identities as identities_svc
-from flow_core.services import memberships as mem_svc
-from flow_core.services import participants as p_svc
-from flow_core.services import recurrence as rec
-from flow_core.services import tasks
-from flow_core.services.auth import signup
+from mycelium_core.db import admin_session, tenant_session
+from mycelium_core.models.task import Task
+from mycelium_core.models.task_participant import TaskParticipant
+from mycelium_core.models.workflow import WorkflowState
+from mycelium_core.services import actors as actors_svc
+from mycelium_core.services import identities as identities_svc
+from mycelium_core.services import memberships as mem_svc
+from mycelium_core.services import participants as p_svc
+from mycelium_core.services import recurrence as rec
+from mycelium_core.services import tasks
+from mycelium_core.services.auth import signup
 
 
 def _email() -> str:
@@ -93,7 +93,7 @@ def test_until_ends_chain() -> None:
 
 
 def test_invalid_spec_rejected() -> None:
-    from flow_core.errors import DomainError
+    from mycelium_core.errors import DomainError
 
     with pytest.raises(DomainError):
         rec.next_occurrence_date(dt.date(2026, 1, 1), {"kind": "bogus"})
@@ -140,7 +140,7 @@ async def test_spawn_on_done_appointment_shifts_start_at() -> None:
             .all()
         }
         # Look up all states of the task's workflow for the transitions.
-        from flow_core.services import workflow as wf_svc
+        from mycelium_core.services import workflow as wf_svc
 
         wf = await wf_svc.effective_workflow_for_task(s, org, t.id)
         all_states = {
@@ -201,7 +201,7 @@ async def test_spawn_on_done_reminder_shifts_due_date() -> None:
             due_date=dt.datetime(2026, 1, 31, 23, 59, 59, tzinfo=dt.UTC),
             recurrence={"kind": "monthly"},
         )
-        from flow_core.services import workflow as wf_svc
+        from mycelium_core.services import workflow as wf_svc
 
         wf = await wf_svc.effective_workflow_for_task(s, org, t.id)
         states = {
@@ -260,7 +260,7 @@ async def test_until_stops_the_chain() -> None:
             due_date=dt.datetime(2026, 12, 31, 23, 59, 59, tzinfo=dt.UTC),
             recurrence={"kind": "daily", "until": "2026-12-31"},
         )
-        from flow_core.services import workflow as wf_svc
+        from mycelium_core.services import workflow as wf_svc
 
         wf = await wf_svc.effective_workflow_for_task(s, org, t.id)
         states = {
@@ -322,7 +322,7 @@ async def test_spawn_carries_extra_participants() -> None:
             task_id=t.id,
             identity_id=collab_ident.id,
         )
-        from flow_core.services import workflow as wf_svc
+        from mycelium_core.services import workflow as wf_svc
 
         wf = await wf_svc.effective_workflow_for_task(s, org, t.id)
         states = {

@@ -246,7 +246,7 @@ const NODE_TYPES = { plant: PlantNode }
 // on a real drag-end, so this key bump is also a clean-slate for
 // every workspace that suffered the v1 behaviour.
 function positionsStorageKey(workspaceId: string): string {
-  return `flow.garden.mindmap.positions.v2.${workspaceId}`
+  return `mycelium.garden.mindmap.positions.v2.${workspaceId}`
 }
 
 function loadPositions(workspaceId: string): Record<string, { x: number; y: number }> {

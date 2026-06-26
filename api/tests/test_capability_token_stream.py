@@ -1,5 +1,5 @@
 """E2E: the note-part body/stream endpoint accepts a scoped, single-use
-capability token (``flow_cap_``) in addition to a normal bearer.
+capability token (``mycelium_cap_``) in addition to a normal bearer.
 
 Covers the agent-without-a-CLI path: an MCP-minted capability token is
 streamed straight to ``PUT /notes/{id}/parts/{pid}/body/stream`` with no
@@ -14,9 +14,9 @@ import uuid
 
 from httpx import ASGITransport, AsyncClient
 
-from flow_api.main import app
-from flow_core.db import tenant_session
-from flow_core.services import capability_tokens as svc
+from mycelium_api.main import app
+from mycelium_core.db import tenant_session
+from mycelium_core.services import capability_tokens as svc
 
 
 def _email() -> str:

@@ -1,6 +1,6 @@
-# Flow, project documentation
+# Mycelium, project documentation
 
-Flow is a multi-tenant task and workflow management system that unifies
+Mycelium is a multi-tenant task and workflow management system that unifies
 a task manager, a time tracker, a scheduler, email-to-task, Italian
 electronic invoicing (SDI) and a hierarchical memory with semantic
 retrieval, with an MCP layer co-equal to the GUI.

@@ -1,19 +1,19 @@
 # Mobile capture: notes from your phone
 
-Three channels, each landing in the SAME Flow `/notes`:
+Three channels, each landing in the SAME Mycelium `/notes`:
 
 1. **PWA install** (browser → home-screen icon)
-2. **Apple Shortcut** (Siri "Hey Siri, nuova nota Flow…")
+2. **Apple Shortcut** (Siri "Hey Siri, nuova nota Mycelium…")
 3. **Telegram bot** (voice messages → notes; revived in v1.2.29)
 
 All three reuse the same backend; the difference is the front door.
 
 ## 1. PWA install
 
-Mobile Safari (iOS) / Chrome (Android) → open `https://flow.xeno.garden` →
-share menu → **Add to Home Screen**. From v1.2.28 Flow registers a
+Mobile Safari (iOS) / Chrome (Android) → open `https://mycelium.xeno.garden` →
+share menu → **Add to Home Screen**. From v1.2.28 Mycelium registers a
 real manifest + service worker, so the icon opens fullscreen (no
-browser chrome), shows the right title (`Flow`), and has two PWA
+browser chrome), shows the right title (`Mycelium`), and has two PWA
 shortcuts the OS surfaces on long-press of the icon: **New note**
 and **Tasks**. The service worker caches the SPA shell so the icon
 opens to a usable screen even with flaky network; the API still goes
@@ -28,8 +28,8 @@ Apple Shortcut paths below.
 
 ## 2. Apple Shortcut
 
-Single endpoint: `POST https://flow.xeno.garden/api/notes/quick-create`
-with `Authorization: Bearer flow_at_…`. Body:
+Single endpoint: `POST https://mycelium.xeno.garden/api/notes/quick-create`
+with `Authorization: Bearer mycelium_at_…`. Body:
 
 ```json
 {
@@ -45,13 +45,13 @@ project.
 
 ### Setup, one-time
 
-1. Open Flow on desktop → **Settings → AI assistants** → "+ New
+1. Open Mycelium on desktop → **Settings → AI assistants** → "+ New
    assistant". Label it "iOS Shortcut". Permissions: leave the
    defaults (everything except `danger:*`). Save. Copy the **client
    secret** that appears in the Credentials card — it's shown only
    once.
 2. On your iPhone, open the **Shortcuts** app → "+" → name it
-   `Nota Flow`.
+   `Nota Mycelium`.
 3. Add the action **Dictate Text** (Siri transcribes on-device).
    Optional: set Stop Listening → "On Tap" so dictation ends when
    you press, not on the first pause.
@@ -63,24 +63,24 @@ project.
    - key `text` → from `Dictated Text`
    - key `kind` → `text`
 6. Add **Get Contents of URL**:
-   - URL: `https://flow.xeno.garden/api/notes/quick-create`
+   - URL: `https://mycelium.xeno.garden/api/notes/quick-create`
    - Method: `POST`
    - Headers:
-     - `Authorization` = `Bearer flow_at_xxxxxxxxxxxxxxxxxxxxxxxxxxx`
+     - `Authorization` = `Bearer mycelium_at_xxxxxxxxxxxxxxxxxxxxxxxxxxx`
    - Request Body: JSON, Source = the Dictionary above
 7. (Optional) **Show Notification** with the response so you see the
    note id when it works.
 8. Bottom of the shortcut: "Add to Siri" — choose a trigger phrase
-   like *"Nuova nota Flow"*. From now on:
+   like *"Nuova nota Mycelium"*. From now on:
    - **Siri** (iPhone, AirPods, Apple Watch, CarPlay): "Hey Siri,
-     Nuova nota Flow" → speaks → done.
+     Nuova nota Mycelium" → speaks → done.
    - **Lock screen widget** / **Action Button**: assign the shortcut
      for one-tap dictation.
 
 ### Security note
 
 The bearer lives **in the Shortcut**. If you lose your phone,
-revoke the assistant from Flow's Settings → AI assistants → Revoke.
+revoke the assistant from Mycelium's Settings → AI assistants → Revoke.
 The bound bearer dies immediately and the Shortcut stops working.
 
 ## 3. Telegram bot (voice-first)
@@ -109,17 +109,17 @@ drag-drop from `/notes`.
 To enable the bot in prod:
 
 1. Mint the bot via BotFather, get the token.
-2. Add to the Flow secret store:
-   - `FLOW_TELEGRAM_BOT_TOKEN` = the BotFather token
-   - `FLOW_TELEGRAM_BOT_USERNAME` = e.g. `flow_leto_bot`
-   - `FLOW_TELEGRAM_WEBHOOK_SECRET` = a long random string
+2. Add to the Mycelium secret store:
+   - `MYCELIUM_TELEGRAM_BOT_TOKEN` = the BotFather token
+   - `MYCELIUM_TELEGRAM_BOT_USERNAME` = e.g. `flow_leto_bot`
+   - `MYCELIUM_TELEGRAM_WEBHOOK_SECRET` = a long random string
 3. Restart the backend; the `/telegram/webhook/{secret}` route comes
    alive (it 404s when the bot is unconfigured).
 4. Register the webhook with Telegram:
 
    ```bash
    curl -s "https://api.telegram.org/bot$TOKEN/setWebhook" \
-     -d "url=https://flow.xeno.garden/api/telegram/webhook/$SECRET" \
+     -d "url=https://mycelium.xeno.garden/api/telegram/webhook/$SECRET" \
      -d "secret_token=$SECRET"
    ```
 
@@ -131,7 +131,7 @@ the default `LocalSTT` raises `RuntimeError` unless the
 `faster-whisper` extra is installed. Two prod options:
 
 - **faster-whisper on Ollama / GPU pod**: install the extra,
-  configure the model id, point Flow at it. Self-hosted.
+  configure the model id, point Mycelium at it. Self-hosted.
 - **External Whisper API**: implement an `OpenAIWhisperProvider` (or
   similar) that returns the same `TranscriptResult` shape. Set the
   override via `set_stt_override`.

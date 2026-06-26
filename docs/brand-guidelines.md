@@ -1,11 +1,11 @@
-# Flow brand guidelines
+# Mycelium brand guidelines
 
 ## Concept
 
-Flow's mark is the **Mycelium Trio**: a tree, two mushrooms, and the
+Mycelium's mark is the **Mycelium Trio**: a tree, two mushrooms, and the
 mycelium network that connects them under the soil. It anchors the
 product vision of "the forest of memory" (note `3747eaac`) and the
-fungal decomposition metaphor that differentiates Flow from
+fungal decomposition metaphor that differentiates Mycelium from
 note-as-rigid-document tools.
 
 ## Files
@@ -14,12 +14,12 @@ note-as-rigid-document tools.
 |---|---|---|
 | App favicon / PWA | `web/public/favicon.svg`, `icon-192.png`, `icon-512.png`, `apple-touch-icon.png` | bake-in `#4a6b3e` background |
 | App topbar mark | `web/src/components/Logo.tsx` | uses `var(--brand)` / `var(--brand-fg)`; adapts to theme |
-| Standalone full mark | `assets/flow-logo.svg` | 128×128, brand background |
-| Compact / very small | `assets/flow-monogram.svg` | drops soil dashes and curving roots; readable down to 16px |
-| Horizontal lockup | `assets/flow-logo-horizontal.svg` | mark + serif wordmark |
-| Monochrome, dark on light | `assets/flow-logo-mono-dark.svg` | print, light overlays |
-| Monochrome, light on dark | `assets/flow-logo-mono-light.svg` | dark overlays |
-| Social card / OG image | `assets/flow-og.svg`, `assets/flow-og.png` | 1200×630, dark forest gradient |
+| Standalone full mark | `assets/mycelium-logo.svg` | 128×128, brand background |
+| Compact / very small | `assets/mycelium-monogram.svg` | drops soil dashes and curving roots; readable down to 16px |
+| Horizontal lockup | `assets/mycelium-logo-horizontal.svg` | mark + serif wordmark |
+| Monochrome, dark on light | `assets/mycelium-logo-mono-dark.svg` | print, light overlays |
+| Monochrome, light on dark | `assets/mycelium-logo-mono-light.svg` | dark overlays |
+| Social card / OG image | `assets/mycelium-og.svg`, `assets/mycelium-og.png` | 1200×630, dark forest gradient |
 
 ## Palette
 
@@ -56,14 +56,14 @@ tighter, editorial look that pairs with the serif.
   horizontal lockup, the same clear space applies around the bounding
   box of mark + wordmark.
 - **Minimum sizes**:
-  - Full mark (`flow-logo.svg`): 24 px square. Below that, switch to
-    `flow-monogram.svg` which keeps the four mycelium nodes legible
+  - Full mark (`mycelium-logo.svg`): 24 px square. Below that, switch to
+    `mycelium-monogram.svg` which keeps the four mycelium nodes legible
     down to 16 px.
   - Horizontal lockup: 96 px wide minimum.
 
 ## Do / don't
 
-- **Do** use `flow-logo.svg` or `flow-monogram.svg` on solid
+- **Do** use `mycelium-logo.svg` or `mycelium-monogram.svg` on solid
   backgrounds. Prefer `--surface` (avorio) in light contexts and
   `--bg` (verde-nero) in dark contexts.
 - **Do** use the monochrome variants for one-color print, embossing,

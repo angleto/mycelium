@@ -70,7 +70,7 @@ def upgrade() -> None:
         "CREATE POLICY p_classification_jobs ON classification_jobs "
         f"USING ({_ORG_PRED}) WITH CHECK ({_ORG_PRED})"
     )
-    op.execute("GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE classification_jobs TO flow_app")
+    op.execute("GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE classification_jobs TO mycelium_app")
 
 
 def downgrade() -> None:

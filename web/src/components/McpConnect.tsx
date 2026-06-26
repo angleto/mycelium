@@ -38,7 +38,7 @@ function buildSnippet(name: string, prefix: string, rawToken: string): {
 } {
   const short = (prefix || '').replace(/[^a-zA-Z0-9]/g, '').slice(0, 6)
   const slug = slugify(name)
-  const serverKey = slug ? `flow-${slug}-${short}` : `flow-${short}`
+  const serverKey = slug ? `mycelium-${slug}-${short}` : `mycelium-${short}`
   const config = {
     mcpServers: {
       [serverKey]: {
@@ -46,14 +46,14 @@ function buildSnippet(name: string, prefix: string, rawToken: string): {
         args: [
           'run',
           '--project',
-          '/path/to/flow/mcp',
+          '/path/to/mycelium/mcp',
           'python',
           '-m',
-          'flow_mcp.main',
+          'mycelium_mcp.main',
         ],
         env: {
-          FLOW_MCP_BASE_URL: apiBaseUrl(),
-          FLOW_MCP_AGENT_TOKEN: rawToken,
+          MYCELIUM_MCP_BASE_URL: apiBaseUrl(),
+          MYCELIUM_MCP_AGENT_TOKEN: rawToken,
         },
       },
     },

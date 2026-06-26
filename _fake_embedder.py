@@ -16,8 +16,8 @@ import hashlib
 import math
 import re
 
-from flow_core.config import get_settings
-from flow_core.embedder import EmbedResult
+from mycelium_core.config import get_settings
+from mycelium_core.embedder import EmbedResult
 
 _TOKEN = re.compile(r"\w+")
 

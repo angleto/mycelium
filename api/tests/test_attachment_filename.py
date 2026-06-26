@@ -11,7 +11,7 @@ import uuid
 
 from httpx import ASGITransport, AsyncClient
 
-from flow_api.main import app
+from mycelium_api.main import app
 
 # The exact name from the bug report: backpack emoji + smart apostrophe.
 BUG_NAME = "\U0001f392 LISTA DELL’OCCORRENTE.pdf"  # noqa: RUF001

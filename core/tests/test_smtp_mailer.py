@@ -2,7 +2,7 @@
 
 Mirrors test_migrate_attachments' config/factory style: explicit
 ``Settings(...)`` kwargs (which override env, so an ambient
-FLOW_SMTP_* dev export cannot make these non-deterministic), a
+MYCELIUM_SMTP_* dev export cannot make these non-deterministic), a
 fail-closed validator assertion, and a fake-driven unit test of the
 real transport with **no network** (``smtplib.SMTP`` monkeypatched).
 
@@ -16,8 +16,8 @@ from email.message import EmailMessage
 
 import pytest
 
-from flow_core.config import Settings
-from flow_core.services.mailer import (
+from mycelium_core.config import Settings
+from mycelium_core.services.mailer import (
     LogMailer,
     OutboundEmail,
     SmtpMailer,
@@ -36,7 +36,7 @@ def _smtp_settings(**over: object) -> Settings:
         "smtp_port": 587,
         "smtp_username": "tem-user",
         "smtp_password": "tem-pass",
-        "smtp_from": "Flow <no-reply@flow.xeno.garden>",
+        "smtp_from": "Mycelium <no-reply@mycelium.xeno.garden>",
         "smtp_starttls": True,
     }
     base.update(over)
@@ -49,14 +49,14 @@ def test_build_returns_smtp_when_configured() -> None:
 
 
 def test_build_returns_logmailer_when_unset() -> None:
-    # Explicit empty host/from overrides any ambient FLOW_SMTP_* env.
+    # Explicit empty host/from overrides any ambient MYCELIUM_SMTP_* env.
     s = Settings(jwt_secret=_JWT, secret_key=_FERNET, smtp_host="", smtp_from="")
     assert s.smtp_configured is False
     assert isinstance(build_system_mailer(s), LogMailer)
 
 
 def test_validator_fails_closed_when_host_without_from() -> None:
-    with pytest.raises(ValueError, match="FLOW_SMTP_FROM is required"):
+    with pytest.raises(ValueError, match="MYCELIUM_SMTP_FROM is required"):
         Settings(
             jwt_secret=_JWT,
             secret_key=_FERNET,
@@ -106,13 +106,13 @@ class _FakeSMTP:
 async def test_smtp_send_uses_starttls_login_and_sendmessage(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr("flow_core.services.mailer.smtplib.SMTP", _FakeSMTP)
+    monkeypatch.setattr("mycelium_core.services.mailer.smtplib.SMTP", _FakeSMTP)
     mailer = SmtpMailer(
         host="smtp.tem.scw.cloud",
         port=587,
         username="tem-user",
         password="tem-pass",
-        sender="Flow <no-reply@flow.xeno.garden>",
+        sender="Mycelium <no-reply@mycelium.xeno.garden>",
         starttls=True,
     )
 
@@ -127,7 +127,7 @@ async def test_smtp_send_uses_starttls_login_and_sendmessage(
     assert fake.starttls_called is True
     assert fake.login_args == ("tem-user", "tem-pass")
     assert fake.sent is not None
-    assert fake.sent["From"] == "Flow <no-reply@flow.xeno.garden>"
+    assert fake.sent["From"] == "Mycelium <no-reply@mycelium.xeno.garden>"
     assert fake.sent["To"] == "user@example.test"
     assert fake.sent["Subject"] == "Reset"
     assert "https://x/r?token=t" in fake.sent.get_content()
@@ -136,13 +136,13 @@ async def test_smtp_send_uses_starttls_login_and_sendmessage(
 async def test_smtp_send_skips_login_without_username_and_starttls_off(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr("flow_core.services.mailer.smtplib.SMTP", _FakeSMTP)
+    monkeypatch.setattr("mycelium_core.services.mailer.smtplib.SMTP", _FakeSMTP)
     mailer = SmtpMailer(
         host="relay.internal",
         port=25,
         username="",  # unauthenticated relay
         password="",
-        sender="ops@flow.xeno.garden",
+        sender="ops@mycelium.xeno.garden",
         starttls=False,  # plain relay, no STARTTLS
     )
 
@@ -153,4 +153,4 @@ async def test_smtp_send_skips_login_without_username_and_starttls_off(
     assert fake.starttls_called is False
     assert fake.login_args is None  # login() never issued
     assert fake.sent is not None
-    assert fake.sent["From"] == "ops@flow.xeno.garden"
+    assert fake.sent["From"] == "ops@mycelium.xeno.garden"

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from flow_core.services import md_anchor
+from mycelium_core.services import md_anchor
 
 
 def _sp(body: str, original: str, proposed: str, prefix=None, suffix=None) -> str | None:

@@ -12,12 +12,12 @@ import uuid
 
 from sqlalchemy import select
 
-from flow_core.db import admin_session, tenant_session
-from flow_core.models.task_tag import TaskTag
-from flow_core.services import tasks as tasks_svc
-from flow_core.services import taxonomy
-from flow_core.services.auth import signup
-from flow_core.services.taxonomy import ClientInput
+from mycelium_core.db import admin_session, tenant_session
+from mycelium_core.models.task_tag import TaskTag
+from mycelium_core.services import tasks as tasks_svc
+from mycelium_core.services import taxonomy
+from mycelium_core.services.auth import signup
+from mycelium_core.services.taxonomy import ClientInput
 
 
 async def _org() -> tuple[uuid.UUID, uuid.UUID]:

@@ -18,8 +18,8 @@ import pytest
 from _fake_embedder import FakeEmbedder
 from httpx import ASGITransport, AsyncClient
 
-from flow_api.main import app
-from flow_core.embedder import set_embedder_override
+from mycelium_api.main import app
+from mycelium_core.embedder import set_embedder_override
 
 
 def _email() -> str:

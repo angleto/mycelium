@@ -39,17 +39,17 @@ ai_providers.py, dispatch_loop.py, rbac.py, billing.py, i18n.py):
 
 ## Decision
 
-### D1. In-process conversational assistant inside Flow
+### D1. In-process conversational assistant inside Mycelium
 
 A free-text Telegram message from a linked user is handled by a new
-**conversational agent loop in the Flow backend** (not `agent_runtime`,
+**conversational agent loop in the Mycelium backend** (not `agent_runtime`,
 not an external host). It reuses `LLMProvider`, the service-layer tools,
 RLS/tenant scoping, and billing. Rationale: self-contained, ships
-without new deployable infra, and it is *Flow's own assistant* (not a
+without new deployable infra, and it is *Mycelium's own assistant* (not a
 third-party vendor integration), so it does not violate the
-"Flow vendor-neutral, LLM glue outside" stance taken for the kiwiprocess
+"Mycelium vendor-neutral, LLM glue outside" stance taken for the kiwiprocess
 integration — that stance is about not embedding *other vendors'*
-connectors in Flow. (An external multi-MCP "glue" host remains a valid
+connectors in Mycelium. (An external multi-MCP "glue" host remains a valid
 future evolution; see Alternatives.)
 
 ### D2. Provider-neutral ReAct (JSON-in-text) tool protocol
@@ -99,7 +99,7 @@ boundaries; the framing is defense-in-depth.
 
 ### D6. i18n posture
 
-Flow-*generated* feedback (errors, "saved", usage) goes through
+Mycelium-*generated* feedback (errors, "saved", usage) goes through
 `MessageCode`; the assistant's *generated* natural-language answer is
 passthrough (not catalogable). As part of this work, retrofit the
 existing hardcoded Telegram replies (link/help/note/task, incl. the
@@ -107,7 +107,7 @@ v1.2.53 shim) to `MessageCode` to clear the ADR-0017 debt.
 
 ## Consequences
 
-- New module (e.g. `core/src/flow_core/services/assistant.py`) with the
+- New module (e.g. `core/src/mycelium_core/services/assistant.py`) with the
   conversational loop + tool dispatch; wired into
   `telegram_link.handle_webhook_update` on the free-text branch.
 - Assistant model selection added to config / assistant settings.
@@ -122,8 +122,8 @@ v1.2.53 shim) to `MessageCode` to clear the ADR-0017 debt.
 
 - **A. Reuse `agent_runtime`** (task-per-message). Rejected: junk tasks,
   wrong shape, dispatch-approval friction.
-- **C. External LLM-glue host over MCP** (one assistant brain across Flow
-  + kiwiprocess + other MCP servers; Telegram → that host → Flow MCP).
+- **C. External LLM-glue host over MCP** (one assistant brain across Mycelium
+  + kiwiprocess + other MCP servers; Telegram → that host → Mycelium MCP).
   Most composable and most aligned with the kiwiprocess "MCP + LLM glue"
   decision, but needs a new always-on deployable component and Telegram
   routing to it. Deferred: revisit when a second MCP server (kiwiprocess)

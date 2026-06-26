@@ -17,14 +17,14 @@ from zoneinfo import ZoneInfo
 
 from tests_helpers import seed_ai_assistant_identity
 
-from flow_core.db import admin_session, tenant_session
-from flow_core.models.dependency import DependencyType
-from flow_core.models.task import ScheduleMode
-from flow_core.services import calendar as cal_svc
-from flow_core.services import dependencies as deps
-from flow_core.services import scheduler as sch
-from flow_core.services import tasks
-from flow_core.services.auth import signup
+from mycelium_core.db import admin_session, tenant_session
+from mycelium_core.models.dependency import DependencyType
+from mycelium_core.models.task import ScheduleMode
+from mycelium_core.services import calendar as cal_svc
+from mycelium_core.services import dependencies as deps
+from mycelium_core.services import scheduler as sch
+from mycelium_core.services import tasks
+from mycelium_core.services.auth import signup
 
 _RM = ZoneInfo("Europe/Rome")
 # Monday 2026-01-12 09:00 Europe/Rome (winter = UTC+1).

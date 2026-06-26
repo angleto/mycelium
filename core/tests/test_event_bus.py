@@ -15,17 +15,17 @@ import uuid
 import pytest
 from sqlalchemy import func, select, update
 
-from flow_core.db import admin_session, tenant_session
-from flow_core.errors import ConflictError, QuotaExceededError
-from flow_core.i18n import MessageCode
-from flow_core.models.event_outbox import EventOutbox
-from flow_core.models.executor import Executor, ExecutorKind
-from flow_core.models.note import Note, NoteKind
-from flow_core.models.tag import TagKind
-from flow_core.services import event_bus, taxonomy
-from flow_core.services import garden_classify as gc
-from flow_core.services import notes as notes_svc
-from flow_core.services.auth import signup
+from mycelium_core.db import admin_session, tenant_session
+from mycelium_core.errors import ConflictError, QuotaExceededError
+from mycelium_core.i18n import MessageCode
+from mycelium_core.models.event_outbox import EventOutbox
+from mycelium_core.models.executor import Executor, ExecutorKind
+from mycelium_core.models.note import Note, NoteKind
+from mycelium_core.models.tag import TagKind
+from mycelium_core.services import event_bus, taxonomy
+from mycelium_core.services import garden_classify as gc
+from mycelium_core.services import notes as notes_svc
+from mycelium_core.services.auth import signup
 
 
 def _email() -> str:

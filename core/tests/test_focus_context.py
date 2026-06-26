@@ -14,13 +14,13 @@ from decimal import Decimal
 import pytest
 from _fake_embedder import FakeEmbedder
 
-from flow_core.db import admin_session, tenant_session
-from flow_core.embedder import set_embedder_override
-from flow_core.models.note import NoteKind
-from flow_core.services import billing, note_links
-from flow_core.services import focus_context as fc
-from flow_core.services import notes as nt
-from flow_core.services.auth import signup
+from mycelium_core.db import admin_session, tenant_session
+from mycelium_core.embedder import set_embedder_override
+from mycelium_core.models.note import NoteKind
+from mycelium_core.services import billing, note_links
+from mycelium_core.services import focus_context as fc
+from mycelium_core.services import notes as nt
+from mycelium_core.services.auth import signup
 
 
 @pytest.fixture

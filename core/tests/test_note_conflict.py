@@ -16,12 +16,12 @@ import uuid
 
 from sqlalchemy import select, text
 
-from flow_core.db import admin_session, tenant_session, with_actor
-from flow_core.models.adjudication import Adjudication
-from flow_core.models.note import NoteKind
-from flow_core.services import note_conflict
-from flow_core.services import notes as notes_svc
-from flow_core.services.auth import signup
+from mycelium_core.db import admin_session, tenant_session, with_actor
+from mycelium_core.models.adjudication import Adjudication
+from mycelium_core.models.note import NoteKind
+from mycelium_core.services import note_conflict
+from mycelium_core.services import notes as notes_svc
+from mycelium_core.services.auth import signup
 
 
 def _email() -> str:
@@ -91,7 +91,7 @@ async def test_no_conflict_for_human_to_human_multitab() -> None:
             title="mature-note",
             text="body",
         )
-        from flow_core.services import note_links
+        from mycelium_core.services import note_links
 
         await note_links.set_maturity(s, org_id=org, actor_id=user, note_id=n.id, maturity="mature")
         # Simulate a prior human_direct edit via update_note's audit:
@@ -124,7 +124,7 @@ async def test_conflict_opens_adjudication_on_agent_after_human_edit() -> None:
             title="mature-note",
             text="body",
         )
-        from flow_core.services import note_links
+        from mycelium_core.services import note_links
 
         await note_links.set_maturity(s, org_id=org, actor_id=user, note_id=n.id, maturity="mature")
         # The set_maturity above is the "previous human edit" the
@@ -161,7 +161,7 @@ async def test_no_conflict_when_window_expired() -> None:
             title="mature-note",
             text="body",
         )
-        from flow_core.services import note_links
+        from mycelium_core.services import note_links
 
         await note_links.set_maturity(s, org_id=org, actor_id=user, note_id=n.id, maturity="mature")
         # Drive the detector with a future ``now`` so the prior edit

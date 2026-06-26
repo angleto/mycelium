@@ -47,26 +47,26 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from tests_helpers import seed_ai_assistant_identity
 
-from flow_api.main import app
-from flow_core.ai_providers import LLMResult, set_llm_override
-from flow_core.db import admin_session, tenant_session
-from flow_core.embedder import set_embedder_override
-from flow_core.errors import DomainError, ForbiddenError
-from flow_core.models.agent_run import AgentRun, AgentRunStatus
-from flow_core.models.dispatch_request import (
+from mycelium_api.main import app
+from mycelium_core.ai_providers import LLMResult, set_llm_override
+from mycelium_core.db import admin_session, tenant_session
+from mycelium_core.embedder import set_embedder_override
+from mycelium_core.errors import DomainError, ForbiddenError
+from mycelium_core.models.agent_run import AgentRun, AgentRunStatus
+from mycelium_core.models.dispatch_request import (
     AutonomousDispatch,
     DispatchRequest,
     DispatchStatus,
 )
-from flow_core.models.executor import Executor, ExecutorKind
-from flow_core.models.membership import Membership, Role
-from flow_core.models.organization import Organization
-from flow_core.security import decode_token
-from flow_core.services import billing
-from flow_core.services import dispatch_loop as loop
-from flow_core.services import executors as exec_svc
-from flow_core.services import tasks as tasks_svc
-from flow_core.services.auth import signup
+from mycelium_core.models.executor import Executor, ExecutorKind
+from mycelium_core.models.membership import Membership, Role
+from mycelium_core.models.organization import Organization
+from mycelium_core.security import decode_token
+from mycelium_core.services import billing
+from mycelium_core.services import dispatch_loop as loop
+from mycelium_core.services import executors as exec_svc
+from mycelium_core.services import tasks as tasks_svc
+from mycelium_core.services.auth import signup
 
 _AS_OF = dt.datetime(2026, 1, 12, 8, 0, tzinfo=dt.UTC)
 

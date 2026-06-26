@@ -2,7 +2,7 @@
   "ts": "2026-05-30",
   "python": "3.12.13",
   "env": {
-    "FLOW_EMBEDDER": ""
+    "MYCELIUM_EMBEDDER": ""
   },
   "registry": {
     "n_http_tools": 4,

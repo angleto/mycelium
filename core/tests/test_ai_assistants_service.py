@@ -7,14 +7,14 @@ import uuid
 import pytest
 from sqlalchemy import select
 
-from flow_core.db import admin_session, tenant_session
-from flow_core.errors import DomainError, NotFoundError
-from flow_core.i18n import MessageCode
-from flow_core.mcp_scopes import DEFAULT_SCOPES, VALID_SCOPE_KEYS
-from flow_core.models.agent_token import AgentToken
-from flow_core.models.ai_assistant import AiAssistant
-from flow_core.services import ai_assistants as svc
-from flow_core.services.auth import signup
+from mycelium_core.db import admin_session, tenant_session
+from mycelium_core.errors import DomainError, NotFoundError
+from mycelium_core.i18n import MessageCode
+from mycelium_core.mcp_scopes import DEFAULT_SCOPES, VALID_SCOPE_KEYS
+from mycelium_core.models.agent_token import AgentToken
+from mycelium_core.models.ai_assistant import AiAssistant
+from mycelium_core.services import ai_assistants as svc
+from mycelium_core.services.auth import signup
 
 
 async def _org() -> tuple[uuid.UUID, uuid.UUID]:

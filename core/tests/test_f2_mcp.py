@@ -7,10 +7,10 @@ import uuid
 
 import pytest
 
-from flow_core.db import admin_session
-from flow_core.errors import DomainError
-from flow_core.services.auth import signup
-from flow_mcp.server import add_dependency, create_task, graph
+from mycelium_core.db import admin_session
+from mycelium_core.errors import DomainError
+from mycelium_core.services.auth import signup
+from mycelium_mcp.server import add_dependency, create_task, graph
 
 
 async def test_mcp_dependency_and_graph() -> None:

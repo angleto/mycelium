@@ -19,7 +19,7 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.x509.oid import NameOID
 
-from flow_core.services.sdi_transport import (
+from mycelium_core.services.sdi_transport import (
     _RICEVI_NS,
     _RICEVI_SOAP_ACTION,
     _mtls_ssl_context,
@@ -166,7 +166,7 @@ def _write_ephemeral_client_material(tmp_path: object) -> tuple[str, str, str]:
     ``_mtls_ssl_context`` can be built without network or real AdE material.
     Returns (client_cert_path, client_key_path, ca_bundle_path)."""
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-    subj = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "flow-sdi-test")])
+    subj = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "mycelium-sdi-test")])
     now = datetime.datetime.now(datetime.UTC)
     cert = (
         x509.CertificateBuilder()

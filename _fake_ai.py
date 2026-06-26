@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from flow_core.ai_providers import LLMResult, TranscriptResult, TtsResult
+from mycelium_core.ai_providers import LLMResult, TranscriptResult, TtsResult
 
 
 class FakeLLM:

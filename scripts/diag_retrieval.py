@@ -1,6 +1,6 @@
 """Read-only retrieval diagnostic (mycelio semantic-recall tuning).
 
-Run inside the backend pod (has the local embedder + DB + flow_core):
+Run inside the backend pod (has the local embedder + DB + mycelium_core):
 
     kubectl -n flow-production exec -i deploy/flow-backend -- python - < scripts/diag_retrieval.py
 
@@ -18,14 +18,14 @@ import asyncio
 
 from sqlalchemy import select
 
-from flow_core.db import admin_session, tenant_session
-from flow_core.embedder import get_embedder
-from flow_core.models.membership import Membership, Role
-from flow_core.models.memory_blob import MemoryBlob
-from flow_core.models.organization import Organization
-from flow_core.services import memory as M
+from mycelium_core.db import admin_session, tenant_session
+from mycelium_core.embedder import get_embedder
+from mycelium_core.models.membership import Membership, Role
+from mycelium_core.models.memory_blob import MemoryBlob
+from mycelium_core.models.organization import Organization
+from mycelium_core.services import memory as M
 
-FLOW_PROJECT = "b5ec1167-11f0-47bf-ba11-f5c25885928c"
+MYCELIUM_PROJECT = "b5ec1167-11f0-47bf-ba11-f5c25885928c"
 
 # Notes that ARE genuinely relevant to the conceptual probes (so the output can
 # flag where they land in the dense ranking vs the noise).
@@ -69,10 +69,10 @@ async def main() -> None:
 
     org_id = user_id = None
     for cand_org, cand_user in orgs:
-        async with tenant_session(str(cand_org), str(cand_user), project_id=FLOW_PROJECT) as s:
+        async with tenant_session(str(cand_org), str(cand_user), project_id=MYCELIUM_PROJECT) as s:
             n = (
                 await s.execute(
-                    select(MemoryBlob.id).where(MemoryBlob.project_id == FLOW_PROJECT).limit(1)
+                    select(MemoryBlob.id).where(MemoryBlob.project_id == MYCELIUM_PROJECT).limit(1)
                 )
             ).first()
         if n is not None:
@@ -80,7 +80,7 @@ async def main() -> None:
             break
     if org_id is None:
         print(
-            f"flow project {FLOW_PROJECT} has no blobs in any of {len(orgs)} owned org(s); aborting"
+            f"project {MYCELIUM_PROJECT} has no blobs in any of {len(orgs)} owned org(s); aborting"
         )
         return
 
@@ -96,7 +96,7 @@ async def main() -> None:
         print(f"  {k} = {bag.get(k, '<unset>')!r}")
     print(f"  (full settings keys: {sorted(bag.keys())})")
 
-    async with tenant_session(str(org_id), str(user_id), project_id=FLOW_PROJECT) as s:
+    async with tenant_session(str(org_id), str(user_id), project_id=MYCELIUM_PROJECT) as s:
         sem_floor = await M.semantic_min_similarity(s, org_id)
         grader_floor = await M.grader_min_rrf_floor(s, org_id)
         print("--- resolved effective floors ---")
@@ -121,7 +121,7 @@ async def main() -> None:
                 await s.execute(
                     select(MemoryBlob.id, MemoryBlob.text, dist.label("d"))
                     .where(
-                        MemoryBlob.project_id == FLOW_PROJECT,
+                        MemoryBlob.project_id == MYCELIUM_PROJECT,
                         MemoryBlob.embedding.is_not(None),
                     )
                     .order_by(dist)
@@ -139,7 +139,7 @@ async def main() -> None:
                 await s.execute(
                     select(MemoryBlob.id, dist.label("d"))
                     .where(
-                        MemoryBlob.project_id == FLOW_PROJECT,
+                        MemoryBlob.project_id == MYCELIUM_PROJECT,
                         MemoryBlob.embedding.is_not(None),
                     )
                     .order_by(dist)

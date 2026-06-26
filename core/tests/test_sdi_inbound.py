@@ -12,16 +12,16 @@ from decimal import Decimal
 import pytest
 from sqlalchemy import select
 
-from flow_core.db import admin_session, tenant_session
-from flow_core.models.invoice import BuyerVerdict, ConservationStatus, InvoiceState, SdiStatus
-from flow_core.models.sdi_notification import InvoiceNotification
-from flow_core.sdi_channel import IntermediaryIdentity, TransmitResult, set_channel_override
-from flow_core.services import invoice as inv
-from flow_core.services import sdi_mandate as mandate
-from flow_core.services.auth import signup
-from flow_core.services.sdi_inbound import ingest_notification, parse_notification
-from flow_core.services.sdi_notification_xsd import NS_MESSAGGI
-from flow_core.services.taxonomy import ClientInput, create_client
+from mycelium_core.db import admin_session, tenant_session
+from mycelium_core.models.invoice import BuyerVerdict, ConservationStatus, InvoiceState, SdiStatus
+from mycelium_core.models.sdi_notification import InvoiceNotification
+from mycelium_core.sdi_channel import IntermediaryIdentity, TransmitResult, set_channel_override
+from mycelium_core.services import invoice as inv
+from mycelium_core.services import sdi_mandate as mandate
+from mycelium_core.services.auth import signup
+from mycelium_core.services.sdi_inbound import ingest_notification, parse_notification
+from mycelium_core.services.sdi_notification_xsd import NS_MESSAGGI
+from mycelium_core.services.taxonomy import ClientInput, create_client
 
 # v1 notification fixtures are XSD-valid against MessaggiTypes_v1.1: SdI
 # rejects anything else, and so do we. The root carries the official messaggi
@@ -131,7 +131,7 @@ def test_inbound_app_rejects_malformed_xml_with_400() -> None:
     # not bubble lxml.XMLSyntaxError into a 500.
     from fastapi.testclient import TestClient
 
-    from flow_sdi_inbound.app import create_app
+    from mycelium_sdi_inbound.app import create_app
 
     client = TestClient(create_app())
     assert client.post("/sdi/notification", content=b"").status_code == 400
@@ -157,7 +157,7 @@ def _coop() -> Iterator[None]:
         @property
         def intermediary(self) -> IntermediaryIdentity | None:
             return IntermediaryIdentity(
-                country_code="IT", vat_number="11122233344", legal_name="Flow Intermediary Srl"
+                country_code="IT", vat_number="11122233344", legal_name="Mycelium Intermediary Srl"
             )
 
         async def transmit(self, *, xml: str, invoice_id: str, filename: str) -> TransmitResult:

@@ -20,7 +20,7 @@ whether an app is needed.
 - True hands-free requires a **native companion app** (or a native
   App Intents / Siri Shortcuts / Android App Actions extension) that
   maps the headphone media button and/or registers an OS assistant
-  intent ("Hey Siri/Google, new Flow note"). Feasibility depends on
+  intent ("Hey Siri/Google, new Mycelium note"). Feasibility depends on
   the button emitting standard media-key/HID events or triggering the
   OS assistant; a vendor-proprietary button usable only by that
   vendor's app may not be interceptable -- a hardware dependency,

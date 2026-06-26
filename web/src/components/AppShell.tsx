@@ -76,7 +76,7 @@ function ProjectFocus() {
   // falls back to "All clients" for a beat on every reload (looks
   // unremembered). Cache the chosen client's name and render it as a
   // stand-in option until the real list arrives.
-  const NAMEK = 'flow-focus-client-name'
+  const NAMEK = 'mycelium-focus-client-name'
   const clientKnown = clients.some((c) => c.id === clientId)
   const cachedName =
     typeof localStorage !== 'undefined'

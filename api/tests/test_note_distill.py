@@ -12,8 +12,8 @@ import pytest
 from _fake_ai import FakeLLM
 from httpx import ASGITransport, AsyncClient
 
-from flow_api.main import app
-from flow_core.ai_providers import set_llm_override
+from mycelium_api.main import app
+from mycelium_core.ai_providers import set_llm_override
 
 
 @pytest.fixture

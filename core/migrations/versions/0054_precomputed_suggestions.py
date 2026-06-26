@@ -67,7 +67,9 @@ def upgrade() -> None:
         "CREATE POLICY p_precomputed_suggestions ON precomputed_suggestions "
         f"USING ({_ORG_PRED}) WITH CHECK ({_ORG_PRED})"
     )
-    op.execute("GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE precomputed_suggestions TO flow_app")
+    op.execute(
+        "GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE precomputed_suggestions TO mycelium_app"
+    )
 
 
 def downgrade() -> None:

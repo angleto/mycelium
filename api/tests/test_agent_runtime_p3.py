@@ -44,21 +44,21 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from tests_helpers import seed_ai_assistant_identity
 
-from flow_api.main import app
-from flow_core.ai_providers import LLMResult, set_llm_override
-from flow_core.db import admin_session, tenant_session
-from flow_core.embedder import set_embedder_override
-from flow_core.errors import DomainError, ForbiddenError, NotFoundError
-from flow_core.models.agent_run import AgentRun, AgentRunStatus
-from flow_core.models.executor import Executor, ExecutorKind
-from flow_core.models.note import Note
-from flow_core.models.schedule import Schedule
-from flow_core.services import agent_runtime as runtime
-from flow_core.services import billing
-from flow_core.services import executors as exec_svc
-from flow_core.services import scheduler as sch
-from flow_core.services import tasks as tasks_svc
-from flow_core.services.auth import signup
+from mycelium_api.main import app
+from mycelium_core.ai_providers import LLMResult, set_llm_override
+from mycelium_core.db import admin_session, tenant_session
+from mycelium_core.embedder import set_embedder_override
+from mycelium_core.errors import DomainError, ForbiddenError, NotFoundError
+from mycelium_core.models.agent_run import AgentRun, AgentRunStatus
+from mycelium_core.models.executor import Executor, ExecutorKind
+from mycelium_core.models.note import Note
+from mycelium_core.models.schedule import Schedule
+from mycelium_core.services import agent_runtime as runtime
+from mycelium_core.services import billing
+from mycelium_core.services import executors as exec_svc
+from mycelium_core.services import scheduler as sch
+from mycelium_core.services import tasks as tasks_svc
+from mycelium_core.services.auth import signup
 
 _AS_OF = dt.datetime(2026, 1, 12, 8, 0, tzinfo=dt.UTC)
 
@@ -220,7 +220,7 @@ async def test_happy_path_metered_artifact_and_determinism(
         # not ``note.task_id`` which was dropped.
         assert run.artifact_note_id is not None
         note = (await s.execute(select(Note).where(Note.id == run.artifact_note_id))).scalar_one()
-        from flow_core.models.note_link import NoteTaskLink
+        from mycelium_core.models.note_link import NoteTaskLink
 
         art_link = (
             await s.execute(
@@ -233,7 +233,7 @@ async def test_happy_path_metered_artifact_and_determinism(
         ).scalar_one_or_none()
         assert art_link is not None
         # Phase 6 final: body lives in note_part(ord=0).
-        from flow_core.services.notes import get_body as _get_body
+        from mycelium_core.services.notes import get_body as _get_body
 
         assert "Investigated and resolved." in (await _get_body(s, note_id=note.id))
 
@@ -455,7 +455,7 @@ async def test_tool_not_allowed_blocks_with_no_side_effect(
         task, _ex = await _dispatched_llm_task(s, org=org, user=user)
         # ADR-0029 P3: notes are linked to tasks via NoteTaskLink
         # (any kind), not the dropped ``Note.task_id`` column.
-        from flow_core.models.note_link import NoteTaskLink
+        from mycelium_core.models.note_link import NoteTaskLink
 
         notes_before = (
             await s.execute(
@@ -623,7 +623,7 @@ async def test_double_start_rejected_via_api(_fake_embedder: None) -> None:
 
 
 def _uid(token: str) -> uuid.UUID:
-    from flow_core.security import decode_token
+    from mycelium_core.security import decode_token
 
     return uuid.UUID(decode_token(token)["sub"])
 
@@ -691,7 +691,7 @@ async def test_rbac_member_cannot_start_service_level(
         run_id = done.id
         # Add `other` as a plain member of owner_org (RLS allows the
         # insert: app.current_org == owner_org in this session).
-        from flow_core.models.membership import Membership, Role
+        from mycelium_core.models.membership import Membership, Role
 
         other = await signup(s, email=_email(), password="pw-strong-123", org_name="OTH")
         s.add(Membership(org_id=owner_org, user_id=other.user_id, role=Role.member))

@@ -10,13 +10,13 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from flow_api.app import _wire_local_llm_override
-from flow_core.ai_providers import LocalLLM, get_llm, set_llm_override
-from flow_core.llm_ollama import OllamaLLM
+from mycelium_api.app import _wire_local_llm_override
+from mycelium_core.ai_providers import LocalLLM, get_llm, set_llm_override
+from mycelium_core.llm_ollama import OllamaLLM
 
 
 def test_wire_local_llm_override_installs_ollama_when_configured() -> None:
-    settings = SimpleNamespace(ollama_url="http://flow-ollama:11434", open_model="llama3.2:3b")
+    settings = SimpleNamespace(ollama_url="http://mycelium-ollama:11434", open_model="llama3.2:3b")
     try:
         assert _wire_local_llm_override(settings) is True
         provider = get_llm()

@@ -20,9 +20,9 @@ import pytest
 from _fake_embedder import FakeEmbedder
 from httpx import ASGITransport, AsyncClient
 
-import flow_core.embedder as embedder_mod
-from flow_api.main import app
-from flow_core.embedder import EmbedResult, set_embedder_override
+import mycelium_core.embedder as embedder_mod
+from mycelium_api.main import app
+from mycelium_core.embedder import EmbedResult, set_embedder_override
 
 
 class _BrokenEmbedder:
@@ -387,9 +387,9 @@ async def test_rechunk_endpoint_re_indexes_legacy_long_note(
     re-read the source's BlobSource rows from the public surface
     (the search hits) to confirm the new chunked indexing took.
     """
-    from flow_core.bootstrap_admin import ensure_admin
-    from flow_core.services import memory as mem_svc
-    from flow_core.services.chunker import WholeChunker
+    from mycelium_core.bootstrap_admin import ensure_admin
+    from mycelium_core.services import memory as mem_svc
+    from mycelium_core.services.chunker import WholeChunker
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://t") as c:
@@ -430,7 +430,7 @@ async def test_rechunk_endpoint_re_indexes_legacy_long_note(
         long_text = f"{para0}\n\n{para1}\n\n{para2}"
         source_id = str(uuid.uuid4())
 
-        from flow_core.db import tenant_session
+        from mycelium_core.db import tenant_session
 
         async with tenant_session(str(org_id), str(user_id)) as s:
             await mem_svc.write_blob(

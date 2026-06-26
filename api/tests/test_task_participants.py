@@ -29,16 +29,16 @@ import uuid
 import pytest
 from sqlalchemy import select
 
-from flow_core.db import admin_session, tenant_session
-from flow_core.errors import ConflictError, DomainError
-from flow_core.i18n import MessageCode
-from flow_core.models.task_participant import TaskParticipant
-from flow_core.services import actors as actors_svc
-from flow_core.services import identities as identities_svc
-from flow_core.services import memberships as mem_svc
-from flow_core.services import participants as p_svc
-from flow_core.services import tasks
-from flow_core.services.auth import signup
+from mycelium_core.db import admin_session, tenant_session
+from mycelium_core.errors import ConflictError, DomainError
+from mycelium_core.i18n import MessageCode
+from mycelium_core.models.task_participant import TaskParticipant
+from mycelium_core.services import actors as actors_svc
+from mycelium_core.services import identities as identities_svc
+from mycelium_core.services import memberships as mem_svc
+from mycelium_core.services import participants as p_svc
+from mycelium_core.services import tasks
+from mycelium_core.services.auth import signup
 
 
 def _email() -> str:
@@ -293,7 +293,7 @@ async def test_participants_http_round_trip() -> None:
     appointment, add participant, list, delete, list empty."""
     from httpx import ASGITransport, AsyncClient
 
-    from flow_api.main import app
+    from mycelium_api.main import app
 
     a_email = _email()
     b_email = _email()

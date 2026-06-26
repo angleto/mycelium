@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from flow_core.vat import is_valid_vat_code, normalize_vat
+from mycelium_core.vat import is_valid_vat_code, normalize_vat
 
 
 def test_strips_country_prefix_into_country() -> None:

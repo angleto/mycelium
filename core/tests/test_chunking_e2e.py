@@ -22,11 +22,11 @@ from decimal import Decimal
 from _fake_embedder import FakeEmbedder
 from sqlalchemy import select
 
-from flow_core.db import admin_session, tenant_session
-from flow_core.models.memory_blob import BlobSource
-from flow_core.services import billing
-from flow_core.services import memory as mem
-from flow_core.services.auth import signup
+from mycelium_core.db import admin_session, tenant_session
+from mycelium_core.models.memory_blob import BlobSource
+from mycelium_core.services import billing
+from mycelium_core.services import memory as mem
+from mycelium_core.services.auth import signup
 
 _FAKE = FakeEmbedder()
 

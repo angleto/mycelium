@@ -1,10 +1,10 @@
-"""Token/byte baseline for the Flow MCP surface and on-disk Claude corpus.
+"""Token/byte baseline for the Mycelium MCP surface and on-disk Claude corpus.
 
 Run from the repo root with ``uv run python scripts/perf/measure_baseline.py``.
 Writes ``docs/perf/baseline-<date>.json`` and prints a compact summary.
 
 The numbers it captures are the cost surfaces an MCP client (e.g.
-Claude Code) pays when it talks to Flow:
+Claude Code) pays when it talks to Mycelium:
 
 * ``tools/list`` payload size for both transports (HTTP gateway with 3
   meta-tools vs. stdio with all ~154 tools), with and without the
@@ -50,8 +50,8 @@ def _jsize(obj: Any) -> int:
 
 # --------------------------------------------------------------- registry
 def collect_registry() -> dict[str, Any]:
-    from flow_mcp.gateway import _strip_auth, gateway
-    from flow_mcp.server import mcp as registry
+    from mycelium_mcp.gateway import _strip_auth, gateway
+    from mycelium_mcp.server import mcp as registry
 
     def serialize(tool: Any, strip: bool) -> dict[str, Any]:
         schema = tool.parameters or {}
@@ -126,7 +126,7 @@ def collect_registry() -> dict[str, Any]:
 
 # --------------------------------------------------------------- search
 async def collect_search_samples() -> dict[str, Any]:
-    from flow_mcp.gateway import search_tools
+    from mycelium_mcp.gateway import search_tools
 
     queries = [
         "create a task",
@@ -153,7 +153,7 @@ def collect_serializer_samples() -> dict[str, Any]:
     ``list_tasks`` / ``list_notes`` etc. so we can extrapolate against
     realistic list sizes without a live database.
     """
-    from flow_mcp.server import (
+    from mycelium_mcp.server import (
         _client,
         _note,
         _project,
@@ -350,7 +350,7 @@ async def main() -> int:
         "ts": date.today().isoformat(),
         "python": sys.version.split()[0],
         "env": {
-            "FLOW_EMBEDDER": os.environ.get("FLOW_EMBEDDER", ""),
+            "MYCELIUM_EMBEDDER": os.environ.get("MYCELIUM_EMBEDDER", ""),
         },
     }
     out["registry"] = collect_registry()

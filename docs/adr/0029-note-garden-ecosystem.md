@@ -9,7 +9,7 @@ Relates to: ADR-0028 (Identity-first addressing), ADR-0027
 
 ## Context
 
-Flow already treats notes as first-class citizens (capture via voice
+Mycelium already treats notes as first-class citizens (capture via voice
 / Telegram / SPA, embedding-backed memory, tag system, link to tasks
 via Proposal A). What the model is missing, and the user has been
 explicit about, is **the substrate of extended thinking**: a place
@@ -62,7 +62,7 @@ necessarily consuming them. The metaphor is not decorative: it maps
 1:1 to schema choices, and it justifies why notes get a lifecycle
 and tasks do not get a "reasoning kind".
 
-| Garden concept | Flow entity | Meaning |
+| Garden concept | Mycelium entity | Meaning |
 |---|---|---|
 | Plant | `Note` | Grows, blooms, may wither or recover |
 | Seed | `note.maturity='seed'` | Fresh capture, untouched |

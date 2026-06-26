@@ -4,7 +4,7 @@
 // React renders (main.tsx) to avoid a flash.
 export type Theme = 'auto' | 'light' | 'dark'
 
-const KEY = 'flow-theme'
+const KEY = 'mycelium-theme'
 
 export function getTheme(): Theme {
   const v = localStorage.getItem(KEY)

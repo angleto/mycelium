@@ -116,7 +116,7 @@ def upgrade() -> None:
     op.execute(
         f"CREATE POLICY p_event_outbox ON event_outbox USING ({_ORG_PRED}) WITH CHECK ({_ORG_PRED})"
     )
-    op.execute("GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE event_outbox TO flow_app")
+    op.execute("GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE event_outbox TO mycelium_app")
 
     # Deferred NOTIFY at COMMIT: the row is visible to subscribers that
     # LISTEN flow.event and pull it by id. Only the id travels (NOTIFY's

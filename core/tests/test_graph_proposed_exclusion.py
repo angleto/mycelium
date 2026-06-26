@@ -21,12 +21,12 @@ if str(ROOT) not in sys.path:
 
 from sqlalchemy import select  # noqa: E402
 
-from flow_core.db import admin_session, tenant_session  # noqa: E402
-from flow_core.models.note import Note, NoteKind  # noqa: E402
-from flow_core.models.note_link import NoteNoteLink  # noqa: E402
-from flow_core.services import graph, link_prediction  # noqa: E402
-from flow_core.services import notes as nt  # noqa: E402
-from flow_core.services.auth import signup  # noqa: E402
+from mycelium_core.db import admin_session, tenant_session  # noqa: E402
+from mycelium_core.models.note import Note, NoteKind  # noqa: E402
+from mycelium_core.models.note_link import NoteNoteLink  # noqa: E402
+from mycelium_core.services import graph, link_prediction  # noqa: E402
+from mycelium_core.services import notes as nt  # noqa: E402
+from mycelium_core.services.auth import signup  # noqa: E402
 
 
 def _email() -> str:

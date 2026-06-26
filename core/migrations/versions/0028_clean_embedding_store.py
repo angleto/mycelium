@@ -112,7 +112,9 @@ def upgrade() -> None:
         f"CREATE POLICY p_org_embedder_provider ON org_embedder_provider "
         f"USING ({_ORG_PRED}) WITH CHECK ({_ORG_PRED})"
     )
-    op.execute("GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE org_embedder_provider TO flow_app")
+    op.execute(
+        "GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE org_embedder_provider TO mycelium_app"
+    )
 
 
 def downgrade() -> None:

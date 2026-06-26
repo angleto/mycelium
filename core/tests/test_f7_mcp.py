@@ -5,10 +5,10 @@ from __future__ import annotations
 
 import uuid
 
-from flow_core.db import admin_session, tenant_session
-from flow_core.services.auth import signup
-from flow_core.services.taxonomy import ClientInput, create_client
-from flow_mcp.server import (
+from mycelium_core.db import admin_session, tenant_session
+from mycelium_core.services.auth import signup
+from mycelium_core.services.taxonomy import ClientInput, create_client
+from mycelium_mcp.server import (
     add_invoice_line,
     create_invoice,
     invoice_credit_note,

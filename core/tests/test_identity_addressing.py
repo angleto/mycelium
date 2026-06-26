@@ -20,13 +20,13 @@ import pytest
 from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
 
-from flow_core.db import admin_session, tenant_session
-from flow_core.models.ai_assistant import AiAssistant
-from flow_core.models.identity import Identity, IdentityKind
-from flow_core.models.task import ExecKind, Task
-from flow_core.services import identities as identities_svc
-from flow_core.services import tasks as tasks_svc
-from flow_core.services.auth import signup
+from mycelium_core.db import admin_session, tenant_session
+from mycelium_core.models.ai_assistant import AiAssistant
+from mycelium_core.models.identity import Identity, IdentityKind
+from mycelium_core.models.task import ExecKind, Task
+from mycelium_core.services import identities as identities_svc
+from mycelium_core.services import tasks as tasks_svc
+from mycelium_core.services.auth import signup
 
 
 def _email() -> str:

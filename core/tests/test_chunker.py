@@ -7,7 +7,7 @@ sync helpers that don't need a session.
 
 from __future__ import annotations
 
-from flow_core.services.chunker import (
+from mycelium_core.services.chunker import (
     NOTE_TURN_SEPARATOR,
     Chunk,
     NoteTurnChunker,

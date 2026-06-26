@@ -1,6 +1,6 @@
 # Context, scope, MVP
 
-## What Flow is
+## What Mycelium is
 
 A multi-tenant/team system that unifies five capabilities that are
 separate today:

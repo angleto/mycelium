@@ -15,19 +15,19 @@ export type Session = {
   refreshToken?: string
 }
 
-const KEY = 'flow.session'
-const LAST_WS = 'flow.lastWorkspace'
+const KEY = 'mycelium.session'
+const LAST_WS = 'mycelium.lastWorkspace'
 // Sudo-style admin elevation: an admin account runs as a normal user
 // and only acts as admin while this is on (cleared on logout). It is
 // purely a client signal; the server re-checks the capability and the
 // X-Admin-Mode header on every admin call (costa_associati model).
-const ADMIN_MODE = 'flow.adminMode'
+const ADMIN_MODE = 'mycelium.adminMode'
 // Sudo-style WORKSPACE role: you operate at the least privilege
 // (member) by default and explicitly switch UP to owner/admin when you
 // need to mutate clients/workflows/billing. Client signal only; the
 // server clamps X-Workspace-Role to the real membership role (a forged
 // higher value cannot escalate). Cleared on logout.
-const WS_ROLE = 'flow.workspaceRole'
+const WS_ROLE = 'mycelium.workspaceRole'
 type Listener = () => void
 const listeners = new Set<Listener>()
 

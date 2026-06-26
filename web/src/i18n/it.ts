@@ -2,7 +2,7 @@ import type { Catalog } from './en'
 
 // Italian catalog. Same key shape as en (typed via Catalog).
 export const it: Catalog = {
-  app: { title: 'Flow' },
+  app: { title: 'Mycelium' },
   cmdk: {
     title: 'Vai a / cerca',
     placeholder: 'Cerca per titolo o incolla un codice (es. 66c5d15d)…',
@@ -222,7 +222,7 @@ export const it: Catalog = {
   aiAssistants: {
     pageTitle: 'AI assistants',
     intro:
-      'Configura client AI (Claude Desktop, Cursor, bot MCP custom) che possono agire per te su Flow.',
+      'Configura client AI (Claude Desktop, Cursor, bot MCP custom) che possono agire per te su Mycelium.',
     connectorTitle: 'URL del connettore MCP',
     transportPending:
       'Incolla URL + segreto nel tuo client MCP (Claude Desktop, Cursor, ...) come server streamable-http. Il server applica il bearer ad ogni chiamata.',
@@ -1166,7 +1166,7 @@ export const it: Catalog = {
     startingNumberHint:
       'Sezionale "{{series}}" anno {{year}}: imposta il numero della prossima fattura. Utile se hai già emesso fatture per questo cliente su un altro sistema (es. imposta 2 se hai già emesso la #1 altrove).',
     startingNumberFloor:
-      'Hai già emesso fatture in Flow sotto questo sezionale: il minimo accettato è {{n}}.',
+      'Hai già emesso fatture in Mycelium sotto questo sezionale: il minimo accettato è {{n}}.',
     startingNumberInvalid: 'Numero non valido.',
     startingNumberNoSeries:
       'Imposta prima il sezionale del cliente (verrà generato automaticamente alla prima fattura).',
@@ -1860,7 +1860,7 @@ export const it: Catalog = {
     defaultTermsDays: 'Giorni termini (default)',
     counters: 'Contatori fattura',
     countersHint:
-      'Per ogni (emittente, sezionale, anno) il contatore tiene il numero dell’ultima fattura emessa. Se sei migrato da un altro sistema puoi alzarlo al valore dell’ultima fattura emessa fuori da Flow (la prossima fattura prenderà il numero successivo). Non puoi scendere sotto il numero massimo già emesso in Flow per quel triple.',
+      'Per ogni (emittente, sezionale, anno) il contatore tiene il numero dell’ultima fattura emessa. Se sei migrato da un altro sistema puoi alzarlo al valore dell’ultima fattura emessa fuori da Mycelium (la prossima fattura prenderà il numero successivo). Non puoi scendere sotto il numero massimo già emesso in Mycelium per quel triple.',
     countersSeries: 'Sezionale',
     countersYear: 'Anno',
     countersLast: 'Ultimo numero',
@@ -1873,7 +1873,7 @@ export const it: Catalog = {
     changeNumber: 'Cambia numero',
     newNextNumber: 'Prossimo numero',
     changeNumberHint:
-      'Imposta il numero della prossima fattura emessa per questo cliente in questo anno. Usalo se hai già emesso fatture su un altro sistema (es. metti 2 se hai già emesso la #1 altrove). Non puoi scendere sotto il massimo già emesso in Flow per lo stesso sezionale/anno.',
+      'Imposta il numero della prossima fattura emessa per questo cliente in questo anno. Usalo se hai già emesso fatture su un altro sistema (es. metti 2 se hai già emesso la #1 altrove). Non puoi scendere sotto il massimo già emesso in Mycelium per lo stesso sezionale/anno.',
     startingNumberInvalid: 'Numero non valido.',
     taxable: 'Imponibile',
     vatTotal: 'IVA',
@@ -1942,7 +1942,7 @@ export const it: Catalog = {
       'Invia spedisce le notifiche in sospeso. Genera dovute materializza i task ricorrenti. Scansiona promemoria accoda i promemoria di scadenza per i task assegnati a te.',
     browserPush: {
       title: 'Notifiche del browser',
-      hint: 'Ricevi i promemoria come notifiche in questo browser, anche quando Flow non e aperto. Per dispositivo.',
+      hint: 'Ricevi i promemoria come notifiche in questo browser, anche quando Mycelium non e aperto. Per dispositivo.',
       enable: 'Abilita su questo dispositivo',
       disable: 'Disabilita su questo dispositivo',
       on: 'abilitate su questo dispositivo',
@@ -1970,7 +1970,7 @@ export const it: Catalog = {
       connect: 'Collega Gmail',
       disconnect: 'Scollega',
       redirectWarning:
-        'Verrai reindirizzato a Google per autorizzare Flow a leggere e inviare email per tuo conto.',
+        'Verrai reindirizzato a Google per autorizzare Mycelium a leggere e inviare email per tuo conto.',
       connectedBanner: 'Gmail collegato.',
       since: 'Ultima sincronizzazione',
     },
@@ -1999,7 +1999,7 @@ export const it: Catalog = {
       copyToken: 'Copia token',
       copySnippet: 'Copia snippet',
       configHint:
-        'Incolla questo nella configurazione di Claude Desktop. Sostituisci il percorso /path/to/flow/mcp con il tuo checkout locale.',
+        'Incolla questo nella configurazione di Claude Desktop. Sostituisci il percorso /path/to/mycelium/mcp con il tuo checkout locale.',
       revoke: 'Revoca',
       prefix: 'Prefisso',
       createdAt: 'Creato',

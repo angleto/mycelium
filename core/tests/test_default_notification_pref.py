@@ -10,10 +10,10 @@ from __future__ import annotations
 
 import uuid
 
-from flow_core.db import admin_session, tenant_session
-from flow_core.models.notification import NotificationChannelKind
-from flow_core.services.auth import signup
-from flow_core.services.notifications import list_prefs
+from mycelium_core.db import admin_session, tenant_session
+from mycelium_core.models.notification import NotificationChannelKind
+from mycelium_core.services.auth import signup
+from mycelium_core.services.notifications import list_prefs
 
 
 def _email() -> str:

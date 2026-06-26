@@ -5,14 +5,14 @@ the REST API** (no business logic):
 
 | Surface | Source | Install |
 | --- | --- | --- |
-| `flow` CLI | [`cli/`](../cli/README.md) | `brew install angleto/flow/flow-cli` |
-| `flow-nvim` plugin | [`nvim/flow-nvim/`](../nvim/flow-nvim/README.md) | `lazy.nvim` block, see plugin README |
+| `flow` CLI | [`cli/`](../cli/README.md) | `brew install angleto/mycelium/mycelium-cli` |
+| `mycelium-nvim` plugin | [`nvim/mycelium-nvim/`](../nvim/mycelium-nvim/README.md) | `lazy.nvim` block, see plugin README |
 
 ## Why a CLI
 
 - Stay in tmux + Neovim for capture-heavy workflows; the SPA stays for
   dense screens (invoicing, calendar grid).
-- Scriptable: `flow task list --json | jq …`, tmux keybinds, shell
+- Scriptable: `mycelium task list --json | jq …`, tmux keybinds, shell
   functions, cron capture, etc.
 - Same auth model as the MCP / SPA: agent tokens (PAT), bound per
   workspace, revocable from `/agent-tokens`.
@@ -34,38 +34,38 @@ the REST API** (no business logic):
 ## Auth flow
 
 ```
-flow auth login -u https://flow.xeno.garden
+mycelium auth login -u https://mycelium.xeno.garden
    │
    ▼  POST /auth/login   (+ /auth/login-mfa if 401 auth.mfa_required)
    ◇  JWT in memory
    │  GET  /auth/me      (identity)
    │  GET  /workspaces   (pick workspace)
    ▼  POST /agent-tokens  (X-Workspace-Role: owner, scope=cli, ttl_days=365)
-   ◇  PAT (flow_at_…) saved to ~/.config/flow/credentials.toml (0600)
+   ◇  PAT (mycelium_at_…) saved to ~/.config/mycelium/credentials.toml (0600)
 ```
 
-Subsequent commands use `Authorization: Bearer flow_at_…` +
+Subsequent commands use `Authorization: Bearer mycelium_at_…` +
 `X-Workspace-Id: <bound workspace>`. Logout revokes the PAT
 server-side (`DELETE /agent-tokens/{id}`) and deletes the local file.
 
 ## Packaging
 
 CLI and plugin share **the monorepo's release tag**. When you cut
-Flow `v2.0.6`, two mirror workflows fire on the tag push:
+Mycelium `v2.0.6`, two mirror workflows fire on the tag push:
 
-- [`mirror-homebrew-flow`](../.github/workflows/mirror-homebrew-flow.yml)
-  renders [`packaging/homebrew-flow/Formula/flow-cli.rb`](../packaging/homebrew-flow/Formula/flow-cli.rb)
+- [`mirror-homebrew-mycelium`](../.github/workflows/mirror-homebrew-mycelium.yml)
+  renders [`packaging/homebrew-mycelium/Formula/mycelium-cli.rb`](../packaging/homebrew-mycelium/Formula/mycelium-cli.rb)
   for `v2.0.6` (downloads the tarball, computes the sha256, substitutes
   the `__TAG__` / `__SHA256__` placeholders) and pushes the result into
-  `github.com/angleto/homebrew-flow`. Users `brew install
-  angleto/flow/flow-cli` and pick up the new version.
-- [`mirror-flow-nvim`](../.github/workflows/mirror-flow-nvim.yml)
-  copies [`nvim/flow-nvim/`](../nvim/flow-nvim/) into
-  `github.com/angleto/flow-nvim` and re-tags it `v2.0.6` too, so
+  `github.com/angleto/homebrew-mycelium`. Users `brew install
+  angleto/mycelium/mycelium-cli` and pick up the new version.
+- [`mirror-mycelium-nvim`](../.github/workflows/mirror-mycelium-nvim.yml)
+  copies [`nvim/mycelium-nvim/`](../nvim/mycelium-nvim/) into
+  `github.com/angleto/mycelium-nvim` and re-tags it `v2.0.6` too, so
   lazy.nvim can pin a version.
 
 The CLI version is single-sourced in `cli/pyproject.toml` (read at
 runtime via `importlib.metadata`), so a tag bump is the only edit
-required for a release. `Formula/flow-cli.rb` installs the CLI in an
+required for a release. `Formula/mycelium-cli.rb` installs the CLI in an
 isolated `libexec` venv (keeps system Python tidy and pins deps
 without colliding with other formulae).

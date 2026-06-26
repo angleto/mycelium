@@ -73,7 +73,8 @@ def upgrade() -> None:
         f"USING ({_ORG_PRED}) WITH CHECK ({_ORG_PRED})"
     )
     op.execute(
-        "GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE classification_personal_prior TO flow_app"
+        "GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE "
+        "classification_personal_prior TO mycelium_app"
     )
 
 

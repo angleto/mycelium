@@ -14,9 +14,9 @@ import datetime as dt
 import pytest
 from sqlalchemy import select
 
-from flow_core.db import admin_session
-from flow_core.models.oauth_code import OAuthCode
-from flow_core.services import oauth_codes as svc
+from mycelium_core.db import admin_session
+from mycelium_core.models.oauth_code import OAuthCode
+from mycelium_core.services import oauth_codes as svc
 
 
 def _challenge() -> str:

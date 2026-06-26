@@ -1,7 +1,7 @@
 [project]
-name = "flow-core"
+name = "mycelium-core"
 version = "0.0.0"
-description = "Flow core: dominio + service layer (unico punto di verita)"
+description = "Mycelium core: dominio + service layer (unico punto di verita)"
 requires-python = ">=3.12"
 dependencies = [
     "sqlalchemy[asyncio]>=2.0",
@@ -41,8 +41,8 @@ local-embedder = ["sentence-transformers>=3"]
 # backed by faster-whisper (CTranslate2). Lazily imported, so CI/dev
 # without it inject a fake STT; a deploy that wants Telegram voice
 # transcription must ship it. Enable with: uv sync --extra stt
-# Model/quantisation via FLOW_STT_MODEL (default small) / FLOW_STT_DEVICE
-# / FLOW_STT_COMPUTE_TYPE (default int8).
+# Model/quantisation via MYCELIUM_STT_MODEL (default small) / MYCELIUM_STT_DEVICE
+# / MYCELIUM_STT_COMPUTE_TYPE (default int8).
 stt = ["faster-whisper>=1.0"]
 # Opt-in graph clustering (task 8c0a8f08, ADR-0031 v2): Leiden community
 # detection + modularity for the garden mindmap. Lazily imported in
@@ -56,4 +56,4 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/flow_core"]
+packages = ["src/mycelium_core"]

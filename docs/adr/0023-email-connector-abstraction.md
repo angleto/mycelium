@@ -32,7 +32,7 @@ volume encryption alone.
   is a no-op. Per-account fault isolation: one account's failure sets
   its status/last_error and never aborts the others.
 - Opaque secrets are stored through a Fernet envelope
-  (`flow_core.crypto`, key from `FLOW_SECRET_KEY`, fail-closed). The
+  (`mycelium_core.crypto`, key from `MYCELIUM_SECRET_KEY`, fail-closed). The
   DB column holds ciphertext; the API never echoes the secret.
 - Reply stays in-thread via `In-Reply-To`/`References`. No
   server-side folder/label management in v1 (FR-7).

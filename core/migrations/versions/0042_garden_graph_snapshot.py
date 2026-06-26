@@ -61,7 +61,9 @@ def upgrade() -> None:
         f"CREATE POLICY p_garden_graph_snapshot ON garden_graph_snapshot "
         f"USING ({_ORG_PRED}) WITH CHECK ({_ORG_PRED})"
     )
-    op.execute("GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE garden_graph_snapshot TO flow_app")
+    op.execute(
+        "GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE garden_graph_snapshot TO mycelium_app"
+    )
 
 
 def downgrade() -> None:

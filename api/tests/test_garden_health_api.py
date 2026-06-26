@@ -13,7 +13,7 @@ import uuid
 
 from httpx import ASGITransport, AsyncClient
 
-from flow_api.main import app
+from mycelium_api.main import app
 
 _SENSORS = (
     "accept_rate_classify_7d",
@@ -102,7 +102,7 @@ async def test_garden_health_events_surfaces_bulk_create() -> None:
     """End-to-end: a burst of note creations over the API shows up on the
     what-changed timeline as a single corpus_edit, with the fields the
     SPA renders (at / kind / detail)."""
-    from flow_core.services.garden_health import BULK_EDIT_THRESHOLD
+    from mycelium_core.services.garden_health import BULK_EDIT_THRESHOLD
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://t") as c:

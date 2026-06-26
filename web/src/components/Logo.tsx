@@ -1,4 +1,4 @@
-// Flow mark: Mycelium Trio. Tree + two mushrooms above the soil,
+// Mycelium mark: Mycelium Trio. Tree + two mushrooms above the soil,
 // mycelium network of four connected nodes below. Mirrors the
 // favicon at 32×32; uses CSS vars so it adapts to light/dark themes.
 export function Logo({ size = 22 }: { size?: number }) {
@@ -8,7 +8,7 @@ export function Logo({ size = 22 }: { size?: number }) {
       height={size}
       viewBox="0 0 32 32"
       role="img"
-      aria-label="Flow"
+      aria-label="Mycelium"
     >
       <rect width="32" height="32" rx="7" fill="var(--brand)" />
       {/* Tree (left) */}

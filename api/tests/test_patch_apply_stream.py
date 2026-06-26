@@ -4,7 +4,7 @@ and capability-token attachment upload -- over real HTTP.
 Mirrors ``test_capability_token_stream.py`` (ASGITransport + signup). The
 patch flow is the keystone: GET ``.../body/raw`` to capture ``X-Version`` +
 ``X-Body-SHA256``, build a unified diff locally with ``difflib``, POST it to
-``.../body/patch`` with a single-use ``flow_cap_`` token, and assert the
+``.../body/patch`` with a single-use ``mycelium_cap_`` token, and assert the
 base gate (409 on drift) and strict apply (422 on a non-applying diff) hold
 with no mutation on failure.
 """
@@ -17,9 +17,9 @@ import uuid
 
 from httpx import ASGITransport, AsyncClient
 
-from flow_api.main import app
-from flow_core.db import tenant_session
-from flow_core.services import capability_tokens as svc
+from mycelium_api.main import app
+from mycelium_core.db import tenant_session
+from mycelium_core.services import capability_tokens as svc
 
 
 def _email() -> str:

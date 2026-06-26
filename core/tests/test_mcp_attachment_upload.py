@@ -12,13 +12,13 @@ import uuid
 
 import pytest
 
-from flow_core.db import admin_session, tenant_session
-from flow_core.errors import DomainError
-from flow_core.models.note import NoteKind
-from flow_core.services import notes as notes_svc
-from flow_core.services import tasks as tasks_svc
-from flow_core.services.auth import signup
-from flow_mcp import server as mcp_server
+from mycelium_core.db import admin_session, tenant_session
+from mycelium_core.errors import DomainError
+from mycelium_core.models.note import NoteKind
+from mycelium_core.services import notes as notes_svc
+from mycelium_core.services import tasks as tasks_svc
+from mycelium_core.services.auth import signup
+from mycelium_mcp import server as mcp_server
 
 
 async def _signup() -> tuple[uuid.UUID, uuid.UUID, str]:
@@ -139,9 +139,9 @@ async def test_upload_attachment_rejects_bad_base64() -> None:
 async def test_upload_attachment_instructions_returns_token_free_recipe() -> None:
     """The recipe tool returns a ready-to-run curl that streams the file
     through the BACKEND gateway (frontend origin + ``/api`` -> the API),
-    never an S3 URL, and never echoes the secret token (a $FLOW_TOKEN
+    never an S3 URL, and never echoes the secret token (a $MYCELIUM_TOKEN
     placeholder stays in the recipe)."""
-    from flow_core.config import get_settings
+    from mycelium_core.config import get_settings
 
     org, user, token = await _signup()
     async with tenant_session(str(org), str(user)) as s:
@@ -163,7 +163,7 @@ async def test_upload_attachment_instructions_returns_token_free_recipe() -> Non
     assert "s3" not in out["endpoint"].lower()
     assert "amazonaws" not in out["curl"].lower()
     # The token is NOT leaked; only a placeholder is handed back.
-    assert "$FLOW_TOKEN" in out["curl"]
+    assert "$MYCELIUM_TOKEN" in out["curl"]
     assert token not in out["curl"]
     assert token not in repr(out)
     assert out["headers"]["X-Workspace-Id"] == str(org)
@@ -210,7 +210,7 @@ async def test_upload_attachment_instructions_rejects_neither_parent() -> None:
 async def test_upload_attachment_size_guard() -> None:
     """The service's ``attachment_max_bytes`` guard still fires for the
     decoded payload (same code path as the REST upload)."""
-    from flow_core.config import get_settings
+    from mycelium_core.config import get_settings
 
     org, user, token = await _signup()
     async with tenant_session(str(org), str(user)) as s:

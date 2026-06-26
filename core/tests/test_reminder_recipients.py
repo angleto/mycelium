@@ -15,12 +15,12 @@ import uuid
 
 from sqlalchemy import select
 
-from flow_core.db import admin_session, tenant_session
-from flow_core.models.identity import Identity
-from flow_core.services import ai_assistants as ai_svc
-from flow_core.services import notifications as nf
-from flow_core.services import tasks as tasks_svc
-from flow_core.services.auth import signup
+from mycelium_core.db import admin_session, tenant_session
+from mycelium_core.models.identity import Identity
+from mycelium_core.services import ai_assistants as ai_svc
+from mycelium_core.services import notifications as nf
+from mycelium_core.services import tasks as tasks_svc
+from mycelium_core.services.auth import signup
 
 
 def _email() -> str:

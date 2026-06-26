@@ -17,18 +17,18 @@ import pytest
 from _fake_ai import FakeLLM, FakeSTT, FakeTTS
 from _fake_embedder import FakeEmbedder
 
-from flow_core.ai_providers import (
+from mycelium_core.ai_providers import (
     set_llm_override,
     set_stt_override,
     set_tts_override,
 )
-from flow_core.db import admin_session, tenant_session
-from flow_core.embedder import set_embedder_override
-from flow_core.errors import DomainError, NotFoundError
-from flow_core.models.note import NoteKind
-from flow_core.services import billing, taxonomy
-from flow_core.services import notes as nt
-from flow_core.services.auth import signup
+from mycelium_core.db import admin_session, tenant_session
+from mycelium_core.embedder import set_embedder_override
+from mycelium_core.errors import DomainError, NotFoundError
+from mycelium_core.models.note import NoteKind
+from mycelium_core.services import billing, taxonomy
+from mycelium_core.services import notes as nt
+from mycelium_core.services.auth import signup
 
 
 @pytest.fixture
@@ -113,7 +113,7 @@ async def test_project_slot_resolution(_providers: None) -> None:
 async def test_transcription_metered_feeds_memory_and_erases(
     _providers: None,
 ) -> None:
-    from flow_core.services import memory as memory_svc
+    from mycelium_core.services import memory as memory_svc
 
     org, user = await _org()
     async with tenant_session(str(org), str(user)) as s:

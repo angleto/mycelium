@@ -1,7 +1,7 @@
 """Offline smoke tests: argument parsing, config round-trip, error rendering.
 
 These tests do not touch a live backend; live E2E lives in ``cli/tests/
-test_cli_live.py`` (skipped unless ``FLOW_CLI_LIVE=1``).
+test_cli_live.py`` (skipped unless ``MYCELIUM_CLI_LIVE=1``).
 """
 
 from __future__ import annotations
@@ -13,9 +13,9 @@ from pathlib import Path
 
 import pytest
 
-from flow_cli import __version__
-from flow_cli.config import Profile, config_path, load_config, save_config
-from flow_cli.credentials import (
+from mycelium_cli import __version__
+from mycelium_cli.config import Profile, config_path, load_config, save_config
+from mycelium_cli.credentials import (
     Credential,
     credentials_path,
     delete_credential,
@@ -26,13 +26,13 @@ from flow_cli.credentials import (
 
 @pytest.fixture
 def isolated_config_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    monkeypatch.setenv("FLOW_CONFIG_DIR", str(tmp_path))
+    monkeypatch.setenv("MYCELIUM_CONFIG_DIR", str(tmp_path))
     return tmp_path
 
 
 def test_version_flag() -> None:
     result = subprocess.run(
-        [sys.executable, "-m", "flow_cli", "--version"],
+        [sys.executable, "-m", "mycelium_cli", "--version"],
         check=True,
         capture_output=True,
         text=True,
@@ -42,7 +42,7 @@ def test_version_flag() -> None:
 
 def test_help_runs() -> None:
     result = subprocess.run(
-        [sys.executable, "-m", "flow_cli", "--help"],
+        [sys.executable, "-m", "mycelium_cli", "--help"],
         check=True,
         capture_output=True,
         text=True,
@@ -57,11 +57,11 @@ def test_status_without_credentials_exits_clean(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     result = subprocess.run(
-        [sys.executable, "-m", "flow_cli", "auth", "status"],
+        [sys.executable, "-m", "mycelium_cli", "auth", "status"],
         check=False,
         capture_output=True,
         text=True,
-        env={**_passthrough_env(monkeypatch), "FLOW_CONFIG_DIR": str(isolated_config_dir)},
+        env={**_passthrough_env(monkeypatch), "MYCELIUM_CONFIG_DIR": str(isolated_config_dir)},
     )
     assert result.returncode == 1
     # User-facing message, no Python traceback leak.
@@ -72,7 +72,7 @@ def test_status_without_credentials_exits_clean(
 def test_config_round_trip(isolated_config_dir: Path) -> None:
     cfg = load_config()
     cfg.profiles["default"] = Profile(
-        base_url="https://flow.xeno.garden/api",
+        base_url="https://mycelium.xeno.garden/api",
         workspace_id="00000000-0000-0000-0000-000000000001",
         workspace_name="Personal",
     )
@@ -81,7 +81,7 @@ def test_config_round_trip(isolated_config_dir: Path) -> None:
 
     again = load_config()
     assert again.current_profile == "default"
-    assert again.profiles["default"].base_url == "https://flow.xeno.garden/api"
+    assert again.profiles["default"].base_url == "https://mycelium.xeno.garden/api"
     assert again.profiles["default"].workspace_name == "Personal"
 
 

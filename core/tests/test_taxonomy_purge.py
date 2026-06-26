@@ -17,22 +17,22 @@ import uuid
 import pytest
 from sqlalchemy import select
 
-from flow_core.db import admin_session, tenant_session
-from flow_core.errors import DomainError
-from flow_core.i18n import MessageCode
-from flow_core.models.invoice import (
+from mycelium_core.db import admin_session, tenant_session
+from mycelium_core.errors import DomainError
+from mycelium_core.i18n import MessageCode
+from mycelium_core.models.invoice import (
     DocumentType,
     Invoice,
     InvoiceKind,
 )
-from flow_core.models.note import Note, NoteKind, NoteStatus
-from flow_core.models.note_tag import NoteTag
-from flow_core.models.tag import Tag
-from flow_core.models.task import Task
-from flow_core.services import tasks as tasks_svc
-from flow_core.services import taxonomy
-from flow_core.services.auth import signup
-from flow_core.services.taxonomy import ClientInput
+from mycelium_core.models.note import Note, NoteKind, NoteStatus
+from mycelium_core.models.note_tag import NoteTag
+from mycelium_core.models.tag import Tag
+from mycelium_core.models.task import Task
+from mycelium_core.services import tasks as tasks_svc
+from mycelium_core.services import taxonomy
+from mycelium_core.services.auth import signup
+from mycelium_core.services.taxonomy import ClientInput
 
 
 async def _org() -> tuple[uuid.UUID, uuid.UUID]:

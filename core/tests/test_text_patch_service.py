@@ -17,19 +17,19 @@ import uuid
 import pytest
 from sqlalchemy import select
 
-from flow_core.db import admin_session, tenant_session
-from flow_core.errors import ConflictError, DomainError, UnprocessableError
-from flow_core.i18n import MessageCode
-from flow_core.models.annotation import Annotation
-from flow_core.models.note import NoteKind
-from flow_core.models.note_part import NotePart
-from flow_core.models.task import Task
-from flow_core.services import annotations as ann_svc
-from flow_core.services import note_parts as parts_svc
-from flow_core.services import notes as notes_svc
-from flow_core.services import tasks as tasks_svc
-from flow_core.services import text_patch
-from flow_core.services.auth import signup
+from mycelium_core.db import admin_session, tenant_session
+from mycelium_core.errors import ConflictError, DomainError, UnprocessableError
+from mycelium_core.i18n import MessageCode
+from mycelium_core.models.annotation import Annotation
+from mycelium_core.models.note import NoteKind
+from mycelium_core.models.note_part import NotePart
+from mycelium_core.models.task import Task
+from mycelium_core.services import annotations as ann_svc
+from mycelium_core.services import note_parts as parts_svc
+from mycelium_core.services import notes as notes_svc
+from mycelium_core.services import tasks as tasks_svc
+from mycelium_core.services import text_patch
+from mycelium_core.services.auth import signup
 
 
 def _udiff(a: str, b: str) -> str:

@@ -151,7 +151,7 @@ export function TaskDetailRoute() {
   // (no modality, both always available; the user picks what to use).
   // The last picked tab is remembered per task in localStorage so that
   // reopening a checklist-driven task lands directly on its checklist.
-  const tabKey = `flow.task.${id}.activeTab`
+  const tabKey = `mycelium.task.${id}.activeTab`
   const [activeTab, setActiveTab] = useState<'description' | 'checklist'>(
     () => {
       try {

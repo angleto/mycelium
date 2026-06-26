@@ -16,14 +16,14 @@ from decimal import Decimal
 
 from sqlalchemy import select
 
-from flow_core.ai_providers import LLMResult, set_llm_override
-from flow_core.db import admin_session, tenant_session
-from flow_core.models.billing import UsageRecord
-from flow_core.models.task import Necessity
-from flow_core.services import billing
-from flow_core.services.advisory import NARRATION_SYSTEM, FeasibleTask, narrate_plan
-from flow_core.services.auth import signup
-from flow_mcp.server import create_task, what_can_i_do_now
+from mycelium_core.ai_providers import LLMResult, set_llm_override
+from mycelium_core.db import admin_session, tenant_session
+from mycelium_core.models.billing import UsageRecord
+from mycelium_core.models.task import Necessity
+from mycelium_core.services import billing
+from mycelium_core.services.advisory import NARRATION_SYSTEM, FeasibleTask, narrate_plan
+from mycelium_core.services.auth import signup
+from mycelium_mcp.server import create_task, what_can_i_do_now
 
 _WIN = dt.datetime(2026, 1, 12, 9, 0, tzinfo=dt.UTC)
 

@@ -10,10 +10,10 @@ from collections.abc import Iterator
 import pytest
 from _fake_embedder import FakeEmbedder
 
-from flow_core.db import admin_session
-from flow_core.embedder import set_embedder_override
-from flow_core.services.auth import signup
-from flow_mcp.server import (
+from mycelium_core.db import admin_session
+from mycelium_core.embedder import set_embedder_override
+from mycelium_core.services.auth import signup
+from mycelium_mcp.server import (
     grant_credits,
     memory_delete_blob,
     memory_erase,

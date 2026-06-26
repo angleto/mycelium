@@ -13,9 +13,9 @@ import uuid
 
 from sqlalchemy import text
 
-from flow_core.db import admin_session, tenant_session
-from flow_core.services import capability_tokens as svc
-from flow_core.services.auth import signup
+from mycelium_core.db import admin_session, tenant_session
+from mycelium_core.services import capability_tokens as svc
+from mycelium_core.services.auth import signup
 
 
 def _email() -> str:
@@ -80,7 +80,7 @@ async def test_authenticate_returns_principal_and_constraint() -> None:
 
 
 async def test_authenticate_rejects_unknown_and_wrong_prefix() -> None:
-    assert await svc.authenticate("flow_cap_does-not-exist") is None
+    assert await svc.authenticate("mycelium_cap_does-not-exist") is None
     # An agent-token prefix is not a capability token.
     assert await svc.authenticate("flow_at_whatever") is None
 

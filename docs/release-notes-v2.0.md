@@ -20,7 +20,7 @@ The SDI integration is now bidirectional. The active (outbound) cycle
 that v1.x already shipped is joined by a **passive (inbound) router**:
 `POST /sdi/notification` accepts SdI-delivered XML, validates it,
 records it into `received_invoices`, and rejects malformed bodies with
-a 400 (no more 500 on XMLSyntaxError). A dedicated `flow-sdi-inbound`
+a 400 (no more 500 on XMLSyntaxError). A dedicated `mycelium-sdi-inbound`
 image is built alongside backend / worker / frontend in CI.
 
 ## Tasks
@@ -56,7 +56,7 @@ image is built alongside backend / worker / frontend in CI.
   tokens still surface AI authorship correctly.
 - **Self-assign** and **AI assistant assignee** are both available
   directly from the picker.
-- The REST bearer path now accepts agent tokens (`flow_at_`) in
+- The REST bearer path now accepts agent tokens (`mycelium_at_`) in
   addition to user JWTs, so a single endpoint serves both human and
   agent callers.
 
@@ -68,29 +68,29 @@ image is built alongside backend / worker / frontend in CI.
 
 ## CLI + Neovim plugin
 
-`flow-cli` is now a first-class workspace member with editing surface,
+`mycelium-cli` is now a first-class workspace member with editing surface,
 MFA enrolment, browse / search / advisory commands, time report and a
-dynamic completion. `flow.nvim` ships Telescope pickers, `:Flow`
+dynamic completion. `flow.nvim` ships Telescope pickers, `:Mycelium`
 commands, writable task / note buffers (`PATCH` on `:w`), live timer
 and refreshing pickers. Both surfaces shell out to the same REST API.
 
-`flow-cli` and `flow.nvim` are **tagged in lockstep with Flow itself**
+`mycelium-cli` and `flow.nvim` are **tagged in lockstep with Mycelium itself**
 (currently `v2.0.x`): a tag push on this repo mirrors the CLI to the
 Homebrew tap and re-tags the nvim plugin mirror, so `brew upgrade
-flow-cli` and `:Lazy update flow.nvim` always land on a version that
+mycelium-cli` and `:Lazy update flow.nvim` always land on a version that
 matches the running backend.
 
-Defaults updated: `flow login` targets `https://flow.xeno.garden/api`
+Defaults updated: `flow login` targets `https://mycelium.xeno.garden/api`
 out of the box (no more bare hostname or `localhost:8000`).
 
 ## Governance
 
 - License switched to a dual model: **AGPL-3.0-or-later with §7(b)
-  attribution** (the "Based on Flow" notice in user-visible locations)
+  attribution** (the "Based on Mycelium" notice in user-visible locations)
   plus a separate commercial option. Contributions require a DCO
-  sign-off **and** the Flow Contributor License Agreement
+  sign-off **and** the Mycelium Contributor License Agreement
   (`CONTRIBUTING.md`, `CLA.md`, `NOTICE`).
-- "Flow" name and logo are reserved trademarks; forks must rename.
+- "Mycelium" name and logo are reserved trademarks; forks must rename.
 
 ## Operational notes
 

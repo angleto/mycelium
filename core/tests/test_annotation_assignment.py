@@ -20,16 +20,16 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from flow_core.db import admin_session, tenant_session  # noqa: E402
-from flow_core.errors import DomainError, NotFoundError  # noqa: E402
-from flow_core.i18n import MessageCode  # noqa: E402
-from flow_core.models.activity_log import ActivityLog  # noqa: E402
-from flow_core.models.note import NoteKind  # noqa: E402
-from flow_core.services import annotations as svc  # noqa: E402
-from flow_core.services import identities as identities_svc  # noqa: E402
-from flow_core.services import note_parts as np  # noqa: E402
-from flow_core.services import notes as nt  # noqa: E402
-from flow_core.services.auth import signup  # noqa: E402
+from mycelium_core.db import admin_session, tenant_session  # noqa: E402
+from mycelium_core.errors import DomainError, NotFoundError  # noqa: E402
+from mycelium_core.i18n import MessageCode  # noqa: E402
+from mycelium_core.models.activity_log import ActivityLog  # noqa: E402
+from mycelium_core.models.note import NoteKind  # noqa: E402
+from mycelium_core.services import annotations as svc  # noqa: E402
+from mycelium_core.services import identities as identities_svc  # noqa: E402
+from mycelium_core.services import note_parts as np  # noqa: E402
+from mycelium_core.services import notes as nt  # noqa: E402
+from mycelium_core.services.auth import signup  # noqa: E402
 
 
 def _email() -> str:

@@ -16,10 +16,10 @@ from typing import Any
 
 import pytest
 
-from flow_core.config import get_settings
-from flow_core.db import admin_session
-from flow_core.services.auth import signup
-from flow_mcp import server as mcp_server
+from mycelium_core.config import get_settings
+from mycelium_core.db import admin_session
+from mycelium_core.services.auth import signup
+from mycelium_mcp import server as mcp_server
 
 
 async def _signup() -> tuple[uuid.UUID, uuid.UUID, str]:
@@ -53,7 +53,7 @@ def _assert_recipe(
     assert out["headers"]["X-Workspace-Id"] == str(org)
     assert out["max_bytes"] == get_settings().note_body_max_bytes
     # token never leaked; only the placeholder is handed back
-    assert "$FLOW_TOKEN" in out["curl"]
+    assert "$MYCELIUM_TOKEN" in out["curl"]
     assert token not in out["curl"]
     assert token not in repr(out)
     # inline body: no S3, no markdown-ref (unlike the attachment recipe)

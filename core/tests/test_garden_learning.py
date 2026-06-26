@@ -21,19 +21,19 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from flow_core.db import admin_session, tenant_session  # noqa: E402
-from flow_core.models.classification_feedback import ClassificationFeedback  # noqa: E402
-from flow_core.models.classification_personal_prior import (  # noqa: E402
+from mycelium_core.db import admin_session, tenant_session  # noqa: E402
+from mycelium_core.models.classification_feedback import ClassificationFeedback  # noqa: E402
+from mycelium_core.models.classification_personal_prior import (  # noqa: E402
     ClassificationPersonalPrior,
 )
-from flow_core.models.note import NoteKind  # noqa: E402
-from flow_core.models.note_tag import NoteTag  # noqa: E402
-from flow_core.models.tag import TagKind  # noqa: E402
-from flow_core.services import garden_classify as classify_svc  # noqa: E402
-from flow_core.services import garden_learning as learn  # noqa: E402
-from flow_core.services import notes as notes_svc  # noqa: E402
-from flow_core.services import taxonomy  # noqa: E402
-from flow_core.services.auth import signup  # noqa: E402
+from mycelium_core.models.note import NoteKind  # noqa: E402
+from mycelium_core.models.note_tag import NoteTag  # noqa: E402
+from mycelium_core.models.tag import TagKind  # noqa: E402
+from mycelium_core.services import garden_classify as classify_svc  # noqa: E402
+from mycelium_core.services import garden_learning as learn  # noqa: E402
+from mycelium_core.services import notes as notes_svc  # noqa: E402
+from mycelium_core.services import taxonomy  # noqa: E402
+from mycelium_core.services.auth import signup  # noqa: E402
 
 
 async def _org_user() -> tuple[uuid.UUID, uuid.UUID]:

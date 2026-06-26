@@ -16,17 +16,17 @@ import pytest
 from _fake_embedder import FakeEmbedder
 from sqlalchemy import delete, select
 
-from flow_core.ai_providers import LLMResult, set_llm_override
-from flow_core.db import admin_session, tenant_session
-from flow_core.embedder import set_embedder_override
-from flow_core.models.note import NoteKind
-from flow_core.models.task import Task
-from flow_core.models.telegram import TelegramAssistantJob, TelegramConversation
-from flow_core.services import assistant as svc
-from flow_core.services import notes as notes_svc
-from flow_core.services import tasks as tasks_svc
-from flow_core.services.auth import signup
-from flow_core.telegram_client import (
+from mycelium_core.ai_providers import LLMResult, set_llm_override
+from mycelium_core.db import admin_session, tenant_session
+from mycelium_core.embedder import set_embedder_override
+from mycelium_core.models.note import NoteKind
+from mycelium_core.models.task import Task
+from mycelium_core.models.telegram import TelegramAssistantJob, TelegramConversation
+from mycelium_core.services import assistant as svc
+from mycelium_core.services import notes as notes_svc
+from mycelium_core.services import tasks as tasks_svc
+from mycelium_core.services.auth import signup
+from mycelium_core.telegram_client import (
     TelegramSendResult,
     TelegramSetWebhookResult,
     set_telegram_api_override,
@@ -217,7 +217,7 @@ async def test_create_note_via_tool_persists() -> None:
     assert "created note" in reply.lower()
     async with tenant_session(str(org), str(user)) as s:
         # Phase 6 final: note body lives in note_part(ord=0) now.
-        from flow_core.models.note_part import NotePart
+        from mycelium_core.models.note_part import NotePart
 
         parts = (
             (await s.execute(select(NotePart).where(NotePart.body == "buy milk"))).scalars().all()

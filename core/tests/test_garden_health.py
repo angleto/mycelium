@@ -23,19 +23,19 @@ if str(ROOT) not in sys.path:
 
 from _fake_ai import FakeLLM  # noqa: E402
 
-from flow_core.ai_providers import set_llm_override  # noqa: E402
-from flow_core.db import admin_session, tenant_session  # noqa: E402
-from flow_core.models.activity_log import ActivityLog  # noqa: E402
-from flow_core.models.classification_feedback import ClassificationFeedback  # noqa: E402
-from flow_core.models.memory_blob import EMBED_DIM, MemoryBlob  # noqa: E402
-from flow_core.models.note import Note, NoteKind  # noqa: E402
-from flow_core.models.note_tag import NoteTag  # noqa: E402
-from flow_core.models.tag import TagKind  # noqa: E402
-from flow_core.services import decomposition as decomp  # noqa: E402
-from flow_core.services import garden_health as health_svc  # noqa: E402
-from flow_core.services import note_links, taxonomy  # noqa: E402
-from flow_core.services import notes as notes_svc  # noqa: E402
-from flow_core.services.auth import signup  # noqa: E402
+from mycelium_core.ai_providers import set_llm_override  # noqa: E402
+from mycelium_core.db import admin_session, tenant_session  # noqa: E402
+from mycelium_core.models.activity_log import ActivityLog  # noqa: E402
+from mycelium_core.models.classification_feedback import ClassificationFeedback  # noqa: E402
+from mycelium_core.models.memory_blob import EMBED_DIM, MemoryBlob  # noqa: E402
+from mycelium_core.models.note import Note, NoteKind  # noqa: E402
+from mycelium_core.models.note_tag import NoteTag  # noqa: E402
+from mycelium_core.models.tag import TagKind  # noqa: E402
+from mycelium_core.services import decomposition as decomp  # noqa: E402
+from mycelium_core.services import garden_health as health_svc  # noqa: E402
+from mycelium_core.services import note_links, taxonomy  # noqa: E402
+from mycelium_core.services import notes as notes_svc  # noqa: E402
+from mycelium_core.services.auth import signup  # noqa: E402
 
 
 @pytest.fixture

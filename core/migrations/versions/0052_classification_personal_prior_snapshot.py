@@ -71,7 +71,7 @@ def upgrade() -> None:
     )
     op.execute(
         "GRANT SELECT, INSERT, UPDATE, DELETE "
-        "ON TABLE classification_personal_prior_snapshot TO flow_app"
+        "ON TABLE classification_personal_prior_snapshot TO mycelium_app"
     )
 
 

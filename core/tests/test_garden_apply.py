@@ -19,18 +19,18 @@ import uuid
 import pytest
 from sqlalchemy import select
 
-from flow_core.db import admin_session, tenant_session
-from flow_core.errors import DomainError
-from flow_core.i18n import MessageCode
-from flow_core.models.classification_feedback import ClassificationFeedback
-from flow_core.models.note import Note, NoteKind
-from flow_core.models.note_link import NoteNoteLink
-from flow_core.models.note_tag import NoteTag
-from flow_core.models.tag import TagKind
-from flow_core.services import garden_classify as gc
-from flow_core.services import note_links, taxonomy
-from flow_core.services import notes as notes_svc
-from flow_core.services.auth import signup
+from mycelium_core.db import admin_session, tenant_session
+from mycelium_core.errors import DomainError
+from mycelium_core.i18n import MessageCode
+from mycelium_core.models.classification_feedback import ClassificationFeedback
+from mycelium_core.models.note import Note, NoteKind
+from mycelium_core.models.note_link import NoteNoteLink
+from mycelium_core.models.note_tag import NoteTag
+from mycelium_core.models.tag import TagKind
+from mycelium_core.services import garden_classify as gc
+from mycelium_core.services import note_links, taxonomy
+from mycelium_core.services import notes as notes_svc
+from mycelium_core.services.auth import signup
 
 
 def _email() -> str:

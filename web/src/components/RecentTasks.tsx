@@ -11,8 +11,8 @@ type Task = components['schemas']['TaskOut']
 // Persisted UI state (same localStorage pattern as the Tasks view
 // toggle): the widget remembers whether the user left it open and how
 // many rows they want.
-const OPEN_KEY = 'flow.tasks.recent.open'
-const COUNT_KEY = 'flow.tasks.recent.count'
+const OPEN_KEY = 'mycelium.tasks.recent.open'
+const COUNT_KEY = 'mycelium.tasks.recent.count'
 const DEFAULT_COUNT = 4
 const MIN_COUNT = 1
 const MAX_COUNT = 20

@@ -7,7 +7,7 @@ and the rejected alternatives are in the [ADRs](adr/README.md).
 
 | # | Topic | Decision |
 |---|---|---|
-| 1/A | SDI invoicing | v1 B2B/B2C only (PA deferred). Single shared channel; Flow as transmitter/intermediary under a per-Org mandate; tenant identity in the FatturaPA payload; conservation = free AdE service (per-tenant adhesion); introduced in phases |
+| 1/A | SDI invoicing | v1 B2B/B2C only (PA deferred). Single shared channel; Mycelium as transmitter/intermediary under a per-Org mandate; tenant identity in the FatturaPA payload; conservation = free AdE service (per-tenant adhesion); introduced in phases |
 | 2/B | Email auth | Gmail OAuth2; Proton via Bridge sidecar; generic IMAP/SMTP |
 | 3 | Scheduling | Deterministic logical CPM + per-person serialization of non-delegated human tasks around appointments; not generic RCPSP |
 | 4 | Workflow states | Configurable per Org, project override |
@@ -18,11 +18,11 @@ and the rejected alternatives are in the [ADRs](adr/README.md).
 | 9 | Memory | Hierarchical on pgvector; hard isolation per (org, project) |
 | 10 | Mobile | Responsive web now; API-first for future mobile |
 | 11 | Hosting | Cloud, PostgreSQL, ARM node; K8s-ready design |
-| 12 | Name | "Flow" |
+| 12 | Name | "Mycelium" |
 | 13 | Tag | A single `tag` concept with `kind`; client/project with typed satellite profiles (FK to `tag.id`), not free JSONB |
 | C | Embedding | Local, pluggable `Embedder` abstraction, re-embedding job |
 | D | Retrieval | Hybrid lexical + semantic baseline, RRF fusion (k ~ 60), (org, project) scope |
-| E | LLM/Embedding abstraction | Reuse the bitvision_phoenix pattern; Flow adds `EmbedderProvider` |
+| E | LLM/Embedding abstraction | Reuse the bitvision_phoenix pattern; Mycelium adds `EmbedderProvider` |
 | F | Memory isolation | Hard boundary per (org, project): mandatory RLS + partition + predicate; never relevance only |
 | G | No-ubiquity | Appointments unified onto `tasks` via `start_at` + `duration_minutes` (ADR-0008 addendum, migration 0094); per-identity overlap is rejected via the GiST EXCLUDE on `task_participants` (enforced for the assignee + every explicit participant, mig 0095/0096) |
 | H | Executor | `task.executor` = human user (serial) or LLM agent (parallel, off the human timeline) |
@@ -39,7 +39,7 @@ and the rejected alternatives are in the [ADRs](adr/README.md).
 
 1. SDI v1 = B2B/B2C only. PA/B2G, signature, NE/DT/EC/SE notifications
    and the passive cycle are deferred post-v1.
-2. Conservation = free AdE service with per-tenant adhesion. Flow
+2. Conservation = free AdE service with per-tenant adhesion. Mycelium
    tracks and guides the adhesion; effective coverage from when
    invoices transit SdI; invoices from the initial manual export are
    out of coverage, the tenant's responsibility.

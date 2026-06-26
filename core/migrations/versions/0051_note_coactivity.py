@@ -77,7 +77,7 @@ def upgrade() -> None:
         f"CREATE POLICY p_note_coactivity ON note_coactivity "
         f"USING ({_ORG_PRED}) WITH CHECK ({_ORG_PRED})"
     )
-    op.execute("GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE note_coactivity TO flow_app")
+    op.execute("GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE note_coactivity TO mycelium_app")
 
     # Supporting index for org + entity + time-window scans on the
     # activity log (co-activity aggregation, garden_health, note conflict).

@@ -17,13 +17,13 @@ from httpx import ASGITransport, AsyncClient
 # Required before importing the app: the webhook router consults
 # Settings at request-time, so the env must be in place at module
 # import time too (Settings is a cached singleton).
-os.environ["FLOW_TELEGRAM_BOT_TOKEN"] = "test:token"
-os.environ["FLOW_TELEGRAM_BOT_USERNAME"] = "flow_test_bot"
-os.environ["FLOW_TELEGRAM_WEBHOOK_SECRET"] = "wh-secret-1234"
+os.environ["MYCELIUM_TELEGRAM_BOT_TOKEN"] = "test:token"
+os.environ["MYCELIUM_TELEGRAM_BOT_USERNAME"] = "mycelium_test_bot"
+os.environ["MYCELIUM_TELEGRAM_WEBHOOK_SECRET"] = "wh-secret-1234"
 
-from flow_api.main import app
-from flow_core.config import get_settings
-from flow_core.telegram_client import (
+from mycelium_api.main import app
+from mycelium_core.config import get_settings
+from mycelium_core.telegram_client import (
     TelegramSendResult,
     TelegramSetWebhookResult,
     set_telegram_api_override,
@@ -83,8 +83,8 @@ async def test_link_request_returns_deep_link(_fake_tg: FakeTelegramApi) -> None
         resp = await c.post("/telegram/link/request", headers=headers)
         assert resp.status_code == 200, resp.text
         body = resp.json()
-        assert body["bot_username"] == "flow_test_bot"
-        assert body["deep_link"].startswith("https://t.me/flow_test_bot?start=")
+        assert body["bot_username"] == "mycelium_test_bot"
+        assert body["deep_link"].startswith("https://t.me/mycelium_test_bot?start=")
         assert body["code"] in body["deep_link"]
 
 
@@ -165,7 +165,7 @@ async def test_webhook_rejects_bad_header_secret(_fake_tg: FakeTelegramApi) -> N
 
 async def test_webhook_404s_when_telegram_not_configured() -> None:
     # Disable Telegram via env + cache reset for the body of this test.
-    os.environ.pop("FLOW_TELEGRAM_BOT_TOKEN", None)
+    os.environ.pop("MYCELIUM_TELEGRAM_BOT_TOKEN", None)
     get_settings.cache_clear()
     transport = ASGITransport(app=app)
     try:
@@ -179,5 +179,5 @@ async def test_webhook_404s_when_telegram_not_configured() -> None:
             )
             assert wh.status_code == 404
     finally:
-        os.environ["FLOW_TELEGRAM_BOT_TOKEN"] = "test:token"
+        os.environ["MYCELIUM_TELEGRAM_BOT_TOKEN"] = "test:token"
         get_settings.cache_clear()

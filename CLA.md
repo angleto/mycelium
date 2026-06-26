@@ -1,7 +1,7 @@
-# Flow — Contributor License Agreement (Individual)
+# Mycelium — Contributor License Agreement (Individual)
 
-By submitting a Contribution (as defined below) to the Flow project
-(the "Project", hosted at https://github.com/angleto/flow and
+By submitting a Contribution (as defined below) to the Mycelium project
+(the "Project", hosted at https://github.com/angleto/mycelium and
 maintained by Angelo Leto, the "Maintainer"), you ("Contributor",
 or "You") agree to the following terms for any past, present and
 future Contribution.
@@ -104,7 +104,7 @@ the Contribution:
   - opening a pull request whose description, or whose top commit
     body, includes the exact line:
 
-        I accept the Flow CLA (CLA.md)
+        I accept the Mycelium CLA (CLA.md)
 
   - signing this document and sending the signed copy to
     angelo@leto.blue (PDF, scanned signature, or PGP-signed plain

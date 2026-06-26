@@ -15,7 +15,7 @@ export interface RecentItem {
   route: string
 }
 
-const KEY = 'flow.recents.v1'
+const KEY = 'mycelium.recents.v1'
 const MAX = 8
 
 function isRecent(x: unknown): x is RecentItem {

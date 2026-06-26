@@ -52,8 +52,8 @@ const INITIAL_SESSION: PomodoroSession = {
   startedDay: todayStr(),
 }
 
-const CFG_KEY = 'flow.pomodoro.config'
-const SESS_KEY = 'flow.pomodoro.session'
+const CFG_KEY = 'mycelium.pomodoro.config'
+const SESS_KEY = 'mycelium.pomodoro.session'
 
 function loadConfig(): PomodoroConfig {
   try {
@@ -331,7 +331,7 @@ function maybeNotify(prev: Phase, suggestedNext: Phase, cfg: PomodoroConfig): vo
   const title = which[prev] || 'Pomodoro'
   const body = upNext[suggestedNext]
   try {
-    new Notification(title, { body, tag: 'flow-pomodoro' })
+    new Notification(title, { body, tag: 'mycelium-pomodoro' })
   } catch {
     /* permission revoked between query and call */
   }

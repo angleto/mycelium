@@ -14,7 +14,7 @@ import random
 
 import pytest
 
-from flow_core.services.text_patch import (
+from mycelium_core.services.text_patch import (
     PatchBaseMismatch,
     PatchDoesNotApply,
     PatchMalformed,

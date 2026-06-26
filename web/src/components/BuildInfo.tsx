@@ -52,7 +52,7 @@ export function BuildInfo() {
           <dd>
             {info.git_sha ? (
               <a
-                href={`https://github.com/angleto/flow/commit/${info.git_sha}`}
+                href={`https://github.com/angleto/mycelium/commit/${info.git_sha}`}
                 target="_blank"
                 rel="noopener noreferrer"
               >

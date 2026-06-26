@@ -5,9 +5,9 @@ from __future__ import annotations
 
 import uuid
 
-from flow_core.db import admin_session
-from flow_core.services.auth import signup
-from flow_mcp.server import create_tag, create_task, get_task, list_tasks
+from mycelium_core.db import admin_session
+from mycelium_core.services.auth import signup
+from mycelium_mcp.server import create_tag, create_task, get_task, list_tasks
 
 
 async def test_mcp_tools_reuse_service_layer() -> None:

@@ -14,7 +14,7 @@ internationalization. Decision needed before the codebase grows.
   documentation (`docs/`, ADRs), commit messages. Single project
   language now; i18n added later, additively.
 - **No hardcoded user-facing strings**. User-facing messages go through
-  a catalog (`flow_core/i18n.py`): a stable machine `MessageCode` plus
+  a catalog (`mycelium_core/i18n.py`): a stable machine `MessageCode` plus
   parameters. Domain errors carry `code` + `params`, never display
   text. Adapters (api/mcp) resolve the locale (e.g. `Accept-Language`,
   default `en`) and render via the catalog. Adding a locale = adding a

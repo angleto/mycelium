@@ -14,8 +14,8 @@ import {
 // selected client's project-tag ids via setClientProjectIds; consumers
 // only read `focusIds` (the effective project-tag-id allow-list) and
 // `active`.
-const CK = 'flow-focus-client'
-const PK = 'flow-focus-project'
+const CK = 'mycelium-focus-client'
+const PK = 'mycelium-focus-project'
 
 type FocusCtx = {
   clientId: string

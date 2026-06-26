@@ -13,12 +13,12 @@ from collections.abc import Iterator
 import pytest
 from _fake_embedder import FakeEmbedder
 
-import flow_mcp.gateway as gw
-from flow_core.db import admin_session
-from flow_core.embedder import set_embedder_override
-from flow_core.services.auth import signup
-from flow_mcp.gateway import describe_tools, execute_tool, gateway, search_tools
-from flow_mcp.server import _PRINCIPAL
+import mycelium_mcp.gateway as gw
+from mycelium_core.db import admin_session
+from mycelium_core.embedder import set_embedder_override
+from mycelium_core.services.auth import signup
+from mycelium_mcp.gateway import describe_tools, execute_tool, gateway, search_tools
+from mycelium_mcp.server import _PRINCIPAL
 
 
 @pytest.fixture(autouse=True)
@@ -67,7 +67,7 @@ async def test_search_semantic_ranks_relevant_tool() -> None:
 async def test_search_lexical_fallback_without_embedder() -> None:
     # No override and sentence-transformers absent in CI -> the lexical
     # branch runs; it must still surface the obvious match.
-    from flow_core.embedder import embedder_available
+    from mycelium_core.embedder import embedder_available
 
     if embedder_available():
         pytest.skip("a real/overridden embedder is available; lexical path not exercised")
@@ -95,7 +95,7 @@ async def test_cross_cutting_search_survives_domain_prefilter() -> None:
     # domain='tasks' must still reach it. Lexical path (CI has no embedder)
     # with a query that matches the search() docstring, so it ranks even
     # without semantics; the point under test is that it is ELIGIBLE at all.
-    from flow_core.embedder import embedder_available
+    from mycelium_core.embedder import embedder_available
 
     if embedder_available():
         pytest.skip("real embedder present; lexical eligibility path not exercised")
@@ -193,7 +193,7 @@ async def test_execute_domain_error_is_structured_with_code_and_params() -> None
 async def test_http_app_builds_and_serves_the_gateway() -> None:
     # Guards the wiring: the HTTP transport must serve the 3-meta-tool
     # gateway, not regress to the full registry.
-    from flow_mcp.server_http import make_mcp_app
+    from mycelium_mcp.server_http import make_mcp_app
 
     app = make_mcp_app()
     assert app is not None
@@ -223,8 +223,8 @@ def test_get_embedder_returns_singleton_in_prod_path() -> None:
     # Pre-fix shape returned a fresh LocalEmbedder per call, so every
     # search_tools paid the in-memory model load again and inflated the
     # working set toward the pod memory limit. Guards the cache.
-    import flow_core.embedder as emb_mod
-    from flow_core.embedder import LocalEmbedder, get_embedder, set_embedder_override
+    import mycelium_core.embedder as emb_mod
+    from mycelium_core.embedder import LocalEmbedder, get_embedder, set_embedder_override
 
     set_embedder_override(None)
     emb_mod._singleton = None  # ensure cold start for this assertion
@@ -238,11 +238,11 @@ def test_get_embedder_returns_singleton_in_prod_path() -> None:
 
 
 async def test_telemetry_records_meta_tool_calls(tmp_path, monkeypatch) -> None:
-    # With FLOW_MCP_TELEMETRY set, each meta-tool call appends one JSONL
+    # With MYCELIUM_MCP_TELEMETRY set, each meta-tool call appends one JSONL
     # row carrying only {ts, kind, tool, result_bytes} -- enough for the
     # usage_report aggregation, but never arguments or payloads.
     telem = tmp_path / "telem.jsonl"
-    monkeypatch.setenv("FLOW_MCP_TELEMETRY", str(telem))
+    monkeypatch.setenv("MYCELIUM_MCP_TELEMETRY", str(telem))
     user_id, org_id = await _signup_principal()
     tok = _PRINCIPAL.set((user_id, org_id, None))
     try:
@@ -267,7 +267,7 @@ async def test_telemetry_records_meta_tool_calls(tmp_path, monkeypatch) -> None:
 async def test_telemetry_is_noop_when_unset(tmp_path, monkeypatch) -> None:
     # Default (env unset): _record must not write and must not raise, so
     # production pays only a single env lookup per call.
-    monkeypatch.delenv("FLOW_MCP_TELEMETRY", raising=False)
+    monkeypatch.delenv("MYCELIUM_MCP_TELEMETRY", raising=False)
     gw._record("execute", "create_tag", {"id": "x"})  # no-op, no exception
     assert not list(tmp_path.iterdir())
 
@@ -286,8 +286,8 @@ def test_estimate_tokens_is_char_over_4() -> None:
 async def _seed_card(org_id: uuid.UUID, user_id: uuid.UUID, *, with_card: bool) -> None:
     from decimal import Decimal
 
-    from flow_core.db import tenant_session
-    from flow_core.services import billing
+    from mycelium_core.db import tenant_session
+    from mycelium_core.services import billing
 
     async with tenant_session(str(org_id), str(user_id)) as s:
         await billing.grant_credits(s, org_id=org_id, actor_id=user_id, amount=Decimal(100))
@@ -308,8 +308,8 @@ async def _seed_card(org_id: uuid.UUID, user_id: uuid.UUID, *, with_card: bool) 
 async def _mcp_io_records(org_id: uuid.UUID, user_id: uuid.UUID) -> list:
     from sqlalchemy import select
 
-    from flow_core.db import tenant_session
-    from flow_core.models.billing import UsageRecord
+    from mycelium_core.db import tenant_session
+    from mycelium_core.models.billing import UsageRecord
 
     async with tenant_session(str(org_id), str(user_id)) as s:
         return list(
@@ -321,8 +321,8 @@ async def test_mcp_io_meters_the_wallet_when_rate_card_configured() -> None:
     """An MCP meta-tool call debits the wallet under op='mcp_io' /
     model_id='mcp:gateway', attributed to actor_kind 'mcp_token' (NOT the
     autonomous 'system' kind), once a rate card exists."""
-    from flow_core.db import tenant_session
-    from flow_core.services import billing
+    from mycelium_core.db import tenant_session
+    from mycelium_core.services import billing
 
     user_id, org_id = await _signup_principal()
     await _seed_card(org_id, user_id, with_card=True)
@@ -347,8 +347,8 @@ async def test_mcp_io_meters_the_wallet_when_rate_card_configured() -> None:
 async def test_mcp_io_is_free_without_rate_card() -> None:
     """Without a 'mcp:gateway' rate card the call is free: no usage row, no
     debit -- so OSS/dev/CI (and any org that opts out) are unchanged."""
-    from flow_core.db import tenant_session
-    from flow_core.services import billing
+    from mycelium_core.db import tenant_session
+    from mycelium_core.services import billing
 
     user_id, org_id = await _signup_principal()
     await _seed_card(org_id, user_id, with_card=False)

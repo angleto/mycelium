@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import pytest
 
-from flow_core.errors import ForbiddenError
-from flow_core.i18n import MessageCode, render
-from flow_core.models.membership import Role
-from flow_core.security import hash_password, verify_password
-from flow_core.services.rbac import ensure_role
+from mycelium_core.errors import ForbiddenError
+from mycelium_core.i18n import MessageCode, render
+from mycelium_core.models.membership import Role
+from mycelium_core.security import hash_password, verify_password
+from mycelium_core.services.rbac import ensure_role
 
 
 def test_render_basic_and_params() -> None:

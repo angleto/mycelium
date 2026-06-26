@@ -17,17 +17,17 @@ import pytest
 import respx
 from httpx import Response
 
-from flow_core.ai_providers import LocalLLM
-from flow_core.config import get_settings
-from flow_core.crypto import decrypt_secret
-from flow_core.db import admin_session, tenant_session
-from flow_core.errors import DomainError
-from flow_core.i18n import MessageCode
-from flow_core.llm_anthropic import AnthropicLLM
-from flow_core.llm_openai import OpenAILLM
-from flow_core.models.billing import CostBasis
-from flow_core.services import llm_resolver, scaleway
-from flow_core.services.auth import signup
+from mycelium_core.ai_providers import LocalLLM
+from mycelium_core.config import get_settings
+from mycelium_core.crypto import decrypt_secret
+from mycelium_core.db import admin_session, tenant_session
+from mycelium_core.errors import DomainError
+from mycelium_core.i18n import MessageCode
+from mycelium_core.llm_anthropic import AnthropicLLM
+from mycelium_core.llm_openai import OpenAILLM
+from mycelium_core.models.billing import CostBasis
+from mycelium_core.services import llm_resolver, scaleway
+from mycelium_core.services.auth import signup
 
 
 def _email() -> str:

@@ -29,20 +29,20 @@ from _fake_ai import FakeLLM
 from _fake_embedder import FakeEmbedder
 from sqlalchemy import select
 
-from flow_core.ai_providers import set_llm_override
-from flow_core.config import get_settings
-from flow_core.db import admin_session, tenant_session
-from flow_core.embedder import set_embedder_override
-from flow_core.errors import NotFoundError
-from flow_core.models.activity_log import ActivityLog
-from flow_core.models.event_outbox import EventOutbox
-from flow_core.models.note import Note, NoteKind
-from flow_core.services import billing, graph, lookup, memory
-from flow_core.services import decomposition as decomp
-from flow_core.services import garden_review as review
-from flow_core.services import notes as nt
-from flow_core.services.auth import signup
-from flow_core.services.task_search import _note_filter_meta
+from mycelium_core.ai_providers import set_llm_override
+from mycelium_core.config import get_settings
+from mycelium_core.db import admin_session, tenant_session
+from mycelium_core.embedder import set_embedder_override
+from mycelium_core.errors import NotFoundError
+from mycelium_core.models.activity_log import ActivityLog
+from mycelium_core.models.event_outbox import EventOutbox
+from mycelium_core.models.note import Note, NoteKind
+from mycelium_core.services import billing, graph, lookup, memory
+from mycelium_core.services import decomposition as decomp
+from mycelium_core.services import garden_review as review
+from mycelium_core.services import notes as nt
+from mycelium_core.services.auth import signup
+from mycelium_core.services.task_search import _note_filter_meta
 
 
 def _email() -> str:
@@ -409,7 +409,7 @@ async def test_accept_ratio_is_none_without_reviews() -> None:
 
 
 async def test_garden_health_surfaces_the_accept_ratio_sensor() -> None:
-    from flow_core.services import garden_health
+    from mycelium_core.services import garden_health
 
     org, user = await _org()
     async with tenant_session(str(org), str(user)) as s:
