@@ -36,25 +36,29 @@ coordinated cutover (images, secrets, DB) in one release window.
       `api.mycelium.xeno.garden`): add its `A`/`CNAME`. NOTE: the CLI default
       is path-based (`https://mycelium.xeno.garden/api`), so a subdomain is
       only needed if the ingress splits hosts. Verify against flow-deploy.
-- [ ] Email records — only if the transactional FROM moves to
-      `@mycelium.xeno.garden` (see section 3). Keeping the FROM on
-      `@flow.xeno.garden` needs no DNS change.
+- [ ] Email records — REQUIRED. `MYCELIUM_SMTP_FROM` is now
+      `no-reply@mycelium.xeno.garden` (no `flow` in the brand), so the TEM
+      records move to the `mycelium` label and MUST exist before mail sends:
   - [ ] SPF: `TXT mycelium.xeno.garden` including Scaleway TEM
         (`include:_spf.tem.scaleway.com` or the value Scaleway shows).
-  - [ ] DKIM: the selector `CNAME`/`TXT` records Scaleway TEM generates.
-  - [ ] DMARC: `TXT _dmarc.mycelium.xeno.garden` (can mirror the flow one).
+  - [ ] DKIM: the selector `CNAME`/`TXT` records Scaleway TEM generates
+        (`<project-id>._domainkey.mycelium`).
+  - [ ] DMARC: `TXT _dmarc.mycelium.xeno.garden`.
+  - [ ] MX: the TEM bounce/verification record on the `mycelium` label.
 
 ## 3. Scaleway — transactional email (TEM)
 
 The SMTP credentials themselves do not change (same TEM project); only the
-env-var NAMES moved (`FLOW_SMTP_*` -> `MYCELIUM_SMTP_*`, handled in §5).
+env-var NAMES moved (`FLOW_SMTP_*` -> `MYCELIUM_SMTP_*`, handled in §5) and
+the FROM domain moved to `mycelium.xeno.garden`.
 
-- [ ] DECISION: keep `MYCELIUM_SMTP_FROM = <something>@flow.xeno.garden`
-      (zero email work, flow domain still owned) **or** move it to
-      `@mycelium.xeno.garden`.
-- [ ] If moving: add `mycelium.xeno.garden` as a verified **sender domain**
-      in Scaleway TEM, publish the DKIM/SPF records it returns (§2), and
-      wait for verification before flipping `MYCELIUM_SMTP_FROM`.
+- [ ] PREREQUISITE (manifest already set `MYCELIUM_SMTP_FROM` to
+      `no-reply@mycelium.xeno.garden`): add `mycelium.xeno.garden` as a
+      verified **sender domain** in Scaleway TEM, publish the DKIM/SPF/DMARC
+      records it returns on the `mycelium` label (§2), and wait for
+      verification. Until then, transactional mail from the new domain will
+      fail SPF/DKIM. The old TEM domain `flow.xeno.garden` can be removed
+      once the cutover is verified.
 - [ ] mTLS / SdI client certs (FatturaPA) are a separate legal identity and
       do **not** change. The env-var names did (`MYCELIUM_SDI_*`); values stay.
 
@@ -104,18 +108,15 @@ Renaming each would break a live external resource for no user benefit:
   side is `MYCELIUM_*` and ESO maps Scaleway `FLOW_*` -> k8s `MYCELIUM_*`, so
   NO Scaleway SM rename is needed.
 - Scaleway Object Storage bucket `flow-prod-attachments` (holds the data).
-- Email/TEM on the `flow.xeno.garden` label: `MYCELIUM_SMTP_FROM` keeps
-  `no-reply@flow.xeno.garden` (TEM-verified); SPF/DKIM/DMARC/MX stay on the
-  `flow` label, only the display name became "Mycelium". The app A record is
-  on `mycelium`; the DEPLOYMENT-GUIDE/CUTOVER DNS sections predate this split,
-  so read them with app=`mycelium`, email=`flow` in mind.
 - Scaleway node pool `flow` (`pool: flow` + taint `dedicated=flow`): renaming
   needs a node-pool recreate.
 - The recovery ConfigMap path `/var/lib/flow/recovery` (historical migration).
 - The org/project literally named `flow` in the DB (that is data).
 
-NOTE: the SdI RicezioneNotifiche host moved to `sdi.mycelium.xeno.garden`
-(re-declared at the AdE portal), and the manifests were updated accordingly.
+These are all internal/infra (never shown to a user). Everything brand-facing
+is now Mycelium, including the transactional email FROM
+(`no-reply@mycelium.xeno.garden`, §3) and the SdI RicezioneNotifiche host
+`sdi.mycelium.xeno.garden` (re-declared at the AdE portal).
 
 ## 6. Production database (maintenance window)
 
