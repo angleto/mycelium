@@ -5,7 +5,7 @@
 - English everywhere: code, identifiers, comments, docstrings, docs,
   ADRs, commit messages. See [ADR-0017](docs/adr/0017-english-only-i18n-message-catalog.md).
 - No hardcoded user-facing strings. Use the message catalog
-  (`flow_core/i18n.py`): a stable `MessageCode` + params. Domain errors
+  (`mycelium_core/i18n.py`): a stable `MessageCode` + params. Domain errors
   carry `code` + `params`, never display text. Adapters render per
   locale (default `en`); adding a locale is additive.
 
@@ -25,7 +25,7 @@ make test       # pytest
 
 ```
 make up                                   # postgres+pgvector, redis (arm64)
-FLOW_DB_APP_PASSWORD=... make db-bootstrap # runtime role + password
+MYCELIUM_DB_APP_PASSWORD=... make db-bootstrap # runtime role + password
 make migrate                              # alembic upgrade head
 ```
 
@@ -63,7 +63,7 @@ sign-offs before merge.
 ## Contributor License Agreement (CLA)
 
 In addition to the DCO sign-off above, contributions are accepted
-under the [Flow Contributor License Agreement](CLA.md). The CLA
+under the [Mycelium Contributor License Agreement](CLA.md). The CLA
 grants the maintainer the rights needed to release the project
 under both AGPL-3.0-or-later and a separate commercial license
 (see [NOTICE](NOTICE) and [LICENSE](LICENSE)). The DCO alone is
@@ -75,7 +75,7 @@ cannot relicense third-party contributions to commercial customers.
 Acceptance is one-time per contributor. The first pull request from
 a contributor must include the exact line
 
-    I accept the Flow CLA (CLA.md)
+    I accept the Mycelium CLA (CLA.md)
 
 in its description or in the body of its top commit. Subsequent
 contributions from the same contributor are covered automatically

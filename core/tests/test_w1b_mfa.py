@@ -1,5 +1,5 @@
 """W1b (DB-backed): TOTP MFA enrolment, gated login, backup codes,
-disable. Ported from bitvision_phoenix; adapted to Flow's services.
+disable. Ported from bitvision_phoenix; adapted to Mycelium's services.
 """
 
 from __future__ import annotations
@@ -9,10 +9,10 @@ import uuid
 import pyotp
 import pytest
 
-from flow_core.db import admin_session
-from flow_core.errors import AuthError, ConflictError
-from flow_core.services import auth as A
-from flow_core.services import mfa as M
+from mycelium_core.db import admin_session
+from mycelium_core.errors import AuthError, ConflictError
+from mycelium_core.services import auth as A
+from mycelium_core.services import mfa as M
 
 
 def _email() -> str:

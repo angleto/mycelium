@@ -11,11 +11,11 @@ import uuid
 import pytest
 from sqlalchemy import select
 
-from flow_core.config import get_settings
-from flow_core.db import admin_session
-from flow_core.errors import AuthError, LockedError
-from flow_core.models.user import User
-from flow_core.services import auth as A
+from mycelium_core.config import get_settings
+from mycelium_core.db import admin_session
+from mycelium_core.errors import AuthError, LockedError
+from mycelium_core.models.user import User
+from mycelium_core.services import auth as A
 
 _PW = "pw-strong-123"
 

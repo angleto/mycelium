@@ -28,19 +28,19 @@ if str(ROOT) not in sys.path:
 from _fake_ai import FakeLLM  # noqa: E402
 from sqlalchemy import select, text  # noqa: E402
 
-from flow_core.ai_providers import LLMResult, set_llm_override  # noqa: E402
-from flow_core.config import get_settings  # noqa: E402
-from flow_core.db import admin_session, tenant_session  # noqa: E402
-from flow_core.errors import DomainError  # noqa: E402
-from flow_core.models.activity_log import ActivityLog  # noqa: E402
-from flow_core.models.billing import CostBasis, UsageRecord  # noqa: E402
-from flow_core.models.classification_feedback import ClassificationFeedback  # noqa: E402
-from flow_core.models.note import Note, NoteKind  # noqa: E402
-from flow_core.models.note_link import NoteNoteLink  # noqa: E402
-from flow_core.services import billing  # noqa: E402
-from flow_core.services import decomposition as decomp  # noqa: E402
-from flow_core.services import notes as nt  # noqa: E402
-from flow_core.services.auth import signup  # noqa: E402
+from mycelium_core.ai_providers import LLMResult, set_llm_override  # noqa: E402
+from mycelium_core.config import get_settings  # noqa: E402
+from mycelium_core.db import admin_session, tenant_session  # noqa: E402
+from mycelium_core.errors import DomainError  # noqa: E402
+from mycelium_core.models.activity_log import ActivityLog  # noqa: E402
+from mycelium_core.models.billing import CostBasis, UsageRecord  # noqa: E402
+from mycelium_core.models.classification_feedback import ClassificationFeedback  # noqa: E402
+from mycelium_core.models.note import Note, NoteKind  # noqa: E402
+from mycelium_core.models.note_link import NoteNoteLink  # noqa: E402
+from mycelium_core.services import billing  # noqa: E402
+from mycelium_core.services import decomposition as decomp  # noqa: E402
+from mycelium_core.services import notes as nt  # noqa: E402
+from mycelium_core.services.auth import signup  # noqa: E402
 
 
 def _email() -> str:

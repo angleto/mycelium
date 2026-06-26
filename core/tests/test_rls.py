@@ -9,13 +9,13 @@ import uuid
 import pytest
 from sqlalchemy import select, text
 
-from flow_core.concurrency import optimistic_update
-from flow_core.db import admin_session, tenant_session
-from flow_core.errors import ConflictError, NotFoundError
-from flow_core.models.membership import Role
-from flow_core.models.organization import Organization
-from flow_core.services import rbac
-from flow_core.services.auth import signup
+from mycelium_core.concurrency import optimistic_update
+from mycelium_core.db import admin_session, tenant_session
+from mycelium_core.errors import ConflictError, NotFoundError
+from mycelium_core.models.membership import Role
+from mycelium_core.models.organization import Organization
+from mycelium_core.services import rbac
+from mycelium_core.services.auth import signup
 
 
 async def _signup(name: str) -> tuple[uuid.UUID, uuid.UUID]:

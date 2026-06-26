@@ -10,17 +10,17 @@ from __future__ import annotations
 
 import os
 
-os.environ.setdefault("FLOW_JWT_SECRET", "test-only-secret-min-32-bytes-aaaaaaaaaa")
+os.environ.setdefault("MYCELIUM_JWT_SECRET", "test-only-secret-min-32-bytes-aaaaaaaaaa")
 # Valid Fernet key (urlsafe-b64 of 32 zero bytes); test-only.
-os.environ.setdefault("FLOW_SECRET_KEY", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
+os.environ.setdefault("MYCELIUM_SECRET_KEY", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
 
 from collections.abc import AsyncIterator, Iterator
 
 import pytest
 
-import flow_core.db as _db
-from flow_core.attachment_store import set_attachment_store_override
-from flow_core.services.mailer import LogMailer, set_mailer
+import mycelium_core.db as _db
+from mycelium_core.attachment_store import set_attachment_store_override
+from mycelium_core.services.mailer import LogMailer, set_mailer
 
 
 @pytest.fixture(autouse=True)
@@ -82,7 +82,7 @@ def _purge_s3_only_attachments() -> Iterator[None]:
     yield
     import psycopg
 
-    from flow_core.config import get_settings
+    from mycelium_core.config import get_settings
 
     dsn = get_settings().database_url_sync.replace("+psycopg", "").replace("+asyncpg", "")
     with psycopg.connect(dsn, autocommit=True) as conn:

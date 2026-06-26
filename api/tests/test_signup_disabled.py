@@ -14,8 +14,8 @@ import uuid
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from flow_api.main import app
-from flow_core.config import get_settings
+from mycelium_api.main import app
+from mycelium_core.config import get_settings
 
 
 def _email() -> str:
@@ -45,8 +45,8 @@ async def test_signup_disabled_does_not_block_the_service(
     """The bootstrap path uses the service, not the HTTP endpoint, so it
     must keep working even with public signup disabled."""
     monkeypatch.setattr(get_settings(), "allow_signup", False, raising=True)
-    from flow_core.db import admin_session
-    from flow_core.services.auth import signup
+    from mycelium_core.db import admin_session
+    from mycelium_core.services.auth import signup
 
     email = _email()
     async with admin_session() as s:

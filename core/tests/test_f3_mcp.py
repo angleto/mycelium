@@ -11,12 +11,12 @@ import uuid
 
 import pytest
 
-from flow_core.db import admin_session, tenant_session
-from flow_core.errors import ConflictError
-from flow_core.services import actors as actors_svc
-from flow_core.services import identities as identities_svc
-from flow_core.services.auth import signup
-from flow_mcp.server import (
+from mycelium_core.db import admin_session, tenant_session
+from mycelium_core.errors import ConflictError
+from mycelium_core.services import actors as actors_svc
+from mycelium_core.services import identities as identities_svc
+from mycelium_core.services.auth import signup
+from mycelium_mcp.server import (
     create_task,
     list_schedule,
     recompute_schedule,
@@ -77,7 +77,7 @@ async def test_mcp_events_and_schedule() -> None:
 async def test_mcp_task_participants() -> None:
     """The participants tools on appointment-tasks: add / list /
     remove via MCP, mirror behaviour of the REST endpoints."""
-    from flow_mcp.server import (
+    from mycelium_mcp.server import (
         add_task_participant,
         list_task_participants,
         remove_task_participant,
@@ -91,7 +91,7 @@ async def test_mcp_task_participants() -> None:
     token, org_uuid, owner = a.token, a.org_id, a.user_id
     org = str(org_uuid)
     # Make user B a member of A's org so we can pin them as a participant.
-    from flow_core.services import memberships as mem_svc
+    from mycelium_core.services import memberships as mem_svc
 
     async with tenant_session(org, str(owner)) as s:
         await mem_svc.add_member(s, org_id=org_uuid, actor_id=owner, email=b_email, role="member")

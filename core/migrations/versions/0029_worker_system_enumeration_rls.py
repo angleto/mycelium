@@ -5,7 +5,7 @@ Worker jobs enumerate every workspace with the no-tenant ``admin_session``
 the Google Calendar job reads ``google_calendar_subscriptions``). That
 session sets ``app.current_actor_kind='system'`` but no ``app.current_org``
 GUC. Under FORCE row-level security the org-scoped policies key off
-``app.current_org`` and therefore match nothing: as the ``flow_app``
+``app.current_org`` and therefore match nothing: as the ``mycelium_app``
 runtime role (no BYPASSRLS) every enumeration returns zero rows, so the
 reminders/dispatch/calendar/revisions/embedding sweeps are silent no-ops
 in production. CI/dev never saw it because the test role is BYPASSRLS.

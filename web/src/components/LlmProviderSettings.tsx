@@ -234,7 +234,7 @@ export function LlmProviderSettings() {
   )
 }
 
-// BYOK platform fee: the minimal per-token percentage Flow charges when an
+// BYOK platform fee: the minimal per-token percentage Mycelium charges when an
 // org brings its own key. Write-only (no GET endpoint exposes the current
 // value); the server defaults it per-org. Admin-gated like the parent.
 function ByokFactor() {

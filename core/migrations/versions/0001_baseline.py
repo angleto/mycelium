@@ -53,4 +53,4 @@ def downgrade() -> None:
     op.execute("DROP SCHEMA IF EXISTS public CASCADE")
     op.execute("CREATE SCHEMA public")
     op.execute("GRANT ALL ON SCHEMA public TO public")
-    op.execute("DROP ROLE IF EXISTS flow_app")
+    op.execute("DROP ROLE IF EXISTS mycelium_app")

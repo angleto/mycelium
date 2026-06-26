@@ -11,7 +11,7 @@ export default defineConfig({
   workers: 1,
   reporter: [['list']],
   use: {
-    baseURL: 'https://flow.xeno.garden',
+    baseURL: 'https://mycelium.xeno.garden',
     headless: true,
     screenshot: 'only-on-failure',
     trace: 'retain-on-failure',

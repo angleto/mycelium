@@ -50,7 +50,7 @@ import { AttachmentPicker } from './AttachmentPicker'
 // Remembered show/hide state of the formatting toolbar (one switch for
 // all editors). Defaults to shown; collapsing is the opt-in for a
 // roomier writing surface, notably on a phone.
-const TOOLBAR_PREF_KEY = 'flow.rte.toolbar'
+const TOOLBAR_PREF_KEY = 'mycelium.rte.toolbar'
 function readToolbarPref(): boolean {
   try {
     return localStorage.getItem(TOOLBAR_PREF_KEY) !== '0'
@@ -170,7 +170,7 @@ function filenameFromContentDisposition(header: string | null): string {
 
 // True WYSIWYG (no preview toggle), markdown round-trip via
 // tiptap-markdown, and an inline @ typeahead mirroring bitvision's
-// EvidenceMentionExtension: type @ -> search Flow tasks/tags ->
+// EvidenceMentionExtension: type @ -> search Mycelium tasks/tags ->
 // inserts a [label](@kind:id) link that serializes as the DSL.
 
 type Cand = { kind: MentionKind; id: string; label: string }
@@ -204,7 +204,7 @@ async function searchCandidates(query: string): Promise<Cand[]> {
 }
 
 const MentionExt = Extension.create({
-  name: 'flowMention',
+  name: 'myceliumMention',
   addProseMirrorPlugins() {
     return [
       Suggestion<Cand>({
@@ -446,7 +446,7 @@ function entitySuggestionRender() {
 }
 
 const EntityAutocompleteExt = Extension.create({
-  name: 'flowEntityAutocomplete',
+  name: 'myceliumEntityAutocomplete',
   addProseMirrorPlugins() {
     return [
       Suggestion<EntityCand>({
@@ -454,7 +454,7 @@ const EntityAutocompleteExt = Extension.create({
         // Distinct key: @tiptap/suggestion defaults every instance to the
         // 'suggestion' PluginKey, so without this the @-mention plugin and
         // this one collide ("Adding different instances of a keyed plugin").
-        pluginKey: new PluginKey('flowEntityAutocompleteSuggestion'),
+        pluginKey: new PluginKey('myceliumEntityAutocompleteSuggestion'),
         char: '[[',
         allowSpaces: false,
         startOfLine: false,

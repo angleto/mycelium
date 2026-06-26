@@ -1,7 +1,7 @@
 // Cross-reference DSL, same shape as bitvision: markdown links whose
 // href is `@<kind>:<uuid>`, e.g. [Fix duct](@task:9cf6bc7f-...). Stored
 // as plain markdown so it round-trips; resolved at render time into a
-// router link / chip. Flow kinds: task, note, tag.
+// router link / chip. Mycelium kinds: task, note, tag.
 
 export type MentionKind = 'task' | 'note' | 'tag'
 

@@ -20,14 +20,14 @@ import asyncio
 
 from sqlalchemy import select
 
-from flow_core.concurrency import optimistic_update
-from flow_core.db import admin_session, tenant_session
-from flow_core.models.membership import Membership, Role
-from flow_core.models.memory_blob import MemoryBlob
-from flow_core.models.organization import Organization
-from flow_core.services import memory as M
+from mycelium_core.concurrency import optimistic_update
+from mycelium_core.db import admin_session, tenant_session
+from mycelium_core.models.membership import Membership, Role
+from mycelium_core.models.memory_blob import MemoryBlob
+from mycelium_core.models.organization import Organization
+from mycelium_core.services import memory as M
 
-FLOW_PROJECT = "b5ec1167-11f0-47bf-ba11-f5c25885928c"
+MYCELIUM_PROJECT = "b5ec1167-11f0-47bf-ba11-f5c25885928c"
 NEW_FLOOR = 0.4
 
 
@@ -41,10 +41,10 @@ async def main() -> None:
 
     org_id = user_id = None
     for cand_org, cand_user in orgs:
-        async with tenant_session(str(cand_org), str(cand_user), project_id=FLOW_PROJECT) as s:
+        async with tenant_session(str(cand_org), str(cand_user), project_id=MYCELIUM_PROJECT) as s:
             hit = (
                 await s.execute(
-                    select(MemoryBlob.id).where(MemoryBlob.project_id == FLOW_PROJECT).limit(1)
+                    select(MemoryBlob.id).where(MemoryBlob.project_id == MYCELIUM_PROJECT).limit(1)
                 )
             ).first()
         if hit is not None:
@@ -54,7 +54,7 @@ async def main() -> None:
         print("flow project not found in any owned org; aborting")
         return
 
-    async with tenant_session(str(org_id), str(user_id), project_id=FLOW_PROJECT) as s:
+    async with tenant_session(str(org_id), str(user_id), project_id=MYCELIUM_PROJECT) as s:
         org = (await s.execute(select(Organization).where(Organization.id == org_id))).scalar_one()
         old = (org.settings or {}).get(M.SEMANTIC_MIN_SIM_KEY, "<unset>")
         if old != "<unset>" and float(old) == NEW_FLOOR:

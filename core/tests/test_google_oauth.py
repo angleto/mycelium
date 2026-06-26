@@ -26,26 +26,26 @@ import httpx
 import pytest
 from sqlalchemy import select
 
-from flow_core.config import get_settings
-from flow_core.crypto import decrypt_secret
-from flow_core.db import admin_session, tenant_session
-from flow_core.errors import DomainError
-from flow_core.google_api import (
+from mycelium_core.config import get_settings
+from mycelium_core.crypto import decrypt_secret
+from mycelium_core.db import admin_session, tenant_session
+from mycelium_core.errors import DomainError
+from mycelium_core.google_api import (
     GoogleEvent,
     TokenResponse,
     set_google_api_client_override,
 )
-from flow_core.google_oauth_state import (
+from mycelium_core.google_oauth_state import (
     DEFAULT_TTL_SECONDS,
     issue_state,
     verify_state,
 )
-from flow_core.models.calendar import WorkingCalendar
-from flow_core.models.email import EmailAccount, EmailProvider
-from flow_core.models.google_calendar import CalendarSubscription
-from flow_core.models.task import Task
-from flow_core.services import google_calendar as gcal_svc
-from flow_core.services.auth import signup
+from mycelium_core.models.calendar import WorkingCalendar
+from mycelium_core.models.email import EmailAccount, EmailProvider
+from mycelium_core.models.google_calendar import CalendarSubscription
+from mycelium_core.models.task import Task
+from mycelium_core.services import google_calendar as gcal_svc
+from mycelium_core.services.auth import signup
 
 # ---- Fake Google client (the HTTP boundary). --------------------------
 
@@ -252,7 +252,7 @@ async def test_callback_creates_gmail_account_and_calendar_subscription(
     """End-to-end: scope=both -> the callback stores both the gmail
     EmailAccount (refresh_token in Fernet envelope) and the
     CalendarSubscription (also Fernet)."""
-    from flow_api.app import create_app
+    from mycelium_api.app import create_app
 
     org_id, user_id = await _signup_owner("OauthBoth")
     await _seed_default_calendar(org_id, user_id)
@@ -290,7 +290,7 @@ async def test_callback_creates_gmail_account_and_calendar_subscription(
 
 
 async def test_callback_rejects_bad_state(_configure_google_oauth) -> None:
-    from flow_api.app import create_app
+    from mycelium_api.app import create_app
 
     app = create_app()
     async with _client_for_app(app) as cx:
@@ -305,7 +305,7 @@ async def test_callback_rejects_bad_state(_configure_google_oauth) -> None:
 
 
 async def test_callback_fails_when_google_not_configured() -> None:
-    from flow_api.app import create_app
+    from mycelium_api.app import create_app
 
     app = create_app()
     org_id, user_id = await _signup_owner("OauthUnconf")
@@ -321,7 +321,7 @@ async def test_callback_fails_when_google_not_configured() -> None:
 
 
 async def test_callback_propagates_exchange_failure(_configure_google_oauth) -> None:
-    from flow_api.app import create_app
+    from mycelium_api.app import create_app
 
     set_google_api_client_override(lambda: FakeGoogleApiClient(fail_exchange=True))
     org_id, user_id = await _signup_owner("OauthExFail")
@@ -462,9 +462,9 @@ async def test_push_event_round_trip(_configure_google_oauth) -> None:
     external_* trio is written back. The next ingest of the same
     Google id must NOT duplicate the row (idempotency via the
     UNIQUE partial index on (external_subscription_id, external_id))."""
-    from flow_core.services import actors as actors_svc
-    from flow_core.services import identities as identities_svc
-    from flow_core.services import tasks as tasks_svc
+    from mycelium_core.services import actors as actors_svc
+    from mycelium_core.services import identities as identities_svc
+    from mycelium_core.services import tasks as tasks_svc
 
     org_id, user_id = await _signup_owner("OauthPush")
     sub_id = await _connect_subscription(org_id, user_id)
@@ -539,8 +539,8 @@ async def test_gmail_account_uses_refresh_token_for_access_token(
 ) -> None:
     """For provider=gmail the connector must receive a freshly-refreshed
     access_token, not the stored refresh_token."""
-    from flow_core.crypto import encrypt_secret
-    from flow_core.services import email as email_svc
+    from mycelium_core.crypto import encrypt_secret
+    from mycelium_core.services import email as email_svc
 
     org_id, user_id = await _signup_owner("OauthGmailRefresh")
     fake = FakeGoogleApiClient(access_token="freshly-minted-token")
@@ -566,8 +566,8 @@ async def test_gmail_account_uses_refresh_token_for_access_token(
 async def test_imap_generic_account_uses_stored_secret() -> None:
     """For non-gmail providers ``access_token_for`` is the identity:
     return the decrypted IMAP password unchanged. No Google call."""
-    from flow_core.crypto import encrypt_secret
-    from flow_core.services import email as email_svc
+    from mycelium_core.crypto import encrypt_secret
+    from mycelium_core.services import email as email_svc
 
     org_id, user_id = await _signup_owner("OauthImapNoop")
     fake = FakeGoogleApiClient()  # not configured by default
@@ -590,7 +590,7 @@ async def test_callback_fails_on_missing_refresh_token(_configure_google_oauth) 
     """A returning consent without ``prompt=consent`` would omit
     refresh_token; the callback must reject that explicitly rather than
     silently store nothing usable."""
-    from flow_api.app import create_app
+    from mycelium_api.app import create_app
 
     set_google_api_client_override(
         lambda: FakeGoogleApiClient(refresh_token=None, id_token=_id_token("x@example.test"))

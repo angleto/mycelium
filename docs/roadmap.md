@@ -66,7 +66,7 @@ end-to-end per phase.
 - **F7c SdICoop production**: service agreement + accreditation +
   switching the channel to production (a heavy item, resourced as
   such). Implementation status (2026-05-22): F7a complete. F7b is now
-  implemented as code, config-gated on `FLOW_SDI_CHANNEL=sdicoop`:
+  implemented as code, config-gated on `MYCELIUM_SDI_CHANNEL=sdicoop`:
   official FatturaPA XSD validation at transmit; the per-issuer
   `SdiMandate` + `TerzoIntermediarioOSoggettoEmittente` /
   `SoggettoEmittente=TZ` intermediary payload; a real SdICoop `RiceviFile`

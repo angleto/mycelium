@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 
-from flow_core.attachment_store import AttachmentStreamTooLarge
+from mycelium_core.attachment_store import AttachmentStreamTooLarge
 
 
 class FakeAttachmentStore:

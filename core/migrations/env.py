@@ -1,9 +1,9 @@
 """Alembic environment.
 
 Decoupled from the app Settings: the URL (sync, psycopg) is read
-directly from FLOW_DATABASE_URL_SYNC, so migrations do not require the
+directly from MYCELIUM_DATABASE_URL_SYNC, so migrations do not require the
 JWT secret. Migrations run as the owner role (`flow`), not as
-`flow_app` (see docs/adr/0015).
+`mycelium_app` (see docs/adr/0015).
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ from logging.config import fileConfig
 from alembic import context
 from sqlalchemy import create_engine, pool
 
-from flow_core.models import Base
+from mycelium_core.models import Base
 
 config = context.config
 if config.config_file_name is not None:
@@ -26,7 +26,7 @@ _DEFAULT_URL = "postgresql+psycopg://flow:flow@localhost:5432/flow"
 
 
 def _url() -> str:
-    return os.environ.get("FLOW_DATABASE_URL_SYNC", _DEFAULT_URL)
+    return os.environ.get("MYCELIUM_DATABASE_URL_SYNC", _DEFAULT_URL)
 
 
 def run_migrations_offline() -> None:

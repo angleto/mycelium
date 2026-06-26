@@ -14,17 +14,17 @@ import uuid
 import pytest
 from sqlalchemy import select
 
-from flow_core.config import get_settings
-from flow_core.db import admin_session, tenant_session
-from flow_core.models.classification_job import ClassificationJob
-from flow_core.models.note import Note, NoteKind
-from flow_core.models.note_tag import NoteTag
-from flow_core.models.tag import TagKind
-from flow_core.services import garden_classify as gc
-from flow_core.services import notes as notes_svc
-from flow_core.services import tasks as tasks_svc
-from flow_core.services import taxonomy
-from flow_core.services.auth import signup
+from mycelium_core.config import get_settings
+from mycelium_core.db import admin_session, tenant_session
+from mycelium_core.models.classification_job import ClassificationJob
+from mycelium_core.models.note import Note, NoteKind
+from mycelium_core.models.note_tag import NoteTag
+from mycelium_core.models.tag import TagKind
+from mycelium_core.services import garden_classify as gc
+from mycelium_core.services import notes as notes_svc
+from mycelium_core.services import tasks as tasks_svc
+from mycelium_core.services import taxonomy
+from mycelium_core.services.auth import signup
 
 
 def _email() -> str:

@@ -11,7 +11,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 from typing import Any
 
-from flow_mcp.server import _client, _compact, _project, _task_full
+from mycelium_mcp.server import _client, _compact, _project, _task_full
 
 
 def test_compact_drops_only_none() -> None:

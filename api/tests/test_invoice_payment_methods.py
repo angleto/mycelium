@@ -19,7 +19,7 @@ import uuid
 
 from httpx import ASGITransport, AsyncClient
 
-from flow_api.main import app
+from mycelium_api.main import app
 
 
 def _email() -> str:
@@ -223,7 +223,7 @@ async def test_counter_override_rejects_value_below_max_emitted() -> None:
 async def test_counter_can_be_created_for_new_year_via_override() -> None:
     """When migrating from another system mid-year, the user starts a
     fresh (series, year) at the import number without ever emitting via
-    Flow first. The PUT endpoint must create the row on the fly."""
+    Mycelium first. The PUT endpoint must create the row on the fly."""
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://t") as c:
         h = await _owner(c)
@@ -300,7 +300,7 @@ def test_invoice_pdf_labels_cover_all_supported_locales() -> None:
     """Every supported locale must carry the same key set: a missing
     label would render an empty string on the PDF for a foreign client
     (silent UX bug). Lock the matrix as a CI invariant."""
-    from flow_core.services.invoice_pdf import _LABELS
+    from mycelium_core.services.invoice_pdf import _LABELS
 
     ref = set(_LABELS["it"])
     assert "it" in _LABELS and "en" in _LABELS
@@ -315,7 +315,7 @@ def test_bollo_dicitura_uses_mef_decree_wording() -> None:
     """The PDF stamp-duty note follows DM 17/06/2014 art.6 wording.
     Asserted on the constant (reportlab Flate-compresses the content
     stream, so we cannot grep the PDF bytes for the phrase)."""
-    from flow_core.services.invoice_format import BOLLO_DICITURA
+    from mycelium_core.services.invoice_format import BOLLO_DICITURA
 
     assert "decreto MEF 17 GIUGNO 2014" in BOLLO_DICITURA
     assert "ART. 6" in BOLLO_DICITURA

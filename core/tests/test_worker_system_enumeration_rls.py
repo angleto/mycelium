@@ -18,10 +18,10 @@ import uuid
 import pytest
 from sqlalchemy import select, text
 
-from flow_core.db import admin_session, tenant_session
-from flow_core.models.membership import Membership, Role
-from flow_core.models.organization import Organization
-from flow_core.services.auth import signup
+from mycelium_core.db import admin_session, tenant_session
+from mycelium_core.models.membership import Membership, Role
+from mycelium_core.models.organization import Organization
+from mycelium_core.services.auth import signup
 
 
 def _email() -> str:

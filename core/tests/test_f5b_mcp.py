@@ -5,9 +5,9 @@ from __future__ import annotations
 
 import uuid
 
-from flow_core.db import admin_session
-from flow_core.services.auth import signup
-from flow_mcp.server import (
+from mycelium_core.db import admin_session
+from mycelium_core.services.auth import signup
+from mycelium_mcp.server import (
     billing_balance,
     grant_credits,
     meter_usage,

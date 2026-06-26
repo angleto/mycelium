@@ -48,7 +48,7 @@
 
 ## LLM / Embedding provider abstraction (pattern adopted)
 
-A pluggable AI-provider pattern Flow adopts (see ADR-0019):
+A pluggable AI-provider pattern Mycelium adopts (see ADR-0019):
 
 - Provider as a `typing.Protocol` (structural typing, not an ABC), so
   adapters need no shared base class.
@@ -65,10 +65,10 @@ A pluggable AI-provider pattern Flow adopts (see ADR-0019):
 - Embedding models versioned by a stable `model_id` with lazy loading
   of the weights.
 
-Flow adds an `EmbedderProvider` mirroring the `LLMProvider` Protocol:
+Mycelium adds an `EmbedderProvider` mirroring the `LLMProvider` Protocol:
 an embedding abstraction is not implied by the LLM one and must be
 designed explicitly (the source pattern called embedding models
 directly). Deliberately out of scope: vendor-specific prompt-cache
 mechanisms, any domain-specific prompt templates or data handling, and
-bespoke MCP token scoping; design those for Flow's own needs rather
+bespoke MCP token scoping; design those for Mycelium's own needs rather
 than porting them.

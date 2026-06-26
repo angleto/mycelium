@@ -8,10 +8,10 @@ import uuid
 import pytest
 from sqlalchemy import select
 
-from flow_core.bootstrap_admin import _check_password, ensure_admin
-from flow_core.db import admin_session
-from flow_core.models.user import User
-from flow_core.services.auth import signup
+from mycelium_core.bootstrap_admin import _check_password, ensure_admin
+from mycelium_core.db import admin_session
+from mycelium_core.models.user import User
+from mycelium_core.services.auth import signup
 
 
 def test_weak_password_rejected() -> None:

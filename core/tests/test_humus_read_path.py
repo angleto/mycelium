@@ -23,13 +23,13 @@ import pytest
 from _fake_embedder import FakeEmbedder
 from sqlalchemy import select
 
-from flow_core.db import admin_session, tenant_session
-from flow_core.embedder import set_embedder_override
-from flow_core.models.note import Note, NoteKind
-from flow_core.services import graph, memory
-from flow_core.services import note_links as nl
-from flow_core.services import notes as nt
-from flow_core.services.auth import signup
+from mycelium_core.db import admin_session, tenant_session
+from mycelium_core.embedder import set_embedder_override
+from mycelium_core.models.note import Note, NoteKind
+from mycelium_core.services import graph, memory
+from mycelium_core.services import note_links as nl
+from mycelium_core.services import notes as nt
+from mycelium_core.services.auth import signup
 
 
 @pytest.fixture

@@ -66,7 +66,7 @@ const TAB_GLYPH: Record<Tab, string> = {
 // reloads avoids the "wait, I was in mindmap" surprise. Scoped per
 // workspace because the same browser may host multiple tenants.
 function activeTabKey(workspaceId: string | null): string {
-  return `flow.garden.activeTab.${workspaceId ?? '_'}`
+  return `mycelium.garden.activeTab.${workspaceId ?? '_'}`
 }
 
 function loadActiveTab(workspaceId: string | null): Tab {

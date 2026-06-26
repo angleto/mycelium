@@ -92,9 +92,9 @@ def upgrade() -> None:
     )
 
     # Shared config: no RLS (fleet-wide, read by every tenant session).
-    # flow_app needs the grants the other tables get; writes are gated at
+    # mycelium_app needs the grants the other tables get; writes are gated at
     # the service/platform-admin layer, never exposed to a tenant path.
-    op.execute("GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE default_rate_card TO flow_app")
+    op.execute("GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE default_rate_card TO mycelium_app")
 
     op.bulk_insert(
         table,

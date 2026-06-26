@@ -25,7 +25,7 @@ from typing import Any
 import _fake_ai
 import pytest
 
-from flow_core.adjudication import (
+from mycelium_core.adjudication import (
     AdjudicationContext,
     AdjudicationOutcome,
     Cap,
@@ -39,20 +39,20 @@ from flow_core.adjudication import (
     StrategyRequirements,
     get_registry,
 )
-from flow_core.adjudication.policy import PolicyRouter, PolicyRule
-from flow_core.adjudication.strategies import (
+from mycelium_core.adjudication.policy import PolicyRouter, PolicyRule
+from mycelium_core.adjudication.strategies import (
     HumanInLoopStrategy,
     SingleShotStrategy,
     register_builtins,
 )
-from flow_core.ai_providers import set_llm_override
-from flow_core.db import admin_session, tenant_session
-from flow_core.models.adjudication import (
+from mycelium_core.ai_providers import set_llm_override
+from mycelium_core.db import admin_session, tenant_session
+from mycelium_core.models.adjudication import (
     AdjudicationStatus,
     AdjudicationStepKind,
 )
-from flow_core.services import adjudication as adj_svc
-from flow_core.services.auth import signup
+from mycelium_core.services import adjudication as adj_svc
+from mycelium_core.services.auth import signup
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -561,7 +561,7 @@ async def test_service_strategy_exception_marks_aborted_and_reraises() -> None:
     async with tenant_session(str(org), str(user)) as s2:
         from sqlalchemy import select
 
-        from flow_core.models.adjudication import Adjudication
+        from mycelium_core.models.adjudication import Adjudication
 
         rows = (
             (await s2.execute(select(Adjudication).where(Adjudication.org_id == org)))

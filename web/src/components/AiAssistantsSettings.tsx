@@ -3,8 +3,8 @@ import { useTranslation } from 'react-i18next'
 import { authFetch } from '../api/client'
 
 // Ported from bitvision_phoenix/frontend/src/app/settings/ai-assistants
-// (Flow API shape: scope is a flat ``string[]`` named ``scope``, not
-// ``permissions``; Flow has no ``deidentify_on_use`` or shared-patient
+// (Mycelium API shape: scope is a flat ``string[]`` named ``scope``, not
+// ``permissions``; Mycelium has no ``deidentify_on_use`` or shared-patient
 // surface — those belonged to the medical domain). Categorized scope
 // grid (read / write / danger), dangerous-confirm modal, select-all
 // with confirm when danger entries exist, clear-all, per-assistant
@@ -429,7 +429,7 @@ function AssistantForm({
           setPerms(Object.fromEntries(entries.map((e) => [e.key, sel.has(e.key)])))
         } else {
           // Default-on: every non-danger entry (mirrors backend
-          // DEFAULT_SCOPES in core/src/flow_core/mcp_scopes.py).
+          // DEFAULT_SCOPES in core/src/mycelium_core/mcp_scopes.py).
           setPerms(
             Object.fromEntries(entries.map((e) => [e.key, e.category !== 'danger'])),
           )

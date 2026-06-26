@@ -16,17 +16,17 @@ from _fake_attachment_store import FakeAttachmentStore
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-import flow_core.db as _db
-from flow_core.attachment_store import (
+import mycelium_core.db as _db
+from mycelium_core.attachment_store import (
     PgAttachmentStore,
     S3AttachmentStore,
     get_attachment_store,
     set_attachment_store_override,
 )
-from flow_core.config import Settings, get_settings
-from flow_core.db import admin_session, tenant_session
-from flow_core.migrate_attachments import migrate_attachments
-from flow_core.models.attachment import Attachment
+from mycelium_core.config import Settings, get_settings
+from mycelium_core.db import admin_session, tenant_session
+from mycelium_core.migrate_attachments import migrate_attachments
+from mycelium_core.models.attachment import Attachment
 
 # The migrator is a deploy-side cross-tenant ops CLI: in production it
 # runs with the owner role (BYPASSRLS), exactly like Alembic migrations
@@ -35,7 +35,7 @@ from flow_core.models.attachment import Attachment
 # (``test_rls.py`` pins the fail-closed 0-rows behaviour for the app
 # role). This is that owner URL (the same one the alembic gate uses);
 # the test drives the migrator under its real runtime contract.
-_OWNER_DB_URL = "postgresql+asyncpg://flow:flow@localhost:5432/flow"
+_OWNER_DB_URL = "postgresql+asyncpg://mycelium:mycelium@localhost:5432/mycelium"
 
 
 def _s3_settings() -> Settings:
@@ -45,7 +45,7 @@ def _s3_settings() -> Settings:
         attachment_store="s3",
         attachment_s3_endpoint_url="https://s3.fr-par.scw.cloud",
         attachment_s3_region="fr-par",
-        attachment_s3_bucket="flow-test",
+        attachment_s3_bucket="mycelium-test",
         attachment_s3_access_key_id="ak",
         attachment_s3_secret_access_key="sk",
     )
@@ -226,7 +226,7 @@ async def test_migrator_moves_bytes_and_is_idempotent(
     exact body the public ``migrate_attachments`` runs for every org).
     Scoped to the freshly-seeded org so the shared test DB's other
     tenants' rows are left untouched (no collateral mutation)."""
-    from flow_core.migrate_attachments import _migrate_org
+    from mycelium_core.migrate_attachments import _migrate_org
 
     payload = b"\x00\x01\x02 legacy attachment body \xff"
     seed = await _seed_attachment(payload)

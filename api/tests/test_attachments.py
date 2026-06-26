@@ -23,8 +23,8 @@ import zlib
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from flow_api.main import app
-from flow_core.config import get_settings
+from mycelium_api.main import app
+from mycelium_core.config import get_settings
 
 
 def _email() -> str:
@@ -250,7 +250,7 @@ async def test_deleting_parent_cascade_deletes_attachments() -> None:
     via list (empty) and download (404)."""
     from sqlalchemy import text
 
-    from flow_core.db import tenant_session
+    from mycelium_core.db import tenant_session
 
     png = _png_bytes()
     transport = ASGITransport(app=app)
@@ -344,8 +344,8 @@ async def test_cross_org_isolation() -> None:
 # mime) and the security posture (svg/html/xhtml are NEVER served inline,
 # which would be a same-origin stored-XSS vector).
 
-import flow_core.services.attachments as _att_svc  # noqa: E402
-from flow_api.routers.attachments import (  # noqa: E402
+import mycelium_core.services.attachments as _att_svc  # noqa: E402
+from mycelium_api.routers.attachments import (  # noqa: E402
     _content_disposition,
     _is_inline_safe,
 )

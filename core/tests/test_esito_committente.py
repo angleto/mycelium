@@ -25,25 +25,25 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.x509.oid import NameOID
 
-from flow_core.config import get_settings
-from flow_core.db import tenant_session
-from flow_core.errors import DomainError
-from flow_core.models.sdi_received import BuyerVerdict, ReceivedInvoice
-from flow_core.services import invoice as inv
-from flow_core.services.auth import signup
-from flow_core.services.esito_committente import (
+from mycelium_core.config import get_settings
+from mycelium_core.db import tenant_session
+from mycelium_core.errors import DomainError
+from mycelium_core.models.sdi_received import BuyerVerdict, ReceivedInvoice
+from mycelium_core.services import invoice as inv
+from mycelium_core.services.auth import signup
+from mycelium_core.services.esito_committente import (
     build_esito_committente_xml,
     send_esito_committente,
 )
-from flow_core.services.sdi_notification_xsd import NS_MESSAGGI, validate_sdi_notification
-from flow_core.services.sdi_passive import ingest_passive_invoice
+from mycelium_core.services.sdi_notification_xsd import NS_MESSAGGI, validate_sdi_notification
+from mycelium_core.services.sdi_passive import ingest_passive_invoice
 
 _DS_NS = "http://www.w3.org/2000/09/xmldsig#"
 
 
 def _generate_test_signing_material() -> tuple[str, str]:
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-    subj = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "flow-test")])
+    subj = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "mycelium-test")])
     cert = (
         x509.CertificateBuilder()
         .subject_name(subj)
@@ -69,14 +69,14 @@ def _ec_signing() -> Iterator[None]:
     the settings singleton picks it up from the env (BaseSettings reads at
     instantiation, so we cache-bust by clearing the LRU cache)."""
     key_pem, cert_pem = _generate_test_signing_material()
-    os.environ["FLOW_SDI_EC_SIGNING_KEY_PEM"] = key_pem
-    os.environ["FLOW_SDI_EC_SIGNING_CERT_PEM"] = cert_pem
+    os.environ["MYCELIUM_SDI_EC_SIGNING_KEY_PEM"] = key_pem
+    os.environ["MYCELIUM_SDI_EC_SIGNING_CERT_PEM"] = cert_pem
     get_settings.cache_clear()
     try:
         yield
     finally:
-        del os.environ["FLOW_SDI_EC_SIGNING_KEY_PEM"]
-        del os.environ["FLOW_SDI_EC_SIGNING_CERT_PEM"]
+        del os.environ["MYCELIUM_SDI_EC_SIGNING_KEY_PEM"]
+        del os.environ["MYCELIUM_SDI_EC_SIGNING_CERT_PEM"]
         get_settings.cache_clear()
 
 
@@ -97,13 +97,13 @@ def _sdicoop_active(tmp_path: object, _ec_signing: None) -> Iterator[str]:
     key_path.write_text(key_pem)
     endpoint = "https://sdi-test.example/ricevinotifica"
     env = {
-        "FLOW_SDI_CHANNEL": "sdicoop",
-        "FLOW_SDI_INTERMEDIARY_ID_PAESE": "IT",
-        "FLOW_SDI_INTERMEDIARY_ID_CODICE": "11122233344",
-        "FLOW_SDI_INTERMEDIARY_DENOMINAZIONE": "Flow Intermediary Srl",
-        "FLOW_SDI_ENDPOINT_URL": endpoint,
-        "FLOW_SDI_CLIENT_CERT": str(cert_path),
-        "FLOW_SDI_CLIENT_KEY": str(key_path),
+        "MYCELIUM_SDI_CHANNEL": "sdicoop",
+        "MYCELIUM_SDI_INTERMEDIARY_ID_PAESE": "IT",
+        "MYCELIUM_SDI_INTERMEDIARY_ID_CODICE": "11122233344",
+        "MYCELIUM_SDI_INTERMEDIARY_DENOMINAZIONE": "Mycelium Intermediary Srl",
+        "MYCELIUM_SDI_ENDPOINT_URL": endpoint,
+        "MYCELIUM_SDI_CLIENT_CERT": str(cert_path),
+        "MYCELIUM_SDI_CLIENT_KEY": str(key_path),
     }
     for k, v in env.items():
         os.environ[k] = v
@@ -138,8 +138,8 @@ def test_build_ec_rejects_bad_esito(_ec_signing: None) -> None:
 
 def test_build_ec_fails_without_signing_material() -> None:
     # Make sure prior fixtures didn't leak material.
-    os.environ.pop("FLOW_SDI_EC_SIGNING_KEY_PEM", None)
-    os.environ.pop("FLOW_SDI_EC_SIGNING_CERT_PEM", None)
+    os.environ.pop("MYCELIUM_SDI_EC_SIGNING_KEY_PEM", None)
+    os.environ.pop("MYCELIUM_SDI_EC_SIGNING_CERT_PEM", None)
     get_settings.cache_clear()
     with pytest.raises(DomainError) as exc:
         build_esito_committente_xml(identificativo_sdi="1", esito="EC01")
@@ -189,7 +189,7 @@ def _wrap_riceve_fatture(fattura_xml: bytes, ident: str, first_name: str) -> byt
 async def _make_org_with_received_invoice() -> tuple[uuid.UUID, uuid.UUID, uuid.UUID]:
     """Create org + issuer (with codice destinatario) + a ReceivedInvoice via
     the passive ingest. Returns (org_id, user_id, received_invoice_id)."""
-    from flow_core.db import admin_session
+    from mycelium_core.db import admin_session
 
     async with admin_session() as s:
         signed = await signup(
@@ -245,7 +245,7 @@ async def test_send_ec_persists_audit_and_updates_verdict(_ec_signing: None) -> 
     # Verdict denormalized on the parent.
     from sqlalchemy import select
 
-    from flow_core.models.sdi_received import ReceivedInvoice
+    from mycelium_core.models.sdi_received import ReceivedInvoice
 
     async with tenant_session(str(org), str(user)) as s:
         ri = (
@@ -260,13 +260,13 @@ async def test_dt_receiver_side_marks_deemed_accepted(_ec_signing: None) -> None
     # dispatcher falls back to the receiver path. ingest_receiver_dt then
     # marks the received invoice deemed-accepted (15-day window expired
     # without us sending EC) and appends a DT audit row.
-    from flow_core.services.sdi_inbound import ingest_notification
+    from mycelium_core.services.sdi_inbound import ingest_notification
 
     org, user, ri_id = await _make_org_with_received_invoice()
     # Pull the IdentificativoSdI back to craft a DT that targets it.
     from sqlalchemy import select
 
-    from flow_core.models.sdi_received import ReceivedInvoice
+    from mycelium_core.models.sdi_received import ReceivedInvoice
 
     async with tenant_session(str(org), str(user)) as s:
         ri = (
@@ -305,7 +305,7 @@ async def test_send_ec_rejection_marks_rejected_verdict(_ec_signing: None) -> No
         )
     from sqlalchemy import select
 
-    from flow_core.models.sdi_received import ReceivedInvoice
+    from mycelium_core.models.sdi_received import ReceivedInvoice
 
     async with tenant_session(str(org), str(user)) as s:
         ri = (
@@ -323,7 +323,7 @@ async def test_send_ec_with_sdicoop_posts_and_stores_ack(_sdicoop_active: str) -
     import respx
     from httpx import Response
 
-    from flow_core.models.sdi_notification import ReceivedInvoiceNotification
+    from mycelium_core.models.sdi_notification import ReceivedInvoiceNotification
 
     org, user, ri_id = await _make_org_with_received_invoice()
     endpoint = _sdicoop_active

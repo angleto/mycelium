@@ -10,7 +10,7 @@ revocation (token-theft signal). ``family_id`` lets a single logout
 revoke every descendant of a login session in one update.
 
 Global table (mirrors ``revoked_tokens`` / ``email_verification_tokens``):
-consumed pre-tenant, no RLS, granted directly to ``flow_app``.
+consumed pre-tenant, no RLS, granted directly to ``mycelium_app``.
 
 Revision ID: 0003
 Revises: 0002
@@ -79,7 +79,7 @@ def upgrade() -> None:
         sa.Index("ix_refresh_tokens_family_id", "family_id"),
         sa.Index("ix_refresh_tokens_expires_at", "expires_at"),
     )
-    op.execute("GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE refresh_tokens TO flow_app")
+    op.execute("GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE refresh_tokens TO mycelium_app")
 
 
 def downgrade() -> None:

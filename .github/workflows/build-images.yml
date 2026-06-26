@@ -1,4 +1,4 @@
-# Flow — image build & push (public repo, free CI).
+# Mycelium — image build & push (public repo, free CI).
 # ==================================================
 # Builds linux/arm64 images (backend, worker, frontend) from this repo
 # at a chosen ref and pushes them to GHCR using the workflow's own
@@ -8,7 +8,7 @@
 #
 # The Dockerfiles always come from the workflow ref (this commit on
 # the default branch). The app source comes from the user-supplied
-# `flow_ref` input — so we can build past tags whose source tree did
+# `mycelium_ref` input — so we can build past tags whose source tree did
 # not yet contain `docker/`.
 
 name: build-images
@@ -16,7 +16,7 @@ name: build-images
 on:
   workflow_dispatch:
     inputs:
-      flow_ref:
+      mycelium_ref:
         description: "Ref to build from (tag/branch/SHA). Default: main"
         required: true
         default: "main"
@@ -33,7 +33,7 @@ permissions:
   packages: write
 
 concurrency:
-  group: flow-build-images-${{ github.event.inputs.image_tag || github.ref_name }}
+  group: mycelium-build-images-${{ github.event.inputs.image_tag || github.ref_name }}
   cancel-in-progress: false
 
 jobs:
@@ -52,8 +52,8 @@ jobs:
       - name: Checkout source @ ref
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.inputs.flow_ref || github.ref }}
-          path: flow-src
+          ref: ${{ github.event.inputs.mycelium_ref || github.ref }}
+          path: mycelium-src
 
       - name: Compute image tag
         id: tag
@@ -81,19 +81,19 @@ jobs:
       - name: Overlay workflow docker/ into source context
         # The Dockerfiles reference `docker/nginx.conf` etc. relative to
         # the build context; past tags (e.g. v1.0.0) do not yet carry
-        # `docker/` in-tree. Copy from workflow-ref so any flow_ref builds.
+        # `docker/` in-tree. Copy from workflow-ref so any mycelium_ref builds.
         # `cp -r SRC DST` when DST exists nests SRC inside DST (e.g.
         # docker/docker/sdi-inbound.Dockerfile), which silently breaks
         # any Dockerfile added on the workflow ref but not yet on the
         # source ref. `cp -r SRC/. DST/` copies the CONTENTS and merges
         # over DST in-place — the only correct shape here.
         run: |
-          mkdir -p flow-src/docker
-          cp -r workflow-ref/docker/. flow-src/docker/
+          mkdir -p mycelium-src/docker
+          cp -r workflow-ref/docker/. mycelium-src/docker/
 
       - name: Resolve source SHA
         id: src
-        working-directory: flow-src
+        working-directory: mycelium-src
         run: |
           SHA=$(git rev-parse HEAD)
           BUILT_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -102,7 +102,7 @@ jobs:
           echo "Source SHA: $SHA  Built at: $BUILT_AT"
 
       - name: Build + push linux/arm64 images
-        working-directory: flow-src
+        working-directory: mycelium-src
         env:
           TAG: ${{ steps.tag.outputs.tag }}
           GIT_SHA: ${{ steps.src.outputs.sha }}
@@ -120,13 +120,13 @@ jobs:
             # (d11a0b0f). A missing :buildcache (first run) is a clean miss.
             docker buildx build --platform linux/arm64 \
               -f docker/$c.Dockerfile \
-              --build-arg FLOW_VERSION="$TAG" \
-              --build-arg FLOW_GIT_SHA="$GIT_SHA" \
-              --build-arg FLOW_BUILD_AT="$BUILT_AT" \
-              --cache-from type=registry,ref=ghcr.io/angleto/flow/$c:buildcache \
-              --cache-to type=registry,ref=ghcr.io/angleto/flow/$c:buildcache,mode=max \
-              -t ghcr.io/angleto/flow/$c:"$TAG" \
+              --build-arg MYCELIUM_VERSION="$TAG" \
+              --build-arg MYCELIUM_GIT_SHA="$GIT_SHA" \
+              --build-arg MYCELIUM_BUILD_AT="$BUILT_AT" \
+              --cache-from type=registry,ref=ghcr.io/angleto/mycelium/$c:buildcache \
+              --cache-to type=registry,ref=ghcr.io/angleto/mycelium/$c:buildcache,mode=max \
+              -t ghcr.io/angleto/mycelium/$c:"$TAG" \
               --push .
             echo "::endgroup::"
           done
-          echo "Pushed: ghcr.io/angleto/flow/{backend,worker,frontend,sdi-inbound}:$TAG"
+          echo "Pushed: ghcr.io/angleto/mycelium/{backend,worker,frontend,sdi-inbound}:$TAG"

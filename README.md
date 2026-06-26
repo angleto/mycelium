@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="assets/flow-logo-horizontal.svg" height="64" alt="Flow logo" />
+  <img src="assets/mycelium-logo-horizontal.svg" height="64" alt="Mycelium logo" />
 </p>
 
-<h1 align="center">Flow</h1>
+<h1 align="center">Mycelium</h1>
 
 <p align="center">
   <strong>The forest of memory.</strong><br/>
@@ -14,7 +14,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/angleto/flow/actions/workflows/ci.yml"><img src="https://github.com/angleto/flow/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
+  <a href="https://github.com/angleto/mycelium/actions/workflows/ci.yml"><img src="https://github.com/angleto/mycelium/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-AGPL%20v3%20or%20later-blue.svg" alt="License: AGPL-3.0-or-later" /></a>
   <img src="https://img.shields.io/badge/python-3.12%2B-blue.svg" alt="Python 3.12+" />
   <a href="https://github.com/astral-sh/ruff"><img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json" alt="Ruff" /></a>
@@ -25,21 +25,21 @@
 
 ---
 
-Flow unifies a task manager, a time tracker, a scheduler, notes with a
+Mycelium unifies a task manager, a time tracker, a scheduler, notes with a
 hierarchical memory and semantic retrieval, clients/projects,
 configurable workflows, and Italian electronic invoicing (SDI). Every
 surface is also exposed over **MCP**, so an AI agent can drive the whole
 system exactly like the web UI.
 
-## What makes Flow different
+## What makes Mycelium different
 
 Most knowledge tools keep your notes intact and let them sediment until
-you can't find anything. Flow treats memory like a forest floor: the
+you can't find anything. Mycelium treats memory like a forest floor: the
 things you finish thinking about don't disappear, they **decompose**
 into smaller, embedded atoms (claims, definitions, examples, decisions)
 that retrieval and the link graph can recompose into new ideas. Tags
 and citations are the mycelium that joins atoms across notes; the LLM
-side of Flow is wired to *traverse* that mycelium, not to summarise
+side of Mycelium is wired to *traverse* that mycelium, not to summarise
 your notes into yet another opaque blob.
 
 Three commitments fall out of this:
@@ -78,11 +78,11 @@ Three commitments fall out of this:
   and an inbound (passive) router that ingests received invoices.
 - **MCP server** (100+ tools) mirroring the API for agent control.
 - **Keyboard-first CLI + Neovim plugin.** `brew install
-  angleto/flow/flow-cli` for the terminal client (`flow today`, `flow
-  task add`, `flow timer start`, `flow note voice`, …) and
-  [`nvim/flow-nvim`](nvim/flow-nvim/README.md) for the in-editor
+  angleto/mycelium/mycelium-cli` for the terminal client (`mycelium today`, `flow
+  task add`, `mycelium timer start`, `mycelium note voice`, …) and
+  [`nvim/mycelium-nvim`](nvim/mycelium-nvim/README.md) for the in-editor
   surface. Both shell out to the same REST API; see
-  [`docs/cli.md`](docs/cli.md). CLI and nvim plugin track Flow tags
+  [`docs/cli.md`](docs/cli.md). CLI and nvim plugin track Mycelium tags
   one-for-one (currently `v2.0.x`).
 - **Tested.** Backend pytest + a Playwright end-to-end suite.
 
@@ -98,15 +98,15 @@ Prereqs: Docker, [uv](https://docs.astral.sh/uv/), Node + pnpm.
 ```
 # 1. infra (Postgres + Redis)
 make up
-FLOW_DB_APP_PASSWORD=flow_app make db-bootstrap
+MYCELIUM_DB_APP_PASSWORD=flow_app make db-bootstrap
 make migrate
 
 # 2. an admin account
-FLOW_ADMIN_EMAIL=you@example.com FLOW_ADMIN_PASSWORD='a-strong-pass' \
-  uv run python -m flow_core.bootstrap_admin
+MYCELIUM_ADMIN_EMAIL=you@example.com MYCELIUM_ADMIN_PASSWORD='a-strong-pass' \
+  uv run python -m mycelium_core.bootstrap_admin
 
 # 3. backend (API)
-FLOW_JWT_SECRET=... FLOW_SECRET_KEY=... make run-api
+MYCELIUM_JWT_SECRET=... MYCELIUM_SECRET_KEY=... make run-api
 
 # 4. frontend
 cd web && pnpm install && pnpm dev
@@ -131,13 +131,13 @@ what shipped in v2.0 is at
 
 ## License
 
-Flow is dual-licensed:
+Mycelium is dual-licensed:
 
 - as **free software** under the **GNU Affero General Public License
   v3.0 or later** (`AGPL-3.0-or-later`), with the attribution
   requirement set out in the [`NOTICE`](NOTICE) file under AGPLv3
   section 7(b). Any redistribution, fork, hosted instance, or
-  derivative work must preserve the "Based on Flow" attribution in
+  derivative work must preserve the "Based on Mycelium" attribution in
   user-visible locations (About / Version / startup banner /
   interactive network interface / documentation). If you run a
   modified version to provide a network service, AGPL section 13
@@ -153,17 +153,17 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 
 ## Trademark
 
-"Flow" and the Flow logo are trademarks of Angelo Leto. Neither the
+"Mycelium" and the Mycelium logo are trademarks of Angelo Leto. Neither the
 AGPL grant nor the section 7(b) attribution requirement grants
 permission to use the project name or logo beyond the descriptive
-"Based on Flow" attribution. Forks and derivative distributions must
+"Based on Mycelium" attribution. Forks and derivative distributions must
 be released under a different name and a different mark. You may
-describe your project as "based on Flow" or "compatible with Flow",
-but you may not redistribute it under the "Flow" name, nor use the
+describe your project as "based on Mycelium" or "compatible with Mycelium",
+but you may not redistribute it under the "Mycelium" name, nor use the
 logo, in a way that would suggest endorsement by or affiliation with
 the upstream project. See [`NOTICE`](NOTICE) for full terms and
 contact details for trademark permission requests.
 
 Contributions to the upstream project must be signed off under the
 [Developer Certificate of Origin](CONTRIBUTING.md#developer-certificate-of-origin-dco)
-**and** submitted under the [Flow Contributor License Agreement](CLA.md).
+**and** submitted under the [Mycelium Contributor License Agreement](CLA.md).

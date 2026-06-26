@@ -117,7 +117,9 @@ def upgrade() -> None:
         f"CREATE POLICY p_note_part_index_pointer ON note_part_index_pointer "
         f"USING ({_org_pred}) WITH CHECK ({_org_pred})"
     )
-    op.execute("GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE note_part_index_pointer TO flow_app")
+    op.execute(
+        "GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE note_part_index_pointer TO mycelium_app"
+    )
 
 
 def downgrade() -> None:

@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import pytest
 
-from flow_core.services.sdi_notification_xsd import (
+from mycelium_core.services.sdi_notification_xsd import (
     ACTIVE_CYCLE_ROOTS,
     ALL_NOTIFICATION_ROOTS,
     DUAL_CYCLE_ROOTS,

@@ -11,7 +11,7 @@ Two new tables and one new nullable column:
 
 - ``note_part_ui_state`` is user-scoped: each user can collapse the
   parts they don't want to see right now; the row syncs cross-device
-  (SPA, flow-nvim, future iOS) so the same gardener sees a
+  (SPA, mycelium-nvim, future iOS) so the same gardener sees a
   consistent layout everywhere. Defaults are NOT materialised at
   write time: the absence of a row means "expanded" (the SPA reads
   the row, falls back to ``collapsed=false`` on miss).
@@ -26,7 +26,7 @@ The backfill creates exactly one part per note with non-empty
 transcript: ``ord=0, body=notes.transcript, lang=NULL,
 merged_from_note_id=NULL``. ``notes.transcript`` stays as the source
 of truth in this phase --- Phase 6 (task 1cd8bc0a) drops the column
-and rewires every consumer (RAG, MCP, SPA, flow-cli) to read parts
+and rewires every consumer (RAG, MCP, SPA, mycelium-cli) to read parts
 instead, in a separate PR to keep the blast radius small.
 
 Revision ID: 0011
@@ -111,7 +111,7 @@ def upgrade() -> None:
     op.execute(
         f"CREATE POLICY p_note_part ON note_part USING ({_ORG_PRED}) WITH CHECK ({_ORG_PRED})"
     )
-    op.execute("GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE note_part TO flow_app")
+    op.execute("GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE note_part TO mycelium_app")
 
     # --- note_part_ui_state -----------------------------------------
     # User-scoped: every gardener owns their own collapse state per
@@ -165,7 +165,7 @@ def upgrade() -> None:
         f"      AND np.{_ORG_PRED}"
         "))"
     )
-    op.execute("GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE note_part_ui_state TO flow_app")
+    op.execute("GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE note_part_ui_state TO mycelium_app")
 
     # --- blob_sources.part_id ---------------------------------------
     # Nullable because (a) blobs whose source is not a note (tasks,

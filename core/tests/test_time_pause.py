@@ -16,11 +16,11 @@ import uuid
 
 import pytest
 
-from flow_core.db import admin_session, tenant_session
-from flow_core.errors import DomainError
-from flow_core.services import tasks
-from flow_core.services import time_tracking as tt
-from flow_core.services.auth import signup
+from mycelium_core.db import admin_session, tenant_session
+from mycelium_core.errors import DomainError
+from mycelium_core.services import tasks
+from mycelium_core.services import time_tracking as tt
+from mycelium_core.services.auth import signup
 
 
 def _email() -> str:

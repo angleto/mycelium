@@ -15,12 +15,12 @@ from collections.abc import Iterator
 
 import pytest
 
-from flow_core.db import admin_session, tenant_session
-from flow_core.models.sdi_received import ReceivedInvoice
-from flow_core.services import invoice as inv
-from flow_core.services.auth import signup
-from flow_core.services.sdi_notification_xsd import NS_MESSAGGI
-from flow_core.services.sdi_passive import (
+from mycelium_core.db import admin_session, tenant_session
+from mycelium_core.models.sdi_received import ReceivedInvoice
+from mycelium_core.services import invoice as inv
+from mycelium_core.services.auth import signup
+from mycelium_core.services.sdi_notification_xsd import NS_MESSAGGI
+from mycelium_core.services.sdi_passive import (
     PassiveDelivery,
     ingest_passive_invoice,
     ingest_receiver_notification,
@@ -313,7 +313,7 @@ async def test_ingest_receiver_notification_appends_audit_row(
     async with tenant_session(str(org), str(user)) as s:
         from sqlalchemy import select
 
-        from flow_core.models.sdi_notification import ReceivedInvoiceNotification
+        from mycelium_core.models.sdi_notification import ReceivedInvoiceNotification
 
         stmt = select(ReceivedInvoiceNotification.kind).order_by(
             ReceivedInvoiceNotification.received_at

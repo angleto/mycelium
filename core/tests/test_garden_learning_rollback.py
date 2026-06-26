@@ -14,14 +14,14 @@ import uuid
 import pytest
 from sqlalchemy import select, update
 
-from flow_core.db import admin_session, tenant_session
-from flow_core.models.classification_feedback import ClassificationFeedback
-from flow_core.models.classification_personal_prior import ClassificationPersonalPrior as _Prior
-from flow_core.models.classification_personal_prior_snapshot import (
+from mycelium_core.db import admin_session, tenant_session
+from mycelium_core.models.classification_feedback import ClassificationFeedback
+from mycelium_core.models.classification_personal_prior import ClassificationPersonalPrior as _Prior
+from mycelium_core.models.classification_personal_prior_snapshot import (
     ClassificationPersonalPriorSnapshot as _Snapshot,
 )
-from flow_core.services import garden_learning as learn
-from flow_core.services.auth import signup
+from mycelium_core.services import garden_learning as learn
+from mycelium_core.services.auth import signup
 
 
 async def _org_user(name: str = "GLR") -> tuple[uuid.UUID, uuid.UUID]:

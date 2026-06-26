@@ -8,7 +8,7 @@ import uuid
 
 from httpx import ASGITransport, AsyncClient
 
-from flow_api.main import app
+from mycelium_api.main import app
 
 
 def _email() -> str:
@@ -91,9 +91,9 @@ async def test_f3_api_flow() -> None:
         # /tasks with start_at + duration_minutes. The /tasks response
         # exposes ``assignee_id`` as the identity, so use that as the
         # axis for the conflict.
-        from flow_core.db import tenant_session as _ts
-        from flow_core.services import actors as _actors_svc
-        from flow_core.services import identities as _identities_svc
+        from mycelium_core.db import tenant_session as _ts
+        from mycelium_core.services import actors as _actors_svc
+        from mycelium_core.services import identities as _identities_svc
 
         async with _ts(a["workspace_id"], a["user_id"]) as _s:
             await _actors_svc.mint_user_handle(_s, user_id=uuid.UUID(a["user_id"]), seed="f3")

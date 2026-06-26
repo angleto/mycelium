@@ -11,12 +11,12 @@ from decimal import Decimal
 
 from _fake_embedder import FakeEmbedder
 
-from flow_core.db import admin_session, tenant_session
-from flow_core.models.tag import TagKind
-from flow_core.services import billing, taxonomy
-from flow_core.services import memory as mem
-from flow_core.services import tasks as tasks_svc
-from flow_core.services.auth import signup
+from mycelium_core.db import admin_session, tenant_session
+from mycelium_core.models.tag import TagKind
+from mycelium_core.services import billing, taxonomy
+from mycelium_core.services import memory as mem
+from mycelium_core.services import tasks as tasks_svc
+from mycelium_core.services.auth import signup
 
 _FAKE = FakeEmbedder()
 

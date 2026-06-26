@@ -30,10 +30,10 @@ from decimal import Decimal
 import pytest
 from sqlalchemy import select
 
-from flow_core.db import admin_session, tenant_session, with_actor
-from flow_core.models.activity_log import ActivityLog
-from flow_core.services import audit, tasks
-from flow_core.services.auth import signup
+from mycelium_core.db import admin_session, tenant_session, with_actor
+from mycelium_core.models.activity_log import ActivityLog
+from mycelium_core.services import audit, tasks
+from mycelium_core.services.auth import signup
 
 
 def _email() -> str:

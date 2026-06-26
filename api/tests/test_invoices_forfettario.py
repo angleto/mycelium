@@ -17,7 +17,7 @@ import uuid
 
 from httpx import ASGITransport, AsyncClient
 
-from flow_api.main import app
+from mycelium_api.main import app
 
 _FORFETTARIO_CAUSALE = (
     "Operazione effettuata in regime forfettario ai sensi dell'articolo 1, "

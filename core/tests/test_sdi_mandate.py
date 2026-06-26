@@ -11,15 +11,15 @@ from decimal import Decimal
 
 import pytest
 
-from flow_core.db import admin_session, tenant_session
-from flow_core.errors import ConflictError, NotFoundError
-from flow_core.models.invoice import ConservationStatus
-from flow_core.models.sdi_mandate import SdiMandateStatus
-from flow_core.sdi_channel import IntermediaryIdentity, TransmitResult, set_channel_override
-from flow_core.services import invoice as inv
-from flow_core.services import sdi_mandate as mandate
-from flow_core.services.auth import signup
-from flow_core.services.taxonomy import ClientInput, create_client
+from mycelium_core.db import admin_session, tenant_session
+from mycelium_core.errors import ConflictError, NotFoundError
+from mycelium_core.models.invoice import ConservationStatus
+from mycelium_core.models.sdi_mandate import SdiMandateStatus
+from mycelium_core.sdi_channel import IntermediaryIdentity, TransmitResult, set_channel_override
+from mycelium_core.services import invoice as inv
+from mycelium_core.services import sdi_mandate as mandate
+from mycelium_core.services.auth import signup
+from mycelium_core.services.taxonomy import ClientInput, create_client
 
 
 async def _org() -> tuple[uuid.UUID, uuid.UUID]:
@@ -95,7 +95,7 @@ def _intermediary_channel() -> Iterator[None]:
         @property
         def intermediary(self) -> IntermediaryIdentity | None:
             return IntermediaryIdentity(
-                country_code="IT", vat_number="11122233344", legal_name="Flow Intermediary Srl"
+                country_code="IT", vat_number="11122233344", legal_name="Mycelium Intermediary Srl"
             )
 
         async def transmit(self, *, xml: str, invoice_id: str, filename: str) -> TransmitResult:

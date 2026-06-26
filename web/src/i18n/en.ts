@@ -3,7 +3,7 @@
 // the API via Accept-Language. Catalog is the shared key/shape type
 // (string values, not literals) so other locales must mirror it.
 export const en = {
-  app: { title: 'Flow' },
+  app: { title: 'Mycelium' },
   cmdk: {
     title: 'Go to / search',
     placeholder: 'Search by title or paste a code (e.g. 66c5d15d)…',
@@ -223,7 +223,7 @@ export const en = {
   aiAssistants: {
     pageTitle: 'AI assistants',
     intro:
-      'Configure AI clients (Claude Desktop, Cursor, custom MCP bots) that can act on your behalf against Flow.',
+      'Configure AI clients (Claude Desktop, Cursor, custom MCP bots) that can act on your behalf against Mycelium.',
     connectorTitle: 'MCP connector URL',
     transportPending:
       'Paste the URL + secret into your MCP client (Claude Desktop, Cursor, ...) as a streamable-http server. The server enforces your bearer on every tool call.',
@@ -1166,7 +1166,7 @@ export const en = {
     startingNumberHint:
       'Series "{{series}}" year {{year}}: set the number of the next invoice. Use it when you have already emitted invoices for this client elsewhere (e.g. set 2 if #1 was emitted on another system).',
     startingNumberFloor:
-      'You have already emitted invoices in Flow under this series: the minimum accepted is {{n}}.',
+      'You have already emitted invoices in Mycelium under this series: the minimum accepted is {{n}}.',
     startingNumberInvalid: 'Invalid number.',
     startingNumberNoSeries:
       "Set the client's sezionale first (it is auto-generated on the first invoice).",
@@ -1859,7 +1859,7 @@ export const en = {
     defaultTermsDays: 'Net days (default)',
     counters: 'Invoice counters',
     countersHint:
-      'For each (issuer, series, year) the counter keeps the last emitted number. If you migrated from another system you can raise it to the last number you emitted there (the next invoice will pick the one after). You cannot lower it below the highest number already emitted in Flow under the same key.',
+      'For each (issuer, series, year) the counter keeps the last emitted number. If you migrated from another system you can raise it to the last number you emitted there (the next invoice will pick the one after). You cannot lower it below the highest number already emitted in Mycelium under the same key.',
     countersSeries: 'Series',
     countersYear: 'Year',
     countersLast: 'Last number',
@@ -1872,7 +1872,7 @@ export const en = {
     changeNumber: 'Change number',
     newNextNumber: 'Next number',
     changeNumberHint:
-      "Set the number of the next invoice emitted for this client/year. Use it when you have already emitted invoices elsewhere (e.g. set 2 if #1 was emitted on another system). You cannot lower it below the highest number already emitted in Flow for the same sezionale/year.",
+      "Set the number of the next invoice emitted for this client/year. Use it when you have already emitted invoices elsewhere (e.g. set 2 if #1 was emitted on another system). You cannot lower it below the highest number already emitted in Mycelium for the same sezionale/year.",
     startingNumberInvalid: 'Invalid number.',
     taxable: 'Taxable',
     vatTotal: 'VAT',
@@ -1941,7 +1941,7 @@ export const en = {
       'Dispatch sends pending notifications. Spawn due materializes recurring tasks. Scan reminders enqueues due-date reminders for tasks assigned to you.',
     browserPush: {
       title: 'Browser notifications',
-      hint: 'Get reminders as notifications in this browser, even when Flow is not open. Per device.',
+      hint: 'Get reminders as notifications in this browser, even when Mycelium is not open. Per device.',
       enable: 'Enable on this device',
       disable: 'Disable on this device',
       on: 'enabled on this device',
@@ -1969,7 +1969,7 @@ export const en = {
       connect: 'Connect Gmail',
       disconnect: 'Disconnect',
       redirectWarning:
-        'You will be redirected to Google to authorize Flow to read and send mail on your behalf.',
+        'You will be redirected to Google to authorize Mycelium to read and send mail on your behalf.',
       connectedBanner: 'Gmail connected.',
       since: 'Last sync',
     },
@@ -1998,7 +1998,7 @@ export const en = {
       copyToken: 'Copy token',
       copySnippet: 'Copy snippet',
       configHint:
-        'Paste this into your Claude Desktop config. Replace the /path/to/flow/mcp path with your local checkout.',
+        'Paste this into your Claude Desktop config. Replace the /path/to/mycelium/mcp path with your local checkout.',
       revoke: 'Revoke',
       prefix: 'Prefix',
       createdAt: 'Created',

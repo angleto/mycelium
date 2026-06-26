@@ -15,7 +15,7 @@ guarded write succeeds, so a retried 409 does not burn the token.
 RLS is ENABLE, not FORCE (same as ``agent_tokens``): the verify function
 runs as the table owner and must read a row with no tenant GUC set;
 FORCE would subject the owner to the org predicate and the lookup would
-find nothing. ``flow_app`` (the app role) is NOT the owner, so it stays
+find nothing. ``mycelium_app`` (the app role) is NOT the owner, so it stays
 fully RLS-confined for the in-tenant mint / consume writes.
 
 Revision ID: 0038
@@ -149,11 +149,13 @@ def upgrade() -> None:
         f"CREATE POLICY p_capability_tokens ON capability_tokens "
         f"USING ({_ORG_PRED}) WITH CHECK ({_ORG_PRED})"
     )
-    op.execute("GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE capability_tokens TO flow_app")
+    op.execute("GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE capability_tokens TO mycelium_app")
 
     op.execute(_AUTH_FN)
     op.execute("REVOKE ALL ON FUNCTION public.authenticate_capability_token(bytea) FROM PUBLIC")
-    op.execute("GRANT EXECUTE ON FUNCTION public.authenticate_capability_token(bytea) TO flow_app")
+    op.execute(
+        "GRANT EXECUTE ON FUNCTION public.authenticate_capability_token(bytea) TO mycelium_app"
+    )
 
 
 def downgrade() -> None:

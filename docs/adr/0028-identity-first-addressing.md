@@ -9,8 +9,8 @@ documented in `models/task.py:108-114` (the "kill Executor" refactor
 
 ## Context
 
-Task assignment in Flow today is sprawled across five partially
-overlapping mechanisms (cfr. mapping in `flow_core/services/tasks.py`,
+Task assignment in Mycelium today is sprawled across five partially
+overlapping mechanisms (cfr. mapping in `mycelium_core/services/tasks.py`,
 `scheduler.py:287-302`, `dispatch_loop.py:252`,
 `agent_runtime.py:135-146`):
 

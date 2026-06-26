@@ -1,4 +1,4 @@
-Flow
+Mycelium
 Copyright (c) 2026 Angelo Leto
 
 This product includes software developed by Angelo Leto.
@@ -37,7 +37,7 @@ user-visible location, including (where applicable):
 
 The required attribution text is, verbatim:
 
-    Based on Flow (https://github.com/angleto/flow),
+    Based on Mycelium (https://github.com/angleto/mycelium),
     Copyright (c) Angelo Leto. Licensed under AGPL-3.0-or-later.
 
 You may not remove, obscure, alter, translate-away, or relocate this
@@ -57,18 +57,18 @@ the underlying work.
 Trademark
 -------------------------------------------------------------------------------
 
-"Flow" and the Flow logo are trademarks of Angelo Leto. Neither the
+"Mycelium" and the Mycelium logo are trademarks of Angelo Leto. Neither the
 GNU Affero General Public License, nor the attribution requirement
-above, grants any right to use the "Flow" name or the Flow logo
-beyond the descriptive "Based on Flow" attribution set out above.
+above, grants any right to use the "Mycelium" name or the Mycelium logo
+beyond the descriptive "Based on Mycelium" attribution set out above.
 
 Forks and derivative distributions must be released under a different
 name and a different mark. You may describe your project as "based
-on Flow" or "compatible with Flow", but you may not redistribute it
-under the "Flow" name, nor use the Flow logo, in a way that would
+on Mycelium" or "compatible with Mycelium", but you may not redistribute it
+under the "Mycelium" name, nor use the Mycelium logo, in a way that would
 suggest endorsement by or affiliation with the upstream project.
 
-For permission inquiries related to the "Flow" mark, contact
+For permission inquiries related to the "Mycelium" mark, contact
 angelo@leto.blue.
 
 -------------------------------------------------------------------------------
@@ -79,7 +79,7 @@ Contributions to the upstream project are accepted under BOTH:
 
   (1) the Developer Certificate of Origin 1.1 (sign-off via
       `git commit -s`); and
-  (2) the Flow Contributor License Agreement (see CLA.md).
+  (2) the Mycelium Contributor License Agreement (see CLA.md).
 
 The CLA grants the project maintainer the rights necessary to
 release the project under both AGPL-3.0-or-later and the separate

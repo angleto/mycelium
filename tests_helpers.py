@@ -16,8 +16,8 @@ import uuid
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from flow_core.models.ai_assistant import AiAssistant
-from flow_core.models.identity import Identity
+from mycelium_core.models.ai_assistant import AiAssistant
+from mycelium_core.models.identity import Identity
 
 
 async def seed_ai_assistant_identity(

@@ -18,7 +18,7 @@ const session = JSON.parse(
 
 export const TOKEN = session.token
 export const WS_ID = session.workspaceId
-export const BASE = 'https://flow.xeno.garden'
+export const BASE = 'https://mycelium.xeno.garden'
 export const E2E_TAG_ID = 'c652a386-5505-484a-9b13-1407adc0af2c'
 
 interface ReqOpts {

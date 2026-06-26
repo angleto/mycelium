@@ -20,10 +20,10 @@ from _fake_attachment_store import FakeAttachmentStore
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import text
 
-from flow_api.main import app
-from flow_core.attachment_store import set_attachment_store_override
-from flow_core.config import get_settings
-from flow_core.db import tenant_session
+from mycelium_api.main import app
+from mycelium_core.attachment_store import set_attachment_store_override
+from mycelium_core.config import get_settings
+from mycelium_core.db import tenant_session
 
 
 def _email() -> str:

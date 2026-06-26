@@ -17,13 +17,13 @@ from decimal import Decimal
 
 from sqlalchemy import select, text
 
-from flow_core.db import admin_session, tenant_session
-from flow_core.models.note import Note, NoteKind, NoteMaturity
-from flow_core.models.task import Task
-from flow_core.services import note_inert, note_links
-from flow_core.services import notes as notes_svc
-from flow_core.services import tasks as tasks_svc
-from flow_core.services.auth import signup
+from mycelium_core.db import admin_session, tenant_session
+from mycelium_core.models.note import Note, NoteKind, NoteMaturity
+from mycelium_core.models.task import Task
+from mycelium_core.services import note_inert, note_links
+from mycelium_core.services import notes as notes_svc
+from mycelium_core.services import tasks as tasks_svc
+from mycelium_core.services.auth import signup
 
 
 def _email() -> str:

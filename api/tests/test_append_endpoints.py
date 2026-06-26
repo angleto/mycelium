@@ -13,7 +13,7 @@ import uuid
 
 from httpx import ASGITransport, AsyncClient
 
-from flow_api.main import app
+from mycelium_api.main import app
 
 
 def _email() -> str:
@@ -148,7 +148,7 @@ async def test_note_append_expected_version_mismatch_conflicts() -> None:
 
 async def test_note_append_body_limit_exceeded() -> None:
     """A single append that would push the body past
-    ``FLOW_NOTE_BODY_MAX_BYTES`` is rejected with ``body.limit_exceeded``
+    ``MYCELIUM_NOTE_BODY_MAX_BYTES`` is rejected with ``body.limit_exceeded``
     -- the SPA / MCP caller can chunk further or stop."""
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://t") as c:

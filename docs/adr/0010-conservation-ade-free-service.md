@@ -13,15 +13,15 @@ and Manual.
 ## Decision
 
 Strategy = **free AdE service**. `ConservationProvider =
-AdeFreeConservation`: Flow does not conserve in-house, it **tracks and
+AdeFreeConservation`: Mycelium does not conserve in-house, it **tracks and
 guides per-tenant adhesion** in the "Fatture e Corrispettivi" tax
 portal (adhesion status on the Org profile) and relies on AdE
 conservation of invoices that transited SdI.
 
 ## Consequences
 
-- Minimal cost, no Conservation Officer/Manual burden on Flow.
-- Adhesion is per VAT subject: Flow cannot adhere on the tenant's
+- Minimal cost, no Conservation Officer/Manual burden on Mycelium.
+- Adhesion is per VAT subject: Mycelium cannot adhere on the tenant's
   behalf, only guide/verify it.
 - AdE conserves only what passes through SdI: invoices issued via
   `ManualExportChannel` in F7a are out of coverage and must be marked

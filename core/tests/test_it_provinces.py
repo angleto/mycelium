@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from flow_core.it_provinces import is_valid_provincia
+from mycelium_core.it_provinces import is_valid_provincia
 
 
 def test_real_italian_province_accepted() -> None:

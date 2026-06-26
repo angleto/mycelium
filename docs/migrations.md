@@ -1,6 +1,6 @@
 # Database migrations
 
-Flow uses Alembic against a managed PostgreSQL (16+, with `pgvector`,
+Mycelium uses Alembic against a managed PostgreSQL (16+, with `pgvector`,
 `pg_trgm`, `btree_gist`). Migrations run as the owner role `flow`
 (BYPASSRLS); the application connects as `flow_app` (subject to RLS).
 See [ADR-0015](adr/0015-rls-two-role-and-provisioning.md).
@@ -29,7 +29,7 @@ GRANTs to `flow_app`, functions, triggers, indexes).
 
 ### Why
 
-- Production was already aligned on `0104` (post `flow.xeno.garden`
+- Production was already aligned on `0104` (post `mycelium.xeno.garden`
   cutover): the incremental history had no live consumer left.
 - New environments paid a long, brittle upgrade path through historical
   backfills. Several late backfills now fail on data shapes that exist

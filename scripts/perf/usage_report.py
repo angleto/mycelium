@@ -1,7 +1,7 @@
-"""Aggregate Flow MCP usage telemetry into a per-tool cost report.
+"""Aggregate Mycelium MCP usage telemetry into a per-tool cost report.
 
-The companion to the opt-in telemetry in ``flow_mcp.gateway``: run a real
-session (or a scripted one) with ``FLOW_MCP_TELEMETRY`` pointing at a
+The companion to the opt-in telemetry in ``mycelium_mcp.gateway``: run a real
+session (or a scripted one) with ``MYCELIUM_MCP_TELEMETRY`` pointing at a
 file, then feed that file here to turn the coarse "~N% of tokens went to
 the MCP" attribution into a measured per-tool breakdown.
 
@@ -19,9 +19,9 @@ their own.
 
 Usage:
 
-    # human-readable, reads $FLOW_MCP_TELEMETRY by default
+    # human-readable, reads $MYCELIUM_MCP_TELEMETRY by default
     uv run python scripts/perf/usage_report.py
-    uv run python scripts/perf/usage_report.py /tmp/flow-mcp.jsonl
+    uv run python scripts/perf/usage_report.py /tmp/mycelium-mcp.jsonl
     uv run python scripts/perf/usage_report.py --json   # machine-readable
 """
 
@@ -138,20 +138,20 @@ def _print_human(report: dict[str, Any]) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Aggregate Flow MCP usage telemetry.")
+    parser = argparse.ArgumentParser(description="Aggregate Mycelium MCP usage telemetry.")
     parser.add_argument(
         "path",
         nargs="?",
-        default=os.environ.get("FLOW_MCP_TELEMETRY"),
-        help="JSONL telemetry file (default: $FLOW_MCP_TELEMETRY)",
+        default=os.environ.get("MYCELIUM_MCP_TELEMETRY"),
+        help="JSONL telemetry file (default: $MYCELIUM_MCP_TELEMETRY)",
     )
     parser.add_argument("--json", action="store_true", help="emit the report as JSON")
     args = parser.parse_args(argv)
 
     if not args.path:
         parser.error(
-            "no telemetry file given and FLOW_MCP_TELEMETRY is unset. "
-            "Run a session with FLOW_MCP_TELEMETRY=/tmp/flow-mcp.jsonl first, "
+            "no telemetry file given and MYCELIUM_MCP_TELEMETRY is unset. "
+            "Run a session with MYCELIUM_MCP_TELEMETRY=/tmp/mycelium-mcp.jsonl first, "
             "or pass the file path."
         )
     path = Path(args.path)

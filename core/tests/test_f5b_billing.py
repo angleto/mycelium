@@ -14,11 +14,11 @@ from decimal import Decimal
 import pytest
 from sqlalchemy import delete, update
 
-from flow_core.db import admin_session, tenant_session
-from flow_core.errors import DomainError
-from flow_core.models.billing import CostBasis, CreditLedger
-from flow_core.services import billing
-from flow_core.services.auth import signup
+from mycelium_core.db import admin_session, tenant_session
+from mycelium_core.errors import DomainError
+from mycelium_core.models.billing import CostBasis, CreditLedger
+from mycelium_core.services import billing
+from mycelium_core.services.auth import signup
 
 
 def _email() -> str:

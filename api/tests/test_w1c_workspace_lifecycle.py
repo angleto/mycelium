@@ -13,8 +13,8 @@ import uuid
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import text
 
-from flow_api.main import app
-from flow_core.db import tenant_session
+from mycelium_api.main import app
+from mycelium_core.db import tenant_session
 
 
 def _email() -> str:

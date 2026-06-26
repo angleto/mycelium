@@ -16,24 +16,24 @@ from zoneinfo import ZoneInfo
 import pytest
 from sqlalchemy import select
 
-from flow_core.db import admin_session, tenant_session
-from flow_core.errors import DomainError
-from flow_core.models.dependency import DependencyType
-from flow_core.models.notification import (
+from mycelium_core.db import admin_session, tenant_session
+from mycelium_core.errors import DomainError
+from mycelium_core.models.dependency import DependencyType
+from mycelium_core.models.notification import (
     NotificationChannelKind,
     NotificationStatus,
     RecurrenceFreq,
 )
-from flow_core.models.workflow import WorkflowState
-from flow_core.notification_channel import set_sender_override
-from flow_core.services import dependencies as deps
-from flow_core.services import notifications as nf
-from flow_core.services import tasks as tasks_svc
-from flow_core.services import users as users_svc
-from flow_core.services.auth import signup
-from flow_core.services.mailer import OutboundEmail, set_mailer
-from flow_core.services.notification_sender import build_notification_sender
-from flow_core.telegram_client import set_telegram_api_override
+from mycelium_core.models.workflow import WorkflowState
+from mycelium_core.notification_channel import set_sender_override
+from mycelium_core.services import dependencies as deps
+from mycelium_core.services import notifications as nf
+from mycelium_core.services import tasks as tasks_svc
+from mycelium_core.services import users as users_svc
+from mycelium_core.services.auth import signup
+from mycelium_core.services.mailer import OutboundEmail, set_mailer
+from mycelium_core.services.notification_sender import build_notification_sender
+from mycelium_core.telegram_client import set_telegram_api_override
 
 
 class FakeSender:

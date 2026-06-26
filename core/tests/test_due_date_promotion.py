@@ -12,11 +12,11 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from flow_core.db import admin_session, tenant_session
-from flow_core.errors import DomainError
-from flow_core.services import tasks as tasks_svc
-from flow_core.services import users as users_svc
-from flow_core.services.auth import signup
+from mycelium_core.db import admin_session, tenant_session
+from mycelium_core.errors import DomainError
+from mycelium_core.services import tasks as tasks_svc
+from mycelium_core.services import users as users_svc
+from mycelium_core.services.auth import signup
 
 
 def _email() -> str:

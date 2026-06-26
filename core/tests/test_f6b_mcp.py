@@ -10,10 +10,10 @@ from collections.abc import Iterator
 import pytest
 from _fake_ai import FakeLLM
 
-from flow_core.ai_providers import set_llm_override
-from flow_core.db import admin_session
-from flow_core.services.auth import signup
-from flow_mcp.server import (
+from mycelium_core.ai_providers import set_llm_override
+from mycelium_core.db import admin_session
+from mycelium_core.services.auth import signup
+from mycelium_mcp.server import (
     add_note_tag,
     append_message,
     create_note,

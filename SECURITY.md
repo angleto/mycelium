@@ -27,7 +27,7 @@ self-host, track `main` (or a tagged release once releases are cut).
 
 ## Scope and design notes
 
-Flow is multi-tenant with PostgreSQL **row-level security** as the
+Mycelium is multi-tenant with PostgreSQL **row-level security** as the
 isolation boundary and a sudo-clamped effective-role model for
 privileged operations. Especially valuable reports: tenant isolation
 or RLS bypass, authentication/authorization or effective-role

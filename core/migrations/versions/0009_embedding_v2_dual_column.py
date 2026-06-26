@@ -8,7 +8,7 @@ large workspaces. The dual-column pattern is the standard answer:
 - Old columns (``embedding``, ``model_id``, ``dim``) stay populated
   for legacy rows. The HNSW index on them keeps serving retrievals.
 - New columns (``embedding_v2``, ``model_id_v2``, ``dim_v2``) start
-  NULL; new writes populate v2 when ``FLOW_EMBED_MODEL_V2`` is set,
+  NULL; new writes populate v2 when ``MYCELIUM_EMBED_MODEL_V2`` is set,
   the embedding-migration worker backfills v2 for legacy rows
   gradually, and ``memory.retrieve`` reads v2 if non-NULL else v1
   (transparent dual-read).
@@ -19,7 +19,7 @@ the canonical names. That migration is NOT part of this PR -- it's
 an operational decision (when to switch) and depends on the worker
 finishing its sweep.
 
-The v2 column dimension is parameterised via ``FLOW_EMBED_DIM_V2``
+The v2 column dimension is parameterised via ``MYCELIUM_EMBED_DIM_V2``
 (default 1024 for bge-m3). The HNSW index uses ``vector_ip_ops`` to
 match the v1 op class (we already moved to IP in migration 0007); the
 embedder contract still guarantees L2-normalised vectors.
@@ -48,7 +48,7 @@ depends_on: str | Sequence[str] | None = None
 # upgrade time. Default targets bge-m3 (1024d). Changing this after
 # the migration ran requires another schema migration (vector dim is
 # immutable in pgvector).
-_DIM_V2 = int(os.environ.get("FLOW_EMBED_DIM_V2", "1024"))
+_DIM_V2 = int(os.environ.get("MYCELIUM_EMBED_DIM_V2", "1024"))
 
 
 def upgrade() -> None:

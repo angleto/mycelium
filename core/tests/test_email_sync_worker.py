@@ -16,17 +16,17 @@ import uuid
 
 import pytest
 
-from flow_core.config import get_settings
-from flow_core.db import admin_session, tenant_session
-from flow_core.email_connector import (
+from mycelium_core.config import get_settings
+from mycelium_core.db import admin_session, tenant_session
+from mycelium_core.email_connector import (
     FetchedMessage,
     OutgoingMessage,
     set_connector_override,
 )
-from flow_core.models.email import EmailProvider
-from flow_core.services import email as svc
-from flow_core.services.auth import signup
-from flow_worker import email_sync
+from mycelium_core.models.email import EmailProvider
+from mycelium_core.services import email as svc
+from mycelium_core.services.auth import signup
+from mycelium_worker import email_sync
 
 
 class _FakeConnector:
@@ -41,7 +41,7 @@ class _FakeConnector:
 
     async def send(self, message: OutgoingMessage) -> str:  # pragma: no cover - loop only fetches
         self.sent.append(message)
-        return "<sent@flow>"
+        return "<sent@mycelium>"
 
 
 def _email() -> str:

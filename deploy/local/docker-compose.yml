@@ -2,21 +2,21 @@
 # `docker compose -f deploy/local/docker-compose.yml up -d`
 # pgvector and pg_trgm are enabled by the baseline Alembic migration.
 
-name: flow
+name: mycelium
 
 services:
   db:
     image: pgvector/pgvector:pg16
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-flow}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-flow}
-      POSTGRES_DB: ${POSTGRES_DB:-flow}
+      POSTGRES_USER: ${POSTGRES_USER:-mycelium}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mycelium}
+      POSTGRES_DB: ${POSTGRES_DB:-mycelium}
     ports:
-      - "${FLOW_DB_PORT:-5432}:5432"
+      - "${MYCELIUM_DB_PORT:-5432}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-flow} -d ${POSTGRES_DB:-flow}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-mycelium} -d ${POSTGRES_DB:-mycelium}"]
       interval: 5s
       timeout: 5s
       retries: 20
@@ -26,7 +26,7 @@ services:
     image: redis:7-alpine
     command: ["redis-server", "--save", "", "--appendonly", "no"]
     ports:
-      - "${FLOW_REDIS_PORT:-6379}:6379"
+      - "${MYCELIUM_REDIS_PORT:-6379}:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s

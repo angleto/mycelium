@@ -23,11 +23,11 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.x509.oid import NameOID
 from httpx import ASGITransport, AsyncClient
 
-from flow_api.main import app
-from flow_core.config import get_settings
-from flow_core.db import tenant_session
-from flow_core.models.sdi_received import BuyerVerdict, ReceivedInvoice
-from flow_core.services.sdi_passive import ingest_passive_invoice
+from mycelium_api.main import app
+from mycelium_core.config import get_settings
+from mycelium_core.db import tenant_session
+from mycelium_core.models.sdi_received import BuyerVerdict, ReceivedInvoice
+from mycelium_core.services.sdi_passive import ingest_passive_invoice
 
 
 def _email() -> str:
@@ -36,7 +36,7 @@ def _email() -> str:
 
 def _generate_signing_material() -> tuple[str, str]:
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-    subj = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "flow-test")])
+    subj = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "mycelium-test")])
     cert = (
         x509.CertificateBuilder()
         .subject_name(subj)
@@ -60,14 +60,14 @@ def _generate_signing_material() -> tuple[str, str]:
 @pytest.fixture
 def _ec_signing() -> Iterator[None]:
     key_pem, cert_pem = _generate_signing_material()
-    os.environ["FLOW_SDI_EC_SIGNING_KEY_PEM"] = key_pem
-    os.environ["FLOW_SDI_EC_SIGNING_CERT_PEM"] = cert_pem
+    os.environ["MYCELIUM_SDI_EC_SIGNING_KEY_PEM"] = key_pem
+    os.environ["MYCELIUM_SDI_EC_SIGNING_CERT_PEM"] = cert_pem
     get_settings.cache_clear()
     try:
         yield
     finally:
-        del os.environ["FLOW_SDI_EC_SIGNING_KEY_PEM"]
-        del os.environ["FLOW_SDI_EC_SIGNING_CERT_PEM"]
+        del os.environ["MYCELIUM_SDI_EC_SIGNING_KEY_PEM"]
+        del os.environ["MYCELIUM_SDI_EC_SIGNING_CERT_PEM"]
         get_settings.cache_clear()
 
 
@@ -144,7 +144,7 @@ async def test_post_esito_committente_endpoint(_ec_signing: None) -> None:
         user_id = uuid.UUID(signed["user_id"])
         from sqlalchemy import select
 
-        from flow_core.models.invoice import IssuerProfile
+        from mycelium_core.models.invoice import IssuerProfile
 
         async with tenant_session(str(org_id), str(user_id)) as s:
             ip = (

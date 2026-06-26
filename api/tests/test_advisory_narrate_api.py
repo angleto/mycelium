@@ -12,8 +12,8 @@ from collections.abc import Sequence
 
 from httpx import ASGITransport, AsyncClient
 
-from flow_api.main import app
-from flow_core.ai_providers import LLMResult, set_llm_override
+from mycelium_api.main import app
+from mycelium_core.ai_providers import LLMResult, set_llm_override
 
 
 def _email() -> str:

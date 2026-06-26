@@ -1,6 +1,6 @@
-# web/ — Flow SPA (React/TS)
+# web/ — Mycelium SPA (React/TS)
 
-Browser client for Flow. Co-equal to the MCP layer: both are thin
+Browser client for Mycelium. Co-equal to the MCP layer: both are thin
 clients over the same `core/` service layer through the REST API
 (see `docs/architecture.md`). No business logic here.
 

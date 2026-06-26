@@ -20,14 +20,14 @@ from _fake_ai import FakeLLM
 from _fake_embedder import FakeEmbedder
 from httpx import ASGITransport, AsyncClient
 
-from flow_api.main import app
-from flow_core.ai_providers import set_llm_override
-from flow_core.config import get_settings
-from flow_core.db import tenant_session
-from flow_core.embedder import set_embedder_override
-from flow_core.models.note import NoteKind
-from flow_core.services import decomposition as decomp
-from flow_core.services import notes as nt
+from mycelium_api.main import app
+from mycelium_core.ai_providers import set_llm_override
+from mycelium_core.config import get_settings
+from mycelium_core.db import tenant_session
+from mycelium_core.embedder import set_embedder_override
+from mycelium_core.models.note import NoteKind
+from mycelium_core.services import decomposition as decomp
+from mycelium_core.services import notes as nt
 
 
 @pytest.fixture

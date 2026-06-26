@@ -17,14 +17,14 @@ import psycopg
 import pytest
 from sqlalchemy import select, text
 
-from flow_core.config import get_settings
-from flow_core.db import admin_session, tenant_session
-from flow_core.errors import ConflictError, DomainError
-from flow_core.models.entity_revision import EntityRevision
-from flow_core.services import entity_revisions as revs
-from flow_core.services import notes as notes_svc
-from flow_core.services import tasks as tasks_svc
-from flow_core.services.auth import signup
+from mycelium_core.config import get_settings
+from mycelium_core.db import admin_session, tenant_session
+from mycelium_core.errors import ConflictError, DomainError
+from mycelium_core.models.entity_revision import EntityRevision
+from mycelium_core.services import entity_revisions as revs
+from mycelium_core.services import notes as notes_svc
+from mycelium_core.services import tasks as tasks_svc
+from mycelium_core.services.auth import signup
 
 
 async def _org(label: str = "Org") -> tuple[uuid.UUID, uuid.UUID]:
@@ -64,7 +64,7 @@ async def _make_note(
     text_body: str | None = "first body",
     channel: str = "api",
 ) -> tuple[uuid.UUID, int]:
-    from flow_core.models.note import NoteKind
+    from mycelium_core.models.note import NoteKind
 
     async with tenant_session(str(org), str(user)) as s:
         n = await notes_svc.create_note(
@@ -92,9 +92,9 @@ def test_snapshot_whitelist_is_subset_of_model_columns() -> None:
 
     Symmetric for task and note.
     """
-    from flow_core.models.note import Note
-    from flow_core.models.task import Task
-    from flow_core.services.entity_revisions import (
+    from mycelium_core.models.note import Note
+    from mycelium_core.models.task import Task
+    from mycelium_core.services.entity_revisions import (
         _NOTE_SNAPSHOT_FIELDS,
         _TASK_SNAPSHOT_FIELDS,
     )
@@ -119,7 +119,7 @@ def test_restorable_whitelist_is_subset_of_snapshot() -> None:
     """Every restorable field must be in the snapshot (otherwise a
     restore would pull from a missing key). Snapshot ⊇ Restorable is
     the load-bearing invariant."""
-    from flow_core.services.entity_revisions import (
+    from mycelium_core.services.entity_revisions import (
         _NOTE_RESTORABLE_FIELDS,
         _NOTE_SNAPSHOT_FIELDS,
         _TASK_RESTORABLE_FIELDS,
@@ -874,7 +874,7 @@ async def test_hard_delete_spares_humus_originals() -> None:
     """
     from sqlalchemy import text
 
-    from flow_core.services import note_links
+    from mycelium_core.services import note_links
 
     org, user = await _org("OrgRetain")
     src, _ = await _make_note(org, user, title="source")

@@ -7,14 +7,14 @@ import uuid
 
 import pytest
 
-from flow_core.db import admin_session, tenant_session
-from flow_core.errors import ConflictError, DomainError, NotFoundError
-from flow_core.i18n import MessageCode
-from flow_core.models.tag import TagKind
-from flow_core.services import tasks, taxonomy
-from flow_core.services import workflow as wf
-from flow_core.services.auth import signup
-from flow_core.services.taxonomy import ClientInput
+from mycelium_core.db import admin_session, tenant_session
+from mycelium_core.errors import ConflictError, DomainError, NotFoundError
+from mycelium_core.i18n import MessageCode
+from mycelium_core.models.tag import TagKind
+from mycelium_core.services import tasks, taxonomy
+from mycelium_core.services import workflow as wf
+from mycelium_core.services.auth import signup
+from mycelium_core.services.taxonomy import ClientInput
 
 
 async def _org() -> tuple[uuid.UUID, uuid.UUID]:

@@ -15,7 +15,7 @@ Reuse the `bitvision_phoenix` pattern: a provider via `typing.Protocol`
 (not an ABC), a DB-driven factory, neutral DTOs, pydantic settings with
 provider keys from env, a DB model registry with `is_active`.
 Reference files in [references.md](../references.md). bitvision has NO
-embedding abstraction (direct calls): Flow adds an `EmbedderProvider`
+embedding abstraction (direct calls): Mycelium adds an `EmbedderProvider`
 mirroring `LLMProvider` (`embed_text`, `dim`, `model_id`). Default: a
 small multilingual CPU/ARM model; the concrete choice is made at
 implementation among strong open-source candidates (BGE-M3,

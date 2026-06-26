@@ -21,7 +21,7 @@ from math import isclose
 
 from httpx import ASGITransport, AsyncClient
 
-from flow_api.main import app
+from mycelium_api.main import app
 
 
 def _email() -> str:
@@ -177,8 +177,8 @@ async def test_phase2_recency_live_and_betweenness_from_snapshot() -> None:
     note reads ~1.0); ``betweenness`` is served from the materialised
     snapshot only — empty with a null ``analytics_computed_at`` before
     the worker's first refresh, populated after."""
-    from flow_core.db import tenant_session
-    from flow_core.services import graph_snapshot as snap_svc
+    from mycelium_core.db import tenant_session
+    from mycelium_core.services import graph_snapshot as snap_svc
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://t") as c:

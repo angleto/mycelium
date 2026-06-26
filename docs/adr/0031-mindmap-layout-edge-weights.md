@@ -4,7 +4,7 @@ Status: Accepted (v1 shipped)
 Date: 2026-05-27
 Relates to: ADR-0029 (note garden ecosystem), ADR-0028 (identity-first
 addressing), ADR-0005 (hierarchical memory). Implements the design
-described in Flow tasks 7e99c724 (layout v1), 4467acb4
+described in Mycelium tasks 7e99c724 (layout v1), 4467acb4
 (`note_edge_strength`), 8c0a8f08 (PageRank / PPR / Leiden), 5bf31b63
 (Walk LLM + Mindmap tab), 56d80038 (garden iconography).
 

@@ -5,12 +5,12 @@
 members = ["core", "api", "mcp", "worker", "sdi-inbound", "cli"]
 
 [tool.uv.sources]
-flow-core = { workspace = true }
-flow-api = { workspace = true }
-flow-mcp = { workspace = true }
-flow-worker = { workspace = true }
-flow-sdi-inbound = { workspace = true }
-flow-cli = { workspace = true }
+mycelium-core = { workspace = true }
+mycelium-api = { workspace = true }
+mycelium-mcp = { workspace = true }
+mycelium-worker = { workspace = true }
+mycelium-sdi-inbound = { workspace = true }
+mycelium-cli = { workspace = true }
 
 [dependency-groups]
 dev = [
@@ -22,7 +22,7 @@ dev = [
     "anyio>=4",
     "respx>=0.21",
     # Graph clustering (Leiden) is the garden mindmap's real "glades"
-    # source (ADR-0040 / ADR-0031). Production opts in via flow-core's
+    # source (ADR-0040 / ADR-0031). Production opts in via mycelium-core's
     # ``clustering`` extra (heavy C deps, graceful degrade when absent),
     # but dev and CI install it by default here so the mindmap renders
     # real communities and the cluster tests exercise the live Leiden
@@ -56,7 +56,7 @@ select = ["E", "F", "I", "UP", "B", "ASYNC", "S", "RUF"]
 # pattern trips B008 on every command signature. The mutable default
 # is also fine: Typer parses each invocation independently and does
 # not mutate the sentinel.
-"cli/src/flow_cli/cmds/**" = ["B008"]
+"cli/src/mycelium_cli/cmds/**" = ["B008"]
 
 [tool.mypy]
 python_version = "3.12"

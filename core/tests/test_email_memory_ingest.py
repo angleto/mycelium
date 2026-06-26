@@ -13,14 +13,14 @@ import uuid
 
 from sqlalchemy import func, select
 
-from flow_core.db import admin_session, tenant_session
-from flow_core.email_connector import FetchedMessage, OutgoingMessage
-from flow_core.models.email import EmailProvider
-from flow_core.models.memory_blob import BlobSource, MemoryBlob
-from flow_core.services import email as svc
-from flow_core.services import memory as memory_svc
-from flow_core.services import taxonomy
-from flow_core.services.auth import signup
+from mycelium_core.db import admin_session, tenant_session
+from mycelium_core.email_connector import FetchedMessage, OutgoingMessage
+from mycelium_core.models.email import EmailProvider
+from mycelium_core.models.memory_blob import BlobSource, MemoryBlob
+from mycelium_core.services import email as svc
+from mycelium_core.services import memory as memory_svc
+from mycelium_core.services import taxonomy
+from mycelium_core.services.auth import signup
 
 
 class FakeConnector:
@@ -31,7 +31,7 @@ class FakeConnector:
         return self.messages[:limit]
 
     async def send(self, message: OutgoingMessage) -> str:  # pragma: no cover - unused
-        return "<sent@flow>"
+        return "<sent@mycelium>"
 
 
 def _email() -> str:
@@ -211,7 +211,7 @@ async def test_ingest_failure_is_isolated_and_surfaced(monkeypatch) -> None:
     async def _boom(*_a, **_k):
         raise RuntimeError("embedder down")
 
-    monkeypatch.setattr("flow_core.services.email.memory_svc.write_blob", _boom)
+    monkeypatch.setattr("mycelium_core.services.email.memory_svc.write_blob", _boom)
 
     org, user = await _signup_org()
     conn = FakeConnector([_msg("1", "Keeper")])

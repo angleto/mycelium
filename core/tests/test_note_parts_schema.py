@@ -13,11 +13,11 @@ import uuid
 
 from sqlalchemy import select
 
-from flow_core.db import admin_session, tenant_session
-from flow_core.models.note import NoteKind
-from flow_core.models.note_part import NotePart, NotePartUIState
-from flow_core.services import notes as nt
-from flow_core.services.auth import signup
+from mycelium_core.db import admin_session, tenant_session
+from mycelium_core.models.note import NoteKind
+from mycelium_core.models.note_part import NotePart, NotePartUIState
+from mycelium_core.services import notes as nt
+from mycelium_core.services.auth import signup
 
 
 def _email() -> str:

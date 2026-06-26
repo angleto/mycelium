@@ -1,10 +1,10 @@
-// Flow PWA service worker. Cache-on-fetch for the SPA shell so the
+// Mycelium PWA service worker. Cache-on-fetch for the SPA shell so the
 // home screen icon opens to a usable surface even with no network.
 // Stays out of the way for /api/* and /mcp* — those always go to the
 // network so an offline backend yields a real error, not a stale UI.
 
 // Bump on every behaviour change so old SWs are replaced atomically.
-const CACHE = 'flow-shell-v4'
+const CACHE = 'mycelium-shell-v4'
 
 self.addEventListener('install', () => {
   // The first activation is fine without any preload — the SPA bundle
@@ -85,12 +85,12 @@ self.addEventListener('push', (event) => {
   } catch {
     data = {}
   }
-  const title = data.title || 'Flow'
+  const title = data.title || 'Mycelium'
   const body = typeof data.body === 'string' ? data.body : ''
   event.waitUntil(
     self.registration.showNotification(title, {
       body,
-      tag: 'flow-reminder',
+      tag: 'mycelium-reminder',
       icon: '/icon-192.png',
       badge: '/icon-192.png',
     }),
@@ -98,8 +98,8 @@ self.addEventListener('push', (event) => {
 })
 
 // Clicking the notification opens the referenced task. The reminder body
-// ends with a deep-link (e.g. https://flow.xeno.garden/tasks/<id>); focus an
-// existing Flow tab and navigate it there, or open a new one.
+// ends with a deep-link (e.g. https://mycelium.xeno.garden/tasks/<id>); focus an
+// existing Mycelium tab and navigate it there, or open a new one.
 self.addEventListener('notificationclick', (event) => {
   event.notification.close()
   const match = (event.notification.body || '').match(/https?:\/\/\S+/)

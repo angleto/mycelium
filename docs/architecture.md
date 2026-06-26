@@ -58,7 +58,7 @@ Browser → web/ ─┤          ▲                                    ▲
 ## Monorepo layout (indicative)
 
 ```
-flow/
+mycelium/
   core/        # domain + service layer (Python package)
   api/         # FastAPI REST + WebSocket
   mcp/         # MCP server

@@ -8,8 +8,8 @@ import uuid
 from httpx import ASGITransport, AsyncClient
 from tests_helpers import seed_ai_assistant_identity
 
-from flow_api.main import app
-from flow_core.db import tenant_session
+from mycelium_api.main import app
+from mycelium_core.db import tenant_session
 
 
 def _email() -> str:

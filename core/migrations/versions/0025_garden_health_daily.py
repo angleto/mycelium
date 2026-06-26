@@ -7,7 +7,7 @@ values directly; this table is the history the sparkline reads.
 
 RLS pattern mirrors 0021 (classification_feedback): ENABLE + FORCE row
 level security, an org-predicate policy for both USING and WITH CHECK,
-and the ``flow_app`` grant.
+and the ``mycelium_app`` grant.
 
 Revision ID: 0025
 Revises: 0024
@@ -70,7 +70,7 @@ def upgrade() -> None:
         f"CREATE POLICY p_garden_health_daily ON garden_health_daily "
         f"USING ({_ORG_PRED}) WITH CHECK ({_ORG_PRED})"
     )
-    op.execute("GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE garden_health_daily TO flow_app")
+    op.execute("GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE garden_health_daily TO mycelium_app")
 
 
 def downgrade() -> None:

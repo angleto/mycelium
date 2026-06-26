@@ -33,16 +33,16 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 from tests_helpers import seed_ai_assistant_identity
 
-from flow_api.main import app
-from flow_core.db import admin_session, tenant_session
-from flow_core.errors import ConflictError, DomainError, ForbiddenError
-from flow_core.models.executor import Executor, ExecutorKind
-from flow_core.models.schedule import Schedule
-from flow_core.models.task import ExecKind, SchedulePolicy
-from flow_core.services import executors as exec_svc
-from flow_core.services import scheduler as sch
-from flow_core.services import tasks
-from flow_core.services.auth import signup
+from mycelium_api.main import app
+from mycelium_core.db import admin_session, tenant_session
+from mycelium_core.errors import ConflictError, DomainError, ForbiddenError
+from mycelium_core.models.executor import Executor, ExecutorKind
+from mycelium_core.models.schedule import Schedule
+from mycelium_core.models.task import ExecKind, SchedulePolicy
+from mycelium_core.services import executors as exec_svc
+from mycelium_core.services import scheduler as sch
+from mycelium_core.services import tasks
+from mycelium_core.services.auth import signup
 
 # Monday 2026-01-12 09:00 Europe/Rome (winter = UTC+1).
 _AS_OF = dt.datetime(2026, 1, 12, 8, 0, tzinfo=dt.UTC)
@@ -664,7 +664,7 @@ async def test_service_mutations_owner_gated_in_session() -> None:
         # A guest membership (effective fallback) cannot mutate. Simulate
         # by asserting require_role(owner) rejects a non-owner: create a
         # second member and act as them.
-        from flow_core.models.membership import Membership, Role
+        from mycelium_core.models.membership import Membership, Role
 
         other = await signup(s, email=_email(), password="pw-strong-123", org_name="OTHER")
         # Add `other` to `org` as a plain member (not owner).

@@ -24,17 +24,17 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select, update
 from tests_helpers import seed_ai_assistant_identity
 
-from flow_api.main import app
-from flow_core.db import admin_session, tenant_session
-from flow_core.models.dependency import DependencyType
-from flow_core.models.executor import Executor, ExecutorKind
-from flow_core.models.schedule import Schedule
-from flow_core.models.task import ExecKind, SchedulePolicy
-from flow_core.services import dependencies as deps
-from flow_core.services import executors as exec_svc
-from flow_core.services import scheduler as sch
-from flow_core.services import tasks
-from flow_core.services.auth import signup
+from mycelium_api.main import app
+from mycelium_core.db import admin_session, tenant_session
+from mycelium_core.models.dependency import DependencyType
+from mycelium_core.models.executor import Executor, ExecutorKind
+from mycelium_core.models.schedule import Schedule
+from mycelium_core.models.task import ExecKind, SchedulePolicy
+from mycelium_core.services import dependencies as deps
+from mycelium_core.services import executors as exec_svc
+from mycelium_core.services import scheduler as sch
+from mycelium_core.services import tasks
+from mycelium_core.services.auth import signup
 
 _RM = ZoneInfo("Europe/Rome")
 # Monday 2026-01-12 09:00 Europe/Rome (winter = UTC+1).

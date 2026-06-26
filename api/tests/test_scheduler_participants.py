@@ -17,14 +17,14 @@ import uuid
 from decimal import Decimal
 from zoneinfo import ZoneInfo
 
-from flow_core.db import admin_session, tenant_session
-from flow_core.services import actors as actors_svc
-from flow_core.services import identities as identities_svc
-from flow_core.services import memberships as mem_svc
-from flow_core.services import participants as p_svc
-from flow_core.services import scheduler as sch
-from flow_core.services import tasks
-from flow_core.services.auth import signup
+from mycelium_core.db import admin_session, tenant_session
+from mycelium_core.services import actors as actors_svc
+from mycelium_core.services import identities as identities_svc
+from mycelium_core.services import memberships as mem_svc
+from mycelium_core.services import participants as p_svc
+from mycelium_core.services import scheduler as sch
+from mycelium_core.services import tasks
+from mycelium_core.services.auth import signup
 
 _RM = ZoneInfo("Europe/Rome")
 # Monday 2026-08-03 09:00 Europe/Rome (summer = UTC+2).

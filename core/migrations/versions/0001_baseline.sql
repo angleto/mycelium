@@ -7030,28 +7030,28 @@ ALTER TABLE public.working_calendars ENABLE ROW LEVEL SECURITY;
 -- Name: SCHEMA public; Type: ACL; Schema: -; Owner: -
 --
 
-GRANT USAGE ON SCHEMA public TO flow_app;
+GRANT USAGE ON SCHEMA public TO mycelium_app;
 
 --
 -- Name: FUNCTION add_org_member(p_org uuid, p_actor uuid, p_email text, p_role text); Type: ACL; Schema: public; Owner: -
 --
 
 REVOKE ALL ON FUNCTION public.add_org_member(p_org uuid, p_actor uuid, p_email text, p_role text) FROM PUBLIC;
-GRANT ALL ON FUNCTION public.add_org_member(p_org uuid, p_actor uuid, p_email text, p_role text) TO flow_app;
+GRANT ALL ON FUNCTION public.add_org_member(p_org uuid, p_actor uuid, p_email text, p_role text) TO mycelium_app;
 
 --
 -- Name: FUNCTION authenticate_agent_token(p_hash bytea, OUT out_token_id uuid, OUT out_user_id uuid, OUT out_org_id uuid, OUT out_scope text, OUT out_assistant_id uuid, OUT out_assistant_scope jsonb, OUT out_assistant_active boolean); Type: ACL; Schema: public; Owner: -
 --
 
 REVOKE ALL ON FUNCTION public.authenticate_agent_token(p_hash bytea, OUT out_token_id uuid, OUT out_user_id uuid, OUT out_org_id uuid, OUT out_scope text, OUT out_assistant_id uuid, OUT out_assistant_scope jsonb, OUT out_assistant_active boolean) FROM PUBLIC;
-GRANT ALL ON FUNCTION public.authenticate_agent_token(p_hash bytea, OUT out_token_id uuid, OUT out_user_id uuid, OUT out_org_id uuid, OUT out_scope text, OUT out_assistant_id uuid, OUT out_assistant_scope jsonb, OUT out_assistant_active boolean) TO flow_app;
+GRANT ALL ON FUNCTION public.authenticate_agent_token(p_hash bytea, OUT out_token_id uuid, OUT out_user_id uuid, OUT out_org_id uuid, OUT out_scope text, OUT out_assistant_id uuid, OUT out_assistant_scope jsonb, OUT out_assistant_active boolean) TO mycelium_app;
 
 --
 -- Name: FUNCTION consume_telegram_link_code(p_code text, p_chat_id bigint, p_chat_username text, OUT out_user_id uuid, OUT out_org_id uuid); Type: ACL; Schema: public; Owner: -
 --
 
 REVOKE ALL ON FUNCTION public.consume_telegram_link_code(p_code text, p_chat_id bigint, p_chat_username text, OUT out_user_id uuid, OUT out_org_id uuid) FROM PUBLIC;
-GRANT ALL ON FUNCTION public.consume_telegram_link_code(p_code text, p_chat_id bigint, p_chat_username text, OUT out_user_id uuid, OUT out_org_id uuid) TO flow_app;
+GRANT ALL ON FUNCTION public.consume_telegram_link_code(p_code text, p_chat_id bigint, p_chat_username text, OUT out_user_id uuid, OUT out_org_id uuid) TO mycelium_app;
 
 --
 -- Name: FUNCTION create_default_calendar(p_org uuid); Type: ACL; Schema: public; Owner: -
@@ -7070,75 +7070,75 @@ REVOKE ALL ON FUNCTION public.create_default_workflow(p_org uuid) FROM PUBLIC;
 --
 
 REVOKE ALL ON FUNCTION public.delete_organization(p_org uuid, p_user uuid) FROM PUBLIC;
-GRANT ALL ON FUNCTION public.delete_organization(p_org uuid, p_user uuid) TO flow_app;
+GRANT ALL ON FUNCTION public.delete_organization(p_org uuid, p_user uuid) TO mycelium_app;
 
 --
 -- Name: FUNCTION list_org_members(p_org uuid, p_user uuid); Type: ACL; Schema: public; Owner: -
 --
 
 REVOKE ALL ON FUNCTION public.list_org_members(p_org uuid, p_user uuid) FROM PUBLIC;
-GRANT ALL ON FUNCTION public.list_org_members(p_org uuid, p_user uuid) TO flow_app;
+GRANT ALL ON FUNCTION public.list_org_members(p_org uuid, p_user uuid) TO mycelium_app;
 
 --
 -- Name: FUNCTION list_user_organizations(p_user_id uuid); Type: ACL; Schema: public; Owner: -
 --
 
 REVOKE ALL ON FUNCTION public.list_user_organizations(p_user_id uuid) FROM PUBLIC;
-GRANT ALL ON FUNCTION public.list_user_organizations(p_user_id uuid) TO flow_app;
+GRANT ALL ON FUNCTION public.list_user_organizations(p_user_id uuid) TO mycelium_app;
 
 --
 -- Name: FUNCTION oauth_token_diag(p_hash bytea); Type: ACL; Schema: public; Owner: -
 --
 
 REVOKE ALL ON FUNCTION public.oauth_token_diag(p_hash bytea) FROM PUBLIC;
-GRANT ALL ON FUNCTION public.oauth_token_diag(p_hash bytea) TO flow_app;
+GRANT ALL ON FUNCTION public.oauth_token_diag(p_hash bytea) TO mycelium_app;
 
 --
 -- Name: FUNCTION provision_organization(p_name text, p_user_id uuid); Type: ACL; Schema: public; Owner: -
 --
 
 REVOKE ALL ON FUNCTION public.provision_organization(p_name text, p_user_id uuid) FROM PUBLIC;
-GRANT ALL ON FUNCTION public.provision_organization(p_name text, p_user_id uuid) TO flow_app;
+GRANT ALL ON FUNCTION public.provision_organization(p_name text, p_user_id uuid) TO mycelium_app;
 
 --
 -- Name: FUNCTION remove_org_member(p_org uuid, p_actor uuid, p_target uuid); Type: ACL; Schema: public; Owner: -
 --
 
 REVOKE ALL ON FUNCTION public.remove_org_member(p_org uuid, p_actor uuid, p_target uuid) FROM PUBLIC;
-GRANT ALL ON FUNCTION public.remove_org_member(p_org uuid, p_actor uuid, p_target uuid) TO flow_app;
+GRANT ALL ON FUNCTION public.remove_org_member(p_org uuid, p_actor uuid, p_target uuid) TO mycelium_app;
 
 --
 -- Name: FUNCTION resolve_telegram_chat(p_chat_id bigint, OUT out_user_id uuid, OUT out_default_org_id uuid); Type: ACL; Schema: public; Owner: -
 --
 
 REVOKE ALL ON FUNCTION public.resolve_telegram_chat(p_chat_id bigint, OUT out_user_id uuid, OUT out_default_org_id uuid) FROM PUBLIC;
-GRANT ALL ON FUNCTION public.resolve_telegram_chat(p_chat_id bigint, OUT out_user_id uuid, OUT out_default_org_id uuid) TO flow_app;
+GRANT ALL ON FUNCTION public.resolve_telegram_chat(p_chat_id bigint, OUT out_user_id uuid, OUT out_default_org_id uuid) TO mycelium_app;
 
 --
 -- Name: FUNCTION sdi_resolve_invoice_org(p_identificativo text); Type: ACL; Schema: public; Owner: -
 --
 
-GRANT ALL ON FUNCTION public.sdi_resolve_invoice_org(p_identificativo text) TO flow_app;
+GRANT ALL ON FUNCTION public.sdi_resolve_invoice_org(p_identificativo text) TO mycelium_app;
 
 --
 -- Name: FUNCTION sdi_resolve_recipient_org(p_codice text); Type: ACL; Schema: public; Owner: -
 --
 
-GRANT ALL ON FUNCTION public.sdi_resolve_recipient_org(p_codice text) TO flow_app;
+GRANT ALL ON FUNCTION public.sdi_resolve_recipient_org(p_codice text) TO mycelium_app;
 
 --
 -- Name: FUNCTION set_member_role(p_org uuid, p_actor uuid, p_target uuid, p_role text); Type: ACL; Schema: public; Owner: -
 --
 
 REVOKE ALL ON FUNCTION public.set_member_role(p_org uuid, p_actor uuid, p_target uuid, p_role text) FROM PUBLIC;
-GRANT ALL ON FUNCTION public.set_member_role(p_org uuid, p_actor uuid, p_target uuid, p_role text) TO flow_app;
+GRANT ALL ON FUNCTION public.set_member_role(p_org uuid, p_actor uuid, p_target uuid, p_role text) TO mycelium_app;
 
 --
 -- Name: FUNCTION set_organization_status(p_org uuid, p_user uuid, p_status text); Type: ACL; Schema: public; Owner: -
 --
 
 REVOKE ALL ON FUNCTION public.set_organization_status(p_org uuid, p_user uuid, p_status text) FROM PUBLIC;
-GRANT ALL ON FUNCTION public.set_organization_status(p_org uuid, p_user uuid, p_status text) TO flow_app;
+GRANT ALL ON FUNCTION public.set_organization_status(p_org uuid, p_user uuid, p_status text) TO mycelium_app;
 
 --
 -- Name: FUNCTION sync_task_assignee_participant(); Type: ACL; Schema: public; Owner: -
@@ -7156,433 +7156,433 @@ REVOKE ALL ON FUNCTION public.sync_task_participants_window() FROM PUBLIC;
 -- Name: TABLE activity_log; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT SELECT,INSERT ON TABLE public.activity_log TO flow_app;
+GRANT SELECT,INSERT ON TABLE public.activity_log TO mycelium_app;
 
 --
 -- Name: TABLE adjudication_steps; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.adjudication_steps TO flow_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.adjudication_steps TO mycelium_app;
 
 --
 -- Name: TABLE adjudications; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.adjudications TO flow_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.adjudications TO mycelium_app;
 
 --
 -- Name: TABLE agent_runs; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.agent_runs TO flow_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.agent_runs TO mycelium_app;
 
 --
 -- Name: TABLE agent_tokens; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.agent_tokens TO flow_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.agent_tokens TO mycelium_app;
 
 --
 -- Name: TABLE ai_assistants; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.ai_assistants TO flow_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.ai_assistants TO mycelium_app;
 
 --
 -- Name: TABLE attachments; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.attachments TO flow_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.attachments TO mycelium_app;
 
 --
 -- Name: TABLE billing_config; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT SELECT,INSERT,UPDATE ON TABLE public.billing_config TO flow_app;
+GRANT SELECT,INSERT,UPDATE ON TABLE public.billing_config TO mycelium_app;
 
 --
 -- Name: TABLE blob_sources; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.blob_sources TO flow_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.blob_sources TO mycelium_app;
 
 --
 -- Name: TABLE budgets; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.budgets TO flow_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.budgets TO mycelium_app;
 
 --
 -- Name: TABLE calendar_holidays; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.calendar_holidays TO flow_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.calendar_holidays TO mycelium_app;
 
 --
 -- Name: TABLE client_profile; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.client_profile TO flow_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.client_profile TO mycelium_app;
 
 --
 -- Name: TABLE comments; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.comments TO flow_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.comments TO mycelium_app;
 
 --
 -- Name: TABLE credit_ledger; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT SELECT,INSERT ON TABLE public.credit_ledger TO flow_app;
+GRANT SELECT,INSERT ON TABLE public.credit_ledger TO mycelium_app;
 
 --
 -- Name: TABLE dispatch_requests; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.dispatch_requests TO flow_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.dispatch_requests TO mycelium_app;
 
 --
 -- Name: TABLE email_accounts; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.email_accounts TO flow_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.email_accounts TO mycelium_app;
 
 --
 -- Name: TABLE email_messages; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.email_messages TO flow_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.email_messages TO mycelium_app;
 
 --
 -- Name: TABLE email_verification_tokens; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.email_verification_tokens TO flow_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.email_verification_tokens TO mycelium_app;
 
 --
 -- Name: TABLE executors; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.executors TO flow_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.executors TO mycelium_app;
 
 --
 -- Name: TABLE google_calendar_subscriptions; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.google_calendar_subscriptions TO flow_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.google_calendar_subscriptions TO mycelium_app;
 
 --
 -- Name: TABLE identities; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.identities TO flow_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.identities TO mycelium_app;
 
 --
 -- Name: TABLE invoice_counters; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.invoice_counters TO flow_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.invoice_counters TO mycelium_app;
 
 --
 -- Name: TABLE invoice_lines; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.invoice_lines TO flow_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.invoice_lines TO mycelium_app;
 
 --
 -- Name: TABLE invoices; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.invoices TO flow_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.invoices TO mycelium_app;
 
 --
 -- Name: TABLE issuer_profiles; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.issuer_profiles TO flow_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.issuer_profiles TO mycelium_app;
 
 --
 -- Name: TABLE memberships; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.memberships TO flow_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.memberships TO mycelium_app;
 
 --
 -- Name: TABLE memory_blob_tags; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.memory_blob_tags TO flow_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.memory_blob_tags TO mycelium_app;
 
 --
 -- Name: TABLE memory_blobs; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.memory_blobs TO flow_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.memory_blobs TO mycelium_app;
 
 --
 -- Name: TABLE note_note_link; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.note_note_link TO flow_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.note_note_link TO mycelium_app;
 
 --
 -- Name: TABLE note_tags; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.note_tags TO flow_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.note_tags TO mycelium_app;
 
 --
 -- Name: TABLE note_task_link; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.note_task_link TO flow_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.note_task_link TO mycelium_app;
 
 --
 -- Name: TABLE note_turns; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.note_turns TO flow_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.note_turns TO mycelium_app;
 
 --
 -- Name: TABLE notes; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.notes TO flow_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.notes TO mycelium_app;
 
 --
 -- Name: TABLE notification_prefs; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.notification_prefs TO flow_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.notification_prefs TO mycelium_app;
 
 --
 -- Name: TABLE notifications; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.notifications TO flow_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.notifications TO mycelium_app;
 
 --
 -- Name: TABLE oauth_codes; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT SELECT,INSERT,DELETE ON TABLE public.oauth_codes TO flow_app;
+GRANT SELECT,INSERT,DELETE ON TABLE public.oauth_codes TO mycelium_app;
 
 --
 -- Name: TABLE organizations; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.organizations TO flow_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.organizations TO mycelium_app;
 
 --
 -- Name: TABLE password_reset_tokens; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.password_reset_tokens TO flow_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.password_reset_tokens TO mycelium_app;
 
 --
 -- Name: TABLE project_profile; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.project_profile TO flow_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.project_profile TO mycelium_app;
 
 --
 -- Name: TABLE rate_cards; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.rate_cards TO flow_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.rate_cards TO mycelium_app;
 
 --
 -- Name: TABLE received_invoices; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.received_invoices TO flow_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.received_invoices TO mycelium_app;
 
 --
 -- Name: TABLE revoked_tokens; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.revoked_tokens TO flow_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.revoked_tokens TO mycelium_app;
 
 --
 -- Name: TABLE schedule; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.schedule TO flow_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.schedule TO mycelium_app;
 
 --
 -- Name: TABLE sdi_mandates; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.sdi_mandates TO flow_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.sdi_mandates TO mycelium_app;
 
 --
 -- Name: TABLE sdi_transmission_counters; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.sdi_transmission_counters TO flow_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.sdi_transmission_counters TO mycelium_app;
 
 --
 -- Name: TABLE storage_rates; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.storage_rates TO flow_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.storage_rates TO mycelium_app;
 
 --
 -- Name: TABLE tag_scopes; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.tag_scopes TO flow_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.tag_scopes TO mycelium_app;
 
 --
 -- Name: TABLE tags; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.tags TO flow_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.tags TO mycelium_app;
 
 --
 -- Name: TABLE task_checklist_items; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.task_checklist_items TO flow_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.task_checklist_items TO mycelium_app;
 
 --
 -- Name: TABLE task_collaborators; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.task_collaborators TO flow_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.task_collaborators TO mycelium_app;
 
 --
 -- Name: TABLE task_dependencies; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.task_dependencies TO flow_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.task_dependencies TO mycelium_app;
 
 --
 -- Name: TABLE task_handoffs; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.task_handoffs TO flow_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.task_handoffs TO mycelium_app;
 
 --
 -- Name: TABLE task_participants; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.task_participants TO flow_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.task_participants TO mycelium_app;
 
 --
 -- Name: TABLE task_recurrences; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.task_recurrences TO flow_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.task_recurrences TO mycelium_app;
 
 --
 -- Name: TABLE task_relations; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.task_relations TO flow_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.task_relations TO mycelium_app;
 
 --
 -- Name: TABLE task_reminders; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.task_reminders TO flow_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.task_reminders TO mycelium_app;
 
 --
 -- Name: TABLE task_tags; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.task_tags TO flow_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.task_tags TO mycelium_app;
 
 --
 -- Name: TABLE tasks; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.tasks TO flow_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.tasks TO mycelium_app;
 
 --
 -- Name: TABLE telegram_assistant_jobs; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.telegram_assistant_jobs TO flow_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.telegram_assistant_jobs TO mycelium_app;
 
 --
 -- Name: TABLE telegram_conversations; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.telegram_conversations TO flow_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.telegram_conversations TO mycelium_app;
 
 --
 -- Name: TABLE telegram_link_codes; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.telegram_link_codes TO flow_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.telegram_link_codes TO mycelium_app;
 
 --
 -- Name: TABLE telegram_links; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.telegram_links TO flow_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.telegram_links TO mycelium_app;
 
 --
 -- Name: TABLE telegram_updates; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT SELECT,INSERT ON TABLE public.telegram_updates TO flow_app;
+GRANT SELECT,INSERT ON TABLE public.telegram_updates TO mycelium_app;
 
 --
 -- Name: TABLE time_entries; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.time_entries TO flow_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.time_entries TO mycelium_app;
 
 --
 -- Name: TABLE usage_record; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT SELECT,INSERT ON TABLE public.usage_record TO flow_app;
+GRANT SELECT,INSERT ON TABLE public.usage_record TO mycelium_app;
 
 --
 -- Name: TABLE user_calendar; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.user_calendar TO flow_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.user_calendar TO mycelium_app;
 
 --
 -- Name: TABLE users; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.users TO flow_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.users TO mycelium_app;
 
 --
 -- Name: TABLE wallet; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT SELECT,INSERT,UPDATE ON TABLE public.wallet TO flow_app;
+GRANT SELECT,INSERT,UPDATE ON TABLE public.wallet TO mycelium_app;
 
 --
 -- Name: TABLE workflow_defs; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.workflow_defs TO flow_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.workflow_defs TO mycelium_app;
 
 --
 -- Name: TABLE workflow_states; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.workflow_states TO flow_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.workflow_states TO mycelium_app;
 
 --
 -- Name: TABLE workflow_transitions; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.workflow_transitions TO flow_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.workflow_transitions TO mycelium_app;
 
 --
 -- Name: TABLE working_calendars; Type: ACL; Schema: public; Owner: -
 --
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.working_calendars TO flow_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.working_calendars TO mycelium_app;
 
 --
 -- PostgreSQL database dump complete

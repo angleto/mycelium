@@ -24,22 +24,22 @@ import uuid
 import pytest
 from sqlalchemy import select, update
 
-from flow_core.config import get_settings
-from flow_core.db import admin_session, tenant_session
-from flow_core.models.note import Note, NoteKind
-from flow_core.models.note_link import NoteTaskLink
-from flow_core.models.note_tag import NoteTag
-from flow_core.models.tag import TagKind
-from flow_core.models.task import Task
-from flow_core.models.task_relation import TaskRelation
-from flow_core.models.task_tag import TaskTag
-from flow_core.services import graph as graph_svc
-from flow_core.services import graph_snapshot as snap_svc
-from flow_core.services import link_prediction as linkpred_svc
-from flow_core.services import note_links, taxonomy
-from flow_core.services import notes as notes_svc
-from flow_core.services import tasks as tasks_svc
-from flow_core.services.auth import signup
+from mycelium_core.config import get_settings
+from mycelium_core.db import admin_session, tenant_session
+from mycelium_core.models.note import Note, NoteKind
+from mycelium_core.models.note_link import NoteTaskLink
+from mycelium_core.models.note_tag import NoteTag
+from mycelium_core.models.tag import TagKind
+from mycelium_core.models.task import Task
+from mycelium_core.models.task_relation import TaskRelation
+from mycelium_core.models.task_tag import TaskTag
+from mycelium_core.services import graph as graph_svc
+from mycelium_core.services import graph_snapshot as snap_svc
+from mycelium_core.services import link_prediction as linkpred_svc
+from mycelium_core.services import note_links, taxonomy
+from mycelium_core.services import notes as notes_svc
+from mycelium_core.services import tasks as tasks_svc
+from mycelium_core.services.auth import signup
 
 
 async def _workspace() -> tuple[uuid.UUID, uuid.UUID]:

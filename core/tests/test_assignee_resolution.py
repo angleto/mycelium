@@ -17,15 +17,15 @@ import uuid
 import pytest
 from sqlalchemy import select
 
-from flow_core.db import admin_session, tenant_session
-from flow_core.errors import NotFoundError
-from flow_core.i18n import MessageCode
-from flow_core.models.identity import Identity
-from flow_core.models.task import Task
-from flow_core.services import identities as identities_svc
-from flow_core.services import tasks as tasks_svc
-from flow_core.services.auth import signup
-from flow_mcp.server import create_task, get_task, list_tasks, set_task_assignee
+from mycelium_core.db import admin_session, tenant_session
+from mycelium_core.errors import NotFoundError
+from mycelium_core.i18n import MessageCode
+from mycelium_core.models.identity import Identity
+from mycelium_core.models.task import Task
+from mycelium_core.services import identities as identities_svc
+from mycelium_core.services import tasks as tasks_svc
+from mycelium_core.services.auth import signup
+from mycelium_mcp.server import create_task, get_task, list_tasks, set_task_assignee
 
 
 def _email() -> str:

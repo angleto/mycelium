@@ -27,20 +27,20 @@ import _fake_ai
 import pytest
 from _fake_embedder import FakeEmbedder
 
-from flow_core.adjudication.base import AdjudicationContext
-from flow_core.adjudication.store import InMemoryStepStore
-from flow_core.adjudication.strategies.debate import (
+from mycelium_core.adjudication.base import AdjudicationContext
+from mycelium_core.adjudication.store import InMemoryStepStore
+from mycelium_core.adjudication.strategies.debate import (
     DebateStrategy,
     _coherence_energy,
     _confidence_for,
     _parse_turn_text,
 )
-from flow_core.ai_providers import LLMResult, set_llm_override
-from flow_core.db import admin_session, tenant_session
-from flow_core.embedder import set_embedder_override
-from flow_core.models.adjudication import AdjudicationStatus, AdjudicationStepKind
-from flow_core.services import adjudication as adj_svc
-from flow_core.services.auth import signup
+from mycelium_core.ai_providers import LLMResult, set_llm_override
+from mycelium_core.db import admin_session, tenant_session
+from mycelium_core.embedder import set_embedder_override
+from mycelium_core.models.adjudication import AdjudicationStatus, AdjudicationStepKind
+from mycelium_core.services import adjudication as adj_svc
+from mycelium_core.services.auth import signup
 
 # ---------------------------------------------------------------------------
 # Test helpers

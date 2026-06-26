@@ -14,8 +14,8 @@ import uuid
 
 from httpx import ASGITransport, AsyncClient
 
-from flow_api.main import app
-from flow_core.services import agent_tokens as svc
+from mycelium_api.main import app
+from mycelium_core.services import agent_tokens as svc
 
 
 def _email() -> str:
@@ -177,9 +177,9 @@ async def test_non_owner_cannot_mint() -> None:
     async with AsyncClient(transport=transport, base_url="http://t") as c:
         # Owner signs up + mints OK; a second account is invited as a
         # member and the same POST must be rejected with 403.
-        from flow_core.db import admin_session, tenant_session
-        from flow_core.models.membership import Membership, Role
-        from flow_core.services.auth import login, signup
+        from mycelium_core.db import admin_session, tenant_session
+        from mycelium_core.models.membership import Membership, Role
+        from mycelium_core.services.auth import login, signup
 
         owner_email = _email()
         member_email = _email()

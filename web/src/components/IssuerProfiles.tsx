@@ -9,9 +9,9 @@ type Counter = components['schemas']['InvoiceCounterOut']
 
 // Per-(issuer, series, year) progressive override. Used when migrating
 // invoices from another billing system: raise last_number to the last
-// emitted-elsewhere value, so the next Flow allocation continues from
+// emitted-elsewhere value, so the next Mycelium allocation continues from
 // there. The backend rejects a value below the max number already
-// transmitted in Flow under the same key.
+// transmitted in Mycelium under the same key.
 function IssuerCounters({ profileId }: { profileId: string }) {
   const { t } = useTranslation()
   const [rows, setRows] = useState<Counter[]>([])
@@ -238,7 +238,7 @@ const EMPTY = {
 type Form = typeof EMPTY
 
 // FatturaPA 1.2 closed enums (kept in sync with
-// flow_core.services.payment_methods). Order matches the SdI table.
+// mycelium_core.services.payment_methods). Order matches the SdI table.
 const CONDIZIONI: ReadonlyArray<readonly [string, string]> = [
   ['TP01', 'pagamento a rate'],
   ['TP02', 'pagamento completo'],

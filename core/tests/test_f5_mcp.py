@@ -10,14 +10,14 @@ from collections.abc import Iterator
 
 import pytest
 
-from flow_core.db import admin_session
-from flow_core.email_connector import (
+from mycelium_core.db import admin_session
+from mycelium_core.email_connector import (
     FetchedMessage,
     OutgoingMessage,
     set_connector_override,
 )
-from flow_core.services.auth import signup
-from flow_mcp.server import (
+from mycelium_core.services.auth import signup
+from mycelium_mcp.server import (
     create_email_account,
     email_to_task,
     list_email_messages,
@@ -41,7 +41,7 @@ class FakeConnector:
         ]
 
     async def send(self, message: OutgoingMessage) -> str:
-        return "<sent-mcp@flow>"
+        return "<sent-mcp@mycelium>"
 
 
 @pytest.fixture
@@ -90,4 +90,4 @@ async def test_mcp_email(_override: None) -> None:
         subject="hi",
         body_text="body",
     )
-    assert sent["sent_id"] == "<sent-mcp@flow>"
+    assert sent["sent_id"] == "<sent-mcp@mycelium>"

@@ -1,8 +1,8 @@
 # MCP coverage
 
-Inventory of every `@mcp.tool()` exposed by `mcp/src/flow_mcp/server.py`,
+Inventory of every `@mcp.tool()` exposed by `mcp/src/mycelium_mcp/server.py`,
 grouped by domain, with the corresponding service-layer entry point and
-the scope key (`core/src/flow_core/mcp_scopes.py`) that will gate each
+the scope key (`core/src/mycelium_core/mcp_scopes.py`) that will gate each
 tool when the per-assistant scope filter is wired
 (`SCOPE_CATALOG.<key>`, currently advisory: enforcement is the deferred
 "hook each `@mcp.tool()` to a scope key" item flagged in
@@ -40,7 +40,7 @@ logic except `note_parts.get_part`):
 - **Memory**: `memory_get_blob`, `memory_attach_tag`,
   `memory_detach_tag`, `memory_recompute_tiers` (workspace-wide tier
   recompute; NOT per-blob — the service function is org-scoped).
-- **Gateway efficiency** (`mcp/src/flow_mcp/gateway.py`): `_DOMAIN_RULES`
+- **Gateway efficiency** (`mcp/src/mycelium_mcp/gateway.py`): `_DOMAIN_RULES`
   refreshed — added a `navigation` domain (matched first, so link/
   relation/resolve tools are not swallowed by the note/task rules) and a
   `notes` domain split out from `memory`; dropped the `recompute` keyword
@@ -69,11 +69,11 @@ the HTTP request body (`curl --data-binary @file`), never a tool
 argument, and lands straight in the Postgres TEXT column
 (`note_part.body` / `annotation.body`), so the write is token-free and
 needs NO S3 backend. Each MCP tool only returns a ready-to-run `curl`
-(`$FLOW_TOKEN` + `<path-to-file>` placeholders; the token is never
+(`$MYCELIUM_TOKEN` + `<path-to-file>` placeholders; the token is never
 echoed); the actual write is a streaming REST endpoint that goes through
 `tenant_ctx` (same RLS / membership gate as every other write). The
 streamed body is size-capped at `note_body_max_bytes` and UTF-8 decoded
-(`api/src/flow_api/textstream.py`).
+(`api/src/mycelium_api/textstream.py`).
 
 | MCP `*_instructions` tool | streaming endpoint | service entry point | scope key |
 | --- | --- | --- | --- |
@@ -100,14 +100,14 @@ Notes:
 ## Convention
 
 - `path:line` columns point at the symbol declaration. The MCP path is
-  always `mcp/src/flow_mcp/server.py`; the service path is always
-  `core/src/flow_core/services/<module>.py`.
+  always `mcp/src/mycelium_mcp/server.py`; the service path is always
+  `core/src/mycelium_core/services/<module>.py`.
 - "Scope key" is the entry from `SCOPE_CATALOG` in `mcp_scopes.py`.
   When a tool acts on data of more than one family (e.g. tools that
   attach a tag to a task), I report the **most specific** key (for
   `add_task_tag` that is `tasks:write`, not `tags:write`, because the
   mutation lives on the task row).
-- "GAP" means: the service-layer function exists in `flow_core` (and
+- "GAP" means: the service-layer function exists in `mycelium_core` (and
   may be reachable from REST or SPA) but is **not exposed as an MCP
   tool**. Items marked "GAP (no service)" need both a service entry
   and a tool.
@@ -182,7 +182,7 @@ GAPs (tasks domain, no MCP tool):
   tasks.py:221), but the tool surface forces the agent to over-fetch
   and filter client-side. Expose a `list_tasks` overload (or a
   `search_tasks`) that accepts the same shape as
-  `api/src/flow_api/routers/tasks.py` query params. Scope:
+  `api/src/mycelium_api/routers/tasks.py` query params. Scope:
   `tasks:read`.
 - **Bulk state change**. REST has a batch endpoint
   (`POST /tasks/bulk-state`); the service path uses
@@ -763,13 +763,13 @@ GAPs (notifications):
 
 | Tool | Server line | Service entry | Scope key |
 |---|---|---|---|
-| `ping` | server.py:108 | (none; returns `flow-core <version>`) | (unscoped; liveness probe) |
+| `ping` | server.py:108 | (none; returns `mycelium-core <version>`) | (unscoped; liveness probe) |
 
 ---
 
 ## Cross-cutting gaps
 
-These are **whole subsystems** present in `flow_core/services/` that
+These are **whole subsystems** present in `mycelium_core/services/` that
 have **zero MCP surface**. Whether they should is a design call, not
 just an oversight:
 

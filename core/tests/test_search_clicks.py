@@ -13,12 +13,12 @@ import uuid
 import pytest
 from sqlalchemy import select
 
-from flow_core.db import admin_session, tenant_session
-from flow_core.errors import DomainError
-from flow_core.models.search_click import SearchClick
-from flow_core.services import garden_health as health_svc
-from flow_core.services import search_clicks as svc
-from flow_core.services.auth import signup
+from mycelium_core.db import admin_session, tenant_session
+from mycelium_core.errors import DomainError
+from mycelium_core.models.search_click import SearchClick
+from mycelium_core.services import garden_health as health_svc
+from mycelium_core.services import search_clicks as svc
+from mycelium_core.services.auth import signup
 
 
 async def _org_user() -> tuple[uuid.UUID, uuid.UUID]:

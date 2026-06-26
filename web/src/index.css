@@ -4786,7 +4786,7 @@ button.btn--danger:hover {
   z-index: 5;
 }
 /* Edge opacity for focus/fade is written inline by the displayEdges
-   overlay onto the <path> (inline style beats CSS there); React Flow
+   overlay onto the <path> (inline style beats CSS there); React Mycelium
    puts the mm-edge--* class on the wrapper <g>, so the transition has
    to target the inner path or it never fires. */
 .react-flow__edge.mm-edge--faded .react-flow__edge-path,

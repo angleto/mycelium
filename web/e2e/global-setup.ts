@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url'
 // external DB seeding and keeps zero personal data in the repo: it
 // ensures a neutral admin (E2E_EMAIL/E2E_PASSWORD) exists via the
 // same service-path bootstrap production uses
-// (flow_core.bootstrap_admin sets is_admin=True; an existing user is
+// (mycelium_core.bootstrap_admin sets is_admin=True; an existing user is
 // left untouched, so re-runs are safe). It targets the SAME database
 // the externally-run test uvicorn serves; the defaults match
 // deploy/local + conftest + ci.yml (well-known local test fixtures,
@@ -16,19 +16,19 @@ export const E2E_PASSWORD = 'E2eAdminPw123'
 
 export default function globalSetup(): void {
   const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..')
-  execFileSync('uv', ['run', 'python', '-m', 'flow_core.bootstrap_admin'], {
+  execFileSync('uv', ['run', 'python', '-m', 'mycelium_core.bootstrap_admin'], {
     cwd: repoRoot,
     env: {
       ...process.env,
-      FLOW_ADMIN_EMAIL: E2E_EMAIL,
-      FLOW_ADMIN_PASSWORD: E2E_PASSWORD,
-      FLOW_DATABASE_URL:
-        process.env.FLOW_DATABASE_URL ??
+      MYCELIUM_ADMIN_EMAIL: E2E_EMAIL,
+      MYCELIUM_ADMIN_PASSWORD: E2E_PASSWORD,
+      MYCELIUM_DATABASE_URL:
+        process.env.MYCELIUM_DATABASE_URL ??
         'postgresql+asyncpg://flow_app:flow_app@localhost:5432/flow',
-      FLOW_JWT_SECRET:
-        process.env.FLOW_JWT_SECRET ?? 'local-dev-only-secret-min-32-bytes-aaaa',
-      FLOW_SECRET_KEY:
-        process.env.FLOW_SECRET_KEY ??
+      MYCELIUM_JWT_SECRET:
+        process.env.MYCELIUM_JWT_SECRET ?? 'local-dev-only-secret-min-32-bytes-aaaa',
+      MYCELIUM_SECRET_KEY:
+        process.env.MYCELIUM_SECRET_KEY ??
         'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=',
     },
     stdio: 'inherit',

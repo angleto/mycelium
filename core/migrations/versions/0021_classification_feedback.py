@@ -8,7 +8,7 @@ trail that makes ``garden_apply`` and the auto-promotion reversible.
 
 RLS pattern mirrors 0011 (note_part): ENABLE + FORCE row level security,
 an org-predicate policy for both USING and WITH CHECK, and the
-``flow_app`` grant.
+``mycelium_app`` grant.
 
 Revision ID: 0021
 Revises: 0020
@@ -93,7 +93,9 @@ def upgrade() -> None:
         f"CREATE POLICY p_classification_feedback ON classification_feedback "
         f"USING ({_ORG_PRED}) WITH CHECK ({_ORG_PRED})"
     )
-    op.execute("GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE classification_feedback TO flow_app")
+    op.execute(
+        "GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE classification_feedback TO mycelium_app"
+    )
 
 
 def downgrade() -> None:

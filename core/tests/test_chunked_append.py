@@ -12,10 +12,10 @@ from __future__ import annotations
 
 import uuid
 
-from flow_core.db import admin_session
-from flow_core.errors import ConflictError
-from flow_core.services.auth import signup
-from flow_mcp.server import (
+from mycelium_core.db import admin_session
+from mycelium_core.errors import ConflictError
+from mycelium_core.services.auth import signup
+from mycelium_mcp.server import (
     append_note_part,
     create_note,
     get_note_part,

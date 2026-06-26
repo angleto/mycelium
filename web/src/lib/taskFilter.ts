@@ -33,7 +33,7 @@ import type { components } from '../api/schema'
 // in-app "back to tasks" link return to the same filtered list whatever
 // entry point opened the task. sessionStorage, so it is tab-scoped and
 // ephemeral.
-export const TASKS_LASTSEARCH_KEY = 'flow.tasks.lastSearch'
+export const TASKS_LASTSEARCH_KEY = 'mycelium.tasks.lastSearch'
 
 type Task = components['schemas']['TaskOut']
 

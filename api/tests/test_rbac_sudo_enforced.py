@@ -18,7 +18,7 @@ from decimal import Decimal
 
 from httpx import ASGITransport, AsyncClient
 
-from flow_api.main import app
+from mycelium_api.main import app
 
 
 def _email() -> str:

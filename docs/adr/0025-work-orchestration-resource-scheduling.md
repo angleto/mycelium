@@ -21,7 +21,7 @@ bottleneck is the resource and not logical precedence, the binding
 constraint is the **critical chain** (CCPM), not the critical path;
 today's critical path is therefore optimistic.
 
-The broader ambition: Flow is a personal-work orchestrator that should
+The broader ambition: Mycelium is a personal-work orchestrator that should
 also orchestrate LLM agents — run them in parallel at maximum
 efficiency, delegate the right number of tasks, and pass coordination
 messages LLM↔LLM, LLM↔human, human↔human.
@@ -46,7 +46,7 @@ Locked with the product owner (2026-05-19):
    schedule-generation scheme), consistent with the "deterministic
    schedule" contract — no opaque solver.
 
-### Architecture (strata, each built on existing Flow systems)
+### Architecture (strata, each built on existing Mycelium systems)
 
 - **Executor** (new first-class): `kind` human|llm_agent. Human →
   a User + a working calendar + `context_switch_cost`. LLM agent →
@@ -63,7 +63,7 @@ Locked with the product owner (2026-05-19):
   and Σcost ≤ budget; a Little's-law-informed WIP target ("the right
   number to delegate"); capability matching task→agent.
 - **Agent execution runtime**: a scheduled `llm_agent` task triggers
-  an agent run in `flow_worker`, driven against Flow's **own MCP
+  an agent run in `mycelium_worker`, driven against Mycelium's **own MCP
   control surface** (already complete) scoped to the task context
   (note↔task link, memory channel). Metered (billing), bounded
   (budget/steps/tool-allowlist), pausable/killable. Results return as
@@ -74,7 +74,7 @@ Locked with the product owner (2026-05-19):
   delivered to a human via the existing notification + note↔task +
   memory substrate. Same primitive for LLM↔LLM, LLM↔human,
   human↔human (contract-net delegation over a shared blackboard =
-  Flow memory).
+  Mycelium memory).
 - **Governance**: autonomous LLM execution on real data needs
   guardrails from day one — credit budget caps, tool allowlist via
   MCP scoping, human-in-the-loop approval gates for sensitive tools,
@@ -88,7 +88,7 @@ Locked with the product owner (2026-05-19):
   shows a feasible plan + projected makespan/cost + critical chain.
 - **P2**: Executor registry + admission-control dispatch (assignable
   plan respecting per-agent WIP/budget/capability; no execution yet).
-- **P3**: Agent execution runtime over MCP in `flow_worker` (one LLM
+- **P3**: Agent execution runtime over MCP in `mycelium_worker` (one LLM
   task end-to-end: spawn → work → artifact → complete; metered,
   bounded, killable).
 - **P4**: Coordination/handoff protocol on notifications + note/memory

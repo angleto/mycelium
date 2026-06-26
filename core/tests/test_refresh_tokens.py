@@ -15,10 +15,10 @@ import uuid
 import pytest
 from sqlalchemy import select
 
-from flow_core.db import admin_session
-from flow_core.errors import AuthError
-from flow_core.models.auth_tokens import RefreshToken
-from flow_core.services.auth import (
+from mycelium_core.db import admin_session
+from mycelium_core.errors import AuthError
+from mycelium_core.models.auth_tokens import RefreshToken
+from mycelium_core.services.auth import (
     login,
     refresh_session,
     revoke_refresh_family,
@@ -39,7 +39,7 @@ async def _signup_login() -> tuple[uuid.UUID, str]:
 
 
 async def _email_of(user_id: uuid.UUID) -> str:
-    from flow_core.models.user import User
+    from mycelium_core.models.user import User
 
     async with admin_session() as s:
         u = (await s.execute(select(User).where(User.id == user_id))).scalar_one()
@@ -48,7 +48,7 @@ async def _email_of(user_id: uuid.UUID) -> str:
 
 async def test_login_returns_refresh_and_persists_hash() -> None:
     user_id, raw = await _signup_login()
-    assert raw.startswith("flow_rt_")
+    assert raw.startswith("mycelium_rt_")
     async with admin_session() as s:
         rows = (
             (await s.execute(select(RefreshToken).where(RefreshToken.user_id == user_id)))
@@ -144,4 +144,4 @@ async def test_expired_refresh_rejected() -> None:
 async def test_unknown_refresh_rejected_silently_on_logout() -> None:
     # Logout-style revoke on an unknown token must NOT raise (no oracle).
     async with admin_session() as s:
-        await revoke_refresh_family(s, raw_refresh="flow_rt_nope-nope-nope")
+        await revoke_refresh_family(s, raw_refresh="mycelium_rt_nope-nope-nope")

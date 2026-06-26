@@ -15,14 +15,14 @@ from collections.abc import Iterator
 import pytest
 from sqlalchemy import select
 
-from flow_core.db import admin_session, tenant_session
-from flow_core.models.note import Note
-from flow_core.models.notification import NotificationChannelKind, NotificationPref
-from flow_core.models.task import Task
-from flow_core.models.telegram import TelegramLink, TelegramLinkCode, TelegramUpdate
-from flow_core.services import telegram_link as svc
-from flow_core.services.auth import signup
-from flow_core.telegram_client import (
+from mycelium_core.db import admin_session, tenant_session
+from mycelium_core.models.note import Note
+from mycelium_core.models.notification import NotificationChannelKind, NotificationPref
+from mycelium_core.models.task import Task
+from mycelium_core.models.telegram import TelegramLink, TelegramLinkCode, TelegramUpdate
+from mycelium_core.services import telegram_link as svc
+from mycelium_core.services.auth import signup
+from mycelium_core.telegram_client import (
     TelegramApi,
     TelegramSendResult,
     TelegramSetWebhookResult,
@@ -103,13 +103,15 @@ async def test_create_link_code_returns_deep_link_and_invalidates_previous() -> 
     org, user = await _signup()
     async with tenant_session(str(org), str(user)) as s:
         first = await svc.create_link_code(
-            s, org_id=org, user_id=user, bot_username="flow_test_bot"
+            s, org_id=org, user_id=user, bot_username="mycelium_test_bot"
         )
-        assert first.deep_link == telegram_deep_link(bot_username="flow_test_bot", code=first.code)
+        assert first.deep_link == telegram_deep_link(
+            bot_username="mycelium_test_bot", code=first.code
+        )
         # Second mint invalidates the first (consumed_at set on the
         # previous unconsumed row).
         second = await svc.create_link_code(
-            s, org_id=org, user_id=user, bot_username="flow_test_bot"
+            s, org_id=org, user_id=user, bot_username="mycelium_test_bot"
         )
         assert second.code != first.code
         rows = (
@@ -169,7 +171,7 @@ async def test_start_with_valid_code_links_and_syncs_pref(_fake_tg: FakeTelegram
     org, user = await _signup()
     async with tenant_session(str(org), str(user)) as s:
         issued = await svc.create_link_code(
-            s, org_id=org, user_id=user, bot_username="flow_test_bot"
+            s, org_id=org, user_id=user, bot_username="mycelium_test_bot"
         )
 
     chat_id = uuid.uuid4().int & 0xFFFFFFFF  # uniqueness across test runs
@@ -200,7 +202,7 @@ async def test_webhook_is_idempotent_by_update_id() -> None:
     org, user = await _signup()
     async with tenant_session(str(org), str(user)) as s:
         issued = await svc.create_link_code(
-            s, org_id=org, user_id=user, bot_username="flow_test_bot"
+            s, org_id=org, user_id=user, bot_username="mycelium_test_bot"
         )
     update_id = _uid()
     chat_id = uuid.uuid4().int & 0xFFFFFFFF
@@ -228,7 +230,7 @@ async def test_note_command_creates_note() -> None:
     org, user = await _signup()
     async with tenant_session(str(org), str(user)) as s:
         issued = await svc.create_link_code(
-            s, org_id=org, user_id=user, bot_username="flow_test_bot"
+            s, org_id=org, user_id=user, bot_username="mycelium_test_bot"
         )
     chat_id = uuid.uuid4().int & 0xFFFFFFFF
     await svc.handle_webhook_update(
@@ -241,7 +243,7 @@ async def test_note_command_creates_note() -> None:
     async with tenant_session(str(org), str(user)) as s:
         note = (await s.execute(select(Note).where(Note.id == outcome.note_id))).scalar_one()
         # Phase 6 final: body lives in note_part(ord=0).
-        from flow_core.services.notes import get_body as _get_body
+        from mycelium_core.services.notes import get_body as _get_body
 
         assert (await _get_body(s, note_id=note.id)) == "Pay invoice tomorrow"
 
@@ -250,7 +252,7 @@ async def test_plain_text_is_not_stored_and_returns_hint() -> None:
     org, user = await _signup()
     async with tenant_session(str(org), str(user)) as s:
         issued = await svc.create_link_code(
-            s, org_id=org, user_id=user, bot_username="flow_test_bot"
+            s, org_id=org, user_id=user, bot_username="mycelium_test_bot"
         )
     chat_id = uuid.uuid4().int & 0xFFFFFFFF
     await svc.handle_webhook_update(
@@ -268,7 +270,7 @@ async def test_task_prefix_creates_task_not_note() -> None:
     org, user = await _signup()
     async with tenant_session(str(org), str(user)) as s:
         issued = await svc.create_link_code(
-            s, org_id=org, user_id=user, bot_username="flow_test_bot"
+            s, org_id=org, user_id=user, bot_username="mycelium_test_bot"
         )
     chat_id = uuid.uuid4().int & 0xFFFFFFFF
     await svc.handle_webhook_update(
@@ -287,7 +289,7 @@ async def test_help_command_replies_without_storing() -> None:
     org, user = await _signup()
     async with tenant_session(str(org), str(user)) as s:
         issued = await svc.create_link_code(
-            s, org_id=org, user_id=user, bot_username="flow_test_bot"
+            s, org_id=org, user_id=user, bot_username="mycelium_test_bot"
         )
     chat_id = uuid.uuid4().int & 0xFFFFFFFF
     await svc.handle_webhook_update(
@@ -305,7 +307,7 @@ async def test_unknown_command_is_not_saved_as_note() -> None:
     org, user = await _signup()
     async with tenant_session(str(org), str(user)) as s:
         issued = await svc.create_link_code(
-            s, org_id=org, user_id=user, bot_username="flow_test_bot"
+            s, org_id=org, user_id=user, bot_username="mycelium_test_bot"
         )
     chat_id = uuid.uuid4().int & 0xFFFFFFFF
     await svc.handle_webhook_update(
@@ -337,7 +339,7 @@ async def test_link_is_user_scoped_other_user_cannot_see() -> None:
     org_b, user_b = await _signup()
     async with tenant_session(str(org_a), str(user_a)) as s:
         issued = await svc.create_link_code(
-            s, org_id=org_a, user_id=user_a, bot_username="flow_test_bot"
+            s, org_id=org_a, user_id=user_a, bot_username="mycelium_test_bot"
         )
     chat_id = uuid.uuid4().int & 0xFFFFFFFF
     await svc.handle_webhook_update(
@@ -354,7 +356,9 @@ async def test_link_codes_are_org_isolated() -> None:
     org_a, user_a = await _signup()
     org_b, user_b = await _signup()
     async with tenant_session(str(org_a), str(user_a)) as s:
-        await svc.create_link_code(s, org_id=org_a, user_id=user_a, bot_username="flow_test_bot")
+        await svc.create_link_code(
+            s, org_id=org_a, user_id=user_a, bot_username="mycelium_test_bot"
+        )
     async with tenant_session(str(org_b), str(user_b)) as s:
         rows = (await s.execute(select(TelegramLinkCode))).scalars().all()
         assert rows == []
@@ -370,7 +374,7 @@ async def test_voice_transcription_failure_tells_user(_fake_tg: FakeTelegramApi)
     from the image, task 44ba3f14), the voice note is still saved and the
     reply says transcription is unavailable instead of implying success.
     Any transcribe failure (STT or metering) takes this branch."""
-    from flow_core.ai_providers import set_stt_override
+    from mycelium_core.ai_providers import set_stt_override
 
     class _RaisingSTT:
         model_id = "raising-stt"
@@ -381,7 +385,7 @@ async def test_voice_transcription_failure_tells_user(_fake_tg: FakeTelegramApi)
     org, user = await _signup()
     async with tenant_session(str(org), str(user)) as s:
         issued = await svc.create_link_code(
-            s, org_id=org, user_id=user, bot_username="flow_test_bot"
+            s, org_id=org, user_id=user, bot_username="mycelium_test_bot"
         )
     chat_id = uuid.uuid4().int & 0xFFFFFFFF
     await svc.handle_webhook_update(
@@ -416,7 +420,7 @@ async def _linked_user(_fake_tg: FakeTelegramApi) -> tuple[uuid.UUID, uuid.UUID,
     org, user = await _signup()
     async with tenant_session(str(org), str(user)) as s:
         issued = await svc.create_link_code(
-            s, org_id=org, user_id=user, bot_username="flow_test_bot"
+            s, org_id=org, user_id=user, bot_username="mycelium_test_bot"
         )
     chat_id = uuid.uuid4().int & 0xFFFFFFFF
     await svc.handle_webhook_update(
@@ -431,7 +435,7 @@ async def _seed_stt_billing(org: uuid.UUID, user: uuid.UUID) -> None:
     the strict ``billing.meter``, which errors on a missing card."""
     from decimal import Decimal
 
-    from flow_core.services import billing
+    from mycelium_core.services import billing
 
     async with tenant_session(str(org), str(user)) as s:
         await billing.grant_credits(s, org_id=org, actor_id=user, amount=Decimal(1000))
@@ -452,7 +456,7 @@ async def _seed_stt_billing(org: uuid.UUID, user: uuid.UUID) -> None:
 def _fake_stt() -> Iterator[None]:
     from _fake_ai import FakeSTT
 
-    from flow_core.ai_providers import set_stt_override
+    from mycelium_core.ai_providers import set_stt_override
 
     set_stt_override(FakeSTT)
     try:
@@ -464,8 +468,8 @@ def _fake_stt() -> Iterator[None]:
 async def test_voice_without_caption_creates_voice_note_with_transcript(
     _fake_tg: FakeTelegramApi, _fake_stt: None
 ) -> None:
-    from flow_core.models.note import NoteKind, NoteStatus
-    from flow_core.services.notes import get_body
+    from mycelium_core.models.note import NoteKind, NoteStatus
+    from mycelium_core.services.notes import get_body
 
     org, user, chat_id = await _linked_user(_fake_tg)
     await _seed_stt_billing(org, user)
@@ -532,7 +536,7 @@ async def test_voice_caption_task_without_transcript_uses_placeholder(
     """STT down + caption ``task`` with no title text: the promotion
     still happens (the task is the user's explicit intent) and the
     title falls back to the generic placeholder."""
-    from flow_core.ai_providers import set_stt_override
+    from mycelium_core.ai_providers import set_stt_override
 
     class _RaisingSTT:
         model_id = "raising-stt"
@@ -571,7 +575,7 @@ async def test_voice_caption_without_prefix_stays_note(
 
 
 async def test_telegram_notification_sender_calls_api(_fake_tg: FakeTelegramApi) -> None:
-    from flow_core.services.notifications_telegram import TelegramNotificationSender
+    from mycelium_core.services.notifications_telegram import TelegramNotificationSender
 
     class FallbackSender:
         async def send(
@@ -597,7 +601,7 @@ async def test_telegram_notification_sender_calls_api(_fake_tg: FakeTelegramApi)
 async def test_telegram_notification_sender_rejects_invalid_target(
     _fake_tg: FakeTelegramApi,
 ) -> None:
-    from flow_core.services.notifications_telegram import TelegramNotificationSender
+    from mycelium_core.services.notifications_telegram import TelegramNotificationSender
 
     class _Noop:
         async def send(self, **_: object) -> None:

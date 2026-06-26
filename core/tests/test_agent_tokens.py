@@ -19,14 +19,14 @@ import uuid
 import pytest
 from sqlalchemy import select, update
 
-from flow_core.db import admin_session, tenant_session
-from flow_core.errors import AuthError, ForbiddenError
-from flow_core.i18n import MessageCode
-from flow_core.models.agent_token import AgentToken
-from flow_core.models.membership import Role
-from flow_core.security import decode_token_async
-from flow_core.services import agent_tokens as svc
-from flow_core.services.auth import login, signup
+from mycelium_core.db import admin_session, tenant_session
+from mycelium_core.errors import AuthError, ForbiddenError
+from mycelium_core.i18n import MessageCode
+from mycelium_core.models.agent_token import AgentToken
+from mycelium_core.models.membership import Role
+from mycelium_core.security import decode_token_async
+from mycelium_core.services import agent_tokens as svc
+from mycelium_core.services.auth import login, signup
 
 
 def _email() -> str:
@@ -73,7 +73,7 @@ async def test_mint_owner_gated_member_forbidden() -> None:
     org_a, owner, _ = await _signup()
     _, second_user, _ = await _signup()
     # Add the second user as a member to org_a (not owner).
-    from flow_core.models.membership import Membership
+    from mycelium_core.models.membership import Membership
 
     async with tenant_session(str(org_a), str(owner)) as s:
         s.add(Membership(org_id=org_a, user_id=second_user, role=Role.member))

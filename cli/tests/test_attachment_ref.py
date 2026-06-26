@@ -8,7 +8,7 @@ public url.
 
 from __future__ import annotations
 
-from flow_cli.cmds._common import attachment_markdown_ref
+from mycelium_cli.cmds._common import attachment_markdown_ref
 
 
 def test_non_image_is_link() -> None:

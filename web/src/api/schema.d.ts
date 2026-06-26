@@ -3686,7 +3686,7 @@ export interface paths {
          *     ``set_note_part_body_instructions`` tool for the matching ``curl``.
          *
          *     Auth accepts a normal bearer (JWT / agent token, with X-Workspace-Id)
-         *     or a scoped one-time capability token (``flow_cap_``) for this exact
+         *     or a scoped one-time capability token (``mycelium_cap_``) for this exact
          *     part, minted by the MCP ``set_note_part_body_capability`` tool and
          *     consumed here on success.
          */
@@ -4567,12 +4567,12 @@ export interface paths {
         /**
          * Mint Download Capability
          * @description Mint a parent-scoped, multi-use ``attachment:read`` capability token
-         *     (``flow_cap_``) that downloads EVERY attachment of a note or task with no
+         *     (``mycelium_cap_``) that downloads EVERY attachment of a note or task with no
          *     PAT and no X-Workspace-Id, and return the parent's attachment metadata so
          *     the caller can build a ``curl`` per file. Member-gated (``mint`` enforces
          *     the same floor a download does, so the token grants nothing the caller did
          *     not already hold). The raw token is returned exactly once; it is multi-use
-         *     until ``expires_at`` and never consumed. Powers ``flow attachments
+         *     until ``expires_at`` and never consumed. Powers ``mycelium attachments
          *     download-capability``; the MCP ``download_attachment_capability`` tool mints
          *     the same grant directly through the service.
          */

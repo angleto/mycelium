@@ -10,9 +10,9 @@ from __future__ import annotations
 import datetime as dt
 import uuid
 
-from flow_core.models.task import Necessity, Task
-from flow_core.models.task_checklist_item import TaskChecklistItem
-from flow_core.services.task_search import (
+from mycelium_core.models.task import Necessity, Task
+from mycelium_core.models.task_checklist_item import TaskChecklistItem
+from mycelium_core.services.task_search import (
     content_hash,
     render_task_for_search,
 )

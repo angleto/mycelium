@@ -138,7 +138,7 @@ export function TimeRoute() {
   // — three buckets only: task / project / client. Persisted in
   // localStorage; default = project.
   type PieGroup = 'task' | 'project' | 'client'
-  const PIE_KEY = 'flow.time.pieGroup'
+  const PIE_KEY = 'mycelium.time.pieGroup'
   const [pieGroup, setPieGroup] = useState<PieGroup>(() => {
     try {
       const saved = localStorage.getItem(PIE_KEY)
@@ -303,7 +303,7 @@ export function TimeRoute() {
     await downloadCsv(
       '/time/report.csv',
       reportQuery() as Record<string, string | boolean>,
-      `flow-time-report-${today}.csv`,
+      `mycelium-time-report-${today}.csv`,
     )
   }, [downloadCsv, reportQuery])
 
@@ -319,7 +319,7 @@ export function TimeRoute() {
     if (clientId) q.client_tag_id = clientId
     if (projectId) q.project_tag_id = projectId
     const today = new Date().toISOString().slice(0, 10)
-    await downloadCsv('/time/entries.csv', q, `flow-time-entries-${today}.csv`)
+    await downloadCsv('/time/entries.csv', q, `mycelium-time-entries-${today}.csv`)
   }, [downloadCsv, from, to, billableF, clientId, projectId])
 
   const loadReport = useCallback(async () => {

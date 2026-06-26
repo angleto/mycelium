@@ -18,7 +18,7 @@ infeasible.
 A **single shared channel**; the tenant's identity in the **FatturaPA
 payload** (`CedentePrestatore`, `TerzoIntermediarioOSoggettoEmittente`),
 never in the TLS identity. An explicit per-issuer-profile (per VAT
-subject) `SdiMandate` model (scope, validity, revocation, audit): Flow
+subject) `SdiMandate` model (scope, validity, revocation, audit): Mycelium
 transmits on the tenant's
 behalf under mandate and assumes the intermediary's operational duties
 (always-on inbound SOAP endpoint, notification correlation by
@@ -51,7 +51,7 @@ test, F7c production).
 
 ## Implementation status (2026-05-22)
 
-F7b implemented as code, config-gated on `FLOW_SDI_CHANNEL=sdicoop`: the
+F7b implemented as code, config-gated on `MYCELIUM_SDI_CHANNEL=sdicoop`: the
 `SdiMandate` is keyed per issuer profile (per VAT subject), not per Org,
 because one Org may hold several VAT subjects each authorizing transmission
 independently (consistent with the per-P.IVA `conservation_adhesion`). The

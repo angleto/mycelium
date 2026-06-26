@@ -33,7 +33,7 @@ const EMPTY_LINE = {
 }
 
 // FatturaPA 1.2 closed enums for the per-invoice payment overrides.
-// Kept in sync with flow_core.services.payment_methods.
+// Kept in sync with mycelium_core.services.payment_methods.
 const INV_CONDIZIONI: ReadonlyArray<readonly [string, string]> = [
   ['TP01', 'a rate'],
   ['TP02', 'completo'],
@@ -233,9 +233,9 @@ export function InvoicesRoute() {
 
   // Override the per-(issuer, series, year) counter so the next number
   // allocated for this client/year is N. Used when the user has
-  // already emitted invoice #N elsewhere and wants Flow to continue
+  // already emitted invoice #N elsewhere and wants Mycelium to continue
   // from #(N+1). The backend rejects any value below the max already
-  // emitted in Flow under the same key — that error is surfaced.
+  // emitted in Mycelium under the same key — that error is surfaced.
   async function saveStartingNumber() {
     if (!sel || !dIssuer) return
     setErr(null)

@@ -8,7 +8,7 @@ Refines, does not regress, ADR-0015 (RLS provisioning) and ADR-0002
 
 ## Context
 
-Flow is a personal assistant first, multi-tenant second. A person may
+Mycelium is a personal assistant first, multi-tenant second. A person may
 belong to several tenants but must never choose one at login, and must
 never log out to switch. The early scaffold asked for an "Organization
 name" at signup and bound the session to one org, which the user

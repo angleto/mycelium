@@ -1,4 +1,4 @@
-"""``flow what-now`` behaviour against a stubbed API (offline).
+"""``mycelium what-now`` behaviour against a stubbed API (offline).
 
 Covers the NarratedPlanOut envelope read (T4/T12) and the new selection +
 narrate flags. The API is stubbed with httpx.MockTransport so no backend is
@@ -15,9 +15,9 @@ import httpx
 from rich.console import Console
 from typer.testing import CliRunner
 
-from flow_cli import ui
-from flow_cli.cmds import what_now as wn
-from flow_cli.main import app
+from mycelium_cli import ui
+from mycelium_cli.cmds import what_now as wn
+from mycelium_cli.main import app
 
 runner = CliRunner()
 

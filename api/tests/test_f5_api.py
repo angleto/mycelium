@@ -12,8 +12,8 @@ from collections.abc import Iterator
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from flow_api.main import app
-from flow_core.email_connector import (
+from mycelium_api.main import app
+from mycelium_core.email_connector import (
     FetchedMessage,
     OutgoingMessage,
     set_connector_override,
@@ -39,7 +39,7 @@ class FakeConnector:
 
     async def send(self, message: OutgoingMessage) -> str:
         self.sent.append(message)
-        return "<sent-api@flow>"
+        return "<sent-api@mycelium>"
 
 
 @pytest.fixture

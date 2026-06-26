@@ -1,4 +1,4 @@
-"""``flow attachments download-capability`` against a stubbed API (offline).
+"""``mycelium attachments download-capability`` against a stubbed API (offline).
 
 The command mints a parent-scoped capability token and prints a ready
 ``curl -o`` per file, each carrying the ephemeral token (no PAT, no
@@ -14,14 +14,14 @@ import json
 import httpx
 from typer.testing import CliRunner
 
-from flow_cli.cmds import attachments as att_cmd
-from flow_cli.main import app
+from mycelium_cli.cmds import attachments as att_cmd
+from mycelium_cli.main import app
 
 runner = CliRunner()
 
 _TASK = "33333333-3333-3333-3333-333333333333"
 _PAYLOAD = {
-    "token": "flow_cap_" + "a" * 43,
+    "token": "mycelium_cap_" + "a" * 43,
     "expires_at": "2026-06-09T12:00:00+00:00",
     "parent_kind": "task",
     "parent_id": _TASK,
@@ -73,7 +73,7 @@ def test_download_capability_prints_a_curl_per_file(monkeypatch) -> None:
     assert cap["path"] == "/attachments/capability"
     assert cap["body"] == {"parent_kind": "task", "parent_id": _TASK, "ttl_seconds": 120}
     # One ready curl per attachment, carrying the ephemeral token + -o name.
-    assert "flow_cap_" + "a" * 43 in res.output
+    assert "mycelium_cap_" + "a" * 43 in res.output
     assert "http://test/attachments/11111111-1111-1111-1111-111111111111/download" in res.output
     assert "-o 'PDL GIUGNO.pdf'" in res.output
     assert "-o 'PDL MAGGIO.pdf'" in res.output
@@ -86,7 +86,7 @@ def test_download_capability_json_includes_built_curls(monkeypatch) -> None:
     assert res.exit_code == 0, res.output
     assert cap["body"]["ttl_seconds"] == 300  # default
     payload = json.loads(res.output)
-    assert payload["token"].startswith("flow_cap_")
+    assert payload["token"].startswith("mycelium_cap_")
     assert payload["attachments"][0]["curl"].startswith("curl -fsS ")
 
 

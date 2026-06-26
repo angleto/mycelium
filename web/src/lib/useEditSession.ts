@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef } from 'react'
 
 /** Coalescing-window TTL between two keystrokes that should still be
  * treated as part of the same web revision. Matches the server-side
- * COALESCE_WINDOW_SECONDS in flow_core.services.entity_revisions —
+ * COALESCE_WINDOW_SECONDS in mycelium_core.services.entity_revisions —
  * cross both ways so a slow client clock cannot accidentally extend
  * the window past what the server accepts. */
 const SESSION_IDLE_GAP_MS = 30_000

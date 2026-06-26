@@ -14,13 +14,13 @@ from decimal import Decimal
 import pytest
 from _fake_embedder import FakeEmbedder
 
-from flow_core.config import get_settings
-from flow_core.db import admin_session, tenant_session
-from flow_core.errors import DomainError
-from flow_core.services import billing
-from flow_core.services import memory as mem
-from flow_core.services.auth import signup
-from flow_worker import garden
+from mycelium_core.config import get_settings
+from mycelium_core.db import admin_session, tenant_session
+from mycelium_core.errors import DomainError
+from mycelium_core.services import billing
+from mycelium_core.services import memory as mem
+from mycelium_core.services.auth import signup
+from mycelium_worker import garden
 
 _FAKE = FakeEmbedder()
 
@@ -451,7 +451,7 @@ async def test_semantic_similarity_floor_drops_far_neighbours(
     """
     from sqlalchemy import update
 
-    from flow_core.models.organization import Organization
+    from mycelium_core.models.organization import Organization
 
     # Control the confounding relative floor; the semantic floor is the
     # variable under test. Read at retrieve()-time from module globals.
@@ -526,7 +526,7 @@ async def test_grader_floor_abstains_when_top_below_per_org_floor() -> None:
     the absolute RRF magnitude."""
     from sqlalchemy import update
 
-    from flow_core.models.organization import Organization
+    from mycelium_core.models.organization import Organization
 
     org, user = await _org("GRADER")
     proj = uuid.uuid4()
@@ -599,7 +599,7 @@ async def test_grader_floor_helper_off_sentinels() -> None:
         assert await mem.grader_min_rrf_floor(s, org) is None  # absent
         from sqlalchemy import update
 
-        from flow_core.models.organization import Organization
+        from mycelium_core.models.organization import Organization
 
         await s.execute(
             update(Organization)

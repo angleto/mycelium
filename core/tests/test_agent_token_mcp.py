@@ -13,10 +13,10 @@ from __future__ import annotations
 
 import uuid
 
-from flow_core.db import admin_session, tenant_session
-from flow_core.services import agent_tokens as svc
-from flow_core.services.auth import signup
-from flow_mcp.server import list_tags
+from mycelium_core.db import admin_session, tenant_session
+from mycelium_core.services import agent_tokens as svc
+from mycelium_core.services.auth import signup
+from mycelium_mcp.server import list_tags
 
 
 async def _signup() -> tuple[uuid.UUID, uuid.UUID]:
@@ -49,7 +49,7 @@ async def test_mcp_tenant_rejects_revoked_agent_token() -> None:
         r = await svc.mint(s, org_id=org, actor_id=user, name="claude")
         await svc.revoke(s, org_id=org, actor_id=user, token_id=r.token.id)
 
-    from flow_core.errors import AuthError
+    from mycelium_core.errors import AuthError
 
     try:
         await list_tags(token=r.raw, org_id="")

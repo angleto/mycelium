@@ -42,9 +42,9 @@ import pytest
 from _fake_embedder import FakeEmbedder
 from httpx import ASGITransport, AsyncClient
 
-from flow_api.main import app
-from flow_core.bootstrap_admin import ensure_admin
-from flow_core.embedder import set_embedder_override
+from mycelium_api.main import app
+from mycelium_core.bootstrap_admin import ensure_admin
+from mycelium_core.embedder import set_embedder_override
 
 # Seeded in the DB (determinism for a future ingest): the original
 # five integrations plus ``task`` (channel for task-search blobs).

@@ -13,7 +13,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from flow_worker import (
+from mycelium_worker import (
     dispatch,
     email_sync,
     embedding_migration,

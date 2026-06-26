@@ -1,12 +1,12 @@
 """E2E: the attachment download endpoint accepts a parent-scoped,
-multi-use capability token (``flow_cap_``) in addition to a normal bearer.
+multi-use capability token (``mycelium_cap_``) in addition to a normal bearer.
 
 Covers the agent-without-a-CLI path: an MCP-minted capability token scoped
 to ``attachment:read`` on a task/note pulls that parent's attachments to
 disk with no PAT and no X-Workspace-Id. Unlike the note-part write
 capability it is NOT single-use: one mint downloads every attachment of the
 parent until its TTL. It still confines access -- only attachments of the
-scoped parent, and only the download endpoint understands ``flow_cap_``.
+scoped parent, and only the download endpoint understands ``mycelium_cap_``.
 The normal-bearer path stays covered by ``test_attachments.py``.
 """
 
@@ -16,9 +16,9 @@ import uuid
 
 from httpx import ASGITransport, AsyncClient
 
-from flow_api.main import app
-from flow_core.db import tenant_session
-from flow_core.services import capability_tokens as svc
+from mycelium_api.main import app
+from mycelium_core.db import tenant_session
+from mycelium_core.services import capability_tokens as svc
 
 
 def _email() -> str:
@@ -128,7 +128,7 @@ async def test_mint_capability_endpoint_then_download() -> None:
         )
         assert minted.status_code == 201, minted.text
         grant = minted.json()
-        assert grant["token"].startswith("flow_cap_")
+        assert grant["token"].startswith("mycelium_cap_")
         assert grant["parent_kind"] == "task"
         assert [a["id"] for a in grant["attachments"]] == [aid]
 

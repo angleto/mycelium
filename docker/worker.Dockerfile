@@ -1,7 +1,7 @@
-# Flow worker — production image.
-# Build from the Flow repo root:
+# Mycelium worker — production image.
+# Build from the Mycelium repo root:
 #   docker build -f deploy/prod/dockerfiles/worker.Dockerfile \
-#     -t ghcr.io/angleto/flow/worker:<tag> .
+#     -t ghcr.io/angleto/mycelium/worker:<tag> .
 #
 # Same workspace venv as the backend; entrypoint is the worker module.
 FROM python:3.12-slim AS builder
@@ -47,12 +47,12 @@ COPY sdi-inbound sdi-inbound
 RUN --mount=type=cache,target=/root/.cache/uv uv sync --no-dev --inexact
 # Build-time guard: fail the build (not prod) if the final sync ever pruned
 # the ML extras or the workspace install broke their import.
-RUN /app/.venv/bin/python -c "import sentence_transformers, igraph, leidenalg, flow_worker; print('worker ml deps ok')"
+RUN /app/.venv/bin/python -c "import sentence_transformers, igraph, leidenalg, mycelium_worker; print('worker ml deps ok')"
 
 # ---
 
 FROM python:3.12-slim
-LABEL org.opencontainers.image.source="https://github.com/angleto/flow"
+LABEL org.opencontainers.image.source="https://github.com/angleto/mycelium"
 LABEL org.opencontainers.image.licenses="AGPL-3.0-or-later"
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -90,11 +90,11 @@ COPY --from=builder /app/sdi-inbound /app/sdi-inbound
 # `COPY .venv` blob (stable digest) instead of re-executing it and stamping fresh
 # mtimes -> a new 3 GB layer the node would re-pull each deploy. ARG/ENV create
 # no filesystem layer, so placing them here costs nothing. Surfaced by /api/buildinfo.
-ARG FLOW_VERSION=dev
-ARG FLOW_GIT_SHA=
-ARG FLOW_BUILD_AT=
-ENV FLOW_VERSION=${FLOW_VERSION} \
-    FLOW_GIT_SHA=${FLOW_GIT_SHA} \
-    FLOW_BUILD_AT=${FLOW_BUILD_AT}
+ARG MYCELIUM_VERSION=dev
+ARG MYCELIUM_GIT_SHA=
+ARG MYCELIUM_BUILD_AT=
+ENV MYCELIUM_VERSION=${MYCELIUM_VERSION} \
+    MYCELIUM_GIT_SHA=${MYCELIUM_GIT_SHA} \
+    MYCELIUM_BUILD_AT=${MYCELIUM_BUILD_AT}
 
-CMD ["python", "-m", "flow_worker.main"]
+CMD ["python", "-m", "mycelium_worker.main"]

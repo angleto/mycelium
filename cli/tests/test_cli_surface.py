@@ -68,7 +68,7 @@ def test_help_runs(argv: list[str], needle: str) -> None:
     # GitHub Actions set FORCE_COLOR=1 by default).
     env = {**os.environ, "NO_COLOR": "1", "TERM": "dumb"}
     result = subprocess.run(  # noqa: S603
-        [sys.executable, "-m", "flow_cli", *argv],
+        [sys.executable, "-m", "mycelium_cli", *argv],
         check=False,
         capture_output=True,
         text=True,

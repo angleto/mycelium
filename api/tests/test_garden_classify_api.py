@@ -14,9 +14,9 @@ import uuid
 
 from httpx import ASGITransport, AsyncClient
 
-from flow_api.main import app
-from flow_core.db import tenant_session
-from flow_core.services import garden_classify as gc
+from mycelium_api.main import app
+from mycelium_core.db import tenant_session
+from mycelium_core.services import garden_classify as gc
 
 
 def _email() -> str:

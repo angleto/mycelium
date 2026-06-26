@@ -18,7 +18,7 @@ type ClientFieldDef = {
 }
 
 // FatturaPA closed enums (kept in sync with
-// flow_core.services.payment_methods); only the most common subset
+// mycelium_core.services.payment_methods); only the most common subset
 // in the dropdowns (the backend accepts the full table).
 const CP_CONDIZIONI: ReadonlyArray<readonly [string, string]> = [
   ['TP01', 'a rate'],
@@ -41,7 +41,7 @@ const CP_MODALITA: ReadonlyArray<readonly [string, string]> = [
   ['MP23', 'PagoPA'],
 ]
 // Supported PDF locales (kept in sync with
-// flow_core.services.invoice_pdf._LABELS). The XML stays Italian; this
+// mycelium_core.services.invoice_pdf._LABELS). The XML stays Italian; this
 // only affects the courtesy PDF the customer reads.
 const CP_LANGUAGES: ReadonlyArray<readonly [string, string]> = [
   ['it', 'italiano'],
@@ -688,7 +688,7 @@ export function ClientsProjectsRoute() {
 // (default_issuer, client.invoice_series, current_year) counter so the
 // next invoice for this client gets the chosen N (sets last_number =
 // N - 1). Used when migrating from another system: e.g. you already
-// emitted #1 elsewhere, you want Flow to start from #2.
+// emitted #1 elsewhere, you want Mycelium to start from #2.
 //
 // Constraints surfaced to the user:
 // - The client must have an invoice_series (sezionale) and a default

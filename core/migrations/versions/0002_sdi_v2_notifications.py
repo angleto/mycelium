@@ -116,7 +116,9 @@ def upgrade() -> None:
         "USING (org_id = (NULLIF(current_setting('app.current_org', true), ''))::uuid) "
         "WITH CHECK (org_id = (NULLIF(current_setting('app.current_org', true), ''))::uuid)"
     )
-    op.execute("GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE invoice_notifications TO flow_app")
+    op.execute(
+        "GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE invoice_notifications TO mycelium_app"
+    )
 
     # --- received_invoice_notifications ---------------------------------------
     op.create_table(
@@ -194,7 +196,8 @@ def upgrade() -> None:
         "WITH CHECK (org_id = (NULLIF(current_setting('app.current_org', true), ''))::uuid)"
     )
     op.execute(
-        "GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE received_invoice_notifications TO flow_app"
+        "GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE "
+        "received_invoice_notifications TO mycelium_app"
     )
 
     # --- denormalized verdict columns ------------------------------------------
@@ -276,7 +279,7 @@ def upgrade() -> None:
             LIMIT 1
         $$
     """)
-    op.execute("GRANT EXECUTE ON FUNCTION sdi_resolve_received_invoice_org(text) TO flow_app")
+    op.execute("GRANT EXECUTE ON FUNCTION sdi_resolve_received_invoice_org(text) TO mycelium_app")
 
 
 def downgrade() -> None:

@@ -72,7 +72,7 @@ do not use it; they pin the timestamp via `start_at`. Reminders use
 
 ### No-ubiquity in multi-user
 
-Flow is a multi-user product (the current single-user deploy is a
+Mycelium is a multi-user product (the current single-user deploy is a
 deployment choice, not a system property). The original "no two
 appointments at the same time" requirement remains, scoped per
 identity: the EXCLUDE constraint keys on `assignee_id` (FK into

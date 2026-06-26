@@ -8,11 +8,11 @@ from collections.abc import Iterator
 
 import pytest
 
-from flow_core.db import admin_session
-from flow_core.models.notification import NotificationChannelKind
-from flow_core.notification_channel import NotificationSender, set_sender_override
-from flow_core.services.auth import signup
-from flow_mcp.server import (
+from mycelium_core.db import admin_session
+from mycelium_core.models.notification import NotificationChannelKind
+from mycelium_core.notification_channel import NotificationSender, set_sender_override
+from mycelium_core.services.auth import signup
+from mycelium_mcp.server import (
     dispatch_notifications,
     set_notification_pref,
 )
