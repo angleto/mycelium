@@ -1766,6 +1766,12 @@ export const it: Catalog = {
       'Cancellare definitivamente "{{title}}" e la sua memoria? Operazione irreversibile.',
     copyId: 'Copia ID nota',
     idCopied: 'ID copiato',
+    back: '← Note',
+    details: 'Dettagli',
+    connections: 'Collegamenti',
+    tabTasks: 'Task',
+    tabIdeas: 'Idee',
+    tabSuggestions: 'Suggerimenti',
   },
   invoices: {
     nav: 'Fatture',

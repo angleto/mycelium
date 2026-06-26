@@ -1269,6 +1269,11 @@ button.btn--danger:hover {
   align-items: baseline;
   gap: 0.5rem;
 }
+.linkedpanel__h {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
 .linkedpanel__section {
   display: flex;
   flex-direction: column;
@@ -1620,6 +1625,29 @@ button.btn--danger:hover {
    never pushed out of the note, and never covered by the editor. */
 .modal__body .atts {
   flex: 0 0 auto;
+}
+/* Full-bleed sheet on phones — opt-in via ``modal--sheet`` (the
+   create-note modal). The shared inset dialog wastes the screen on a
+   360px viewport and, fixed at 92vh, leaves the foot under the soft
+   keyboard. Scoped so the small confirm / lightbox modals that reuse
+   ``.modal__*`` stay as compact dialogs. Only the OUTER panel/backdrop
+   geometry changes: .modal__body stays the single scroller and the
+   .grow/.rte editor-overflow contract (above) is untouched, so 100dvh
+   only gives the body more height to distribute. */
+@media (max-width: 640px) {
+  .modal--sheet.modal__backdrop {
+    padding: 0;
+  }
+  .modal--sheet .modal__panel {
+    width: 100%;
+    max-width: none;
+    height: 100dvh;
+    border: 0;
+    border-radius: 0;
+  }
+  .modal--sheet .modal__head {
+    flex-wrap: wrap;
+  }
 }
 .chips {
   display: flex;
@@ -3857,6 +3885,160 @@ button.btn--danger:hover {
   background: var(--surface-2);
   font-size: 0.84rem;
 }
+
+/* ---- Note detail page (NoteDetailRoute) ----
+   The note editor moved from a non-responsive 92vh modal to a full page
+   mirroring TaskDetailRoute: a body-led main column, a collapsible
+   "Details" rail (linked task + timer + tags) and a tabbed "Connections"
+   region. Structure/layout only; the create modal on /notes keeps the
+   .modal__* rules. */
+.notedetail {
+  max-width: 78rem;
+}
+.notedetail__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.4rem 0.8rem;
+  flex-wrap: wrap;
+}
+.notedetail__back {
+  margin: 0;
+}
+.notedetail__headeractions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.notedetail__savestate {
+  white-space: nowrap;
+}
+.notedetail__headersep {
+  width: 1px;
+  align-self: stretch;
+  min-height: 1.4rem;
+  background: var(--border);
+  margin: 0 0.15rem;
+}
+/* Destructive cluster (Archive / Trash / Erase) is an atomic, right-
+   aligned, divided unit so a wrap never lands Save next to Erase. */
+.notedetail__headeractions-danger {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  margin-left: auto;
+  padding-left: 0.6rem;
+  border-left: 1px solid var(--border);
+}
+.notedetail__titleform {
+  margin: 0.6rem 0 0;
+}
+.notedetail__title {
+  width: 100%;
+  font-size: 1.15rem;
+  font-weight: 600;
+}
+.notedetail__title-h {
+  margin: 0.4rem 0;
+}
+.chip--copy {
+  cursor: pointer;
+}
+.notedetail__grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 19rem;
+  gap: 1.4rem;
+  align-items: start;
+  margin-top: 0.7rem;
+}
+.notedetail__main {
+  grid-column: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+}
+.notedetail__aside {
+  grid-column: 2;
+  grid-row: 1;
+  position: sticky;
+  top: calc(var(--topbar-h) + 0.75rem);
+  align-self: start;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: 0.6rem 0.8rem;
+  max-height: calc(100svh - var(--topbar-h) - 1.5rem);
+  overflow-y: auto;
+}
+.notedetail__asideh {
+  margin: 0.1rem 0 0.4rem;
+  font-size: 0.95rem;
+}
+.notedetail__asidebody {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+.notedetail__propstoggle {
+  width: 100%;
+  text-align: left;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.5rem 0.7rem;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 600;
+  color: inherit;
+}
+.notedetail__connections {
+  margin-top: 1.2rem;
+}
+.notedetail__connh {
+  margin-bottom: 0.2rem;
+}
+.notedetail__connections .tabs {
+  display: flex;
+  gap: 0.25rem;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 0.6rem;
+  flex-wrap: wrap;
+}
+.notedetail__connections .tabs__tab {
+  background: transparent;
+  border: none;
+  padding: 0.35rem 0.75rem;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  color: inherit;
+  font: inherit;
+}
+.notedetail__connections .tabs__tab.is-active {
+  border-bottom-color: var(--accent);
+  font-weight: 600;
+}
+@media (max-width: 820px) {
+  /* The Details rail can't sit beside the body: it stacks BELOW the
+     content (the note body leads) as a collapsible panel. */
+  .notedetail__grid {
+    display: flex;
+    flex-direction: column;
+  }
+  .notedetail__aside {
+    position: static;
+    max-height: none;
+    border: none;
+    background: transparent;
+    padding: 0;
+    margin-top: 0.3rem;
+  }
+  .notedetail__asidebody {
+    padding: 0.5rem 0.2rem 0.2rem;
+  }
+}
 /* The linked task's title, shown inline in the work-note banner and
    doubling as the "open task" link. Weighted up so it reads as the
    subject of the sentence, not as boilerplate. */
@@ -4472,6 +4654,46 @@ button.btn--danger:hover {
   gap: 0.4rem;
   padding: 0.35rem 0.5rem;
   border-bottom: 1px solid transparent;
+  /* Wrap rather than force a body-wide horizontal scrollbar when the
+     row's controls can't all fit on one line (narrow viewports). */
+  flex-wrap: wrap;
+}
+.parts-editor__title-h {
+  margin: 0;
+  font-size: 0.95rem;
+}
+/* Icon-only row controls: a comfortable centered hit area, enlarged to
+   ~40px on phones (the dense desktop row stays compact). */
+.parts-editor__icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+.parts-editor__rowactions {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+/* Isolate the destructive × from the additive move / add-below group so
+   it is not a mis-tap neighbour of "Add below". */
+.parts-editor__remove {
+  margin-left: 0.3rem;
+}
+.parts-editor__body .rte .ProseMirror
+  > :where(p, h1, h2, h3, h4, h5, h6, ul, ol, blockquote) {
+  /* Cap the reading measure on flow text only; the editor box, tables
+     and code fences stay full width. */
+  max-width: 72ch;
+}
+@media (max-width: 640px) {
+  .parts-editor__add-label {
+    display: none;
+  }
+  .parts-editor__icon-btn {
+    min-width: 2.5rem;
+    min-height: 2.5rem;
+  }
 }
 .parts-editor__item:not(:has(.parts-editor__body)) .parts-editor__item-head {
   border-bottom-color: transparent;
@@ -4507,15 +4729,17 @@ button.btn--danger:hover {
   /* Optional per-part label (migration 0017). Sits above the
      markdown body, slightly de-emphasised so the body still reads
      as the main surface. ``maxLength`` mirrors the 300-char DB
-     limit. */
+     limit. The dashed border uses --muted (≈5-6:1 on the surface in
+     both themes), not --border (<3:1): the field must read as
+     editable before focus, where it switches to a solid accent edge. */
   width: 100%;
   margin-bottom: 0.4rem;
   font-weight: 600;
   background: transparent;
-  border: 1px dashed var(--border);
+  border: 1px dashed var(--muted);
   border-radius: 4px;
   padding: 0.3rem 0.5rem;
-  color: var(--fg);
+  color: var(--text-h);
 }
 .parts-editor__title:focus {
   border-style: solid;

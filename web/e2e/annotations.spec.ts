@@ -235,9 +235,9 @@ test('inline suggest on a NOTE part: accept replaces the part text', async ({ pa
   await login(page)
   await page.goto(`/notes/${noteId}`)
 
-  // The note opens in a modal; the part body is a RichEditor inside the
-  // parts editor. This is the surface where #2 used to fail: after Accept
-  // the local ``editingBody`` draft shadowed the freshly spliced body.
+  // The note page renders the part body as a RichEditor inside the parts
+  // editor. This is the surface where #2 used to fail: after Accept the
+  // local ``editingBody`` draft shadowed the freshly spliced body.
   const editor = page.locator('.parts-editor .ProseMirror').first()
   await expect(editor).toBeVisible({ timeout: 15_000 })
   await expect(editor).toContainText('beta', { timeout: 10_000 })

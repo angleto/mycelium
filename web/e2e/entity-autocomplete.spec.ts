@@ -18,7 +18,7 @@ async function openFreshNoteEditor(page: Page, title: string) {
   await page.getByRole('button', { name: 'New note' }).click()
   await page.locator('.modal__panel input').first().fill(title)
   await page.locator('.modal__foot button:not(.btn--ghost)').first().click()
-  // The edit modal opens with the multi-part editor.
+  // The note page opens with the multi-part editor.
   await expect(page.locator('.parts-editor')).toBeVisible({ timeout: 10_000 })
   await page.waitForTimeout(500)
 }

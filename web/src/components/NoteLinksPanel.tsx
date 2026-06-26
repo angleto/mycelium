@@ -247,7 +247,7 @@ export function NoteLinksPanel({ noteId }: { noteId: string }) {
   return (
     <div className="linkedpanel">
       <div className="linkedpanel__head">
-        <strong>{t('noteLinks.title')}</strong>
+        <h3 className="linkedpanel__h">{t('noteLinks.title')}</h3>
         <span className="muted">{t('noteLinks.headHint')}</span>
       </div>
       {err && <p className="error">{err}</p>}

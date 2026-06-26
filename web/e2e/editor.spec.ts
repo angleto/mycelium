@@ -17,7 +17,7 @@ async function openFreshNoteEditor(page: Page) {
   await page.getByRole('button', { name: 'New note' }).click()
   await page.locator('.modal__panel input').first().fill(`e2e editor ${Date.now()}`)
   await page.locator('.modal__foot button:not(.btn--ghost)').first().click()
-  // The edit modal opens with the multi-part editor. New notes start with
+  // The note page opens with the multi-part editor. New notes start with
   // zero parts (notes are split into markdown blocks), so add one to get a
   // rich-text body editor (.rte) to drive.
   await expect(page.locator('.parts-editor')).toBeVisible({ timeout: 10_000 })

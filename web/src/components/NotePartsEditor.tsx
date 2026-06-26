@@ -475,9 +475,9 @@ export const NotePartsEditor = forwardRef<NotePartsEditorHandle, Props>(
       <section className="parts-editor">
         <header className="parts-editor__head">
           <GardenIcon name="branch" size={14} />
-          <strong>
+          <h3 className="parts-editor__title-h">
             {t('notes.parts.title', { defaultValue: 'Parts' })} ({parts.length})
-          </strong>
+          </h3>
           <button
             type="button"
             className="btn--sm btn--ghost"
@@ -540,16 +540,21 @@ export const NotePartsEditor = forwardRef<NotePartsEditorHandle, Props>(
                 <header className="parts-editor__item-head">
                   <button
                     type="button"
-                    className="parts-editor__toggle"
+                    className="parts-editor__toggle parts-editor__icon-btn"
                     onClick={() => void toggleCollapsed(p.id, !!p.ui_collapsed)}
                     aria-expanded={!p.ui_collapsed}
+                    aria-label={
+                      p.ui_collapsed
+                        ? t('notes.parts.expand', { defaultValue: 'Expand' })
+                        : t('notes.parts.collapse', { defaultValue: 'Collapse' })
+                    }
                     title={
                       p.ui_collapsed
                         ? t('notes.parts.expand', { defaultValue: 'Expand' })
                         : t('notes.parts.collapse', { defaultValue: 'Collapse' })
                     }
                   >
-                    {p.ui_collapsed ? '▸' : '▾'}
+                    <span aria-hidden="true">{p.ui_collapsed ? '▸' : '▾'}</span>
                   </button>
                   <span className="parts-editor__ord muted">#{p.ord}</span>
                   {/* Copyable part id, mirroring the note's id chip in
@@ -602,48 +607,64 @@ export const NotePartsEditor = forwardRef<NotePartsEditorHandle, Props>(
                     </span>
                   )}
                   <span className="parts-editor__spacer" />
+                  <div className="parts-editor__rowactions">
+                    <button
+                      type="button"
+                      className="btn--sm btn--ghost parts-editor__icon-btn"
+                      disabled={busy || i === 0}
+                      onClick={() => void move(p.id, -1)}
+                      aria-label={t('notes.parts.moveUp', {
+                        defaultValue: 'Move up',
+                      })}
+                      title={t('notes.parts.moveUp', { defaultValue: 'Move up' })}
+                    >
+                      <span aria-hidden="true">↑</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="btn--sm btn--ghost parts-editor__icon-btn"
+                      disabled={busy || i === parts.length - 1}
+                      onClick={() => void move(p.id, 1)}
+                      aria-label={t('notes.parts.moveDown', {
+                        defaultValue: 'Move down',
+                      })}
+                      title={t('notes.parts.moveDown', {
+                        defaultValue: 'Move down',
+                      })}
+                    >
+                      <span aria-hidden="true">↓</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="btn--sm btn--ghost"
+                      disabled={busy}
+                      onClick={() => void addPart(insertAfterOrd)}
+                      aria-label={t('notes.parts.addBelowHint', {
+                        defaultValue: 'Add a new part below this one',
+                      })}
+                      title={t('notes.parts.addBelowHint', {
+                        defaultValue: 'Add a new part below this one',
+                      })}
+                    >
+                      <span aria-hidden="true">+</span>{' '}
+                      <span className="parts-editor__add-label">
+                        {t('notes.parts.addBelow', { defaultValue: 'Add below' })}
+                      </span>
+                    </button>
+                  </div>
                   <button
                     type="button"
-                    className="btn--sm btn--ghost"
-                    disabled={busy || i === 0}
-                    onClick={() => void move(p.id, -1)}
-                    title={t('notes.parts.moveUp', { defaultValue: 'Move up' })}
-                  >
-                    ↑
-                  </button>
-                  <button
-                    type="button"
-                    className="btn--sm btn--ghost"
-                    disabled={busy || i === parts.length - 1}
-                    onClick={() => void move(p.id, 1)}
-                    title={t('notes.parts.moveDown', { defaultValue: 'Move down' })}
-                  >
-                    ↓
-                  </button>
-                  <button
-                    type="button"
-                    className="btn--sm btn--ghost"
-                    disabled={busy}
-                    onClick={() => void addPart(insertAfterOrd)}
-                    title={t('notes.parts.addBelowHint', {
-                      defaultValue: 'Add a new part below this one',
-                    })}
-                  >
-                    +{' '}
-                    {t('notes.parts.addBelow', {
-                      defaultValue: 'Add below',
-                    })}
-                  </button>
-                  <button
-                    type="button"
-                    className="btn--sm btn--danger"
+                    className="btn--sm btn--danger parts-editor__icon-btn parts-editor__remove"
                     disabled={busy}
                     onClick={() => void removePart(p.id)}
+                    aria-label={t('notes.parts.removeHint', {
+                      defaultValue: 'Remove this part',
+                    })}
                     title={t('notes.parts.removeHint', {
                       defaultValue: 'Remove this part',
                     })}
                   >
-                    ×
+                    <span aria-hidden="true">×</span>
                   </button>
                 </header>
                 {!p.ui_collapsed && (

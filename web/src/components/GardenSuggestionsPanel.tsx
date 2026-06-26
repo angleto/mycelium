@@ -160,7 +160,7 @@ export function GardenSuggestionsPanel({
   return (
     <div className="linkedpanel">
       <div className="linkedpanel__head">
-        <strong>{t('gardenSuggest.title')}</strong>
+        <h3 className="linkedpanel__h">{t('gardenSuggest.title')}</h3>
         <span className="muted">{t('gardenSuggest.headHint')}</span>
         {data && (
           <span

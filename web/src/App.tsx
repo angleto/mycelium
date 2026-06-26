@@ -25,6 +25,7 @@ import { EmailRoute } from './routes/EmailRoute'
 import { BillingRoute } from './routes/BillingRoute'
 import { MemoryRoute } from './routes/MemoryRoute'
 import { NotesRoute } from './routes/NotesRoute'
+import { NoteDetailRoute } from './routes/NoteDetailRoute'
 import { GardenRoute } from './routes/GardenRoute'
 import { GardenHealthRoute } from './routes/GardenHealthRoute'
 import { GardenAuditRoute } from './routes/GardenAuditRoute'
@@ -76,7 +77,7 @@ function App() {
               path="/notes/:id"
               element={
                 <PrefixOrUuid kind="note">
-                  <NotesRoute />
+                  <NoteDetailRoute />
                 </PrefixOrUuid>
               }
             />

@@ -1765,6 +1765,12 @@ export const en = {
       'Permanently erase "{{title}}" and its memory? This cannot be undone.',
     copyId: 'Copy note ID',
     idCopied: 'ID copied',
+    back: '← Notes',
+    details: 'Details',
+    connections: 'Connections',
+    tabTasks: 'Tasks',
+    tabIdeas: 'Ideas',
+    tabSuggestions: 'Suggestions',
   },
   invoices: {
     nav: 'Invoices',

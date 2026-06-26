@@ -143,17 +143,18 @@ test('notes: create, client auto-assigned, convert to task', async ({
     .getByRole('button', { name: /create note|crea nota/i })
     .click()
 
-  // doCreate keeps the modal open in edit mode on the new note: the
-  // reusable TagPicker is present and the note already carries its
-  // (Personal) client tag (every note belongs to a client).
-  await expect(dialog.locator('.tagpick')).toBeVisible()
-  await expect(dialog.locator('.tagpick__search')).toBeVisible()
-  await expect(dialog.locator('.tagpick .chip--rm').first()).toBeVisible()
+  // doCreate navigates to the full note page in edit mode: the reusable
+  // TagPicker is present in the Details rail and the note already carries
+  // its (Personal) client tag (every note belongs to a client).
+  await page.waitForURL(/\/notes\/[0-9a-f-]+/, { timeout: 15_000 })
+  await expect(page.locator('.tagpick')).toBeVisible()
+  await expect(page.locator('.tagpick__search')).toBeVisible()
+  await expect(page.locator('.tagpick .chip--rm').first()).toBeVisible()
 
   // Derive a task (ADR-0029): the button is "Derive task" / "Genera task"
-  // and, on success, the app closes the modal and navigates straight to
-  // the freshly-derived task, whose title is inherited from the note.
-  await dialog
+  // and, on success, the app navigates straight to the freshly-derived
+  // task, whose title is inherited from the note.
+  await page
     .getByRole('button', { name: /derive task|genera task/i })
     .click()
   await page.waitForURL(/\/tasks\/[0-9a-f-]{8}/, { timeout: 15_000 })
@@ -315,11 +316,13 @@ test('task work note: open from task + billable timer in the note', async ({
   await dialog
     .getByRole('button', { name: /create note|crea nota/i })
     .click()
-  await dialog
+  // Create navigates to the note page; derive the task from there.
+  await page.waitForURL(/\/notes\/[0-9a-f-]+/, { timeout: 15_000 })
+  await page
     .getByRole('button', { name: /derive task|genera task/i })
     .click()
-  // Deriving (ADR-0029) closes the note modal and navigates straight to
-  // the new task; capture its path for the later re-visits.
+  // Deriving (ADR-0029) navigates straight to the new task; capture its
+  // path for the later re-visits.
   await page.waitForURL(/\/tasks\/[0-9a-f-]+/, { timeout: 15_000 })
   const href = new URL(page.url()).pathname
 
