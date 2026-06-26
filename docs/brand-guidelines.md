@@ -2,11 +2,11 @@
 
 ## Concept
 
-Mycelium's mark is the **Mycelium Trio**: a tree, two mushrooms, and the
-mycelium network that connects them under the soil. It anchors the
-product vision of "the forest of memory" (note `3747eaac`) and the
-fungal decomposition metaphor that differentiates Mycelium from
-note-as-rigid-document tools.
+Mycelium's mark is a **fungal mycelial network**: a central node with
+hyphae branching out to spore nodes, plus a couple of anastomosis
+cross-links. No wordmark. It anchors the product vision of "the forest
+of memory" (note `3747eaac`) and the fungal decomposition metaphor that
+differentiates Mycelium from note-as-rigid-document tools.
 
 ## Files
 
@@ -15,8 +15,8 @@ note-as-rigid-document tools.
 | App favicon / PWA | `web/public/favicon.svg`, `icon-192.png`, `icon-512.png`, `apple-touch-icon.png` | bake-in `#4a6b3e` background |
 | App topbar mark | `web/src/components/Logo.tsx` | uses `var(--brand)` / `var(--brand-fg)`; adapts to theme |
 | Standalone full mark | `assets/mycelium-logo.svg` | 128×128, brand background |
-| Compact / very small | `assets/mycelium-monogram.svg` | drops soil dashes and curving roots; readable down to 16px |
-| Horizontal lockup | `assets/mycelium-logo-horizontal.svg` | mark + serif wordmark |
+| Compact / very small | `assets/mycelium-monogram.svg` | sparser network (fewer hyphae); readable down to 16px |
+| Horizontal lockup | `assets/mycelium-logo-horizontal.svg` | mark + mycelium spreading rightward; no wordmark |
 | Monochrome, dark on light | `assets/mycelium-logo-mono-dark.svg` | print, light overlays |
 | Monochrome, light on dark | `assets/mycelium-logo-mono-light.svg` | dark overlays |
 | Social card / OG image | `assets/mycelium-og.svg`, `assets/mycelium-og.png` | 1200×630, dark forest gradient |
@@ -42,7 +42,7 @@ without a border — it sits at ~5.3:1 against the warmer surface.
 
 ## Typography
 
-- **Display** (`--font-display`): `ui-serif, Georgia, 'Times New Roman', serif`. Used for `h1`–`h3` and the wordmark. The system serif keeps the build free of external font requests; it carries the organic warmth required by the forest metaphor.
+- **Display** (`--font-display`): `ui-serif, Georgia, 'Times New Roman', serif`. Used for `h1`–`h3`. The system serif keeps the build free of external font requests; it carries the organic warmth required by the forest metaphor.
 - **Body** (`--sans`): `system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif`. Unchanged for readability and zero-cost rendering.
 - **Mono** (`--mono`): `ui-monospace, SFMono-Regular, Consolas, monospace`.
 
@@ -51,14 +51,12 @@ tighter, editorial look that pairs with the serif.
 
 ## Clear space and minimum sizes
 
-- **Clear space** around the mark: at least the height of one
-  mushroom cap (~25% of the mark's height) on every side. For the
-  horizontal lockup, the same clear space applies around the bounding
-  box of mark + wordmark.
+- **Clear space** around the mark: at least ~25% of the mark's height on
+  every side. For the horizontal lockup, the same clear space applies
+  around the bounding box of the whole network.
 - **Minimum sizes**:
   - Full mark (`mycelium-logo.svg`): 24 px square. Below that, switch to
-    `mycelium-monogram.svg` which keeps the four mycelium nodes legible
-    down to 16 px.
+    `mycelium-monogram.svg` which keeps the network legible down to 16 px.
   - Horizontal lockup: 96 px wide minimum.
 
 ## Do / don't
