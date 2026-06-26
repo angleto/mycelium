@@ -7,9 +7,7 @@ Raw token format
 ``mycelium_at_<43 url-safe chars>``: a fixed ``mycelium_at_``
 discriminator prefix that makes the type identifiable to the verifier
 without trying JWT decode first, followed by ``secrets.token_urlsafe(32)``
-(256 bits of entropy, URL-safe alphabet, no padding). Tokens minted
-before the Flow -> Mycelium rename carry the legacy ``flow_at_`` prefix
-and are still accepted on read (lookup is by hash).
+(256 bits of entropy, URL-safe alphabet, no padding).
 
 The stored ``prefix`` column is the first 20 characters of the raw
 value (``mycelium_at_`` + 8 chars of random material) -- enough to give a
@@ -47,11 +45,6 @@ from mycelium_core.services.rbac import require_role
 # on cryptographic errors. Plain ASCII, never appears in a Mycelium JWT
 # (those are ``<base64>.<base64>.<base64>``).
 RAW_PREFIX: str = "mycelium_at_"
-# Legacy discriminator from before the Flow -> Mycelium rename. Still
-# accepted on read so long-lived tokens minted under the old brand keep
-# authenticating (lookup is by hash; the prefix only routes the branch).
-# New tokens are always minted with RAW_PREFIX.
-_LEGACY_RAW_PREFIX: str = "flow_at_"
 # Length of the random url-safe portion (in bytes of entropy; the
 # resulting string is ~43 chars).
 _RAW_ENTROPY_BYTES: int = 32
@@ -199,7 +192,7 @@ def is_agent_token(raw: str) -> bool:
     """True iff the bearer looks like an agent token (discriminator
     prefix). Cheap pre-check so the verifier branches without paying a
     failed JWT decode."""
-    return raw.startswith(RAW_PREFIX) or raw.startswith(_LEGACY_RAW_PREFIX)
+    return raw.startswith(RAW_PREFIX)
 
 
 async def authenticate(

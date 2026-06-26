@@ -3,7 +3,7 @@
 The coordinated read/write substrate for multi-agent operation on the
 graph (tasks cb6d6baf / c19b5489). An ``event_outbox`` row is written in
 the SAME transaction as the originating mutation (authoritative state); a
-deferred trigger ``pg_notify('flow.event', id)`` at COMMIT lets future
+deferred trigger ``pg_notify('mycelium.event', id)`` at COMMIT lets future
 subscribers pull the row by id (the 8 KB NOTIFY cap is why only the id
 travels). RLS reuses the per-org story (0025 pattern), so the bus needs
 no new security model.
@@ -119,14 +119,14 @@ def upgrade() -> None:
     op.execute("GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE event_outbox TO mycelium_app")
 
     # Deferred NOTIFY at COMMIT: the row is visible to subscribers that
-    # LISTEN flow.event and pull it by id. Only the id travels (NOTIFY's
+    # LISTEN mycelium.event and pull it by id. Only the id travels (NOTIFY's
     # 8 KB payload cap). AFTER trigger returning NULL is correct.
     op.execute(
         """
         CREATE OR REPLACE FUNCTION notify_event_outbox() RETURNS trigger
             LANGUAGE plpgsql AS $$
         BEGIN
-          PERFORM pg_notify('flow.event', NEW.id::text);
+          PERFORM pg_notify('mycelium.event', NEW.id::text);
           RETURN NULL;
         END
         $$;

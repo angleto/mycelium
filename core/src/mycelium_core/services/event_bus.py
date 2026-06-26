@@ -3,7 +3,7 @@
 The single write path onto the coordinated graph substrate. Every emit
 writes one ``event_outbox`` row in the CALLER's transaction (so the bus
 event and the originating mutation commit or roll back together); the
-deferred DB trigger ``pg_notify('flow.event', id)`` fires at COMMIT so a
+deferred DB trigger ``pg_notify('mycelium.event', id)`` fires at COMMIT so a
 subscriber can pull the row by id. Two guards protect autonomous actors:
 
   * a per-actor volume quota on write events (``propose``/``commit``),
