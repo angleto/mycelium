@@ -111,7 +111,8 @@ To enable the bot in prod:
 1. Mint the bot via BotFather, get the token.
 2. Add to the Mycelium secret store:
    - `MYCELIUM_TELEGRAM_BOT_TOKEN` = the BotFather token
-   - `MYCELIUM_TELEGRAM_BOT_USERNAME` = e.g. `mycelium_leto_bot`
+   - `MYCELIUM_TELEGRAM_BOT_USERNAME` = the bot's @username, e.g.
+     `mycelium_garden_bot` (your free choice in BotFather)
    - `MYCELIUM_TELEGRAM_WEBHOOK_SECRET` = a long random string
 3. Restart the backend; the `/telegram/webhook/{secret}` route comes
    alive (it 404s when the bot is unconfigured).

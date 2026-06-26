@@ -123,9 +123,15 @@ node pool and the SM names were all renamed). The manifests now reference the
       there. Drain + delete the old `flow` pool. The model-cache PVC is block
       storage and re-attaches (no data loss; the model just re-downloads if the
       PVC is recreated).
-- [ ] **Telegram bot username** `flow_leto_bot` -> `mycelium_leto_bot` (or
-      similar) via @BotFather (keeps the bot + its chats), then update the
-      `MYCELIUM_TELEGRAM_BOT_USERNAME` SM value.
+- [ ] **Telegram bot** `@flow_leto_bot` -> a new mycelium-branded bot via
+      @BotFather. Telegram does not let you change an existing bot's
+      @username, so mint a fresh bot (e.g. `@mycelium_garden_bot`); its
+      @username is a free choice and need not echo any personal name. Then
+      update the `MYCELIUM_TELEGRAM_BOT_TOKEN` + `MYCELIUM_TELEGRAM_BOT_USERNAME`
+      SM values and re-register the webhook. Note: the bot is a single global
+      platform bot (one per deployment); each user links their own chat to it
+      (per-user `telegram_links` row), so existing users must re-link after a
+      token change.
 - [ ] **`og.png`**: re-export `assets/mycelium-og.svg` to PNG (the raster can't
       be edited as text). The 6 logo SVGs were redesigned as a mycelial network
       (no wordmark); the social-card PNG needs regeneration.
