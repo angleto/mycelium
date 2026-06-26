@@ -14,6 +14,7 @@ os.environ.setdefault("MYCELIUM_JWT_SECRET", "test-only-secret-min-32-bytes-aaaa
 # Valid Fernet key (urlsafe-b64 of 32 zero bytes); test-only.
 os.environ.setdefault("MYCELIUM_SECRET_KEY", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
 
+import pathlib
 from collections.abc import AsyncIterator, Iterator
 
 import pytest
@@ -21,6 +22,43 @@ import pytest
 import mycelium_core.db as _db
 from mycelium_core.attachment_store import set_attachment_store_override
 from mycelium_core.services.mailer import LogMailer, set_mailer
+
+_HARDEN_ACLS_SQL = pathlib.Path(__file__).parent / "deploy" / "local" / "harden_function_acls.sql"
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _reproduce_prod_function_acls() -> None:
+    """Make the test DB execute-posture match production (ADR-0015).
+
+    Production grants the runtime role ``mycelium_app`` only what is
+    explicitly granted: the default PUBLIC execute on functions is revoked
+    out-of-band. A dev/CI DB built straight from the migrations keeps that
+    default PUBLIC execute, which silently masks a missing
+    ``GRANT EXECUTE ... TO mycelium_app`` -- a function the app calls
+    directly then works in tests and 500s in prod (the
+    /advisory/what-now -> ``tasks_event_end`` incident, migration 0059).
+
+    Apply the shared ``harden_function_acls.sql`` once per session, as the
+    OWNER (BYPASSRLS) role -- the same ``database_url_sync`` Alembic uses --
+    via a plain sync libpq connection (mirrors ``_purge_s3_only_attachments``
+    and sidesteps the async engine-per-loop teardown). Idempotent. The
+    posture is asserted by ``test_function_acl_posture`` so a silent skip
+    here cannot reopen the gap unnoticed. If no DB is reachable (e.g. an
+    offline CLI-only run) this skips: DB-backed tests would fail on their
+    own connection anyway."""
+    from sqlalchemy import create_engine
+    from sqlalchemy.exc import OperationalError
+
+    from mycelium_core.config import get_settings
+
+    engine = create_engine(get_settings().database_url_sync)
+    try:
+        with engine.begin() as conn:
+            conn.exec_driver_sql(_HARDEN_ACLS_SQL.read_text())
+    except OperationalError:
+        return
+    finally:
+        engine.dispose()
 
 
 @pytest.fixture(autouse=True)

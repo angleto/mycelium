@@ -1,4 +1,4 @@
-.PHONY: sync lint fmt type test eval up down db-bootstrap migrate revision \
+.PHONY: sync lint fmt type test eval up down db-bootstrap migrate db-harden revision \
         run-api run-mcp run-worker run-sdi
 
 sync:
@@ -40,6 +40,17 @@ db-bootstrap:
 
 migrate:
 	uv run alembic -c core/alembic.ini upgrade head
+
+# Reproduce the production function-execute posture: revoke the default
+# PUBLIC execute on our functions so mycelium_app keeps only its explicit
+# grants (see the SQL header and docs/adr/0015). Run after `migrate`. The
+# pytest suite applies this automatically (root conftest); this target is
+# for the local docker stack so `make run-api` matches prod too.
+db-harden:
+	docker compose -f deploy/local/docker-compose.yml exec -T \
+	  -e PGPASSWORD=$${POSTGRES_PASSWORD:-mycelium} db \
+	  psql -v ON_ERROR_STOP=1 -U $${POSTGRES_USER:-mycelium} -d $${POSTGRES_DB:-mycelium} \
+	  -f - < deploy/local/harden_function_acls.sql
 
 revision:
 	uv run alembic -c core/alembic.ini revision --autogenerate -m "$(m)"

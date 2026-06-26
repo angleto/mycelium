@@ -61,6 +61,10 @@ jobs:
             -f deploy/local/bootstrap_roles.sql
       - name: Apply migrations
         run: uv run alembic -c core/alembic.ini upgrade head
+      - name: Harden function ACLs (reproduce prod execute posture)
+        run: |
+          PGPASSWORD=mycelium psql -h localhost -U mycelium -d mycelium \
+            -v ON_ERROR_STOP=1 -f deploy/local/harden_function_acls.sql
       - name: Tests
         run: uv run pytest -q
 
@@ -126,6 +130,10 @@ jobs:
             -f deploy/local/bootstrap_roles.sql
       - name: Apply migrations
         run: uv run alembic -c core/alembic.ini upgrade head
+      - name: Harden function ACLs (reproduce prod execute posture)
+        run: |
+          PGPASSWORD=mycelium psql -h localhost -U mycelium -d mycelium \
+            -v ON_ERROR_STOP=1 -f deploy/local/harden_function_acls.sql
       - uses: pnpm/action-setup@v4
         with:
           version: 10
