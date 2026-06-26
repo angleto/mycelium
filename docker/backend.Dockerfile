@@ -107,6 +107,11 @@ COPY --from=builder /app/api /app/api
 COPY --from=builder /app/mcp /app/mcp
 COPY --from=builder /app/worker /app/worker
 COPY --from=builder /app/sdi-inbound /app/sdi-inbound
+# The migrate Job re-asserts the prod function-execute posture after Alembic
+# (`python -m mycelium_core.db_harden`, ADR-0015). Bundle the SQL it runs.
+# Copied from the build context (the repo root), not the builder stage, and
+# kept in this thin trailing layer so it never busts the cached venv blob.
+COPY deploy/local/harden_function_acls.sql /app/deploy/local/harden_function_acls.sql
 
 # Build identity LAST (bake into env so /api/buildinfo can return it). These args
 # change EVERY build; keeping them below the COPYs lets buildkit reuse the cached
