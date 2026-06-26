@@ -83,26 +83,39 @@ This repo is external; mirror these renames there.
 - [ ] Ingress: add the `mycelium.xeno.garden` host; serve a 308 redirect
       `flow.xeno.garden -> mycelium.xeno.garden` (or co-serve both).
 - [ ] DB connection string secret -> `mycelium` / `mycelium_app` (after §6).
-- [ ] OPTIONAL internal-consistency (heavy, invisible to users): the k8s
-      Service `flow-backend` and namespace `flow-production` are still
-      referenced by `docker/nginx.conf` in this repo. A Service rename is
-      cheap; a **namespace rename is not** (k8s can't rename in place — it
-      needs recreate + PVC move). If you rename them, update
-      `docker/nginx.conf` (`mycelium-backend.mycelium-production`) in lockstep
-      and rebuild the frontend image. Left as `flow-*` by default.
-- [ ] Logger namespaces moved `flow.*` -> `mycelium.*`. If flow-deploy's log
-      config sets per-logger levels keyed on `flow.*`, move them to
+- [x] k8s Service + namespace renamed in mycelium-deploy: `flow-backend` ->
+      `mycelium-backend`, namespace `flow-production` -> `mycelium-production`;
+      `docker/nginx.conf` updated in lockstep
+      (`mycelium-backend.mycelium-production`). A namespace CANNOT be renamed
+      in place: apply the renamed manifests to create `mycelium-production`,
+      migrate the model-cache PVC + re-sync ESO, cut the ingress over, then
+      delete the old `flow-production`.
+- [ ] Logger namespaces moved `flow.*` -> `mycelium.*`. If mycelium-deploy's
+      log config sets per-logger levels keyed on `flow.*`, move them to
       `mycelium.*` (otherwise those loggers fall back to the root level).
 
-### Deliberately kept as internal `flow.*` constants
+### Deliberately kept as `flow` (external coupling, not user-facing)
 
-Not user-facing; renaming each would need a coordinated migration for no
-user benefit, so they stay:
-- The Postgres `NOTIFY`/`LISTEN` channel `flow.event` (DB trigger <-> the
-  event_bus listener): renaming needs a trigger-recreate migration.
-- The legacy agent-token prefix `flow_at_` (still accepted on read).
-- k8s Service/namespace `flow-backend` / `flow-production` (see above).
+Renaming each would break a live external resource for no user benefit:
+- Postgres `NOTIFY`/`LISTEN` channel `flow.event` (DB trigger <-> event_bus):
+  needs a trigger-recreate migration.
+- Legacy agent-token prefix `flow_at_` (still accepted on read).
+- Scaleway SM secret names (`name:FLOW_*`) + the `/flow/prod` SM path: the k8s
+  side is `MYCELIUM_*` and ESO maps Scaleway `FLOW_*` -> k8s `MYCELIUM_*`, so
+  NO Scaleway SM rename is needed.
+- Scaleway Object Storage bucket `flow-prod-attachments` (holds the data).
+- Email/TEM on the `flow.xeno.garden` label: `MYCELIUM_SMTP_FROM` keeps
+  `no-reply@flow.xeno.garden` (TEM-verified); SPF/DKIM/DMARC/MX stay on the
+  `flow` label, only the display name became "Mycelium". The app A record is
+  on `mycelium`; the DEPLOYMENT-GUIDE/CUTOVER DNS sections predate this split,
+  so read them with app=`mycelium`, email=`flow` in mind.
+- Scaleway node pool `flow` (`pool: flow` + taint `dedicated=flow`): renaming
+  needs a node-pool recreate.
+- The recovery ConfigMap path `/var/lib/flow/recovery` (historical migration).
 - The org/project literally named `flow` in the DB (that is data).
+
+NOTE: the SdI RicezioneNotifiche host moved to `sdi.mycelium.xeno.garden`
+(re-declared at the AdE portal), and the manifests were updated accordingly.
 
 ## 6. Production database (maintenance window)
 
