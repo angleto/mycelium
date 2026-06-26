@@ -5,7 +5,7 @@ never edited after creation).
 
 The backup payload is **not** in the repo: it contains personal note
 bodies. It is mounted into the migrate-job at
-``/var/lib/flow/recovery/notes_backup.json`` from a ConfigMap created
+``/var/lib/mycelium/recovery/notes_backup.json`` from a ConfigMap created
 ad-hoc from the local pg_dump export. The path can be overridden via
 ``MYCELIUM_NOTES_RECOVERY_PATH``. When the file is absent the migration
 is a no-op (which is the case for any environment except the one we
@@ -39,7 +39,7 @@ down_revision: str | None = "0013"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
-_DEFAULT_PATH = "/var/lib/flow/recovery/notes_backup.json"
+_DEFAULT_PATH = "/var/lib/mycelium/recovery/notes_backup.json"
 _log = logging.getLogger("alembic.runtime.migration")
 
 

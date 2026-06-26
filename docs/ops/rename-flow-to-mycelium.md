@@ -98,25 +98,44 @@ This repo is external; mirror these renames there.
       log config sets per-logger levels keyed on `flow.*`, move them to
       `mycelium.*` (otherwise those loggers fall back to the root level).
 
-### Deliberately kept as `flow` (external coupling, not user-facing)
+### Data-preserving external migrations (do BEFORE applying the manifests)
 
-Renaming each would break a live external resource for no user benefit:
-- Postgres `NOTIFY`/`LISTEN` channel `flow.event` (DB trigger <-> event_bus):
-  needs a trigger-recreate migration.
-- Legacy agent-token prefix `flow_at_` (still accepted on read).
-- Scaleway SM secret names (`name:FLOW_*`) + the `/flow/prod` SM path: the k8s
-  side is `MYCELIUM_*` and ESO maps Scaleway `FLOW_*` -> k8s `MYCELIUM_*`, so
-  NO Scaleway SM rename is needed.
-- Scaleway Object Storage bucket `flow-prod-attachments` (holds the data).
-- Scaleway node pool `flow` (`pool: flow` + taint `dedicated=flow`): renaming
-  needs a node-pool recreate.
-- The recovery ConfigMap path `/var/lib/flow/recovery` (historical migration).
-- The org/project literally named `flow` in the DB (that is data).
+Nothing `flow` remains in either repo (the agent-token legacy prefix, the
+`flow.event` channel via migration 0058, the recovery path, the bucket, the
+node pool and the SM names were all renamed). The manifests now reference the
+`mycelium` names, so the underlying external resources must be migrated first,
+**preserving data**:
 
-These are all internal/infra (never shown to a user). Everything brand-facing
-is now Mycelium, including the transactional email FROM
-(`no-reply@mycelium.xeno.garden`, §3) and the SdI RicezioneNotifiche host
-`sdi.mycelium.xeno.garden` (re-declared at the AdE portal).
+- [ ] **Scaleway Object Storage bucket** `flow-prod-attachments` ->
+      `mycelium-prod-attachments`. Buckets cannot be renamed in place: create
+      the new bucket, copy every object (keys are bucket-relative and stay the
+      same, so DB `storage_key`s keep resolving), verify, then delete the old.
+      e.g. `rclone sync scw:flow-prod-attachments scw:mycelium-prod-attachments`.
+- [ ] **Scaleway Secret Manager**: recreate each `FLOW_*` secret as
+      `MYCELIUM_*` under path `/mycelium/prod` with the SAME value (or move the
+      folder), then point ESO at them (already done in `eso/external-secrets.yaml`:
+      `remoteRef.key: name:MYCELIUM_*`). The k8s Secret names + keys are all
+      `mycelium-*` / `MYCELIUM_*` now. Values are unchanged.
+- [ ] **Kapsule node pool** `flow` -> `mycelium`: create a new pool named
+      `mycelium` with taint `dedicated=mycelium:NoSchedule`, label
+      `pool=mycelium`; the renamed `nodeSelector`/`tolerations` schedule pods
+      there. Drain + delete the old `flow` pool. The model-cache PVC is block
+      storage and re-attaches (no data loss; the model just re-downloads if the
+      PVC is recreated).
+- [ ] **Telegram bot username** `flow_leto_bot` -> `mycelium_leto_bot` (or
+      similar) via @BotFather (keeps the bot + its chats), then update the
+      `MYCELIUM_TELEGRAM_BOT_USERNAME` SM value.
+- [ ] **`og.png`**: re-export `assets/mycelium-og.svg` to PNG (the raster can't
+      be edited as text). The 6 logo SVGs were redesigned as a mycelial network
+      (no wordmark); the social-card PNG needs regeneration.
+- [ ] **Project named `flow`** in the DB (your data): rename it in-app if you
+      want it gone from the UI (the diag scripts key off its UUID, not the name).
+
+The transactional email FROM is now `no-reply@mycelium.xeno.garden` (§3) and
+the SdI RicezioneNotifiche host is `sdi.mycelium.xeno.garden` (re-declared at
+AdE). The only `flow` left in the deploy repo is the literal word "workflow"
+(GitHub Actions) and `flow.leto.blue` in `CUTOVER-*.md`, which documents a PAST
+migration and is historical (delete/archive it if it bothers you).
 
 ## 6. Production database (maintenance window)
 

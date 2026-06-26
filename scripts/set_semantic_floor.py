@@ -1,6 +1,6 @@
 """Set the per-org semantic-similarity floor (mycelio retrieval tuning).
 
-The `flow` org shipped with ``retrieval_semantic_min_similarity = 0.8`` — above
+The `mycelium` org shipped with ``retrieval_semantic_min_similarity = 0.8`` — above
 bge-m3's achievable cosine band on the real corpus (max ~0.63, measured by
 scripts/diag_retrieval.py), so ``SemanticDenseStage`` rejected 100% of dense
 neighbours and retrieval silently degraded to lexical-only. 0.4 sits at the
@@ -10,7 +10,7 @@ every relevant note while trimming the bottom third.
 Mirrors the workspace settings router (merge bag + version-checked
 optimistic_update), so audit/version invariants hold:
 
-    kubectl -n flow-production exec -i deploy/flow-backend \
+    kubectl -n mycelium-production exec -i deploy/mycelium-backend \
       -- python - < scripts/set_semantic_floor.py
 """
 
@@ -51,7 +51,7 @@ async def main() -> None:
             org_id, user_id = cand_org, cand_user
             break
     if org_id is None:
-        print("flow project not found in any owned org; aborting")
+        print("mycelium project not found in any owned org; aborting")
         return
 
     async with tenant_session(str(org_id), str(user_id), project_id=MYCELIUM_PROJECT) as s:

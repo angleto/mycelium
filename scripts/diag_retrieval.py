@@ -2,9 +2,10 @@
 
 Run inside the backend pod (has the local embedder + DB + mycelium_core):
 
-    kubectl -n flow-production exec -i deploy/flow-backend -- python - < scripts/diag_retrieval.py
+    kubectl -n mycelium-production exec -i deploy/mycelium-backend \
+        -- python - < scripts/diag_retrieval.py
 
-Pure reads: resolves the `flow` project's org + a member, prints the per-org
+Pure reads: resolves the `mycelium` project's org + a member, prints the per-org
 retrieval floor settings, then for a few queries embeds locally and prints the
 top dense neighbours by cosine. NO writes (does not call memory.retrieve, so no
 access-counter bump). Goal: see (a) the grader/semantic floor values, (b) bge-m3's
@@ -147,7 +148,7 @@ async def main() -> None:
             ).all()
             order = [str(bid) for bid, _ in allrows]
             cosmap = {str(bid): -float(d) for bid, d in allrows}
-            print(f"  corpus size (embedded, flow project) = {len(order)}")
+            print(f"  corpus size (embedded, mycelium project) = {len(order)}")
             for rid, name in RELEVANT.items():
                 if rid in order:
                     print(
