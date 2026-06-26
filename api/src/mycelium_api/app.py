@@ -272,7 +272,7 @@ def create_app() -> FastAPI:
     app.include_router(export.router)
 
     # MCP streamable-http transport — same process, same DB, same
-    # ingress. Authenticated by Authorization: Bearer flow_at_…; the
+    # ingress. Authenticated by Authorization: Bearer mycelium_at_…; the
     # middleware in mycelium_mcp.server_http resolves the principal via
     # the SECURITY DEFINER authenticate_agent_token (migration 0059)
     # and publishes it into a ContextVar that ``_tenant`` inside every

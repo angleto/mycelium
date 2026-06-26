@@ -2,7 +2,7 @@
 (``bvmcp.oauth_shim``).
 
 Mycelium's MCP transport at ``/mcp`` already accepts a static
-``Authorization: Bearer flow_at_…`` (the agent_token system). Claude
+``Authorization: Bearer mycelium_at_…`` (the agent_token system). Claude
 Desktop's "Add custom connector" flow doesn't speak that: when the
 operator pastes the server URL + client_id + client_secret, Claude
 performs a standard OAuth 2.1 Authorization Code + PKCE handshake.
@@ -284,7 +284,7 @@ async def token_endpoint(
     """Exchange a code for an access token.
 
     The access token we return is literally the assistant's
-    ``client_secret`` (the raw ``flow_at_…``) — the MCP HTTP
+    ``client_secret`` (the raw ``mycelium_at_…``) — the MCP HTTP
     middleware resolves it via ``agent_tokens.authenticate`` on every
     MCP call. Reusing the static credential as the access_token
     keeps the bearer life-cycle (rotate, revoke, scope changes) on

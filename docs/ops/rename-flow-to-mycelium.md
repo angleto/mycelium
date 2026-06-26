@@ -16,8 +16,9 @@ coordinated cutover (images, secrets, DB) in one release window.
 - DB / role defaults + CI + compose + migration grants -> `mycelium`.
 - GHCR image refs in `build-images.yml` -> `ghcr.io/angleto/mycelium/*`.
 - Mirror workflows -> `mycelium-nvim`, `homebrew-mycelium`.
-- Backward compat: legacy agent tokens (`flow_at_`) still authenticate;
-  refresh tokens unaffected; SPA migrates `flow.*` localStorage keys.
+- Tokens: agent tokens must be RE-MINTED (the legacy `flow_at_` prefix is no
+  longer accepted; new ones use `mycelium_at_`). Refresh tokens are unaffected
+  (hash lookup). The SPA migrates `flow.*` localStorage keys on first load.
 
 ## 1. GitHub (done by Claude via `gh`)
 
@@ -156,8 +157,9 @@ migration runs as part of this.
 
 - [ ] MCP client (Claude Desktop/CLI): the server identifier changed
       `flow` -> `mycelium`. Re-add the connector; its tools move from
-      `...Flow...` to `...Mycelium...`. Existing agent tokens (`flow_at_…`)
-      keep working (legacy-accepted).
+      `...Flow...` to `...Mycelium...`. Existing `flow_at_…` agent tokens NO
+      LONGER validate (legacy acceptance was dropped) — mint a fresh
+      `mycelium_at_…` token and paste it into the connector config.
 - [ ] CLI: binary is now `mycelium` (was `flow`). Config dir moved
       `~/.config/flow` -> `~/.config/mycelium`; copy `credentials.toml`
       across or re-run `mycelium auth login`.

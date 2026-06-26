@@ -101,7 +101,7 @@ mcp: FastMCP = FastMCP("mycelium")
 # ``authenticate_agent_token`` (migration 0059) so the principal is
 # trustworthy. The third element is the ``agent_tokens.id`` of the
 # token used (always populated under HTTP; the bearer must be a
-# ``flow_at_…`` agent token). ``None`` for the stdio transport, which
+# ``mycelium_at_…`` agent token). ``None`` for the stdio transport, which
 # keeps using the legacy positional-args flow with a plain JWT.
 _PRINCIPAL: ContextVar[tuple[uuid.UUID, uuid.UUID, uuid.UUID | None] | None] = ContextVar(
     "_PRINCIPAL", default=None
