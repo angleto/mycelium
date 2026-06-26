@@ -4,7 +4,7 @@
 Background: migration 0011 introduced ``note_part`` and backfilled
 each note's transcript into ``note_part(ord=0)``. The backfill ran
 without bracketing the ``INSERT...SELECT FROM notes`` in a
-NO FORCE / FORCE RLS pair; since the migration role (``flow``)
+NO FORCE / FORCE RLS pair; since the migration role (``mycelium``)
 sees ``FORCE ROW LEVEL SECURITY`` like everyone else, and there is
 no ``app.current_org`` GUC during a migration run, the SELECT
 returned zero rows -- silently. Migration 0012 then dropped the

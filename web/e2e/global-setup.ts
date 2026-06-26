@@ -24,7 +24,7 @@ export default function globalSetup(): void {
       MYCELIUM_ADMIN_PASSWORD: E2E_PASSWORD,
       MYCELIUM_DATABASE_URL:
         process.env.MYCELIUM_DATABASE_URL ??
-        'postgresql+asyncpg://flow_app:flow_app@localhost:5432/flow',
+        'postgresql+asyncpg://mycelium_app:mycelium_app@localhost:5432/mycelium',
       MYCELIUM_JWT_SECRET:
         process.env.MYCELIUM_JWT_SECRET ?? 'local-dev-only-secret-min-32-bytes-aaaa',
       MYCELIUM_SECRET_KEY:

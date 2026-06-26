@@ -22,7 +22,7 @@ if config.config_file_name is not None:
 
 target_metadata = Base.metadata
 
-_DEFAULT_URL = "postgresql+psycopg://flow:flow@localhost:5432/flow"
+_DEFAULT_URL = "postgresql+psycopg://mycelium:mycelium@localhost:5432/mycelium"
 
 
 def _url() -> str:

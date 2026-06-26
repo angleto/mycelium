@@ -198,7 +198,7 @@ def upgrade() -> None:
     # they'll grow parts when the user (or the API) writes the first
     # body, which is the natural moment to materialise the row.
     #
-    # CRITICAL: the migration runs as the table owner (``flow``) but
+    # CRITICAL: the migration runs as the table owner (``mycelium``) but
     # the tables carry FORCE ROW LEVEL SECURITY, so even the owner
     # is gated by the ``app.current_org`` GUC -- and the migration
     # runs WITHOUT a GUC (no tenant scope). Without the
