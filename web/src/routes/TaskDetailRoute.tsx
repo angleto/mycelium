@@ -171,7 +171,7 @@ export function TaskDetailRoute() {
   }, [tabKey, activeTab])
   // Unified "Connections" group: subtasks / dependencies / related /
   // notes share one tabbed surface. Active tab remembered per task
-  // (mycelium.* localStorage namespace; brand rename Flow -> Mycelium).
+  // (mycelium.* localStorage namespace).
   const connKey = `mycelium.task.${id}.connTab`
   const [connTab, setConnTab] = useState<
     'subtasks' | 'deps' | 'related' | 'notes'
@@ -584,7 +584,9 @@ export function TaskDetailRoute() {
   // Keep a ref to the latest ``flushText`` closure so the mount-once
   // listeners below always flush the current draft, not a stale one.
   const flushRef = useRef(flushText)
-  flushRef.current = flushText
+  useEffect(() => {
+    flushRef.current = flushText
+  })
 
   useEffect(() => {
     if (!task) return
@@ -620,7 +622,6 @@ export function TaskDetailRoute() {
       window.removeEventListener('beforeunload', onUnload)
       flushRef.current()
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // Out-of-band change detection: an MCP tool / CLI / another device can
@@ -1183,15 +1184,29 @@ export function TaskDetailRoute() {
             />
           </div>
         </div>
-        <div className="row">
-          <button type="submit" disabled={busy || !dirty}>
-            {busy ? t('tasks.saving') : t('tasks.save')}
-          </button>
-          {dirty && <span className="muted">{t('tasks.unsaved')}</span>}
-          {!dirty && !busy && (
-            <span className="muted">{t('tasks.saved')}</span>
+        {err && <p className="err">{err}</p>}
+        </main>
+        <aside
+          className={
+            'taskdetail__aside' +
+            (isMobile && !propsOpen ? ' taskdetail__aside--collapsed' : '')
+          }
+        >
+          {isMobile ? (
+            <button
+              type="button"
+              className="taskdetail__propstoggle"
+              aria-expanded={propsOpen}
+              onClick={() => setPropsOpen((v) => !v)}
+            >
+              {t('tasks.properties')}
+              <span aria-hidden="true">{propsOpen ? ' ▾' : ' ▸'}</span>
+            </button>
+          ) : (
+            <h2 className="taskdetail__asideh">{t('tasks.properties')}</h2>
           )}
-        </div>
+          {(!isMobile || propsOpen) && (
+            <div className="taskdetail__asidebody">
         <div className="row">
           <label>
             {t('tasks.importance')}
@@ -1431,49 +1446,63 @@ export function TaskDetailRoute() {
             </label>
           )
         })()}
-        {msg && <p className="ok">{msg}</p>}
-        {err && <p className="err">{err}</p>}
-        <div className="row">
-          <button
-            type="button"
-            className="btn--sm"
-            onClick={() => void onNewChild()}
-            title={t('tasks.newChildHint')}
-          >
-            {t('tasks.newChild')}
-          </button>
-          <button
-            type="button"
-            className="btn--ghost btn--sm"
-            onClick={() => void onArchive()}
-          >
-            {t('tasks.archive')}
-          </button>
-          <button
-            type="button"
-            className="btn--danger btn--sm"
-            onClick={() => void onDelete()}
-          >
-            {t('tasks.delete')}
-          </button>
-        </div>
-      </form>
-
-      <div className="row">
-        <button type="button" onClick={() => void openWorkNote()}>
-          {t('tasks.workNote')}
-        </button>
+              <h2 className="taskdetail__asideh">{t('tasks.tagsTitle')}</h2>
+              <TagPicker
+                selected={task?.tags ?? []}
+                all={tags}
+                onAdd={(tid) => void addTag(tid)}
+                onRemove={(tid) => void removeTag(tid)}
+              />
+            </div>
+          )}
+        </aside>
       </div>
 
-      <h2>{t('tasks.tagsTitle')}</h2>
-      <TagPicker
-        selected={task?.tags ?? []}
-        all={tags}
-        onAdd={(tid) => void addTag(tid)}
-        onRemove={(tid) => void removeTag(tid)}
-      />
-
-      <h2>{t('tasks.deps')}</h2>
+      <section className="taskdetail__connections">
+        <h2 className="taskdetail__connh">{t('tasks.connections')}</h2>
+        <div
+          className="tabs"
+          role="tablist"
+          aria-label={t('tasks.connections')}
+        >
+          <button
+            type="button"
+            role="tab"
+            aria-selected={connTab === 'subtasks'}
+            className={`tabs__tab${connTab === 'subtasks' ? ' is-active' : ''}`}
+            onClick={() => setConnTab('subtasks')}
+          >
+            {t('tasks.subtasks')}
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={connTab === 'deps'}
+            className={`tabs__tab${connTab === 'deps' ? ' is-active' : ''}`}
+            onClick={() => setConnTab('deps')}
+          >
+            {t('tasks.deps')}
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={connTab === 'related'}
+            className={`tabs__tab${connTab === 'related' ? ' is-active' : ''}`}
+            onClick={() => setConnTab('related')}
+          >
+            {t('tasks.related')}
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={connTab === 'notes'}
+            className={`tabs__tab${connTab === 'notes' ? ' is-active' : ''}`}
+            onClick={() => setConnTab('notes')}
+          >
+            {t('tasks.connNotes')}
+          </button>
+        </div>
+        <div role="tabpanel" hidden={connTab !== 'deps'}>
       {dependsOn.length === 0 && blocks.length === 0 ? (
         <p className="hint">{t('tasks.depNone')}</p>
       ) : (
@@ -1562,11 +1591,14 @@ export function TaskDetailRoute() {
           {t('tasks.addDep')}
         </button>
       </div>
-      <p className="hint">{t('tasks.relatedTo')}</p>
-
-      {(task.parent_task_id || subtasks.length > 0) && (
-        <>
-          <h2>{t('tasks.subtasks')}</h2>
+          <p className="hint">{t('tasks.relatedTo')}</p>
+        </div>
+        <div role="tabpanel" hidden={connTab !== 'subtasks'}>
+          {task.parent_task_id == null && subtasks.length === 0 && (
+            <p className="hint">{t('tasks.subtasksNone')}</p>
+          )}
+          {(task.parent_task_id || subtasks.length > 0) && (
+            <>
           {task.parent_task_id && (
             <p className="hint">
               {t('tasks.parentLabel')}{' '}
@@ -1589,11 +1621,11 @@ export function TaskDetailRoute() {
               ))}
             </ul>
           )}
-        </>
-      )}
-
-      <h2>{t('tasks.related')}</h2>
-      {rels.length === 0 ? (
+            </>
+          )}
+        </div>
+        <div role="tabpanel" hidden={connTab !== 'related'}>
+          {rels.length === 0 ? (
         <p className="hint">{t('tasks.relatedNone')}</p>
       ) : (
         <div className="chips">
@@ -1648,6 +1680,40 @@ export function TaskDetailRoute() {
           )}
         </label>
       </div>
+        </div>
+        <div role="tabpanel" hidden={connTab !== 'notes'}>
+          <LinkedNotesPanel taskId={id} />
+          <div className="row">
+            <button
+              type="button"
+              className="btn--sm"
+              onClick={() => void openWorkNote()}
+            >
+              {t('tasks.workNote')}
+            </button>
+            <button
+              type="button"
+              className="btn--sm"
+              onClick={() => void newWorkNote()}
+            >
+              {t('tasks.newWorkNote')}
+            </button>
+          </div>
+          {workNotes.length === 0 ? (
+            <p className="hint">{t('tasks.noWorkNotes')}</p>
+          ) : (
+            <ul className="list">
+              {workNotes.map((n) => (
+                <li key={n.id}>
+                  <Link to={`/notes/${n.id}`}>
+                    {n.title || t('notes.untitled')}
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </section>
 
       <h2>{t('coord.title')}</h2>
       <CoordinationPanel
@@ -1657,37 +1723,7 @@ export function TaskDetailRoute() {
         onChanged={() => void reload()}
       />
 
-      <h2>{t('linkedNotes.title')}</h2>
-      <LinkedNotesPanel taskId={id} />
-
       <GardenSuggestionsPanel nodeId={id} nodeKind="task" onApplied={() => void reload()} />
-
-      <h2>{t('tasks.workNotes')}</h2>
-      {/* The TaskTimer at the top of this view (next to the state
-          select) is the canonical timer for the task; the section-
-          level ⏱▶ / ⏱▶▶ buttons that used to sit here read as
-          unrelated to "Work notes" and confused users into thinking
-          they started a per-note timer — they didn't. Removed in the
-          UX pass; the per-note timer (inside RichEditor's note shell)
-          still carries the note_id provenance. */}
-      <div className="row">
-        <button type="button" onClick={() => void newWorkNote()}>
-          {t('tasks.newWorkNote')}
-        </button>
-      </div>
-      {workNotes.length === 0 ? (
-        <p className="hint">{t('tasks.noWorkNotes')}</p>
-      ) : (
-        <ul className="list">
-          {workNotes.map((n) => (
-            <li key={n.id}>
-              <Link to={`/notes/${n.id}`}>
-                {n.title || t('notes.untitled')}
-              </Link>
-            </li>
-          ))}
-        </ul>
-      )}
 
       {task.duration_minutes != null && task.start_at != null && (
         <ParticipantsSection
