@@ -19,7 +19,7 @@ ingress. There is no separate K8s Service or pod — the MCP and REST
 surfaces are co-equal adapters over ``mycelium_core`` (docs/adr/0001).
 
 Auth flow per request:
-1. Read ``Authorization: Bearer <flow_at_…>``; reject 401 if absent.
+1. Read ``Authorization: Bearer <mycelium_at_…>``; reject 401 if absent.
 2. ``agent_tokens.authenticate(raw)`` → ``AuthenticatedAgent`` or None.
    The SECURITY DEFINER function already enforces token expiry,
    revocation, and the bound assistant's ``is_active`` flag.
@@ -50,7 +50,7 @@ from mycelium_mcp.server import _PRINCIPAL
 
 
 class _BearerAuthMiddleware(BaseHTTPMiddleware):
-    """Resolve ``Authorization: Bearer flow_at_…`` to an
+    """Resolve ``Authorization: Bearer mycelium_at_…`` to an
     ``AuthenticatedAgent`` and publish the principal into ``_PRINCIPAL``
     for the duration of the request. The session manager + tool
     dispatch run on the same task, so the ContextVar is visible all
@@ -102,7 +102,7 @@ def make_mcp_app() -> Starlette:
     # 421 Misdirected Request on every call. DNS rebinding is a
     # localhost-server threat (a malicious page reaching a loopback
     # MCP); for a public HTTPS server the real gate is the
-    # ``flow_at_`` bearer + the nginx Host routing, both already in
+    # ``mycelium_at_`` bearer + the nginx Host routing, both already in
     # place. Setting an explicit (disabled) policy overrides the
     # auto-enabled localhost one.
     gateway.settings.transport_security = TransportSecuritySettings(

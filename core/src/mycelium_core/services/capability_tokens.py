@@ -30,7 +30,7 @@ from mycelium_core.models.membership import Role
 from mycelium_core.services import audit
 from mycelium_core.services.rbac import require_role
 
-# Discriminator prefix. Distinct from ``flow_at_`` (agent tokens) so the
+# Discriminator prefix. Distinct from ``mycelium_at_`` (agent tokens) so the
 # verifier can branch on the credential kind before any JWT decode.
 RAW_PREFIX: str = "mycelium_cap_"
 _RAW_ENTROPY_BYTES: int = 32

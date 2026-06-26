@@ -1277,7 +1277,7 @@ async def erase(
 
 # ----------------------------------------------------------------------
 # Quick-create endpoint (Apple Shortcut / Tasker / cURL one-liner).
-# Auth: agent_token (``flow_at_...``). The user mints one in
+# Auth: agent_token (``mycelium_at_...``). The user mints one in
 # /settings/ai-assistants, pastes it into the Shortcut. The Shortcut
 # resolves the project by case-insensitive partial name (or UUID).
 # Designed to be hit from a single ``Get Contents of URL`` action on
@@ -1306,7 +1306,7 @@ class QuickCreateOut(BaseModel):
 async def _agent_principal(
     authorization: Annotated[str | None, Header()] = None,
 ) -> agent_tokens_svc.AuthenticatedAgent:
-    """Resolve the ``Authorization: Bearer flow_at_...`` header to an
+    """Resolve the ``Authorization: Bearer mycelium_at_...`` header to an
     ``AuthenticatedAgent``. 401 if missing / malformed / unknown.
     Mirrors the MCP HTTP transport bearer middleware (mcp/server_http)
     but at the FastAPI dep boundary so this endpoint can be reached

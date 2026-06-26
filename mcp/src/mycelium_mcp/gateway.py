@@ -16,7 +16,7 @@ is still imported directly by the test suite and by the stdio
 entrypoint (``main.py``), which keeps the legacy token-based flow.
 
 Auth: the bearer middleware (``server_http``) validates the
-``flow_at_…`` token and publishes the principal into ``_PRINCIPAL``
+``mycelium_at_…`` token and publishes the principal into ``_PRINCIPAL``
 before dispatch. ``execute_tool`` injects the (now redundant)
 ``token``/``org_id`` tool args as empty strings, so the LLM never sees
 or provides them — this also closes the ``org_id="me"`` magic-literal

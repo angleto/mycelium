@@ -137,7 +137,7 @@ async def mint_download_capability(
     the caller can build a ``curl`` per file. Member-gated (``mint`` enforces
     the same floor a download does, so the token grants nothing the caller did
     not already hold). The raw token is returned exactly once; it is multi-use
-    until ``expires_at`` and never consumed. Powers ``flow attachments
+    until ``expires_at`` and never consumed. Powers ``mycelium attachments
     download-capability``; the MCP ``download_attachment_capability`` tool mints
     the same grant directly through the service."""
     is_note = payload.parent_kind == "note"
