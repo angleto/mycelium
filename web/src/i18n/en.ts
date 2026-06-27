@@ -1513,11 +1513,23 @@ export const en = {
     filterAcct: 'Account',
     all: 'All',
     toTask: 'To task',
+    toNote: 'To note',
     linked: 'linked',
+    linkedNote: 'note',
     reply: 'Reply',
     send: 'Send',
     none: 'No messages. Add an account and sync.',
     loading: 'Loading...',
+    defaultTags: 'Default tags',
+    autoDraft: 'Auto-draft replies',
+    autoDraftHint:
+      'When the responder is enabled, each new message gets a draft reply you review before sending. Nothing is sent automatically.',
+    drafts: {
+      title: 'Draft replies',
+      approve: 'Approve & send',
+      reject: 'Discard',
+      sent: 'Reply sent.',
+    },
   },
   billing: {
     nav: 'Billing',

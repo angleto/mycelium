@@ -31,7 +31,12 @@ from mycelium_core.models.budget import Budget, BudgetPeriod
 from mycelium_core.models.client_profile import ClientProfile
 from mycelium_core.models.dependency import DependencyType, TaskDependency
 from mycelium_core.models.dispatch_request import DispatchRequest
-from mycelium_core.models.email import EmailAccount, EmailMessage, EmailProvider
+from mycelium_core.models.email import (
+    EmailAccount,
+    EmailMessage,
+    EmailProvider,
+    EmailResponderJob,
+)
 from mycelium_core.models.executor import Executor, ExecutorKind
 from mycelium_core.models.invoice import Invoice
 from mycelium_core.models.memory_blob import MemoryBlob
@@ -2742,7 +2747,7 @@ async def prioritize_within_budget(token: str, org_id: str, budget_id: str) -> d
 # --- F5: email (FR-7) ---
 
 
-def _email_account(a: EmailAccount) -> dict[str, Any]:
+def _email_account(a: EmailAccount, default_tags: list[Tag] | None = None) -> dict[str, Any]:
     return {
         "id": str(a.id),
         "provider": a.provider.value,
@@ -2751,6 +2756,11 @@ def _email_account(a: EmailAccount) -> dict[str, Any]:
         "last_sync_at": a.last_sync_at.isoformat() if a.last_sync_at else None,
         "last_error": a.last_error,
         "ingest_to_memory": a.ingest_to_memory,
+        "auto_draft_replies": a.auto_draft_replies,
+        "default_tags": [
+            {"id": str(t.id), "kind": t.kind.value, "name": t.name, "color": t.color}
+            for t in (default_tags or [])
+        ],
         "version": a.version,
     }
 
@@ -2763,8 +2773,23 @@ def _email_message(m: EmailMessage) -> dict[str, Any]:
         "subject": m.subject,
         "snippet": m.snippet,
         "received_at": m.received_at.isoformat(),
+        "thread_id": m.thread_id,
         "linked_task_id": (str(m.linked_task_id) if m.linked_task_id else None),
+        "linked_note_id": (str(m.linked_note_id) if m.linked_note_id else None),
         "version": m.version,
+    }
+
+
+def _email_draft(j: EmailResponderJob) -> dict[str, Any]:
+    return {
+        "id": str(j.id),
+        "message_id": str(j.message_id),
+        "status": j.status,
+        "draft_reply": j.draft_reply,
+        "origin_model_id": j.origin_model_id,
+        "error": j.error,
+        "created_at": j.created_at.isoformat(),
+        "finished_at": j.finished_at.isoformat() if j.finished_at else None,
     }
 
 
@@ -2800,9 +2825,36 @@ async def create_email_account(
 
 @mcp.tool()
 async def list_email_accounts(token: str, org_id: str) -> list[dict[str, Any]]:
-    """List email accounts (no secrets)."""
+    """List email accounts (no secrets), each with its default tags."""
     async with _tenant(token, org_id) as (s, org, _user):
-        return [_email_account(a) for a in await email_svc.list_accounts(s, org_id=org)]
+        accounts = await email_svc.list_accounts(s, org_id=org)
+        tags_by = await email_svc.default_tags_by_account(s, account_ids=[a.id for a in accounts])
+        return [_email_account(a, tags_by.get(a.id, [])) for a in accounts]
+
+
+@mcp.tool()
+async def set_email_default_tags(
+    token: str,
+    org_id: str,
+    account_id: str,
+    expected_version: int,
+    tag_ids: list[str],
+) -> dict[str, Any]:
+    """Replace this account's default tags (WS-1): a flat set (typ. one
+    client + one project tag) auto-applied to everything ingested from the
+    account — memory blobs on the 'email' channel and email->task/note — so
+    a per-client / per-project mailbox is born tagged. Returns the new
+    version."""
+    async with _tenant(token, org_id) as (s, org, user):
+        version = await email_svc.set_default_tags(
+            s,
+            org_id=org,
+            actor_id=user,
+            account_id=uuid.UUID(account_id),
+            expected_version=expected_version,
+            tag_ids=[uuid.UUID(t) for t in tag_ids],
+        )
+        return {"id": account_id, "version": version}
 
 
 @mcp.tool()
@@ -2862,6 +2914,16 @@ async def list_email_messages(
 
 
 @mcp.tool()
+async def email_thread(token: str, org_id: str, thread_id: str) -> list[dict[str, Any]]:
+    """Fetch a whole email thread (oldest first) by its provider thread id
+    (WS-2) — recall a full conversation as a unit to answer or reply with
+    context, instead of reconstructing it from individual search hits."""
+    async with _tenant(token, org_id) as (s, org, _user):
+        rows = await email_svc.get_thread(s, org_id=org, thread_id=thread_id)
+        return [_email_message(m) for m in rows]
+
+
+@mcp.tool()
 async def email_to_task(
     token: str,
     org_id: str,
@@ -2878,6 +2940,26 @@ async def email_to_task(
             project_tag_id=(uuid.UUID(project_tag_id) if project_tag_id else None),
         )
         return {"task_id": str(task_id)}
+
+
+@mcp.tool()
+async def email_to_note(
+    token: str,
+    org_id: str,
+    message_id: str,
+    tag_ids: list[str] | None = None,
+) -> dict[str, Any]:
+    """Create a note from a message (WS-3), with a back-link. The account's
+    default tags are applied automatically; ``tag_ids`` adds more."""
+    async with _tenant(token, org_id) as (s, org, user):
+        note_id = await email_svc.email_to_note(
+            s,
+            org_id=org,
+            actor_id=user,
+            message_id=uuid.UUID(message_id),
+            tag_ids=[uuid.UUID(t) for t in (tag_ids or [])],
+        )
+        return {"note_id": str(note_id)}
 
 
 @mcp.tool()
@@ -2915,6 +2997,70 @@ async def reply_email(token: str, org_id: str, message_id: str, body_text: str) 
             body_text=body_text,
         )
         return {"sent_id": sent}
+
+
+@mcp.tool()
+async def set_email_auto_draft_replies(
+    token: str, org_id: str, account_id: str, expected_version: int, enabled: bool
+) -> dict[str, Any]:
+    """Toggle the autonomous responder for this account (WS-4). When enabled
+    AND the deployment's responder is on, each new non-bulk message gets a
+    DRAFT reply (withheld until a human approves it; nothing auto-sends). OFF
+    by default. Returns the new version."""
+    async with _tenant(token, org_id) as (s, org, user):
+        version = await email_svc.update_account(
+            s,
+            org_id=org,
+            actor_id=user,
+            account_id=uuid.UUID(account_id),
+            expected_version=expected_version,
+            values={"auto_draft_replies": enabled},
+        )
+        return {"id": account_id, "version": version}
+
+
+@mcp.tool()
+async def draft_email_reply(token: str, org_id: str, message_id: str) -> dict[str, Any]:
+    """On-demand (WS-4): queue a draft reply for one message (idempotent).
+    The responder worker drafts it; review it with ``list_email_drafts`` and
+    send with ``approve_email_draft``. Nothing is sent automatically."""
+    async with _tenant(token, org_id) as (s, org, user):
+        job_id = await email_svc.enqueue_draft(
+            s, org_id=org, actor_id=user, message_id=uuid.UUID(message_id)
+        )
+        return {"job_id": str(job_id)}
+
+
+@mcp.tool()
+async def list_email_drafts(token: str, org_id: str) -> list[dict[str, Any]]:
+    """List drafted replies awaiting human review (WS-4)."""
+    async with _tenant(token, org_id) as (s, org, _user):
+        return [_email_draft(j) for j in await email_svc.list_drafts(s, org_id=org)]
+
+
+@mcp.tool()
+async def approve_email_draft(
+    token: str, org_id: str, job_id: str, body_text: str | None = None
+) -> dict[str, Any]:
+    """Approve a drafted reply and SEND it in-thread (WS-4). ``body_text``
+    overrides the draft so you can edit before sending."""
+    async with _tenant(token, org_id) as (s, org, user):
+        sent = await email_svc.approve_draft(
+            s,
+            org_id=org,
+            actor_id=user,
+            job_id=uuid.UUID(job_id),
+            body_text=body_text,
+        )
+        return {"sent_id": sent}
+
+
+@mcp.tool()
+async def reject_email_draft(token: str, org_id: str, job_id: str) -> dict[str, Any]:
+    """Discard a drafted reply without sending (WS-4)."""
+    async with _tenant(token, org_id) as (s, org, user):
+        await email_svc.reject_draft(s, org_id=org, actor_id=user, job_id=uuid.UUID(job_id))
+        return {"id": job_id, "status": "rejected"}
 
 
 # --- F5b: billing / metering (FR-15) ---

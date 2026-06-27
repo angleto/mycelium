@@ -12,12 +12,16 @@ import uuid
 
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
+    PrimaryKeyConstraint,
     String,
     Text,
     UniqueConstraint,
+    func,
 )
 from sqlalchemy import Enum as SAEnum
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
@@ -78,6 +82,14 @@ class EmailAccount(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, Ba
     # default — ingesting third-party PII into searchable memory is an
     # explicit per-account decision, never automatic.
     ingest_to_memory: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
+    # Per-account opt-in for the autonomous responder (WS-4): when true and
+    # the global ``email_responder_enabled`` is set, each new non-bulk
+    # message enqueues a draft reply (withheld until a human approves). OFF
+    # by default — drafting + later sending on the user's behalf is an
+    # explicit per-account decision.
+    auto_draft_replies: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default="false"
+    )
 
 
 class EmailMessage(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, Base):
@@ -116,4 +128,93 @@ class EmailMessage(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, Ba
         PG_UUID(as_uuid=True),
         ForeignKey("tasks.id", ondelete="SET NULL"),
         nullable=True,
+    )
+    # WS-3: a message can also be promoted to a Note (symmetric with
+    # ``linked_task_id``). SET NULL so deleting the note leaves the email.
+    linked_note_id: Mapped[uuid.UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("notes.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
+
+class EmailAccountDefaultTag(Base):
+    """Default tags auto-applied to everything ingested from an account
+    (memory blobs on the 'email' channel + email->task/note). A flat set of
+    any ``TagKind`` (typical use: one client + one project tag per account),
+    so material from a per-client / per-project mailbox is born tagged and
+    becomes filterable in memory search. Composite-PK association table
+    mirroring ``MemoryBlobTag``; deleting the account or the tag cascades
+    here. ``org_id`` carries the RLS predicate (no extra FK; same shape as
+    ``MemoryBlobTag.org_id``)."""
+
+    __tablename__ = "email_account_default_tags"
+    __table_args__ = (
+        PrimaryKeyConstraint("account_id", "tag_id", name="pk_email_account_default_tags"),
+    )
+
+    account_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("email_accounts.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    org_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False, index=True)
+    tag_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("tags.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class EmailResponderJob(UUIDPKMixin, OrgScopedMixin, TimestampMixin, Base):
+    """One queued draft-reply task for the autonomous responder (WS-4),
+    mirroring ``TelegramAssistantJob``. Enqueued (per-account opt-in) when a
+    new non-bulk message is synced; the worker drafts a reply via a metered
+    LLM call and parks it in state ``drafted``. The draft is WITHHELD until a
+    human approves it (``approve`` sends in-thread -> ``sent``; ``reject`` ->
+    ``rejected``). UNIQUE on ``message_id`` makes enqueue idempotent.
+    ``origin_model_id`` records which model wrote the draft (transparency).
+    RLS per-org like the rest of the tenant data (enqueue / review run in a
+    tenant session; the worker claims per-org)."""
+
+    __tablename__ = "email_responder_jobs"
+    __table_args__ = (
+        UniqueConstraint("message_id", name="uq_email_responder_jobs_message_id"),
+        Index(
+            "ix_email_responder_jobs_pending",
+            "org_id",
+            "created_at",
+            postgresql_where="status = 'pending'",
+        ),
+        CheckConstraint(
+            "status IN ('pending', 'running', 'drafted', 'sent', 'rejected', 'failed')",
+            name="ck_email_responder_jobs_status",
+        ),
+    )
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    message_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("email_messages.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    status: Mapped[str] = mapped_column(String(16), nullable=False, server_default="pending")
+    draft_reply: Mapped[str | None] = mapped_column(Text, nullable=True)
+    origin_model_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    sent_id: Mapped[str | None] = mapped_column(String(998), nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    started_at: Mapped[datetime.datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    finished_at: Mapped[datetime.datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
     )

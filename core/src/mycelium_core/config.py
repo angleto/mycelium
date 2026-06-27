@@ -183,6 +183,20 @@ class Settings(BaseSettings):
     email_sync_interval_seconds: int = 300
     email_sync_fetch_limit: int = 50
 
+    # Autonomous email responder (WS-4). When enabled, the periodic worker
+    # drafts a reply for each new non-bulk message on an account that has
+    # opted in (per-account ``auto_draft_replies``). The draft is WITHHELD:
+    # it is stored on an ``email_responder_jobs`` row in state ``drafted``
+    # and only SENT when a human approves it (the responder NEVER auto-sends
+    # -- email is outward-facing/irreversible). Each draft is one metered LLM
+    # call through the per-org provider seam (``resolve_llm``), so a free
+    # local model costs nothing and a premium model debits credits exactly
+    # like the rest of the fleet. OFF by default: with no caller enabled no
+    # job is ever enqueued and behaviour is unchanged.
+    # MYCELIUM_EMAIL_RESPONDER_ENABLED / MYCELIUM_EMAIL_RESPONDER_LOOP_INTERVAL_SECONDS.
+    email_responder_enabled: bool = False
+    email_responder_loop_interval_seconds: int = 60
+
     # Closed-loop dispatch worker (docs/adr/0025 P5). The periodic tick
     # interval, in seconds. Modest by default (do not hammer the
     # scheduler); per-workspace and exception-isolated. Configurable via

@@ -759,6 +759,83 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/tasks/{task_id}/description/raw": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Download Task Description Raw
+         * @description Token-free raw download of a task's ``description`` markdown. Returns
+         *     it as ``text/markdown`` with ``X-Version`` + ``X-Body-SHA256`` headers
+         *     (the base gate the patch route checks). Bearer or a multi-use
+         *     ``task_description:read`` capability for this task. Use the MCP
+         *     ``get_text_block_capability`` tool (kind=``task_description``) for the
+         *     matching ``curl -D-``.
+         */
+        get: operations["download_task_description_raw_tasks__task_id__description_raw_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tasks/{task_id}/description/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Replace Task Description Stream
+         * @description Token-free full-body replace of a task's ``description``: the new
+         *     markdown is the raw request body, size-capped (``note_body_max_bytes``)
+         *     and UTF-8. ``expected_version`` is the optimistic cursor (mismatch ->
+         *     409). An empty body clears the description. For incremental growth use
+         *     ``/description/append``. Bearer or a single-use
+         *     ``task_description:write`` capability, consumed on success. Use the MCP
+         *     ``set_text_block_capability`` tool (kind=``task_description``).
+         */
+        put: operations["replace_task_description_stream_tasks__task_id__description_stream_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tasks/{task_id}/description/patch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Patch Task Description
+         * @description Apply a strict unified diff (the raw request body) to a task's
+         *     ``description``. Base gate (``expected_version`` + ``base_sha256`` from
+         *     the ``description/raw`` headers): 409 ``patch.stale`` on drift, 422 on a
+         *     diff that does not apply, nothing mutates on failure. Bearer or a
+         *     single-use ``task_description:patch`` capability, consumed on success.
+         *     Use the MCP ``patch_text_block_capability`` tool
+         *     (kind=``task_description``).
+         */
+        post: operations["patch_task_description_tasks__task_id__description_patch_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/tasks/{task_id}/state": {
         parameters: {
             query?: never;
@@ -1444,6 +1521,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/annotations/assigned": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Assigned Annotations
+         * @description The "assigned to me" inbox: annotations assigned to ``handle``
+         *     (defaults to the calling user's identity), newest first. Open-only unless
+         *     ``include_resolved=true``. An unknown handle yields an empty list.
+         *     Declared before ``/{annotation_id}`` so the static path wins.
+         */
+        get: operations["list_assigned_annotations_annotations_assigned_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/annotations/{annotation_id}": {
         parameters: {
             query?: never;
@@ -1482,10 +1582,64 @@ export interface paths {
          *     suggestion's rationale): the new text is the raw request body,
          *     streamed in instead of riding a tool argument. ``expected_version``
          *     is the optimistic cursor (a mismatch is ``stale_version`` -> 409);
-         *     author-or-admin only. Use the MCP ``edit_annotation_body_instructions``
-         *     tool for the matching ``curl``.
+         *     author-or-admin only. Bearer (assistant identity preserved) or a
+         *     single-use ``annotation_body:write`` capability (attributed to the
+         *     token's user), consumed on success. Use the MCP
+         *     ``edit_annotation_body_instructions`` /
+         *     ``set_text_block_capability`` tools for the matching ``curl``.
          */
         patch: operations["edit_annotation_body_stream_annotations__annotation_id__body_stream_patch"];
+        trace?: never;
+    };
+    "/annotations/{annotation_id}/body/raw": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Download Annotation Body Raw
+         * @description Token-free raw download of a comment/annotation body. Returns it as
+         *     ``text/markdown`` with ``X-Version`` + ``X-Body-SHA256`` headers (the
+         *     base gate the patch route checks). Bearer or a multi-use
+         *     ``annotation_body:read`` capability for this annotation. Use the MCP
+         *     ``get_text_block_capability`` tool (kind=``annotation``) for the
+         *     matching ``curl -D-``.
+         */
+        get: operations["download_annotation_body_raw_annotations__annotation_id__body_raw_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/annotations/{annotation_id}/body/patch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Patch Annotation Body
+         * @description Apply a strict unified diff (the raw request body) to a
+         *     comment/annotation body. Base gate (``expected_version`` +
+         *     ``base_sha256`` from the ``body/raw`` headers): 409 ``patch.stale`` on
+         *     drift, 422 on a diff that does not apply, nothing mutates on failure.
+         *     Author-or-admin only. Bearer or a single-use ``annotation_body:patch``
+         *     capability, consumed on success. Use the MCP
+         *     ``patch_text_block_capability`` tool (kind=``annotation``).
+         */
+        post: operations["patch_annotation_body_annotations__annotation_id__body_patch_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/annotations/{annotation_id}/resolve": {
@@ -1550,6 +1704,28 @@ export interface paths {
         put?: never;
         /** Reject Suggestion */
         post: operations["reject_suggestion_annotations__annotation_id__reject_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/annotations/{annotation_id}/assign": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Assign Annotation
+         * @description Assign an annotation to a workspace identity (by id or handle), or
+         *     clear it (``clear=true``). Any member may assign -- it is coordination,
+         *     not authorship.
+         */
+        post: operations["assign_annotation_annotations__annotation_id__assign_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2615,6 +2791,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/email/accounts/{account_id}/default-tags": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Set Default Tags */
+        put: operations["set_default_tags_email_accounts__account_id__default_tags_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/email/accounts/{account_id}/sync": {
         parameters: {
             query?: never;
@@ -2666,6 +2859,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/email/threads/{thread_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Thread */
+        get: operations["get_thread_email_threads__thread_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/email/messages/{message_id}/to-task": {
         parameters: {
             query?: never;
@@ -2677,6 +2887,23 @@ export interface paths {
         put?: never;
         /** Email To Task */
         post: operations["email_to_task_email_messages__message_id__to_task_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/email/messages/{message_id}/to-note": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Email To Note */
+        post: operations["email_to_note_email_messages__message_id__to_note_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2711,6 +2938,77 @@ export interface paths {
         put?: never;
         /** Reply */
         post: operations["reply_email_messages__message_id__reply_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/email/messages/{message_id}/draft": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Draft Reply
+         * @description On-demand: queue a draft-reply job for this message (idempotent).
+         */
+        post: operations["draft_reply_email_messages__message_id__draft_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/email/drafts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Drafts */
+        get: operations["list_drafts_email_drafts_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/email/drafts/{job_id}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Approve Draft */
+        post: operations["approve_draft_email_drafts__job_id__approve_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/email/drafts/{job_id}/reject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reject Draft */
+        post: operations["reject_draft_email_drafts__job_id__reject_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3698,6 +3996,58 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/notes/{note_id}/parts/{part_id}/body/raw": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Download Note Part Body Raw
+         * @description Token-free raw download of a note part's markdown body. Returns the
+         *     body as ``text/markdown`` with ``X-Version`` + ``X-Body-SHA256`` headers
+         *     (the base gate the patch route checks). Bearer or a multi-use
+         *     ``note_part_body:read`` capability for this part; the bytes never ride a
+         *     tool argument. Use the MCP ``get_note_part_body_capability`` tool for the
+         *     matching ``curl -D-``.
+         */
+        get: operations["download_note_part_body_raw_notes__note_id__parts__part_id__body_raw_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/notes/{note_id}/parts/{part_id}/body/patch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Patch Note Part Body
+         * @description Apply a strict unified diff (the raw request body) to a note part's
+         *     markdown body. The base gate (``expected_version`` + ``base_sha256``,
+         *     taken from the ``body/raw`` headers) refuses to apply if the live body
+         *     drifted (409 ``patch.stale``); a diff that does not apply cleanly is 422
+         *     (``patch.does_not_apply`` / ``patch.malformed``); nothing mutates on
+         *     failure. Bearer or a single-use ``note_part_body:patch`` capability,
+         *     consumed on success. Use the MCP ``patch_note_part_body_capability`` tool
+         *     for the matching ``curl``.
+         */
+        post: operations["patch_note_part_body_notes__note_id__parts__part_id__body_patch_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/notes/{note_id}/parts/order": {
         parameters: {
             query?: never;
@@ -4380,12 +4730,18 @@ export interface paths {
         };
         /**
          * Garden Classify
-         * @description The proposal engine (ADR-0032): a structured enrichment proposal
-         *     ``{tags, links, maturity, cluster}`` for a note, each with confidence
-         *     + rationale, plus ``signals_used`` for transparency. **Read-only** —
-         *     nothing is mutated; the user (or an agent) applies a suggestion via
-         *     ``POST /garden/apply``. v1 classifies notes (404 otherwise). Unknown
-         *     ``kinds`` tokens are dropped; an all-unknown set falls back to all.
+         * @description The proposal engine (ADR-0032 / ADR-0042): a structured enrichment
+         *     proposal ``{tags, links, maturity, cluster}`` for a note or task, each
+         *     with confidence + rationale, plus ``signals_used`` for transparency.
+         *     **Read-only** — nothing is mutated; the user (or an agent) applies a
+         *     suggestion via ``POST /garden/apply``.
+         *
+         *     Serves the persisted on-create suggestions when fresh (``source =
+         *     precomputed``); otherwise — or when ``refresh`` is set — recomputes live
+         *     (``source = live``). The cache is populated by the on-create queue, so a
+         *     read never writes. Tasks are classifiable only when the unified-task-graph
+         *     flag is on (404 otherwise). Unknown ``kinds`` tokens are dropped; an
+         *     all-unknown set falls back to all.
          */
         get: operations["garden_classify_garden_classify__node_id__get"];
         put?: never;
@@ -4414,6 +4770,97 @@ export interface paths {
          *     written — the audit trail behind the learning loop and rollback.
          */
         post: operations["garden_apply_garden_apply_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/garden/review/pending": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Garden Review Pending
+         * @description The review inbox (ADR-0043): AUTONOMOUSLY-generated humus notes awaiting
+         *     human approval (``review_state='proposed'``), newest first, each with the
+         *     model that produced it (``origin_model_id``) so the reviewer sees WHICH
+         *     model wrote the summary. A pure read; RLS-scoped.
+         */
+        get: operations["garden_review_pending_garden_review_pending_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/garden/review/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Garden Review Approve
+         * @description Approve a proposed humus note (ADR-0043): it becomes effective and
+         *     re-enters retrieval/search/listings. Audited; emits a bus ``commit``
+         *     event. Idempotent. Member role.
+         */
+        post: operations["garden_review_approve_garden_review_approve_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/garden/review/reject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Garden Review Reject
+         * @description Reject a proposed humus note (ADR-0043): soft-delete it so a weak
+         *     summary never pollutes the corpus (reversible via trash/restore). Audited;
+         *     emits a bus ``reject`` event carrying ``origin_model_id``. Idempotent.
+         *     Member role.
+         */
+        post: operations["garden_review_reject_garden_review_reject_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/garden/review/accept-ratio": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Garden Review Accept Ratio
+         * @description Per-model accept ratio of the garden's AUTONOMOUSLY-generated proposals
+         *     (ADR-0043 D4): the earned-autonomy reliability signal, most-decided model
+         *     first. Derived from the durable approve/reject bus events; a pure read.
+         *     "Show, never judge": counts + ratio, never a verdict.
+         */
+        get: operations["garden_review_accept_ratio_garden_review_accept_ratio_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -4583,6 +5030,33 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/attachments/capability/write": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mint Upload Capability
+         * @description Mint a parent-scoped, single-use ``attachment:write`` capability
+         *     token (``mycelium_cap_``) that authorises ONE upload to a note or task with
+         *     no PAT and no X-Workspace-Id. Member-gated (the same floor an upload
+         *     enforces, so the token grants nothing the caller did not already hold).
+         *     The raw token is returned once and consumed on the first successful
+         *     upload. Symmetric to ``POST /attachments/capability`` (read); powers the
+         *     MCP ``upload_attachment_capability`` tool. ``attachments`` is empty -- a
+         *     write grant enumerates nothing, the caller POSTs the file.
+         */
+        post: operations["mint_upload_capability_attachments_capability_write_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/attachments/{attachment_id}/download": {
         parameters: {
             query?: never;
@@ -4612,6 +5086,34 @@ export interface paths {
         post?: never;
         /** Delete Attachment */
         delete: operations["delete_attachment_attachments__attachment_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/capability/text-block": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mint Text Block Capability
+         * @description Mint a mycelium_cap_ token for a text block. ``(kind, verb)`` maps to the
+         *     capability action via :func:`capability_tokens.text_block_action`; the
+         *     resource_kind follows ``kind`` (note_part -> note_part id;
+         *     task_description -> task id; annotation -> annotation id). read is
+         *     multi-use within the TTL; write / patch are single-use (consumed on the
+         *     first successful write). Member-gated, so the token grants nothing the
+         *     caller did not already hold. The raw token is returned exactly once; the
+         *     caller hits the matching raw / stream / patch route with
+         *     ``Authorization: Bearer <token>`` (no PAT, no X-Workspace-Id).
+         */
+        post: operations["mint_text_block_capability_capability_text_block_post"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -5520,6 +6022,25 @@ export interface components {
             /** Is Active */
             is_active?: boolean | null;
         };
+        /**
+         * AnnotationAssignIn
+         * @description Assign an annotation to a workspace identity, or clear it. Pass an
+         *     ``assignee_identity_id`` OR an ``assignee_handle`` (bare / ``@handle`` /
+         *     login email), or ``clear=true`` to unassign. Optimistic-versioned.
+         */
+        AnnotationAssignIn: {
+            /** Expected Version */
+            expected_version: number;
+            /** Assignee Identity Id */
+            assignee_identity_id?: string | null;
+            /** Assignee Handle */
+            assignee_handle?: string | null;
+            /**
+             * Clear
+             * @default false
+             */
+            clear?: boolean;
+        };
         /** AnnotationCommentIn */
         AnnotationCommentIn: {
             /**
@@ -5592,6 +6113,8 @@ export interface components {
             author_identity_id?: string | null;
             /** Resolved By Identity Id */
             resolved_by_identity_id?: string | null;
+            /** Assigned To Identity Id */
+            assigned_to_identity_id?: string | null;
             /** Resolved At */
             resolved_at?: string | null;
             /** Edited At */
@@ -5677,7 +6200,7 @@ export interface components {
              */
             parent_id: string;
             /** Attachments */
-            attachments: components["schemas"]["AttachmentOut"][];
+            attachments?: components["schemas"]["AttachmentOut"][];
         };
         /** AttachmentOut */
         AttachmentOut: {
@@ -6310,6 +6833,14 @@ export interface components {
          * @enum {string}
          */
         DocumentType: "TD01" | "TD04";
+        /** DraftIdOut */
+        DraftIdOut: {
+            /**
+             * Job Id
+             * Format: uuid
+             */
+            job_id: string;
+        };
         /**
          * EditSessionSealIn
          * @description Body of ``POST /{tasks|notes}/{id}/edit-session/seal``.
@@ -6375,6 +6906,13 @@ export interface components {
             last_error: string | null;
             /** Ingest To Memory */
             ingest_to_memory: boolean;
+            /** Auto Draft Replies */
+            auto_draft_replies: boolean;
+            /**
+             * Default Tags
+             * @default []
+             */
+            default_tags?: components["schemas"]["TagBrief"][];
             /** Version */
             version: number;
         };
@@ -6395,12 +6933,66 @@ export interface components {
             status?: components["schemas"]["EmailAccountStatus"] | null;
             /** Ingest To Memory */
             ingest_to_memory?: boolean | null;
+            /** Auto Draft Replies */
+            auto_draft_replies?: boolean | null;
         };
         /**
          * EmailAccountStatus
          * @enum {string}
          */
         EmailAccountStatus: "active" | "error" | "disabled";
+        /**
+         * EmailDefaultTagsIn
+         * @description Body of ``PUT /email/accounts/{id}/default-tags`` — replace the
+         *     account's default-tag set (set-replace, like the secret rotation).
+         */
+        EmailDefaultTagsIn: {
+            /** Expected Version */
+            expected_version: number;
+            /** Tag Ids */
+            tag_ids?: string[];
+        };
+        /**
+         * EmailDraftApproveIn
+         * @description Optional edited body; ``None`` sends the stored draft as-is.
+         */
+        EmailDraftApproveIn: {
+            /** Body Text */
+            body_text?: string | null;
+        };
+        /**
+         * EmailDraftOut
+         * @description A queued/drafted reply awaiting human review. ``message_id`` keys
+         *     back to the source message the SPA already has, so subject/sender are
+         *     resolved client-side (no second fetch).
+         */
+        EmailDraftOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Message Id
+             * Format: uuid
+             */
+            message_id: string;
+            /** Status */
+            status: string;
+            /** Draft Reply */
+            draft_reply: string | null;
+            /** Origin Model Id */
+            origin_model_id: string | null;
+            /** Error */
+            error: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Finished At */
+            finished_at: string | null;
+        };
         /**
          * EmailIn
          * @description Used by resend-verification and forgot-password (enumeration-safe;
@@ -6449,6 +7041,8 @@ export interface components {
             is_read: boolean;
             /** Linked Task Id */
             linked_task_id: string | null;
+            /** Linked Note Id */
+            linked_note_id: string | null;
             /** Version */
             version: number;
         };
@@ -6481,6 +7075,15 @@ export interface components {
             in_reply_to?: string | null;
             /** References */
             references?: string | null;
+        };
+        /**
+         * EmailToNoteIn
+         * @description Body of ``POST /email/messages/{id}/to-note`` (WS-3). The account's
+         *     default tags are applied automatically; ``tag_ids`` adds more.
+         */
+        EmailToNoteIn: {
+            /** Tag Ids */
+            tag_ids?: string[];
         };
         /** EmailToTaskIn */
         EmailToTaskIn: {
@@ -6706,6 +7309,22 @@ export interface components {
             deadline_bucket: string;
         };
         /**
+         * GardenAcceptRatioOut
+         * @description Per-model reliability of AUTONOMOUSLY-generated proposals (ADR-0043
+         *     D4): how often a human approved vs rejected this model's output. ``ratio``
+         *     is null when there are no decisions yet (no signal, not 0%).
+         */
+        GardenAcceptRatioOut: {
+            /** Model Id */
+            model_id: string;
+            /** Approved */
+            approved: number;
+            /** Rejected */
+            rejected: number;
+            /** Ratio */
+            ratio?: number | null;
+        };
+        /**
          * GardenApplyIn
          * @description Apply (or decline) one suggestion. ``accept``/``override`` mutate
          *     via the existing services; ``reject``/``ignore`` only record the
@@ -6764,10 +7383,15 @@ export interface components {
         };
         /**
          * GardenClassifyOut
-         * @description Response of GET /garden/classify/{node_id} (ADR-0032). A block is
-         *     null/empty when its signal was not requested or produced nothing;
+         * @description Response of GET /garden/classify/{node_id} (ADR-0032 / ADR-0042). A
+         *     block is null/empty when its signal was not requested or produced nothing;
          *     ``signals_used`` names the signals that actually fired (and records
          *     ``leiden_extra_absent`` when clustering degraded gracefully).
+         *
+         *     ``source`` (ADR-0042 D4/D6) tells the SPA whether these are the persisted
+         *     on-create suggestions (``precomputed``) or a fresh live recompute
+         *     (``live``); ``generated_at`` dates them so the panel can show freshness and
+         *     offer a refresh.
          */
         GardenClassifyOut: {
             /**
@@ -6795,8 +7419,9 @@ export interface components {
             /**
              * Source
              * @default live
+             * @enum {string}
              */
-            source: "precomputed" | "live";
+            source?: "precomputed" | "live";
         };
         /** GardenClusterSuggestionOut */
         GardenClusterSuggestionOut: {
@@ -7128,6 +7753,60 @@ export interface components {
              * Format: date-time
              */
             last_declined_at: string;
+        };
+        /**
+         * GardenReviewActionIn
+         * @description Approve, or reject, one proposed node by id (ADR-0043). ``reason`` is
+         *     an optional note recorded on a reject (ignored by approve).
+         */
+        GardenReviewActionIn: {
+            /**
+             * Note Id
+             * Format: uuid
+             */
+            note_id: string;
+            /** Reason */
+            reason?: string | null;
+        };
+        /** GardenReviewActionOut */
+        GardenReviewActionOut: {
+            /**
+             * Note Id
+             * Format: uuid
+             */
+            note_id: string;
+            /** Review State */
+            review_state: string | null;
+            /** Origin Model Id */
+            origin_model_id?: string | null;
+            /** Rejected */
+            rejected: boolean;
+        };
+        /**
+         * GardenReviewPendingItem
+         * @description One AUTONOMOUSLY-generated humus note awaiting human review (ADR-0043
+         *     review inbox). ``origin_model_id`` is the transparency requirement: the
+         *     reviewer sees the producing model before approving/rejecting.
+         */
+        GardenReviewPendingItem: {
+            /**
+             * Note Id
+             * Format: uuid
+             */
+            note_id: string;
+            /** Title */
+            title?: string | null;
+            /** Humus Kind */
+            humus_kind?: string | null;
+            /** Origin Model Id */
+            origin_model_id?: string | null;
+            /** Preview */
+            preview: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
         };
         /** GardenTagSuggestionOut */
         GardenTagSuggestionOut: {
@@ -8212,6 +8891,14 @@ export interface components {
             audio_ref: string | null;
             /** Memory Blobs Deleted */
             memory_blobs_deleted: number;
+        };
+        /** NoteIdOut */
+        NoteIdOut: {
+            /**
+             * Note Id
+             * Format: uuid
+             */
+            note_id: string;
         };
         /**
          * NoteKind
@@ -10098,6 +10785,48 @@ export interface components {
             chat_username?: string | null;
             /** Linked At */
             linked_at?: string | null;
+        };
+        /** TextBlockCapabilityIn */
+        TextBlockCapabilityIn: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "note_part" | "task_description" | "annotation";
+            /**
+             * Resource Id
+             * Format: uuid
+             */
+            resource_id: string;
+            /**
+             * Verb
+             * @enum {string}
+             */
+            verb: "read" | "write" | "patch";
+            /**
+             * Ttl Seconds
+             * @default 300
+             */
+            ttl_seconds?: number;
+        };
+        /** TextBlockCapabilityOut */
+        TextBlockCapabilityOut: {
+            /** Token */
+            token: string;
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
+            /** Kind */
+            kind: string;
+            /**
+             * Resource Id
+             * Format: uuid
+             */
+            resource_id: string;
+            /** Verb */
+            verb: string;
         };
         /** TierCountsOut */
         TierCountsOut: {
@@ -12292,6 +13021,121 @@ export interface operations {
             };
         };
     };
+    download_task_description_raw_tasks__task_id__description_raw_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-workspace-id"?: string | null;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    replace_task_description_stream_tasks__task_id__description_stream_put: {
+        parameters: {
+            query: {
+                expected_version: number;
+            };
+            header?: {
+                "X-Edit-Session-Id"?: string | null;
+                "x-workspace-id"?: string | null;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VersionOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    patch_task_description_tasks__task_id__description_patch_post: {
+        parameters: {
+            query: {
+                expected_version: number;
+                base_sha256: string;
+            };
+            header?: {
+                "X-Edit-Session-Id"?: string | null;
+                "x-workspace-id"?: string | null;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VersionOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     set_state_tasks__task_id__state_post: {
         parameters: {
             query?: never;
@@ -12975,8 +13819,8 @@ export interface operations {
     upload_task_attachment_tasks__task_id__attachments_post: {
         parameters: {
             query?: never;
-            header: {
-                "x-workspace-id": string;
+            header?: {
+                "x-workspace-id"?: string | null;
                 "x-project-id"?: string | null;
                 "x-workspace-role"?: string | null;
                 "x-admin-mode"?: string | null;
@@ -13967,6 +14811,43 @@ export interface operations {
             };
         };
     };
+    list_assigned_annotations_annotations_assigned_get: {
+        parameters: {
+            query?: {
+                handle?: string | null;
+                include_resolved?: boolean;
+            };
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnnotationOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_annotation_annotations__annotation_id__get: {
         parameters: {
             query?: never;
@@ -14086,8 +14967,83 @@ export interface operations {
             query: {
                 expected_version: number;
             };
-            header: {
-                "x-workspace-id": string;
+            header?: {
+                "x-workspace-id"?: string | null;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                annotation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VersionOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    download_annotation_body_raw_annotations__annotation_id__body_raw_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-workspace-id"?: string | null;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                annotation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    patch_annotation_body_annotations__annotation_id__body_patch_post: {
+        parameters: {
+            query: {
+                expected_version: number;
+                base_sha256: string;
+            };
+            header?: {
+                "x-workspace-id"?: string | null;
                 "x-project-id"?: string | null;
                 "x-workspace-role"?: string | null;
                 "x-admin-mode"?: string | null;
@@ -14256,6 +15212,46 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["ExpectedVersionIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VersionOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    assign_annotation_annotations__annotation_id__assign_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                annotation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AnnotationAssignIn"];
             };
         };
         responses: {
@@ -17154,6 +18150,46 @@ export interface operations {
             };
         };
     };
+    set_default_tags_email_accounts__account_id__default_tags_put: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                account_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EmailDefaultTagsIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VersionOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     sync_account_email_accounts__account_id__sync_post: {
         parameters: {
             query?: {
@@ -17265,6 +18301,42 @@ export interface operations {
             };
         };
     };
+    get_thread_email_threads__thread_id__get: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                thread_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EmailMessageOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     email_to_task_email_messages__message_id__to_task_post: {
         parameters: {
             query?: never;
@@ -17292,6 +18364,46 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TaskIdOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    email_to_note_email_messages__message_id__to_note_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                message_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EmailToNoteIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NoteIdOut"];
                 };
             };
             /** @description Validation Error */
@@ -17373,6 +18485,150 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["SentOut"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    draft_reply_email_messages__message_id__draft_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                message_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DraftIdOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_drafts_email_drafts_get: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EmailDraftOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    approve_draft_email_drafts__job_id__approve_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EmailDraftApproveIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SentOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reject_draft_email_drafts__job_id__reject_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {
@@ -19269,8 +20525,8 @@ export interface operations {
     upload_note_attachment_notes__note_id__attachments_post: {
         parameters: {
             query?: never;
-            header: {
-                "x-workspace-id": string;
+            header?: {
+                "x-workspace-id"?: string | null;
                 "x-project-id"?: string | null;
                 "x-workspace-role"?: string | null;
                 "x-admin-mode"?: string | null;
@@ -19629,6 +20885,84 @@ export interface operations {
         parameters: {
             query: {
                 expected_version: number;
+            };
+            header?: {
+                "X-Edit-Session-Id"?: string | null;
+                "x-workspace-id"?: string | null;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                note_id: string;
+                part_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VersionOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    download_note_part_body_raw_notes__note_id__parts__part_id__body_raw_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-workspace-id"?: string | null;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                note_id: string;
+                part_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    patch_note_part_body_notes__note_id__parts__part_id__body_patch_post: {
+        parameters: {
+            query: {
+                expected_version: number;
+                base_sha256: string;
             };
             header?: {
                 "X-Edit-Session-Id"?: string | null;
@@ -21123,6 +22457,152 @@ export interface operations {
             };
         };
     };
+    garden_review_pending_garden_review_pending_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GardenReviewPendingItem"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    garden_review_approve_garden_review_approve_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GardenReviewActionIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GardenReviewActionOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    garden_review_reject_garden_review_reject_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GardenReviewActionIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GardenReviewActionOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    garden_review_accept_ratio_garden_review_accept_ratio_get: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GardenAcceptRatioOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     garden_learning_rollback_garden_learning_rollback_post: {
         parameters: {
             query?: never;
@@ -21356,6 +22836,44 @@ export interface operations {
             };
         };
     };
+    mint_upload_capability_attachments_capability_write_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AttachmentCapabilityIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AttachmentCapabilityOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     download_attachment_attachments__attachment_id__download_get: {
         parameters: {
             query?: never;
@@ -21414,6 +22932,44 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    mint_text_block_capability_capability_text_block_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TextBlockCapabilityIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TextBlockCapabilityOut"];
+                };
             };
             /** @description Validation Error */
             422: {

@@ -1827,6 +1827,7 @@ class EmailAccountPatchIn(BaseModel):
     smtp_port: int | None = None
     status: EmailAccountStatus | None = None
     ingest_to_memory: bool | None = None
+    auto_draft_replies: bool | None = None
 
 
 class EmailSecretIn(BaseModel):
@@ -1849,7 +1850,20 @@ class EmailAccountOut(BaseModel):
     last_sync_at: datetime.datetime | None
     last_error: str | None
     ingest_to_memory: bool
+    # Per-account opt-in for the autonomous responder (WS-4).
+    auto_draft_replies: bool
+    # Per-account default tags (WS-1) auto-applied to ingested memory +
+    # email->task/note (typ. one client + one project tag).
+    default_tags: list[TagBrief] = []
     version: int
+
+
+class EmailDefaultTagsIn(BaseModel):
+    """Body of ``PUT /email/accounts/{id}/default-tags`` — replace the
+    account's default-tag set (set-replace, like the secret rotation)."""
+
+    expected_version: int = Field(ge=1)
+    tag_ids: list[uuid.UUID] = Field(default_factory=list)
 
 
 class EmailMessageOut(BaseModel):
@@ -1867,6 +1881,7 @@ class EmailMessageOut(BaseModel):
     received_at: datetime.datetime
     is_read: bool
     linked_task_id: uuid.UUID | None
+    linked_note_id: uuid.UUID | None
     version: int
 
 
@@ -1882,6 +1897,17 @@ class EmailToTaskIn(BaseModel):
     project_tag_id: uuid.UUID | None = None
     tag_ids: list[uuid.UUID] = Field(default_factory=list)
     assignee_ids: list[uuid.UUID] = Field(default_factory=list)
+
+
+class EmailToNoteIn(BaseModel):
+    """Body of ``POST /email/messages/{id}/to-note`` (WS-3). The account's
+    default tags are applied automatically; ``tag_ids`` adds more."""
+
+    tag_ids: list[uuid.UUID] = Field(default_factory=list)
+
+
+class NoteIdOut(BaseModel):
+    note_id: uuid.UUID
 
 
 class EmailSendIn(BaseModel):
@@ -1902,6 +1928,34 @@ class TaskIdOut(BaseModel):
 
 class SentOut(BaseModel):
     sent_id: str
+
+
+# --- WS-4: autonomous responder (draft review) ---
+
+
+class EmailDraftOut(BaseModel):
+    """A queued/drafted reply awaiting human review. ``message_id`` keys
+    back to the source message the SPA already has, so subject/sender are
+    resolved client-side (no second fetch)."""
+
+    id: uuid.UUID
+    message_id: uuid.UUID
+    status: str
+    draft_reply: str | None
+    origin_model_id: str | None
+    error: str | None
+    created_at: datetime.datetime
+    finished_at: datetime.datetime | None
+
+
+class EmailDraftApproveIn(BaseModel):
+    """Optional edited body; ``None`` sends the stored draft as-is."""
+
+    body_text: str | None = Field(default=None, min_length=1)
+
+
+class DraftIdOut(BaseModel):
+    job_id: uuid.UUID
 
 
 # --- F5b: billing / metering (FR-15, docs/adr/0019) ---

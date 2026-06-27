@@ -23,6 +23,7 @@ from mycelium_core.services.mailer import build_system_mailer, set_mailer
 from mycelium_core.services.notification_sender import build_notification_sender
 from mycelium_worker import (
     dispatch,
+    email_responder,
     email_sync,
     embedding_migration,
     garden,
@@ -46,6 +47,8 @@ def _enabled_jobs() -> list[Callable[[], Awaitable[None]]]:
      - F5/ADR-0023 email connector periodic sync (no-op without accounts);
      - ADR-0026 P3 Telegram assistant queue drain (no-op when
        MYCELIUM_ASSISTANT_ENABLED is false);
+     - WS-4 autonomous email responder queue drain (no-op when
+       MYCELIUM_EMAIL_RESPONDER_ENABLED is false);
      - reminders + notification-dispatch tick (FR-12);
      - task-search embedding backfill (timed-out re-embed safety net);
      - note-search pointer backfill (back-catalogue indexing);
@@ -64,6 +67,7 @@ def _enabled_jobs() -> list[Callable[[], Awaitable[None]]]:
         google_calendar.run_forever,
         email_sync.run_forever,
         telegram_assistant.run_forever,
+        email_responder.run_forever,
         reminders.run_forever,
         task_search_backfill.run_forever,
         note_search_backfill.run_forever,

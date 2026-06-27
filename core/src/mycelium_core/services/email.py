@@ -16,7 +16,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from sqlalchemy import String, cast, select, update
+from sqlalchemy import String, cast, delete, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -33,14 +33,19 @@ from mycelium_core.google_api import GoogleApiClient, google_api_client
 from mycelium_core.i18n import MessageCode
 from mycelium_core.models.email import (
     EmailAccount,
+    EmailAccountDefaultTag,
     EmailAccountStatus,
     EmailMessage,
     EmailProvider,
+    EmailResponderJob,
 )
 from mycelium_core.models.membership import Role
 from mycelium_core.models.memory_blob import BlobSource
+from mycelium_core.models.note import NoteKind
+from mycelium_core.models.tag import Tag
 from mycelium_core.services import audit
 from mycelium_core.services import memory as memory_svc
+from mycelium_core.services import notes as notes_svc
 from mycelium_core.services import tasks as tasks_svc
 from mycelium_core.services.rbac import require_role
 
@@ -55,6 +60,7 @@ _ACCOUNT_UPDATABLE = frozenset(
         "smtp_port",
         "status",
         "ingest_to_memory",
+        "auto_draft_replies",
     }
 )
 
@@ -206,6 +212,87 @@ async def set_secret(
     return new_version
 
 
+async def _visible_tag_ids(session: AsyncSession, ids: Sequence[uuid.UUID]) -> set[uuid.UUID]:
+    """Subset of ``ids`` that are tags visible in the current tenant (RLS
+    scopes ``tags`` to the org), so a caller cannot bind an account to
+    another workspace's tag. Mirrors ``memory._visible_tag_ids``."""
+    if not ids:
+        return set()
+    rows = await session.execute(select(Tag.id).where(Tag.id.in_(list(ids))))
+    return set(rows.scalars().all())
+
+
+async def default_tag_ids(session: AsyncSession, account_id: uuid.UUID) -> set[uuid.UUID]:
+    """The tag ids auto-applied to everything ingested from this account."""
+    rows = await session.execute(
+        select(EmailAccountDefaultTag.tag_id).where(EmailAccountDefaultTag.account_id == account_id)
+    )
+    return set(rows.scalars().all())
+
+
+async def default_tags_by_account(
+    session: AsyncSession, *, account_ids: Sequence[uuid.UUID]
+) -> dict[uuid.UUID, list[Tag]]:
+    """Default ``Tag`` rows per account (single query, ordered by
+    kind/name), for serialisation on ``EmailAccountOut``."""
+    if not account_ids:
+        return {}
+    rows = await session.execute(
+        select(EmailAccountDefaultTag.account_id, Tag)
+        .join(Tag, Tag.id == EmailAccountDefaultTag.tag_id)
+        .where(EmailAccountDefaultTag.account_id.in_(list(account_ids)))
+        .order_by(Tag.kind, Tag.name)
+    )
+    out: dict[uuid.UUID, list[Tag]] = {}
+    for account_id, tag in rows.all():
+        out.setdefault(account_id, []).append(tag)
+    return out
+
+
+async def set_default_tags(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    account_id: uuid.UUID,
+    expected_version: int,
+    tag_ids: Sequence[uuid.UUID],
+) -> int:
+    """Replace the account's default-tag set (typ. client + project).
+    Validates every tag is visible in the tenant (404 otherwise — an
+    explicit set, unlike the silent drop on the ingest path), then bumps
+    the account version (optimistic-lock guard for the SPA)."""
+    await require_role(session, org_id, actor_id, Role.member)
+    await get_account(session, org_id=org_id, account_id=account_id)
+    wanted = list(dict.fromkeys(tag_ids))  # dedupe, preserve order
+    visible = await _visible_tag_ids(session, wanted)
+    if set(wanted) - visible:
+        raise NotFoundError(MessageCode.TAG_NOT_FOUND)
+    await session.execute(
+        delete(EmailAccountDefaultTag).where(EmailAccountDefaultTag.account_id == account_id)
+    )
+    for tid in wanted:
+        session.add(EmailAccountDefaultTag(account_id=account_id, org_id=org_id, tag_id=tid))
+    await session.flush()
+    new_version = await optimistic_update(
+        session,
+        EmailAccount,
+        pk=account_id,
+        expected_version=expected_version,
+        values={},
+    )
+    await audit.log(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        entity="email_account",
+        entity_id=account_id,
+        action="set_default_tags",
+        diff={"tag_ids": ",".join(str(t) for t in wanted)},
+    )
+    return new_version
+
+
 async def delete_account(
     session: AsyncSession,
     *,
@@ -353,6 +440,18 @@ async def sync_account(
         except Exception as exc:  # savepoint rolled back; isolate from the sync
             ingest_error = str(exc)
             _log.warning("email ingest failed for account=%s: %s", account_id, exc)
+    # Autonomous responder (WS-4): enqueue a draft-reply job per new non-bulk
+    # message when the account opted in AND the responder is enabled. The
+    # worker drafts later; nothing is ever sent without human approval.
+    # Best-effort + savepoint-isolated, like the ingest block above.
+    if account.auto_draft_replies and get_settings().email_responder_enabled:
+        try:
+            async with session.begin_nested():
+                await enqueue_pending_drafts(
+                    session, org_id=org_id, user_id=actor_id, account_id=account_id
+                )
+        except Exception as exc:  # savepoint rolled back; never blocks the sync
+            _log.warning("email draft enqueue failed for account=%s: %s", account_id, exc)
     # Status reflects the OUTCOME: the fetch+persist succeeded (active), and
     # an ingest failure (if any) is recorded in last_error rather than
     # committing a green "no error" row over a silently failed ingest.
@@ -437,6 +536,10 @@ async def ingest_account_to_memory(
         .scalars()
         .all()
     )
+    # Per-account default tags (WS-1): every ingested blob is born tagged
+    # (typ. client + project), so email memory is filterable by client /
+    # project. write_blob merges these with the 'email' channel tag.
+    tag_ids = list(await default_tag_ids(session, account_id))
     for m in rows:
         await memory_svc.write_blob(
             session,
@@ -448,6 +551,7 @@ async def ingest_account_to_memory(
             namespace="email",
             channel_key="email",
             sources=[(_INGEST_SOURCE_KIND, str(m.id))],
+            tag_ids=tag_ids,
         )
     return len(rows)
 
@@ -519,6 +623,32 @@ async def get_message(
     return m
 
 
+async def get_thread(
+    session: AsyncSession, *, org_id: uuid.UUID, thread_id: str
+) -> list[EmailMessage]:
+    """All messages in a provider thread, oldest first (WS-2). RLS scopes
+    to the tenant; ``thread_id`` is the provider's stable conversation id
+    (indexed). Lets an agent recall a whole conversation as a unit rather
+    than reconstructing it from individual search hits."""
+    rows = await session.execute(
+        select(EmailMessage)
+        .where(EmailMessage.thread_id == thread_id)
+        .order_by(EmailMessage.received_at)
+    )
+    return list(rows.scalars().all())
+
+
+async def get_thread_for_message(
+    session: AsyncSession, *, org_id: uuid.UUID, message_id: uuid.UUID
+) -> list[EmailMessage]:
+    """The thread containing ``message_id`` (WS-2). Falls back to the lone
+    message when the provider gave it no ``thread_id``."""
+    msg = await get_message(session, org_id=org_id, message_id=message_id)
+    if not msg.thread_id:
+        return [msg]
+    return await get_thread(session, org_id=org_id, thread_id=msg.thread_id)
+
+
 async def email_to_task(
     session: AsyncSession,
     *,
@@ -535,6 +665,11 @@ async def email_to_task(
     all_tags = list(tag_ids)
     if project_tag_id is not None and project_tag_id not in all_tags:
         all_tags.append(project_tag_id)
+    # Union the account's default tags (WS-1): a task derived from a
+    # per-client / per-project mailbox inherits its client + project.
+    for tid in await default_tag_ids(session, msg.account_id):
+        if tid not in all_tags:
+            all_tags.append(tid)
     task = await tasks_svc.create_task(
         session,
         org_id=org_id,
@@ -561,6 +696,50 @@ async def email_to_task(
         diff={"task_id": str(task.id)},
     )
     return task.id
+
+
+async def email_to_note(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    message_id: uuid.UUID,
+    tag_ids: Sequence[uuid.UUID] = (),
+) -> uuid.UUID:
+    """Create a note from a message (WS-3): subject -> title, body -> text,
+    with the account's default tags plus any passed tags, and a back-link
+    (``linked_note_id``). Symmetric with :func:`email_to_task`."""
+    msg = await get_message(session, org_id=org_id, message_id=message_id)
+    note = await notes_svc.create_note(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        kind=NoteKind.text,
+        title=(msg.subject or "(no subject)")[:300],
+        text=msg.body_text,
+    )
+    all_tags = list(dict.fromkeys([*tag_ids, *await default_tag_ids(session, msg.account_id)]))
+    for tid in all_tags:
+        await notes_svc.attach_tag(
+            session, org_id=org_id, actor_id=actor_id, note_id=note.id, tag_id=tid
+        )
+    await optimistic_update(
+        session,
+        EmailMessage,
+        pk=msg.id,
+        expected_version=msg.version,
+        values={"linked_note_id": note.id},
+    )
+    await audit.log(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        entity="email_message",
+        entity_id=msg.id,
+        action="to_note",
+        diff={"note_id": str(note.id)},
+    )
+    return note.id
 
 
 async def send_message(
@@ -624,4 +803,169 @@ async def reply_to_message(
         in_reply_to=msg.message_id,
         references=msg.message_id,
         connector=connector,
+    )
+
+
+# --- WS-4: autonomous responder (enqueue + human-gated review) ---
+
+
+async def enqueue_pending_drafts(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    user_id: uuid.UUID,
+    account_id: uuid.UUID,
+    cap: int = _INGEST_BATCH_CAP,
+) -> int:
+    """Queue a draft-reply job for each non-bulk message of the account
+    that has no job yet (newest first, capped). Idempotent via the UNIQUE
+    on ``message_id``. Gated by the caller (per-account ``auto_draft_replies``
+    + global ``email_responder_enabled``). Returns the number enqueued."""
+    not_jobbed = ~(
+        select(EmailResponderJob.id).where(EmailResponderJob.message_id == EmailMessage.id).exists()
+    )
+    rows = (
+        (
+            await session.execute(
+                select(EmailMessage.id)
+                .where(
+                    EmailMessage.account_id == account_id,
+                    EmailMessage.is_bulk.is_(False),
+                    not_jobbed,
+                )
+                .order_by(EmailMessage.received_at.desc())
+                .limit(cap)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    for mid in rows:
+        session.add(
+            EmailResponderJob(org_id=org_id, user_id=user_id, message_id=mid, status="pending")
+        )
+    await session.flush()
+    return len(rows)
+
+
+async def enqueue_draft(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    message_id: uuid.UUID,
+) -> uuid.UUID:
+    """On-demand: ensure a draft-reply job exists for one message (idempotent
+    -- returns the existing job id if already queued). Lets an agent ask the
+    responder to draft a specific reply regardless of the per-account flag."""
+    await require_role(session, org_id, actor_id, Role.member)
+    msg = await get_message(session, org_id=org_id, message_id=message_id)
+    existing = (
+        await session.execute(
+            select(EmailResponderJob).where(EmailResponderJob.message_id == msg.id)
+        )
+    ).scalar_one_or_none()
+    if existing is not None:
+        return existing.id
+    job = EmailResponderJob(org_id=org_id, user_id=actor_id, message_id=msg.id, status="pending")
+    session.add(job)
+    await session.flush()
+    return job.id
+
+
+async def get_draft(
+    session: AsyncSession, *, org_id: uuid.UUID, job_id: uuid.UUID
+) -> EmailResponderJob:
+    job = (
+        await session.execute(select(EmailResponderJob).where(EmailResponderJob.id == job_id))
+    ).scalar_one_or_none()
+    if job is None:
+        raise NotFoundError(MessageCode.EMAIL_DRAFT_NOT_FOUND)
+    return job
+
+
+async def list_drafts(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    statuses: Sequence[str] = ("drafted",),
+) -> list[EmailResponderJob]:
+    """The review inbox: responder jobs in the given states (default the
+    drafted-but-not-sent ones awaiting a human), newest first."""
+    rows = await session.execute(
+        select(EmailResponderJob)
+        .where(EmailResponderJob.status.in_(list(statuses)))
+        .order_by(EmailResponderJob.created_at.desc())
+    )
+    return list(rows.scalars().all())
+
+
+async def approve_draft(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    job_id: uuid.UUID,
+    body_text: str | None = None,
+    connector: EmailConnector | None = None,
+) -> str:
+    """Approve a drafted reply and SEND it in-thread (the only path that ever
+    sends a responder draft). ``body_text`` overrides the stored draft so a
+    human can edit before sending. Marks the job ``sent``."""
+    await require_role(session, org_id, actor_id, Role.member)
+    job = await get_draft(session, org_id=org_id, job_id=job_id)
+    if job.status != "drafted":
+        raise DomainError(MessageCode.EMAIL_DRAFT_NOT_READY)
+    body = (body_text if body_text is not None else job.draft_reply) or ""
+    if not body.strip():
+        raise DomainError(MessageCode.EMAIL_DRAFT_NOT_READY)
+    sent_id = await reply_to_message(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        message_id=job.message_id,
+        body_text=body,
+        connector=connector,
+    )
+    job.status = "sent"
+    job.draft_reply = body
+    job.sent_id = sent_id
+    job.finished_at = dt.datetime.now(tz=dt.UTC)
+    await session.flush()
+    await audit.log(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        entity="email_responder_job",
+        entity_id=job.id,
+        action="approve_draft",
+        diff={"sent_id": sent_id},
+    )
+    return sent_id
+
+
+async def reject_draft(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    job_id: uuid.UUID,
+) -> None:
+    """Discard a draft (never sent). Idempotent if already rejected."""
+    await require_role(session, org_id, actor_id, Role.member)
+    job = await get_draft(session, org_id=org_id, job_id=job_id)
+    if job.status == "rejected":
+        return
+    if job.status == "sent":
+        raise DomainError(MessageCode.EMAIL_DRAFT_NOT_READY)
+    job.status = "rejected"
+    job.finished_at = dt.datetime.now(tz=dt.UTC)
+    await session.flush()
+    await audit.log(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        entity="email_responder_job",
+        entity_id=job.id,
+        action="reject_draft",
     )

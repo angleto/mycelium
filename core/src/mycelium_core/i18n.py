@@ -77,6 +77,8 @@ class MessageCode(enum.StrEnum):
     EMAIL_ACCOUNT_DUPLICATE = "email.account_duplicate"
     EMAIL_MESSAGE_NOT_FOUND = "email.message_not_found"
     EMAIL_SYNC_FAILED = "email.sync_failed"
+    EMAIL_DRAFT_NOT_FOUND = "email.draft_not_found"
+    EMAIL_DRAFT_NOT_READY = "email.draft_not_ready"
     INSUFFICIENT_CREDITS = "billing.insufficient_credits"
     RATE_CARD_NOT_FOUND = "billing.rate_card_not_found"
     MEMORY_NOT_FOUND = "memory.not_found"
@@ -287,6 +289,8 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
         MessageCode.EMAIL_ACCOUNT_DUPLICATE: ("An email account with this address already exists"),
         MessageCode.EMAIL_MESSAGE_NOT_FOUND: "Email message not found",
         MessageCode.EMAIL_SYNC_FAILED: "Email sync failed: {detail}",
+        MessageCode.EMAIL_DRAFT_NOT_FOUND: "Email draft not found",
+        MessageCode.EMAIL_DRAFT_NOT_READY: "Email draft is not ready to send",
         MessageCode.INSUFFICIENT_CREDITS: ("Insufficient credits: need {needed}, have {balance}"),
         MessageCode.RATE_CARD_NOT_FOUND: ("No active rate card for model {model_id}"),
         MessageCode.MEMORY_NOT_FOUND: "Memory blob not found",

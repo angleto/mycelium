@@ -11,26 +11,38 @@ from fastapi import APIRouter, Depends, status
 
 from mycelium_api.deps import TenantCtx, tenant_ctx
 from mycelium_api.schemas import (
+    DraftIdOut,
     EmailAccountCreateIn,
     EmailAccountOut,
     EmailAccountPatchIn,
+    EmailDefaultTagsIn,
+    EmailDraftApproveIn,
+    EmailDraftOut,
     EmailMessageOut,
     EmailReplyIn,
     EmailSecretIn,
     EmailSendIn,
+    EmailToNoteIn,
     EmailToTaskIn,
+    NoteIdOut,
     SentOut,
     SyncResultOut,
+    TagBrief,
     TaskIdOut,
     VersionOut,
 )
-from mycelium_core.models.email import EmailAccount, EmailMessage
+from mycelium_core.models.email import EmailAccount, EmailMessage, EmailResponderJob
+from mycelium_core.models.tag import Tag
 from mycelium_core.services import email as svc
 
 router = APIRouter(prefix="/email", tags=["email"])
 
 
-def _account_out(a: EmailAccount) -> EmailAccountOut:
+def _tag_brief(t: Tag) -> TagBrief:
+    return TagBrief(id=t.id, kind=t.kind, name=t.name, color=t.color)
+
+
+def _account_out(a: EmailAccount, default_tags: list[Tag] | None = None) -> EmailAccountOut:
     return EmailAccountOut(
         id=a.id,
         provider=a.provider,
@@ -44,6 +56,8 @@ def _account_out(a: EmailAccount) -> EmailAccountOut:
         last_sync_at=a.last_sync_at,
         last_error=a.last_error,
         ingest_to_memory=a.ingest_to_memory,
+        auto_draft_replies=a.auto_draft_replies,
+        default_tags=[_tag_brief(t) for t in (default_tags or [])],
         version=a.version,
     )
 
@@ -64,7 +78,21 @@ def _msg_out(m: EmailMessage) -> EmailMessageOut:
         received_at=m.received_at,
         is_read=m.is_read,
         linked_task_id=m.linked_task_id,
+        linked_note_id=m.linked_note_id,
         version=m.version,
+    )
+
+
+def _draft_out(j: EmailResponderJob) -> EmailDraftOut:
+    return EmailDraftOut(
+        id=j.id,
+        message_id=j.message_id,
+        status=j.status,
+        draft_reply=j.draft_reply,
+        origin_model_id=j.origin_model_id,
+        error=j.error,
+        created_at=j.created_at,
+        finished_at=j.finished_at,
     )
 
 
@@ -93,7 +121,9 @@ async def create_account(
 async def list_accounts(
     ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> list[EmailAccountOut]:
-    return [_account_out(a) for a in await svc.list_accounts(ctx.session, org_id=ctx.org_id)]
+    accounts = await svc.list_accounts(ctx.session, org_id=ctx.org_id)
+    tags_by = await svc.default_tags_by_account(ctx.session, account_ids=[a.id for a in accounts])
+    return [_account_out(a, tags_by.get(a.id, [])) for a in accounts]
 
 
 @router.get("/accounts/{account_id}", response_model=EmailAccountOut)
@@ -101,9 +131,9 @@ async def get_account(
     account_id: uuid.UUID,
     ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> EmailAccountOut:
-    return _account_out(
-        await svc.get_account(ctx.session, org_id=ctx.org_id, account_id=account_id)
-    )
+    a = await svc.get_account(ctx.session, org_id=ctx.org_id, account_id=account_id)
+    tags_by = await svc.default_tags_by_account(ctx.session, account_ids=[a.id])
+    return _account_out(a, tags_by.get(a.id, []))
 
 
 @router.patch("/accounts/{account_id}", response_model=VersionOut)
@@ -137,6 +167,23 @@ async def set_secret(
         account_id=account_id,
         expected_version=body.expected_version,
         secret=body.secret,
+    )
+    return VersionOut(id=account_id, version=version)
+
+
+@router.put("/accounts/{account_id}/default-tags", response_model=VersionOut)
+async def set_default_tags(
+    account_id: uuid.UUID,
+    body: EmailDefaultTagsIn,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+) -> VersionOut:
+    version = await svc.set_default_tags(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        account_id=account_id,
+        expected_version=body.expected_version,
+        tag_ids=body.tag_ids,
     )
     return VersionOut(id=account_id, version=version)
 
@@ -196,6 +243,15 @@ async def get_message(
     return _msg_out(await svc.get_message(ctx.session, org_id=ctx.org_id, message_id=message_id))
 
 
+@router.get("/threads/{thread_id}", response_model=list[EmailMessageOut])
+async def get_thread(
+    thread_id: str,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+) -> list[EmailMessageOut]:
+    rows = await svc.get_thread(ctx.session, org_id=ctx.org_id, thread_id=thread_id)
+    return [_msg_out(m) for m in rows]
+
+
 @router.post("/messages/{message_id}/to-task", response_model=TaskIdOut)
 async def email_to_task(
     message_id: uuid.UUID,
@@ -212,6 +268,22 @@ async def email_to_task(
         assignee_ids=body.assignee_ids,
     )
     return TaskIdOut(task_id=task_id)
+
+
+@router.post("/messages/{message_id}/to-note", response_model=NoteIdOut)
+async def email_to_note(
+    message_id: uuid.UUID,
+    body: EmailToNoteIn,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+) -> NoteIdOut:
+    note_id = await svc.email_to_note(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        message_id=message_id,
+        tag_ids=body.tag_ids,
+    )
+    return NoteIdOut(note_id=note_id)
 
 
 @router.post("/accounts/{account_id}/send", response_model=SentOut)
@@ -248,3 +320,50 @@ async def reply(
         body_text=body.body_text,
     )
     return SentOut(sent_id=sent_id)
+
+
+# --- WS-4: autonomous responder (draft review) ---
+
+
+@router.post("/messages/{message_id}/draft", response_model=DraftIdOut)
+async def draft_reply(
+    message_id: uuid.UUID,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+) -> DraftIdOut:
+    """On-demand: queue a draft-reply job for this message (idempotent)."""
+    job_id = await svc.enqueue_draft(
+        ctx.session, org_id=ctx.org_id, actor_id=ctx.user_id, message_id=message_id
+    )
+    return DraftIdOut(job_id=job_id)
+
+
+@router.get("/drafts", response_model=list[EmailDraftOut])
+async def list_drafts(
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+) -> list[EmailDraftOut]:
+    rows = await svc.list_drafts(ctx.session, org_id=ctx.org_id)
+    return [_draft_out(j) for j in rows]
+
+
+@router.post("/drafts/{job_id}/approve", response_model=SentOut)
+async def approve_draft(
+    job_id: uuid.UUID,
+    body: EmailDraftApproveIn,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+) -> SentOut:
+    sent_id = await svc.approve_draft(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        job_id=job_id,
+        body_text=body.body_text,
+    )
+    return SentOut(sent_id=sent_id)
+
+
+@router.post("/drafts/{job_id}/reject", status_code=status.HTTP_204_NO_CONTENT)
+async def reject_draft(
+    job_id: uuid.UUID,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+) -> None:
+    await svc.reject_draft(ctx.session, org_id=ctx.org_id, actor_id=ctx.user_id, job_id=job_id)

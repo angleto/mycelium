@@ -1513,11 +1513,23 @@ export const it: Catalog = {
     filterAcct: 'Account',
     all: 'Tutti',
     toTask: 'A task',
+    toNote: 'A nota',
     linked: 'collegato',
+    linkedNote: 'nota',
     reply: 'Rispondi',
     send: 'Invia',
     none: 'Nessun messaggio. Aggiungi un account e sincronizza.',
     loading: 'Caricamento...',
+    defaultTags: 'Tag di default',
+    autoDraft: 'Bozze automatiche',
+    autoDraftHint:
+      'Quando il responder è attivo, ogni nuovo messaggio riceve una bozza di risposta da rivedere prima dell’invio. Nulla viene inviato in automatico.',
+    drafts: {
+      title: 'Bozze di risposta',
+      approve: 'Approva e invia',
+      reject: 'Scarta',
+      sent: 'Risposta inviata.',
+    },
   },
   billing: {
     nav: 'Fatturazione',

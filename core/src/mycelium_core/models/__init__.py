@@ -62,9 +62,11 @@ from mycelium_core.models.dispatch_request import (
 )
 from mycelium_core.models.email import (
     EmailAccount,
+    EmailAccountDefaultTag,
     EmailAccountStatus,
     EmailMessage,
     EmailProvider,
+    EmailResponderJob,
 )
 from mycelium_core.models.entity_revision import EntityRevision
 from mycelium_core.models.event_outbox import EventOutbox
@@ -204,9 +206,11 @@ __all__ = [
     "DispatchStatus",
     "DocumentType",
     "EmailAccount",
+    "EmailAccountDefaultTag",
     "EmailAccountStatus",
     "EmailMessage",
     "EmailProvider",
+    "EmailResponderJob",
     "EmailVerificationToken",
     "EmbedderProviderKind",
     "EntityRevision",
