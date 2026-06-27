@@ -38,6 +38,12 @@
   --mono: ui-monospace, SFMono-Regular, Consolas, monospace;
   --font-display: ui-serif, Georgia, 'Times New Roman', serif;
   --topbar-h: 52px;
+  /* Total header band: the bar height plus the iOS status-bar safe-area
+     inset that overlays the top edge in installed (standalone) PWA mode.
+     env() is 0 in a normal browser tab, so --header-h == --topbar-h there
+     and the layout is unchanged. Everything anchored "below the header"
+     uses --header-h so it tracks the inset. */
+  --header-h: calc(var(--topbar-h) + env(safe-area-inset-top, 0px));
 
   font: 15px/1.5 var(--sans);
   color: var(--text);
@@ -164,14 +170,35 @@ a:hover {
   position: sticky;
   top: 0;
   z-index: 20;
-  height: var(--topbar-h);
+  height: var(--header-h);
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
-  padding: 0 1rem;
+  /* Pad the controls clear of the iOS status bar in installed (standalone)
+     PWA mode; the surface still fills edge-to-edge behind it. The left/right
+     insets cover the notch in landscape. env() insets are 0 in the browser,
+     so this matches the old ``0 1rem`` there. */
+  padding: env(safe-area-inset-top, 0px) max(1rem, env(safe-area-inset-right, 0px))
+    0 max(1rem, env(safe-area-inset-left, 0px));
   background: var(--surface);
   border-bottom: 1px solid var(--border);
+}
+/* Installed (standalone) PWA on iOS draws the status-bar glyphs (clock,
+   battery) in white over the top edge. Paint the safe-area strip behind
+   them with the brand green (matches the manifest theme_color, fixed
+   across light/dark) so the white glyphs stay legible. Fixed + edge-to-edge
+   so it spans the full width regardless of the topbar's side padding; zero
+   height (invisible) in a browser tab, where env() insets are 0. */
+.topbar::before {
+  content: '';
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: env(safe-area-inset-top, 0px);
+  background: #4a6b3e;
+  pointer-events: none;
 }
 .topbar__brand {
   display: flex;
@@ -205,8 +232,8 @@ a:hover {
   padding: 0.9rem 0.7rem;
   gap: 0.5rem;
   position: sticky;
-  top: var(--topbar-h);
-  height: calc(100svh - var(--topbar-h));
+  top: var(--header-h);
+  height: calc(100svh - var(--header-h));
   overflow-y: auto;
 }
 .sidebar__ws {
@@ -433,7 +460,11 @@ button.running__n {
      timers stay here — the utilities relocate into the drawer foot
      (AppShell), so the row fits a phone instead of forcing the page
      ~200px wider than the viewport. */
-  .topbar { gap: 0.5rem; padding: 0 0.65rem; }
+  .topbar {
+    gap: 0.5rem;
+    padding: env(safe-area-inset-top, 0px) max(0.65rem, env(safe-area-inset-right, 0px))
+      0 max(0.65rem, env(safe-area-inset-left, 0px));
+  }
   .topbar__brand { min-width: 0; overflow: hidden; }
   .topbar__actions { gap: 0.4rem; min-width: 0; }
   .running__title { max-width: 6rem; }
@@ -443,10 +474,13 @@ button.running__n {
      and tapping a destination closes it (both wired in AppShell). */
   .sidebar {
     position: fixed;
-    top: var(--topbar-h);
+    top: var(--header-h);
     left: 0;
     width: min(86vw, 18rem);
-    height: calc(100svh - var(--topbar-h));
+    height: calc(100svh - var(--header-h));
+    /* Clear the home-indicator strip so the drawer foot (logout) is fully
+       tappable in standalone mode. */
+    padding-bottom: max(0.9rem, env(safe-area-inset-bottom, 0px));
     transform: translateX(-100%);
     transition: transform 0.22s ease-out;
     z-index: 50;
@@ -455,7 +489,10 @@ button.running__n {
   }
   .app--sidebar-open .sidebar { transform: translateX(0); }
   .layout { display: block; }
-  .content { padding: 1.25rem clamp(0.8rem, 4vw, 1.5rem); }
+  .content {
+    padding: 1.25rem clamp(0.8rem, 4vw, 1.5rem)
+      max(1.25rem, env(safe-area-inset-bottom, 0px));
+  }
 
   /* Wide data tables scroll horizontally inside their own box rather
      than stretching the whole page. */
@@ -482,7 +519,7 @@ button.running__n {
      zero height (no extra reserved space). */
   .topbar__row2 {
     position: sticky;
-    top: var(--topbar-h);
+    top: var(--header-h);
     z-index: 19;
     display: flex;
     justify-content: center;
@@ -519,7 +556,7 @@ button.running__n {
    Only mounted below the layout breakpoint (AppShell). */
 .sidebar__backdrop {
   position: fixed;
-  inset: var(--topbar-h) 0 0 0;
+  inset: var(--header-h) 0 0 0;
   z-index: 40;
   background: rgba(8, 9, 13, 0.45);
   border: 0;
@@ -2577,7 +2614,7 @@ button.btn--danger:hover {
      toolbar must pin just below it (not at 0, where the topbar — higher
      z-index — would cover it). Inside the notes modal the scroll
      container is .modal__body, so it is reset to 0 below. */
-  top: var(--topbar-h);
+  top: var(--header-h);
   z-index: 5;
   display: flex;
   justify-content: space-between;
@@ -3792,13 +3829,13 @@ button.btn--danger:hover {
   grid-column: 2;
   grid-row: 1;
   position: sticky;
-  top: calc(var(--topbar-h) + 0.75rem);
+  top: calc(var(--header-h) + 0.75rem);
   align-self: start;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--surface);
   padding: 0.6rem 0.8rem;
-  max-height: calc(100svh - var(--topbar-h) - 1.5rem);
+  max-height: calc(100svh - var(--header-h) - 1.5rem);
   overflow-y: auto;
 }
 .taskdetail__asideh {
@@ -3964,13 +4001,13 @@ button.btn--danger:hover {
   grid-column: 2;
   grid-row: 1;
   position: sticky;
-  top: calc(var(--topbar-h) + 0.75rem);
+  top: calc(var(--header-h) + 0.75rem);
   align-self: start;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--surface);
   padding: 0.6rem 0.8rem;
-  max-height: calc(100svh - var(--topbar-h) - 1.5rem);
+  max-height: calc(100svh - var(--header-h) - 1.5rem);
   overflow-y: auto;
 }
 .notedetail__asideh {

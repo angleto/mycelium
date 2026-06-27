@@ -4,7 +4,7 @@
 // network so an offline backend yields a real error, not a stale UI.
 
 // Bump on every behaviour change so old SWs are replaced atomically.
-const CACHE = 'mycelium-shell-v4'
+const CACHE = 'mycelium-shell-v5'
 
 self.addEventListener('install', () => {
   // The first activation is fine without any preload — the SPA bundle
