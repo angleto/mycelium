@@ -226,6 +226,18 @@ export function InvoicesRoute() {
     setTriLoaded(false)
   }, [])
 
+  // The open invoice shows in a modal (no scrolling to the bottom of the
+  // page): Escape dismisses it, alongside the backdrop click and the Close
+  // button in the header.
+  useEffect(() => {
+    if (!sel) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setSel(null)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [sel])
+
   async function reloadSel() {
     if (sel) await openInvoice(sel.id)
     await loadList()
@@ -637,10 +649,29 @@ export function InvoicesRoute() {
         const counter =
           sel.number ?? preview?.number?.match(/(\d+)$/)?.[1] ?? '–'
         return (
-        <div className="card card--running">
-          <h2>
-            {t('invoices.title')} {sel.series}/{sel.year}/{counter}
-          </h2>
+        <div
+          className="modal__backdrop"
+          role="dialog"
+          aria-modal="true"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setSel(null)
+          }}
+        >
+        <div className="modal__panel">
+          <div className="modal__head">
+            <strong>
+              {t('invoices.title')} {sel.series}/{sel.year}/{counter}
+            </strong>
+            <span className="modal__sp" />
+            <button
+              type="button"
+              className="btn--ghost btn--sm"
+              onClick={() => setSel(null)}
+            >
+              {t('notes.close')}
+            </button>
+          </div>
+          <div className="modal__body">
           <p className="hint">
             {isDraft ? t('invoices.draftEditable') : t('invoices.emitted')}
           </p>
@@ -1419,6 +1450,8 @@ export function InvoicesRoute() {
               {xml}
             </pre>
           )}
+          </div>
+        </div>
         </div>
         )
       })()}
