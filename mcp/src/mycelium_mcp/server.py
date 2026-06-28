@@ -93,7 +93,7 @@ from mycelium_core.services.rbac import get_role
 from mycelium_core.services.taxonomy import ClientInput
 from mycelium_core.services.time_tracking import ReportGroup
 from mycelium_core.services.workflow import StateEdit, StateSpec
-from mycelium_core.timewindow import split_due
+from mycelium_core.timewindow import resolve_tz, split_due
 
 mcp: FastMCP = FastMCP("mycelium")
 
@@ -621,6 +621,31 @@ async def create_task(
         return _task(task)
 
 
+async def _caller_tz(s: AsyncSession, user_id: uuid.UUID) -> dt.tzinfo:
+    """The calling user's IANA timezone -> tzinfo (UTC fallback), used to
+    expand a bare ``YYYY-MM-DD`` date filter into a day window (task 39e98a30)."""
+    return resolve_tz(await s.scalar(select(User.timezone).where(User.id == user_id)))
+
+
+def _day_start(d: dt.date, tz: dt.tzinfo) -> dt.datetime:
+    return dt.datetime.combine(d, dt.time(0, 0), tzinfo=tz)
+
+
+def _to_instant(raw: str, tz: dt.tzinfo) -> dt.datetime:
+    """ISO string -> aware datetime: a timed value keeps its instant (a naive
+    one is read in ``tz``); a bare date becomes that day's start in ``tz``."""
+    v = split_due(raw)
+    if isinstance(v, dt.datetime):
+        return v if v.tzinfo is not None else v.replace(tzinfo=tz)
+    return _day_start(v, tz)
+
+
+def _to_date(raw: str) -> dt.date:
+    """ISO string -> date (drops any time component)."""
+    v = split_due(raw)
+    return v.date() if isinstance(v, dt.datetime) else v
+
+
 @mcp.tool()
 async def list_tasks(
     token: str,
@@ -637,20 +662,38 @@ async def list_tasks(
     fields: list[str] | None = None,
     limit: int = 50,
     q: str | None = None,
+    due_on: str | None = None,
+    due_before: str | None = None,
+    due_after: str | None = None,
+    start_before: str | None = None,
+    start_after: str | None = None,
+    updated_since: str | None = None,
+    order_by: str | None = None,
+    order_desc: bool = False,
 ) -> list[dict[str, Any]]:
-    """List tasks by state, tag, parent, assignee, owner, or free-text ``q``.
-
-    Use ``search(kinds=['task'])`` or ``what_can_i_do_now`` for ranked retrieval.
-    ``q`` matches title/description/checklist/tag (terms ANDed).
-    Filters ANDed; ``limit`` caps rows (default 50).
-    ``assignee_handles`` / ``owner_handles`` match identities,
-    ``assignee_id`` is collaborator membership;
-    ``include_archived`` / ``include_deleted`` widen the view.
-    ``fields`` keeps named columns; full detail on ``get_task``."""
+    """List tasks: filter by state, tag, parent, assignee, owner, free-text
+    ``q``, or a due/start/updated date window; optional ``order_by`` +
+    ``order_desc`` sort. ``q`` matches a task's title/description/checklist/tag.
+    For ranked retrieval use ``search(kinds=['task'])`` or ``what_can_i_do_now``;
+    ``get_task`` for the full detail of one task."""
     from mycelium_core.models.identity import IdentityKind
 
     kind: IdentityKind | None = IdentityKind(assignee_kind) if assignee_kind else None
-    async with _tenant(token, org_id) as (s, org, _user):
+    async with _tenant(token, org_id) as (s, org, user):
+        # Expand the date filters to absolute bounds in the caller's tz. A
+        # bare date on ``due_*`` becomes a half-open day window on the
+        # timestamptz ``due_date``; ``start_*`` map to the plain Date column.
+        tz = (
+            await _caller_tz(s, user)
+            if any((due_on, due_before, due_after, start_before, start_after, updated_since))
+            else dt.UTC
+        )
+        due_from = _to_instant(due_after, tz) if due_after else None
+        due_to = _to_instant(due_before, tz) if due_before else None
+        if due_on:
+            d0 = _to_date(due_on)
+            due_from = _day_start(d0, tz)
+            due_to = _day_start(d0 + dt.timedelta(days=1), tz)
         rows = await tasks.list_tasks(
             s,
             org_id=org,
@@ -665,6 +708,13 @@ async def list_tasks(
             include_deleted=include_deleted,
             with_description=False,
             q=q,
+            due_from=due_from,
+            due_to=due_to,
+            start_from=_to_date(start_after) if start_after else None,
+            start_to=_to_date(start_before) if start_before else None,
+            updated_since=_to_instant(updated_since, tz) if updated_since else None,
+            order_by=order_by,
+            order_desc=order_desc,
         )
         if limit > 0:
             rows = rows[:limit]
@@ -3781,17 +3831,30 @@ async def list_notes(
     include_transcript: bool = False,
     fields: list[str] | None = None,
     limit: int = 50,
+    created_after: str | None = None,
+    created_before: str | None = None,
+    updated_since: str | None = None,
+    order_by: str | None = None,
+    order_desc: bool = False,
 ) -> list[dict[str, Any]]:
     """List notes (newest first); for the @note picker. Optional
     project/tag focus and archive/trash views. ``q`` is a case-insensitive
     free-text filter applied server-side over the WHOLE corpus (note title,
     part bodies, part titles and tag names, ANDed) BEFORE ``limit``, so it
     is a reliable lexical find rather than a re-rank of the newest page; for
-    semantic or cross-kind retrieval use ``search``. ``include_transcript``
+    semantic or cross-kind retrieval use ``search``. Date filters (ISO; a
+    bare date is your-timezone day): ``created_after`` / ``created_before`` /
+    ``updated_since``. ``order_by`` one of created_at|updated_at|title
+    (+ ``order_desc``); default newest-first. ``include_transcript``
     opt-in (default False) keeps picker payloads small; ``fields``
     keeps only the named columns (``id`` always kept); ``limit`` caps
     rows at the DB level (default 50; raise it to page further)."""
-    async with _tenant(token, org_id) as (s, org, _user):
+    async with _tenant(token, org_id) as (s, org, user):
+        tz = (
+            await _caller_tz(s, user)
+            if any((created_after, created_before, updated_since))
+            else dt.UTC
+        )
         rows = await notes_svc.list_notes(
             s,
             org_id=org,
@@ -3801,6 +3864,11 @@ async def list_notes(
             include_archived=include_archived,
             include_deleted=include_deleted,
             limit=limit,
+            created_from=_to_instant(created_after, tz) if created_after else None,
+            created_to=_to_instant(created_before, tz) if created_before else None,
+            updated_since=_to_instant(updated_since, tz) if updated_since else None,
+            order_by=order_by,
+            order_desc=order_desc,
         )
         tagmap = await notes_svc.tags_by_note(s, note_ids=[n.id for n in rows])
         pid_map = await note_links_svc.primary_task_ids_for_notes(

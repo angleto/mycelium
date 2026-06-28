@@ -143,6 +143,15 @@ def _derive_title(text: str | None) -> str | None:
     return None
 
 
+# order_by whitelist (task 39e98a30): a strict name->ORM-column map so the
+# sort key can never be raw-string-interpolated.
+_NOTE_ORDER: dict[str, Any] = {
+    "created_at": Note.created_at,
+    "updated_at": Note.updated_at,
+    "title": Note.title,
+}
+
+
 async def list_notes(
     session: AsyncSession,
     *,
@@ -153,6 +162,11 @@ async def list_notes(
     project_id: uuid.UUID | None = None,
     tag_id: uuid.UUID | None = None,
     q: str | None = None,
+    created_from: dt.datetime | None = None,
+    created_to: dt.datetime | None = None,
+    updated_since: dt.datetime | None = None,
+    order_by: str | None = None,
+    order_desc: bool = False,
 ) -> list[Note]:
     """Notes in the workspace, newest first (for the @note picker and
     the notes list). RLS scopes to the org. Archived/deleted are
@@ -198,7 +212,22 @@ async def list_notes(
                     Note.id.in_(tag_notes),
                 )
             )
-    stmt = stmt.order_by(Note.created_at.desc()).limit(limit)
+    # Date-window predicates + sort (task 39e98a30); half-open [from, to).
+    if created_from is not None:
+        stmt = stmt.where(Note.created_at >= created_from)
+    if created_to is not None:
+        stmt = stmt.where(Note.created_at < created_to)
+    if updated_since is not None:
+        stmt = stmt.where(Note.updated_at >= updated_since)
+    order_col = _NOTE_ORDER.get(order_by) if order_by else None
+    if order_col is not None:
+        stmt = stmt.order_by(
+            (order_col.desc() if order_desc else order_col.asc()).nulls_last(),
+            Note.created_at.desc(),
+        )
+    else:
+        stmt = stmt.order_by(Note.created_at.desc())
+    stmt = stmt.limit(limit)
     return list((await session.execute(stmt)).scalars().all())
 
 

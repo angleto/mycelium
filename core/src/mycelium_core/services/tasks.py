@@ -10,7 +10,7 @@ from collections.abc import Sequence
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import delete, func, or_, select
+from sqlalchemy import case, delete, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import defer
@@ -424,6 +424,23 @@ async def create_task(
     return task
 
 
+# order_by whitelist (task 39e98a30): a strict name->ORM-column map so the
+# sort key can never be raw-string-interpolated. ``necessity`` sorts by
+# MoSCoW rank (must < should < could), not the alphabetical enum value.
+_TASK_ORDER: dict[str, Any] = {
+    "priority": Task.priority,
+    "due_date": Task.due_date,
+    "start_date": Task.start_date,
+    "created_at": Task.created_at,
+    "updated_at": Task.updated_at,
+    "necessity": case(
+        (Task.necessity == Necessity.must, 0),
+        (Task.necessity == Necessity.should, 1),
+        else_=2,
+    ),
+}
+
+
 async def list_tasks(
     session: AsyncSession,
     *,
@@ -439,6 +456,13 @@ async def list_tasks(
     include_deleted: bool = False,
     with_description: bool = True,
     q: str | None = None,
+    due_from: dt.datetime | None = None,
+    due_to: dt.datetime | None = None,
+    start_from: dt.date | None = None,
+    start_to: dt.date | None = None,
+    updated_since: dt.datetime | None = None,
+    order_by: str | None = None,
+    order_desc: bool = False,
 ) -> list[Task]:
     stmt = select(Task)
     # The list view does not need the (potentially large) description: the
@@ -504,9 +528,30 @@ async def list_tasks(
                     Task.id.in_(tag_tasks),
                 )
             )
-    # Default order: most prioritary first (priority asc, 1 = top),
-    # newest as tiebreak. The number is always "smaller = sooner".
-    stmt = stmt.order_by(Task.priority.asc(), Task.created_at.desc())
+    # Date-window predicates (task 39e98a30). ``due_*`` are absolute instants
+    # on the timestamptz ``due_date`` (the adapter expands an owner/caller-tz
+    # day to bounds); ``start_*`` compare the plain Date ``start_date``. All
+    # half-open ([from, to)) so adjacent windows don't double-count.
+    if due_from is not None:
+        stmt = stmt.where(Task.due_date >= due_from)
+    if due_to is not None:
+        stmt = stmt.where(Task.due_date < due_to)
+    if start_from is not None:
+        stmt = stmt.where(Task.start_date >= start_from)
+    if start_to is not None:
+        stmt = stmt.where(Task.start_date < start_to)
+    if updated_since is not None:
+        stmt = stmt.where(Task.updated_at >= updated_since)
+    # Order: a whitelisted key (NULLs always last so unset dates never lead),
+    # created_at as a stable tiebreak; else the default priority-first order.
+    order_col = _TASK_ORDER.get(order_by) if order_by else None
+    if order_col is not None:
+        primary = (order_col.desc() if order_desc else order_col.asc()).nulls_last()
+        stmt = stmt.order_by(primary, Task.created_at.desc())
+    else:
+        # Default: most prioritary first (priority asc, 1 = top), newest as
+        # tiebreak. The number is always "smaller = sooner".
+        stmt = stmt.order_by(Task.priority.asc(), Task.created_at.desc())
     return list((await session.execute(stmt)).scalars().unique().all())
 
 
