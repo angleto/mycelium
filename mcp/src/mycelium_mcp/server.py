@@ -3544,20 +3544,27 @@ async def search(
     include_archived: bool = False,
     include_deleted: bool = False,
     rerank: bool = False,
+    task_scope: str = "org",
+    due_before: str | None = None,
+    assignee_handles: list[str] | None = None,
+    state_id: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Unified free-text search across tasks, notes and memory blobs.
+    """Unified search across tasks/notes/blobs; the TASK branch is org-wide
+    even when ``project_id`` is set (each hit's ``scope`` says 'org' or
+    'project' so you are never misled).
 
-    ``kinds`` defaults to ``['task', 'blob', 'note']``. Task hits are
-    org-wide (project filtering goes via ``tag_ids``); note and blob hits
-    respect the caller's ``project_id``. ``note`` hits carry ``note_id`` +
-    ``part_id`` and a title (the note part blob resolved to its note).
-    Results carry an ``ts_headline`` snippet. Use this instead of
-    ``memory_search`` when the caller wants "everything that mentions X"
-    rather than memory-only retrieval. ``rerank=True`` opts into a
-    cross-encoder pass on the top-K (task 27579d6a) regardless of the env
-    default.
+    ``kinds`` defaults to ``['task', 'blob', 'note']``. note/blob hits are
+    project-scoped to ``project_id``; task hits are org-wide UNLESS
+    ``task_scope='project'`` (which ANDs the caller's project tag into the
+    task branch). Task facets ``due_before`` (ISO date/datetime),
+    ``assignee_handles``, ``state_id`` narrow the task branch, so "tasks due
+    today assigned to X" is answerable here too. ``note`` hits carry
+    ``note_id`` + ``part_id`` + a title; results carry an ``ts_headline``
+    snippet. Use this over ``memory_search`` for "everything that mentions
+    X". ``rerank=True`` opts into the cross-encoder top-K pass.
     """
     async with _tenant(token, org_id) as (s, org, user):
+        due_before_dt = _to_instant(due_before, await _caller_tz(s, user)) if due_before else None
         hits = await task_search_svc.search_unified(
             s,
             org_id=org,
@@ -3572,10 +3579,15 @@ async def search(
             include_deleted=include_deleted,
             rerank=rerank,
             operation_id=operation_id,
+            task_scope=task_scope,
+            due_before=due_before_dt,
+            assignee_handles=assignee_handles,
+            task_state_id=uuid.UUID(state_id) if state_id else None,
         )
         return [
             {
                 "kind": h.kind,
+                "scope": h.scope,
                 "task_id": str(h.task_id) if h.task_id else None,
                 "note_id": str(h.note_id) if h.note_id else None,
                 "part_id": str(h.part_id) if h.part_id else None,

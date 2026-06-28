@@ -55,7 +55,7 @@ over-fetch the org table and filter in its head.
 |---|---|
 | `graph_focus_context` | PPR-seeded reading set around a seed note: the relevant subgraph and |
 | `memory_search` | Hybrid RRF retrieval within the (org, project) boundary. |
-| `search` | Unified free-text search across tasks, notes and memory blobs. |
+| `search` | Unified search across tasks/notes/blobs; the TASK branch is org-wide |
 
 ### navigation (18)
 

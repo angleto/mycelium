@@ -68,6 +68,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session, object_session
 
 from mycelium_core.embedder import Embedder, EmbedResult, get_embedder
+from mycelium_core.models.identity import Identity
 from mycelium_core.models.memory_blob import EMBED_DIM, BlobSource, MemoryBlob
 from mycelium_core.models.note import Note
 from mycelium_core.models.note_part_index_pointer import NotePartIndexPointer
@@ -548,6 +549,12 @@ class UnifiedHit:
     title: str | None
     snippet: str | None
     score: float
+    # Which boundary this hit was retrieved under: 'org' (whole workspace)
+    # or 'project' (the caller's project). The task branch is org-wide by
+    # default even when project_id is set -- so an agent that passes
+    # project_id can SEE that its task hits are NOT project-scoped, instead
+    # of silently believing they are (audit finding #5).
+    scope: str = "org"
     note_id: uuid.UUID | None = None
     part_id: uuid.UUID | None = None
 
@@ -567,18 +574,28 @@ async def search_unified(
     include_deleted: bool,
     operation_id: str,
     rerank: bool = False,
+    task_scope: str = "org",
+    due_before: dt.datetime | None = None,
+    assignee_handles: list[str] | None = None,
+    task_state_id: uuid.UUID | None = None,
 ) -> list[UnifiedHit]:
     """Unified search across tasks, notes and memory blobs.
 
-    Project scoping is split per kind: ``task`` blobs carry
-    ``project_id=NULL`` (org-wide; task entities don't have a
-    ``project_id`` column intrinsically -- project filtering is
-    available via the project's tag in ``tag_ids``), ``note`` and
-    ``blob`` hits run project-scoped against the caller's current
-    project. Each kind is an independent retrieve; results are merged by
-    score descending (RRF is already applied inside each branch), then
-    deduped so a blob that resolved to a task/note isn't also surfaced as
-    an opaque ``blob`` row.
+    Project scoping is split per kind and each hit carries a ``scope``
+    ('org' | 'project') saying which boundary it was retrieved under, so a
+    caller passing ``project_id`` is never misled about what was scoped.
+    ``note`` / ``blob`` hits run project-scoped against the caller's
+    project (scope 'project' when ``project_id`` is set). The ``task``
+    branch is org-wide by default (task entities have no ``project_id``
+    column; project filtering rides the project tag) -- pass
+    ``task_scope='project'`` to AND the caller's project tag into the task
+    branch so its hits are project-scoped too. ``due_before`` /
+    ``assignee_handles`` / ``task_state_id`` are post-retrieval facets on
+    the task branch (so 'tasks due today assigned to X' is answerable via
+    search too). Each kind is an independent retrieve; results merge by
+    score descending (RRF already applied inside each branch), then dedup
+    so a blob that resolved to a task/note isn't also surfaced as an opaque
+    ``blob`` row.
     """
     # Local imports break a static cycle: memory imports nothing from
     # task_search, but task_search imports memory only at call time.
@@ -593,9 +610,17 @@ async def search_unified(
     hits: list[UnifiedHit] = []
 
     if want_task:
-        # Task search is org-wide (project_id=None). The 'task' channel
-        # tag is required so notes/manual blobs don't leak into the task
-        # surface; user-supplied tag_ids are ANDed on top.
+        # Task blobs carry project_id=NULL (org-wide memory channel), so
+        # project scoping rides the project TAG, not the blob predicate.
+        # ``project_id`` IS the project tag id here (the X-Project-Id the
+        # SPA focuses on), so task_scope='project' just ANDs it into the
+        # task channel's tag_ids. The 'task' channel tag is required so
+        # notes/manual blobs don't leak into the task surface; user-supplied
+        # tag_ids are ANDed on top.
+        task_project_scoped = task_scope == "project" and project_id is not None
+        task_tag_ids = list(tag_ids)
+        if task_project_scoped and project_id is not None:
+            task_tag_ids.append(project_id)
         task_hits = await memory_svc.retrieve(
             session,
             org_id=org_id,
@@ -604,7 +629,7 @@ async def search_unified(
             query=query,
             operation_id=operation_id,
             limit=max(limit * 2, limit),
-            tag_ids=tag_ids,
+            tag_ids=task_tag_ids,
             channel_key="task",
             rerank=rerank,
         )
@@ -616,8 +641,12 @@ async def search_unified(
                 task_ids=list(id_to_task.values()),
                 include_archived=include_archived,
                 include_deleted=include_deleted,
+                due_before=due_before,
+                assignee_handles=assignee_handles,
+                state_id=task_state_id,
             )
             snippets = await _ts_headlines(session, blob_ids=blob_ids, query=query)
+            task_hit_scope = "project" if task_project_scoped else "org"
             for h in task_hits:
                 tid = id_to_task.get(h.blob.id)
                 if tid is None:
@@ -627,7 +656,8 @@ async def search_unified(
                     continue
                 meta = task_meta.get(tid)
                 if meta is None:
-                    # Task gone or filtered out (archived/deleted).
+                    # Task gone, hidden (archived/deleted), or filtered out
+                    # by a due/assignee/state facet.
                     continue
                 hits.append(
                     UnifiedHit(
@@ -637,6 +667,7 @@ async def search_unified(
                         title=meta.title,
                         snippet=snippets.get(h.blob.id),
                         score=h.rrf,
+                        scope=task_hit_scope,
                     )
                 )
 
@@ -690,6 +721,7 @@ async def search_unified(
                         title=note_m.title,
                         snippet=snippets.get(h.blob.id),
                         score=h.rrf,
+                        scope="project" if project_id is not None else "org",
                     )
                 )
 
@@ -731,6 +763,7 @@ async def search_unified(
                         title=None,
                         snippet=snippets.get(h.blob.id),
                         score=h.rrf,
+                        scope="project" if project_id is not None else "org",
                     )
                 )
 
@@ -828,15 +861,29 @@ async def _task_filter_meta(
     task_ids: list[uuid.UUID],
     include_archived: bool,
     include_deleted: bool,
+    due_before: dt.datetime | None = None,
+    assignee_handles: list[str] | None = None,
+    state_id: uuid.UUID | None = None,
 ) -> dict[uuid.UUID, _TaskMeta]:
-    """Single batched SELECT that returns task ids + titles, applying
-    the soft-delete / archived filters as a WHERE so a hidden task is
-    not surfaced even if its blob ranked high."""
+    """Single batched SELECT that returns task ids + titles, applying the
+    soft-delete / archived filters (and the optional due/assignee/state
+    facets) as a WHERE so a hit that ranked high but does not match is
+    dropped from the result -- the facets run here, on the rows this pass
+    already batch-loads, not as a second query."""
     if not task_ids:
         return {}
     stmt = select(Task.id, Task.title, Task.deleted_at, Task.is_archived).where(
         Task.id.in_(task_ids)
     )
+    if state_id is not None:
+        stmt = stmt.where(Task.state_id == state_id)
+    if due_before is not None:
+        # Half-open upper bound; a NULL due_date never matches a due facet.
+        stmt = stmt.where(Task.due_date < due_before)
+    if assignee_handles:
+        stmt = stmt.join(Identity, Identity.id == Task.assignee_id).where(
+            Identity.handle.in_(assignee_handles)
+        )
     rows = (await session.execute(stmt)).all()
     out: dict[uuid.UUID, _TaskMeta] = {}
     for tid, title, deleted_at, is_archived in rows:
