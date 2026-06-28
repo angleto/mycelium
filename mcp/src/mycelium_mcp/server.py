@@ -12,7 +12,7 @@ import base64
 import datetime as dt
 import json
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
 from decimal import Decimal
@@ -648,23 +648,48 @@ def _to_date(raw: str) -> dt.date:
     return v.date() if isinstance(v, dt.datetime) else v
 
 
-def _encode_task_cursor(priority: int, created_at: dt.datetime, task_id: uuid.UUID) -> str:
-    """Opaque keyset cursor for the DEFAULT list_tasks order (priority asc,
-    created_at desc, id asc) -- the last returned row's position. Base64 of a
-    compact JSON triple so the caller treats it as opaque (task c20c6351)."""
-    raw = json.dumps([priority, created_at.isoformat(), str(task_id)], separators=(",", ":"))
-    return base64.urlsafe_b64encode(raw.encode()).decode()
+# ── Unified list pagination (tasks b7dde607 / c20c6351) ──────────────────
+# One keyset-cursor contract for every paginated list_* tool: the service
+# orders by a TOTAL key (the sort column(s) + an id tiebreak, all
+# comparable), fetches limit+1 to detect truncation, and the MCP layer
+# shapes the {items, next_cursor, truncated} envelope. The cursor is the
+# opaque, base64'd value-list of the last returned row's sort key.
 
 
-def _decode_task_cursor(token: str) -> tuple[int, dt.datetime, uuid.UUID]:
-    """Inverse of :func:`_encode_task_cursor`. The cursor is opaque (the caller
-    round-trips the token we issued); a malformed one is a caller error and
-    raises a clear ``ValueError`` instead of leaking a base64/JSON traceback."""
+def _encode_cursor(values: list[Any]) -> str:
+    """Opaque keyset cursor: base64 of the last row's sort-key values
+    (datetime -> ISO, uuid -> str). Shared by every paginated list_* tool."""
+    enc = [
+        v.isoformat() if isinstance(v, dt.datetime) else str(v) if isinstance(v, uuid.UUID) else v
+        for v in values
+    ]
+    return base64.urlsafe_b64encode(json.dumps(enc, separators=(",", ":")).encode()).decode()
+
+
+def _decode_cursor(token: str) -> list[Any]:
+    """Decode an opaque cursor to its raw value list; the caller casts each
+    value to its column type. The cursor is round-tripped by the caller, so a
+    malformed one is a caller error -> ``ValueError`` (not a leaked traceback)."""
     try:
-        priority, created_at, task_id = json.loads(base64.urlsafe_b64decode(token.encode()))
-        return int(priority), dt.datetime.fromisoformat(created_at), uuid.UUID(task_id)
+        out = json.loads(base64.urlsafe_b64decode(token.encode()))
     except (ValueError, TypeError, json.JSONDecodeError) as exc:
-        raise ValueError("invalid list_tasks cursor") from exc
+        raise ValueError("invalid cursor") from exc
+    if not isinstance(out, list):
+        raise ValueError("invalid cursor")
+    return out
+
+
+def _page_envelope(
+    rows: list[Any], limit: int, key: Callable[[Any], list[Any]]
+) -> tuple[list[Any], str | None, bool]:
+    """Shape a paginated list: ``rows`` were fetched as limit+1 (the service
+    applied the SQL keyset + LIMIT). Returns ``(items, next_cursor,
+    truncated)`` -- ``next_cursor`` is the encoded sort key of the last item
+    when there is another page, else None. limit<=0 means 'no pagination'."""
+    truncated = limit > 0 and len(rows) > limit
+    items = rows[:limit] if limit > 0 else rows
+    next_cursor = _encode_cursor(key(items[-1])) if (truncated and items) else None
+    return items, next_cursor, truncated
 
 
 async def _task_date_kwargs(
@@ -747,9 +772,10 @@ async def list_tasks(
 
     # A cursor pins the default keyset order (it was issued under it); ignore
     # any order_by so a paged walk can't silently re-order mid-stream.
-    after = None
+    after: tuple[int, dt.datetime, uuid.UUID] | None = None
     if cursor:
-        after = _decode_task_cursor(cursor)
+        cp, cc, ci = _decode_cursor(cursor)
+        after = (int(cp), dt.datetime.fromisoformat(cc), uuid.UUID(ci))
         order_by, order_desc = None, False
     kind: IdentityKind | None = IdentityKind(assignee_kind) if assignee_kind else None
     async with _tenant(token, org_id) as (s, org, user):
@@ -786,14 +812,13 @@ async def list_tasks(
             after=after,
             **dates,
         )
-        truncated = limit > 0 and len(rows) > limit
-        items = rows[:limit] if limit > 0 else rows
-        # next_cursor only for the default keyset order (after-based); a custom
-        # order exposes truncation but not a cursor.
-        next_cursor: str | None = None
-        if truncated and order_by is None and items:
-            last = items[-1]
-            next_cursor = _encode_task_cursor(last.priority, last.created_at, last.id)
+        # next_cursor only for the default keyset order; a custom order exposes
+        # truncation but not a cursor (its key isn't the default triple).
+        items, next_cursor, truncated = _page_envelope(
+            rows, limit, key=lambda t: [t.priority, t.created_at, t.id]
+        )
+        if order_by is not None:
+            next_cursor = None
         ids = [t.id for t in items]
         tagmap = await tasks.tags_by_task(s, task_ids=ids)
         ccounts = await tasks.collaborator_counts(s, org_id=org, task_ids=ids)
@@ -1426,13 +1451,21 @@ async def list_annotations(
     doc_id: str,
     include_resolved: bool = True,
     kind: str | None = None,
-) -> list[dict[str, Any]]:
+    limit: int | None = None,
+    cursor: str | None = None,
+) -> dict[str, Any]:
     """List the annotations (comments + suggestions) on a markdown document,
     oldest first. include_resolved defaults True (returns resolved/accepted/
     rejected rows too, unlike the SPA); pass include_resolved=False for
     open-only. ``kind`` optionally narrows to 'comment' or 'suggestion'. A
     task's work-diary comments are also reachable via list_comments. For just
-    the open/total counts use ``count_annotations``."""
+    the open/total counts use ``count_annotations``. Returns the paginated
+    envelope ``{items, next_cursor, truncated}``: pass ``limit`` to page, then
+    ``next_cursor`` back as ``cursor`` (keyset, no dupes/gaps)."""
+    after: tuple[dt.datetime, uuid.UUID] | None = None
+    if cursor:
+        cc, ci = _decode_cursor(cursor)
+        after = (dt.datetime.fromisoformat(cc), uuid.UUID(ci))
     async with _tenant(token, org_id) as (s, org, _user):
         rows = await annotations_svc.list_for_doc(
             s,
@@ -1441,8 +1474,17 @@ async def list_annotations(
             doc_id=uuid.UUID(doc_id),
             include_resolved=include_resolved,
             kind=kind,
+            limit=(limit + 1) if limit else None,
+            after=after,
         )
-        return [_annotation_dict(a) for a in rows]
+        items, next_cursor, truncated = _page_envelope(
+            rows, limit or 0, key=lambda a: [a.created_at, a.id]
+        )
+        return {
+            "items": [_annotation_dict(a) for a in items],
+            "next_cursor": next_cursor,
+            "truncated": truncated,
+        }
 
 
 @mcp.tool()
@@ -1647,19 +1689,37 @@ def _dependency(d: TaskDependency) -> dict[str, Any]:
 
 @mcp.tool()
 async def list_dependencies(
-    token: str, org_id: str, task_id: str | None = None, limit: int | None = None
-) -> list[dict[str, Any]]:
+    token: str,
+    org_id: str,
+    task_id: str | None = None,
+    limit: int | None = None,
+    cursor: str | None = None,
+) -> dict[str, Any]:
     """List task dependencies, newest first, optionally only those touching a
-    task. Without ``task_id`` this is the whole org graph: pass ``limit`` to
-    bound that org-wide scan."""
+    task. Without ``task_id`` this is the whole org graph. Returns the
+    paginated envelope ``{items, next_cursor, truncated}``: pass ``limit`` to
+    page, then ``next_cursor`` back as ``cursor`` for the next disjoint page
+    (keyset, no dupes/gaps)."""
+    after: tuple[dt.datetime, uuid.UUID] | None = None
+    if cursor:
+        cc, ci = _decode_cursor(cursor)
+        after = (dt.datetime.fromisoformat(cc), uuid.UUID(ci))
     async with _tenant(token, org_id) as (s, org, _user):
         rows = await dependencies.list_dependencies(
             s,
             org_id=org,
             task_id=uuid.UUID(task_id) if task_id else None,
-            limit=limit,
+            limit=(limit + 1) if limit else None,
+            after=after,
         )
-        return [_dependency(d) for d in rows]
+        items, next_cursor, truncated = _page_envelope(
+            rows, limit or 0, key=lambda d: [d.created_at, d.id]
+        )
+        return {
+            "items": [_dependency(d) for d in items],
+            "next_cursor": next_cursor,
+            "truncated": truncated,
+        }
 
 
 @mcp.tool()
@@ -3525,6 +3585,7 @@ async def memory_search(
     operation_id: str,
     project_id: str | None = None,
     limit: int = 10,
+    offset: int = 0,
     tag_ids: list[str] | None = None,
     channel_tag_id: str | None = None,
     channel_key: str | None = None,
@@ -3533,7 +3594,9 @@ async def memory_search(
     Degrades to keyword-only without embedder. ``tag_ids``,
     ``channel_tag_id`` and ``channel_key`` narrow within the boundary
     (facets, never cross). Channel by id or stable slug; if both given
-    they must agree. Deterministic order.
+    they must agree. Deterministic order. ``offset`` pages the ranked
+    results (ranked retrieval has no stable keyset, so offset not cursor):
+    the top ``limit`` after skipping ``offset``.
 
     Returns ``{hits, meta}``. ``meta`` (RetrievalMeta) tells you WHY: an
     empty ``hits`` with ``meta.query_embedded=false`` or
@@ -3548,14 +3611,15 @@ async def memory_search(
             project_id=uuid.UUID(project_id) if project_id else None,
             query=query,
             operation_id=operation_id,
-            limit=limit,
+            limit=limit + max(0, offset),
             tag_ids=[uuid.UUID(t) for t in (tag_ids or [])],
             channel_tag_id=uuid.UUID(channel_tag_id) if channel_tag_id else None,
             channel_key=channel_key,
         )
-        tagmap = await memory_svc.tags_by_blob(s, blob_ids=[h.blob.id for h in hits])
+        page = hits[offset : offset + limit] if offset > 0 else hits[:limit]
+        tagmap = await memory_svc.tags_by_blob(s, blob_ids=[h.blob.id for h in page])
         return {
-            "hits": [{"blob": _blob(h.blob, tagmap.get(h.blob.id)), "rrf": h.rrf} for h in hits],
+            "hits": [{"blob": _blob(h.blob, tagmap.get(h.blob.id)), "rrf": h.rrf} for h in page],
             "meta": _retrieval_meta(meta),
         }
 
@@ -3609,6 +3673,7 @@ async def search(
     kinds: list[str] | None = None,
     project_id: str | None = None,
     limit: int = 20,
+    offset: int = 0,
     tag_ids: list[str] | None = None,
     channel_keys: list[str] | None = None,
     include_archived: bool = False,
@@ -3634,10 +3699,12 @@ async def search(
     X". ``rerank=True`` opts into the cross-encoder top-K pass.
 
     Returns ``{hits, meta}``. Each hit carries ``model_id`` ('none' = a
-    keyword-only row, no dense vector). ``meta`` (RetrievalMeta) exposes
-    whether the query embedded and whether the dense branch contributed /
-    was rejected by the per-org similarity floor, so an empty or thin result
-    distinguishes 'nothing relevant' from 'recall silently degraded'.
+    keyword-only row, no dense vector). ``offset`` pages the ranked results
+    (offset, not cursor: ranked retrieval has no stable keyset). ``meta``
+    (RetrievalMeta) exposes whether the query embedded and whether the dense
+    branch contributed / was rejected by the per-org similarity floor, so an
+    empty or thin result distinguishes 'nothing relevant' from 'recall
+    silently degraded'.
     """
     async with _tenant(token, org_id) as (s, org, user):
         due_before_dt = _to_instant(due_before, await _caller_tz(s, user)) if due_before else None
@@ -3650,7 +3717,7 @@ async def search(
             kinds=kinds or ["task", "blob", "note"],
             tag_ids=[uuid.UUID(t) for t in (tag_ids or [])],
             channel_keys=channel_keys or [],
-            limit=limit,
+            limit=limit + max(0, offset),
             include_archived=include_archived,
             include_deleted=include_deleted,
             rerank=rerank,
@@ -3660,6 +3727,7 @@ async def search(
             assignee_handles=assignee_handles,
             task_state_id=uuid.UUID(state_id) if state_id else None,
         )
+        page = hits[offset : offset + limit] if offset > 0 else hits[:limit]
         return {
             "hits": [
                 {
@@ -3674,7 +3742,7 @@ async def search(
                     "snippet": h.snippet,
                     "score": h.score,
                 }
-                for h in hits
+                for h in page
             ],
             "meta": _retrieval_meta(meta),
         }
@@ -4079,13 +4147,17 @@ async def list_notes(
     include_transcript: bool = False,
     fields: list[str] | None = None,
     limit: int = 50,
+    cursor: str | None = None,
     created_after: str | None = None,
     created_before: str | None = None,
     updated_since: str | None = None,
     order_by: str | None = None,
     order_desc: bool = False,
-) -> list[dict[str, Any]]:
-    """List notes (newest first); for the @note picker. Each row carries
+) -> dict[str, Any]:
+    """List notes (newest first); for the @note picker. Returns the paginated
+    envelope ``{items, next_cursor, truncated}`` (pass ``next_cursor`` back as
+    ``cursor`` for the next disjoint page; keyset on the default order, so no
+    dupes/gaps). Each row carries
     maturity / review_state / summary / is_archived / created_at /
     updated_at, so a note's lifecycle is readable without a second
     ``get_note``. ``task_id`` returns the notes linked to that task
@@ -4104,6 +4176,11 @@ async def list_notes(
     keeps only the named columns (``id`` always kept); ``limit`` caps
     rows at the DB level (default 50; raise it to page further)."""
     want_maturities = [m for m in ([maturity] if maturity else []) + (maturities or [])]
+    after: tuple[dt.datetime, uuid.UUID] | None = None
+    if cursor:
+        cc, ci = _decode_cursor(cursor)
+        after = (dt.datetime.fromisoformat(cc), uuid.UUID(ci))
+        order_by, order_desc = None, False
     async with _tenant(token, org_id) as (s, org, user):
         note_ids: list[uuid.UUID] | None = None
         if task_id is not None:
@@ -4114,7 +4191,7 @@ async def list_notes(
                 kinds=tuple(link_kinds) if link_kinds else None,
             )
             if not note_ids:
-                return []
+                return {"items": [], "next_cursor": None, "truncated": False}
         tz = (
             await _caller_tz(s, user)
             if any((created_after, created_before, updated_since))
@@ -4130,38 +4207,48 @@ async def list_notes(
             q=q,
             include_archived=include_archived,
             include_deleted=include_deleted,
-            limit=limit,
+            limit=(limit + 1) if limit > 0 else limit,
+            after=after,
             created_from=_to_instant(created_after, tz) if created_after else None,
             created_to=_to_instant(created_before, tz) if created_before else None,
             updated_since=_to_instant(updated_since, tz) if updated_since else None,
             order_by=order_by,
             order_desc=order_desc,
         )
-        tagmap = await notes_svc.tags_by_note(s, note_ids=[n.id for n in rows])
+        items, next_cursor, truncated = _page_envelope(
+            rows, limit, key=lambda n: [n.created_at, n.id]
+        )
+        if order_by is not None:
+            next_cursor = None
+        tagmap = await notes_svc.tags_by_note(s, note_ids=[n.id for n in items])
         pid_map = await note_links_svc.primary_task_ids_for_notes(
-            s, org_id=org, note_ids=[n.id for n in rows]
+            s, org_id=org, note_ids=[n.id for n in items]
         )
         # Phase 6 final: bodies come from note_part(ord=0)+; batched
         # so the picker stays one round-trip even when
         # include_transcript=True.
         bodies = (
-            await notes_svc._bodies_by_note(s, note_ids=[n.id for n in rows])
+            await notes_svc._bodies_by_note(s, note_ids=[n.id for n in items])
             if include_transcript
             else {}
         )
-        return [
-            _project_fields(
-                _note(
-                    n,
-                    tagmap.get(n.id, []),
-                    primary_task_id=pid_map.get(n.id),
-                    include_transcript=include_transcript,
-                    transcript=bodies.get(n.id),
-                ),
-                fields,
-            )
-            for n in rows
-        ]
+        return {
+            "items": [
+                _project_fields(
+                    _note(
+                        n,
+                        tagmap.get(n.id, []),
+                        primary_task_id=pid_map.get(n.id),
+                        include_transcript=include_transcript,
+                        transcript=bodies.get(n.id),
+                    ),
+                    fields,
+                )
+                for n in items
+            ],
+            "next_cursor": next_cursor,
+            "truncated": truncated,
+        }
 
 
 @mcp.tool()
@@ -4947,11 +5034,33 @@ async def remove_note_tag(token: str, org_id: str, note_id: str, tag_id: str) ->
 
 
 @mcp.tool()
-async def list_turns(token: str, org_id: str, note_id: str) -> list[dict[str, Any]]:
-    """List the turns of a conversation note, in order."""
+async def list_turns(
+    token: str, org_id: str, note_id: str, limit: int | None = None, cursor: str | None = None
+) -> dict[str, Any]:
+    """List the turns of a conversation note, in order. Returns the paginated
+    envelope ``{items, next_cursor, truncated}``: pass ``limit`` to page a long
+    transcript, then ``next_cursor`` back as ``cursor`` (keyset, no
+    dupes/gaps)."""
+    after: tuple[int, uuid.UUID] | None = None
+    if cursor:
+        co, ci = _decode_cursor(cursor)
+        after = (int(co), uuid.UUID(ci))
     async with _tenant(token, org_id) as (s, org, _user):
-        rows = await notes_svc.list_turns(s, org_id=org, note_id=uuid.UUID(note_id))
-        return [_turn(t) for t in rows]
+        rows = await notes_svc.list_turns(
+            s,
+            org_id=org,
+            note_id=uuid.UUID(note_id),
+            limit=(limit + 1) if limit else None,
+            after=after,
+        )
+        items, next_cursor, truncated = _page_envelope(
+            rows, limit or 0, key=lambda t: [t.ord, t.id]
+        )
+        return {
+            "items": [_turn(t) for t in items],
+            "next_cursor": next_cursor,
+            "truncated": truncated,
+        }
 
 
 @mcp.tool()
@@ -6761,26 +6870,46 @@ async def resolve_prefix(
 
 @mcp.tool()
 async def list_task_relations(
-    token: str, org_id: str, task_id: str | None = None, limit: int | None = None
-) -> list[dict[str, Any]]:
+    token: str,
+    org_id: str,
+    task_id: str | None = None,
+    limit: int | None = None,
+    cursor: str | None = None,
+) -> dict[str, Any]:
     """List symmetric "related task" links (a pure navigation aid,
     distinct from dependencies: no direction, no cycle rules), newest
-    first. Pass ``task_id`` for that task's relations, omit it for the
-    whole workspace (pass ``limit`` to bound that org-wide scan). Each row
-    is ``{relation_id, task_a_id, task_b_id}``; the edge is the same
-    regardless of order."""
+    first. Pass ``task_id`` for that task's relations, omit it for the whole
+    workspace. Returns the paginated envelope ``{items, next_cursor,
+    truncated}``: pass ``limit`` to page, then ``next_cursor`` back as
+    ``cursor`` (keyset, no dupes/gaps). Each item is ``{relation_id,
+    task_a_id, task_b_id}``; the edge is the same regardless of order."""
+    after: tuple[dt.datetime, uuid.UUID] | None = None
+    if cursor:
+        cc, ci = _decode_cursor(cursor)
+        after = (dt.datetime.fromisoformat(cc), uuid.UUID(ci))
     async with _tenant(token, org_id) as (s, org, _user):
         rels = await task_relations_svc.list_relations(
-            s, org_id=org, task_id=uuid.UUID(task_id) if task_id else None, limit=limit
+            s,
+            org_id=org,
+            task_id=uuid.UUID(task_id) if task_id else None,
+            limit=(limit + 1) if limit else None,
+            after=after,
         )
-        return [
-            {
-                "relation_id": str(r.id),
-                "task_a_id": str(r.task_a_id),
-                "task_b_id": str(r.task_b_id),
-            }
-            for r in rels
-        ]
+        items, next_cursor, truncated = _page_envelope(
+            rels, limit or 0, key=lambda r: [r.created_at, r.id]
+        )
+        return {
+            "items": [
+                {
+                    "relation_id": str(r.id),
+                    "task_a_id": str(r.task_a_id),
+                    "task_b_id": str(r.task_b_id),
+                }
+                for r in items
+            ],
+            "next_cursor": next_cursor,
+            "truncated": truncated,
+        }
 
 
 @mcp.tool()

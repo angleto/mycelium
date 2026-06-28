@@ -102,9 +102,11 @@ async def test_count_annotations_and_kind_filter() -> None:
     )
     assert counts == {"total": 2, "open": 2}
 
-    comments = await list_annotations(
-        token=token, org_id=org, doc_kind="task_description", doc_id=task["id"], kind="comment"
-    )
+    comments = (
+        await list_annotations(
+            token=token, org_id=org, doc_kind="task_description", doc_id=task["id"], kind="comment"
+        )
+    )["items"]
     assert len(comments) == 2
     # No suggestions on a task description: the kind filter must isolate.
     sug_count = await count_annotations(
@@ -114,7 +116,7 @@ async def test_count_annotations_and_kind_filter() -> None:
     sug_list = await list_annotations(
         token=token, org_id=org, doc_kind="task_description", doc_id=task["id"], kind="suggestion"
     )
-    assert sug_list == []
+    assert sug_list["items"] == []
 
 
 async def test_org_wide_edge_lists_are_bounded() -> None:
@@ -132,10 +134,10 @@ async def test_org_wide_edge_lists_are_bounded() -> None:
     await add_task_relation(token=token, org_id=org, task_id=a["id"], other_id=c["id"])
 
     # org-wide branch (no task_id): all edges, then a bounded slice.
-    assert len(await list_dependencies(token=token, org_id=org)) == 2
-    assert len(await list_dependencies(token=token, org_id=org, limit=1)) == 1
-    assert len(await list_task_relations(token=token, org_id=org)) == 2
-    assert len(await list_task_relations(token=token, org_id=org, limit=1)) == 1
+    assert len((await list_dependencies(token=token, org_id=org))["items"]) == 2
+    assert len((await list_dependencies(token=token, org_id=org, limit=1))["items"]) == 1
+    assert len((await list_task_relations(token=token, org_id=org))["items"]) == 2
+    assert len((await list_task_relations(token=token, org_id=org, limit=1))["items"]) == 1
 
 
 async def test_list_running_timers_defaults_to_caller() -> None:

@@ -48,7 +48,11 @@ class LexicalFTSStage(Stage):
                 text(match),
                 *ctx.tag_clauses,
             )
-            .order_by(text(f"{rank} DESC"))
+            # id as a final tiebreak so tied ts_rank rows get a STABLE rank
+            # across calls -- otherwise the RRF rank (and thus the fused
+            # score) shuffles between identical queries, making the order
+            # non-deterministic and offset pagination unreliable.
+            .order_by(text(f"{rank} DESC"), MemoryBlob.id)
             .limit(self.oversample)
         ).params(q=query)
         rows = (await ctx.session.execute(stmt)).scalars().all()

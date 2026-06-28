@@ -26,7 +26,7 @@ import datetime as dt
 import uuid
 from typing import cast
 
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from mycelium_core.concurrency import optimistic_update
@@ -298,10 +298,13 @@ async def list_for_doc(
     include_resolved: bool = True,
     include_deleted: bool = False,
     kind: str | None = None,
+    limit: int | None = None,
+    after: tuple[dt.datetime, uuid.UUID] | None = None,
 ) -> list[Annotation]:
-    """Every annotation on a markdown document, oldest first (so a task's
-    general comments read as a chronological work diary). ``kind`` optionally
-    narrows to ``comment`` or ``suggestion`` (the row already carries it)."""
+    """Every annotation on a markdown document, oldest first (created_at asc,
+    id asc -- a total order, so a task's general comments read as a
+    chronological work diary). ``kind`` optionally narrows to ``comment`` or
+    ``suggestion``. ``limit`` + the ``after`` keyset cursor page the thread."""
     if doc_kind not in ANNOTATION_DOC_KINDS:
         raise DomainError(MessageCode.ANNOTATION_DOC_KIND_INVALID)
     stmt = select(Annotation).where(Annotation.doc_kind == doc_kind)
@@ -315,7 +318,14 @@ async def list_for_doc(
         stmt = stmt.where(Annotation.status == "open")
     if kind is not None:
         stmt = stmt.where(Annotation.kind == kind)
-    stmt = stmt.order_by(Annotation.created_at)
+    if after is not None:
+        ac, ai = after
+        stmt = stmt.where(
+            or_(Annotation.created_at > ac, and_(Annotation.created_at == ac, Annotation.id > ai))
+        )
+    stmt = stmt.order_by(Annotation.created_at.asc(), Annotation.id.asc())
+    if limit is not None and limit > 0:
+        stmt = stmt.limit(limit)
     return list((await session.execute(stmt)).scalars().all())
 
 

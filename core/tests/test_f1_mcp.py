@@ -158,7 +158,10 @@ async def test_list_notes_date_window_and_sort() -> None:
     ours = {a["id"], b["id"]}
 
     async def ids_for(**kw: object) -> list[str]:
-        return [n["id"] for n in await list_notes(token=token, org_id=org, **kw)]  # type: ignore[arg-type]
+        return [
+            n["id"]
+            for n in (await list_notes(token=token, org_id=org, **kw))["items"]  # type: ignore[arg-type]
+        ]
 
     # created_before far-future includes both; created_after far-future excludes both.
     assert ours <= set(await ids_for(created_before="2099-01-01"))

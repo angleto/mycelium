@@ -117,7 +117,7 @@ class SemanticDenseStage(Stage):
                     MemoryBlob.embedding_hosted.is_not(None),
                     *ctx.tag_clauses,
                 )
-                .order_by(dist_hosted)
+                .order_by(dist_hosted, MemoryBlob.id)
                 .limit(self.oversample)
             )
             rows_hosted = (await ctx.session.execute(stmt_hosted)).all()
@@ -140,7 +140,7 @@ class SemanticDenseStage(Stage):
                     MemoryBlob.embedding.is_not(None),
                     *ctx.tag_clauses,
                 )
-                .order_by(dist_local)
+                .order_by(dist_local, MemoryBlob.id)
                 .limit(self.oversample)
             )
             rows_local = (await ctx.session.execute(stmt_local)).all()

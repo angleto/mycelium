@@ -93,5 +93,7 @@ async def test_note_serializers_carry_tags() -> None:
     chip = next(g for g in full["tags"] if g["name"] == "note-tag")
     assert {"id", "kind", "name", "color"} <= chip.keys()
 
-    listed = next(n for n in await list_notes(token=token, org_id=org) if n["id"] == note["id"])
+    listed = next(
+        n for n in (await list_notes(token=token, org_id=org))["items"] if n["id"] == note["id"]
+    )
     assert "note-tag" in {g["name"] for g in listed["tags"]}

@@ -197,9 +197,9 @@ over-fetch the org table and filter in its head.
 | `list_email_messages` | List ingested messages, optionally filtered by account. |
 | `list_note_parts` | Outline (table of contents) of a note's markdown parts in ``ord`` |
 | `list_note_revisions` | Recovery-history timeline for a note, most recent first. |
-| `list_notes` | List notes (newest first); for the @note picker. Each row carries |
+| `list_notes` | List notes (newest first); for the @note picker. Returns the paginated |
 | `list_task_participants` | List the additional identities pinned to an appointment-task |
-| `list_turns` | List the turns of a conversation note, in order. |
+| `list_turns` | List the turns of a conversation note, in order. Returns the paginated |
 | `merge_notes` | Fold the source note's parts into the target (task 7070a456 |
 | `patch_note_part_body_capability` | Mint a single-use ``note_part_body:patch`` capability and return a |
 | `patch_text_block_capability` | Mint a single-use ``<kind>:patch`` capability for a task description |

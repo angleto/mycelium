@@ -6,9 +6,10 @@ CPM scheduling consumes these in F3.
 from __future__ import annotations
 
 import uuid
+from datetime import datetime
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
@@ -133,14 +134,24 @@ async def list_dependencies(
     org_id: uuid.UUID,
     task_id: uuid.UUID | None = None,
     limit: int | None = None,
+    after: tuple[datetime, uuid.UUID] | None = None,
 ) -> list[TaskDependency]:
-    """Dependency edges, newest first. With ``task_id`` only those touching
-    the task (naturally small); without it the whole RLS-scoped graph, so
-    ``limit`` bounds that org-wide branch instead of streaming every edge."""
+    """Dependency edges, newest first (created_at desc, id asc -- a total
+    order). With ``task_id`` only those touching the task (naturally small);
+    without it the whole RLS-scoped graph, so ``limit`` + the ``after`` keyset
+    cursor page that org-wide branch instead of streaming every edge."""
     stmt = select(TaskDependency).order_by(TaskDependency.created_at.desc(), TaskDependency.id)
     if task_id is not None:
         stmt = stmt.where(
             (TaskDependency.predecessor_id == task_id) | (TaskDependency.successor_id == task_id)
+        )
+    if after is not None:
+        ac, ai = after
+        stmt = stmt.where(
+            or_(
+                TaskDependency.created_at < ac,
+                and_(TaskDependency.created_at == ac, TaskDependency.id > ai),
+            )
         )
     if limit is not None and limit > 0:
         stmt = stmt.limit(limit)

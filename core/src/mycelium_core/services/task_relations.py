@@ -12,8 +12,9 @@ No cycle rules (unlike ``dependencies``): A-B and B-A are the same edge.
 from __future__ import annotations
 
 import uuid
+from datetime import datetime
 
-from sqlalchemy import or_, select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -95,13 +96,23 @@ async def list_relations(
     org_id: uuid.UUID,
     task_id: uuid.UUID | None = None,
     limit: int | None = None,
+    after: tuple[datetime, uuid.UUID] | None = None,
 ) -> list[TaskRelation]:
-    """Related-task edges, newest first. With ``task_id`` only that task's
-    relations (small); without it the whole RLS-scoped set, so ``limit``
-    bounds that org-wide branch instead of streaming every edge."""
+    """Related-task edges, newest first (created_at desc, id asc -- a total
+    order). With ``task_id`` only that task's relations (small); without it
+    the whole RLS-scoped set, so ``limit`` + the ``after`` keyset cursor page
+    that org-wide branch instead of streaming every edge."""
     stmt = select(TaskRelation).order_by(TaskRelation.created_at.desc(), TaskRelation.id)
     if task_id is not None:
         stmt = stmt.where(or_(TaskRelation.task_a_id == task_id, TaskRelation.task_b_id == task_id))
+    if after is not None:
+        ac, ai = after
+        stmt = stmt.where(
+            or_(
+                TaskRelation.created_at < ac,
+                and_(TaskRelation.created_at == ac, TaskRelation.id > ai),
+            )
+        )
     if limit is not None and limit > 0:
         stmt = stmt.limit(limit)
     return list((await session.execute(stmt)).scalars().all())

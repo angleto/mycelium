@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import delete, func, or_, select
+from sqlalchemy import and_, delete, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -169,6 +169,7 @@ async def list_notes(
     updated_since: dt.datetime | None = None,
     order_by: str | None = None,
     order_desc: bool = False,
+    after: tuple[dt.datetime, uuid.UUID] | None = None,
 ) -> list[Note]:
     """Notes in the workspace, newest first (for the @note picker and
     the notes list). RLS scopes to the org. Archived/deleted are
@@ -227,14 +228,22 @@ async def list_notes(
         stmt = stmt.where(Note.created_at < created_to)
     if updated_since is not None:
         stmt = stmt.where(Note.updated_at >= updated_since)
+    # Keyset cursor for the DEFAULT order (created_at desc, id asc -- both
+    # NOT NULL): rows strictly after the cursor position. The MCP layer only
+    # passes ``after`` for the default order, so no NULL-ordering hazard.
+    if after is not None:
+        ac, ai = after
+        stmt = stmt.where(or_(Note.created_at < ac, and_(Note.created_at == ac, Note.id > ai)))
     order_col = _NOTE_ORDER.get(order_by) if order_by else None
     if order_col is not None:
+        # id is the unique final tiebreak for a TOTAL order (stable pagination).
         stmt = stmt.order_by(
             (order_col.desc() if order_desc else order_col.asc()).nulls_last(),
             Note.created_at.desc(),
+            Note.id.asc(),
         )
     else:
-        stmt = stmt.order_by(Note.created_at.desc())
+        stmt = stmt.order_by(Note.created_at.desc(), Note.id.asc())
     stmt = stmt.limit(limit)
     return list((await session.execute(stmt)).scalars().all())
 
@@ -1279,17 +1288,23 @@ async def append_message(
 
 
 async def list_turns(
-    session: AsyncSession, *, org_id: uuid.UUID, note_id: uuid.UUID
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    note_id: uuid.UUID,
+    limit: int | None = None,
+    after: tuple[int, uuid.UUID] | None = None,
 ) -> list[NoteTurn]:
-    return list(
-        (
-            await session.execute(
-                select(NoteTurn).where(NoteTurn.note_id == note_id).order_by(NoteTurn.ord)
-            )
-        )
-        .scalars()
-        .all()
-    )
+    """Conversation turns in ``ord`` order (ord asc, id asc -- a total order).
+    ``limit`` + the ``after`` keyset cursor page a long transcript."""
+    stmt = select(NoteTurn).where(NoteTurn.note_id == note_id)
+    if after is not None:
+        ao, ai = after
+        stmt = stmt.where(or_(NoteTurn.ord > ao, and_(NoteTurn.ord == ao, NoteTurn.id > ai)))
+    stmt = stmt.order_by(NoteTurn.ord.asc(), NoteTurn.id.asc())
+    if limit is not None and limit > 0:
+        stmt = stmt.limit(limit)
+    return list((await session.execute(stmt)).scalars().all())
 
 
 async def synthesize(
