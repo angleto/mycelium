@@ -81,8 +81,13 @@ async def test_task_branch_scope_label_and_task_scope(_fake_embedder: None) -> N
         proj_id = str(proj.id)
 
     # Default: the task branch is org-wide even WITH project_id set -> both
-    # hits, each labelled scope='org' so the caller is never misled.
-    res = await search(token=token, org_id=org, q="zephyrtoken", kinds=["task"], project_id=proj_id)
+    # hits, each labelled scope='org' so the caller is never misled. search()
+    # now returns the {hits, meta} envelope (task 4f3c2207).
+    envelope = await search(
+        token=token, org_id=org, q="zephyrtoken", kinds=["task"], project_id=proj_id
+    )
+    assert "meta" in envelope
+    res = envelope["hits"]
     titles = {h["title"] for h in res}
     assert any("inside" in t for t in titles) and any("outside" in t for t in titles)
     assert res and all(h["scope"] == "org" for h in res)
@@ -90,14 +95,16 @@ async def test_task_branch_scope_label_and_task_scope(_fake_embedder: None) -> N
 
     # task_scope='project' ANDs the project tag into the task branch -> only
     # the project-tagged task, now labelled scope='project'.
-    scoped = await search(
-        token=token,
-        org_id=org,
-        q="zephyrtoken",
-        kinds=["task"],
-        project_id=proj_id,
-        task_scope="project",
-    )
+    scoped = (
+        await search(
+            token=token,
+            org_id=org,
+            q="zephyrtoken",
+            kinds=["task"],
+            project_id=proj_id,
+            task_scope="project",
+        )
+    )["hits"]
     stitles = {h["title"] for h in scoped}
     assert any("inside" in t for t in stitles)
     assert not any("outside" in t for t in stitles)
@@ -124,12 +131,14 @@ async def test_task_branch_facets(_fake_embedder: None) -> None:
         )
 
     # No facet: both found.
-    both = await search(token=token, org_id=org, q="quokkatoken", kinds=["task"])
+    both = (await search(token=token, org_id=org, q="quokkatoken", kinds=["task"]))["hits"]
     assert len({h["title"] for h in both}) == 2
 
     # due_before facet (half-open upper bound): only the soon task.
     cutoff = (today + dt.timedelta(days=3)).isoformat()
-    soon = await search(token=token, org_id=org, q="quokkatoken", kinds=["task"], due_before=cutoff)
+    soon = (
+        await search(token=token, org_id=org, q="quokkatoken", kinds=["task"], due_before=cutoff)
+    )["hits"]
     stitles = {h["title"] for h in soon}
     assert any("soon" in t for t in stitles) and not any("far" in t for t in stitles)
 
@@ -137,10 +146,10 @@ async def test_task_branch_facets(_fake_embedder: None) -> None:
     none_state = await search(
         token=token, org_id=org, q="quokkatoken", kinds=["task"], state_id=str(uuid.uuid4())
     )
-    assert none_state == []
+    assert none_state["hits"] == []
 
     # A bogus assignee handle likewise filters every task hit out.
     none_assignee = await search(
         token=token, org_id=org, q="quokkatoken", kinds=["task"], assignee_handles=["ghost-nobody"]
     )
-    assert none_assignee == []
+    assert none_assignee["hits"] == []

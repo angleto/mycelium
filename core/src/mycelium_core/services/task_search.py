@@ -60,6 +60,7 @@ import hashlib
 import logging
 import uuid
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from sqlalchemy import delete, event, select, update
 from sqlalchemy.engine import CursorResult
@@ -75,6 +76,12 @@ from mycelium_core.models.note_part_index_pointer import NotePartIndexPointer
 from mycelium_core.models.task import Task
 from mycelium_core.models.task_checklist_item import TaskChecklistItem
 from mycelium_core.models.task_index_pointer import TaskIndexPointer
+
+if TYPE_CHECKING:
+    # Imported under TYPE_CHECKING only: ``memory`` is otherwise imported at
+    # call time (see the note in search_unified) to keep the import graph
+    # acyclic. At runtime the value is built via ``memory_svc.RetrievalMeta``.
+    from mycelium_core.services.memory import RetrievalMeta
 
 logger = logging.getLogger(__name__)
 
@@ -555,11 +562,15 @@ class UnifiedHit:
     # project_id can SEE that its task hits are NOT project-scoped, instead
     # of silently believing they are (audit finding #5).
     scope: str = "org"
+    # Backing blob's embedding model id; 'none' (or None) means the hit is
+    # keyword-only (no dense vector) -- surfaced so a caller can see when a
+    # result rode FTS alone (audit #8, task 4f3c2207).
+    model_id: str | None = None
     note_id: uuid.UUID | None = None
     part_id: uuid.UUID | None = None
 
 
-async def search_unified(
+async def search_unified_with_meta(
     session: AsyncSession,
     *,
     org_id: uuid.UUID,
@@ -578,7 +589,7 @@ async def search_unified(
     due_before: dt.datetime | None = None,
     assignee_handles: list[str] | None = None,
     task_state_id: uuid.UUID | None = None,
-) -> list[UnifiedHit]:
+) -> tuple[list[UnifiedHit], RetrievalMeta]:
     """Unified search across tasks, notes and memory blobs.
 
     Project scoping is split per kind and each hit carries a ``scope``
@@ -604,8 +615,21 @@ async def search_unified(
     want_task = "task" in kinds
     want_note = "note" in kinds
     want_blob = "blob" in kinds
+
+    # Per-branch recall meta, aggregated at the end so the caller can tell a
+    # genuinely-empty result from silently-degraded recall (task 4f3c2207).
+    metas: list[RetrievalMeta] = []
+
+    def _aggregate(final: list[UnifiedHit]) -> RetrievalMeta:
+        return memory_svc.RetrievalMeta(
+            query_embedded=any(m.query_embedded for m in metas),
+            dense_branch_contributed=any(m.dense_branch_contributed for m in metas),
+            dense_rejected_by_floor=sum(m.dense_rejected_by_floor for m in metas),
+            keyword_only_hits=sum(1 for h in final if (h.model_id or "none") == "none"),
+        )
+
     if not want_task and not want_note and not want_blob:
-        return []
+        return [], _aggregate([])
 
     hits: list[UnifiedHit] = []
 
@@ -621,7 +645,7 @@ async def search_unified(
         task_tag_ids = list(tag_ids)
         if task_project_scoped and project_id is not None:
             task_tag_ids.append(project_id)
-        task_hits = await memory_svc.retrieve(
+        task_hits, task_rmeta = await memory_svc.retrieve_with_meta(
             session,
             org_id=org_id,
             actor_id=actor_id,
@@ -633,6 +657,7 @@ async def search_unified(
             channel_key="task",
             rerank=rerank,
         )
+        metas.append(task_rmeta)
         if task_hits:
             blob_ids = [h.blob.id for h in task_hits]
             id_to_task = await _resolve_task_ids(session, blob_ids)
@@ -668,6 +693,7 @@ async def search_unified(
                         snippet=snippets.get(h.blob.id),
                         score=h.rrf,
                         scope=task_hit_scope,
+                        model_id=h.blob.model_id,
                     )
                 )
 
@@ -677,7 +703,7 @@ async def search_unified(
         # blob to its note via ``note_part_index_pointer`` and surface a
         # titled hit that the SPA can route to /notes/:id. Project-scoped
         # like 'blob' (note part blobs carry the note's project_id).
-        note_hits = await memory_svc.retrieve(
+        note_hits, note_rmeta = await memory_svc.retrieve_with_meta(
             session,
             org_id=org_id,
             actor_id=actor_id,
@@ -689,6 +715,7 @@ async def search_unified(
             channel_key="note",
             rerank=rerank,
         )
+        metas.append(note_rmeta)
         if note_hits:
             blob_ids = [h.blob.id for h in note_hits]
             blob_to_ref = await _resolve_note_refs(session, blob_ids)
@@ -722,6 +749,7 @@ async def search_unified(
                         snippet=snippets.get(h.blob.id),
                         score=h.rrf,
                         scope="project" if project_id is not None else "org",
+                        model_id=h.blob.model_id,
                     )
                 )
 
@@ -734,7 +762,7 @@ async def search_unified(
         # we'd need multiple retrieves -- out of scope for v1, callers
         # pass at most one channel).
         single_channel = channel_keys[0] if channel_keys else None
-        blob_hits = await memory_svc.retrieve(
+        blob_hits, blob_rmeta = await memory_svc.retrieve_with_meta(
             session,
             org_id=org_id,
             actor_id=actor_id,
@@ -746,6 +774,7 @@ async def search_unified(
             channel_key=single_channel,
             rerank=rerank,
         )
+        metas.append(blob_rmeta)
         if blob_hits:
             blob_ids = [h.blob.id for h in blob_hits]
             snippets = await _ts_headlines(session, blob_ids=blob_ids, query=query)
@@ -764,6 +793,7 @@ async def search_unified(
                         snippet=snippets.get(h.blob.id),
                         score=h.rrf,
                         scope="project" if project_id is not None else "org",
+                        model_id=h.blob.model_id,
                     )
                 )
 
@@ -776,7 +806,54 @@ async def search_unified(
         hits = [h for h in hits if not (h.kind == "blob" and h.blob_id in typed_blob_ids)]
 
     hits.sort(key=lambda r: (-r.score, r.kind, str(r.blob_id)))
-    return hits[:limit]
+    final = hits[:limit]
+    return final, _aggregate(final)
+
+
+async def search_unified(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    project_id: uuid.UUID | None,
+    query: str,
+    kinds: list[str],
+    tag_ids: list[uuid.UUID],
+    channel_keys: list[str],
+    limit: int,
+    include_archived: bool,
+    include_deleted: bool,
+    operation_id: str,
+    rerank: bool = False,
+    task_scope: str = "org",
+    due_before: dt.datetime | None = None,
+    assignee_handles: list[str] | None = None,
+    task_state_id: uuid.UUID | None = None,
+) -> list[UnifiedHit]:
+    """Unified search -> the ranked hits. Thin wrapper over
+    :func:`search_unified_with_meta` for callers that don't need the recall
+    diagnostics (REST /search, the assistant, the agent runtime); the meta
+    variant powers the MCP ``search`` tool."""
+    hits, _meta = await search_unified_with_meta(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        project_id=project_id,
+        query=query,
+        kinds=kinds,
+        tag_ids=tag_ids,
+        channel_keys=channel_keys,
+        limit=limit,
+        include_archived=include_archived,
+        include_deleted=include_deleted,
+        operation_id=operation_id,
+        rerank=rerank,
+        task_scope=task_scope,
+        due_before=due_before,
+        assignee_handles=assignee_handles,
+        task_state_id=task_state_id,
+    )
+    return hits
 
 
 async def _resolve_task_ids(

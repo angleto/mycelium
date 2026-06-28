@@ -142,6 +142,33 @@ class Hit:
     provenance: str | None = None
 
 
+# Sentinel model_id for a blob stored keyword-only (embed unavailable/failed):
+# FTS covers it but it carries no dense vector. Mirrors task_search.
+_KEYWORD_ONLY_MODEL = "none"
+
+
+@dataclass(frozen=True)
+class RetrievalMeta:
+    """Why a retrieval returned what it did -- so a caller can tell a
+    genuinely-empty result from silently-degraded recall (task 4f3c2207).
+    The byte-identical empty response hid three caller-invisible collapses:
+    an un-embeddable query, a per-org floor that rejected every neighbour
+    (that mis-calibration shipped to prod once), and keyword-only blobs.
+
+    - ``query_embedded``: the query produced an embedding (a dense tier
+      ran). False => keyword-only by construction.
+    - ``dense_branch_contributed``: the dense branch added >=1 candidate.
+    - ``dense_rejected_by_floor``: kNN neighbours dropped by the per-org
+      similarity floor (high + not contributed => floor mis-calibrated).
+    - ``keyword_only_hits``: returned hits backed by a keyword-only blob.
+    """
+
+    query_embedded: bool
+    dense_branch_contributed: bool
+    dense_rejected_by_floor: int
+    keyword_only_hits: int
+
+
 async def _safe_embed(emb: Embedder, text: str) -> EmbedResult | None:
     """Embed defensively. The local model depends on an optional extra
     (``sentence-transformers``); if it is missing or fails to load,
@@ -418,7 +445,7 @@ async def write_blob(
     return first_blob
 
 
-async def retrieve(
+async def retrieve_with_meta(
     session: AsyncSession,
     *,
     org_id: uuid.UUID,
@@ -433,7 +460,11 @@ async def retrieve(
     channel_key: str | None = None,
     embedder: Embedder | None = None,
     rerank: bool = False,
-) -> list[Hit]:
+) -> tuple[list[Hit], RetrievalMeta]:
+    """Like :func:`retrieve` but also returns a :class:`RetrievalMeta` so the
+    caller can distinguish 'nothing relevant' from 'dense recall silently
+    collapsed to keyword-only' (task 4f3c2207). ``retrieve`` is the thin
+    hits-only wrapper over this."""
     await require_role(session, org_id, actor_id, Role.member)
     channel_id = await _resolve_channel_tag_id(
         session, org_id=org_id, channel_tag_id=channel_tag_id, channel_key=channel_key
@@ -607,8 +638,25 @@ async def retrieve(
     )
     pipeline = RetrievalPipeline(stages=stages)
     top = await pipeline.run(query, ctx)
+
+    def _meta(hits: list[Hit]) -> RetrievalMeta:
+        # The semantic stage records its diagnostics into ctx.extras (the
+        # designated per-call scratch slot); read them back here.
+        diag = ctx.extras.get("semantic_diag") or {}
+        return RetrievalMeta(
+            query_embedded=qres is not None or qres_hosted is not None,
+            dense_branch_contributed=bool(diag.get("contributed", False)),
+            dense_rejected_by_floor=int(diag.get("floor_rejected", 0)),
+            keyword_only_hits=sum(
+                1 for h in hits if (h.blob.model_id or _KEYWORD_ONLY_MODEL) == _KEYWORD_ONLY_MODEL
+            ),
+        )
+
     if not top:
-        return []
+        # Empty is exactly the case the meta exists for: an empty result with
+        # query_embedded=False (or dense_rejected_by_floor>0) means 'recall
+        # was degraded', not 'nothing relevant'.
+        return [], _meta([])
     # Load full blobs for the result (the pipeline carries only ids +
     # rank; the caller still expects ``Hit(blob=MemoryBlob, rrf=score)``).
     blobs = {
@@ -636,7 +684,7 @@ async def retrieve(
         if c.blob_id in blobs and (c.source_kind, c.source_id) in multi_chunk_sources
     ]
     snippets = await _ts_headlines(session, blob_ids=snippet_blob_ids, query=query)
-    return [
+    hits = [
         Hit(
             blob=blobs[c.blob_id],
             rrf=c.score,
@@ -647,6 +695,45 @@ async def retrieve(
         for c in top
         if c.blob_id in blobs
     ]
+    return hits, _meta(hits)
+
+
+async def retrieve(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    project_id: uuid.UUID | None,
+    query: str,
+    operation_id: str,
+    limit: int = 10,
+    grader_min_rrf: float | None = None,
+    tag_ids: Sequence[uuid.UUID] | None = None,
+    channel_tag_id: uuid.UUID | None = None,
+    channel_key: str | None = None,
+    embedder: Embedder | None = None,
+    rerank: bool = False,
+) -> list[Hit]:
+    """Hybrid RRF retrieval -> the ranked hits. Thin wrapper over
+    :func:`retrieve_with_meta` for the callers that don't need the recall
+    diagnostics (the majority); the meta variant powers the MCP search
+    tools."""
+    hits, _meta = await retrieve_with_meta(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        project_id=project_id,
+        query=query,
+        operation_id=operation_id,
+        limit=limit,
+        grader_min_rrf=grader_min_rrf,
+        tag_ids=tag_ids,
+        channel_tag_id=channel_tag_id,
+        channel_key=channel_key,
+        embedder=embedder,
+        rerank=rerank,
+    )
+    return hits
 
 
 async def _multi_chunk_source_ids(

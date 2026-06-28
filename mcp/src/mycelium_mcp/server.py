@@ -3415,6 +3415,18 @@ def _blob(b: MemoryBlob, tags: list[Tag] | None = None) -> dict[str, Any]:
     }
 
 
+def _retrieval_meta(m: memory_svc.RetrievalMeta) -> dict[str, Any]:
+    """Serialize the recall diagnostics (task 4f3c2207): why a retrieval
+    returned what it did, so a caller can tell a genuinely-empty result from
+    silently-degraded (keyword-only) recall."""
+    return {
+        "query_embedded": m.query_embedded,
+        "dense_branch_contributed": m.dense_branch_contributed,
+        "dense_rejected_by_floor": m.dense_rejected_by_floor,
+        "keyword_only_hits": m.keyword_only_hits,
+    }
+
+
 @mcp.tool()
 async def memory_write(
     token: str,
@@ -3467,14 +3479,20 @@ async def memory_search(
     tag_ids: list[str] | None = None,
     channel_tag_id: str | None = None,
     channel_key: str | None = None,
-) -> list[dict[str, Any]]:
+) -> dict[str, Any]:
     """Hybrid RRF retrieval within the (org, project) boundary.
     Degrades to keyword-only without embedder. ``tag_ids``,
     ``channel_tag_id`` and ``channel_key`` narrow within the boundary
     (facets, never cross). Channel by id or stable slug; if both given
-    they must agree. Deterministic order."""
+    they must agree. Deterministic order.
+
+    Returns ``{hits, meta}``. ``meta`` (RetrievalMeta) tells you WHY: an
+    empty ``hits`` with ``meta.query_embedded=false`` or
+    ``meta.dense_rejected_by_floor>0`` means recall silently degraded to
+    keyword-only, not that nothing was relevant (per-hit ``blob.model_id``
+    ='none' also flags a keyword-only row)."""
     async with _tenant(token, org_id) as (s, org, user):
-        hits = await memory_svc.retrieve(
+        hits, meta = await memory_svc.retrieve_with_meta(
             s,
             org_id=org,
             actor_id=user,
@@ -3487,7 +3505,10 @@ async def memory_search(
             channel_key=channel_key,
         )
         tagmap = await memory_svc.tags_by_blob(s, blob_ids=[h.blob.id for h in hits])
-        return [{"blob": _blob(h.blob, tagmap.get(h.blob.id)), "rrf": h.rrf} for h in hits]
+        return {
+            "hits": [{"blob": _blob(h.blob, tagmap.get(h.blob.id)), "rrf": h.rrf} for h in hits],
+            "meta": _retrieval_meta(meta),
+        }
 
 
 @mcp.tool()
@@ -3548,7 +3569,7 @@ async def search(
     due_before: str | None = None,
     assignee_handles: list[str] | None = None,
     state_id: str | None = None,
-) -> list[dict[str, Any]]:
+) -> dict[str, Any]:
     """Unified search across tasks/notes/blobs; the TASK branch is org-wide
     even when ``project_id`` is set (each hit's ``scope`` says 'org' or
     'project' so you are never misled).
@@ -3562,10 +3583,16 @@ async def search(
     ``note_id`` + ``part_id`` + a title; results carry an ``ts_headline``
     snippet. Use this over ``memory_search`` for "everything that mentions
     X". ``rerank=True`` opts into the cross-encoder top-K pass.
+
+    Returns ``{hits, meta}``. Each hit carries ``model_id`` ('none' = a
+    keyword-only row, no dense vector). ``meta`` (RetrievalMeta) exposes
+    whether the query embedded and whether the dense branch contributed /
+    was rejected by the per-org similarity floor, so an empty or thin result
+    distinguishes 'nothing relevant' from 'recall silently degraded'.
     """
     async with _tenant(token, org_id) as (s, org, user):
         due_before_dt = _to_instant(due_before, await _caller_tz(s, user)) if due_before else None
-        hits = await task_search_svc.search_unified(
+        hits, meta = await task_search_svc.search_unified_with_meta(
             s,
             org_id=org,
             actor_id=user,
@@ -3584,20 +3611,24 @@ async def search(
             assignee_handles=assignee_handles,
             task_state_id=uuid.UUID(state_id) if state_id else None,
         )
-        return [
-            {
-                "kind": h.kind,
-                "scope": h.scope,
-                "task_id": str(h.task_id) if h.task_id else None,
-                "note_id": str(h.note_id) if h.note_id else None,
-                "part_id": str(h.part_id) if h.part_id else None,
-                "blob_id": str(h.blob_id),
-                "title": h.title,
-                "snippet": h.snippet,
-                "score": h.score,
-            }
-            for h in hits
-        ]
+        return {
+            "hits": [
+                {
+                    "kind": h.kind,
+                    "scope": h.scope,
+                    "model_id": h.model_id,
+                    "task_id": str(h.task_id) if h.task_id else None,
+                    "note_id": str(h.note_id) if h.note_id else None,
+                    "part_id": str(h.part_id) if h.part_id else None,
+                    "blob_id": str(h.blob_id),
+                    "title": h.title,
+                    "snippet": h.snippet,
+                    "score": h.score,
+                }
+                for h in hits
+            ],
+            "meta": _retrieval_meta(meta),
+        }
 
 
 @mcp.tool()

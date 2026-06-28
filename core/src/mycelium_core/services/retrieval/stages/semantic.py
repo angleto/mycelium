@@ -90,6 +90,11 @@ class SemanticDenseStage(Stage):
         candidates: list[Candidate],
     ) -> list[Candidate]:
         # No embedding at all -> degrade to lexical-only.
+        # Recall diagnostics (task 4f3c2207): record into the per-call
+        # ``extras`` scratch slot so ``retrieve_with_meta`` can tell the
+        # caller why dense recall did (not) contribute -- the floor-rejected
+        # mis-calibration was invisible in the byte-identical response.
+        diag = ctx.extras.setdefault("semantic_diag", {"contributed": False, "floor_rejected": 0})
         local: EmbedResult | None = ctx.query_embedding
         hosted: EmbedResult | None = ctx.extras.get("query_embedding_hosted")
         if local is None and hosted is None:
@@ -116,12 +121,14 @@ class SemanticDenseStage(Stage):
                 .limit(self.oversample)
             )
             rows_hosted = (await ctx.session.execute(stmt_hosted)).all()
+            kept_hosted = self._kept(rows_hosted, f"{self.name}_hosted")
+            diag["floor_rejected"] += len(rows_hosted) - len(kept_hosted)
             new.extend(
                 Candidate(
                     blob_id=row[0],
                     scores_by_stage={f"{self.name}_hosted": float(rank)},
                 )
-                for rank, row in enumerate(self._kept(rows_hosted, f"{self.name}_hosted"), start=1)
+                for rank, row in enumerate(kept_hosted, start=1)
             )
         if local is not None:
             dist_local = MemoryBlob.embedding.max_inner_product(local.vector)
@@ -137,11 +144,15 @@ class SemanticDenseStage(Stage):
                 .limit(self.oversample)
             )
             rows_local = (await ctx.session.execute(stmt_local)).all()
+            kept_local = self._kept(rows_local, self.name)
+            diag["floor_rejected"] += len(rows_local) - len(kept_local)
             new.extend(
                 Candidate(
                     blob_id=row[0],
                     scores_by_stage={self.name: float(rank)},
                 )
-                for rank, row in enumerate(self._kept(rows_local, self.name), start=1)
+                for rank, row in enumerate(kept_local, start=1)
             )
+        if new:
+            diag["contributed"] = True
         return merge_candidates(candidates, new)

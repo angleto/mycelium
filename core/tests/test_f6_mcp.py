@@ -61,7 +61,7 @@ async def test_mcp_memory(_embedder: None) -> None:
     assert b["tier"] == "hot"
 
     hits = await memory_search(token=token, org_id=org, query="bravo", operation_id="q1")
-    assert b["id"] in {h["blob"]["id"] for h in hits}
+    assert b["id"] in {h["blob"]["id"] for h in hits["hits"]}
 
     erased = await memory_erase(token=token, org_id=org, source_kind="email", source_id="m1")
     assert erased["deleted"] == 1
@@ -94,7 +94,7 @@ async def test_mcp_memory_delete_blob(_embedder: None) -> None:
     hits = await memory_search(
         token=token, org_id=org, query="echo", operation_id="qd", project_id=proj
     )
-    assert bid in {h["blob"]["id"] for h in hits}
+    assert bid in {h["blob"]["id"] for h in hits["hits"]}
 
     res = await memory_delete_blob(token=token, org_id=org, blob_id=bid)
     assert res == {"blob_id": bid, "deleted": True}
@@ -103,4 +103,4 @@ async def test_mcp_memory_delete_blob(_embedder: None) -> None:
     after = await memory_search(
         token=token, org_id=org, query="echo", operation_id="qd2", project_id=proj
     )
-    assert bid not in {h["blob"]["id"] for h in after}
+    assert bid not in {h["blob"]["id"] for h in after["hits"]}
