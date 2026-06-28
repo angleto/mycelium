@@ -1,5 +1,5 @@
-.PHONY: sync lint fmt type test eval up down db-bootstrap migrate db-harden revision \
-        run-api run-mcp run-worker run-sdi
+.PHONY: sync lint fmt type test eval mcp-coverage mcp-coverage-check up down \
+        db-bootstrap migrate db-harden revision run-api run-mcp run-worker run-sdi
 
 sync:
 	uv sync --all-packages
@@ -22,6 +22,16 @@ test:
 # local baseline check.
 eval:
 	uv run pytest core/tests/test_eval_offline.py -q
+
+# Regenerate the auto-generated tool inventory in docs/mcp-coverage.md from
+# the live registry (counts + per-domain listing never drift from code).
+mcp-coverage:
+	uv run python scripts/gen_mcp_coverage.py
+
+# CI/pre-commit gate: fail if docs/mcp-coverage.md is stale. DB-free and
+# embedder-free (importing the server only registers tool callables).
+mcp-coverage-check:
+	uv run python scripts/gen_mcp_coverage.py --check
 
 up:
 	docker compose -f deploy/local/docker-compose.yml up -d
