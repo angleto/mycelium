@@ -47,7 +47,7 @@ handles (see the generated `tasks` section below). An agent never needs to
 over-fetch the org table and filter in its head.
 
 <!-- BEGIN GENERATED: mcp tool inventory (scripts/gen_mcp_coverage.py) -->
-**235 tools across 13 domains.** This inventory is generated from the live registry by `scripts/gen_mcp_coverage.py` — do not edit by hand; run `make mcp-coverage` to refresh. The one-line summary is each tool's first docstring line, so it cannot drift from the code.
+**237 tools across 13 domains.** This inventory is generated from the live registry by `scripts/gen_mcp_coverage.py` — do not edit by hand; run `make mcp-coverage` to refresh. The one-line summary is each tool's first docstring line, so it cannot drift from the code.
 
 ### search (3)
 
@@ -87,7 +87,7 @@ over-fetch the org table and filter in its head.
 | `add_time_entry` | Add a manual time entry (provide ended_at or duration_seconds). |
 | `delete_time_entry` | Delete a time entry. |
 | `get_time_entry` | Read one time entry. |
-| `list_running_timers` | All live timers for a user (the serial one plus any parallel). |
+| `list_running_timers` | Live timers (the serial one plus any parallel). Defaults to the |
 | `pause_timer` | Pause a running timer without finalizing it: the one for |
 | `resume_timer` | Resume a paused timer: the one for ``task_id`` if given, else the |
 | `start_timer` | Start the live timer. Serial (default) replaces the running |
@@ -279,7 +279,7 @@ over-fetch the org table and filter in its head.
 | `update_project` | Edit a project. Pass ``client_tag_id`` to reassign the project |
 | `update_tag` | Rename / recolor / set status of a tag (status: active\|archived). |
 
-### tasks (32)
+### tasks (33)
 
 | Tool | Summary |
 |---|---|
@@ -290,6 +290,7 @@ over-fetch the org table and filter in its head.
 | `archive_task` | Archive (or unarchive with ``archived=False``) a task. |
 | `assign_task` | Assign a user to a task (idempotent). |
 | `check_item` | Mark a checklist item as done. Stamps ``done_at`` / ``done_by``. |
+| `count_tasks` | Count tasks matching the SAME filters as ``list_tasks`` with one |
 | `create_task` | Create a task. ``importance``/``urgency`` 1..5 Eisenhower |
 | `delete_attachment` | Hard-delete an attachment (the stored blob goes with the row). |
 | `delete_task` | Soft-delete a task (recoverable via restore_task). |
@@ -316,7 +317,7 @@ over-fetch the org table and filter in its head.
 | `upload_attachment_capability` | Mint ONE single-use capability token that UPLOADS a file to a note or |
 | `upload_attachment_instructions` | Recipe for a TOKEN-FREE large-file upload (MRI, DICOM, PDF, ...). |
 
-### misc (28)
+### misc (29)
 
 | Tool | Summary |
 |---|---|
@@ -324,6 +325,7 @@ over-fetch the org table and filter in its head.
 | `assign_annotation` | Assign an annotation to a workspace identity (``assignee_handle``: a |
 | `billing_balance` | Current credit balance for the org. |
 | `clear_done` | Remove every item already ticked done. Returns the count for |
+| `count_annotations` | Count the annotations on a markdown document with ``COUNT`` queries |
 | `create_recurrence` | Make a task recurring (mutually exclusive with dependencies). |
 | `delete_annotation` | Soft-delete an annotation / withdraw a pending suggestion (author |
 | `edit_annotation` | Edit an annotation's body (author or admin only). |
@@ -338,7 +340,7 @@ over-fetch the org table and filter in its head.
 | `ingest_sdi_receipt` | Correlate an SdI receipt (RC/MC/NS/AT) by IdentificativoSdI. |
 | `list_annotations` | List the annotations (comments + suggestions) on a markdown document, |
 | `list_assigned_annotations` | The "assigned to me" inbox: annotations assigned to ``assignee_handle`` |
-| `list_dependencies` | List task dependencies, optionally only those touching a task. |
+| `list_dependencies` | List task dependencies, newest first, optionally only those touching a |
 | `list_time_entries` | List time entries, optionally filtered by task or user. |
 | `ping` | Liveness probe; returns the mycelium-core version. |
 | `reopen_annotation` | Reopen a resolved comment thread. |

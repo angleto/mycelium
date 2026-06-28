@@ -132,12 +132,18 @@ async def list_dependencies(
     *,
     org_id: uuid.UUID,
     task_id: uuid.UUID | None = None,
+    limit: int | None = None,
 ) -> list[TaskDependency]:
-    stmt = select(TaskDependency)
+    """Dependency edges, newest first. With ``task_id`` only those touching
+    the task (naturally small); without it the whole RLS-scoped graph, so
+    ``limit`` bounds that org-wide branch instead of streaming every edge."""
+    stmt = select(TaskDependency).order_by(TaskDependency.created_at.desc(), TaskDependency.id)
     if task_id is not None:
         stmt = stmt.where(
             (TaskDependency.predecessor_id == task_id) | (TaskDependency.successor_id == task_id)
         )
+    if limit is not None and limit > 0:
+        stmt = stmt.limit(limit)
     return list((await session.execute(stmt)).scalars().all())
 
 

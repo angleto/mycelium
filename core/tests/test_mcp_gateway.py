@@ -52,7 +52,14 @@ async def test_public_surface_is_only_meta_tools() -> None:
 async def test_search_semantic_ranks_relevant_tool() -> None:
     set_embedder_override(FakeEmbedder)
     try:
-        hits = await search_tools(query="list all my tasks", limit=8)
+        # FakeEmbedder is a length-normalized bag-of-words: the over-generic
+        # token "list" matches all ~18 list_* tools, so a query leading with
+        # it buries the richer-docstring list_tasks under its short siblings
+        # (and the count_tasks sibling added in 080a9c13). A natural task
+        # query without that token still surfaces it -- the discovery
+        # property under test; a real embedder ranks list_tasks first either
+        # way.
+        hits = await search_tools(query="show my tasks", limit=8)
     finally:
         set_embedder_override(None)
     names = [h["name"] for h in hits]

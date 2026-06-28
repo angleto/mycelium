@@ -646,6 +646,40 @@ def _to_date(raw: str) -> dt.date:
     return v.date() if isinstance(v, dt.datetime) else v
 
 
+async def _task_date_kwargs(
+    s: AsyncSession,
+    user_id: uuid.UUID,
+    *,
+    due_on: str | None,
+    due_before: str | None,
+    due_after: str | None,
+    start_before: str | None,
+    start_after: str | None,
+    updated_since: str | None,
+) -> dict[str, Any]:
+    """Expand the string date filters that ``list_tasks`` and ``count_tasks``
+    share into the service's absolute due/start/updated bounds in the
+    caller's timezone (one place, so the two tools cannot drift)."""
+    tz = (
+        await _caller_tz(s, user_id)
+        if any((due_on, due_before, due_after, start_before, start_after, updated_since))
+        else dt.UTC
+    )
+    due_from = _to_instant(due_after, tz) if due_after else None
+    due_to = _to_instant(due_before, tz) if due_before else None
+    if due_on:
+        d0 = _to_date(due_on)
+        due_from = _day_start(d0, tz)
+        due_to = _day_start(d0 + dt.timedelta(days=1), tz)
+    return {
+        "due_from": due_from,
+        "due_to": due_to,
+        "start_from": _to_date(start_after) if start_after else None,
+        "start_to": _to_date(start_before) if start_before else None,
+        "updated_since": _to_instant(updated_since, tz) if updated_since else None,
+    }
+
+
 @mcp.tool()
 async def list_tasks(
     token: str,
@@ -659,6 +693,7 @@ async def list_tasks(
     assignee_id: str | None = None,
     include_archived: bool = False,
     include_deleted: bool = False,
+    open_only: bool = False,
     fields: list[str] | None = None,
     limit: int = 50,
     q: str | None = None,
@@ -673,27 +708,26 @@ async def list_tasks(
 ) -> list[dict[str, Any]]:
     """List tasks: filter by state, tag, parent, assignee, owner, free-text
     ``q``, or a due/start/updated date window; optional ``order_by`` +
-    ``order_desc`` sort. ``q`` matches a task's title/description/checklist/tag.
-    For ranked retrieval use ``search(kinds=['task'])`` or ``what_can_i_do_now``;
-    ``get_task`` for the full detail of one task."""
+    ``order_desc`` sort. ``open_only=True`` returns only tasks in a
+    non-terminal workflow state (no need to resolve a state uuid first).
+    ``q`` matches a task's title/description/checklist/tag. For just the
+    matching count use ``count_tasks`` (same filters); for ranked retrieval
+    ``search(kinds=['task'])`` or ``what_can_i_do_now``; ``get_task`` for the
+    full detail of one task."""
     from mycelium_core.models.identity import IdentityKind
 
     kind: IdentityKind | None = IdentityKind(assignee_kind) if assignee_kind else None
     async with _tenant(token, org_id) as (s, org, user):
-        # Expand the date filters to absolute bounds in the caller's tz. A
-        # bare date on ``due_*`` becomes a half-open day window on the
-        # timestamptz ``due_date``; ``start_*`` map to the plain Date column.
-        tz = (
-            await _caller_tz(s, user)
-            if any((due_on, due_before, due_after, start_before, start_after, updated_since))
-            else dt.UTC
+        dates = await _task_date_kwargs(
+            s,
+            user,
+            due_on=due_on,
+            due_before=due_before,
+            due_after=due_after,
+            start_before=start_before,
+            start_after=start_after,
+            updated_since=updated_since,
         )
-        due_from = _to_instant(due_after, tz) if due_after else None
-        due_to = _to_instant(due_before, tz) if due_before else None
-        if due_on:
-            d0 = _to_date(due_on)
-            due_from = _day_start(d0, tz)
-            due_to = _day_start(d0 + dt.timedelta(days=1), tz)
         rows = await tasks.list_tasks(
             s,
             org_id=org,
@@ -706,15 +740,12 @@ async def list_tasks(
             assignee_id=uuid.UUID(assignee_id) if assignee_id else None,
             include_archived=include_archived,
             include_deleted=include_deleted,
+            open_only=open_only,
             with_description=False,
             q=q,
-            due_from=due_from,
-            due_to=due_to,
-            start_from=_to_date(start_after) if start_after else None,
-            start_to=_to_date(start_before) if start_before else None,
-            updated_since=_to_instant(updated_since, tz) if updated_since else None,
             order_by=order_by,
             order_desc=order_desc,
+            **dates,
         )
         if limit > 0:
             rows = rows[:limit]
@@ -728,6 +759,65 @@ async def list_tasks(
             )
             for t in rows
         ]
+
+
+@mcp.tool()
+async def count_tasks(
+    token: str,
+    org_id: str,
+    state_id: str | None = None,
+    tag_id: str | None = None,
+    parent_task_id: str | None = None,
+    assignee_kind: str | None = None,
+    assignee_handles: list[str] | None = None,
+    owner_handles: list[str] | None = None,
+    assignee_id: str | None = None,
+    include_archived: bool = False,
+    include_deleted: bool = False,
+    open_only: bool = False,
+    q: str | None = None,
+    due_on: str | None = None,
+    due_before: str | None = None,
+    due_after: str | None = None,
+    start_before: str | None = None,
+    start_after: str | None = None,
+    updated_since: str | None = None,
+) -> dict[str, int]:
+    """Count tasks matching the SAME filters as ``list_tasks`` with one
+    ``COUNT`` query -- so 'how many open tasks' / 'do any tasks tagged X
+    exist' is ``count_tasks(open_only=True)`` / ``count_tasks(tag_id=...)``,
+    not a full ``list_tasks`` + ``len()``. Returns ``{"total": n}``."""
+    from mycelium_core.models.identity import IdentityKind
+
+    kind: IdentityKind | None = IdentityKind(assignee_kind) if assignee_kind else None
+    async with _tenant(token, org_id) as (s, org, user):
+        dates = await _task_date_kwargs(
+            s,
+            user,
+            due_on=due_on,
+            due_before=due_before,
+            due_after=due_after,
+            start_before=start_before,
+            start_after=start_after,
+            updated_since=updated_since,
+        )
+        total = await tasks.count_tasks(
+            s,
+            org_id=org,
+            state_id=uuid.UUID(state_id) if state_id else None,
+            tag_id=uuid.UUID(tag_id) if tag_id else None,
+            parent_task_id=uuid.UUID(parent_task_id) if parent_task_id else None,
+            assignee_kind=kind,
+            assignee_handles=assignee_handles,
+            owner_handles=owner_handles,
+            assignee_id=uuid.UUID(assignee_id) if assignee_id else None,
+            include_archived=include_archived,
+            include_deleted=include_deleted,
+            open_only=open_only,
+            q=q,
+            **dates,
+        )
+        return {"total": total}
 
 
 @mcp.tool()
@@ -1286,11 +1376,14 @@ async def list_annotations(
     doc_kind: str,
     doc_id: str,
     include_resolved: bool = True,
+    kind: str | None = None,
 ) -> list[dict[str, Any]]:
     """List the annotations (comments + suggestions) on a markdown document,
     oldest first. include_resolved defaults True (returns resolved/accepted/
     rejected rows too, unlike the SPA); pass include_resolved=False for
-    open-only. A task's work-diary comments are also reachable via list_comments."""
+    open-only. ``kind`` optionally narrows to 'comment' or 'suggestion'. A
+    task's work-diary comments are also reachable via list_comments. For just
+    the open/total counts use ``count_annotations``."""
     async with _tenant(token, org_id) as (s, org, _user):
         rows = await annotations_svc.list_for_doc(
             s,
@@ -1298,8 +1391,33 @@ async def list_annotations(
             doc_kind=doc_kind,
             doc_id=uuid.UUID(doc_id),
             include_resolved=include_resolved,
+            kind=kind,
         )
         return [_annotation_dict(a) for a in rows]
+
+
+@mcp.tool()
+async def count_annotations(
+    token: str,
+    org_id: str,
+    doc_kind: str,
+    doc_id: str,
+    kind: str | None = None,
+) -> dict[str, int]:
+    """Count the annotations on a markdown document with ``COUNT`` queries
+    (no row fetch). Returns ``{"total": n, "open": m}`` -- ``open`` is the
+    still-actionable subset (status='open'). ``kind`` optionally narrows to
+    'comment' or 'suggestion'. ``doc_kind`` is 'task_description' (then
+    ``doc_id`` is the task id) or a note-part kind."""
+    async with _tenant(token, org_id) as (s, org, _user):
+        total, open_ = await annotations_svc.count_for_doc(
+            s,
+            org_id=org,
+            doc_kind=doc_kind,
+            doc_id=uuid.UUID(doc_id),
+            kind=kind,
+        )
+        return {"total": total, "open": open_}
 
 
 @mcp.tool()
@@ -1480,14 +1598,17 @@ def _dependency(d: TaskDependency) -> dict[str, Any]:
 
 @mcp.tool()
 async def list_dependencies(
-    token: str, org_id: str, task_id: str | None = None
+    token: str, org_id: str, task_id: str | None = None, limit: int | None = None
 ) -> list[dict[str, Any]]:
-    """List task dependencies, optionally only those touching a task."""
+    """List task dependencies, newest first, optionally only those touching a
+    task. Without ``task_id`` this is the whole org graph: pass ``limit`` to
+    bound that org-wide scan."""
     async with _tenant(token, org_id) as (s, org, _user):
         rows = await dependencies.list_dependencies(
             s,
             org_id=org,
             task_id=uuid.UUID(task_id) if task_id else None,
+            limit=limit,
         )
         return [_dependency(d) for d in rows]
 
@@ -2412,10 +2533,26 @@ async def get_time_entry(token: str, org_id: str, entry_id: str) -> dict[str, An
 
 
 @mcp.tool()
-async def list_running_timers(token: str, org_id: str, user_id: str) -> list[dict[str, Any]]:
-    """All live timers for a user (the serial one plus any parallel)."""
-    async with _tenant(token, org_id) as (s, org, _user):
-        rows = await time_svc.running_entries(s, org_id=org, user_id=uuid.UUID(user_id))
+async def list_running_timers(
+    token: str, org_id: str, user_id: str | None = None, handle: str | None = None
+) -> list[dict[str, Any]]:
+    """Live timers (the serial one plus any parallel). Defaults to the
+    CALLER's timers; pass ``user_id`` (uuid) or ``handle`` (a workspace
+    user handle / ``@handle`` / login email) to read someone else's. An
+    unknown ``handle`` or a non-user identity yields an empty list."""
+    from mycelium_core.services import identities as identities_svc
+
+    async with _tenant(token, org_id) as (s, org, user):
+        if user_id:
+            target = uuid.UUID(user_id)
+        elif handle:
+            ident_row = await identities_svc.lookup_by_handle(s, org_id=org, handle=handle)
+            if ident_row is None or ident_row.user_id is None:
+                return []
+            target = ident_row.user_id
+        else:
+            target = user
+        rows = await time_svc.running_entries(s, org_id=org, user_id=target)
         return await _time_entries_many(s, rows)
 
 
@@ -6494,16 +6631,17 @@ async def resolve_prefix(
 
 @mcp.tool()
 async def list_task_relations(
-    token: str, org_id: str, task_id: str | None = None
+    token: str, org_id: str, task_id: str | None = None, limit: int | None = None
 ) -> list[dict[str, Any]]:
     """List symmetric "related task" links (a pure navigation aid,
-    distinct from dependencies: no direction, no cycle rules). Pass
-    ``task_id`` for that task's relations, omit it for the whole
-    workspace. Each row is ``{relation_id, task_a_id, task_b_id}``; the
-    edge is the same regardless of order."""
+    distinct from dependencies: no direction, no cycle rules), newest
+    first. Pass ``task_id`` for that task's relations, omit it for the
+    whole workspace (pass ``limit`` to bound that org-wide scan). Each row
+    is ``{relation_id, task_a_id, task_b_id}``; the edge is the same
+    regardless of order."""
     async with _tenant(token, org_id) as (s, org, _user):
         rels = await task_relations_svc.list_relations(
-            s, org_id=org, task_id=uuid.UUID(task_id) if task_id else None
+            s, org_id=org, task_id=uuid.UUID(task_id) if task_id else None, limit=limit
         )
         return [
             {

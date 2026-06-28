@@ -10,7 +10,7 @@ from collections.abc import Sequence
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import case, delete, func, or_, select
+from sqlalchemy import Select, case, delete, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import defer
@@ -441,40 +441,43 @@ _TASK_ORDER: dict[str, Any] = {
 }
 
 
-async def list_tasks(
-    session: AsyncSession,
+def _apply_task_filters(
+    stmt: Select[Any],
     *,
-    org_id: uuid.UUID,
-    state_id: uuid.UUID | None = None,
-    tag_id: uuid.UUID | None = None,
-    assignee_id: uuid.UUID | None = None,
-    assignee_kind: IdentityKind | None = None,
-    assignee_handles: Sequence[str] | None = None,
-    owner_handles: Sequence[str] | None = None,
-    parent_task_id: uuid.UUID | None = None,
-    include_archived: bool = False,
-    include_deleted: bool = False,
-    with_description: bool = True,
-    q: str | None = None,
-    due_from: dt.datetime | None = None,
-    due_to: dt.datetime | None = None,
-    start_from: dt.date | None = None,
-    start_to: dt.date | None = None,
-    updated_since: dt.datetime | None = None,
-    order_by: str | None = None,
-    order_desc: bool = False,
-) -> list[Task]:
-    stmt = select(Task)
-    # The list view does not need the (potentially large) description: the
-    # SPA free-text search is server-side and the body is edited on the
-    # detail page. Defer it so listing hundreds of tasks doesn't transfer
-    # every body. Callers that read ``description`` keep the default.
-    if not with_description:
-        stmt = stmt.options(defer(Task.description))
+    state_id: uuid.UUID | None,
+    tag_id: uuid.UUID | None,
+    assignee_id: uuid.UUID | None,
+    assignee_kind: IdentityKind | None,
+    assignee_handles: Sequence[str] | None,
+    owner_handles: Sequence[str] | None,
+    parent_task_id: uuid.UUID | None,
+    include_archived: bool,
+    include_deleted: bool,
+    open_only: bool,
+    q: str | None,
+    due_from: dt.datetime | None,
+    due_to: dt.datetime | None,
+    start_from: dt.date | None,
+    start_to: dt.date | None,
+    updated_since: dt.datetime | None,
+) -> Select[Any]:
+    """Apply the shared WHERE/JOIN predicates that ``list_tasks`` and
+    ``count_tasks`` agree on: one filter vocabulary, two projections (the
+    row set vs its count). All joins are anchored on ``Task`` so the same
+    clauses compose onto ``select(Task)`` or ``select(count(distinct(id)))``.
+    """
     if not include_deleted:
         stmt = stmt.where(Task.deleted_at.is_(None))
     if not include_archived:
         stmt = stmt.where(Task.is_archived.is_(False))
+    if open_only:
+        # 'open' == the task's workflow state is non-terminal. Resolved via
+        # WorkflowState.is_terminal (RLS-scoped to the org), so the caller
+        # never has to look up a non-terminal state uuid first. ``state_id``
+        # is NOT NULL, so the IN-subquery is exact.
+        stmt = stmt.where(
+            Task.state_id.in_(select(WorkflowState.id).where(WorkflowState.is_terminal.is_(False)))
+        )
     if state_id is not None:
         stmt = stmt.where(Task.state_id == state_id)
     if parent_task_id is not None:
@@ -492,12 +495,11 @@ async def list_tasks(
     # an identity filter (unassigned tasks are excluded from those
     # facets by design).
     if assignee_kind is not None or assignee_handles:
-        ident_alias = Identity
-        stmt = stmt.join(ident_alias, ident_alias.id == Task.assignee_id)
+        stmt = stmt.join(Identity, Identity.id == Task.assignee_id)
         if assignee_kind is not None:
-            stmt = stmt.where(ident_alias.kind == assignee_kind)
+            stmt = stmt.where(Identity.kind == assignee_kind)
         if assignee_handles:
-            stmt = stmt.where(ident_alias.handle.in_(list(assignee_handles)))
+            stmt = stmt.where(Identity.handle.in_(list(assignee_handles)))
     if owner_handles:
         stmt = stmt.join(User, User.id == Task.owner_id).where(User.handle.in_(list(owner_handles)))
     if q is not None:
@@ -542,6 +544,59 @@ async def list_tasks(
         stmt = stmt.where(Task.start_date < start_to)
     if updated_since is not None:
         stmt = stmt.where(Task.updated_at >= updated_since)
+    return stmt
+
+
+async def list_tasks(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    state_id: uuid.UUID | None = None,
+    tag_id: uuid.UUID | None = None,
+    assignee_id: uuid.UUID | None = None,
+    assignee_kind: IdentityKind | None = None,
+    assignee_handles: Sequence[str] | None = None,
+    owner_handles: Sequence[str] | None = None,
+    parent_task_id: uuid.UUID | None = None,
+    include_archived: bool = False,
+    include_deleted: bool = False,
+    open_only: bool = False,
+    with_description: bool = True,
+    q: str | None = None,
+    due_from: dt.datetime | None = None,
+    due_to: dt.datetime | None = None,
+    start_from: dt.date | None = None,
+    start_to: dt.date | None = None,
+    updated_since: dt.datetime | None = None,
+    order_by: str | None = None,
+    order_desc: bool = False,
+) -> list[Task]:
+    stmt: Select[Any] = select(Task)
+    # The list view does not need the (potentially large) description: the
+    # SPA free-text search is server-side and the body is edited on the
+    # detail page. Defer it so listing hundreds of tasks doesn't transfer
+    # every body. Callers that read ``description`` keep the default.
+    if not with_description:
+        stmt = stmt.options(defer(Task.description))
+    stmt = _apply_task_filters(
+        stmt,
+        state_id=state_id,
+        tag_id=tag_id,
+        assignee_id=assignee_id,
+        assignee_kind=assignee_kind,
+        assignee_handles=assignee_handles,
+        owner_handles=owner_handles,
+        parent_task_id=parent_task_id,
+        include_archived=include_archived,
+        include_deleted=include_deleted,
+        open_only=open_only,
+        q=q,
+        due_from=due_from,
+        due_to=due_to,
+        start_from=start_from,
+        start_to=start_to,
+        updated_since=updated_since,
+    )
     # Order: a whitelisted key (NULLs always last so unset dates never lead),
     # created_at as a stable tiebreak; else the default priority-first order.
     order_col = _TASK_ORDER.get(order_by) if order_by else None
@@ -553,6 +608,54 @@ async def list_tasks(
         # tiebreak. The number is always "smaller = sooner".
         stmt = stmt.order_by(Task.priority.asc(), Task.created_at.desc())
     return list((await session.execute(stmt)).scalars().unique().all())
+
+
+async def count_tasks(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    state_id: uuid.UUID | None = None,
+    tag_id: uuid.UUID | None = None,
+    assignee_id: uuid.UUID | None = None,
+    assignee_kind: IdentityKind | None = None,
+    assignee_handles: Sequence[str] | None = None,
+    owner_handles: Sequence[str] | None = None,
+    parent_task_id: uuid.UUID | None = None,
+    include_archived: bool = False,
+    include_deleted: bool = False,
+    open_only: bool = False,
+    q: str | None = None,
+    due_from: dt.datetime | None = None,
+    due_to: dt.datetime | None = None,
+    start_from: dt.date | None = None,
+    start_to: dt.date | None = None,
+    updated_since: dt.datetime | None = None,
+) -> int:
+    """Count tasks matching the same filter vocabulary as ``list_tasks`` with
+    one ``COUNT`` query (O(index)), so 'how many open tasks' never fetches the
+    whole RLS-scoped table to ``len()`` it. ``distinct(Task.id)`` keeps the
+    tag/assignee joins from inflating the count."""
+    stmt: Select[Any] = select(func.count(func.distinct(Task.id))).select_from(Task)
+    stmt = _apply_task_filters(
+        stmt,
+        state_id=state_id,
+        tag_id=tag_id,
+        assignee_id=assignee_id,
+        assignee_kind=assignee_kind,
+        assignee_handles=assignee_handles,
+        owner_handles=owner_handles,
+        parent_task_id=parent_task_id,
+        include_archived=include_archived,
+        include_deleted=include_deleted,
+        open_only=open_only,
+        q=q,
+        due_from=due_from,
+        due_to=due_to,
+        start_from=start_from,
+        start_to=start_to,
+        updated_since=updated_since,
+    )
+    return int((await session.execute(stmt)).scalar_one())
 
 
 async def tags_by_task(

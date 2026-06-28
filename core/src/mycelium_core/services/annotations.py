@@ -26,7 +26,7 @@ import datetime as dt
 import uuid
 from typing import cast
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from mycelium_core.concurrency import optimistic_update
@@ -297,9 +297,11 @@ async def list_for_doc(
     doc_id: uuid.UUID,
     include_resolved: bool = True,
     include_deleted: bool = False,
+    kind: str | None = None,
 ) -> list[Annotation]:
     """Every annotation on a markdown document, oldest first (so a task's
-    general comments read as a chronological work diary)."""
+    general comments read as a chronological work diary). ``kind`` optionally
+    narrows to ``comment`` or ``suggestion`` (the row already carries it)."""
     if doc_kind not in ANNOTATION_DOC_KINDS:
         raise DomainError(MessageCode.ANNOTATION_DOC_KIND_INVALID)
     stmt = select(Annotation).where(Annotation.doc_kind == doc_kind)
@@ -311,8 +313,41 @@ async def list_for_doc(
         stmt = stmt.where(Annotation.deleted_at.is_(None))
     if not include_resolved:
         stmt = stmt.where(Annotation.status == "open")
+    if kind is not None:
+        stmt = stmt.where(Annotation.kind == kind)
     stmt = stmt.order_by(Annotation.created_at)
     return list((await session.execute(stmt)).scalars().all())
+
+
+async def count_for_doc(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    doc_kind: str,
+    doc_id: uuid.UUID,
+    kind: str | None = None,
+) -> tuple[int, int]:
+    """``(total, open)`` annotation counts on a document via ``COUNT`` queries
+    (no row fetch). Excludes soft-deleted; ``kind`` optionally narrows to
+    ``comment`` | ``suggestion``. ``total`` counts every non-deleted row,
+    ``open`` only those still in ``status='open'`` (the actionable subset)."""
+    if doc_kind not in ANNOTATION_DOC_KINDS:
+        raise DomainError(MessageCode.ANNOTATION_DOC_KIND_INVALID)
+    anchor = Annotation.task_id if doc_kind == "task_description" else Annotation.note_part_id
+    base = (
+        select(func.count())
+        .select_from(Annotation)
+        .where(
+            Annotation.doc_kind == doc_kind,
+            anchor == doc_id,
+            Annotation.deleted_at.is_(None),
+        )
+    )
+    if kind is not None:
+        base = base.where(Annotation.kind == kind)
+    total = int((await session.execute(base)).scalar_one())
+    open_ = int((await session.execute(base.where(Annotation.status == "open"))).scalar_one())
+    return total, open_
 
 
 async def get_annotation(
