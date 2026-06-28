@@ -200,6 +200,18 @@ _DOMAIN_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("tasks", ("task", "comment", "checklist", "item", "revision", "attachment")),
 )
 
+# Soft down-rank applied to a tool whose domain is not the one the caller
+# asked for (the cross-cutting 'search' bucket is never penalized). A
+# subtractive penalty, not a hard exclude (task 26efb287): the requested
+# domain dominates the common case, yet a genuinely strong off-domain match
+# (cosine gap > the penalty) can still surface below the in-domain hits
+# instead of being hidden. Sized at 0.5 -- larger than any realistic
+# off-domain advantage for an in-domain query, so a clear in-domain query
+# still yields an all-in-domain top-k; small enough that a real
+# cross-domain best-answer (e.g. an orchestration tool for a task-shaped
+# query) beats a weak in-domain match.
+_OFF_DOMAIN_PENALTY = 0.5
+
 # Lazily built once: name -> (meta, normalized embedding). The index is
 # small (~140 short strings) so a single build at first search is cheap
 # and is never re-billed (embedder.embed does not meter).
@@ -214,6 +226,15 @@ def _domain_for(name: str) -> str:
         if any(kw in low for kw in kws):
             return domain
     return "misc"
+
+
+def _domain_penalty(requested: str | None, tool_domain: str) -> float:
+    """Score penalty for an off-domain tool (0 when no domain was asked, the
+    tool is in the requested domain, or it is a cross-cutting 'search' tool
+    -- those always survive). See ``_OFF_DOMAIN_PENALTY``."""
+    if requested is None or tool_domain == requested or tool_domain == "search":
+        return 0.0
+    return _OFF_DOMAIN_PENALTY
 
 
 def _summary(description: str | None) -> str:
@@ -379,30 +400,37 @@ async def search_tools(
     first). This is
     the entry point of the dynamic-toolset flow: search here, then call
     ``describe_tools`` for the schemas of the ones you want, then
-    ``execute_tool`` to run them. ``domain`` optionally narrows to one
-    of: tasks, notes, search, navigation, time, calendar, memory,
-    orchestration, workflow, taxonomy, billing, email, misc. The
+    ``execute_tool`` to run them. ``domain`` optionally biases ranking
+    toward one of: tasks, notes, search, navigation, time, calendar,
+    memory, orchestration, workflow, taxonomy, billing, email, misc. It is
+    a SOFT down-rank, not a hard filter: off-domain tools are demoted, not
+    removed, so the requested domain dominates the top results while a
+    genuinely strong off-domain match can still surface below them. The
     cross-cutting search tools (``search`` / ``memory_search`` /
-    ``graph_focus_context``) are always returned regardless of ``domain``,
-    so a domain-scoped query still discovers them (ranking still decides
-    whether they make the cut).
+    ``graph_focus_context``) are never penalized, so a domain-scoped query
+    always reaches them.
     """
     cat = {m["name"]: m for m in _catalog()}
-    # Cross-cutting search tools (domain 'search') bypass the prefilter so
-    # a domain-scoped discovery still reaches them; ranking then decides.
-    names = [
-        n
-        for n, m in cat.items()
-        if domain is None or m["domain"] == domain or m["domain"] == "search"
-    ]
+    # Every tool is a candidate; ``domain`` only down-ranks off-domain tools
+    # (task 26efb287). The old hard prefilter hid a strong cross-domain
+    # answer outright; the penalty keeps it reachable while the requested
+    # domain still wins the common case.
+    names = list(cat)
     if embedder_available():
         await _ensure_index()
         index = _index or {}
         qv = _normalize((await get_embedder().embed(query)).vector)
-        scored = [(_cosine(qv, index[n]), n) for n in names if n in index]
+        scored = [
+            (_cosine(qv, index[n]) - _domain_penalty(domain, cat[n]["domain"]), n)
+            for n in names
+            if n in index
+        ]
     else:
         qtok = set(query.lower().split())
-        scored = [(_lexical(qtok, cat[n]["text"]), n) for n in names]
+        scored = [
+            (_lexical(qtok, cat[n]["text"]) - _domain_penalty(domain, cat[n]["domain"]), n)
+            for n in names
+        ]
     scored.sort(key=lambda s: s[0], reverse=True)
     out: list[dict[str, Any]] = []
     # Emit in rank order (most relevant first); the numeric ``score`` is

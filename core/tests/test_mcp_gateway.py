@@ -82,17 +82,32 @@ async def test_search_lexical_fallback_without_embedder() -> None:
     assert any(h["name"] in {"start_timer", "stop_timer"} for h in hits)
 
 
-async def test_search_domain_filter() -> None:
+async def test_domain_dominates_top_k_for_a_clear_in_domain_query() -> None:
+    # Common-case contract (task 26efb287): a clearly in-domain query still
+    # yields an all-in-domain top-k -- the soft penalty is large enough that
+    # off-domain tools do not crack the top of a focused search. The 'search'
+    # bucket is allowed too (never penalized), as before.
     set_embedder_override(FakeEmbedder)
     try:
-        hits = await search_tools(query="anything", limit=50, domain="calendar")
+        hits = await search_tools(query="timer start stop pause resume", limit=8, domain="time")
     finally:
         set_embedder_override(None)
-    # The domain prefilter keeps only the requested domain, with one
-    # deliberate carve-out: the cross-cutting search tools (domain
-    # 'search') always survive so a domain-scoped discovery still finds
-    # them. Everything else must be 'calendar'.
-    assert hits and all(h["domain"] in {"calendar", "search"} for h in hits)
+    assert hits and all(h["domain"] in {"time", "search"} for h in hits)
+
+
+async def test_domain_is_a_soft_downrank_not_a_hard_exclude() -> None:
+    # The durable refinement (task 26efb287): off-domain tools are demoted,
+    # not removed. With a wide enough window a strong off-domain match is
+    # still reachable below the in-domain hits, instead of being hidden as
+    # the old hard prefilter did.
+    set_embedder_override(FakeEmbedder)
+    try:
+        hits = await search_tools(query="timer", limit=60, domain="time")
+    finally:
+        set_embedder_override(None)
+    domains = {h["domain"] for h in hits}
+    assert "time" in domains
+    assert domains - {"time", "search"}, "off-domain tools must remain reachable (soft, not hard)"
 
 
 async def test_cross_cutting_search_survives_domain_prefilter() -> None:
