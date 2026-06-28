@@ -61,6 +61,7 @@ export function TaskDetailRoute() {
   const { t } = useTranslation()
   const navigate = useNavigate()
   const { id = '' } = useParams()
+  const [idCopied, setIdCopied] = useState(false)
   // Annotations on the task description (its work diary + review). One
   // shared fetch feeds both the inline editor decorations and the panel.
   const {
@@ -987,6 +988,16 @@ export function TaskDetailRoute() {
   const dirty =
     title !== task.title || description !== (task.description ?? '')
 
+  async function copyId() {
+    try {
+      await navigator.clipboard.writeText(id)
+      setIdCopied(true)
+      window.setTimeout(() => setIdCopied(false), 1500)
+    } catch {
+      setIdCopied(false)
+    }
+  }
+
   return (
     <section className="card card--wide taskdetail">
       {stale && (
@@ -1011,6 +1022,15 @@ export function TaskDetailRoute() {
           <span className="taskdetail__savestate hint" aria-live="polite">
             {dirty ? t('tasks.unsaved') : t('tasks.saved')}
           </span>
+          <button
+            type="button"
+            className="chip chip--copy"
+            title={idCopied ? t('tasks.idCopied') : id}
+            aria-label={t('tasks.copyId')}
+            onClick={() => void copyId()}
+          >
+            {idCopied ? t('tasks.idCopied') : `ID ${id.slice(0, 8)}…`}
+          </button>
           <select
             aria-label={t('tasks.state')}
             value={stateId}
