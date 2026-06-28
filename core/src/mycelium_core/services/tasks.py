@@ -10,7 +10,7 @@ from collections.abc import Sequence
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import defer
@@ -438,6 +438,7 @@ async def list_tasks(
     include_archived: bool = False,
     include_deleted: bool = False,
     with_description: bool = True,
+    q: str | None = None,
 ) -> list[Task]:
     stmt = select(Task)
     # The list view does not need the (potentially large) description: the
@@ -475,6 +476,34 @@ async def list_tasks(
             stmt = stmt.where(ident_alias.handle.in_(list(assignee_handles)))
     if owner_handles:
         stmt = stmt.join(User, User.id == Task.owner_id).where(User.handle.in_(list(owner_handles)))
+    if q is not None:
+        # Free-text filter mirroring notes.list_notes: each whitespace term
+        # must match the task title, its description, any checklist item
+        # text, or a tag name (terms ANDed, fields ORed, case-insensitive).
+        # Applied server-side over the whole RLS-scoped set BEFORE any
+        # caller-side row cap, so it is not limited to the newest rows the
+        # way a client-side filter would be. Sub-SELECTs (not joins) keep it
+        # composable with the tag_id/assignee joins above without row fan-out.
+        from mycelium_core.models.task_checklist_item import TaskChecklistItem
+
+        for term in (w for w in q.split() if w.strip()):
+            like = f"%{term}%"
+            checklist_tasks = select(TaskChecklistItem.task_id).where(
+                TaskChecklistItem.text.ilike(like)
+            )
+            tag_tasks = (
+                select(TaskTag.task_id)
+                .join(Tag, Tag.id == TaskTag.tag_id)
+                .where(Tag.name.ilike(like))
+            )
+            stmt = stmt.where(
+                or_(
+                    Task.title.ilike(like),
+                    Task.description.ilike(like),
+                    Task.id.in_(checklist_tasks),
+                    Task.id.in_(tag_tasks),
+                )
+            )
     # Default order: most prioritary first (priority asc, 1 = top),
     # newest as tiebreak. The number is always "smaller = sooner".
     stmt = stmt.order_by(Task.priority.asc(), Task.created_at.desc())

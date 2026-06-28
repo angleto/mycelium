@@ -8,10 +8,11 @@ value (``False`` / ``0`` / ``""`` / ``[]``) is kept.
 
 from __future__ import annotations
 
+import datetime as dt
 from types import SimpleNamespace
 from typing import Any
 
-from mycelium_mcp.server import _client, _compact, _project, _task_full
+from mycelium_mcp.server import _client, _compact, _project, _task, _task_full
 
 
 def test_compact_drops_only_none() -> None:
@@ -107,6 +108,39 @@ def test_task_full_keeps_set_values() -> None:
     # Assignment/accountability ids are surfaced for read-back (901f0f9f).
     assert out["assignee_id"] == "44444444-4444-4444-4444-444444444444"
     assert out["owner_id"] == "55555555-5555-5555-5555-555555555555"
+
+
+def test_task_lean_enriched_drops_unset_keeps_axes() -> None:
+    # Enriched lean row (eb874772): the always-present planning axes stay,
+    # the sparse fields are dropped when unset so they cost zero tokens.
+    out = _task(_mock_task(), [])
+    assert out["importance"] == 4
+    assert out["urgency"] == 3
+    assert out["necessity"] == "should"
+    assert out["priority"] == 2 and out["version"] == 1
+    assert out["id"] and out["title"] and out["state_id"]
+    assert out["collaborators_count"] == 0  # real 0, kept
+    assert out["tags"] == []  # empty list, kept
+    for k in ("start_date", "due_date", "parent_task_id", "assignee_id", "owner_id"):
+        assert k not in out, f"{k} should be dropped when None"
+
+
+def test_task_lean_enriched_surfaces_set_fields() -> None:
+    out = _task(
+        _mock_task(
+            start_date=dt.date(2026, 7, 1),
+            due_date=dt.datetime(2026, 7, 5, tzinfo=dt.UTC),
+            parent_task_id="66666666-6666-6666-6666-666666666666",
+            assignee_id="44444444-4444-4444-4444-444444444444",
+        ),
+        [],
+        collaborators_count=2,
+    )
+    assert out["start_date"] == "2026-07-01"
+    assert out["due_date"] == "2026-07-05T00:00:00+00:00"
+    assert out["parent_task_id"] == "66666666-6666-6666-6666-666666666666"
+    assert out["assignee_id"] == "44444444-4444-4444-4444-444444444444"
+    assert out["collaborators_count"] == 2
 
 
 def test_client_drops_unset_card_fields_keeps_falsy() -> None:

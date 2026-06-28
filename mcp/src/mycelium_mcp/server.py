@@ -259,17 +259,32 @@ def _task(
     # authorship (``created_by_*``) lives on the REST ``TaskOut`` serializer
     # (the SPA's source, used for the AI badge), not here: it is debug-only
     # over MCP and was dropped from the list shape for payload economy.
-    return {
-        "id": str(t.id),
-        "title": t.title,
-        "state_id": str(t.state_id),
-        "priority": t.priority,
-        "version": t.version,
-        "tags": [_tag_brief(g) for g in (tags or [])],
-        "assignee_id": str(t.assignee_id) if t.assignee_id else None,
-        "owner_id": str(t.owner_id) if t.owner_id else None,
-        "collaborators_count": collaborators_count,
-    }
+    #
+    # Enriched (task eb874772) with the planning axes an agent needs to
+    # triage a row without a follow-up ``get_task``: importance/urgency
+    # (Eisenhower), necessity (MoSCoW), start/due dates and parent. Wrapped
+    # in ``_compact`` so the sparse fields (dates/parent/assignee/owner)
+    # cost zero tokens when unset; the always-present axes
+    # (importance/urgency/necessity) stay. ``fields=[...]`` still narrows it.
+    return _compact(
+        {
+            "id": str(t.id),
+            "title": t.title,
+            "state_id": str(t.state_id),
+            "priority": t.priority,
+            "importance": t.importance,
+            "urgency": t.urgency,
+            "necessity": t.necessity.value if t.necessity else None,
+            "start_date": t.start_date.isoformat() if t.start_date else None,
+            "due_date": t.due_date.isoformat() if t.due_date else None,
+            "parent_task_id": str(t.parent_task_id) if t.parent_task_id else None,
+            "version": t.version,
+            "tags": [_tag_brief(g) for g in (tags or [])],
+            "assignee_id": str(t.assignee_id) if t.assignee_id else None,
+            "owner_id": str(t.owner_id) if t.owner_id else None,
+            "collaborators_count": collaborators_count,
+        }
+    )
 
 
 @mcp.tool()
@@ -621,10 +636,12 @@ async def list_tasks(
     include_deleted: bool = False,
     fields: list[str] | None = None,
     limit: int = 50,
+    q: str | None = None,
 ) -> list[dict[str, Any]]:
-    """List tasks by state, tag, parent, assignee or owner (no free-text/date filter).
+    """List tasks by state, tag, parent, assignee, owner, or free-text ``q``.
 
-    Use ``search(kinds=['task'])`` or ``what_can_i_do_now`` for those.
+    Use ``search(kinds=['task'])`` or ``what_can_i_do_now`` for ranked retrieval.
+    ``q`` matches title/description/checklist/tag (terms ANDed).
     Filters ANDed; ``limit`` caps rows (default 50).
     ``assignee_handles`` / ``owner_handles`` match identities,
     ``assignee_id`` is collaborator membership;
@@ -647,6 +664,7 @@ async def list_tasks(
             include_archived=include_archived,
             include_deleted=include_deleted,
             with_description=False,
+            q=q,
         )
         if limit > 0:
             rows = rows[:limit]
@@ -1115,7 +1133,10 @@ async def unassign_task(token: str, org_id: str, task_id: str, user_id: str) -> 
 
 @mcp.tool()
 async def list_comments(token: str, org_id: str, task_id: str) -> list[dict[str, Any]]:
-    """List a task's comments (its work diary), oldest first."""
+    """List a task's work-diary comments (doc_kind='task_description'), oldest
+    first. Returns resolved comments too (unlike the SPA, which hides them);
+    for open-only use
+    list_annotations(doc_kind='task_description', doc_id=task_id, include_resolved=False)."""
     async with _tenant(token, org_id) as (s, org, _user):
         rows = await tasks.list_comments(s, org_id=org, task_id=uuid.UUID(task_id))
         return [_annotation_dict(c) for c in rows]
@@ -1216,8 +1237,10 @@ async def list_annotations(
     doc_id: str,
     include_resolved: bool = True,
 ) -> list[dict[str, Any]]:
-    """List the annotations (comments + suggestions) on a markdown
-    document, oldest first."""
+    """List the annotations (comments + suggestions) on a markdown document,
+    oldest first. include_resolved defaults True (returns resolved/accepted/
+    rejected rows too, unlike the SPA); pass include_resolved=False for
+    open-only. A task's work-diary comments are also reachable via list_comments."""
     async with _tenant(token, org_id) as (s, org, _user):
         rows = await annotations_svc.list_for_doc(
             s,
@@ -2608,7 +2631,9 @@ async def what_can_i_do_now(
     min_necessity: str | None = None,
     narrate: bool = False,
 ) -> dict[str, Any]:
-    """Deterministic: feasible tasks for a free window, urgency-first ranked.
+    """Deterministic plan over the CALLER's OWN actionable tasks for a free
+    window, urgency-first ranked. Scoped to tasks you own only; for someone
+    else's queue use list_tasks(assignee_handles=[...]).
 
     window_start (ISO 8601) defaults to UTC now() when omitted; a naive
     value is coerced to UTC. focus_tag_ids (project/client tag ids) is a
@@ -2692,7 +2717,9 @@ async def errands(
     location: str | None = None,
     context: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Deterministic: tasks relevant to a place/context across the org."""
+    """Place/context matcher: tasks for an errand run at a location and/or
+    context, across the org. Requires at least one of location/context and
+    returns [] when both are omitted -- a matcher, not a general task lister."""
     async with _tenant(token, org_id) as (s, org, user):
         rows = await advisory_svc.errands(
             s,
