@@ -247,14 +247,18 @@ def _summary(description: str | None) -> str:
     return ""
 
 
-def _searchable_text(name: str, domain: str, description: str | None) -> str:
+def _searchable_text(name: str, domain: str, summary: str) -> str:
     # The domain prefix gives the embedder a categorical signal the
     # terse per-tool docstrings lack (the article's "categorical
-    # overview" trick), improving discoverability without editing 140
-    # docstrings. The name is de-snaked (list_tasks -> "list tasks") so
+    # overview" trick), improving discoverability without editing every
+    # docstring. The name is de-snaked (list_tasks -> "list tasks") so
     # its words are real tokens for both the model and the lexical
-    # fallback.
-    return f"[{domain}] {name.replace('_', ' ')}: {description or ''}"
+    # fallback. We rank on the one-line SUMMARY, not the full docstring:
+    # a long docstring (e.g. list_tasks' filter/sort/pagination prose)
+    # otherwise dilutes the name + topic signal under bag-of-words /
+    # length-sensitive embeddings and buries the tool for an obvious
+    # query. The summary is the curated, length-stable signal.
+    return f"[{domain}] {name.replace('_', ' ')}: {summary}"
 
 
 def _catalog() -> list[dict[str, Any]]:
@@ -263,12 +267,13 @@ def _catalog() -> list[dict[str, Any]]:
         cat: list[dict[str, Any]] = []
         for t in _registry._tool_manager.list_tools():
             domain = _domain_for(t.name)
+            summary = _summary(t.description)
             cat.append(
                 {
                     "name": t.name,
-                    "summary": _summary(t.description),
+                    "summary": summary,
                     "domain": domain,
-                    "text": _searchable_text(t.name, domain, t.description),
+                    "text": _searchable_text(t.name, domain, summary),
                 }
             )
         _catalog_cache = cat
