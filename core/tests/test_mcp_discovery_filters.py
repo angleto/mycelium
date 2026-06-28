@@ -85,7 +85,7 @@ async def test_count_tasks_tool_matches_list_tool() -> None:
     tag = await create_tag(token=token, org_id=org, kind="generic", name="count-set")
     for title in ("x", "y", "z"):
         await create_task(token=token, org_id=org, title=title, tag_ids=[tag["id"]])
-    listed = await list_tasks(token=token, org_id=org, tag_id=tag["id"])
+    listed = (await list_tasks(token=token, org_id=org, tag_id=tag["id"]))["items"]
     counted = await count_tasks(token=token, org_id=org, tag_id=tag["id"])
     assert counted == {"total": 3}
     assert counted["total"] == len(listed)

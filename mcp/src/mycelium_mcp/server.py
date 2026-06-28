@@ -8,7 +8,9 @@ session (RLS GUCs set) and verifies membership, exactly like the REST
 
 from __future__ import annotations
 
+import base64
 import datetime as dt
+import json
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -646,6 +648,25 @@ def _to_date(raw: str) -> dt.date:
     return v.date() if isinstance(v, dt.datetime) else v
 
 
+def _encode_task_cursor(priority: int, created_at: dt.datetime, task_id: uuid.UUID) -> str:
+    """Opaque keyset cursor for the DEFAULT list_tasks order (priority asc,
+    created_at desc, id asc) -- the last returned row's position. Base64 of a
+    compact JSON triple so the caller treats it as opaque (task c20c6351)."""
+    raw = json.dumps([priority, created_at.isoformat(), str(task_id)], separators=(",", ":"))
+    return base64.urlsafe_b64encode(raw.encode()).decode()
+
+
+def _decode_task_cursor(token: str) -> tuple[int, dt.datetime, uuid.UUID]:
+    """Inverse of :func:`_encode_task_cursor`. The cursor is opaque (the caller
+    round-trips the token we issued); a malformed one is a caller error and
+    raises a clear ``ValueError`` instead of leaking a base64/JSON traceback."""
+    try:
+        priority, created_at, task_id = json.loads(base64.urlsafe_b64decode(token.encode()))
+        return int(priority), dt.datetime.fromisoformat(created_at), uuid.UUID(task_id)
+    except (ValueError, TypeError, json.JSONDecodeError) as exc:
+        raise ValueError("invalid list_tasks cursor") from exc
+
+
 async def _task_date_kwargs(
     s: AsyncSession,
     user_id: uuid.UUID,
@@ -696,6 +717,7 @@ async def list_tasks(
     open_only: bool = False,
     fields: list[str] | None = None,
     limit: int = 50,
+    cursor: str | None = None,
     q: str | None = None,
     due_on: str | None = None,
     due_before: str | None = None,
@@ -705,17 +727,30 @@ async def list_tasks(
     updated_since: str | None = None,
     order_by: str | None = None,
     order_desc: bool = False,
-) -> list[dict[str, Any]]:
+) -> dict[str, Any]:
     """List tasks: filter by state, tag, parent, assignee, owner, free-text
     ``q``, or a due/start/updated date window; optional ``order_by`` +
     ``order_desc`` sort. ``open_only=True`` returns only tasks in a
     non-terminal workflow state (no need to resolve a state uuid first).
-    ``q`` matches a task's title/description/checklist/tag. For just the
-    matching count use ``count_tasks`` (same filters); for ranked retrieval
-    ``search(kinds=['task'])`` or ``what_can_i_do_now``; ``get_task`` for the
-    full detail of one task."""
+    ``q`` matches a task's title/description/checklist/tag.
+
+    Returns the paginated envelope ``{items, next_cursor, truncated}`` (NOT a
+    bare array): ``truncated`` is true when more rows match than ``limit``;
+    pass ``next_cursor`` back as ``cursor`` for the next disjoint page (keyset,
+    so no dupes/gaps and no re-fetching). Cursor paging uses the default order;
+    a ``cursor`` pins it (any ``order_by`` is ignored). With a custom
+    ``order_by`` you still get ``items`` + ``truncated`` but ``next_cursor`` is
+    null (raise ``limit`` to see more). For just the matching count use
+    ``count_tasks`` (same filters); for ranked retrieval ``search(kinds=
+    ['task'])`` or ``what_can_i_do_now``; ``get_task`` for one task's detail."""
     from mycelium_core.models.identity import IdentityKind
 
+    # A cursor pins the default keyset order (it was issued under it); ignore
+    # any order_by so a paged walk can't silently re-order mid-stream.
+    after = None
+    if cursor:
+        after = _decode_task_cursor(cursor)
+        order_by, order_desc = None, False
     kind: IdentityKind | None = IdentityKind(assignee_kind) if assignee_kind else None
     async with _tenant(token, org_id) as (s, org, user):
         dates = await _task_date_kwargs(
@@ -728,6 +763,8 @@ async def list_tasks(
             start_after=start_after,
             updated_since=updated_since,
         )
+        # Fetch one extra row to detect truncation; the limit is pushed into
+        # SQL by the service (no whole-table materialize).
         rows = await tasks.list_tasks(
             s,
             org_id=org,
@@ -745,20 +782,32 @@ async def list_tasks(
             q=q,
             order_by=order_by,
             order_desc=order_desc,
+            limit=(limit + 1) if limit > 0 else None,
+            after=after,
             **dates,
         )
-        if limit > 0:
-            rows = rows[:limit]
-        ids = [t.id for t in rows]
+        truncated = limit > 0 and len(rows) > limit
+        items = rows[:limit] if limit > 0 else rows
+        # next_cursor only for the default keyset order (after-based); a custom
+        # order exposes truncation but not a cursor.
+        next_cursor: str | None = None
+        if truncated and order_by is None and items:
+            last = items[-1]
+            next_cursor = _encode_task_cursor(last.priority, last.created_at, last.id)
+        ids = [t.id for t in items]
         tagmap = await tasks.tags_by_task(s, task_ids=ids)
         ccounts = await tasks.collaborator_counts(s, org_id=org, task_ids=ids)
-        return [
-            _project_fields(
-                _task(t, tagmap.get(t.id, []), collaborators_count=ccounts.get(t.id, 0)),
-                fields,
-            )
-            for t in rows
-        ]
+        return {
+            "items": [
+                _project_fields(
+                    _task(t, tagmap.get(t.id, []), collaborators_count=ccounts.get(t.id, 0)),
+                    fields,
+                )
+                for t in items
+            ],
+            "next_cursor": next_cursor,
+            "truncated": truncated,
+        }
 
 
 @mcp.tool()

@@ -30,7 +30,7 @@ async def test_mcp_tools_reuse_service_layer() -> None:
     token, org = r.token, str(r.org_id)
     tag = await create_tag(token=token, org_id=org, kind="generic", name="mcp-tag")
     await create_task(token=token, org_id=org, title="via-mcp", tag_ids=[tag["id"]])
-    titles = [t["title"] for t in await list_tasks(token=token, org_id=org)]
+    titles = [t["title"] for t in (await list_tasks(token=token, org_id=org))["items"]]
     assert "via-mcp" in titles
 
 
@@ -54,7 +54,9 @@ async def test_get_task_and_list_carry_tags() -> None:
     surf = next(g for g in full["tags"] if g["name"] == "surf-tag")
     assert {"id", "kind", "name", "color"} <= surf.keys()
 
-    listed = next(t for t in await list_tasks(token=token, org_id=org) if t["id"] == created["id"])
+    listed = next(
+        t for t in (await list_tasks(token=token, org_id=org))["items"] if t["id"] == created["id"]
+    )
     assert "surf-tag" in {g["name"] for g in listed["tags"]}
 
 
@@ -82,7 +84,7 @@ async def test_list_tasks_free_text_q() -> None:
     noise = await create_task(token=token, org_id=org, title="Unrelated chore")
 
     async def ids_for(q: str) -> set[str]:
-        return {t["id"] for t in await list_tasks(token=token, org_id=org, q=q)}
+        return {t["id"] for t in (await list_tasks(token=token, org_id=org, q=q))["items"]}
 
     # A single term matches across all four fields, never the noise row.
     hit = await ids_for("invoice")
@@ -118,7 +120,10 @@ async def test_list_tasks_date_window_and_sort() -> None:
         ids[k] = t["id"]
 
     async def ids_for(**kw: object) -> list[str]:
-        return [t["id"] for t in await list_tasks(token=token, org_id=org, **kw)]  # type: ignore[arg-type]
+        return [
+            t["id"]
+            for t in (await list_tasks(token=token, org_id=org, **kw))["items"]  # type: ignore[arg-type]
+        ]
 
     assert set(await ids_for(due_on="2027-03-15")) == {ids["0"]}
     assert set(await ids_for(due_before="2027-03-15")) == {ids["-1"]}

@@ -10,7 +10,7 @@ from collections.abc import Sequence
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import Select, case, delete, func, or_, select
+from sqlalchemy import Select, and_, case, delete, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import defer
@@ -570,6 +570,8 @@ async def list_tasks(
     updated_since: dt.datetime | None = None,
     order_by: str | None = None,
     order_desc: bool = False,
+    limit: int | None = None,
+    after: tuple[int, dt.datetime, uuid.UUID] | None = None,
 ) -> list[Task]:
     stmt: Select[Any] = select(Task)
     # The list view does not need the (potentially large) description: the
@@ -601,12 +603,30 @@ async def list_tasks(
     # created_at as a stable tiebreak; else the default priority-first order.
     order_col = _TASK_ORDER.get(order_by) if order_by else None
     if order_col is not None:
+        # Custom order: the whitelisted column (NULLs last), with id as a
+        # unique final tiebreak for a TOTAL order. Keyset cursoring (``after``)
+        # is offered only for the default order below -- the MCP layer never
+        # emits a cursor for a custom order -- so it is ignored here.
         primary = (order_col.desc() if order_desc else order_col.asc()).nulls_last()
-        stmt = stmt.order_by(primary, Task.created_at.desc())
+        stmt = stmt.order_by(primary, Task.created_at.desc(), Task.id.asc())
     else:
-        # Default: most prioritary first (priority asc, 1 = top), newest as
-        # tiebreak. The number is always "smaller = sooner".
-        stmt = stmt.order_by(Task.priority.asc(), Task.created_at.desc())
+        # Default total order: priority asc (1 = top), created_at desc, id asc.
+        # All three columns are NOT NULL, so the keyset predicate is exact (no
+        # NULL-ordering hazard) -- pagination has no dupes/gaps (task c20c6351).
+        if after is not None:
+            ap, ac, ai = after
+            stmt = stmt.where(
+                or_(
+                    Task.priority > ap,
+                    and_(Task.priority == ap, Task.created_at < ac),
+                    and_(Task.priority == ap, Task.created_at == ac, Task.id > ai),
+                )
+            )
+        stmt = stmt.order_by(Task.priority.asc(), Task.created_at.desc(), Task.id.asc())
+    # Push the row cap into SQL (task c20c6351): the list view used to
+    # materialize the whole RLS-scoped table and slice in Python.
+    if limit is not None and limit > 0:
+        stmt = stmt.limit(limit)
     return list((await session.execute(stmt)).scalars().unique().all())
 
 

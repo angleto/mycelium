@@ -185,6 +185,8 @@ async def test_mcp_get_task_readback_and_list_fields() -> None:
     assert full["owner_handle"]
     assert any(c["user_id"] == str(user) for c in full["collaborators"])
 
-    listed = next(t for t in await list_tasks(token=token, org_id=org) if t["id"] == created["id"])
+    listed = next(
+        t for t in (await list_tasks(token=token, org_id=org))["items"] if t["id"] == created["id"]
+    )
     assert "owner_id" in listed
     assert listed["collaborators_count"] == 1
