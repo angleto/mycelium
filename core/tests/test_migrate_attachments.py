@@ -34,8 +34,11 @@ from mycelium_core.models.attachment import Attachment
 # scan of ``organizations`` only returns rows under such a role
 # (``test_rls.py`` pins the fail-closed 0-rows behaviour for the app
 # role). This is that owner URL (the same one the alembic gate uses);
-# the test drives the migrator under its real runtime contract.
-_OWNER_DB_URL = "postgresql+asyncpg://mycelium:mycelium@localhost:5432/mycelium"
+# derive it from the configured sync (owner) DSN so the test honours
+# MYCELIUM_DATABASE_URL_SYNC (host/port/db) instead of a hardcoded
+# localhost:5432, swapping only the driver to asyncpg for the async
+# engine. The test drives the migrator under its real runtime contract.
+_OWNER_DB_URL = get_settings().database_url_sync.replace("+psycopg", "+asyncpg")
 
 
 def _s3_settings() -> Settings:

@@ -56,7 +56,10 @@ async def test_mint_returns_raw_and_stores_only_hash() -> None:
     async with tenant_session(str(org), str(user)) as s:
         result = await svc.mint(s, org_id=org, actor_id=user, name="Claude Desktop")
     assert result.raw.startswith(svc.RAW_PREFIX)
-    assert result.token.prefix == result.raw[:16]
+    # The stored, non-secret prefix is the first ``_PREFIX_CHARS`` of the raw
+    # token ("mycelium_at_" + 8 of randomness); track the constant, not a
+    # literal that goes stale when the discriminator prefix is renamed.
+    assert result.token.prefix == result.raw[: svc._PREFIX_CHARS]
     # The hash on the row is sha256 of the raw bytes
     expected_hash = hashlib.sha256(result.raw.encode("utf-8")).digest()
     assert result.token.token_hash == expected_hash

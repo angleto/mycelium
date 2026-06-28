@@ -230,16 +230,21 @@ async def test_accept_is_markdown_aware() -> None:
         ] == "Para one X there."
 
 
-async def test_accept_refuses_corrupting_straddle() -> None:
-    """A selection that straddles a mark boundary would orphan a delimiter;
-    accept declines (stale) and leaves the body byte-for-byte unchanged."""
+async def test_accept_straddle_swallows_run_formatting() -> None:
+    """A selection that straddles an inline-mark edge (one delimiter inside the
+    span, its partner outside) applies by swallowing the whole run and dropping
+    the now-meaningless formatting -- render-faithful, never an orphaned
+    delimiter. This is the deliberate contract of commit 8998deb; the splice
+    layer is pinned by core/tests/test_md_anchor.py::test_splice_straddle_drops_formatting
+    and the never-corrupts invariant by test_splice_never_corrupts_on_unmodellable_input.
+    This case asserts it end-to-end through the accept endpoint."""
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://t") as c:
         h = await _signup(c)
         nid, pid = await _note_with_part(c, h, "a **b** c")
         acc = await _accept_suggestion(c, h, pid, "b c", "X Y")
-        assert acc.status_code >= 400
-        assert (await c.get(f"/notes/{nid}", headers=h)).json()["parts"][0]["body"] == "a **b** c"
+        assert acc.status_code == 200, acc.text
+        assert (await c.get(f"/notes/{nid}", headers=h)).json()["parts"][0]["body"] == "a X Y"
 
 
 async def test_lifecycle_resolve_reopen_edit_delete() -> None:
