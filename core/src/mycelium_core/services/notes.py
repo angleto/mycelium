@@ -161,6 +161,8 @@ async def list_notes(
     include_deleted: bool = False,
     project_id: uuid.UUID | None = None,
     tag_id: uuid.UUID | None = None,
+    note_ids: Sequence[uuid.UUID] | None = None,
+    maturities: Sequence[str] | None = None,
     q: str | None = None,
     created_from: dt.datetime | None = None,
     created_to: dt.datetime | None = None,
@@ -188,6 +190,12 @@ async def list_notes(
     # never listed here (only the review inbox surfaces it). NULL/'approved'
     # pass via IS DISTINCT FROM; a no-op until a proposed note exists.
     stmt = stmt.where(Note.review_state.is_distinct_from("proposed"))
+    if note_ids is not None:
+        # Explicit id set (e.g. the notes linked to a task): narrow to it
+        # while keeping all the visibility/maturity/sort logic below.
+        stmt = stmt.where(Note.id.in_(note_ids))
+    if maturities:
+        stmt = stmt.where(Note.maturity.in_(list(maturities)))
     if project_id is not None:
         # Project lives in the junction (migration 0016): a project
         # focus is just a tag filter against the project tag.

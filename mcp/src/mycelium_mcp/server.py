@@ -3921,7 +3921,22 @@ def _note(
         "title": n.title,
         "version": n.version,
         "tags": [_tag_brief(g) for g in (tags or [])],
+        # Lifecycle + provenance the picker/agent needs to read a note's
+        # state without a second call (audit #6b/#7). maturity / is_archived
+        # / timestamps are always-set columns; review_state / summary /
+        # deleted_at ride _compact semantics (omitted when unset = zero
+        # token cost).
+        "maturity": n.maturity,
+        "is_archived": n.is_archived,
+        "created_at": n.created_at.isoformat(),
+        "updated_at": n.updated_at.isoformat(),
     }
+    if n.review_state is not None:
+        out["review_state"] = n.review_state
+    if n.summary is not None:
+        out["summary"] = n.summary
+    if n.deleted_at is not None:
+        out["deleted_at"] = n.deleted_at.isoformat()
     if include_transcript and part_bodies:
         if parts:
             out["transcript"] = "\n\n".join((p.body or "") for p in parts)
@@ -3974,6 +3989,10 @@ async def list_notes(
     org_id: str,
     project_id: str | None = None,
     tag_id: str | None = None,
+    task_id: str | None = None,
+    link_kinds: list[str] | None = None,
+    maturity: str | None = None,
+    maturities: list[str] | None = None,
     q: str | None = None,
     include_archived: bool = False,
     include_deleted: bool = False,
@@ -3986,7 +4005,13 @@ async def list_notes(
     order_by: str | None = None,
     order_desc: bool = False,
 ) -> list[dict[str, Any]]:
-    """List notes (newest first); for the @note picker. Optional
+    """List notes (newest first); for the @note picker. Each row carries
+    maturity / review_state / summary / is_archived / created_at /
+    updated_at, so a note's lifecycle is readable without a second
+    ``get_note``. ``task_id`` returns the notes linked to that task
+    (optionally narrowed by ``link_kinds``) ENRICHED in one call, replacing
+    list_note_task_links + per-note get_note. ``maturity`` / ``maturities``
+    filter by lifecycle stage (e.g. list the 'dormant' notes). Optional
     project/tag focus and archive/trash views. ``q`` is a case-insensitive
     free-text filter applied server-side over the WHOLE corpus (note title,
     part bodies, part titles and tag names, ANDed) BEFORE ``limit``, so it
@@ -3998,7 +4023,18 @@ async def list_notes(
     opt-in (default False) keeps picker payloads small; ``fields``
     keeps only the named columns (``id`` always kept); ``limit`` caps
     rows at the DB level (default 50; raise it to page further)."""
+    want_maturities = [m for m in ([maturity] if maturity else []) + (maturities or [])]
     async with _tenant(token, org_id) as (s, org, user):
+        note_ids: list[uuid.UUID] | None = None
+        if task_id is not None:
+            note_ids = await note_links_svc.notes_for_task(
+                s,
+                org_id=org,
+                task_id=uuid.UUID(task_id),
+                kinds=tuple(link_kinds) if link_kinds else None,
+            )
+            if not note_ids:
+                return []
         tz = (
             await _caller_tz(s, user)
             if any((created_after, created_before, updated_since))
@@ -4009,6 +4045,8 @@ async def list_notes(
             org_id=org,
             project_id=uuid.UUID(project_id) if project_id else None,
             tag_id=uuid.UUID(tag_id) if tag_id else None,
+            note_ids=note_ids,
+            maturities=want_maturities or None,
             q=q,
             include_archived=include_archived,
             include_deleted=include_deleted,
