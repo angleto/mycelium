@@ -21,8 +21,8 @@ async function loginAsAdmin(page: Page) {
   // real owner, which the bootstrap admin is). Navigating fresh after makes
   // isAdminMode() / getWorkspaceRole() pick the flags up.
   await page.evaluate(() => {
-    localStorage.setItem('flow.adminMode', '1')
-    localStorage.setItem('flow.workspaceRole', 'owner')
+    localStorage.setItem('mycelium.adminMode', '1')
+    localStorage.setItem('mycelium.workspaceRole', 'owner')
   })
 }
 

@@ -24,7 +24,7 @@ test('kanban card shows the appointment badge for an appointment task', async ({
   page,
 }) => {
   await login(page)
-  const raw = await page.evaluate(() => localStorage.getItem('flow.session'))
+  const raw = await page.evaluate(() => localStorage.getItem('mycelium.session'))
   if (!raw) throw new Error('no session in localStorage after login')
   const { token, workspaceId } = JSON.parse(raw) as {
     token: string
@@ -63,7 +63,7 @@ test('kanban card shows the appointment badge for an appointment task', async ({
   try {
     // Land on /tasks in the kanban view (default on desktop; force it so
     // the assertion is viewport-independent).
-    await page.evaluate(() => localStorage.setItem('flow.tasks.view', 'kanban'))
+    await page.evaluate(() => localStorage.setItem('mycelium.tasks.view', 'kanban'))
     await page.goto('/tasks')
     await expect(page.locator('.kanban')).toBeVisible({ timeout: 10_000 })
 

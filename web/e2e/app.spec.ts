@@ -316,9 +316,13 @@ test('task work note: open from task + billable timer in the note', async ({
   await dialog
     .getByRole('button', { name: /create note|crea nota/i })
     .click()
-  // Create navigates to the note page; derive the task from there.
+  // Create navigates to the note page; derive the task from there. Scope
+  // to the detail pane (.notedetail): on the master-detail /notes layout the
+  // still-visible list item for this note also carries a "Derive task"
+  // button (notes.derive), so an unscoped role query is strict-mode-ambiguous.
   await page.waitForURL(/\/notes\/[0-9a-f-]+/, { timeout: 15_000 })
   await page
+    .locator('.notedetail')
     .getByRole('button', { name: /derive task|genera task/i })
     .click()
   // Deriving (ADR-0029) navigates straight to the new task; capture its
@@ -327,7 +331,10 @@ test('task work note: open from task + billable timer in the note', async ({
   const href = new URL(page.url()).pathname
 
   // New work note (Proposal A: a note is the work log of the task) →
-  // opens the linked note with the billable timer.
+  // opens the linked note with the billable timer. The work-note actions
+  // live under the task's "Notes" connection tab (role=tab), so activate it
+  // first — it is not the default-selected tab.
+  await page.getByRole('tab', { name: /^(notes|note)$/i }).click()
   await page
     .getByRole('button', { name: /new work note|nuova nota di lavoro/i })
     .click()
