@@ -56,6 +56,7 @@ from mycelium_core.embedder import Embedder, EmbedResult, get_embedder
 from mycelium_core.models.memory_blob import EMBED_DIM, BlobSource, MemoryBlob
 from mycelium_core.models.note_part import NotePart
 from mycelium_core.models.note_part_index_pointer import NotePartIndexPointer
+from mycelium_core.services.fts_language import detect_fts_language
 
 logger = logging.getLogger(__name__)
 
@@ -333,6 +334,7 @@ async def _create_blob_and_pointer(
         namespace="note",
         tier="hot",
         text=text_body,
+        fts_language=detect_fts_language(text_body),
         embedding=vector,
         model_id=model_id,
         dim=EMBED_DIM,
@@ -387,6 +389,7 @@ async def _update_blob_and_pointer(
     blob's project and the pointer's note_id."""
     values: dict[str, object] = {
         "text": text_body,
+        "fts_language": detect_fts_language(text_body),
         "embedding": vector,
         "model_id": model_id,
         "dim": EMBED_DIM,

@@ -76,6 +76,7 @@ from mycelium_core.models.note_part_index_pointer import NotePartIndexPointer
 from mycelium_core.models.task import Task
 from mycelium_core.models.task_checklist_item import TaskChecklistItem
 from mycelium_core.models.task_index_pointer import TaskIndexPointer
+from mycelium_core.services.fts_language import detect_fts_language
 
 if TYPE_CHECKING:
     # Imported under TYPE_CHECKING only: ``memory`` is otherwise imported at
@@ -412,6 +413,7 @@ async def _create_blob_and_pointer(
         namespace="task",
         tier="hot",
         text=text_body,
+        fts_language=detect_fts_language(text_body),
         embedding=vector,
         model_id=model_id,
         dim=EMBED_DIM,
@@ -469,6 +471,7 @@ async def _update_blob_and_pointer(
         .where(MemoryBlob.id == pointer.blob_id, MemoryBlob.org_id == pointer.org_id)
         .values(
             text=text_body,
+            fts_language=detect_fts_language(text_body),
             embedding=vector,
             model_id=model_id,
             dim=EMBED_DIM,
@@ -976,15 +979,17 @@ async def _ts_headlines(
     session: AsyncSession, *, blob_ids: list[uuid.UUID], query: str
 ) -> dict[uuid.UUID, str]:
     """Postgres-native snippet: ``ts_headline`` over the blob ``text``
-    with the same ``simple`` config the FTS column uses. One pass, no
-    Python-side highlighting -- the SPA can re-emphasise tokens if it
-    wants. ``MaxFragments=1, MaxWords=20`` keeps the snippet UI-sized."""
+    in the row's OWN language (task b1baaf52) so a stemmed hit is actually
+    highlighted, not just an exact one. One pass, no Python-side
+    highlighting -- the SPA can re-emphasise tokens if it wants.
+    ``MaxFragments=1, MaxWords=20`` keeps the snippet UI-sized."""
     if not blob_ids:
         return {}
     from sqlalchemy import text as sa_text
 
     sql = sa_text(
-        "SELECT id, ts_headline('simple', text, plainto_tsquery('simple', :q),"
+        "SELECT id, ts_headline(fts_language::regconfig, text,"
+        " plainto_tsquery(fts_language::regconfig, :q),"
         " 'MaxFragments=1, MaxWords=20') AS snippet"
         " FROM memory_blobs"
         " WHERE id = ANY(:ids)"

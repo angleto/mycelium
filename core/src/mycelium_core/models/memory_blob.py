@@ -66,6 +66,13 @@ class MemoryBlob(OrgScopedMixin, TimestampMixin, Base):
     namespace: Mapped[str] = mapped_column(String(40), nullable=False, server_default="email")
     tier: Mapped[str] = mapped_column(String(8), nullable=False, server_default="hot")
     text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Per-row text-search config driving the stemmed ``fts_lang`` generated
+    # column (task b1baaf52): a Postgres regconfig name ('italian',
+    # 'english', ...) or 'simple' (no stemming). Set at write from the
+    # source language (detected, or passed explicitly); see
+    # services.fts_language. The generated column reads it via the
+    # immutable ``fts_to_tsvector`` helper (migration 0066).
+    fts_language: Mapped[str] = mapped_column(String(32), nullable=False, server_default="simple")
     summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     embedding: Mapped[list[float] | None] = mapped_column(Vector(EMBED_DIM), nullable=True)
     model_id: Mapped[str | None] = mapped_column(String(160), nullable=True)

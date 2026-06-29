@@ -315,6 +315,7 @@ async def write_blob(
     channel_key: str | None = None,
     embedder: Embedder | None = None,
     chunker: Chunker | None = None,
+    language: str | None = None,
 ) -> MemoryBlob:
     """Write a memory blob (or N blobs if the text is chunked).
 
@@ -327,8 +328,16 @@ async def write_blob(
 
     ``chunker`` is the explicit override: pass a Chunker instance to
     force a strategy regardless of the namespace/length heuristic.
+
+    ``language`` is the explicit text-search config for the row's stemmed
+    FTS (task b1baaf52); when omitted it is detected per chunk and falls
+    back to 'simple' (no stemming) for short/ambiguous text.
     """
     from mycelium_core.services.chunker import pick_chunker
+    from mycelium_core.services.fts_language import (
+        detect_fts_language,
+        normalize_fts_language,
+    )
 
     await require_role(session, org_id, actor_id, Role.member)
     channel_id = await _resolve_channel_tag_id(
@@ -393,12 +402,18 @@ async def write_blob(
                 basis=hosted_basis,
             )
         now = dt.datetime.now(tz=dt.UTC)
+        fts_lang = (
+            normalize_fts_language(language)
+            if language is not None
+            else detect_fts_language(piece.text)
+        )
         blob = MemoryBlob(
             org_id=org_id,
             project_id=project_id,
             namespace=namespace,
             tier="hot",
             text=piece.text,
+            fts_language=fts_lang,
             embedding=result.vector if result is not None else None,
             model_id=result.model_id if result is not None else _NO_EMBED_MODEL,
             dim=len(result.vector) if result is not None else expected,
@@ -773,15 +788,17 @@ async def _ts_headlines(
     session: AsyncSession, *, blob_ids: list[uuid.UUID], query: str
 ) -> dict[uuid.UUID, str]:
     """Postgres-native snippet over ``memory_blobs.text``. Mirrors the
-    helper in ``task_search`` so each service stays self-contained;
-    same ``simple`` config the FTS column uses, MaxFragments=1 /
+    helper in ``task_search`` so each service stays self-contained.
+    Highlights in the row's OWN language (task b1baaf52) so a stemmed hit
+    is actually emphasised (it: fatture->fattura), MaxFragments=1 /
     MaxWords=20 to fit the SPA inline preview."""
     if not blob_ids:
         return {}
     from sqlalchemy import text as sa_text
 
     sql = sa_text(
-        "SELECT id, ts_headline('simple', text, plainto_tsquery('simple', :q),"
+        "SELECT id, ts_headline(fts_language::regconfig, text,"
+        " plainto_tsquery(fts_language::regconfig, :q),"
         " 'MaxFragments=1, MaxWords=20') AS snippet"
         " FROM memory_blobs"
         " WHERE id = ANY(:ids)"

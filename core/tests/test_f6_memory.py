@@ -394,6 +394,9 @@ async def test_stem_collision_yields_to_exact_match() -> None:
     proj = uuid.uuid4()
     async with tenant_session(str(org), str(user)) as s:
         await _seed_billing(s, org, user)
+        # Pin Italian: this exercises the Italian-stem-collision path
+        # specifically (these phrases are too short for auto-detection,
+        # which would pick 'simple' and sidestep the collision entirely).
         exact = await mem.write_blob(
             s,
             org_id=org,
@@ -401,6 +404,7 @@ async def test_stem_collision_yields_to_exact_match() -> None:
             project_id=proj,
             text_body="promemoria per Marzia",
             operation_id="a",
+            language="italian",
             embedder=_FAKE,
         )
         collision = await mem.write_blob(
@@ -410,6 +414,7 @@ async def test_stem_collision_yields_to_exact_match() -> None:
             project_id=proj,
             text_body="consegna del progetto entro marzo 2025",
             operation_id="b",
+            language="italian",
             embedder=_FAKE,
         )
         hits = await mem.retrieve(

@@ -1,17 +1,19 @@
 """Lexical FTS stage: dual-dictionary tsvector on ``memory_blobs.fts``
-(``simple``, exact terms) and ``fts_lang`` (``italian``, stemmed),
-migration 0007.
+(``simple``, exact terms) and ``fts_lang`` (stemmed in the row's OWN
+language, migrations 0007 + 0066).
 
 Emitted as TWO separate signals so fusion can weight them apart:
 
 - ``lexical_exact``: blobs that match the query terms VERBATIM (the
   ``simple`` dictionary does no stemming). The strongest signal.
-- ``lexical_stem``: blobs that match only after Italian stemming. Useful
-  for morphology ('gatti' -> 'gatto') but it also conflates a short
+- ``lexical_stem``: blobs that match only after stemming with the row's
+  ``fts_language`` dictionary (task b1baaf52 -- an English row stems with
+  ``english``, a French row with ``french``, not everything with Italian).
+  Useful for morphology ('gatti' -> 'gatto') but it also conflates a short
   proper noun with a common word -- e.g. 'marzia' and 'marzo' share the
-  stem, so an essay dated 'marzo 2025' spuriously matches a search for
-  the name Marzia. Weighted DOWN in fusion (near the semantic tier) so a
-  stem-only hit never masquerades as an exact hit; the relative floor
+  Italian stem, so an essay dated 'marzo 2025' spuriously matches a search
+  for the name Marzia. Weighted DOWN in fusion (near the semantic tier) so
+  a stem-only hit never masquerades as an exact hit; the relative floor
   then drops it when a genuine exact match set a high top score.
 
 Each signal's per-blob value is its 1-based rank in that dictionary's
@@ -74,11 +76,16 @@ class LexicalFTSStage(Stage):
             rank="ts_rank(fts, plainto_tsquery('simple', :q))",
             key="lexical_exact",
         )
+        # Stem in the ROW's own language (task b1baaf52): fts_lang is now a
+        # per-row tsvector (migration 0066), so the matching tsquery must use
+        # the same config. fts_language is a closed domain (a valid config or
+        # 'simple'), so the cast is always well-defined; 'simple'-tagged rows
+        # simply don't stem.
         stem = await self._ranked(
             ctx,
             query,
-            match="fts_lang @@ plainto_tsquery('italian', :q)",
-            rank="ts_rank(fts_lang, plainto_tsquery('italian', :q))",
+            match="fts_lang @@ plainto_tsquery(fts_language::regconfig, :q)",
+            rank="ts_rank(fts_lang, plainto_tsquery(fts_language::regconfig, :q))",
             key="lexical_stem",
         )
         return merge_candidates(candidates, exact + stem)
