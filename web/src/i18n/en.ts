@@ -924,9 +924,10 @@ export const en = {
       restore: 'restore',
       system: 'system',
     },
-    // The note version this revision produced (part edits don't bump the
-    // note version, so they share its number).
-    versionTitle: 'Version',
+    // The revision's 1-based sequence number (1 = first revision),
+    // computed server-side. Not the row version: a part edit doesn't bump
+    // the note version, so that would otherwise always read v1.
+    versionTitle: 'Revision',
     // Readable labels for ``changed_fields`` tags. Part tags
     // ``parts[N].field`` show the position (N = the editor's ``#N``
     // chip); ``*_noord`` covers legacy revisions with no recorded ord.

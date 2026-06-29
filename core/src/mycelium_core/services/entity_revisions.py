@@ -540,6 +540,43 @@ async def list_revisions(
     return list((await session.execute(stmt)).scalars().all())
 
 
+async def revision_sequence(
+    session: AsyncSession,
+    *,
+    entity_kind: str,
+    entity_id: uuid.UUID,
+    only_ids: Sequence[uuid.UUID],
+) -> dict[uuid.UUID, int]:
+    """Map each id in ``only_ids`` to its 1-based chronological position
+    among ALL of the entity's revisions (1 = the first-ever revision).
+
+    The SPA timeline renders this as ``v{n}``. It is NOT the entity row
+    ``version``: a part-level edit bumps the PART's version, not the
+    note row's, so a parts-based note's revisions would all read the same
+    ``version_to`` (e.g. v1). This counter increments once per revision
+    instead. Ranked over every revision (a window function) so the number
+    stays correct past the listing page cap, then filtered to the handful
+    of ids actually shown.
+    """
+    if not only_ids:
+        return {}
+    seq_col = (
+        func.row_number()
+        .over(order_by=(EntityRevision.started_at.asc(), EntityRevision.id.asc()))
+        .label("seq")
+    )
+    ranked = (
+        select(EntityRevision.id.label("id"), seq_col)
+        .where(
+            EntityRevision.entity_kind == entity_kind,
+            EntityRevision.entity_id == entity_id,
+        )
+        .subquery()
+    )
+    stmt = select(ranked.c.id, ranked.c.seq).where(ranked.c.id.in_(list(only_ids)))
+    return {row_id: int(seq) for row_id, seq in (await session.execute(stmt)).all()}
+
+
 async def get_revision(
     session: AsyncSession,
     *,
@@ -819,6 +856,7 @@ __all__ = (
     "hard_delete_soft_deleted",
     "list_revisions",
     "restorable_payload",
+    "revision_sequence",
     "seal_idle",
     "seal_open",
     "snapshot_note",

@@ -1377,10 +1377,12 @@ async def reorder_checklist(
     return [_checklist_item_out(r) for r in rows]
 
 
-def _revision_out(rev: Any) -> RevisionOut:
+def _revision_out(rev: Any, seq: int | None = None) -> RevisionOut:
     """Serialize an EntityRevision ORM row. ``org_id`` is dropped: the
     revision lives in the caller's tenant already (RLS) and the SPA
-    doesn't need it on every row."""
+    doesn't need it on every row. ``seq`` is the revision's 1-based
+    chronological position (the timeline's ``v{n}``), computed by the
+    list endpoint; None on the single-revision GET."""
     return RevisionOut(
         id=rev.id,
         entity_kind=rev.entity_kind,
@@ -1394,6 +1396,7 @@ def _revision_out(rev: Any) -> RevisionOut:
         edit_session_id=rev.edit_session_id,
         version_from=rev.version_from,
         version_to=rev.version_to,
+        seq=seq,
         edit_count=rev.edit_count,
         started_at=rev.started_at,
         last_edit_at=rev.last_edit_at,
@@ -1424,7 +1427,13 @@ async def list_task_revisions(
         limit=limit,
         before=before,
     )
-    return [_revision_out(r) for r in rows]
+    seqs = await rev_svc.revision_sequence(
+        ctx.session,
+        entity_kind=rev_svc.ENTITY_KIND_TASK,
+        entity_id=task_id,
+        only_ids=[r.id for r in rows],
+    )
+    return [_revision_out(r, seq=seqs.get(r.id)) for r in rows]
 
 
 @router.get("/{task_id}/revisions/{rev_id}", response_model=RevisionOut)

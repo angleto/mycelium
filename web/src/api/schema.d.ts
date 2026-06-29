@@ -10033,6 +10033,8 @@ export interface components {
             version_from: number;
             /** Version To */
             version_to: number;
+            /** Seq */
+            seq?: number | null;
             /** Edit Count */
             edit_count: number;
             /**

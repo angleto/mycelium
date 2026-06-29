@@ -336,6 +336,13 @@ class RevisionOut(BaseModel):
     edit_session_id: str | None
     version_from: int
     version_to: int
+    # 1-based chronological position of this revision among ALL of the
+    # entity's revisions (1 = first ever). The SPA timeline shows it as
+    # ``v{n}``. Unlike ``version_to`` (the entity ROW version, which a
+    # part-level edit does NOT bump — so a parts-based note's rows would
+    # all read v1), this increments once per revision. Only the list
+    # endpoints populate it; NULL on the single-revision GET.
+    seq: int | None = None
     edit_count: int
     started_at: datetime.datetime
     last_edit_at: datetime.datetime

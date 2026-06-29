@@ -236,3 +236,53 @@ async def test_task_revision_summary_patch() -> None:
             json={"summary": "x" * 201},
         )
         assert r.status_code == 422
+
+
+async def test_note_revision_seq_increments_while_row_version_is_flat() -> None:
+    """The timeline ``seq`` is a per-note revision counter (1 = first),
+    distinct from the entity ROW version. Part-body edits log a revision
+    each but do NOT bump the note row version, so every revision shares
+    the same ``version_to`` while ``seq`` keeps incrementing — the fix for
+    "the history always shows v1". Newest-first, so listing[0] carries the
+    highest seq."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as c:
+        a = await _signup(c, "RevSeq")
+        h = _auth(a)
+
+        note = (await c.post("/notes", headers=h, json={"kind": "text", "text": "body"})).json()
+        nid = note["id"]
+
+        # Ensure there's a part to edit (create one if the text note
+        # didn't materialise one), then edit its body a few times. No
+        # X-Edit-Session-Id -> "api" channel seals each immediately, so
+        # the edits don't coalesce into one open revision.
+        parts = (await c.get(f"/notes/{nid}/parts", headers=h)).json()
+        if not parts:
+            parts = [(await c.post(f"/notes/{nid}/parts", headers=h, json={"body": "p0"})).json()]
+        pid = parts[0]["id"]
+        ver = parts[0]["version"]
+        ordv = parts[0]["ord"]
+        for i in range(3):
+            r = await c.patch(
+                f"/notes/{nid}/parts/{pid}",
+                headers=h,
+                json={"expected_version": ver, "body": f"edit {i}"},
+            )
+            assert r.status_code == 200, r.text
+            ver = r.json()["version"]
+
+        listing = (await c.get(f"/notes/{nid}/revisions", headers=h)).json()
+        seqs = [row["seq"] for row in listing]
+        # Every revision carries a seq, contiguous and 1-based.
+        assert all(s is not None for s in seqs)
+        assert sorted(seqs) == list(range(1, len(listing) + 1))
+        # Newest-first: the head holds the highest seq, the tail seq 1.
+        assert listing[0]["seq"] == len(listing)
+        assert listing[-1]["seq"] == 1
+        # The note ROW version never moved (part edits bump the PART), so
+        # version_to is flat across the whole timeline — exactly why seq
+        # (not version_to) is the right number to surface.
+        assert len({row["version_to"] for row in listing}) == 1
+        # The part edits are tagged with the part position.
+        assert any(f"parts[{ordv}].body" in row["changed_fields"] for row in listing)

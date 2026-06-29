@@ -350,14 +350,16 @@ export function RevisionsPanel({
                   aria-expanded={isSelected}
                 >
                   <div className="revision-meta">
-                    <span
-                      className="revision-version"
-                      title={t('revisions.versionTitle', {
-                        defaultValue: 'Version',
-                      })}
-                    >
-                      v{rev.version_to}
-                    </span>
+                    {rev.seq != null && (
+                      <span
+                        className="revision-version"
+                        title={t('revisions.versionTitle', {
+                          defaultValue: 'Revision',
+                        })}
+                      >
+                        v{rev.seq}
+                      </span>
+                    )}
                     <span className="revision-time">{formatTime(ts)}</span>
                     <span className="revision-channel">{channelLabel}</span>
                     {open && (

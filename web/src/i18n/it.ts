@@ -924,10 +924,10 @@ export const it: Catalog = {
       restore: 'restore',
       system: 'sistema',
     },
-    // Risultato della revisione: la versione della nota dopo questa
-    // modifica (gli edit di parte non cambiano la versione della nota,
-    // quindi ne condividono il numero).
-    versionTitle: 'Versione',
+    // Numero progressivo della revisione (1 = prima revisione), calcolato
+    // lato server. Non è la versione della riga: un edit di parte non
+    // bumpa la versione della nota, quindi quella resterebbe sempre a 1.
+    versionTitle: 'Revisione',
     // Etichette leggibili per i tag in ``changed_fields``. I tag di
     // parte ``parts[N].campo`` mostrano la posizione (N = chip ``#N``
     // dell'editor); ``*_noord`` copre le revisioni vecchie senza ord.
