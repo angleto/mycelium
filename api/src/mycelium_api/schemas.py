@@ -2880,6 +2880,8 @@ class InvoiceOut(BaseModel):
     sdi_status: SdiStatus
     payment_status: PaymentStatus
     conservation_status: ConservationStatus
+    deleted_at: datetime.datetime | None
+    is_archived: bool
     version: int
 
 

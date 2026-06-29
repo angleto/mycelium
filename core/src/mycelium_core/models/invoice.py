@@ -310,6 +310,16 @@ class Invoice(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, Base):
     dt_received_at: Mapped[datetime.datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # Soft-delete (recycle bin) + archive (year-end filing), mirroring the
+    # task/note convention: ``deleted_at`` non-NULL = trashed (reversible,
+    # hidden from the active list; only a draft may then be hard-deleted,
+    # a transmitted document is kept for the fiscal record); ``is_archived``
+    # = filed away but valid. Both are orthogonal visibility axes, separate
+    # from the SdI ``state``.
+    deleted_at: Mapped[datetime.datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    is_archived: Mapped[bool] = mapped_column(nullable=False, server_default="false")
 
 
 class InvoiceLine(UUIDPKMixin, OrgScopedMixin, Base):

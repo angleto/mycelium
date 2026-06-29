@@ -46,7 +46,26 @@ const FILTER_PAYMENTS: readonly PaymentStatus[] = ['unpaid', 'paid']
 // back to the default.
 const FILTER_STATES_KEY = 'mycelium.invoices.filterStates'
 const FILTER_PAYMENTS_KEY = 'mycelium.invoices.filterPayments'
+const VIEW_KEY = 'mycelium.invoices.view'
 const DEFAULT_FILTER_STATES: InvoiceState[] = ['draft', 'transmitted']
+
+// Visibility band (orthogonal to the state/payment filters). The
+// state/payment toggles apply only within 'active'; archived/trashed show
+// everything in their band.
+type InvView = 'active' | 'archived' | 'trashed'
+const INV_VIEWS: readonly InvView[] = ['active', 'archived', 'trashed']
+
+// The view persists, but never restores INTO the recycle bin: a reload
+// always lands on the active list (or archived, if that was chosen), so
+// you don't reopen the app stuck in the bin.
+function readView(): InvView {
+  try {
+    if (localStorage.getItem(VIEW_KEY) === 'archived') return 'archived'
+  } catch {
+    /* ignore */
+  }
+  return 'active'
+}
 
 function readFilter<T extends string>(key: string, allowed: readonly T[], fallback: T[]): T[] {
   try {
@@ -138,10 +157,11 @@ export function InvoicesRoute() {
   const [filterPayments, setFilterPayments] = useState<PaymentStatus[]>(() =>
     readFilter(FILTER_PAYMENTS_KEY, FILTER_PAYMENTS, [...FILTER_PAYMENTS]),
   )
+  const [view, setView] = useState<InvView>(() => readView())
   // SdI transmission timeline (RC/MC/NS/AT/NE/DT) of the open invoice.
   const [notifs, setNotifs] = useState<SdiNotif[]>([])
 
-  // Persist the filter selection on every change.
+  // Persist the filter selection + view on every change.
   useEffect(() => {
     try {
       localStorage.setItem(FILTER_STATES_KEY, JSON.stringify(filterStates))
@@ -156,9 +176,19 @@ export function InvoicesRoute() {
       /* ignore */
     }
   }, [filterPayments])
-  // payment_status is a single backend param: send it only when exactly
-  // one of the two toggles is active (both/none = no constraint).
+  useEffect(() => {
+    try {
+      localStorage.setItem(VIEW_KEY, view)
+    } catch {
+      /* ignore */
+    }
+  }, [view])
+  // The state/payment filters refine only the active list; the archive and
+  // recycle bin show everything in their band. payment_status is a single
+  // backend param: sent only when exactly one toggle is active.
   const paymentFilter = filterPayments.length === 1 ? filterPayments[0] : undefined
+  const stateQuery = view === 'active' && filterStates.length ? filterStates : undefined
+  const paymentQuery = view === 'active' ? paymentFilter : undefined
 
   // new-invoice form (issuer profiles are managed in Settings)
   const [niClient, setNiClient] = useState('')
@@ -228,8 +258,9 @@ export function InvoicesRoute() {
         params: {
           header: h,
           query: {
-            ...(filterStates.length ? { state: filterStates } : {}),
-            ...(paymentFilter ? { payment_status: paymentFilter } : {}),
+            view,
+            ...(stateQuery ? { state: stateQuery } : {}),
+            ...(paymentQuery ? { payment_status: paymentQuery } : {}),
           },
         },
       }),
@@ -237,7 +268,7 @@ export function InvoicesRoute() {
     if (pr.data) setProfiles(pr.data)
     if (cl.data) setClients(cl.data)
     if (iv.data) setList(iv.data)
-  }, [filterStates, paymentFilter])
+  }, [view, stateQuery, paymentQuery])
 
   // Reload on workspace switch and whenever a filter changes. Inlined
   // (rather than calling loadList) so the setState lands after an await
@@ -254,8 +285,9 @@ export function InvoicesRoute() {
           params: {
             header: h,
             query: {
-              ...(filterStates.length ? { state: filterStates } : {}),
-              ...(paymentFilter ? { payment_status: paymentFilter } : {}),
+              view,
+              ...(stateQuery ? { state: stateQuery } : {}),
+              ...(paymentQuery ? { payment_status: paymentQuery } : {}),
             },
           },
         }),
@@ -268,7 +300,7 @@ export function InvoicesRoute() {
     return () => {
       active = false
     }
-  }, [activeId, filterStates, paymentFilter])
+  }, [activeId, view, stateQuery, paymentQuery])
 
   const openInvoice = useCallback(async (id: string) => {
     setErr(null)
@@ -587,6 +619,30 @@ export function InvoicesRoute() {
     await loadList()
   }
 
+  // Recycle-bin / archive actions. openapi-fetch needs a literal path, so
+  // each verb is dispatched explicitly rather than via a templated string.
+  function rowAction(id: string, kind: 'trash' | 'restore' | 'archive' | 'unarchive') {
+    const p = { params: { header: workspaceHeader(), path: { invoice_id: id } } }
+    const call =
+      kind === 'trash'
+        ? api.POST('/invoices/{invoice_id}/trash', p)
+        : kind === 'restore'
+          ? api.POST('/invoices/{invoice_id}/restore', p)
+          : kind === 'archive'
+            ? api.POST('/invoices/{invoice_id}/archive', p)
+            : api.POST('/invoices/{invoice_id}/unarchive', p)
+    return act(call)
+  }
+
+  function deletePermanent(id: string) {
+    return act(
+      api.DELETE('/invoices/{invoice_id}', {
+        params: { header: workspaceHeader(), path: { invoice_id: id } },
+      }),
+      t('invoices.confirmDeletePermanent'),
+    )
+  }
+
   async function showXml(id: string) {
     setErr(null)
     const { data, error } = await api.GET('/invoices/{invoice_id}/xml', {
@@ -708,11 +764,25 @@ export function InvoicesRoute() {
       <p className="hint">{t('invoices.seriesLegalHint')}</p>
 
       <h2>{t('invoices.list')}</h2>
-      {/* Two orthogonal toggle-button filter groups: the invoice lifecycle
-          (default Draft+Transmitted) and the paid/unpaid axis, separated by
-          a divider. Both persist across sessions. */}
+      {/* Visibility band selector (Active | Archived | Trash). */}
       <div className="row">
-        {FILTER_STATES.map((s) => {
+        {INV_VIEWS.map((v) => (
+          <button
+            key={v}
+            type="button"
+            className={`btn--sm ${view === v ? '' : 'btn--ghost'}`}
+            aria-pressed={view === v}
+            onClick={() => setView(v)}
+          >
+            {t(`invoices.view.${v}`)}
+          </button>
+        ))}
+      </div>
+      {/* Lifecycle + paid/unpaid toggle filters (persisted), refining only
+          the active list; archive/bin show everything in their band. */}
+      {view === 'active' && (
+        <div className="row">
+          {FILTER_STATES.map((s) => {
           const on = filterStates.includes(s)
           return (
             <button
@@ -749,9 +819,18 @@ export function InvoicesRoute() {
             </button>
           )
         })}
-      </div>
+        </div>
+      )}
       {list.length === 0 ? (
-        <p className="hint">{t('invoices.none')}</p>
+        <p className="hint">
+          {t(
+            view === 'trashed'
+              ? 'invoices.noneTrash'
+              : view === 'archived'
+                ? 'invoices.noneArchived'
+                : 'invoices.none',
+          )}
+        </p>
       ) : (
         <ul className="list">
           {list.map((i) => (
@@ -770,7 +849,61 @@ export function InvoicesRoute() {
                 {t(`invoices.sdiStatus.${i.sdi_status}`)} ·{' '}
                 {t(`invoices.paymentStatus.${i.payment_status}`)}
                 {i.identificativo_sdi ? ` · ${i.identificativo_sdi}` : ''}
-              </span>
+              </span>{' '}
+              {view === 'trashed' ? (
+                <>
+                  <button
+                    type="button"
+                    className="btn--sm btn--ghost"
+                    onClick={() => void rowAction(i.id, 'restore')}
+                  >
+                    {t('invoices.restore')}
+                  </button>
+                  {i.state === 'draft' && (
+                    <button
+                      type="button"
+                      className="btn--sm btn--danger"
+                      onClick={() => void deletePermanent(i.id)}
+                    >
+                      {t('invoices.deletePermanent')}
+                    </button>
+                  )}
+                </>
+              ) : view === 'archived' ? (
+                <>
+                  <button
+                    type="button"
+                    className="btn--sm btn--ghost"
+                    onClick={() => void rowAction(i.id, 'unarchive')}
+                  >
+                    {t('invoices.unarchive')}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn--sm btn--ghost"
+                    onClick={() => void rowAction(i.id, 'trash')}
+                  >
+                    {t('invoices.trash')}
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    className="btn--sm btn--ghost"
+                    onClick={() => void rowAction(i.id, 'archive')}
+                  >
+                    {t('invoices.archive')}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn--sm btn--ghost"
+                    onClick={() => void rowAction(i.id, 'trash')}
+                  >
+                    {t('invoices.trash')}
+                  </button>
+                </>
+              )}
             </li>
           ))}
         </ul>
@@ -1554,20 +1687,19 @@ export function InvoicesRoute() {
                 </button>
                 <button
                   type="button"
-                  className="btn--danger"
+                  className="btn--ghost"
                   onClick={() =>
                     void act(
-                      api.DELETE('/invoices/{invoice_id}', {
+                      api.POST('/invoices/{invoice_id}/trash', {
                         params: {
                           header: workspaceHeader(),
                           path: { invoice_id: sel.id },
                         },
                       }),
-                      t('invoices.confirmDeleteDraft'),
                     ).then(() => setSel(null))
                   }
                 >
-                  {t('invoices.deleteDraft')}
+                  {t('invoices.trash')}
                 </button>
               </>
             )}

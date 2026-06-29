@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import uuid
 from decimal import ROUND_HALF_UP, Decimal
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, File, Query, Response, UploadFile, status
 
@@ -88,6 +88,8 @@ def _inv_out(i: Invoice) -> InvoiceOut:
         sdi_status=i.sdi_status,
         payment_status=i.payment_status,
         conservation_status=i.conservation_status,
+        deleted_at=i.deleted_at,
+        is_archived=i.is_archived,
         version=i.version,
     )
 
@@ -551,12 +553,18 @@ async def list_invoices(
     ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
     state: Annotated[list[InvoiceState] | None, Query()] = None,
     payment_status: Annotated[PaymentStatus | None, Query()] = None,
+    view: Annotated[Literal["active", "archived", "trashed"], Query()] = "active",
 ) -> list[InvoiceOut]:
     """List invoices, newest first. ``state`` is repeatable (the SPA's
     lifecycle multi-select, default Draft+Transmitted); ``payment_status``
-    is an orthogonal paid/unpaid filter."""
+    is an orthogonal paid/unpaid filter. ``view`` picks the visibility band
+    (active = default; archived; trashed = recycle bin)."""
     rows = await svc.list_invoices(
-        ctx.session, org_id=ctx.org_id, states=state, payment_status=payment_status
+        ctx.session,
+        org_id=ctx.org_id,
+        states=state,
+        payment_status=payment_status,
+        view=view,
     )
     return [_inv_out(i) for i in rows]
 
@@ -799,11 +807,70 @@ async def ingest_receipt(
     return _inv_out(inv)
 
 
+# --- recycle bin (soft-delete) + archive: reversible visibility, any state ---
+
+
+@router.post("/invoices/{invoice_id}/trash", response_model=InvoiceOut)
+async def trash_invoice(
+    invoice_id: uuid.UUID,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+) -> InvoiceOut:
+    """Move an invoice to the recycle bin (reversible). Allowed in any
+    state; the document is kept, only hidden from the active list."""
+    inv = await svc.soft_delete_invoice(
+        ctx.session, org_id=ctx.org_id, actor_id=ctx.user_id, invoice_id=invoice_id
+    )
+    return _inv_out(inv)
+
+
+@router.post("/invoices/{invoice_id}/restore", response_model=InvoiceOut)
+async def restore_invoice(
+    invoice_id: uuid.UUID,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+) -> InvoiceOut:
+    inv = await svc.restore_invoice(
+        ctx.session, org_id=ctx.org_id, actor_id=ctx.user_id, invoice_id=invoice_id
+    )
+    return _inv_out(inv)
+
+
+@router.post("/invoices/{invoice_id}/archive", response_model=InvoiceOut)
+async def archive_invoice(
+    invoice_id: uuid.UUID,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+) -> InvoiceOut:
+    inv = await svc.archive_invoice(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        invoice_id=invoice_id,
+        archived=True,
+    )
+    return _inv_out(inv)
+
+
+@router.post("/invoices/{invoice_id}/unarchive", response_model=InvoiceOut)
+async def unarchive_invoice(
+    invoice_id: uuid.UUID,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+) -> InvoiceOut:
+    inv = await svc.archive_invoice(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        invoice_id=invoice_id,
+        archived=False,
+    )
+    return _inv_out(inv)
+
+
 @router.delete("/invoices/{invoice_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_draft(
     invoice_id: uuid.UUID,
     ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> None:
+    """Permanent (hard) delete, draft-only — the "delete permanently"
+    action in the recycle bin. A transmitted invoice is never purged."""
     await svc.delete_draft(
         ctx.session,
         org_id=ctx.org_id,

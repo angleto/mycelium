@@ -632,12 +632,18 @@ async def set_counter(
 
 
 async def get_invoice(
-    session: AsyncSession, *, org_id: uuid.UUID, invoice_id: uuid.UUID
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    invoice_id: uuid.UUID,
+    include_deleted: bool = False,
 ) -> Invoice:
     inv = (
         await session.execute(select(Invoice).where(Invoice.id == invoice_id))
     ).scalar_one_or_none()
-    if inv is None:
+    # A trashed invoice is a 404 to every normal operation (it must be
+    # restored first); the trash/restore path opts in via include_deleted.
+    if inv is None or (inv.deleted_at is not None and not include_deleted):
         raise NotFoundError(MessageCode.INVOICE_NOT_FOUND)
     return inv
 
@@ -1006,7 +1012,10 @@ async def delete_draft(
     actor_id: uuid.UUID,
     invoice_id: uuid.UUID,
 ) -> None:
-    inv = await get_invoice(session, org_id=org_id, invoice_id=invoice_id)
+    # Permanent (hard) delete, only for drafts. Reachable on a trashed
+    # draft too (the "delete permanently" action in the recycle bin), so
+    # include_deleted is set; a transmitted invoice can never be purged.
+    inv = await get_invoice(session, org_id=org_id, invoice_id=invoice_id, include_deleted=True)
     _require_draft(inv)
     await require_role(session, org_id, actor_id, Role.member)
     await session.execute(delete(Invoice).where(Invoice.id == invoice_id))
@@ -1472,6 +1481,75 @@ async def mark_paid(
     return inv
 
 
+async def soft_delete_invoice(
+    session: AsyncSession, *, org_id: uuid.UUID, actor_id: uuid.UUID, invoice_id: uuid.UUID
+) -> Invoice:
+    """Move an invoice to the recycle bin (reversible). Allowed in any
+    state: trashing only hides the row, it never deletes the document, so
+    it does not break the immutability of a transmitted invoice (which is
+    kept for the fiscal record and can only be restored, never purged)."""
+    inv = await get_invoice(session, org_id=org_id, invoice_id=invoice_id)
+    await require_role(session, org_id, actor_id, Role.member)
+    inv.deleted_at = dt.datetime.now(tz=dt.UTC)
+    inv.version += 1
+    await session.flush()
+    await audit.log(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        entity="invoice",
+        entity_id=invoice_id,
+        action="trash",
+    )
+    return inv
+
+
+async def restore_invoice(
+    session: AsyncSession, *, org_id: uuid.UUID, actor_id: uuid.UUID, invoice_id: uuid.UUID
+) -> Invoice:
+    """Restore a trashed invoice back to the active list."""
+    inv = await get_invoice(session, org_id=org_id, invoice_id=invoice_id, include_deleted=True)
+    await require_role(session, org_id, actor_id, Role.member)
+    inv.deleted_at = None
+    inv.version += 1
+    await session.flush()
+    await audit.log(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        entity="invoice",
+        entity_id=invoice_id,
+        action="restore",
+    )
+    return inv
+
+
+async def archive_invoice(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    invoice_id: uuid.UUID,
+    archived: bool = True,
+) -> Invoice:
+    """Archive (year-end filing) or unarchive an invoice. Reversible and
+    document-preserving: only the visibility changes, not the content."""
+    inv = await get_invoice(session, org_id=org_id, invoice_id=invoice_id)
+    await require_role(session, org_id, actor_id, Role.member)
+    inv.is_archived = archived
+    inv.version += 1
+    await session.flush()
+    await audit.log(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        entity="invoice",
+        entity_id=invoice_id,
+        action="archive" if archived else "unarchive",
+    )
+    return inv
+
+
 # Active-cycle outcomes RC/MC/AT/NS: legacy delivery + conservation effect.
 # NE/DT do not alter sdi_status this way (they layer on top, see verdict).
 _RECEIPT_MAP: dict[str, tuple[SdiStatus, InvoiceState, ConservationStatus]] = {
@@ -1619,7 +1697,9 @@ async def ingest_receipt(
 # Forward-declared protocol-ish typing helper to avoid an import cycle with
 # ``sdi_inbound``. The dispatcher only reads attributes from the parsed
 # notification; any object exposing this shape is accepted.
-from typing import Protocol  # noqa: E402
+from typing import Literal, Protocol  # noqa: E402
+
+InvoiceView = Literal["active", "archived", "trashed"]
 
 
 class ParsedNotificationLike(Protocol):
@@ -1648,12 +1728,22 @@ async def list_invoices(
     states: Sequence[InvoiceState] | None = None,
     payment_status: PaymentStatus | None = None,
     client_tag_id: uuid.UUID | None = None,
+    view: InvoiceView = "active",
 ) -> list[Invoice]:
     """List invoices, newest first. ``state`` (single) is kept for
     existing callers; ``states`` (the lifecycle multi-select used by the
     SPA) takes precedence when given. ``payment_status`` is an orthogonal
-    axis (paid/unpaid), AND-ed with the state filter."""
+    axis (paid/unpaid), AND-ed with the state filter. ``view`` selects the
+    visibility band (orthogonal to everything else): ``active`` (default)
+    hides trashed and archived; ``archived`` shows filed-away non-trashed;
+    ``trashed`` shows the recycle bin."""
     stmt = select(Invoice)
+    if view == "trashed":
+        stmt = stmt.where(Invoice.deleted_at.is_not(None))
+    elif view == "archived":
+        stmt = stmt.where(Invoice.deleted_at.is_(None), Invoice.is_archived.is_(True))
+    else:
+        stmt = stmt.where(Invoice.deleted_at.is_(None), Invoice.is_archived.is_(False))
     if states:
         stmt = stmt.where(Invoice.state.in_(list(states)))
     elif state is not None:

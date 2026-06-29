@@ -1890,6 +1890,16 @@ export const it: Catalog = {
       paid: 'Pagata',
     },
     sdi: { timeline: 'Cronologia trasmissione SdI' },
+    view: { active: 'Attive', archived: 'Archiviate', trashed: 'Cestino' },
+    archive: 'Archivia',
+    unarchive: 'Disarchivia',
+    trash: 'Cestina',
+    restore: 'Ripristina',
+    deletePermanent: 'Elimina definitivamente',
+    confirmDeletePermanent:
+      'Eliminare definitivamente questa bozza? Operazione irreversibile.',
+    noneArchived: 'Nessuna fattura archiviata.',
+    noneTrash: 'Il cestino è vuoto.',
     letterhead: 'Intestazione (testo)',
     letterheadPlaceholder:
       'es. slogan, sito web, contatti — stampati in cima al PDF',

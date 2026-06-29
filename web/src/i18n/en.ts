@@ -1889,6 +1889,16 @@ export const en = {
       paid: 'Paid',
     },
     sdi: { timeline: 'SdI transmission timeline' },
+    view: { active: 'Active', archived: 'Archived', trashed: 'Trash' },
+    archive: 'Archive',
+    unarchive: 'Unarchive',
+    trash: 'Trash',
+    restore: 'Restore',
+    deletePermanent: 'Delete permanently',
+    confirmDeletePermanent:
+      'Permanently delete this draft? This cannot be undone.',
+    noneArchived: 'No archived invoices.',
+    noneTrash: 'Recycle bin is empty.',
     letterhead: 'Letterhead (header text)',
     letterheadPlaceholder:
       'e.g. company tagline, website, contacts — printed at the top of the PDF',

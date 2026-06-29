@@ -5300,7 +5300,8 @@ export interface paths {
          * List Invoices
          * @description List invoices, newest first. ``state`` is repeatable (the SPA's
          *     lifecycle multi-select, default Draft+Transmitted); ``payment_status``
-         *     is an orthogonal paid/unpaid filter.
+         *     is an orthogonal paid/unpaid filter. ``view`` picks the visibility band
+         *     (active = default; archived; trashed = recycle bin).
          */
         get: operations["list_invoices_invoices_get"];
         put?: never;
@@ -5323,7 +5324,11 @@ export interface paths {
         get: operations["get_invoice_invoices__invoice_id__get"];
         put?: never;
         post?: never;
-        /** Delete Draft */
+        /**
+         * Delete Draft
+         * @description Permanent (hard) delete, draft-only — the "delete permanently"
+         *     action in the recycle bin. A transmitted invoice is never purged.
+         */
         delete: operations["delete_draft_invoices__invoice_id__delete"];
         options?: never;
         head?: never;
@@ -5524,6 +5529,78 @@ export interface paths {
         put?: never;
         /** Ingest Receipt */
         post: operations["ingest_receipt_invoices_receipt_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/invoices/{invoice_id}/trash": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Trash Invoice
+         * @description Move an invoice to the recycle bin (reversible). Allowed in any
+         *     state; the document is kept, only hidden from the active list.
+         */
+        post: operations["trash_invoice_invoices__invoice_id__trash_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/invoices/{invoice_id}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Restore Invoice */
+        post: operations["restore_invoice_invoices__invoice_id__restore_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/invoices/{invoice_id}/archive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Archive Invoice */
+        post: operations["archive_invoice_invoices__invoice_id__archive_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/invoices/{invoice_id}/unarchive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Unarchive Invoice */
+        post: operations["unarchive_invoice_invoices__invoice_id__unarchive_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -8196,6 +8273,10 @@ export interface components {
             sdi_status: components["schemas"]["SdiStatus"];
             payment_status: components["schemas"]["PaymentStatus"];
             conservation_status: components["schemas"]["ConservationStatus"];
+            /** Deleted At */
+            deleted_at: string | null;
+            /** Is Archived */
+            is_archived: boolean;
             /** Version */
             version: number;
         };
@@ -23710,6 +23791,7 @@ export interface operations {
             query?: {
                 state?: components["schemas"]["InvoiceState"][] | null;
                 payment_status?: components["schemas"]["PaymentStatus"] | null;
+                view?: "active" | "archived" | "trashed";
             };
             header: {
                 "x-workspace-id": string;
@@ -24351,6 +24433,150 @@ export interface operations {
                 "application/json": components["schemas"]["ReceiptIn"];
             };
         };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvoiceOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    trash_invoice_invoices__invoice_id__trash_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                invoice_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvoiceOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    restore_invoice_invoices__invoice_id__restore_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                invoice_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvoiceOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    archive_invoice_invoices__invoice_id__archive_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                invoice_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvoiceOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    unarchive_invoice_invoices__invoice_id__unarchive_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                invoice_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
             200: {
