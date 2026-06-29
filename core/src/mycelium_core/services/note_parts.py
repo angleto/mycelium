@@ -309,10 +309,15 @@ async def update_part(
         note_id=part.note_id,
         version_from=note.version,
         version_to=note.version,
+        # Tag the timeline with the edited part's position (``ord``,
+        # the ``#N`` chip the editor shows) and every field that
+        # changed, so a recovery row reads "Part 5: body" instead of a
+        # bare ``parts.body``. ``ord`` is captured at edit time: a later
+        # reorder does not rewrite history. The previous form logged a
+        # single field even when body+title+lang changed together; the
+        # comprehension records them all.
         changed_fields=[
-            "parts.body"
-            if "body" in values
-            else ("parts.title" if "title" in values else "parts.lang")
+            f"parts[{part.ord}].{field}" for field in ("body", "title", "lang") if field in values
         ],
         channel=channel,
         edit_session_id=edit_session_id,
@@ -402,7 +407,9 @@ async def append_to_part(
             note_id=part.note_id,
             version_from=note.version,
             version_to=note.version,
-            changed_fields=["parts.body"],
+            # ``parts[ord].body``: tag the timeline with the edited part's
+            # position so a recovery row reads "Part N: body" (see update_part).
+            changed_fields=[f"parts[{part.ord}].body"],
             channel=channel,
             edit_session_id=operation_id,
         )
@@ -468,7 +475,9 @@ async def prepend_to_part(
         note_id=part.note_id,
         version_from=note.version,
         version_to=note.version,
-        changed_fields=["parts.body"],
+        # ``parts[ord].body``: tag the timeline with the edited part's
+        # position so a recovery row reads "Part N: body" (see update_part).
+        changed_fields=[f"parts[{part.ord}].body"],
         channel=channel,
         edit_session_id=operation_id,
     )
@@ -543,7 +552,9 @@ async def replace_in_part(
         note_id=part.note_id,
         version_from=note.version,
         version_to=note.version,
-        changed_fields=["parts.body"],
+        # ``parts[ord].body``: tag the timeline with the edited part's
+        # position so a recovery row reads "Part N: body" (see update_part).
+        changed_fields=[f"parts[{part.ord}].body"],
         channel=channel,
         edit_session_id=operation_id,
     )

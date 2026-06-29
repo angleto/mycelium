@@ -4060,6 +4060,10 @@ button.btn--danger:hover {
   gap: 0.6rem;
 }
 .notedetail__propstoggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem;
   width: 100%;
   text-align: left;
   background: var(--surface-2);
@@ -4070,6 +4074,27 @@ button.btn--danger:hover {
   font: inherit;
   font-weight: 600;
   color: inherit;
+}
+.notedetail__propstoggle-caret {
+  font-size: 0.85em;
+  line-height: 1;
+}
+/* Collapsed (desktop): the rail shrinks to a slim auto-width column
+   holding just the caret toggle, and the body's ``1fr`` reclaims the
+   freed space. The toggle keeps its full a11y name via title/aria; only
+   the visible text label is dropped. */
+.notedetail__grid--asideclosed {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+.notedetail__aside--collapsed {
+  width: auto;
+  padding: 0.3rem;
+}
+.notedetail__aside--collapsed .notedetail__propstoggle {
+  width: auto;
+}
+.notedetail__aside--collapsed .notedetail__propstoggle-label {
+  display: none;
 }
 .notedetail__connections {
   margin-top: 1.2rem;
@@ -4114,6 +4139,15 @@ button.btn--danger:hover {
   }
   .notedetail__asidebody {
     padding: 0.5rem 0.2rem 0.2rem;
+  }
+  /* On mobile the rail stacks vertically, so "collapse" just hides the
+     body — keep the toggle full-width with its text label (the slim
+     desktop rail treatment does not apply). */
+  .notedetail__aside--collapsed .notedetail__propstoggle {
+    width: 100%;
+  }
+  .notedetail__aside--collapsed .notedetail__propstoggle-label {
+    display: inline;
   }
 }
 /* The linked task's title, shown inline in the work-note banner and
@@ -5521,6 +5555,11 @@ button.btn--danger:hover {
   gap: 0.6rem;
   align-items: baseline;
   font-size: 0.85rem;
+}
+.revision-version {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  color: var(--text-h);
 }
 .revision-time { font-variant-numeric: tabular-nums; }
 .revision-channel { color: var(--muted); }

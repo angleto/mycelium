@@ -924,6 +924,27 @@ export const it: Catalog = {
       restore: 'restore',
       system: 'sistema',
     },
+    // Risultato della revisione: la versione della nota dopo questa
+    // modifica (gli edit di parte non cambiano la versione della nota,
+    // quindi ne condividono il numero).
+    versionTitle: 'Versione',
+    // Etichette leggibili per i tag in ``changed_fields``. I tag di
+    // parte ``parts[N].campo`` mostrano la posizione (N = chip ``#N``
+    // dell'editor); ``*_noord`` copre le revisioni vecchie senza ord.
+    fields: {
+      part_body: 'Parte {{n}}: corpo',
+      part_title: 'Parte {{n}}: titolo',
+      part_lang: 'Parte {{n}}: lingua',
+      parts_body_noord: 'Parte: corpo',
+      parts_title_noord: 'Parte: titolo',
+      parts_lang_noord: 'Parte: lingua',
+      _create: 'Creazione',
+      _archive: 'Archiviazione',
+      _delete: 'Spostata nel cestino',
+      _soft_delete: 'Spostata nel cestino',
+      _restore: 'Ripristino',
+      audio_ref: 'Audio',
+    },
   },
   ownerPicker: {
     none: 'Nessun responsabile',

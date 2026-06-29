@@ -25,7 +25,7 @@ import { ChecklistPanel } from '../components/ChecklistPanel'
 import { RevisionsPanel } from '../components/RevisionsPanel'
 import { useEditSession } from '../lib/useEditSession'
 import { useStaleWatch } from '../lib/useStaleWatch'
-import { useMediaQuery, MOBILE_QUERY } from '../lib/useMediaQuery'
+import { MOBILE_QUERY } from '../lib/useMediaQuery'
 import type { components } from '../api/schema'
 
 type Note = components['schemas']['NoteOut']
@@ -69,11 +69,36 @@ export function NoteDetailRoute() {
     text: '',
   })
 
-  // Responsive: below the layout breakpoint the Details rail can't sit
-  // beside the body, so it becomes a collapsible panel (closed by
-  // default) above the content; desktop renders it as a sticky rail.
-  const isMobile = useMediaQuery(MOBILE_QUERY)
-  const [detailsOpen, setDetailsOpen] = useState(false)
+  // The Details rail is collapsible on every viewport. Default: expanded
+  // on desktop (a sticky side rail), collapsed on mobile (where it stacks
+  // below the body, which leads). Collapsing it on desktop shrinks the
+  // rail to a slim toggle so the note body reclaims the freed width. The
+  // choice is remembered across notes — it's a layout preference, not a
+  // per-note one.
+  const [detailsOpen, setDetailsOpen] = useState<boolean>(() => {
+    try {
+      const v = localStorage.getItem('mycelium.note.detailsOpen')
+      if (v === 'open') return true
+      if (v === 'closed') return false
+    } catch {
+      /* private mode / quota */
+    }
+    try {
+      return !window.matchMedia(MOBILE_QUERY).matches
+    } catch {
+      return true
+    }
+  })
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        'mycelium.note.detailsOpen',
+        detailsOpen ? 'open' : 'closed',
+      )
+    } catch {
+      /* ignore */
+    }
+  }, [detailsOpen])
 
   // Unified "Connections" group: linked tasks / note links / garden
   // suggestions share one tabbed surface. Active tab remembered per note.
@@ -613,7 +638,12 @@ export function NoteDetailRoute() {
         />
       </form>
 
-      <div className="notedetail__grid">
+      <div
+        className={
+          'notedetail__grid' +
+          (detailsOpen ? '' : ' notedetail__grid--asideclosed')
+        }
+      >
         <main className="notedetail__main">
           {note.kind === 'voice' && note.audio_ref && (
             <VoicePlayer
@@ -645,23 +675,24 @@ export function NoteDetailRoute() {
         <aside
           className={
             'notedetail__aside' +
-            (isMobile && !detailsOpen ? ' notedetail__aside--collapsed' : '')
+            (detailsOpen ? '' : ' notedetail__aside--collapsed')
           }
         >
-          {isMobile ? (
-            <button
-              type="button"
-              className="notedetail__propstoggle"
-              aria-expanded={detailsOpen}
-              onClick={() => setDetailsOpen((v) => !v)}
-            >
+          <button
+            type="button"
+            className="notedetail__propstoggle"
+            aria-expanded={detailsOpen}
+            title={t('notes.details')}
+            onClick={() => setDetailsOpen((v) => !v)}
+          >
+            <span className="notedetail__propstoggle-label">
               {t('notes.details')}
-              <span aria-hidden="true">{detailsOpen ? ' ▾' : ' ▸'}</span>
-            </button>
-          ) : (
-            <h2 className="notedetail__asideh">{t('notes.details')}</h2>
-          )}
-          {(!isMobile || detailsOpen) && (
+            </span>
+            <span aria-hidden="true" className="notedetail__propstoggle-caret">
+              {detailsOpen ? '▾' : '▸'}
+            </span>
+          </button>
+          {detailsOpen && (
             <div className="notedetail__asidebody">
               <div className="notebanner">
                 {note.task_id ? (

@@ -924,6 +924,26 @@ export const en = {
       restore: 'restore',
       system: 'system',
     },
+    // The note version this revision produced (part edits don't bump the
+    // note version, so they share its number).
+    versionTitle: 'Version',
+    // Readable labels for ``changed_fields`` tags. Part tags
+    // ``parts[N].field`` show the position (N = the editor's ``#N``
+    // chip); ``*_noord`` covers legacy revisions with no recorded ord.
+    fields: {
+      part_body: 'Part {{n}}: body',
+      part_title: 'Part {{n}}: title',
+      part_lang: 'Part {{n}}: language',
+      parts_body_noord: 'Part: body',
+      parts_title_noord: 'Part: title',
+      parts_lang_noord: 'Part: language',
+      _create: 'Created',
+      _archive: 'Archived',
+      _delete: 'Moved to trash',
+      _soft_delete: 'Moved to trash',
+      _restore: 'Restored',
+      audio_ref: 'Audio',
+    },
   },
   ownerPicker: {
     none: 'No owner',

@@ -56,6 +56,46 @@ function formatTime(iso: string | null): string {
   return d.toLocaleString()
 }
 
+const PART_FIELD_RE = /^parts\[(\d+)\]\.(body|title|lang)$/
+
+/** Humanise a single ``changed_fields`` token for the timeline label.
+ *
+ * Part edits arrive tagged ``parts[N].body|title|lang`` (N = the part's
+ * ``ord``, the ``#N`` chip in the editor) and render as "Part N: body".
+ * Rows written before the ord was recorded use the legacy ``parts.body``
+ * form (no number). Core columns reuse the diff-table labels; lifecycle
+ * tags (``_create`` …) and anything unknown fall back through i18n to the
+ * raw token. */
+function prettyField(token: string, t: TFunction): string {
+  const m = PART_FIELD_RE.exec(token)
+  if (m)
+    return t(`revisions.fields.part_${m[2]}`, { n: m[1], defaultValue: token })
+  if (token === 'parts.body' || token === 'parts.title' || token === 'parts.lang')
+    return t(`revisions.fields.${token.replace('.', '_')}_noord`, {
+      defaultValue: token,
+    })
+  // Core columns + lifecycle tags (``_create`` …): try the dedicated
+  // ``revisions.fields`` keys first, then fall back to the diff-table
+  // labels (which already name every task/note column), then the raw
+  // token. This keeps task revisions readable too (e.g. ``importance``
+  // → "Importance") without duplicating the column dictionary.
+  return t(`revisions.fields.${token}`, {
+    defaultValue: t(`revisions.diff.fields.${token}`, { defaultValue: token }),
+  })
+}
+
+function prettyChangedFields(fields: readonly string[], t: TFunction): string {
+  // Lifecycle transitions (create / archive / delete / restore) tag the
+  // revision with a leading ``_<action>`` PLUS the column they touched
+  // (``_archive`` alongside ``is_archived``, ``_delete`` alongside
+  // ``deleted_at`` …). The action label already names the event, so the
+  // co-emitted column is redundant noise: when any ``_<action>`` tag is
+  // present, show only those.
+  const lifecycle = fields.filter((f) => f.startsWith('_'))
+  const shown = lifecycle.length > 0 ? lifecycle : fields
+  return shown.map((f) => prettyField(f, t)).join(', ')
+}
+
 /** Recovery-history timeline for a single task or note.
  *
  * - Lists the latest 50 revisions, most recent first; the row with
@@ -285,7 +325,7 @@ export function RevisionsPanel({
             const channelLabel = t(`revisions.channel.${rev.channel}`, {
               defaultValue: rev.channel,
             })
-            const fields = rev.changed_fields.join(', ')
+            const fields = prettyChangedFields(rev.changed_fields, t)
             const isSelected = rev.id === selectedId
             const isEditingLabel = editingId === rev.id
             const labelDisplay = rev.summary ?? fields
@@ -310,6 +350,14 @@ export function RevisionsPanel({
                   aria-expanded={isSelected}
                 >
                   <div className="revision-meta">
+                    <span
+                      className="revision-version"
+                      title={t('revisions.versionTitle', {
+                        defaultValue: 'Version',
+                      })}
+                    >
+                      v{rev.version_to}
+                    </span>
                     <span className="revision-time">{formatTime(ts)}</span>
                     <span className="revision-channel">{channelLabel}</span>
                     {open && (
