@@ -1,8 +1,18 @@
-import { useCallback, useEffect, useState, type FormEvent } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useState,
+  type ChangeEvent,
+  type FormEvent,
+} from 'react'
 import { useTranslation } from 'react-i18next'
-import { api, errMessage, workspaceHeader } from '../api/client'
+import { api, authFetch, errMessage, workspaceHeader } from '../api/client'
 import { useSession } from '../auth/useSession'
 import type { components } from '../api/schema'
+
+// Logo formats the backend accepts (PNG/JPEG; reportlab raster). Kept in
+// sync with mycelium_core.services.invoice.LOGO_MIMES.
+const LOGO_ACCEPT = 'image/png,image/jpeg'
 
 type Profile = components['schemas']['IssuerProfileOut']
 type Counter = components['schemas']['InvoiceCounterOut']
@@ -233,6 +243,7 @@ const EMPTY = {
   default_payment_conditions_code: '',
   default_payment_method_code: '',
   default_payment_terms_days: '',
+  letterhead: '',
   is_default: false,
 }
 type Form = typeof EMPTY
@@ -271,6 +282,26 @@ export function IssuerProfiles() {
   const [showCounters, setShowCounters] = useState<string | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const [msg, setMsg] = useState<string | null>(null)
+  // Object URL of the currently-edited profile's logo (auth-fetched as a
+  // blob: the endpoint is bearer-protected, so an <img src> to it would
+  // 401). Revoked before replacing / on close.
+  const [logoUrl, setLogoUrl] = useState<string | null>(null)
+  const [logoBusy, setLogoBusy] = useState(false)
+
+  const showLogo = useCallback(async (id: string | null) => {
+    setLogoUrl((prev) => {
+      if (prev) URL.revokeObjectURL(prev)
+      return null
+    })
+    if (!id) return
+    const res = await authFetch(`/issuer-profiles/${id}/logo`)
+    if (!res.ok) return
+    const blob = await res.blob()
+    setLogoUrl(URL.createObjectURL(blob))
+  }, [])
+
+  // Revoke the last object URL when the component unmounts.
+  useEffect(() => () => setLogoUrl((p) => (p ? (URL.revokeObjectURL(p), null) : null)), [])
 
   const load = useCallback(async () => {
     const { data } = await api.GET('/issuer-profiles', {
@@ -321,11 +352,14 @@ export function IssuerProfiles() {
           p.default_payment_terms_days != null
             ? String(p.default_payment_terms_days)
             : '',
+        letterhead: p.letterhead ?? '',
         is_default: p.is_default,
       })
+      void showLogo(p.has_logo ? p.id : null)
     } else {
       setEdit('new')
       setForm(EMPTY)
+      void showLogo(null)
     }
   }
 
@@ -352,6 +386,7 @@ export function IssuerProfiles() {
       default_payment_conditions_code: form.default_payment_conditions_code || null,
       default_payment_method_code: form.default_payment_method_code || null,
       default_payment_terms_days: termsDays ? Number(termsDays) : null,
+      letterhead: form.letterhead || null,
       is_default: form.is_default,
     }
     // tax_regime drives forfettario (RF19) invoicing — it is a hard
@@ -407,6 +442,46 @@ export function IssuerProfiles() {
       setErr(errMessage(error))
       return
     }
+    await load()
+  }
+
+  async function uploadLogo(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    e.target.value = '' // let the same file be re-picked after a failure
+    if (!file || edit === 'new' || edit === null) return
+    setErr(null)
+    setMsg(null)
+    setLogoBusy(true)
+    try {
+      const body = new FormData()
+      body.append('file', file)
+      const res = await authFetch(`/issuer-profiles/${edit}/logo`, {
+        method: 'POST',
+        body,
+      })
+      if (!res.ok) {
+        setErr(errMessage(await res.json().catch(() => null)))
+        return
+      }
+      await showLogo(edit)
+      await load()
+      setMsg(t('invoices.saved'))
+    } finally {
+      setLogoBusy(false)
+    }
+  }
+
+  async function removeLogo() {
+    if (edit === 'new' || edit === null) return
+    setErr(null)
+    const { error } = await api.DELETE('/issuer-profiles/{profile_id}/logo', {
+      params: { header: workspaceHeader(), path: { profile_id: edit } },
+    })
+    if (error) {
+      setErr(errMessage(error))
+      return
+    }
+    await showLogo(null)
     await load()
   }
 
@@ -628,6 +703,55 @@ export function IssuerProfiles() {
               onChange={(e) => setForm({ ...form, fax: e.target.value })}
             />
           </div>
+          {/* Letterhead: header text + optional logo printed at the top of
+              the courtesy PDF. The logo attaches to a saved profile (it
+              needs the profile id), so it shows only when editing. */}
+          <div className="row">
+            <label className="lbl--wide">
+              {t('invoices.letterhead')}
+              <textarea
+                rows={3}
+                placeholder={t('invoices.letterheadPlaceholder')}
+                value={form.letterhead}
+                onChange={(e) =>
+                  setForm({ ...form, letterhead: e.target.value })
+                }
+              />
+            </label>
+          </div>
+          {edit !== 'new' && (
+            <div className="field">
+              {t('invoices.logo')}
+              <p className="hint">{t('invoices.logoHint')}</p>
+              {logoUrl && (
+                <img
+                  src={logoUrl}
+                  alt={t('invoices.logo')}
+                  className="issuer-logo"
+                />
+              )}
+              <div className="row">
+                <label className="btn--sm btn--ghost">
+                  {logoBusy ? '…' : t('invoices.logoUpload')}
+                  <input
+                    type="file"
+                    accept={LOGO_ACCEPT}
+                    hidden
+                    onChange={(e) => void uploadLogo(e)}
+                  />
+                </label>
+                {logoUrl && (
+                  <button
+                    type="button"
+                    className="btn--sm btn--danger"
+                    onClick={() => void removeLogo()}
+                  >
+                    {t('invoices.logoRemove')}
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
           {/* Issuer-level payment fallbacks (used only if the client
               carries no own default; the invoice itself overrides both). */}
           <div className="row">
@@ -669,20 +793,26 @@ export function IssuerProfiles() {
                 ))}
               </select>
             </label>
-            <input
-              type="number"
-              min={0}
-              max={365}
-              placeholder={t('invoices.defaultTermsDays')}
-              value={form.default_payment_terms_days}
-              onChange={(e) =>
-                setForm({
-                  ...form,
-                  default_payment_terms_days: e.target.value,
-                })
-              }
-            />
+            <label title={t('invoices.defaultTermsDaysTip')}>
+              {t('invoices.defaultTermsDays')}
+              <input
+                className="inp--netdays"
+                type="number"
+                min={0}
+                max={365}
+                placeholder={t('invoices.defaultTermsDaysPlaceholder')}
+                title={t('invoices.defaultTermsDaysTip')}
+                value={form.default_payment_terms_days}
+                onChange={(e) =>
+                  setForm({
+                    ...form,
+                    default_payment_terms_days: e.target.value,
+                  })
+                }
+              />
+            </label>
           </div>
+          <p className="hint">{t('invoices.defaultTermsDaysTip')}</p>
           <label className="row">
             <input
               type="checkbox"

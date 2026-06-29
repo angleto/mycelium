@@ -5190,6 +5190,25 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/issuer-profiles/{profile_id}/logo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Issuer Logo */
+        get: operations["get_issuer_logo_issuer_profiles__profile_id__logo_get"];
+        put?: never;
+        /** Upload Issuer Logo */
+        post: operations["upload_issuer_logo_issuer_profiles__profile_id__logo_post"];
+        /** Delete Issuer Logo */
+        delete: operations["delete_issuer_logo_issuer_profiles__profile_id__logo_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/issuer-profiles/{profile_id}/counters": {
         parameters: {
             query?: never;
@@ -5277,7 +5296,12 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List Invoices */
+        /**
+         * List Invoices
+         * @description List invoices, newest first. ``state`` is repeatable (the SPA's
+         *     lifecycle multi-select, default Draft+Transmitted); ``payment_status``
+         *     is an orthogonal paid/unpaid filter.
+         */
         get: operations["list_invoices_invoices_get"];
         put?: never;
         /** Create Invoice */
@@ -5338,6 +5362,50 @@ export interface paths {
         post?: never;
         /** Delete Line */
         delete: operations["delete_line_invoices__invoice_id__lines__line_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/invoices/{invoice_id}/notifications": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Invoice Notifications
+         * @description The SdI transmission timeline for an invoice: RC/MC/NS/AT/NE/DT,
+         *     oldest first. An NS carries the parsed rejection error list; an NE the
+         *     buyer's EC verdict.
+         */
+        get: operations["list_invoice_notifications_invoices__invoice_id__notifications_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/invoices/purge-test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Purge Test Invoices
+         * @description Hard-delete this org's accreditation test invoices (series "TEST" +
+         *     the fixed SDICoop interoperability purpose). Owner only; one-off
+         *     cleanup after accreditation.
+         */
+        post: operations["purge_test_invoices_invoices_purge_test_post"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -6240,6 +6308,11 @@ export interface components {
             /** Balance */
             balance: string;
         };
+        /** Body_upload_issuer_logo_issuer_profiles__profile_id__logo_post */
+        Body_upload_issuer_logo_issuer_profiles__profile_id__logo_post: {
+            /** File */
+            file: string;
+        };
         /** Body_upload_note_attachment_notes__note_id__attachments_post */
         Body_upload_note_attachment_notes__note_id__attachments_post: {
             /** File */
@@ -6470,6 +6543,8 @@ export interface components {
             default_payment_terms_days?: number | null;
             /** Invoice Language */
             invoice_language?: string | null;
+            /** Invoice Date Format */
+            invoice_date_format?: string | null;
         };
         /** ClientOut */
         ClientOut: {
@@ -6532,6 +6607,8 @@ export interface components {
             default_payment_terms_days: number | null;
             /** Invoice Language */
             invoice_language: string | null;
+            /** Invoice Date Format */
+            invoice_date_format: string | null;
         };
         /** ClientPatchIn */
         ClientPatchIn: {
@@ -6585,6 +6662,8 @@ export interface components {
             default_payment_terms_days?: number | null;
             /** Invoice Language */
             invoice_language?: string | null;
+            /** Invoice Date Format */
+            invoice_date_format?: string | null;
         };
         /** CommandIn */
         CommandIn: {
@@ -8030,6 +8109,39 @@ export interface components {
             /** Vat Nature */
             vat_nature: string | null;
         };
+        /**
+         * InvoiceNotificationError
+         * @description One ``Errore`` from a NotificaScarto error list.
+         */
+        InvoiceNotificationError: {
+            /** Codice */
+            codice: string;
+            /** Descrizione */
+            descrizione: string;
+        };
+        /**
+         * InvoiceNotificationOut
+         * @description One SdI notification in the invoice's transmission timeline. ``esito``
+         *     is the buyer EC verdict (EC01 accepted / EC02 rejected) on an NE;
+         *     ``errors`` is the rejection list on an NS (empty for every other kind).
+         */
+        InvoiceNotificationOut: {
+            /** Kind */
+            kind: string;
+            /**
+             * Received At
+             * Format: date-time
+             */
+            received_at: string;
+            /** File Name */
+            file_name: string | null;
+            /** Message Id */
+            message_id: string | null;
+            /** Esito */
+            esito: string | null;
+            /** Errors */
+            errors: components["schemas"]["InvoiceNotificationError"][];
+        };
         /** InvoiceOut */
         InvoiceOut: {
             /**
@@ -8289,6 +8401,8 @@ export interface components {
             default_payment_method_code?: string | null;
             /** Default Payment Terms Days */
             default_payment_terms_days?: number | null;
+            /** Letterhead */
+            letterhead?: string | null;
             /**
              * Is Default
              * @default false
@@ -8350,6 +8464,12 @@ export interface components {
             default_payment_method_code: string | null;
             /** Default Payment Terms Days */
             default_payment_terms_days: number | null;
+            /** Letterhead */
+            letterhead: string | null;
+            /** Logo Mime */
+            logo_mime: string | null;
+            /** Has Logo */
+            has_logo: boolean;
             /** Is Default */
             is_default: boolean;
             /** Conservation Adhesion */
@@ -8407,6 +8527,8 @@ export interface components {
             default_payment_method_code?: string | null;
             /** Default Payment Terms Days */
             default_payment_terms_days?: number | null;
+            /** Letterhead */
+            letterhead?: string | null;
             /** Is Default */
             is_default?: boolean | null;
         };
@@ -9497,6 +9619,11 @@ export interface components {
             expected_version: number;
             /** Workflow Id */
             workflow_id?: string | null;
+        };
+        /** PurgeTestInvoicesOut */
+        PurgeTestInvoicesOut: {
+            /** Deleted */
+            deleted: number;
         };
         /**
          * PushSubscriptionIn
@@ -23240,6 +23367,118 @@ export interface operations {
             };
         };
     };
+    get_issuer_logo_issuer_profiles__profile_id__logo_get: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                profile_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    upload_issuer_logo_issuer_profiles__profile_id__logo_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                profile_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_upload_issuer_logo_issuer_profiles__profile_id__logo_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IssuerProfileOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_issuer_logo_issuer_profiles__profile_id__logo_delete: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                profile_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IssuerProfileOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_counters_issuer_profiles__profile_id__counters_get: {
         parameters: {
             query?: never;
@@ -23468,7 +23707,10 @@ export interface operations {
     };
     list_invoices_invoices_get: {
         parameters: {
-            query?: never;
+            query?: {
+                state?: components["schemas"]["InvoiceState"][] | null;
+                payment_status?: components["schemas"]["PaymentStatus"] | null;
+            };
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;
@@ -23788,6 +24030,76 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_invoice_notifications_invoices__invoice_id__notifications_get: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                invoice_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvoiceNotificationOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    purge_test_invoices_invoices_purge_test_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PurgeTestInvoicesOut"];
+                };
             };
             /** @description Validation Error */
             422: {
