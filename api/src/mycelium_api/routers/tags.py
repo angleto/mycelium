@@ -134,6 +134,7 @@ async def create_client(
         default_payment_method_code=body.default_payment_method_code,
         default_payment_terms_days=body.default_payment_terms_days,
         invoice_language=body.invoice_language,
+        invoice_date_format=body.invoice_date_format,
     )
     tag = await taxonomy.create_client(
         ctx.session,
@@ -193,6 +194,7 @@ def _client_out(t: Tag, p: object) -> ClientOut:
         default_payment_method_code=p.default_payment_method_code,  # type: ignore[attr-defined]
         default_payment_terms_days=p.default_payment_terms_days,  # type: ignore[attr-defined]
         invoice_language=p.invoice_language,  # type: ignore[attr-defined]
+        invoice_date_format=p.invoice_date_format,  # type: ignore[attr-defined]
     )
 
 

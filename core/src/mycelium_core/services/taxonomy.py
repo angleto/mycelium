@@ -32,6 +32,7 @@ from mycelium_core.models.tag_scope import TagScope
 from mycelium_core.models.task import Task
 from mycelium_core.models.task_tag import TaskTag
 from mycelium_core.services import audit
+from mycelium_core.services.date_format import validate_date_format
 from mycelium_core.services.rbac import require_role
 from mycelium_core.vat import is_valid_vat_code, normalize_vat
 
@@ -62,6 +63,7 @@ class ClientInput:
     default_payment_method_code: str | None = None
     default_payment_terms_days: int | None = None
     invoice_language: str | None = None
+    invoice_date_format: str | None = None
 
 
 # Tag kinds any member may create/rename (free-form facets): the
@@ -160,6 +162,7 @@ async def create_client(
             default_payment_method_code=profile.default_payment_method_code,
             default_payment_terms_days=profile.default_payment_terms_days,
             invoice_language=profile.invoice_language,
+            invoice_date_format=validate_date_format(profile.invoice_date_format),
         )
     )
     await session.flush()
@@ -616,6 +619,8 @@ async def update_client(
         from mycelium_core.services.payment_methods import validate_terms_days as _vt
 
         flds["default_payment_terms_days"] = _vt(flds["default_payment_terms_days"])  # type: ignore[arg-type]
+    if "invoice_date_format" in flds:
+        flds["invoice_date_format"] = validate_date_format(flds["invoice_date_format"])  # type: ignore[arg-type]
     for k, v in flds.items():
         setattr(prof, k, v)
     if "vat_number" in flds or "country_code" in flds:

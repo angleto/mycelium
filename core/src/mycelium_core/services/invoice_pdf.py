@@ -20,12 +20,16 @@ import datetime as dt
 from collections.abc import Sequence
 from decimal import ROUND_HALF_UP, Decimal
 from io import BytesIO
+from xml.sax.saxutils import escape
 
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
+from reportlab.lib.utils import ImageReader
 from reportlab.platypus import (
+    HRFlowable,
+    Image,
     Paragraph,
     SimpleDocTemplate,
     Spacer,
@@ -35,6 +39,7 @@ from reportlab.platypus import (
 
 from mycelium_core.models.client_profile import ClientProfile
 from mycelium_core.models.invoice import Invoice, InvoiceLine, IssuerProfile
+from mycelium_core.services.date_format import format_date
 from mycelium_core.services.invoice_format import (
     BOLLO_DICITURA,
     FORFETTARIO_CAUSALE,
@@ -71,7 +76,7 @@ _LABELS: dict[str, dict[str, str]] = {
         "total": "Totale",
         "taxable": "Imponibile",
         "vat": "IVA",
-        "stamp_duty": "Imposta di stamp_duty",
+        "stamp_duty": "Imposta di bollo",
         "doc_total": "Totale documento",
         "payment": "Pagamento",
         "method": "Modalità",
@@ -268,6 +273,75 @@ def _addr(
     return "<br/>".join(p for p in parts if p)
 
 
+# Logo box: scaled to fit within this envelope (preserving aspect ratio)
+# at the top-left of the letterhead band. A courtesy mark, not a fiscal
+# element, so it stays modest.
+_LOGO_MAX_W = 58 * mm
+_LOGO_MAX_H = 22 * mm
+
+
+def _logo_image(logo: bytes | None) -> Image | None:
+    """A reportlab ``Image`` scaled to fit the logo box, or None if the
+    bytes are absent or not a decodable raster. Never raises: a broken
+    logo must not break the (courtesy) PDF."""
+    if not logo:
+        return None
+    try:
+        iw, ih = ImageReader(BytesIO(logo)).getSize()
+        if not iw or not ih:
+            return None
+        scale = min(_LOGO_MAX_W / iw, _LOGO_MAX_H / ih)
+        img = Image(BytesIO(logo), width=iw * scale, height=ih * scale)
+        img.hAlign = "LEFT"
+    except Exception:
+        # Any decode failure -> no logo; a broken image must never break
+        # the courtesy PDF.
+        return None
+    return img
+
+
+def _letterhead_flow(
+    issuer: IssuerProfile | None, logo: bytes | None, base: ParagraphStyle
+) -> list[object]:
+    """The optional graphic header at the very top of the page: the
+    issuer logo (left) and/or the free-text ``letterhead`` block (right),
+    followed by a thin rule. Empty list when the issuer set neither."""
+    if issuer is None:
+        return []
+    img = _logo_image(logo)
+    text = (issuer.letterhead or "").strip()
+    if img is None and not text:
+        return []
+    lh_style = ParagraphStyle("letterhead", parent=base, fontSize=9, leading=12)
+    # Escape XML metacharacters before turning newlines into <br/> so an
+    # ampersand or angle bracket in the header cannot break reportlab's
+    # mini-markup (or be mis-parsed as a tag).
+    para = Paragraph(escape(text).replace("\n", "<br/>"), lh_style) if text else None
+    flow: list[object] = []
+    if img is not None and para is not None:
+        band = Table([[img, para]], colWidths=[60 * mm, 112 * mm])
+        band.setStyle(
+            TableStyle(
+                [
+                    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+                    ("TOPPADDING", (0, 0), (-1, -1), 0),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+                ]
+            )
+        )
+        flow.append(band)
+    elif img is not None:
+        flow.append(img)
+    elif para is not None:
+        flow.append(para)
+    flow.append(Spacer(1, 2 * mm))
+    flow.append(HRFlowable(width="100%", thickness=0.6, color=colors.HexColor("#888888")))
+    flow.append(Spacer(1, 3 * mm))
+    return flow
+
+
 def build_pdf(
     invoice: Invoice,
     issuer: IssuerProfile | None,
@@ -277,6 +351,7 @@ def build_pdf(
     *,
     number: str | None = None,
     is_draft: bool = False,
+    logo: bytes | None = None,
 ) -> bytes:
     """Render the courtesy A4 invoice. Tolerant of a still-incomplete
     draft (missing fields render blank) so it can preview a draft.
@@ -333,8 +408,12 @@ def build_pdf(
         # allocated. Show only the sezionale so the placeholder is
         # short and unambiguous.
         display_number = invoice.series
-    issued = (invoice.issued_at or dt.datetime.now(tz=dt.UTC)).date().isoformat()
+    date_fmt = client.invoice_date_format if client is not None else None
+    issued = format_date((invoice.issued_at or dt.datetime.now(tz=dt.UTC)).date(), date_fmt)
 
+    # Optional graphic letterhead (issuer logo + header text) above the
+    # "Fattura" title.
+    flow.extend(_letterhead_flow(issuer, logo, base))
     flow.append(Paragraph(_L(loc, "invoice"), h_title))
     draft_tag = f"  ({_L(loc, 'draft')})" if is_draft else ""
     flow.append(
@@ -550,7 +629,7 @@ def build_pdf(
             pay_rows.append(
                 [
                     Paragraph(_L(loc, "due_date"), small),
-                    Paragraph(invoice.payment_due_date.isoformat(), small),
+                    Paragraph(format_date(invoice.payment_due_date, date_fmt), small),
                 ]
             )
         pay = Table(pay_rows, colWidths=[30 * mm, 90 * mm], hAlign="LEFT")

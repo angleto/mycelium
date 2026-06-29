@@ -78,3 +78,10 @@ class ClientProfile(OrgScopedMixin, TimestampMixin, VersionMixin, Base):
     # "it". The FatturaPA XML is not translated: SdI ignores the field
     # and the legally mandated purpose/dicitura stay verbatim Italian.
     invoice_language: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    # How dates (issue date, due date) are formatted on this client's
+    # courtesy PDF. A closed set of pattern tokens validated at the
+    # service layer (see services/date_format.py): "YYYY-MM-DD" (ISO),
+    # "DD-MM-YYYY", "DD/MM/YYYY", "MM/DD/YYYY", "DD.MM.YYYY". NULL ->
+    # ISO (the historical behaviour). The FatturaPA XML always uses the
+    # SdI date format regardless; this is courtesy-PDF only.
+    invoice_date_format: Mapped[str | None] = mapped_column(String(16), nullable=True)

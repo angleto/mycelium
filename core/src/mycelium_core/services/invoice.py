@@ -105,6 +105,7 @@ _PROFILE_FIELDS = frozenset(
         "default_payment_conditions_code",
         "default_payment_method_code",
         "default_payment_terms_days",
+        "letterhead",
     }
 )
 
@@ -181,6 +182,7 @@ async def create_issuer_profile(
     default_payment_conditions_code: str | None = None,
     default_payment_method_code: str | None = None,
     default_payment_terms_days: int | None = None,
+    letterhead: str | None = None,
     is_default: bool = False,
 ) -> IssuerProfile:
     await require_role(session, org_id, actor_id, Role.admin)
@@ -228,6 +230,7 @@ async def create_issuer_profile(
         default_payment_conditions_code=default_payment_conditions_code,
         default_payment_method_code=default_payment_method_code,
         default_payment_terms_days=default_payment_terms_days,
+        letterhead=letterhead,
         is_default=make_default,
     )
     session.add(p)
@@ -355,6 +358,95 @@ async def delete_issuer_profile(
         entity_id=profile_id,
         action="delete",
     )
+
+
+# --- issuer logo (the courtesy-PDF letterhead image) ---
+
+# A letterhead mark is small; cap it so a misplaced large file cannot
+# bloat the row. PNG/JPEG only (reportlab raster formats); SVG would
+# need an extra dependency.
+LOGO_MAX_BYTES = 512 * 1024
+LOGO_MIMES = frozenset({"image/png", "image/jpeg"})
+
+
+async def set_issuer_logo(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    profile_id: uuid.UUID,
+    data: bytes,
+    mime: str,
+    filename: str | None = None,
+) -> IssuerProfile:
+    """Store/replace the issuer's letterhead logo. PNG/JPEG, size-capped."""
+    await require_role(session, org_id, actor_id, Role.admin)
+    if mime not in LOGO_MIMES:
+        raise DomainError(MessageCode.DOMAIN_ERROR, detail=f"logo mime '{mime}'")
+    if not data:
+        raise DomainError(MessageCode.DOMAIN_ERROR, detail="empty logo")
+    if len(data) > LOGO_MAX_BYTES:
+        raise DomainError(MessageCode.DOMAIN_ERROR, detail="logo too large")
+    p = await get_issuer_profile(session, org_id=org_id, profile_id=profile_id)
+    p.logo_data = data
+    p.logo_mime = mime
+    p.logo_filename = filename
+    p.version += 1
+    await session.flush()
+    await audit.log(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        entity="issuer_profile",
+        entity_id=p.id,
+        action="set_logo",
+    )
+    return p
+
+
+async def get_issuer_logo(
+    session: AsyncSession, *, org_id: uuid.UUID, profile_id: uuid.UUID
+) -> tuple[bytes, str] | None:
+    """The logo bytes + mime, or None when unset. An explicit column-
+    select: ``logo_data`` is a deferred ORM column, so the normal profile
+    queries never pull it; only this path (and the PDF builder) loads it.
+    RLS scopes the row to the tenant session."""
+    row = (
+        await session.execute(
+            select(IssuerProfile.logo_data, IssuerProfile.logo_mime).where(
+                IssuerProfile.id == profile_id
+            )
+        )
+    ).one_or_none()
+    if row is None or row[0] is None:
+        return None
+    return bytes(row[0]), (row[1] or "application/octet-stream")
+
+
+async def clear_issuer_logo(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    profile_id: uuid.UUID,
+) -> IssuerProfile:
+    """Remove the issuer's letterhead logo."""
+    await require_role(session, org_id, actor_id, Role.admin)
+    p = await get_issuer_profile(session, org_id=org_id, profile_id=profile_id)
+    p.logo_data = None
+    p.logo_mime = None
+    p.logo_filename = None
+    p.version += 1
+    await session.flush()
+    await audit.log(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        entity="issuer_profile",
+        entity_id=p.id,
+        action="clear_logo",
+    )
+    return p
 
 
 async def set_conservation_adhesion(
@@ -920,6 +1012,76 @@ async def delete_draft(
     )
 
 
+# Accreditation / SDICoop-interoperability test invoices: the test suite
+# emits them with the "TEST" sezionale and a fixed purpose. They are
+# transmissions to the SdI *test* host, not fiscal documents, so the
+# draft-only deletion guard (which protects real emitted invoices) does
+# not apply. One-off cleanup so the accreditation noise leaves the list.
+TEST_SERIES = "TEST"
+TEST_PURPOSE_PREFIX = "Prestazione di test interoperabilita"
+
+
+async def delete_test_invoices(
+    session: AsyncSession, *, org_id: uuid.UUID, actor_id: uuid.UUID
+) -> int:
+    """Hard-delete this org's accreditation test invoices (series "TEST"
+    + the fixed test purpose) regardless of state, returning the count.
+    Idempotent: a no-op when none remain."""
+    await require_role(session, org_id, actor_id, Role.admin)
+    ids = list(
+        (
+            await session.execute(
+                select(Invoice.id).where(
+                    Invoice.series == TEST_SERIES,
+                    Invoice.purpose.like(f"{TEST_PURPOSE_PREFIX}%"),
+                )
+            )
+        ).scalars()
+    )
+    if not ids:
+        return 0
+    # invoice_notifications FK is ON DELETE RESTRICT -> remove the audit
+    # rows first; invoice_lines cascade with the invoice row.
+    await session.execute(
+        delete(InvoiceNotification).where(InvoiceNotification.invoice_id.in_(ids))
+    )
+    await session.execute(delete(Invoice).where(Invoice.id.in_(ids)))
+    # Drop the now-empty TEST counter rows so the test sezionale does not
+    # linger (numbering is per issuer+series+year; RLS scopes to this org).
+    await session.execute(delete(InvoiceCounter).where(InvoiceCounter.series == TEST_SERIES))
+    await session.flush()
+    await audit.log(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        entity="invoice",
+        entity_id=None,
+        action="purge_test_invoices",
+        diff={"deleted": len(ids)},
+    )
+    return len(ids)
+
+
+async def list_invoice_notifications(
+    session: AsyncSession, *, org_id: uuid.UUID, invoice_id: uuid.UUID
+) -> list[InvoiceNotification]:
+    """Every SdI notification recorded against this invoice, oldest first
+    (the transmission timeline: RC/MC/NS/AT/NE/DT). Validates the invoice
+    is in the tenant first (404 otherwise)."""
+    await get_invoice(session, org_id=org_id, invoice_id=invoice_id)
+    return list(
+        (
+            await session.execute(
+                select(InvoiceNotification)
+                .where(InvoiceNotification.invoice_id == invoice_id)
+                .order_by(InvoiceNotification.received_at.asc())
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+
 async def _resolve_issuer(
     session: AsyncSession, *, org_id: uuid.UUID, inv: Invoice
 ) -> IssuerProfile | None:
@@ -1474,11 +1636,21 @@ async def list_invoices(
     *,
     org_id: uuid.UUID,
     state: InvoiceState | None = None,
+    states: Sequence[InvoiceState] | None = None,
+    payment_status: PaymentStatus | None = None,
     client_tag_id: uuid.UUID | None = None,
 ) -> list[Invoice]:
+    """List invoices, newest first. ``state`` (single) is kept for
+    existing callers; ``states`` (the lifecycle multi-select used by the
+    SPA) takes precedence when given. ``payment_status`` is an orthogonal
+    axis (paid/unpaid), AND-ed with the state filter."""
     stmt = select(Invoice)
-    if state is not None:
+    if states:
+        stmt = stmt.where(Invoice.state.in_(list(states)))
+    elif state is not None:
         stmt = stmt.where(Invoice.state == state)
+    if payment_status is not None:
+        stmt = stmt.where(Invoice.payment_status == payment_status)
     if client_tag_id is not None:
         stmt = stmt.where(Invoice.client_tag_id == client_tag_id)
     stmt = stmt.order_by(Invoice.year.desc(), Invoice.number.desc().nullslast())
@@ -1627,5 +1799,16 @@ async def render_pdf(
     # "BOZZA" alone hides the information the user actually needs
     # (which number am I about to emit?).
     is_draft = inv.state == InvoiceState.draft
-    pdf = build_pdf(inv, p.issuer, p.client, p.lines, p.totals, number=p.number, is_draft=is_draft)
+    # Load the (deferred) letterhead logo only here, on the PDF path.
+    logo_row = await get_issuer_logo(session, org_id=org_id, profile_id=p.issuer.id)
+    pdf = build_pdf(
+        inv,
+        p.issuer,
+        p.client,
+        p.lines,
+        p.totals,
+        number=p.number,
+        is_draft=is_draft,
+        logo=logo_row[0] if logo_row else None,
+    )
     return p.number, pdf

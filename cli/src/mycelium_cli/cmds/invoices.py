@@ -173,3 +173,16 @@ def xml(invoice_id: str = typer.Argument(..., help="Invoice id (full or short pr
         emit_json(row)
         return
     out().print(row.get("xml", ""))
+
+
+@app.command("purge-test")
+def purge_test() -> None:
+    """Delete the SdI accreditation test invoices (series "TEST"). Owner only.
+    One-off cleanup so the accreditation noise leaves the invoice list."""
+    with client() as c:
+        row = get_json(c.post("/invoices/purge-test", json={}))
+    deleted = row.get("deleted", 0)
+    if json_mode():
+        emit_json(row)
+        return
+    out().print(f"[green]deleted[/green] {deleted} test invoice(s).")

@@ -466,6 +466,10 @@ class ClientCreateIn(BaseModel):
     # untouched (SdI ignores this field; legal purpose/dicitura remain
     # in Italian regardless).
     invoice_language: str | None = Field(default=None, max_length=8)
+    # Date format token for the courtesy PDF (closed set validated at the
+    # service layer: YYYY-MM-DD | DD-MM-YYYY | DD/MM/YYYY | MM/DD/YYYY |
+    # DD.MM.YYYY). NULL -> ISO. Courtesy-PDF only; the XML is unaffected.
+    invoice_date_format: str | None = Field(default=None, max_length=16)
 
 
 class ProjectCreateIn(BaseModel):
@@ -502,6 +506,7 @@ class ClientPatchIn(BaseModel):
     default_payment_method_code: str | None = Field(default=None, max_length=4)
     default_payment_terms_days: int | None = Field(default=None, ge=0, le=365)
     invoice_language: str | None = Field(default=None, max_length=8)
+    invoice_date_format: str | None = Field(default=None, max_length=16)
 
 
 class ClientOut(BaseModel):
@@ -533,6 +538,7 @@ class ClientOut(BaseModel):
     default_payment_method_code: str | None
     default_payment_terms_days: int | None
     invoice_language: str | None
+    invoice_date_format: str | None
 
 
 class ProjectPatchIn(BaseModel):
@@ -2694,6 +2700,9 @@ class IssuerProfileIn(BaseModel):
     default_payment_conditions_code: str | None = Field(default=None, max_length=4)
     default_payment_method_code: str | None = Field(default=None, max_length=4)
     default_payment_terms_days: int | None = Field(default=None, ge=0, le=365)
+    # Free-text header block (the "intestazione") printed at the top of
+    # the courtesy PDF; the logo image is uploaded separately.
+    letterhead: str | None = Field(default=None, max_length=2000)
     is_default: bool = False
 
 
@@ -2722,6 +2731,7 @@ class IssuerProfilePatchIn(BaseModel):
     default_payment_conditions_code: str | None = Field(default=None, max_length=4)
     default_payment_method_code: str | None = Field(default=None, max_length=4)
     default_payment_terms_days: int | None = Field(default=None, ge=0, le=365)
+    letterhead: str | None = Field(default=None, max_length=2000)
     is_default: bool | None = None
 
 
@@ -2751,6 +2761,9 @@ class IssuerProfileOut(BaseModel):
     default_payment_conditions_code: str | None
     default_payment_method_code: str | None
     default_payment_terms_days: int | None
+    letterhead: str | None
+    logo_mime: str | None
+    has_logo: bool
     is_default: bool
     conservation_adhesion: str
     version: int
@@ -2903,6 +2916,30 @@ class EsitoCommittenteOut(BaseModel):
 
 class InvoiceXmlOut(BaseModel):
     xml: str
+
+
+class InvoiceNotificationError(BaseModel):
+    """One ``Errore`` from a NotificaScarto error list."""
+
+    codice: str
+    descrizione: str
+
+
+class InvoiceNotificationOut(BaseModel):
+    """One SdI notification in the invoice's transmission timeline. ``esito``
+    is the buyer EC verdict (EC01 accepted / EC02 rejected) on an NE;
+    ``errors`` is the rejection list on an NS (empty for every other kind)."""
+
+    kind: str
+    received_at: datetime.datetime
+    file_name: str | None
+    message_id: str | None
+    esito: str | None
+    errors: list[InvoiceNotificationError]
+
+
+class PurgeTestInvoicesOut(BaseModel):
+    deleted: int
 
 
 class InvoicePreviewParty(BaseModel):

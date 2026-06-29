@@ -151,6 +151,30 @@ def parse_notification(raw: bytes) -> ParsedNotification:
     )
 
 
+def parse_scarto_errors(raw: bytes) -> list[dict[str, str]]:
+    """Extract the rejection errors from a NotificaScarto / RicevutaScarto
+    payload: each ``ListaErrori/Errore`` becomes ``{"codice", "descrizione"}``.
+
+    The error list is not denormalized at ingest (only the outcome code is),
+    so the detail view parses it back from the stored ``raw_xml`` on demand,
+    which also covers notifications already on file. Returns ``[]`` for any
+    other notification kind or an unparseable blob (never raises: this feeds
+    a read-only UI panel)."""
+    try:
+        root = ET.fromstring(raw)
+    except (ValueError, ET.XMLSyntaxError):
+        return []
+    errors: list[dict[str, str]] = []
+    for el in root.iter():
+        if not isinstance(el.tag, str) or ET.QName(el).localname != "Errore":
+            continue
+        codice = _text(_find_local(el, "Codice"))
+        descrizione = _text(_find_local(el, "Descrizione"))
+        if codice or descrizione:
+            errors.append({"codice": codice or "", "descrizione": descrizione or ""})
+    return errors
+
+
 async def _resolve_org(identificativo: str) -> uuid.UUID | None:
     """Cross-org correlation by IdentificativoSdI via the SECURITY DEFINER
     resolver (bypasses RLS for this one lookup only; migration 0074)."""

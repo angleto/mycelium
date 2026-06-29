@@ -14,7 +14,7 @@ import uuid
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Response, status
+from fastapi import APIRouter, Depends, File, Query, Response, UploadFile, status
 
 from mycelium_api.deps import TenantCtx, tenant_ctx
 from mycelium_api.schemas import (
@@ -25,6 +25,8 @@ from mycelium_api.schemas import (
     InvoiceCreateIn,
     InvoiceLineIn,
     InvoiceLineOut,
+    InvoiceNotificationError,
+    InvoiceNotificationOut,
     InvoiceOut,
     InvoicePatchIn,
     InvoicePreviewLine,
@@ -35,17 +37,25 @@ from mycelium_api.schemas import (
     IssuerProfileIn,
     IssuerProfileOut,
     IssuerProfilePatchIn,
+    PurgeTestInvoicesOut,
     ReceiptIn,
     SdiMandateIn,
     SdiMandateOut,
     TransmitIn,
 )
-from mycelium_core.models.invoice import Invoice, InvoiceLine, IssuerProfile
+from mycelium_core.models.invoice import (
+    Invoice,
+    InvoiceLine,
+    InvoiceState,
+    IssuerProfile,
+    PaymentStatus,
+)
 from mycelium_core.models.membership import Role
 from mycelium_core.models.sdi_mandate import SdiMandate
 from mycelium_core.services import invoice as svc
 from mycelium_core.services import sdi_mandate as msvc
 from mycelium_core.services.rbac import ensure_role
+from mycelium_core.services.sdi_inbound import parse_scarto_errors
 
 router = APIRouter(tags=["invoices"])
 
@@ -121,6 +131,9 @@ def _ip_out(p: IssuerProfile) -> IssuerProfileOut:
         default_payment_conditions_code=p.default_payment_conditions_code,
         default_payment_method_code=p.default_payment_method_code,
         default_payment_terms_days=p.default_payment_terms_days,
+        letterhead=p.letterhead,
+        logo_mime=p.logo_mime,
+        has_logo=p.logo_mime is not None,
         is_default=p.is_default,
         conservation_adhesion=p.conservation_adhesion.value,
         version=p.version,
@@ -185,6 +198,7 @@ async def create_issuer_profile(
         default_payment_conditions_code=body.default_payment_conditions_code,
         default_payment_method_code=body.default_payment_method_code,
         default_payment_terms_days=body.default_payment_terms_days,
+        letterhead=body.letterhead,
         is_default=body.is_default,
     )
     return _ip_out(p)
@@ -256,6 +270,55 @@ async def delete_issuer_profile(
     await svc.delete_issuer_profile(
         ctx.session, org_id=ctx.org_id, actor_id=ctx.user_id, profile_id=profile_id
     )
+
+
+# --- issuer letterhead logo (courtesy-PDF image) ---
+
+
+@router.post("/issuer-profiles/{profile_id}/logo", response_model=IssuerProfileOut)
+async def upload_issuer_logo(
+    profile_id: uuid.UUID,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+    file: Annotated[UploadFile, File()],
+) -> IssuerProfileOut:
+    ensure_role(ctx.role, Role.owner)
+    # Bound the read to the cap + 1 byte: the service rejects anything
+    # over the cap, and we never buffer an unbounded upload in memory.
+    data = await file.read(svc.LOGO_MAX_BYTES + 1)
+    p = await svc.set_issuer_logo(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        profile_id=profile_id,
+        data=data,
+        mime=file.content_type or "",
+        filename=file.filename,
+    )
+    return _ip_out(p)
+
+
+@router.get("/issuer-profiles/{profile_id}/logo")
+async def get_issuer_logo(
+    profile_id: uuid.UUID,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+) -> Response:
+    logo = await svc.get_issuer_logo(ctx.session, org_id=ctx.org_id, profile_id=profile_id)
+    if logo is None:
+        return Response(status_code=status.HTTP_404_NOT_FOUND)
+    data, mime = logo
+    return Response(content=data, media_type=mime, headers={"Cache-Control": "no-store"})
+
+
+@router.delete("/issuer-profiles/{profile_id}/logo", response_model=IssuerProfileOut)
+async def delete_issuer_logo(
+    profile_id: uuid.UUID,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+) -> IssuerProfileOut:
+    ensure_role(ctx.role, Role.owner)
+    p = await svc.clear_issuer_logo(
+        ctx.session, org_id=ctx.org_id, actor_id=ctx.user_id, profile_id=profile_id
+    )
+    return _ip_out(p)
 
 
 # --- invoice counter override (migration from another billing system) ---
@@ -486,9 +549,59 @@ async def get_invoice(
 @router.get("/invoices", response_model=list[InvoiceOut])
 async def list_invoices(
     ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+    state: Annotated[list[InvoiceState] | None, Query()] = None,
+    payment_status: Annotated[PaymentStatus | None, Query()] = None,
 ) -> list[InvoiceOut]:
-    rows = await svc.list_invoices(ctx.session, org_id=ctx.org_id)
+    """List invoices, newest first. ``state`` is repeatable (the SPA's
+    lifecycle multi-select, default Draft+Transmitted); ``payment_status``
+    is an orthogonal paid/unpaid filter."""
+    rows = await svc.list_invoices(
+        ctx.session, org_id=ctx.org_id, states=state, payment_status=payment_status
+    )
     return [_inv_out(i) for i in rows]
+
+
+@router.get(
+    "/invoices/{invoice_id}/notifications",
+    response_model=list[InvoiceNotificationOut],
+)
+async def list_invoice_notifications(
+    invoice_id: uuid.UUID,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+) -> list[InvoiceNotificationOut]:
+    """The SdI transmission timeline for an invoice: RC/MC/NS/AT/NE/DT,
+    oldest first. An NS carries the parsed rejection error list; an NE the
+    buyer's EC verdict."""
+    rows = await svc.list_invoice_notifications(
+        ctx.session, org_id=ctx.org_id, invoice_id=invoice_id
+    )
+    out: list[InvoiceNotificationOut] = []
+    for n in rows:
+        errors = parse_scarto_errors(n.raw_xml) if n.kind == "NS" else []
+        esito = n.payload.get("esito") if isinstance(n.payload, dict) else None
+        out.append(
+            InvoiceNotificationOut(
+                kind=n.kind,
+                received_at=n.received_at,
+                file_name=n.file_name,
+                message_id=n.message_id,
+                esito=esito if isinstance(esito, str) else None,
+                errors=[InvoiceNotificationError(**e) for e in errors],
+            )
+        )
+    return out
+
+
+@router.post("/invoices/purge-test", response_model=PurgeTestInvoicesOut)
+async def purge_test_invoices(
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+) -> PurgeTestInvoicesOut:
+    """Hard-delete this org's accreditation test invoices (series "TEST" +
+    the fixed SDICoop interoperability purpose). Owner only; one-off
+    cleanup after accreditation."""
+    ensure_role(ctx.role, Role.owner)
+    deleted = await svc.delete_test_invoices(ctx.session, org_id=ctx.org_id, actor_id=ctx.user_id)
+    return PurgeTestInvoicesOut(deleted=deleted)
 
 
 @router.post("/invoices/{invoice_id}/transmit", response_model=InvoiceOut)

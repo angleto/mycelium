@@ -22,6 +22,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Integer,
+    LargeBinary,
     Numeric,
     PrimaryKeyConstraint,
     String,
@@ -161,6 +162,18 @@ class IssuerProfile(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, B
         nullable=False,
         server_default="none",
     )
+    # --- letterhead (the graphic header printed at the top of the
+    # courtesy PDF). Free-text ``letterhead`` (a multi-line block, e.g.
+    # tagline / web / contacts) and an optional raster logo. Both are
+    # courtesy-only: the FatturaPA XML carries none of this. The logo
+    # bytes live in a DEFERRED column so the many issuer-profile list/get
+    # queries never pull them; the PDF path and the logo endpoint load
+    # them explicitly (an undeferred column-select). Same "bytes in the
+    # row, atomic with it" model as ``attachments.data`` on the pg store.
+    letterhead: Mapped[str | None] = mapped_column(Text, nullable=True)
+    logo_mime: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    logo_filename: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    logo_data: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True, deferred=True)
 
 
 class InvoiceCounter(Base):
