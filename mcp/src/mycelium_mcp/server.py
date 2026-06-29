@@ -3533,6 +3533,8 @@ def _retrieval_meta(m: memory_svc.RetrievalMeta) -> dict[str, Any]:
         "dense_branch_contributed": m.dense_branch_contributed,
         "dense_rejected_by_floor": m.dense_rejected_by_floor,
         "keyword_only_hits": m.keyword_only_hits,
+        "abstained": m.abstained,
+        "abstain_reason": m.abstain_reason,
     }
 
 
@@ -3619,7 +3621,21 @@ async def memory_search(
         page = hits[offset : offset + limit] if offset > 0 else hits[:limit]
         tagmap = await memory_svc.tags_by_blob(s, blob_ids=[h.blob.id for h in page])
         return {
-            "hits": [{"blob": _blob(h.blob, tagmap.get(h.blob.id)), "rrf": h.rrf} for h in page],
+            "hits": [
+                {
+                    "blob": _blob(h.blob, tagmap.get(h.blob.id)),
+                    "rrf": h.rrf,
+                    # Why this hit ranked here (WS-B2 / R8): the per-stage RRF
+                    # branch scores + rerank logit, the winning chunk, its
+                    # snippet, and the humus provenance marker -- so an agent
+                    # can reason about retrieval quality, not just the order.
+                    "scores_by_stage": h.scores_by_stage,
+                    "chunk_index": h.chunk_index,
+                    "chunk_snippet": h.chunk_snippet,
+                    "provenance": h.provenance,
+                }
+                for h in page
+            ],
             "meta": _retrieval_meta(meta),
         }
 
@@ -3661,6 +3677,46 @@ async def graph_focus_context(
                 "provenance": n.provenance,
             }
             for n in nodes
+        ]
+
+
+@mcp.tool()
+async def graph_walk(
+    token: str,
+    org_id: str,
+    seed: str,
+    mode: str = "focused",
+    budget: int = 24,
+) -> list[dict[str, Any]]:
+    """Traverse the note graph ("micelio") rooted at ``seed`` and return the
+    walked notes as a reading set (WS-B2).
+
+    ``mode='focused'`` returns the seed's personalised-PageRank neighbourhood
+    ordered by induced mass (its "neighbourhood of attention").
+    ``mode='free_wander'`` runs a Node2Vec biased random walk that drifts
+    across the graph for cross-domain serendipity (humus-biased, ADR-0034).
+    Each step carries ``title`` + ``snippet`` + ``provenance`` so you can
+    navigate multi-hop WITHOUT a lookup per node. For a QUERY-aware reading
+    set use ``graph_focus_context`` instead. Read-only; no LLM."""
+    async with _tenant(token, org_id) as (s, org, user):
+        steps = await focus_context_svc.walk_context(
+            s,
+            org_id=org,
+            actor_id=user,
+            seed_id=uuid.UUID(seed),
+            mode=mode,
+            budget=budget,
+        )
+        return [
+            {
+                "note_id": str(w.note_id),
+                "step": w.step,
+                "weight": w.weight,
+                "title": w.title,
+                "snippet": w.snippet,
+                "provenance": w.provenance,
+            }
+            for w in steps
         ]
 
 
@@ -4776,18 +4832,34 @@ async def gdpr_erase_note(token: str, org_id: str, note_id: str) -> dict[str, An
 
 
 @mcp.tool()
-async def distill_note(token: str, org_id: str, note_id: str) -> dict[str, Any]:
+async def distill_note(
+    token: str,
+    org_id: str,
+    note_id: str,
+    distilled_text: str | None = None,
+    origin_model_id: str | None = None,
+) -> dict[str, Any]:
     """Fungal decomposition (ADR-0034): distil a note's body into a
     reusable atom note and flag both source and distillation as humus so
     the LLM walk surfaces them as fertiliser. Idempotent: an
     already-distilled note returns its existing distillation
-    (``created`` false). Member role; metered LLM call inside."""
+    (``created`` false). Member role.
+
+    By default Mycelium runs the distillation on the org's own metered LLM.
+    To write the atom with YOUR OWN strong model instead, pass
+    ``distilled_text`` (the distillation you produced from the note's body)
+    and optionally ``origin_model_id`` (your model's id, recorded for
+    provenance). On that path the internal LLM call and the verify pass are
+    skipped and Mycelium meters no model call (only the flat gateway fee
+    applies) -- the grounding/fidelity is then YOURS to guarantee."""
     async with _tenant(token, org_id) as (s, org, user):
         res = await decomposition_svc.distill_note(
             s,
             org_id=org,
             actor_id=user,
             note_id=uuid.UUID(note_id),
+            distilled_text=distilled_text,
+            origin_model_id=origin_model_id,
         )
         return {
             "source_note_id": note_id,

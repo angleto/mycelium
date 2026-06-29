@@ -141,6 +141,27 @@ async def test_grader_min_keeps_strong_top() -> None:
     assert len(out) == 2
 
 
+async def test_grader_min_records_abstain_on_ctx() -> None:
+    # WS-B1: a deliberate abstain (empty result because the top hit is below
+    # the floor) must leave a marker so RetrievalMeta can tell it apart from a
+    # genuinely empty index.
+    ctx = _ctx_stub()
+    out = await GraderMinStage(min_score=0.05).run(
+        "q", ctx, [Candidate(blob_id=uuid.uuid4(), score=0.01)]
+    )
+    assert out == []
+    assert ctx.extras.get("grader_abstained") is True
+
+
+async def test_grader_min_no_abstain_marker_when_kept() -> None:
+    ctx = _ctx_stub()
+    out = await GraderMinStage(min_score=0.05).run(
+        "q", ctx, [Candidate(blob_id=uuid.uuid4(), score=0.5)]
+    )
+    assert len(out) == 1
+    assert "grader_abstained" not in ctx.extras
+
+
 async def test_limit_truncates() -> None:
     cands = [Candidate(blob_id=uuid.uuid4(), score=1.0 - i * 0.1) for i in range(10)]
     out = await LimitStage(k=3).run("q", _ctx_stub(), cands)

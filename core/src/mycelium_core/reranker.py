@@ -46,9 +46,11 @@ class Reranker(Protocol):
 
 
 class NoopReranker:
-    """Identity reranker: scores all docs equal so the OrderingStage
-    falls back to the upstream RRF order. Used when the feature is
-    disabled (the gate keeps the production default off)."""
+    """Identity reranker used when the feature is gated off. It scores all
+    docs 0.0, but the ``CrossEncoderRerankerStage`` detects it and passes
+    candidates through UNCHANGED -- applying a flat 0.0 would let the
+    downstream ``OrderingStage`` re-sort on the created_at tiebreak and
+    destroy the upstream RRF order. The production default keeps it off."""
 
     model_id = "noop"
 

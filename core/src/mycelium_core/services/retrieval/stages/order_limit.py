@@ -77,6 +77,10 @@ class GraderMinStage(Stage):
         top = candidates[0]
         fused = top.scores_by_stage.get("rrf", top.score)
         if fused < self.min_score:
+            # Record the abstain so RetrievalMeta can tell a deliberate
+            # "no answer above the floor" from a genuinely empty index
+            # (the empty result is otherwise byte-identical). WS-B1.
+            ctx.extras["grader_abstained"] = True
             return []
         return candidates
 

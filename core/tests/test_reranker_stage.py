@@ -31,6 +31,16 @@ class _StaticReranker:
         return RerankResult(scores=scores, model_id=self.model_id)
 
 
+class _RaisingReranker:
+    """A reranker whose model load/predict fails (the missing optional extra
+    in prod). The stage must degrade to the RRF order, not crash the search."""
+
+    model_id = "boom"
+
+    async def rerank(self, query: str, pairs: Sequence[str]) -> RerankResult:
+        raise RuntimeError("reranker model unavailable")
+
+
 @pytest.fixture(autouse=True)
 def _reset_reranker_override() -> Iterator[None]:
     yield
@@ -163,3 +173,41 @@ def test_provider_override_seam() -> None:
 
     assert get_reranker() is sentinel
     _ = cast(NoopReranker, get_reranker())  # type narrows
+
+
+async def test_rerank_degrades_gracefully_on_provider_failure() -> None:
+    # A missing/broken cross-encoder model must NOT crash the search: the
+    # stage degrades to the upstream RRF order (mirrors memory._safe_embed).
+    # This is the prerequisite that makes enabling the reranker by default safe.
+    stage = CrossEncoderRerankerStage(
+        provider=_RaisingReranker(),
+        gate=RerankGate(min_query_tokens=1, min_candidates=1),
+    )
+    a = _cand("alpha", score=0.05)
+    b = _cand("bravo", score=0.04)
+    a.scores_by_stage = {"rrf": 0.05}
+    b.scores_by_stage = {"rrf": 0.04}
+    ctx = _ctx_stub()
+    out = await stage.run("one two three", ctx, [a, b])
+    assert out == [a, b]
+    assert a.score == 0.05 and b.score == 0.04
+    assert "rerank" not in a.scores_by_stage
+    assert ctx.extras.get("rerank_failed") is True
+
+
+async def test_rerank_noop_provider_preserves_rrf_order() -> None:
+    # A Noop reranker (feature gated off but rerank requested per-call) must
+    # pass through UNCHANGED; applying its flat 0.0 scores would let
+    # OrderingStage re-sort on the created_at tiebreak and destroy RRF order.
+    stage = CrossEncoderRerankerStage(
+        provider=NoopReranker(),
+        gate=RerankGate(min_query_tokens=1, min_candidates=1),
+    )
+    a = _cand("alpha", score=0.05)
+    b = _cand("bravo", score=0.04)
+    a.scores_by_stage = {"rrf": 0.05}
+    b.scores_by_stage = {"rrf": 0.04}
+    out = await stage.run("one two three", _ctx_stub(), [a, b])
+    assert out == [a, b]
+    assert a.score == 0.05 and b.score == 0.04
+    assert "rerank" not in a.scores_by_stage

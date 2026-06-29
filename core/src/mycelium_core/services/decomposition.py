@@ -169,6 +169,8 @@ async def distill_note(
     note_id: uuid.UUID,
     llm: LLMProvider | None = None,
     autonomous: bool = False,
+    distilled_text: str | None = None,
+    origin_model_id: str | None = None,
 ) -> DistillationResult:
     """Read the source note's body, generate a distillation via the
     LLM provider, and persist it as a new note linked to the source.
@@ -214,39 +216,50 @@ async def distill_note(
     body = await notes_svc.get_body(session, note_id=note_id)
     if not body or not body.strip():
         raise DomainError(MessageCode.DOMAIN_ERROR)
-    # Route through the per-org METERED seam (WS-C3): an org on a hosted
-    # provider (anthropic/scaleway/openai) gets ITS model and is charged,
-    # instead of silently falling back to the local model for free -- the
-    # bug this fixes, where the metering the docstrings/ADRs promise was
-    # bypassed by a bare get_llm(). ``llm`` stays an explicit test/override
-    # injection. The operation_id is deterministic so a retried distill
-    # never double-charges (the idempotency guard above already prevents a
-    # second LLM call once the humus atom exists).
-    provider = llm or await resolve_llm(
-        session,
-        org_id,
-        actor_id=actor_id,
-        operation_id=f"distill:{org_id}:{note_id}",
-        op="distill",
-    )
-    res = await provider.complete(
-        system=_DISTILL_SYSTEM,
-        messages=[("user", body)],
-    )
-    # Fidelity verify pass (task a44e72a4): keep only the claims the source
-    # supports before persisting. Gated (cost-doubling second LLM call); off
-    # by default leaves ``res.text`` as the draft, byte-identical.
-    distilled_text = res.text
-    if get_settings().distill_verify_pass_enabled:
-        distilled_text = await _verify_against_source(
+    if distilled_text is not None and distilled_text.strip():
+        # dec45ebc: an external MCP caller (running its OWN strong model)
+        # supplied the distillation text directly. Persist it verbatim and
+        # attribute it to the caller's model, SKIPPING the internal metered
+        # LLM call and the verify pass. Mycelium never observes the caller's
+        # model spend (only the flat mcp_io gateway fee applies), so no
+        # ``distill:`` UsageRecord is produced on this path -- by design.
+        final_text = distilled_text.strip()
+        model_id = origin_model_id or "external"
+    else:
+        # Route through the per-org METERED seam (WS-C3): an org on a hosted
+        # provider (anthropic/scaleway/openai) gets ITS model and is charged,
+        # instead of silently falling back to the local model for free -- the
+        # bug this fixes, where the metering the docstrings/ADRs promise was
+        # bypassed by a bare get_llm(). ``llm`` stays an explicit test/override
+        # injection. The operation_id is deterministic so a retried distill
+        # never double-charges (the idempotency guard above already prevents a
+        # second LLM call once the humus atom exists).
+        provider = llm or await resolve_llm(
             session,
-            org_id=org_id,
+            org_id,
             actor_id=actor_id,
-            note_id=note_id,
-            source=body,
-            draft=res.text,
-            llm=llm,
+            operation_id=f"distill:{org_id}:{note_id}",
+            op="distill",
         )
+        res = await provider.complete(
+            system=_DISTILL_SYSTEM,
+            messages=[("user", body)],
+        )
+        # Fidelity verify pass (task a44e72a4): keep only the claims the source
+        # supports before persisting. Gated (cost-doubling second LLM call); off
+        # by default leaves ``res.text`` as the draft, byte-identical.
+        final_text = res.text
+        if get_settings().distill_verify_pass_enabled:
+            final_text = await _verify_against_source(
+                session,
+                org_id=org_id,
+                actor_id=actor_id,
+                note_id=note_id,
+                source=body,
+                draft=res.text,
+                llm=llm,
+            )
+        model_id = res.model_id
     title = (source.title or "").strip()
     distill_title = f"Distillation · {title or 'untitled'}"[:300]
     # Migration 0016: the source's project lives in the junction;
@@ -258,7 +271,7 @@ async def distill_note(
         actor_id=actor_id,
         kind=NoteKind.text,
         title=distill_title,
-        text=distilled_text,
+        text=final_text,
         project_id=source_project_id,
     )
     distilled.humus_kind = "distillation"
@@ -266,7 +279,7 @@ async def distill_note(
     # ADR-0043: the generating model on the artifact (transparency,
     # unconditional) + the review gate (proposed only for an autonomous,
     # gate-enabled run; NULL/effective otherwise).
-    distilled.origin_model_id = res.model_id
+    distilled.origin_model_id = model_id
     distilled.review_state = _review_state_for(autonomous)
     # Anti-mutation invariant (task 8a26c000): the source becomes humus
     # only if it is inert (archived/dormant, no open linked work, past the
@@ -315,7 +328,7 @@ async def distill_note(
                 signals_snapshot={
                     "trigger": "distill",
                     "distilled_note_id": str(distilled.id),
-                    "distill_model_id": res.model_id,
+                    "distill_model_id": model_id,
                 },
             )
         )
@@ -348,7 +361,7 @@ async def distill_note(
         )
     )
     await session.flush()
-    return DistillationResult(distilled_note_id=distilled.id, model_id=res.model_id, created=True)
+    return DistillationResult(distilled_note_id=distilled.id, model_id=model_id, created=True)
 
 
 # ── Phase 2: pattern extraction + season synthesis (e87daff4, ADR-0039) ──

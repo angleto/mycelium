@@ -22,6 +22,8 @@ from dataclasses import dataclass
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from mycelium_core.errors import DomainError
+from mycelium_core.i18n import MessageCode
 from mycelium_core.models.membership import Role
 from mycelium_core.models.memory_blob import MemoryBlob
 from mycelium_core.models.note import Note
@@ -51,6 +53,22 @@ class FocusNode:
     score: float
     # "humus" when the note is archived/decomposed material (ADR-0034), so
     # the caller can render the leaf marker, else None.
+    provenance: str | None
+
+
+@dataclass(frozen=True)
+class WalkStep:
+    """One step of a graph_walk traversal (WS-B2). ``step`` is the 1-based
+    rank for ``focused`` mode and the 0-based hop index for ``free_wander``;
+    ``weight`` is the induced PPR mass (focused) or a decaying 1/step
+    (free_wander). title/snippet/provenance are resolved so a caller can
+    navigate multi-hop without a lookup per node."""
+
+    note_id: uuid.UUID
+    step: int
+    weight: float
+    title: str | None
+    snippet: str | None
     provenance: str | None
 
 
@@ -128,6 +146,65 @@ async def focus_context(
             provenance="humus" if humus.get(nid) else None,
         )
         for nid, score in final
+    ]
+
+
+async def walk_context(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    seed_id: uuid.UUID,
+    mode: str = "focused",
+    budget: int = 24,
+    p: float = 1.0,
+    q: float = 1.0,
+    seed_rng: int | None = None,
+) -> list[WalkStep]:
+    """A graph traversal rooted at ``seed_id`` resolved to a reading set.
+
+    ``focused`` ranks the seed's neighbourhood by personalised-PageRank mass
+    (the "neighbourhood of attention"); ``free_wander`` runs a Node2Vec
+    second-order biased random walk (humus-biased, ADR-0034) for cross-domain
+    serendipity. Each step carries title + snippet + provenance. RLS-scoped;
+    member role required. Read-only, vendor-neutral (no LLM).
+
+    Mirrors the ``GET /garden/walk`` route so the SPA and an MCP agent share
+    one traversal; ``graph_focus_context`` remains the QUERY-aware variant."""
+    await require_role(session, org_id, actor_id, Role.member)
+    pairs: list[tuple[uuid.UUID, int, float]]
+    if mode == "focused":
+        ranks = await graph_svc.compute_personalized_pagerank(
+            session, org_id=org_id, seed_ids=[seed_id]
+        )
+        ordered = sorted(
+            ((nid, m) for nid, m in ranks.items() if nid != seed_id and m > 0.0),
+            key=lambda kv: (-kv[1], str(kv[0])),
+        )[:budget]
+        pairs = [(nid, i + 1, mass) for i, (nid, mass) in enumerate(ordered)]
+    elif mode == "free_wander":
+        path = await graph_svc.biased_random_walk(
+            session, org_id=org_id, seed_id=seed_id, budget=budget, p=p, q=q, seed_rng=seed_rng
+        )
+        pairs = [
+            (nid, i, 1.0 / max(1, i)) for i, nid in enumerate(path) if nid != seed_id or i == 0
+        ]
+    else:
+        # Unknown mode: refuse rather than silently default (docs/adr/0021).
+        raise DomainError(MessageCode.DOMAIN_ERROR)
+    note_ids = [nid for nid, _, _ in pairs]
+    titles, humus = await _titles_and_humus(session, note_ids)
+    snippets = await _snippets(session, note_ids)
+    return [
+        WalkStep(
+            note_id=nid,
+            step=step,
+            weight=weight,
+            title=titles.get(nid),
+            snippet=snippets.get(nid),
+            provenance="humus" if humus.get(nid) else None,
+        )
+        for nid, step, weight in pairs
     ]
 
 
@@ -220,4 +297,4 @@ async def _snippets(
     return out
 
 
-__all__ = ["FocusNode", "focus_context"]
+__all__ = ["FocusNode", "WalkStep", "focus_context", "walk_context"]

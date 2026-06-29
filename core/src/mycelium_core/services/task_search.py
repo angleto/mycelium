@@ -624,11 +624,17 @@ async def search_unified_with_meta(
     metas: list[RetrievalMeta] = []
 
     def _aggregate(final: list[UnifiedHit]) -> RetrievalMeta:
+        abstained_metas = [m for m in metas if m.abstained]
         return memory_svc.RetrievalMeta(
             query_embedded=any(m.query_embedded for m in metas),
             dense_branch_contributed=any(m.dense_branch_contributed for m in metas),
             dense_rejected_by_floor=sum(m.dense_rejected_by_floor for m in metas),
             keyword_only_hits=sum(1 for h in final if (h.model_id or "none") == "none"),
+            # A branch abstained if its per-org grader floor dropped its top
+            # hit; surface it on the unified meta so a thin unified result
+            # isn't misread as "nothing indexed" (WS-B1).
+            abstained=bool(abstained_metas),
+            abstain_reason=abstained_metas[0].abstain_reason if abstained_metas else None,
         )
 
     if not want_task and not want_note and not want_blob:

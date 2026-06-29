@@ -128,6 +128,8 @@ async def test_mcp_tools_return_the_meta_envelope(_fake_embedder: None) -> None:
         "dense_branch_contributed",
         "dense_rejected_by_floor",
         "keyword_only_hits",
+        "abstained",
+        "abstain_reason",
     }
     ms = await memory_search(
         token=token, org_id=org, query="kilo", operation_id="q4", project_id=proj

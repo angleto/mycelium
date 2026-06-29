@@ -47,7 +47,7 @@ handles (see the generated `tasks` section below). An agent never needs to
 over-fetch the org table and filter in its head.
 
 <!-- BEGIN GENERATED: mcp tool inventory (scripts/gen_mcp_coverage.py) -->
-**237 tools across 13 domains.** This inventory is generated from the live registry by `scripts/gen_mcp_coverage.py` — do not edit by hand; run `make mcp-coverage` to refresh. The one-line summary is each tool's first docstring line, so it cannot drift from the code.
+**238 tools across 13 domains.** This inventory is generated from the live registry by `scripts/gen_mcp_coverage.py` — do not edit by hand; run `make mcp-coverage` to refresh. The one-line summary is each tool's first docstring line, so it cannot drift from the code.
 
 ### search (3)
 
@@ -57,7 +57,7 @@ over-fetch the org table and filter in its head.
 | `memory_search` | Hybrid RRF retrieval within the (org, project) boundary. |
 | `search` | Unified search across tasks/notes/blobs; the TASK branch is org-wide |
 
-### navigation (18)
+### navigation (19)
 
 | Tool | Summary |
 |---|---|
@@ -65,6 +65,7 @@ over-fetch the org table and filter in its head.
 | `add_dependency` | Add a typed task dependency (FS/SS/FF/SF). Cycles are rejected. |
 | `add_task_relation` | Link two tasks as "related" (symmetric, bidirectional; NOT a |
 | `graph` | Return the dependency DAG (nodes + edges) for a scope. |
+| `graph_walk` | Traverse the note graph ("micelio") rooted at ``seed`` and return the |
 | `link_notes` | Link two notes with a typed relation. The mycelial 4-verb model |
 | `list_note_links` | Traverse a note's typed note↔note links. Returns |
 | `list_note_task_links` | Traverse typed note↔task links. Pass ``task_id`` to get every note |

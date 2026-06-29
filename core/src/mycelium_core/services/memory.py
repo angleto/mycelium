@@ -15,7 +15,7 @@ from __future__ import annotations
 import datetime as dt
 import uuid
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import Decimal
 
 from sqlalchemy import ColumnElement, delete, func, select, update
@@ -140,6 +140,11 @@ class Hit:
     # the parallel humus source (archived material), else None. Drives
     # the leaf icon + the "from archived material" footer in the SPA.
     provenance: str | None = None
+    # Per-stage scores carried from the winning Candidate (lexical_exact /
+    # lexical_stem / semantic / semantic_hosted / humus / rrf / rerank): lets
+    # an MCP caller SEE why a hit ranked where it did, not just the final
+    # score. Empty dict for callers that don't surface it.
+    scores_by_stage: dict[str, float] = field(default_factory=dict)
 
 
 # Sentinel model_id for a blob stored keyword-only (embed unavailable/failed):
@@ -161,12 +166,18 @@ class RetrievalMeta:
     - ``dense_rejected_by_floor``: kNN neighbours dropped by the per-org
       similarity floor (high + not contributed => floor mis-calibrated).
     - ``keyword_only_hits``: returned hits backed by a keyword-only blob.
+    - ``abstained``: the per-org grader/abstain floor (WS-B1,
+      ``retrieval_grader_min_rrf``) dropped an otherwise-present top hit, so
+      an EMPTY result means "no answer above the quality bar", not "nothing
+      indexed". ``abstain_reason`` names the gate that fired (None otherwise).
     """
 
     query_embedded: bool
     dense_branch_contributed: bool
     dense_rejected_by_floor: int
     keyword_only_hits: int
+    abstained: bool = False
+    abstain_reason: str | None = None
 
 
 async def _safe_embed(emb: Embedder, text: str) -> EmbedResult | None:
@@ -658,6 +669,7 @@ async def retrieve_with_meta(
         # The semantic stage records its diagnostics into ctx.extras (the
         # designated per-call scratch slot); read them back here.
         diag = ctx.extras.get("semantic_diag") or {}
+        abstained = bool(ctx.extras.get("grader_abstained"))
         return RetrievalMeta(
             query_embedded=qres is not None or qres_hosted is not None,
             dense_branch_contributed=bool(diag.get("contributed", False)),
@@ -665,6 +677,8 @@ async def retrieve_with_meta(
             keyword_only_hits=sum(
                 1 for h in hits if (h.blob.model_id or _KEYWORD_ONLY_MODEL) == _KEYWORD_ONLY_MODEL
             ),
+            abstained=abstained,
+            abstain_reason="grader_min_rrf" if abstained else None,
         )
 
     if not top:
@@ -706,6 +720,7 @@ async def retrieve_with_meta(
             chunk_index=c.chunk_index,
             chunk_snippet=snippets.get(c.blob_id),
             provenance=c.provenance,
+            scores_by_stage=dict(c.scores_by_stage),
         )
         for c in top
         if c.blob_id in blobs

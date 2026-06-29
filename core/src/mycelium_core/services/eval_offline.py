@@ -23,9 +23,11 @@ LLM-as-judge, which is neither deterministic nor available in CI.
 
 from __future__ import annotations
 
+import json
 import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
+from pathlib import Path
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -137,3 +139,54 @@ async def run_eval(
         total_blobs=total,
         cases=tuple(results),
     )
+
+
+def load_cases(path: str | Path) -> list[GoldCase]:
+    """Load gold cases from a JSONL file: one object per line with ``query``
+    (str) and ``expected_blob_ids`` (a non-empty list of blob-id strings --
+    the stored blobs that correctly answer the query). Blank lines skipped.
+
+    The file-driven counterpart to the in-code synthetic gold set, so an
+    EXTERNAL bench (a LongMemEval / LOCOMO subset, ingested into an org and
+    resolved to stored blob ids) runs through the SAME ``run_eval`` without
+    code changes -- the first step toward a public, comparable measurement of
+    "is this the most powerful memory" (WS-E1 follow-up). A multi-target
+    ``expected_blob_ids`` scores as a hit when ANY id lands in top-k, matching
+    ``run_eval``'s recall semantics."""
+    cases: list[GoldCase] = []
+    for lineno, raw in enumerate(Path(path).read_text(encoding="utf-8").splitlines(), start=1):
+        line = raw.strip()
+        if not line:
+            continue
+        try:
+            obj = json.loads(line)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"{path}:{lineno}: invalid JSON ({exc})") from exc
+        query = obj.get("query")
+        ids = obj.get("expected_blob_ids")
+        if not isinstance(query, str) or not query.strip():
+            raise ValueError(f"{path}:{lineno}: missing/blank 'query'")
+        if not isinstance(ids, list) or not ids:
+            raise ValueError(f"{path}:{lineno}: 'expected_blob_ids' must be a non-empty list")
+        try:
+            expected = frozenset(uuid.UUID(str(i)) for i in ids)
+        except ValueError as exc:
+            raise ValueError(f"{path}:{lineno}: bad blob id ({exc})") from exc
+        cases.append(GoldCase(query=query, expected=expected))
+    return cases
+
+
+async def run_eval_from_file(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    path: str | Path,
+    k: int = 10,
+) -> EvalReport:
+    """Convenience: load the gold cases from ``path`` and run them through
+    :func:`run_eval` against the corpus ALREADY ingested under ``org_id``
+    (the ingestion of an external bench corpus is the caller's job; this only
+    measures). Keeps the synthetic CI gate and the external-bench run on one
+    measurement path."""
+    return await run_eval(session, org_id=org_id, actor_id=actor_id, cases=load_cases(path), k=k)

@@ -175,6 +175,65 @@ async def test_distill_note_meters_through_the_seam(_wire_llm: None) -> None:
         assert await billing.balance(s, org_id=org) < before
 
 
+async def test_distill_accepts_caller_supplied_text() -> None:
+    """dec45ebc: an external MCP caller can write the humus atom with its OWN
+    strong model. The caller text is persisted verbatim (stripped) and
+    attributed to the caller's model; Mycelium runs and meters NO internal LLM
+    call on that path, and the result is idempotent."""
+    org, user = await _org()
+    async with tenant_session(str(org), str(user)) as s:
+        await _seed_billing(s, org, user)
+        source = await nt.create_note(
+            s,
+            org_id=org,
+            actor_id=user,
+            kind=NoteKind.text,
+            title="external",
+            text="a non-trivial finished thought worth distilling into reusable atoms",
+        )
+        res = await decomp.distill_note(
+            s,
+            org_id=org,
+            actor_id=user,
+            note_id=source.id,
+            distilled_text="  Atom: the one reusable lesson.  ",
+            origin_model_id="claude-opus-4-8",
+        )
+        assert res.created is True
+        assert res.model_id == "claude-opus-4-8"
+        distilled = (
+            await s.execute(select(Note).where(Note.id == res.distilled_note_id))
+        ).scalar_one()
+        assert distilled.humus_kind == "distillation"
+        assert distilled.humus_flag is True
+        assert distilled.origin_model_id == "claude-opus-4-8"
+        body = await nt.get_body(s, note_id=distilled.id)
+        assert (body or "").strip() == "Atom: the one reusable lesson."
+        # No internal LLM call => no metered distill usage on the caller path.
+        usage = (
+            (
+                await s.execute(
+                    select(UsageRecord).where(
+                        UsageRecord.operation_id == f"distill:{org}:{source.id}"
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert usage == []
+        # Idempotent: a second call returns the cached distillation untouched.
+        again = await decomp.distill_note(
+            s,
+            org_id=org,
+            actor_id=user,
+            note_id=source.id,
+            distilled_text="a different text that must be ignored",
+        )
+        assert again.created is False
+        assert again.distilled_note_id == res.distilled_note_id
+
+
 async def _inert_source(s: object, org: uuid.UUID, user: uuid.UUID, *, title: str) -> Note:
     """Create a note and make it inert (archived + aged past the quiet
     window) so distilling it flips the source's ``humus_flag``."""

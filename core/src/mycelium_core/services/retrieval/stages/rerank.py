@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from sqlalchemy import select
 
 from mycelium_core.models.memory_blob import MemoryBlob
-from mycelium_core.reranker import Reranker, get_reranker
+from mycelium_core.reranker import NoopReranker, Reranker, get_reranker
 from mycelium_core.services.retrieval.types import Candidate, RetrievalContext, Stage
 
 
@@ -57,13 +57,28 @@ class CrossEncoderRerankerStage(Stage):
         if not gate.should_rerank(query, candidates):
             return candidates
         provider = self.provider or get_reranker()
+        # A Noop/identity reranker (the feature is gated off but rerank was
+        # requested per-call) scores every doc 0.0; applying that override
+        # would flatten the candidates and let the downstream OrderingStage
+        # re-sort them by the created_at tiebreak, DESTROYING the upstream RRF
+        # order. Pass through unchanged so the RRF ranking is preserved.
+        if isinstance(provider, NoopReranker):
+            return candidates
         # Operate only on the top-K candidates (cost is O(top-K), and
         # rerankering tail candidates that won't be returned is waste).
         # We still pass the full list through and patch in the new scores
         # so the next stage can do whatever it wants with the tail.
         target = candidates[: self.top_k]
         texts = await self._load_texts(ctx, target)
-        result = await provider.rerank(query, texts)
+        try:
+            result = await provider.rerank(query, texts)
+        except Exception:
+            # The cross-encoder depends on an optional extra / model load that
+            # can fail (mirrors memory._safe_embed): degrade to the RRF order
+            # rather than erroring the whole search. This is what makes
+            # enabling the reranker by default safe.
+            ctx.extras["rerank_failed"] = True
+            return candidates
         for cand, score in zip(target, result.scores, strict=False):
             cand.scores_by_stage["rrf"] = cand.score  # preserve for diagnostics
             cand.scores_by_stage[self.name] = score
