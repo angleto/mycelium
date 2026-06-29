@@ -190,3 +190,44 @@ async def run_eval_from_file(
     measures). Keeps the synthetic CI gate and the external-bench run on one
     measurement path."""
     return await run_eval(session, org_id=org_id, actor_id=actor_id, cases=load_cases(path), k=k)
+
+
+@dataclass(frozen=True)
+class ForgettingReport:
+    """Verified forgetting / GDPR right-to-erasure -- a GOVERNANCE axis the
+    public memory benchmarks omit. Erasing a subject's provenance must make its
+    answers actually unretrievable, not merely hidden."""
+
+    erased: int  # blobs deleted by the provenance erase
+    recall_before: float
+    recall_after: float
+
+    @property
+    def forgotten(self) -> bool:
+        """The erase removed >=1 blob AND recall strictly dropped."""
+        return self.erased > 0 and self.recall_after < self.recall_before
+
+
+async def gdpr_forgetting(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    source_kind: str,
+    source_id: str,
+    cases: Sequence[GoldCase],
+    k: int = 10,
+) -> ForgettingReport:
+    """Measure verified forgetting: recall over ``cases``, then erase one
+    subject's provenance via ``memory.gdpr_erase``, then recall again. A
+    compliant memory drops recall for the erased subject (the blobs are GONE,
+    not just hidden) -- the metric where self-hostable, provenance-auditable
+    memory beats hosted competitors that never score it. Reuses ``run_eval``."""
+    before = await run_eval(session, org_id=org_id, actor_id=actor_id, cases=cases, k=k)
+    erased = await memory.gdpr_erase(
+        session, org_id=org_id, actor_id=actor_id, source_kind=source_kind, source_id=source_id
+    )
+    after = await run_eval(session, org_id=org_id, actor_id=actor_id, cases=cases, k=k)
+    return ForgettingReport(
+        erased=erased, recall_before=before.recall_at_k, recall_after=after.recall_at_k
+    )

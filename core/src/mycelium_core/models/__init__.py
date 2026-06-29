@@ -92,6 +92,7 @@ from mycelium_core.models.invoice import (
     SdiStatus,
     SdiTransmissionCounter,
 )
+from mycelium_core.models.kg import KG_ENTITY_TYPES, KgEdge, KgEntity
 from mycelium_core.models.membership import Membership, Role
 from mycelium_core.models.memory_blob import BlobSource, MemoryBlob, Tier
 from mycelium_core.models.note import (
@@ -166,6 +167,7 @@ __all__ = [
     "ANNOTATION_KINDS",
     "ANNOTATION_STATUSES",
     "DEFAULT_AUTONOMOUS_DISPATCH",
+    "KG_ENTITY_TYPES",
     "NOTE_NOTE_LINK_KINDS",
     "NOTE_TASK_LINK_KINDS",
     "SEARCH_CLICK_KINDS",
@@ -231,6 +233,8 @@ __all__ = [
     "InvoiceNotification",
     "InvoiceState",
     "IssuerProfile",
+    "KgEdge",
+    "KgEntity",
     "LLMProviderKind",
     "LedgerEntryKind",
     "Membership",

@@ -78,6 +78,7 @@ from mycelium_core.services import focus_context as focus_context_svc
 from mycelium_core.services import garden_classify as garden_classify_svc
 from mycelium_core.services import garden_review as garden_review_svc
 from mycelium_core.services import invoice as invoice_svc
+from mycelium_core.services import kg as kg_svc
 from mycelium_core.services import link_prediction as link_prediction_svc
 from mycelium_core.services import lookup as lookup_svc
 from mycelium_core.services import memory as memory_svc
@@ -3717,6 +3718,82 @@ async def graph_walk(
                 "provenance": w.provenance,
             }
             for w in steps
+        ]
+
+
+@mcp.tool()
+async def kg_extract(token: str, org_id: str, note_id: str) -> dict[str, Any]:
+    """Extract a TEMPORAL KNOWLEDGE GRAPH (typed entities + relation facts)
+    from a note's body using the org's metered LLM (ADR-0044). Entities are
+    resolved/deduped; facts are written EFFECTIVE (user-initiated) with
+    bi-temporal validity (valid_from/valid_to) and are idempotent per triple.
+    Returns the entity/fact counts + new edge ids."""
+    async with _tenant(token, org_id) as (s, org, user):
+        res = await kg_svc.extract_facts(s, org_id=org, actor_id=user, note_id=uuid.UUID(note_id))
+        return {
+            "entities": res.entities,
+            "facts": res.facts,
+            "edge_ids": [str(e) for e in res.edge_ids],
+            "model_id": res.model_id,
+        }
+
+
+@mcp.tool()
+async def kg_entities(
+    token: str,
+    org_id: str,
+    query: str,
+    entity_type: str | None = None,
+    limit: int = 20,
+) -> list[dict[str, Any]]:
+    """Look up knowledge-graph entities whose name matches ``query`` (ADR-0044).
+    Optionally filter by ``entity_type`` (person | organization | project |
+    place | product | event | concept | other). Returns id + type + canonical
+    name -- feed an id into ``kg_neighbors`` to read its facts."""
+    async with _tenant(token, org_id) as (s, org, user):
+        ents = await kg_svc.search_entities(
+            s, org_id=org, actor_id=user, query=query, entity_type=entity_type, limit=limit
+        )
+        return [{"id": str(e.id), "type": e.entity_type, "name": e.name} for e in ents]
+
+
+@mcp.tool()
+async def kg_neighbors(
+    token: str,
+    org_id: str,
+    entity: str,
+    depth: int = 1,
+    as_of: str | None = None,
+) -> list[dict[str, Any]]:
+    """Effective knowledge-graph facts around an entity id (ADR-0044).
+    ``depth=1`` = the entity's direct facts; ``depth>1`` = a multi-hop
+    traversal for cross-entity questions ("which projects did X and Y share").
+    With ``as_of`` (an ISO date/datetime) facts are clamped to the VALID window
+    at that instant -- so "where did X work in 2024" returns the fact true
+    THEN, not the current one (bi-temporal, invalidate-not-delete). Each fact
+    carries subject/predicate/object + its validity window."""
+    async with _tenant(token, org_id) as (s, org, user):
+        as_of_dt = _to_instant(as_of, await _caller_tz(s, user)) if as_of else None
+        entity_id = uuid.UUID(entity)
+        if depth <= 1:
+            facts = await kg_svc.entity_facts(
+                s, org_id=org, actor_id=user, entity_id=entity_id, as_of=as_of_dt
+            )
+        else:
+            facts = await kg_svc.traverse(
+                s, org_id=org, actor_id=user, seed_id=entity_id, depth=depth, as_of=as_of_dt
+            )
+        return [
+            {
+                "edge_id": str(f.edge_id),
+                "subject": {"id": str(f.subject_id), "name": f.subject_name},
+                "predicate": f.predicate,
+                "object": {"id": str(f.object_id), "name": f.object_name},
+                "valid_from": f.valid_from.isoformat() if f.valid_from else None,
+                "valid_to": f.valid_to.isoformat() if f.valid_to else None,
+                "confidence": float(f.confidence) if f.confidence is not None else None,
+            }
+            for f in facts
         ]
 
 
