@@ -1167,6 +1167,7 @@ export const en = {
     rateOnClient: 'Rate & billable are set on the client.',
     inherit: 'inherit from issuer',
     languageDefault: 'default (Italian)',
+    dateFormatDefault: 'default (ISO, 2026-06-29)',
     startingNumber: 'Starting number (current year)',
     startingNumberHint:
       'Series "{{series}}" year {{year}}: set the number of the next invoice. Use it when you have already emitted invoices for this client elsewhere (e.g. set 2 if #1 was emitted on another system).',
@@ -1195,6 +1196,7 @@ export const en = {
       default_payment_method_code: 'Payment method (default)',
       default_payment_terms_days: 'Net days (default)',
       invoice_language: 'Invoice language (PDF)',
+      invoice_date_format: 'Date format (PDF)',
     },
   },
   workflows: {
@@ -1861,6 +1863,48 @@ export const en = {
       sdiId: 'SdI id',
       conservation: 'Conservation',
     },
+    stateLabel: {
+      draft: 'Draft',
+      transmitted: 'Transmitted',
+      delivered: 'Delivered',
+      accepted: 'Accepted',
+      rejected: 'Rejected',
+    },
+    sdiStatus: {
+      none: 'none',
+      RC: 'RC · delivered',
+      MC: 'MC · not delivered',
+      NS: 'NS · rejected',
+      AT: 'AT · transmission attested',
+      NE: 'NE · buyer outcome',
+      DT: 'DT · terms expired',
+    },
+    conservationStatus: {
+      out_of_coverage: 'out of coverage',
+      ade_pending: 'AdE pending',
+      ade_covered: 'AdE covered',
+    },
+    paymentStatus: {
+      unpaid: 'Unpaid',
+      paid: 'Paid',
+    },
+    filterPaymentAll: 'Paid + unpaid',
+    purgeTest: 'Delete test invoices',
+    purgeTestConfirm:
+      'Permanently delete the SdI accreditation test invoices (series TEST)? This cannot be undone.',
+    purgeTestDone: 'Deleted {{n}} test invoice(s).',
+    sdi: { timeline: 'SdI transmission timeline' },
+    letterhead: 'Letterhead (header text)',
+    letterheadPlaceholder:
+      'e.g. company tagline, website, contacts — printed at the top of the PDF',
+    logo: 'Logo',
+    logoHint:
+      'PNG or JPEG, printed top-left of the invoice PDF (max 512 KB).',
+    logoUpload: 'Upload logo',
+    logoRemove: 'Remove',
+    defaultTermsDaysTip:
+      'Default net payment days: days after the invoice date by which payment is due (e.g. 30 = net 30). Inherited by invoices/clients that set none. Maps to SdI GiorniTerminiPagamento.',
+    defaultTermsDaysPlaceholder: 'e.g. 30',
     noLines: 'No lines yet. Add at least one before transmitting.',
     edit: 'Edit',
     save: 'Save',

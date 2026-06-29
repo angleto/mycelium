@@ -387,10 +387,19 @@ async def set_issuer_logo(
         raise DomainError(MessageCode.DOMAIN_ERROR, detail="empty logo")
     if len(data) > LOGO_MAX_BYTES:
         raise DomainError(MessageCode.DOMAIN_ERROR, detail="logo too large")
+    # Reject a corrupt / non-raster upload here (the declared mime is the
+    # client's, never sniffed): storing one would 500 every later PDF
+    # render for this issuer at draw time. Decode-validate before persist.
+    from mycelium_core.services.invoice_pdf import logo_is_decodable
+
+    if not logo_is_decodable(data):
+        raise DomainError(MessageCode.DOMAIN_ERROR, detail="logo not a decodable image")
     p = await get_issuer_profile(session, org_id=org_id, profile_id=profile_id)
     p.logo_data = data
     p.logo_mime = mime
-    p.logo_filename = filename
+    # logo_filename is VARCHAR(255); a longer client filename would raise a
+    # DataError on flush. Truncate (display-only field).
+    p.logo_filename = filename[:255] if filename else None
     p.version += 1
     await session.flush()
     await audit.log(

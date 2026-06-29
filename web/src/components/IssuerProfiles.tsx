@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useRef,
   useState,
   type ChangeEvent,
   type FormEvent,
@@ -287,17 +288,27 @@ export function IssuerProfiles() {
   // 401). Revoked before replacing / on close.
   const [logoUrl, setLogoUrl] = useState<string | null>(null)
   const [logoBusy, setLogoBusy] = useState(false)
+  // Monotonic token so overlapping showLogo calls (rapid profile
+  // switching) don't race: only the latest commits its blob URL, and a
+  // superseded fetch neither creates a leaked URL nor shows a stale logo.
+  const logoSeq = useRef(0)
 
   const showLogo = useCallback(async (id: string | null) => {
+    const seq = ++logoSeq.current
     setLogoUrl((prev) => {
       if (prev) URL.revokeObjectURL(prev)
       return null
     })
     if (!id) return
     const res = await authFetch(`/issuer-profiles/${id}/logo`)
-    if (!res.ok) return
+    if (!res.ok || seq !== logoSeq.current) return
     const blob = await res.blob()
-    setLogoUrl(URL.createObjectURL(blob))
+    if (seq !== logoSeq.current) return
+    const url = URL.createObjectURL(blob)
+    setLogoUrl((prev) => {
+      if (prev) URL.revokeObjectURL(prev)
+      return url
+    })
   }, [])
 
   // Revoke the last object URL when the component unmounts.

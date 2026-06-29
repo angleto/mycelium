@@ -22,6 +22,20 @@ type Preview = components['schemas']['InvoicePreviewOut']
 // line per task (full detail); 'project' aggregates to one line per
 // project, so clients who shouldn't see the task breakdown don't.
 type BillGroup = Extract<components['schemas']['ReportGroup'], 'task' | 'project'>
+type InvoiceState = components['schemas']['InvoiceState']
+type PaymentStatus = components['schemas']['PaymentStatus']
+type SdiNotif = components['schemas']['InvoiceNotificationOut']
+
+// Lifecycle states offered in the list filter (default = work in
+// progress). sdi_status (the SdI receipt) and payment_status are
+// orthogonal axes, filtered/shown separately.
+const FILTER_STATES: readonly InvoiceState[] = [
+  'draft',
+  'transmitted',
+  'delivered',
+  'accepted',
+  'rejected',
+]
 
 
 const EMPTY_LINE = {
@@ -92,6 +106,15 @@ export function InvoicesRoute() {
   const [list, setList] = useState<Invoice[]>([])
   const [err, setErr] = useState<string | null>(null)
   const [msg, setMsg] = useState<string | null>(null)
+  // List filters: lifecycle multi-select (default work-in-progress) +
+  // an orthogonal paid/unpaid axis. Empty payment = both.
+  const [filterStates, setFilterStates] = useState<InvoiceState[]>([
+    'draft',
+    'transmitted',
+  ])
+  const [filterPayment, setFilterPayment] = useState<'' | PaymentStatus>('')
+  // SdI transmission timeline (RC/MC/NS/AT/NE/DT) of the open invoice.
+  const [notifs, setNotifs] = useState<SdiNotif[]>([])
 
   // new-invoice form (issuer profiles are managed in Settings)
   const [niClient, setNiClient] = useState('')
@@ -157,13 +180,25 @@ export function InvoicesRoute() {
     const [pr, cl, iv] = await Promise.all([
       api.GET('/issuer-profiles', { params: { header: h } }),
       api.GET('/clients', { params: { header: h } }),
-      api.GET('/invoices', { params: { header: h } }),
+      api.GET('/invoices', {
+        params: {
+          header: h,
+          query: {
+            ...(filterStates.length ? { state: filterStates } : {}),
+            ...(filterPayment ? { payment_status: filterPayment } : {}),
+          },
+        },
+      }),
     ])
     if (pr.data) setProfiles(pr.data)
     if (cl.data) setClients(cl.data)
     if (iv.data) setList(iv.data)
-  }, [])
+  }, [filterStates, filterPayment])
 
+  // Reload on workspace switch and whenever a filter changes. Inlined
+  // (rather than calling loadList) so the setState lands after an await
+  // — a synchronous setState in an effect body cascades renders — and so
+  // an unmount mid-fetch is cancellable via the active guard.
   useEffect(() => {
     let active = true
     void (async () => {
@@ -171,7 +206,15 @@ export function InvoicesRoute() {
       const [pr, cl, iv] = await Promise.all([
         api.GET('/issuer-profiles', { params: { header: h } }),
         api.GET('/clients', { params: { header: h } }),
-        api.GET('/invoices', { params: { header: h } }),
+        api.GET('/invoices', {
+          params: {
+            header: h,
+            query: {
+              ...(filterStates.length ? { state: filterStates } : {}),
+              ...(filterPayment ? { payment_status: filterPayment } : {}),
+            },
+          },
+        }),
       ])
       if (!active) return
       if (pr.data) setProfiles(pr.data)
@@ -181,13 +224,13 @@ export function InvoicesRoute() {
     return () => {
       active = false
     }
-  }, [activeId])
+  }, [activeId, filterStates, filterPayment])
 
   const openInvoice = useCallback(async (id: string) => {
     setErr(null)
     setXml(null)
     const h = workspaceHeader()
-    const [iv, ln, pv] = await Promise.all([
+    const [iv, ln, pv, nt] = await Promise.all([
       api.GET('/invoices/{invoice_id}', {
         params: { header: h, path: { invoice_id: id } },
       }),
@@ -195,6 +238,9 @@ export function InvoicesRoute() {
         params: { header: h, path: { invoice_id: id } },
       }),
       api.GET('/invoices/{invoice_id}/preview', {
+        params: { header: h, path: { invoice_id: id } },
+      }),
+      api.GET('/invoices/{invoice_id}/notifications', {
         params: { header: h, path: { invoice_id: id } },
       }),
     ])
@@ -206,6 +252,9 @@ export function InvoicesRoute() {
     setSel(inv)
     setLines(ln.data ?? [])
     setPreview(pv.data ?? null)
+    // SdI notification timeline (empty for a draft / not-yet-transmitted),
+    // set in the same batch so the panel never shows the prior invoice's.
+    setNotifs(nt.data ?? [])
     setDIssuer(inv.issuer_profile_id ?? '')
     setDClient(inv.client_tag_id)
     setDSeries(inv.series)
@@ -240,6 +289,24 @@ export function InvoicesRoute() {
 
   async function reloadSel() {
     if (sel) await openInvoice(sel.id)
+    await loadList()
+  }
+
+  // One-off cleanup of the SdI accreditation test invoices (series
+  // "TEST"). Owner-only on the server; confirmed because it is a hard
+  // delete.
+  async function purgeTest() {
+    if (!window.confirm(t('invoices.purgeTestConfirm'))) return
+    setErr(null)
+    setMsg(null)
+    const { data, error } = await api.POST('/invoices/purge-test', {
+      params: { header: workspaceHeader() },
+    })
+    if (error) {
+      setErr(errMessage(error))
+      return
+    }
+    setMsg(t('invoices.purgeTestDone', { n: data?.deleted ?? 0 }))
     await loadList()
   }
 
@@ -615,6 +682,46 @@ export function InvoicesRoute() {
       <p className="hint">{t('invoices.seriesLegalHint')}</p>
 
       <h2>{t('invoices.list')}</h2>
+      {/* Filters: lifecycle multi-select (toggle buttons, default
+          Draft+Transmitted) + an orthogonal paid/unpaid axis. The purge
+          button clears the SdI accreditation test invoices. */}
+      <div className="row">
+        {FILTER_STATES.map((s) => {
+          const on = filterStates.includes(s)
+          return (
+            <button
+              key={s}
+              type="button"
+              className={`btn--sm ${on ? '' : 'btn--ghost'}`}
+              aria-pressed={on}
+              onClick={() =>
+                setFilterStates((prev) =>
+                  on ? prev.filter((x) => x !== s) : [...prev, s],
+                )
+              }
+            >
+              {t(`invoices.stateLabel.${s}`)}
+            </button>
+          )
+        })}
+        <select
+          value={filterPayment}
+          onChange={(e) =>
+            setFilterPayment(e.target.value as '' | PaymentStatus)
+          }
+        >
+          <option value="">{t('invoices.filterPaymentAll')}</option>
+          <option value="unpaid">{t('invoices.paymentStatus.unpaid')}</option>
+          <option value="paid">{t('invoices.paymentStatus.paid')}</option>
+        </select>
+        <button
+          type="button"
+          className="btn--sm btn--danger"
+          onClick={() => void purgeTest()}
+        >
+          {t('invoices.purgeTest')}
+        </button>
+      </div>
       {list.length === 0 ? (
         <p className="hint">{t('invoices.none')}</p>
       ) : (
@@ -630,8 +737,11 @@ export function InvoicesRoute() {
               </button>{' '}
               {i.series}/{i.year}/{i.number ?? '–'}{' '}
               <span className="muted">
-                · {clientName(i.client_tag_id)} · {t('invoices.state')} {i.state} ·{' '}
-                {i.total} · sdi {i.sdi_status}
+                · {clientName(i.client_tag_id)} ·{' '}
+                {t(`invoices.stateLabel.${i.state}`)} · {i.total} · sdi{' '}
+                {t(`invoices.sdiStatus.${i.sdi_status}`)} ·{' '}
+                {t(`invoices.paymentStatus.${i.payment_status}`)}
+                {i.identificativo_sdi ? ` · ${i.identificativo_sdi}` : ''}
               </span>
             </li>
           ))}
@@ -803,8 +913,8 @@ export function InvoicesRoute() {
                 <div>
                   <div className="muted">{t('invoices.doc.sdiState')}</div>
                   <div>
-                    {t('invoices.state')} {preview.state} · sdi{' '}
-                    {preview.sdi_status}
+                    {t(`invoices.stateLabel.${preview.state}`)} · sdi{' '}
+                    {t(`invoices.sdiStatus.${preview.sdi_status}`)}
                   </div>
                   <div className="muted">
                     {t('invoices.doc.sdiId')}:{' '}
@@ -812,12 +922,37 @@ export function InvoicesRoute() {
                   </div>
                   <div className="muted">
                     {t('invoices.doc.conservation')}:{' '}
-                    {preview.conservation_status}
+                    {t(`invoices.conservationStatus.${preview.conservation_status}`)}
                   </div>
                 </div>
               </div>
               {preview.is_forfettario && preview.purpose && (
                 <p className="hint docpanel__causale">{preview.purpose}</p>
+              )}
+              {notifs.length > 0 && (
+                <div className="sdi-timeline">
+                  <div className="muted">{t('invoices.sdi.timeline')}</div>
+                  <ul className="list">
+                    {notifs.map((n, idx) => (
+                      <li key={`${n.kind}-${n.message_id ?? idx}`}>
+                        <strong>{t(`invoices.sdiStatus.${n.kind}`)}</strong>
+                        {' · '}
+                        {n.received_at.slice(0, 19).replace('T', ' ')}
+                        {n.esito ? ` · ${n.esito}` : ''}
+                        {n.errors.length > 0 && (
+                          <ul className="sdi-timeline__errors">
+                            {n.errors.map((e, j) => (
+                              <li key={j} className="err">
+                                {e.codice ? `[${e.codice}] ` : ''}
+                                {e.descrizione}
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
               )}
             </div>
           )}

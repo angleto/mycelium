@@ -1167,6 +1167,7 @@ export const it: Catalog = {
     rateOnClient: 'Tariffa e fatturabilita si impostano sul cliente.',
     inherit: 'eredita da emittente',
     languageDefault: 'predefinita (italiano)',
+    dateFormatDefault: 'predefinito (ISO, 2026-06-29)',
     startingNumber: 'Numero da cui partire (anno corrente)',
     startingNumberHint:
       'Sezionale "{{series}}" anno {{year}}: imposta il numero della prossima fattura. Utile se hai già emesso fatture per questo cliente su un altro sistema (es. imposta 2 se hai già emesso la #1 altrove).',
@@ -1195,6 +1196,7 @@ export const it: Catalog = {
       default_payment_method_code: 'Modalità pagamento (default)',
       default_payment_terms_days: 'Giorni termini pagamento (default)',
       invoice_language: 'Lingua fattura (PDF)',
+      invoice_date_format: 'Formato data (PDF)',
     },
   },
   workflows: {
@@ -1862,6 +1864,48 @@ export const it: Catalog = {
       sdiId: 'Id SdI',
       conservation: 'Conservazione',
     },
+    stateLabel: {
+      draft: 'Bozza',
+      transmitted: 'Trasmessa',
+      delivered: 'Consegnata',
+      accepted: 'Accettata',
+      rejected: 'Rifiutata',
+    },
+    sdiStatus: {
+      none: 'nessuno',
+      RC: 'RC · consegnata',
+      MC: 'MC · mancata consegna',
+      NS: 'NS · scartata',
+      AT: 'AT · trasmissione attestata',
+      NE: 'NE · esito committente',
+      DT: 'DT · decorrenza termini',
+    },
+    conservationStatus: {
+      out_of_coverage: 'fuori copertura',
+      ade_pending: 'AdE in attesa',
+      ade_covered: 'AdE in conservazione',
+    },
+    paymentStatus: {
+      unpaid: 'Non pagata',
+      paid: 'Pagata',
+    },
+    filterPaymentAll: 'Pagate + non pagate',
+    purgeTest: 'Elimina fatture di test',
+    purgeTestConfirm:
+      "Eliminare definitivamente le fatture di test dell'accreditamento SdI (sezionale TEST)? L'operazione è irreversibile.",
+    purgeTestDone: 'Eliminate {{n}} fatture di test.',
+    sdi: { timeline: 'Cronologia trasmissione SdI' },
+    letterhead: 'Intestazione (testo)',
+    letterheadPlaceholder:
+      'es. slogan, sito web, contatti — stampati in cima al PDF',
+    logo: 'Logo',
+    logoHint:
+      'PNG o JPEG, stampato in alto a sinistra nel PDF della fattura (max 512 KB).',
+    logoUpload: 'Carica logo',
+    logoRemove: 'Rimuovi',
+    defaultTermsDaysTip:
+      'Giorni netti di default: giorni dopo la data fattura entro cui è dovuto il pagamento (es. 30 = pagamento a 30 giorni). Ereditato da fattura→cliente→emittente. Corrisponde a GiorniTerminiPagamento SdI.',
+    defaultTermsDaysPlaceholder: 'es. 30',
     noLines: 'Nessuna riga. Aggiungine almeno una prima di trasmettere.',
     edit: 'Modifica',
     save: 'Salva',

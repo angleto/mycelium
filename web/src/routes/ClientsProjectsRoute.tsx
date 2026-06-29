@@ -14,8 +14,25 @@ type Project = components['schemas']['ProjectOut']
 
 type ClientFieldDef = {
   name: keyof Client
-  kind?: 'text' | 'number' | 'select-condizioni' | 'select-modalita' | 'select-language'
+  kind?:
+    | 'text'
+    | 'number'
+    | 'select-condizioni'
+    | 'select-modalita'
+    | 'select-language'
+    | 'select-dateformat'
 }
+
+// Date-format presets for the courtesy PDF (kept in sync with
+// mycelium_core.services.date_format.INVOICE_DATE_FORMATS). The stored
+// value is the literal pattern token; empty = ISO (the default).
+const CP_DATE_FORMATS: ReadonlyArray<readonly [string, string]> = [
+  ['YYYY-MM-DD', 'YYYY-MM-DD (2026-06-29)'],
+  ['DD-MM-YYYY', 'DD-MM-YYYY (29-06-2026)'],
+  ['DD/MM/YYYY', 'DD/MM/YYYY (29/06/2026)'],
+  ['MM/DD/YYYY', 'MM/DD/YYYY (06/29/2026)'],
+  ['DD.MM.YYYY', 'DD.MM.YYYY (29.06.2026)'],
+]
 
 // FatturaPA closed enums (kept in sync with
 // mycelium_core.services.payment_methods); only the most common subset
@@ -72,6 +89,8 @@ const CLIENT_FIELDS: ClientFieldDef[] = [
   { name: 'default_payment_terms_days', kind: 'number' },
   // Locale for the PDF only; XML is always Italian.
   { name: 'invoice_language', kind: 'select-language' },
+  // Date format for the PDF only (issue date + due date).
+  { name: 'invoice_date_format', kind: 'select-dateformat' },
 ]
 
 // Add-a-project row, scoped to one client (its own input state so
@@ -607,6 +626,11 @@ export function ClientsProjectsRoute() {
                             className={
                               f.name === 'description' ? 'cpform__wide' : ''
                             }
+                            title={
+                              f.name === 'default_payment_terms_days'
+                                ? t('invoices.defaultTermsDaysTip')
+                                : undefined
+                            }
                           >
                             {t(`cp.f.${f.name}`)}
                             {f.kind === 'select-condizioni' ? (
@@ -636,12 +660,38 @@ export function ClientsProjectsRoute() {
                                   </option>
                                 ))}
                               </select>
+                            ) : f.kind === 'select-dateformat' ? (
+                              <select name={f.name} defaultValue={dv}>
+                                <option value="">
+                                  {t('cp.dateFormatDefault')}
+                                </option>
+                                {CP_DATE_FORMATS.map(([code, lbl]) => (
+                                  <option key={code} value={code}>
+                                    {lbl}
+                                  </option>
+                                ))}
+                              </select>
                             ) : (
                               <input
                                 name={f.name}
+                                className={
+                                  f.name === 'default_payment_terms_days'
+                                    ? 'inp--netdays'
+                                    : undefined
+                                }
                                 type={f.kind === 'number' ? 'number' : 'text'}
                                 min={f.kind === 'number' ? 0 : undefined}
                                 max={f.kind === 'number' ? 365 : undefined}
+                                title={
+                                  f.name === 'default_payment_terms_days'
+                                    ? t('invoices.defaultTermsDaysTip')
+                                    : undefined
+                                }
+                                placeholder={
+                                  f.name === 'default_payment_terms_days'
+                                    ? t('invoices.defaultTermsDaysPlaceholder')
+                                    : undefined
+                                }
                                 defaultValue={dv}
                               />
                             )}

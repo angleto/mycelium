@@ -280,16 +280,30 @@ _LOGO_MAX_W = 58 * mm
 _LOGO_MAX_H = 22 * mm
 
 
+def logo_is_decodable(data: bytes) -> bool:
+    """True iff ``data`` is a FULLY decodable raster (header AND pixels).
+    ``getSize`` only parses the header; ``getRGBData`` forces the full
+    pixel decode, so a truncated/corrupt body is caught here instead of
+    later, at ``doc.build`` draw time (which would crash the PDF). Used
+    to reject a bad logo at upload AND to gate it again at render."""
+    try:
+        reader = ImageReader(BytesIO(data))
+        if not all(reader.getSize()):
+            return False
+        reader.getRGBData()
+    except Exception:
+        return False
+    return True
+
+
 def _logo_image(logo: bytes | None) -> Image | None:
     """A reportlab ``Image`` scaled to fit the logo box, or None if the
-    bytes are absent or not a decodable raster. Never raises: a broken
-    logo must not break the (courtesy) PDF."""
-    if not logo:
+    bytes are absent or not a fully decodable raster. Never raises: a
+    broken logo must not break the (courtesy) PDF."""
+    if not logo or not logo_is_decodable(logo):
         return None
     try:
         iw, ih = ImageReader(BytesIO(logo)).getSize()
-        if not iw or not ih:
-            return None
         scale = min(_LOGO_MAX_W / iw, _LOGO_MAX_H / ih)
         img = Image(BytesIO(logo), width=iw * scale, height=ih * scale)
         img.hAlign = "LEFT"

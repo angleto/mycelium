@@ -714,6 +714,37 @@ label > select,
   min-width: 0;
 }
 
+/* Issuer letterhead controls + the wider Net-days input (its caption and
+   placeholder were unreadable at the default content width). ``.lbl--wide``
+   makes a form label span the whole row (the multi-line header textarea). */
+.lbl--wide {
+  flex: 1 1 100%;
+}
+.inp--netdays {
+  min-width: 8.5rem;
+}
+.issuer-logo {
+  display: block;
+  max-height: 64px;
+  max-width: 220px;
+  margin: 0.3rem 0;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+}
+
+/* SdI transmission timeline (notification list) inside the open-invoice
+   panel: the per-NS rejection errors nest one level in, in the error
+   colour. */
+.sdi-timeline {
+  margin-top: 0.6rem;
+}
+.sdi-timeline__errors {
+  margin: 0.2rem 0 0.3rem 1rem;
+  font-size: 0.82rem;
+}
+
 /* Advisory "what can I do now" form: a responsive field grid where each
    field stacks caption / input / hint. A fixed-height caption keeps every
    input on the same baseline even when one caption wraps and another does
