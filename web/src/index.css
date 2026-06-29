@@ -723,6 +723,15 @@ label > select,
 .inp--netdays {
   min-width: 8.5rem;
 }
+/* Vertical divider between two adjacent toggle-button filter groups
+   (e.g. invoice lifecycle vs paid/unpaid), so they read as distinct axes
+   rather than one flat multi-select. */
+.filter-divider {
+  align-self: stretch;
+  width: 1px;
+  margin: 0.15rem 0.25rem;
+  background: var(--border);
+}
 .issuer-logo {
   display: block;
   max-height: 64px;

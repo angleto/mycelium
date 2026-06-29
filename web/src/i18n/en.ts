@@ -1888,11 +1888,6 @@ export const en = {
       unpaid: 'Unpaid',
       paid: 'Paid',
     },
-    filterPaymentAll: 'Paid + unpaid',
-    purgeTest: 'Delete test invoices',
-    purgeTestConfirm:
-      'Permanently delete the SdI accreditation test invoices (series TEST)? This cannot be undone.',
-    purgeTestDone: 'Deleted {{n}} test invoice(s).',
     sdi: { timeline: 'SdI transmission timeline' },
     letterhead: 'Letterhead (header text)',
     letterheadPlaceholder:

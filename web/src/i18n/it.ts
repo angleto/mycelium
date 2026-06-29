@@ -1889,11 +1889,6 @@ export const it: Catalog = {
       unpaid: 'Non pagata',
       paid: 'Pagata',
     },
-    filterPaymentAll: 'Pagate + non pagate',
-    purgeTest: 'Elimina fatture di test',
-    purgeTestConfirm:
-      "Eliminare definitivamente le fatture di test dell'accreditamento SdI (sezionale TEST)? L'operazione è irreversibile.",
-    purgeTestDone: 'Eliminate {{n}} fatture di test.',
     sdi: { timeline: 'Cronologia trasmissione SdI' },
     letterhead: 'Intestazione (testo)',
     letterheadPlaceholder:

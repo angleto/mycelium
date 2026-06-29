@@ -36,6 +36,29 @@ const FILTER_STATES: readonly InvoiceState[] = [
   'accepted',
   'rejected',
 ]
+// Payment axis as its own toggle group. Both selected (or none) = no
+// payment constraint; exactly one selected filters to it.
+const FILTER_PAYMENTS: readonly PaymentStatus[] = ['unpaid', 'paid']
+
+// The filter selection is remembered across sessions (localStorage, same
+// pattern as the Tasks/Recent widgets). A persisted empty array is a
+// valid user choice (deselected all); only an absent/garbled key falls
+// back to the default.
+const FILTER_STATES_KEY = 'mycelium.invoices.filterStates'
+const FILTER_PAYMENTS_KEY = 'mycelium.invoices.filterPayments'
+const DEFAULT_FILTER_STATES: InvoiceState[] = ['draft', 'transmitted']
+
+function readFilter<T extends string>(key: string, allowed: readonly T[], fallback: T[]): T[] {
+  try {
+    const raw = localStorage.getItem(key)
+    if (raw == null) return fallback
+    const parsed = JSON.parse(raw)
+    if (Array.isArray(parsed)) return parsed.filter((x): x is T => allowed.includes(x as T))
+  } catch {
+    /* private mode / malformed: use default */
+  }
+  return fallback
+}
 
 
 const EMPTY_LINE = {
@@ -106,15 +129,36 @@ export function InvoicesRoute() {
   const [list, setList] = useState<Invoice[]>([])
   const [err, setErr] = useState<string | null>(null)
   const [msg, setMsg] = useState<string | null>(null)
-  // List filters: lifecycle multi-select (default work-in-progress) +
-  // an orthogonal paid/unpaid axis. Empty payment = both.
-  const [filterStates, setFilterStates] = useState<InvoiceState[]>([
-    'draft',
-    'transmitted',
-  ])
-  const [filterPayment, setFilterPayment] = useState<'' | PaymentStatus>('')
+  // List filters: lifecycle multi-select (default work-in-progress) + an
+  // orthogonal paid/unpaid toggle group. Both restored from localStorage
+  // so the selection survives reloads / sessions.
+  const [filterStates, setFilterStates] = useState<InvoiceState[]>(() =>
+    readFilter(FILTER_STATES_KEY, FILTER_STATES, DEFAULT_FILTER_STATES),
+  )
+  const [filterPayments, setFilterPayments] = useState<PaymentStatus[]>(() =>
+    readFilter(FILTER_PAYMENTS_KEY, FILTER_PAYMENTS, [...FILTER_PAYMENTS]),
+  )
   // SdI transmission timeline (RC/MC/NS/AT/NE/DT) of the open invoice.
   const [notifs, setNotifs] = useState<SdiNotif[]>([])
+
+  // Persist the filter selection on every change.
+  useEffect(() => {
+    try {
+      localStorage.setItem(FILTER_STATES_KEY, JSON.stringify(filterStates))
+    } catch {
+      /* ignore */
+    }
+  }, [filterStates])
+  useEffect(() => {
+    try {
+      localStorage.setItem(FILTER_PAYMENTS_KEY, JSON.stringify(filterPayments))
+    } catch {
+      /* ignore */
+    }
+  }, [filterPayments])
+  // payment_status is a single backend param: send it only when exactly
+  // one of the two toggles is active (both/none = no constraint).
+  const paymentFilter = filterPayments.length === 1 ? filterPayments[0] : undefined
 
   // new-invoice form (issuer profiles are managed in Settings)
   const [niClient, setNiClient] = useState('')
@@ -185,7 +229,7 @@ export function InvoicesRoute() {
           header: h,
           query: {
             ...(filterStates.length ? { state: filterStates } : {}),
-            ...(filterPayment ? { payment_status: filterPayment } : {}),
+            ...(paymentFilter ? { payment_status: paymentFilter } : {}),
           },
         },
       }),
@@ -193,7 +237,7 @@ export function InvoicesRoute() {
     if (pr.data) setProfiles(pr.data)
     if (cl.data) setClients(cl.data)
     if (iv.data) setList(iv.data)
-  }, [filterStates, filterPayment])
+  }, [filterStates, paymentFilter])
 
   // Reload on workspace switch and whenever a filter changes. Inlined
   // (rather than calling loadList) so the setState lands after an await
@@ -211,7 +255,7 @@ export function InvoicesRoute() {
             header: h,
             query: {
               ...(filterStates.length ? { state: filterStates } : {}),
-              ...(filterPayment ? { payment_status: filterPayment } : {}),
+              ...(paymentFilter ? { payment_status: paymentFilter } : {}),
             },
           },
         }),
@@ -224,7 +268,7 @@ export function InvoicesRoute() {
     return () => {
       active = false
     }
-  }, [activeId, filterStates, filterPayment])
+  }, [activeId, filterStates, paymentFilter])
 
   const openInvoice = useCallback(async (id: string) => {
     setErr(null)
@@ -289,24 +333,6 @@ export function InvoicesRoute() {
 
   async function reloadSel() {
     if (sel) await openInvoice(sel.id)
-    await loadList()
-  }
-
-  // One-off cleanup of the SdI accreditation test invoices (series
-  // "TEST"). Owner-only on the server; confirmed because it is a hard
-  // delete.
-  async function purgeTest() {
-    if (!window.confirm(t('invoices.purgeTestConfirm'))) return
-    setErr(null)
-    setMsg(null)
-    const { data, error } = await api.POST('/invoices/purge-test', {
-      params: { header: workspaceHeader() },
-    })
-    if (error) {
-      setErr(errMessage(error))
-      return
-    }
-    setMsg(t('invoices.purgeTestDone', { n: data?.deleted ?? 0 }))
     await loadList()
   }
 
@@ -682,9 +708,9 @@ export function InvoicesRoute() {
       <p className="hint">{t('invoices.seriesLegalHint')}</p>
 
       <h2>{t('invoices.list')}</h2>
-      {/* Filters: lifecycle multi-select (toggle buttons, default
-          Draft+Transmitted) + an orthogonal paid/unpaid axis. The purge
-          button clears the SdI accreditation test invoices. */}
+      {/* Two orthogonal toggle-button filter groups: the invoice lifecycle
+          (default Draft+Transmitted) and the paid/unpaid axis, separated by
+          a divider. Both persist across sessions. */}
       <div className="row">
         {FILTER_STATES.map((s) => {
           const on = filterStates.includes(s)
@@ -704,23 +730,25 @@ export function InvoicesRoute() {
             </button>
           )
         })}
-        <select
-          value={filterPayment}
-          onChange={(e) =>
-            setFilterPayment(e.target.value as '' | PaymentStatus)
-          }
-        >
-          <option value="">{t('invoices.filterPaymentAll')}</option>
-          <option value="unpaid">{t('invoices.paymentStatus.unpaid')}</option>
-          <option value="paid">{t('invoices.paymentStatus.paid')}</option>
-        </select>
-        <button
-          type="button"
-          className="btn--sm btn--danger"
-          onClick={() => void purgeTest()}
-        >
-          {t('invoices.purgeTest')}
-        </button>
+        <span className="filter-divider" aria-hidden="true" />
+        {FILTER_PAYMENTS.map((p) => {
+          const on = filterPayments.includes(p)
+          return (
+            <button
+              key={p}
+              type="button"
+              className={`btn--sm ${on ? '' : 'btn--ghost'}`}
+              aria-pressed={on}
+              onClick={() =>
+                setFilterPayments((prev) =>
+                  on ? prev.filter((x) => x !== p) : [...prev, p],
+                )
+              }
+            >
+              {t(`invoices.paymentStatus.${p}`)}
+            </button>
+          )
+        })}
       </div>
       {list.length === 0 ? (
         <p className="hint">{t('invoices.none')}</p>
