@@ -89,6 +89,22 @@ function clampLeft(left: number, width = 320): number {
   return Math.max(margin, Math.min(left, max))
 }
 
+// Keep a fixed-position popover within the viewport vertically. The
+// compose popover anchors just below the selection (``below``); for a
+// selection whose end sits low or below the fold (e.g. a Ctrl+A over a
+// tall note part) that would render the bubble off the bottom, leaving
+// its buttons unreachable. Flip it above the selection (``anchorTop``)
+// when there is room, else clamp to the margins. ``height`` is a safe
+// over-estimate of the popover so the whole thing stays on-screen.
+function clampTop(below: number, anchorTop: number, height = 300): number {
+  const margin = 8
+  const maxTop = window.innerHeight - height - margin
+  if (below <= maxTop) return Math.max(margin, below)
+  const above = anchorTop - height - margin
+  if (above >= margin) return above
+  return Math.max(margin, maxTop)
+}
+
 export const InlineAnnotator = forwardRef<InlineAnnotatorHandle, Props>(
   function InlineAnnotator(
     {
@@ -381,7 +397,7 @@ export const InlineAnnotator = forwardRef<InlineAnnotatorHandle, Props>(
           style={{
             position: 'fixed',
             left: clampLeft(compose.sel.left - 160),
-            top: compose.sel.bottom + 8,
+            top: clampTop(compose.sel.bottom + 8, compose.sel.top),
           }}
           onMouseDown={(e) => e.stopPropagation()}
         >
