@@ -16,6 +16,7 @@ import {
 import { useMe } from '../auth/useMe'
 import { useMyWorkspace } from '../auth/useMyWorkspace'
 import { Logo } from './Logo'
+import { UserAvatar } from './UserAvatar'
 import { Icon, type IconName } from './NavIcon'
 import { ThemeToggle } from './ThemeToggle'
 import { PomodoroTimer } from './PomodoroTimer'
@@ -567,6 +568,7 @@ export function AppShell() {
   // exactly one place at a time, so no duplicate controls in the DOM).
   const utilities = (
     <>
+      <UserAvatar />
       <ModeChip
         canOwner={canSwitchRole}
         canAdmin={canAdmin}
