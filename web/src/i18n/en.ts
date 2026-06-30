@@ -1201,6 +1201,9 @@ export const en = {
       'Create an issuer profile in Settings first.',
     nameRequired: 'Enter either a Legal name or First + Last name.',
     f: {
+      subjectType: 'Subject type',
+      company: 'Legal entity',
+      person: 'Natural person',
       legal_name: 'Legal name',
       first_name: 'First name',
       last_name: 'Last name',

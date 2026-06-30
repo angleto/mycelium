@@ -1201,6 +1201,9 @@ export const it: Catalog = {
       'Crea prima un profilo emittente in Impostazioni.',
     nameRequired: 'Inserisci la Ragione sociale oppure Nome e Cognome.',
     f: {
+      subjectType: 'Tipo soggetto',
+      company: 'Persona giuridica',
+      person: 'Persona fisica',
       legal_name: 'Ragione sociale',
       first_name: 'Nome',
       last_name: 'Cognome',

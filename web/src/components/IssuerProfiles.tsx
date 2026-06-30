@@ -286,6 +286,10 @@ export function IssuerProfiles() {
   const [profiles, setProfiles] = useState<Profile[]>([])
   const [form, setForm] = useState<Form>(EMPTY)
   const [edit, setEdit] = useState<string | 'new' | null>(null)
+  // FatturaPA Anagrafica is a choice: a legal entity uses Ragione sociale
+  // (Denominazione), a persona fisica uses Nome+Cognome. This toggle picks one
+  // so the form never submits both (the API stays lenient for legacy rows).
+  const [subjectType, setSubjectType] = useState<'company' | 'person'>('company')
   const [showCounters, setShowCounters] = useState<string | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const [msg, setMsg] = useState<string | null>(null)
@@ -345,6 +349,9 @@ export function IssuerProfiles() {
     setMsg(null)
     if (p) {
       setEdit(p.id)
+      // Both filled (a legacy row) infers persona fisica, matching the XML's
+      // Nome/Cognome precedence.
+      setSubjectType(p.first_name && p.last_name ? 'person' : 'company')
       setForm({
         label: p.label,
         legal_name: p.legal_name ?? '',
@@ -381,17 +388,34 @@ export function IssuerProfiles() {
       void showLogo(p.has_logo ? p.id : null)
     } else {
       setEdit('new')
+      setSubjectType('company')
       setForm(EMPTY)
       void showLogo(null)
     }
   }
 
+  // Switch Anagrafica mode: clear the OTHER mode's fields so the payload is
+  // single-mode (legal entity XOR persona fisica), never both.
+  function setSubject(next: 'company' | 'person') {
+    setSubjectType(next)
+    setForm((f) =>
+      next === 'person'
+        ? { ...f, legal_name: '' }
+        : { ...f, first_name: '', last_name: '' },
+    )
+  }
+
   async function save(e: FormEvent) {
     e.preventDefault()
     setErr(null)
-    // FatturaPA Anagrafica choice: Denominazione (legal_name) OR Nome+Cognome.
-    // Reject the empty case client-side (the API enforces it too).
-    if (!form.legal_name.trim() && !(form.first_name.trim() && form.last_name.trim())) {
+    // FatturaPA Anagrafica choice: the active subject type is authoritative.
+    // Validate (and below, submit) only that mode, so a legacy both-filled row
+    // is normalised to a single mode on save and never re-sends a stale field.
+    const isPerson = subjectType === 'person'
+    const nameOk = isPerson
+      ? !!(form.first_name.trim() && form.last_name.trim())
+      : !!form.legal_name.trim()
+    if (!nameOk) {
       setErr(t('cp.nameRequired'))
       return
     }
@@ -399,9 +423,9 @@ export function IssuerProfiles() {
     const termsDays = form.default_payment_terms_days.trim()
     const common = {
       label: form.label,
-      legal_name: form.legal_name || null,
-      first_name: form.first_name || null,
-      last_name: form.last_name || null,
+      legal_name: isPerson ? null : form.legal_name || null,
+      first_name: isPerson ? form.first_name || null : null,
+      last_name: isPerson ? form.last_name || null : null,
       vat_number: form.vat_number || null,
       tax_code: form.tax_code || null,
       address: form.address,
@@ -597,39 +621,55 @@ export function IssuerProfiles() {
                 onChange={(e) => setForm({ ...form, label: e.target.value })}
               />
             </label>
+            {/* FatturaPA Anagrafica is a choice: a legal entity emits
+                Denominazione (Ragione sociale), a persona fisica Nome+Cognome.
+                The mode picks which field(s) show, so they are never both
+                filled (setSubject clears the inactive one). */}
             <label>
-              {t('cp.f.legal_name')}
-              <input
-                value={form.legal_name}
-                onChange={(e) =>
-                  setForm({ ...form, legal_name: e.target.value })
-                }
-              />
+              {t('cp.f.subjectType')}
+              <select
+                value={subjectType}
+                onChange={(e) => setSubject(e.target.value as 'company' | 'person')}
+              >
+                <option value="company">{t('cp.f.company')}</option>
+                <option value="person">{t('cp.f.person')}</option>
+              </select>
             </label>
           </div>
-          {/* Anagrafica choice: legal entity uses Ragione sociale above; a
-              persona fisica (ditta individuale) leaves it empty and fills
-              Nome + Cognome here. Exactly one mode is required (validated). */}
-          <div className="row">
-            <label>
-              {t('cp.f.first_name')}
-              <input
-                value={form.first_name}
-                onChange={(e) =>
-                  setForm({ ...form, first_name: e.target.value })
-                }
-              />
-            </label>
-            <label>
-              {t('cp.f.last_name')}
-              <input
-                value={form.last_name}
-                onChange={(e) =>
-                  setForm({ ...form, last_name: e.target.value })
-                }
-              />
-            </label>
-          </div>
+          {subjectType === 'company' ? (
+            <div className="row">
+              <label>
+                {t('cp.f.legal_name')}
+                <input
+                  value={form.legal_name}
+                  onChange={(e) =>
+                    setForm({ ...form, legal_name: e.target.value })
+                  }
+                />
+              </label>
+            </div>
+          ) : (
+            <div className="row">
+              <label>
+                {t('cp.f.first_name')}
+                <input
+                  value={form.first_name}
+                  onChange={(e) =>
+                    setForm({ ...form, first_name: e.target.value })
+                  }
+                />
+              </label>
+              <label>
+                {t('cp.f.last_name')}
+                <input
+                  value={form.last_name}
+                  onChange={(e) =>
+                    setForm({ ...form, last_name: e.target.value })
+                  }
+                />
+              </label>
+            </div>
+          )}
           {/* Identity, symmetric with the client: Country (VAT) + VAT
               number split, plus tax code. */}
           <div className="row">
