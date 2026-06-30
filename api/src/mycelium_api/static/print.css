@@ -1,0 +1,206 @@
+/* Print stylesheet for /export/pdf (markdown editor → PDF).
+ *
+ * Drives WeasyPrint's rendering. Resolved relative to this file so
+ * @font-face URLs and @import "katex/..." resolve via file://; nothing
+ * here is loaded over HTTP.
+ */
+
+@import url("katex/katex.min.css");
+
+/* CSS Paged Media: A4 with generous margins and a page counter in
+ * the footer. Page 1 carries the document title in the header; later
+ * pages repeat a short slug + page number so the print stays
+ * navigable when bound. */
+@page {
+  size: A4;
+  margin: 22mm 18mm 22mm 18mm;
+  @bottom-center {
+    content: counter(page) " / " counter(pages);
+    font: 9pt "Source Serif", "Charter", Georgia, serif;
+    color: #666;
+  }
+  @top-right {
+    content: string(doc-title);
+    font: 9pt "Source Serif", "Charter", Georgia, serif;
+    color: #888;
+  }
+}
+@page :first {
+  @top-right { content: ""; }
+}
+
+html, body {
+  background: #fff;
+  color: #111;
+  margin: 0;
+  padding: 0;
+  font-family: "Source Serif", "Charter", "Iowan Old Style", Georgia, "Times New Roman", serif;
+  font-size: 10.5pt;
+  line-height: 1.55;
+}
+
+.pdf-doc {
+  /* Headed by the document title; running-element keeps a copy in
+   * the page header from page 2 onward (the @page rule above). */
+}
+.pdf-doc > h1.pdf-title {
+  string-set: doc-title content();
+  font-size: 22pt;
+  line-height: 1.2;
+  margin: 0 0 0.4em 0;
+  border-bottom: 1pt solid #ccc;
+  padding-bottom: 0.25em;
+}
+
+/* Headings: clean hierarchy with sensible page-break behaviour. */
+h1, h2, h3, h4, h5, h6 {
+  font-family: "Source Sans", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  font-weight: 600;
+  line-height: 1.25;
+  page-break-after: avoid;
+  break-after: avoid;
+  margin: 1.4em 0 0.4em;
+}
+h1 { font-size: 18pt; }
+h2 { font-size: 15pt; }
+h3 { font-size: 13pt; }
+h4 { font-size: 11.5pt; }
+h5, h6 { font-size: 10.5pt; }
+
+p { margin: 0.55em 0; orphans: 3; widows: 3; }
+
+a {
+  color: #0b5fff;
+  text-decoration: none;
+  word-break: break-word;
+}
+
+/* Mention chips ([label](@kind:id)) rendered by the SPA: keep the
+ * pill look in PDF so the document still feels like the app. */
+a.chip,
+.chip {
+  display: inline-block;
+  padding: 0.05em 0.4em;
+  border-radius: 0.4em;
+  background: #f1f3f7;
+  color: #111;
+  font-size: 0.92em;
+  text-decoration: none;
+}
+.chip--task-closed {
+  text-decoration: line-through;
+  color: #777;
+}
+
+ul, ol { margin: 0.55em 0 0.55em 1.4em; padding: 0; }
+li { margin: 0.15em 0; }
+ul[data-type="taskList"] { list-style: none; margin-left: 0.4em; }
+ul[data-type="taskList"] li { display: flex; gap: 0.4em; align-items: flex-start; }
+ul[data-type="taskList"] li > label { line-height: 1; }
+ul[data-type="taskList"] li > label input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 0.9em;
+  height: 0.9em;
+  border: 1pt solid #888;
+  border-radius: 2pt;
+  display: inline-block;
+  vertical-align: middle;
+  margin: 0.15em 0.1em 0 0;
+}
+ul[data-type="taskList"] li > label input[type="checkbox"]:checked {
+  background: #111;
+  border-color: #111;
+}
+
+blockquote {
+  margin: 0.8em 0;
+  padding: 0.1em 1em;
+  border-left: 2pt solid #bbb;
+  color: #555;
+  font-style: italic;
+  page-break-inside: avoid;
+  break-inside: avoid;
+}
+
+hr {
+  border: 0;
+  border-top: 0.5pt solid #ccc;
+  margin: 1.4em 0;
+}
+
+/* Inline code + fenced blocks: monospace, light surface, soft border.
+ * Break-inside:avoid keeps short snippets together; long blocks can
+ * still split across pages (otherwise they'd silently overflow). */
+code, kbd, samp {
+  font-family: "JetBrains Mono", "Fira Code", "Menlo", "Source Code Pro", monospace;
+  font-size: 0.9em;
+  background: #f5f5f7;
+  padding: 0.05em 0.3em;
+  border-radius: 2pt;
+}
+pre {
+  font-family: "JetBrains Mono", "Fira Code", "Menlo", "Source Code Pro", monospace;
+  font-size: 9pt;
+  line-height: 1.45;
+  background: #f5f5f7;
+  border: 0.5pt solid #e3e3e7;
+  border-radius: 3pt;
+  padding: 0.7em 0.9em;
+  margin: 0.8em 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow: hidden;
+  page-break-inside: auto;
+  break-inside: auto;
+}
+pre > code {
+  background: transparent;
+  padding: 0;
+  border: 0;
+  font-size: inherit;
+}
+
+/* Tables: print-grade borders + header tint + repeat headers when a
+ * table crosses pages. */
+table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 1em 0;
+  font-size: 9.5pt;
+  page-break-inside: auto;
+  break-inside: auto;
+}
+thead { display: table-header-group; }
+tr { page-break-inside: avoid; break-inside: avoid; }
+th, td {
+  border: 0.5pt solid #c8c8d0;
+  padding: 0.35em 0.55em;
+  vertical-align: top;
+  text-align: left;
+}
+th {
+  background: #f0f1f5;
+  font-weight: 600;
+}
+
+/* Images: never bleed past the text column, and try not to split. */
+img {
+  max-width: 100%;
+  height: auto;
+  page-break-inside: avoid;
+  break-inside: avoid;
+}
+.md-img { display: inline-block; }
+.md-img-wrap { display: inline-block; }
+
+/* KaTeX is imported above; tighten the inline math so it sits on the
+ * text baseline instead of growing the line box. */
+.katex {
+  font-size: 1.02em;
+}
+.katex-display {
+  margin: 0.8em 0;
+  page-break-inside: avoid;
+  break-inside: avoid;
+}

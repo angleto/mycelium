@@ -1,0 +1,125 @@
+# Mirror packaging/homebrew-mycelium/ into github.com/angleto/homebrew-mycelium
+# on every v* tag (the unified Mycelium release tag). The tap repo is a
+# public mirror used by `brew tap angleto/mycelium`; the monorepo is the
+# source of truth for the formula template.
+#
+# The committed `Formula/mycelium-cli.rb` is a TEMPLATE with `__TAG__` and
+# `__SHA256__` placeholders. This workflow resolves them against the
+# tarball produced by the tag, then pushes the rendered formula to the
+# tap repo so users see a versioned, ready-to-install formula.
+#
+# Setup (one-time):
+#   1. Create a fine-grained Personal Access Token with `Contents:
+#      read+write` on the `angleto/homebrew-mycelium` repository only.
+#   2. Save it as a repository secret named `TAP_PUSH_TOKEN` in this
+#      repo.
+#
+# Without that secret the first step fails fast with a clear error.
+
+name: mirror-homebrew-mycelium
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to mirror (e.g. v2.0.6). Defaults to the latest v* tag."
+        required: false
+      message:
+        description: "Override commit message to use in the tap repo"
+        required: false
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Resolve target tag
+        id: tag
+        env:
+          INPUT_TAG: ${{ github.event.inputs.tag }}
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_EVENT_NAME}" == "push" ]]; then
+            TAG="${GITHUB_REF_NAME}"
+          elif [[ -n "${INPUT_TAG}" ]]; then
+            TAG="${INPUT_TAG}"
+          else
+            # workflow_dispatch with no tag input: take the latest v*
+            # tag reachable from the default branch.
+            git ls-remote --tags --refs "https://github.com/${GITHUB_REPOSITORY}.git" \
+              | awk -F/ '/refs\/tags\/v[0-9]/{print $NF}' \
+              | sort -V | tail -1 > /tmp/latest-tag
+            TAG=$(cat /tmp/latest-tag)
+            if [[ -z "${TAG}" ]]; then
+              echo "::error::no v* tag found"
+              exit 1
+            fi
+          fi
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "Mirroring tag: ${TAG}"
+
+      - name: Checkout monorepo @ tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.tag.outputs.tag }}
+
+      - name: Render formula (resolve __TAG__ + __SHA256__)
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          set -euo pipefail
+          packaging/homebrew-mycelium/bin/render-formula "${TAG}" --in-place
+          # Sanity: placeholders must be gone now.
+          if grep -qE '__TAG__|__SHA256__' packaging/homebrew-mycelium/Formula/mycelium-cli.rb; then
+            echo "::error::render-formula left placeholders unresolved"
+            grep -nE '__TAG__|__SHA256__' packaging/homebrew-mycelium/Formula/mycelium-cli.rb
+            exit 1
+          fi
+
+      - name: Clone tap repo
+        env:
+          TAP_PUSH_TOKEN: ${{ secrets.TAP_PUSH_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${TAP_PUSH_TOKEN}" ]]; then
+            echo "::error::TAP_PUSH_TOKEN secret is not set; cannot push to the tap repo."
+            exit 1
+          fi
+          git clone --depth=1 \
+            "https://x-access-token:${TAP_PUSH_TOKEN}@github.com/angleto/homebrew-mycelium.git" \
+            tap-repo
+
+      - name: Sync content into tap
+        run: |
+          set -euo pipefail
+          # Wipe what we own and re-copy, so removals propagate too.
+          rm -rf tap-repo/Formula tap-repo/bin tap-repo/README.md
+          cp -r packaging/homebrew-mycelium/Formula tap-repo/
+          cp -r packaging/homebrew-mycelium/bin tap-repo/
+          cp packaging/homebrew-mycelium/README.md tap-repo/
+
+      - name: Commit + push if changed
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+          OVERRIDE_MSG: ${{ github.event.inputs.message }}
+        run: |
+          set -euo pipefail
+          cd tap-repo
+          git config user.email "ci@mycelium.xeno.garden"
+          git config user.name "Mycelium CI"
+          if [[ -z "$(git status --porcelain)" ]]; then
+            echo "No changes to mirror."
+            exit 0
+          fi
+          git add -A
+          if [[ -n "${OVERRIDE_MSG}" ]]; then
+            MSG="${OVERRIDE_MSG}"
+          else
+            MSG="Release ${TAG}"
+          fi
+          git commit -m "${MSG}"
+          git push origin HEAD:main

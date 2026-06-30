@@ -1,0 +1,5958 @@
+:root {
+  --bg: #f7f5ef;
+  --surface: #fdfcf7;
+  --surface-2: #ece8de;
+  --text: #2e362d;
+  --text-h: #15201a;
+  /* Darkened from #6b7665 so muted text clears WCAG AA (>=4.5:1) on the
+     darker --surface-2 strips too, not only on --surface — see the theme
+     contrast pass. Dark --muted is unchanged (already passes). */
+  --muted: #5b6453;
+  --border: #d8d3c4;
+  --accent: #4a6b3e;
+  --accent-weak: #e2ecde;
+  --accent-fg: #ffffff;
+  --brand: #4a6b3e;
+  --brand-weak: #e2ecde;
+  --brand-fg: #ffffff;
+  --moss: #4a6b3e;
+  --bark: #6a4f33;
+  --bloom: #c97b9f;
+  --err: #a13322;
+  --ok: #2f7d3f;
+  /* Semantic chip/badge hues. Each flips per theme (see the dark blocks)
+     so status/maturity chips stay legible on both the light and dark
+     surfaces instead of baking a single-theme literal. */
+  --violet: #6f4bb0;
+  --info: #285a96;
+  --mat-seed: #287029;
+  --mat-growing: #1b6b22;
+  --mat-mature: #16531b;
+  --mat-dormant: #6f5347;
+  /* PriorityChip dot lightness: darker on the pale light chip, lighter on
+     the dark one, so the hue ramp keeps a >=3:1 boundary in both themes. */
+  --prio-l: 30%;
+  --radius: 9px;
+  --shadow: 0 1px 2px rgba(21, 32, 26, 0.06), 0 1px 8px rgba(21, 32, 26, 0.04);
+  --sans: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, Consolas, monospace;
+  --font-display: ui-serif, Georgia, 'Times New Roman', serif;
+  --topbar-h: 52px;
+  /* Total header band: the bar height plus the iOS status-bar safe-area
+     inset that overlays the top edge in installed (standalone) PWA mode.
+     env() is 0 in a normal browser tab, so --header-h == --topbar-h there
+     and the layout is unchanged. Everything anchored "below the header"
+     uses --header-h so it tracks the inset. */
+  --header-h: calc(var(--topbar-h) + env(safe-area-inset-top, 0px));
+
+  font: 15px/1.5 var(--sans);
+  color: var(--text);
+  background: var(--bg);
+  /* Native widgets (datetime/date/time fields, select popups,
+     scrollbars) must follow the APPLIED palette, not the OS: with
+     ``light dark`` the browser resolved the scheme from the OS
+     preference, so forcing the app theme opposite to the OS rendered
+     native input text black-on-black (dark app, light OS) or
+     white-on-white (light app, dark OS). Each palette block below
+     pins its own scheme. */
+  color-scheme: light;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Dark palette. Applied (a) when the user forces dark
+   (html[data-theme="dark"]) and (b) when the system is dark AND the
+   user has not forced light (data-theme auto/unset). Forced light just
+   keeps the :root defaults. The block is duplicated because a media
+   query is the only way to read the system preference; keep the two
+   copies in sync. */
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --bg: #0f1612;
+  --surface: #161e18;
+  --surface-2: #1f2820;
+  --text: #cfd6c8;
+  --text-h: #f0eee5;
+  --muted: #8a937e;
+  --border: #2a342c;
+  --accent: #7fa56e;
+  --accent-weak: #1d2c1f;
+  --accent-fg: #0f1612;
+  --brand: #7fa56e;
+  --brand-weak: #1d2c1f;
+  --brand-fg: #0f1612;
+  --moss: #7fa56e;
+  --bark: #a98963;
+  --bloom: #d99cb8;
+  --err: #f08a76;
+  --ok: #6dc176;
+  --violet: #b39ddb;
+  --info: #7bb0e8;
+  --mat-seed: #7ec885;
+  --mat-growing: #6dc176;
+  --mat-mature: #8fd49a;
+  --mat-dormant: #c9a896;
+  --prio-l: 62%;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 1px 10px rgba(0, 0, 0, 0.3);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']):not([data-theme='dark']) {
+    color-scheme: dark;
+    --bg: #0f1612;
+    --surface: #161e18;
+    --surface-2: #1f2820;
+    --text: #cfd6c8;
+    --text-h: #f0eee5;
+    --muted: #8a937e;
+    --border: #2a342c;
+    --accent: #7fa56e;
+    --accent-weak: #1d2c1f;
+    --accent-fg: #0f1612;
+    --brand: #7fa56e;
+    --brand-weak: #1d2c1f;
+    --brand-fg: #0f1612;
+    --moss: #7fa56e;
+    --bark: #a98963;
+    --bloom: #d99cb8;
+    --err: #f08a76;
+    --ok: #6dc176;
+    --violet: #b39ddb;
+    --info: #7bb0e8;
+    --mat-seed: #7ec885;
+    --mat-growing: #6dc176;
+    --mat-mature: #8fd49a;
+    --mat-dormant: #c9a896;
+    --prio-l: 62%;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 1px 10px rgba(0, 0, 0, 0.3);
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+}
+h1,
+h2,
+h3 {
+  color: var(--text-h);
+  font-family: var(--font-display);
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: -0.01em;
+  margin: 0 0 0.6rem;
+}
+h1 {
+  font-size: 1.4rem;
+}
+h2 {
+  font-size: 1.05rem;
+  margin-top: 1.5rem;
+}
+h3 {
+  font-size: 0.95rem;
+}
+a {
+  color: var(--accent);
+  text-decoration: none;
+}
+a:hover {
+  text-decoration: underline;
+}
+
+/* ---- layout: sidebar rail + content ---- */
+.app {
+  display: flex;
+  flex-direction: column;
+  min-height: 100svh;
+}
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  height: var(--header-h);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  /* Pad the controls clear of the iOS status bar in installed (standalone)
+     PWA mode; the surface still fills edge-to-edge behind it. The left/right
+     insets cover the notch in landscape. env() insets are 0 in the browser,
+     so this matches the old ``0 1rem`` there. */
+  padding: env(safe-area-inset-top, 0px) max(1rem, env(safe-area-inset-right, 0px))
+    0 max(1rem, env(safe-area-inset-left, 0px));
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+/* Installed (standalone) PWA on iOS draws the status-bar glyphs (clock,
+   battery) in white over the top edge. Paint the safe-area strip behind
+   them with the brand green (matches the manifest theme_color, fixed
+   across light/dark) so the white glyphs stay legible. Fixed + edge-to-edge
+   so it spans the full width regardless of the topbar's side padding; zero
+   height (invisible) in a browser tab, where env() insets are 0. */
+.topbar::before {
+  content: '';
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: env(safe-area-inset-top, 0px);
+  background: #4a6b3e;
+  pointer-events: none;
+}
+.topbar__brand {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-weight: 800;
+  font-size: 1.1rem;
+  color: var(--text-h);
+  letter-spacing: -0.3px;
+}
+.topbar__actions {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+.topbar__actions .nav__link {
+  padding: 0.3rem 0.5rem;
+}
+.layout {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+.sidebar {
+  width: 232px;
+  flex: 0 0 232px;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  padding: 0.9rem 0.7rem;
+  gap: 0.5rem;
+  position: sticky;
+  top: var(--header-h);
+  height: calc(100svh - var(--header-h));
+  overflow-y: auto;
+}
+.sidebar__ws {
+  padding: 0 0.25rem 0.4rem;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.focus {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+.focus__lbl {
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+.focus select {
+  width: 100%;
+}
+.running {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.8rem;
+  color: var(--text);
+  padding: 0.15rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-2);
+}
+.running:hover {
+  border-color: var(--accent);
+}
+.running__link {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
+  color: inherit;
+  text-decoration: none;
+  cursor: pointer;
+}
+.running__n {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  font-weight: 700;
+  color: var(--accent);
+}
+button.running__n {
+  cursor: pointer;
+}
+.running__ctl {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  line-height: 1;
+  color: var(--text);
+  cursor: pointer;
+}
+.running__ctl:hover {
+  color: var(--accent);
+}
+.running__ctl:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.running__t {
+  font-variant-numeric: tabular-nums;
+  font-family: var(--mono);
+}
+.running__title {
+  display: inline-block;
+  max-width: 11rem;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.running__title > span {
+  display: inline-block;
+  padding-left: 100%;
+  animation: running-marquee 9s linear infinite;
+}
+@keyframes running-marquee {
+  to {
+    transform: translateX(-100%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .running__title > span {
+    padding-left: 0;
+    animation: none;
+    max-width: 11rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+}
+.themetoggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text);
+}
+.running__spin {
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: running-spin 2s linear infinite;
+}
+@keyframes running-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .running__spin {
+    animation-duration: 6s;
+  }
+}
+/* Paused timer: freeze the spinner and dim the frozen readout so a
+   paused entry reads differently from a live (ticking) one. */
+.running__spin.is-paused {
+  animation: none;
+  border-top-color: var(--border);
+  opacity: 0.6;
+}
+.tasktimer__stop.is-paused,
+.taskrow__meta strong.is-paused {
+  opacity: 0.6;
+}
+/* Paused timer readout: de-emphasize with the secondary text color
+   (theme-tuned, same standard as muted text) rather than opacity, so
+   contrast stays consistent across light/dark. */
+.running__t.is-paused {
+  color: var(--muted);
+}
+.nav {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  padding-top: 0.4rem;
+}
+.nav__group {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.nav__title {
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  padding: 0.2rem 0.6rem;
+}
+.nav__link {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.42rem 0.6rem;
+  border-radius: 7px;
+  color: var(--text);
+  font-size: 0.9rem;
+  text-decoration: none;
+}
+.nav__svg {
+  flex: 0 0 auto;
+  opacity: 0.75;
+}
+.nav__link--active .nav__svg {
+  opacity: 1;
+}
+.nav__link:hover {
+  background: var(--surface-2);
+  text-decoration: none;
+}
+.nav__link--active {
+  background: var(--accent-weak);
+  color: var(--accent);
+  font-weight: 600;
+}
+.content {
+  flex: 1;
+  min-width: 0;
+  padding: 1.75rem clamp(1rem, 4vw, 2.75rem);
+}
+
+/* Hamburger: hidden on desktop. The button sits in the topbar; CSS
+   below makes it visible only below the 820px breakpoint. */
+.topbar__hamburger {
+  display: none;
+  background: transparent;
+  border: 0;
+  font-size: 1.5rem;
+  line-height: 1;
+  /* 0.7rem vertical padding + 1.5rem glyph ≈ 46px effective height, just
+     above the 44px tap-target floor (Apple HIG / Material 48dp) without
+     overflowing the 52px topbar. */
+  padding: 0.7rem 0.6rem;
+  color: inherit;
+  cursor: pointer;
+}
+
+/* ===========================================================
+   Responsive layout. Breakpoints used across this file:
+     820px  layout/shell  — sidebar collapses to an off-canvas drawer,
+                            topbar utilities move into the drawer foot
+                            (mirrors useMediaQuery MOBILE_QUERY).
+     768px  tablet        — kanban column sizing, tasks default view.
+     640px  small phone   — single-column form grids, popover sizing.
+   =========================================================== */
+@media (max-width: 820px) {
+  .topbar__hamburger { display: inline-block; }
+  /* Tighter topbar: only the hamburger, brand and the glanceable
+     timers stay here — the utilities relocate into the drawer foot
+     (AppShell), so the row fits a phone instead of forcing the page
+     ~200px wider than the viewport. */
+  .topbar {
+    gap: 0.5rem;
+    padding: env(safe-area-inset-top, 0px) max(0.65rem, env(safe-area-inset-right, 0px))
+      0 max(0.65rem, env(safe-area-inset-left, 0px));
+  }
+  .topbar__brand { min-width: 0; overflow: hidden; }
+  .topbar__actions { gap: 0.4rem; min-width: 0; }
+  .running__title { max-width: 6rem; }
+
+  /* Sidebar becomes an off-canvas drawer; ``.app--sidebar-open`` slides
+     it in from the left over a tap-to-close backdrop. Escape closes it
+     and tapping a destination closes it (both wired in AppShell). */
+  .sidebar {
+    position: fixed;
+    top: var(--header-h);
+    left: 0;
+    width: min(86vw, 18rem);
+    height: calc(100svh - var(--header-h));
+    /* Clear the home-indicator strip so the drawer foot (logout) is fully
+       tappable in standalone mode. */
+    padding-bottom: max(0.9rem, env(safe-area-inset-bottom, 0px));
+    transform: translateX(-100%);
+    transition: transform 0.22s ease-out;
+    z-index: 50;
+    overflow-y: auto;
+    box-shadow: 2px 0 12px rgba(0, 0, 0, 0.1);
+  }
+  .app--sidebar-open .sidebar { transform: translateX(0); }
+  .layout { display: block; }
+  .content {
+    padding: 1.25rem clamp(0.8rem, 4vw, 1.5rem)
+      max(1.25rem, env(safe-area-inset-bottom, 0px));
+  }
+
+  /* Wide data tables scroll horizontally inside their own box rather
+     than stretching the whole page. */
+  .tbl {
+    display: block;
+    overflow-x: auto;
+    max-width: 100%;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* 16px form controls: below this width iOS Safari auto-zooms inputs
+     whose font is < 16px (base is 15px), shoving the layout on every
+     focus. (Class-scoped compact inputs keep their own size.) */
+  input,
+  select,
+  textarea {
+    font-size: 16px;
+  }
+
+  /* Mobile second-row bar under the topbar: hosts the task running
+     indicator on its own line so the topbar can stay compact for the
+     pomodoro. Sticky just below the topbar; when no timer is running
+     RunningIndicator returns null and ``:empty`` collapses the bar to
+     zero height (no extra reserved space). */
+  .topbar__row2 {
+    position: sticky;
+    top: var(--header-h);
+    z-index: 19;
+    display: flex;
+    justify-content: center;
+    padding: 0.3rem 0.65rem;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+  }
+  .topbar__row2:empty {
+    display: none;
+  }
+  .topbar__row2 .running {
+    max-width: 100%;
+  }
+  /* Row 2 has the full topbar width to work with, so the title doesn't
+     need to scroll horizontally any more — at some animation frames the
+     marquee left empty space between the "1/n" badge and the elapsed
+     counter. Show it statically with an ellipsis instead. */
+  .topbar__row2 .running__title {
+    max-width: 16rem;
+  }
+  .topbar__row2 .running__title > span {
+    padding-left: 0;
+    animation: none;
+    max-width: 16rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+/* Drawer scrim: dims and intercepts taps on the page behind the open
+   mobile drawer. Sits below the drawer (z 50) and below the topbar,
+   which it deliberately leaves uncovered (the hamburger toggles it).
+   Only mounted below the layout breakpoint (AppShell). */
+.sidebar__backdrop {
+  position: fixed;
+  inset: var(--header-h) 0 0 0;
+  z-index: 40;
+  background: rgba(8, 9, 13, 0.45);
+  border: 0;
+  cursor: pointer;
+}
+body.body--locked {
+  overflow: hidden;
+}
+
+/* Drawer foot: the topbar utilities relocated here on mobile. A wrapped
+   row under a divider, pushed to the bottom by the flex:1 nav above. */
+.nav__util {
+  margin-top: 0.6rem;
+  padding-top: 0.7rem;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+.nav__util select {
+  width: auto;
+}
+
+/* ---- cards / surfaces ---- */
+.page-title {
+  margin: 0 0 0.4rem;
+  font-size: 1.5rem;
+  color: var(--text-h);
+}
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 1.25rem 1.4rem;
+  max-width: 60rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+}
+/* Wide variant for data-dense routes (Tasks, Graph, Time tables) that
+   want to use the full available width inside .content instead of the
+   60rem reading-friendly cap. Opt-in per route. */
+.card--wide {
+  max-width: none;
+}
+.card + .card {
+  margin-top: 1rem;
+}
+
+/* ---- forms ---- */
+/* ``.field`` is a non-label captioned group: same look as a form
+   label, but a <div>. Used to wrap the RichEditor, which must NOT sit
+   inside a <label> — a label forwards user clicks to its first control
+   (the toolbar's Bold button), so a double-click in the editor toggled
+   bold on the selected word (the reported bug). */
+label,
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+input,
+select,
+textarea {
+  font: inherit;
+  color: var(--text-h);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 0.46rem 0.6rem;
+  /* Never grow past the container. A native <select> otherwise widens
+     to fit its longest option (e.g. a long task title), spilling the
+     page sideways on a phone; the cap truncates the label instead. */
+  max-width: 100%;
+}
+input:focus,
+select:focus,
+textarea:focus {
+  outline: 2px solid var(--accent-weak);
+  border-color: var(--accent);
+}
+textarea {
+  min-height: 6rem;
+  resize: vertical;
+  font-family: var(--mono);
+  font-size: 0.85rem;
+}
+.row {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  margin: 0.5rem 0;
+}
+/* Grouped filter widgets that must stay together on a single line, even
+   when the parent .row wraps. Used on /tasks to keep the date scope
+   (All/Today/Week/Month + Date focus + Show hidden) glued as one unit
+   instead of breaking mid-group when the viewport shrinks. The group
+   itself is shrink-eligible so it can co-exist on the same row as the
+   search input on wide screens, but stays atomic on narrow ones. */
+.filterbar__group {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: nowrap;
+  min-width: 0;
+}
+/* A second row below the main filter row, hosting the TagPickerGrid
+   (chip grid). Mirrors what /notes does so the tag-filter widget reads
+   identically across routes. */
+.filterbar__tags {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin: 0.3rem 0 0.5rem;
+}
+.filterbar__tags > .tagpickgrid { flex: 1; min-width: 0; }
+/* Bulk-actions panel: only visible when selection > 0. Styled as a
+   distinct subdued strip so it doesn't read as a second filter bar. */
+.filterbar__bulk {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin: 0.3rem 0;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface-2);
+}
+.filterbar__bulk-label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+/* A select captioned by a label/.field fills its group and shrinks with
+   it, rather than widening to its longest <option>: long task titles in
+   the scheduler/notifications task pickers were otherwise spilling the
+   page sideways on a phone. Inline selects (topbar, segmented controls)
+   sit outside a label/.field and keep their own sizing. */
+label > select,
+.field > select {
+  width: 100%;
+}
+/* Let those labels shrink below their content in a wrapping form row. */
+.row > label {
+  min-width: 0;
+}
+
+/* Issuer letterhead controls + the wider Net-days input (its caption and
+   placeholder were unreadable at the default content width). ``.lbl--wide``
+   makes a form label span the whole row (the multi-line header textarea). */
+.lbl--wide {
+  flex: 1 1 100%;
+}
+.inp--netdays {
+  min-width: 8.5rem;
+}
+/* Vertical divider between two adjacent toggle-button filter groups
+   (e.g. invoice lifecycle vs paid/unpaid), so they read as distinct axes
+   rather than one flat multi-select. */
+.filter-divider {
+  align-self: stretch;
+  width: 1px;
+  margin: 0.15rem 0.25rem;
+  background: var(--border);
+}
+.issuer-logo {
+  display: block;
+  max-height: 64px;
+  max-width: 220px;
+  margin: 0.3rem 0;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+}
+
+/* SdI transmission timeline (notification list) inside the open-invoice
+   panel: the per-NS rejection errors nest one level in, in the error
+   colour. */
+.sdi-timeline {
+  margin-top: 0.6rem;
+}
+.sdi-timeline__errors {
+  margin: 0.2rem 0 0.3rem 1rem;
+  font-size: 0.82rem;
+}
+
+/* Advisory "what can I do now" form: a responsive field grid where each
+   field stacks caption / input / hint. A fixed-height caption keeps every
+   input on the same baseline even when one caption wraps and another does
+   not, so the controls and their descriptions never read as misaligned. */
+.advform {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 0.5rem 1.2rem;
+  margin: 0.6rem 0;
+}
+.advform > label,
+.advform > .field {
+  flex: 1 1 13rem;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin: 0;
+}
+.advform .cap {
+  display: flex;
+  align-items: flex-end;
+  min-height: 2.3em;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+.advform .hint {
+  margin: 0;
+}
+.advform input {
+  width: 100%;
+}
+/* A caption paired with an inline control (necessity floor, tag grid). */
+.advrow {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.4rem 0.9rem;
+  margin: 0.55rem 0;
+}
+.advrow--tags {
+  align-items: flex-start;
+}
+.advrow > .cap {
+  min-width: 8.5rem;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+.advform__actions {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  margin: 0.8rem 0 0.2rem;
+}
+/* The active focus-scope chip reads as an APPLIED filter (accent tint),
+   not the muted default pill that looked permanently disabled. */
+.chip--scope {
+  background: color-mix(in srgb, var(--accent) 14%, var(--surface));
+  border-color: var(--accent);
+  color: var(--text-h);
+  cursor: help;
+}
+.chip--scope .chip__dot {
+  background: var(--accent);
+}
+
+/* A read-only "value" rendered as plain text inside a form label,
+   sized to line up vertically with the adjacent inputs/selects. Used
+   for fields that are immutable on the current entity (e.g. invoice
+   Issuer + Client once the draft exists). A disabled <select>/<input>
+   would carry pointless chrome and an inactive caret. */
+.ro-value {
+  display: inline-block;
+  padding: 0.46rem 0;
+  font-weight: 600;
+  color: var(--fg);
+  word-break: break-word;
+}
+
+button,
+.btn {
+  font: inherit;
+  font-weight: 600;
+  font-size: 0.88rem;
+  padding: 0.46rem 0.85rem;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: var(--accent);
+  color: var(--accent-fg);
+  cursor: pointer;
+}
+button:hover,
+.btn:hover {
+  filter: brightness(1.05);
+}
+button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.btn--ghost,
+button.btn--ghost {
+  background: transparent;
+  color: var(--text);
+  border-color: var(--border);
+}
+.btn--sm {
+  padding: 0.28rem 0.55rem;
+  font-size: 0.8rem;
+}
+.card--running {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 6%, var(--surface));
+  margin-bottom: 1rem;
+}
+.scrollbox {
+  max-height: 22rem;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 0.3rem 0.5rem;
+}
+.btn--danger,
+button.btn--danger {
+  background: transparent;
+  color: var(--err);
+  border-color: color-mix(in srgb, var(--err) 40%, transparent);
+}
+.btn--danger:hover,
+button.btn--danger:hover {
+  background: color-mix(in srgb, var(--err) 12%, transparent);
+}
+
+/* ---- lists / key-value ---- */
+.list {
+  list-style: none;
+  padding: 0;
+  margin: 0.6rem 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.list li {
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.list li button {
+  margin-left: auto;
+}
+.list li button + button {
+  margin-left: 0.4rem;
+}
+/* Advisory ranked/errand results: the title links to the task. */
+.advisory__task {
+  color: var(--text-h);
+  text-decoration: none;
+  font-weight: 500;
+}
+.advisory__task:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+.kv {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.3rem 1.1rem;
+  margin: 0.4rem 0 1rem;
+}
+.kv dt {
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+/* A "Task + comment" report row label can carry a long free-text memo;
+   cap the grid's max-content column so it wraps instead of stretching
+   the table. The full text stays available via the dt's title tooltip. */
+.kv dt.reportrow__label {
+  max-width: 32ch;
+  overflow-wrap: anywhere;
+}
+.kv dd {
+  margin: 0;
+  color: var(--text-h);
+  font-family: var(--mono);
+  font-size: 0.82rem;
+}
+
+/* ---- chips (colored tags) ---- */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  background: var(--surface-2);
+  color: var(--text-h);
+  border: 1px solid var(--border);
+  /* Chips are atomic labels: the label itself must never break across
+   * two lines (it turns a chip into a "pellet"). The chip can still
+   * wrap as a whole inside a flex parent. */
+  white-space: nowrap;
+}
+.chip__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  /* A theme-contrasting inset ring bounds the dot regardless of fill, so
+     a user/tag color near the surface (TagPicker, priority dot) never
+     vanishes against it (>=3:1 boundary in both themes). */
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text-h) 55%, transparent);
+}
+/* Kind-aware glyph: triangle / square / diamond / circle. Coloured via
+   the inline style on the parent (uses the tag's own colour, falls
+   back to the accent), sized just below the chip's font so it doesn't
+   shove the label off the baseline. */
+.chip__glyph {
+  font-size: 0.7em;
+  line-height: 1;
+  display: inline-block;
+}
+
+/* Toggle pill: a button styled like a chip used as a stateful switch
+   (e.g. pomodoro notification on/off). Avoids the misalignment between
+   a native checkbox and its label that the original "label + input"
+   layout had. */
+.toggle-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.22rem 0.7rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  background: var(--surface-2);
+  color: var(--text-h);
+  border: 1px solid var(--border);
+  cursor: pointer;
+}
+.toggle-pill--on {
+  background: var(--accent);
+  color: var(--accent-fg);
+  border-color: var(--accent);
+}
+.toggle-pill:hover { border-color: var(--accent); }
+
+/* TagPickerGrid: laid-out toggleable chip grid, used by /memory and
+   /notes (and any other route that wants the visual selector rather
+   than a search-as-you-type dropdown). Mirrors the existing .chip /
+   chip--on / chip--off look-and-feel + the kind-aware glyph. */
+.tagpickgrid {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+.tagpickgrid__search {
+  width: 100%;
+  max-width: 24rem;
+}
+.tagpickgrid__group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  align-items: center;
+}
+.tagpickgrid__kind {
+  text-transform: uppercase;
+  font-size: 0.68rem;
+  letter-spacing: 0.04em;
+  margin-right: 0.2rem;
+}
+
+/* AI assistants page (replaces the old McpConnect). */
+.aiconnector {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.6rem 0.8rem;
+  background: var(--surface-2);
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+.aiconnector__url {
+  background: var(--surface);
+  padding: 0.2rem 0.45rem;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  font-family: var(--mono);
+  font-size: 0.85rem;
+  word-break: break-all;
+}
+.airreveal {
+  border: 1px solid var(--accent);
+  background: var(--surface-2);
+  border-radius: 10px;
+  padding: 0.6rem 0.8rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.aiscopes {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.5rem 0.7rem;
+}
+.aiscopes__group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  margin-bottom: 0.5rem;
+}
+.aiscopes__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.82rem;
+}
+.aiscopes__item code {
+  font-family: var(--mono);
+  background: var(--surface-2);
+  padding: 0 0.3rem;
+  border-radius: 4px;
+  font-size: 0.78rem;
+}
+.airow {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.5rem 0.7rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.airow__head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.airow__meta {
+  font-size: 0.78rem;
+}
+
+/* AI assistants page (rewritten v1.2.25, mirroring bitvision_phoenix
+   ai-assistants UX). The container card stays wide (.card--wide on
+   .aiset), connector strip + reveal card sit at the top, the
+   create/edit form opens inline above the per-assistant list. */
+.aiset { gap: 0.9rem; }
+.aiconnector__row { align-items: center; flex-wrap: wrap; gap: 0.4rem; }
+.aiconnector__instructions {
+  font-family: var(--font);
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  font-size: 0.85rem;
+  white-space: pre-wrap;
+  color: var(--muted);
+}
+.airreveal__row { align-items: baseline; flex-wrap: wrap; gap: 0.4rem; }
+.airreveal__secret {
+  font-size: 1rem;
+  letter-spacing: 0.02em;
+  word-break: break-all;
+}
+
+.aiform { gap: 0.7rem; }
+.aiform__grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.5rem;
+}
+.aiform__grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+.aiform__grid input,
+.aiform__grid textarea {
+  width: 100%;
+  box-sizing: border-box;
+}
+.aiform__full { grid-column: 1 / -1; }
+.aiform__perms {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.6rem 0.8rem;
+  margin: 0;
+}
+.aiform__perms legend {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  width: 100%;
+  flex-wrap: wrap;
+  padding: 0 0.3rem;
+}
+.aiform__perms-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.aiform__perms-actions {
+  display: flex;
+  gap: 0.3rem;
+  margin-left: auto;
+}
+.aiform__perms-group {
+  margin-top: 0.5rem;
+  padding: 0.4rem 0.6rem;
+}
+.aiform__perms-cat {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 0.25rem;
+}
+.aiform__perm {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 0.2rem 0;
+  font-size: 0.85rem;
+}
+.aiform__perm input { margin-top: 0.2rem; }
+.aiform__perm-key {
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  background: var(--surface-2);
+  padding: 0 0.3rem;
+  border-radius: 4px;
+  color: var(--muted);
+}
+.aiform__actions {
+  justify-content: flex-end;
+  margin-top: 0.5rem;
+}
+@media (max-width: 640px) {
+  .aiform__grid { grid-template-columns: 1fr; }
+}
+
+/* AssigneePicker (#21 Stage B): single-select chip + search list,
+   mirroring TagPicker's layout. Anchored within the task detail
+   fieldset; the result list is absolute-positioned under the input. */
+.assignpick { display: flex; flex-direction: column; gap: 0.4rem; }
+.assignpick__row { gap: 0.4rem; align-items: center; }
+.assignpick__current { display: inline-flex; align-items: center; gap: 0.2rem; }
+.assignpick__clear {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-size: 0.9rem;
+  cursor: pointer;
+  padding: 0 0.1rem;
+}
+.assignpick__searchbox { position: relative; }
+.assignpick__search { width: 100%; max-width: 22rem; }
+.assignpick__list {
+  position: absolute;
+  top: calc(100% + 2px);
+  left: 0;
+  z-index: 30;
+  list-style: none;
+  padding: 0.2rem;
+  margin: 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  max-height: 14rem;
+  overflow-y: auto;
+  width: 100%;
+  max-width: 22rem;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+.assignpick__hint { padding: 0.3rem 0.5rem; }
+.assignpick__opt {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.3rem 0.5rem;
+  background: transparent;
+  /* The global ``button`` rule sets ``color: var(--accent-fg)`` (text for
+     an accent fill). On this transparent/--surface dropdown that is
+     ``readableOn(accent)`` over the surface -- white-on-white in light,
+     black-on-black in dark. Reset to the normal on-surface text colour. */
+  color: var(--text);
+  border: 0;
+  text-align: left;
+  cursor: pointer;
+  border-radius: 4px;
+  font-size: 0.85rem;
+}
+.assignpick__opt:hover { background: var(--surface-2); }
+.assignpick__handle { font-weight: 500; }
+.taskdetail__assignee {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.5rem 0.7rem;
+  margin: 0.5rem 0;
+}
+.taskdetail__assignee legend {
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  padding: 0 0.3rem;
+}
+
+/* TaskPickList (#49): the searchable scrolling task picker that
+   replaced the /time start-timer and entry-edit <select>s. Shared
+   container so any future place that needs the same widget gets
+   the same look. */
+.taskpicklist {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: 0;
+}
+.taskpicklist__head {
+  align-items: center;
+  gap: 0.4rem;
+}
+.taskpicklist__search {
+  flex: 1 1 auto;
+  min-width: 12rem;
+}
+.taskpicklist__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 14rem;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+}
+.taskpicklist__item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.35rem 0.6rem;
+  cursor: pointer;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.88rem;
+}
+.taskpicklist__item:last-child { border-bottom: 0; }
+.taskpicklist__item:hover { background: var(--surface-2); }
+.taskpicklist__item--selected {
+  background: rgba(109, 40, 217, 0.12);
+  font-weight: 500;
+}
+.taskpicklist__title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.taskpicklist__meta {
+  display: flex;
+  gap: 0.45rem;
+  align-items: center;
+  font-size: 0.78rem;
+  flex-shrink: 0;
+}
+.taskpicklist__state {
+  text-transform: lowercase;
+  letter-spacing: 0.02em;
+}
+.taskpicklist__empty { padding: 0.5rem 0.6rem; }
+
+/* LinkedTasksPanel / LinkedNotesPanel (task 892f40b1): note↔task
+   typed relations (ADR-0029). One section per kind: subject, artifact,
+   derived_from, promoted_from. The section head is a kind chip + count;
+   the body is a compact list with × to unlink. */
+.linkedpanel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  margin-top: 0.6rem;
+  padding: 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+.linkedpanel__head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+.linkedpanel__h {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+.linkedpanel__section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  border-top: 1px dashed var(--border);
+  padding-top: 0.4rem;
+}
+.linkedpanel__section:first-of-type { border-top: 0; padding-top: 0; }
+.linkedpanel__sectionhead {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+.linkedpanel__empty {
+  margin: 0;
+  padding-left: 0.4rem;
+}
+.linkedpanel__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.linkedpanel__item {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.2rem 0.4rem;
+  border-radius: 4px;
+}
+.linkedpanel__item:hover { background: var(--surface-2); }
+.linkedpanel__title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.linkedpanel__picker { margin-top: 0.35rem; }
+/* Kind chips: a faint background + matching text, distinct per kind so
+   the four sections read at a glance. Subject = active green, artifact
+   = neutral, derived = blue, promoted = purple. */
+.chip--kind {
+  font-size: 0.74rem;
+  text-transform: lowercase;
+  letter-spacing: 0.02em;
+  padding: 0.05rem 0.4rem;
+}
+.chip--kind-subject {
+  background: color-mix(in srgb, var(--accent) 16%, var(--surface));
+  color: var(--accent);
+}
+.chip--kind-artifact {
+  background: color-mix(in srgb, var(--muted) 16%, var(--surface));
+  color: var(--text);
+}
+.chip--kind-derived_from {
+  background: color-mix(in srgb, var(--info) 14%, var(--surface));
+  color: var(--info);
+}
+.chip--kind-promoted_from {
+  background: color-mix(in srgb, var(--violet) 14%, var(--surface));
+  color: var(--violet);
+}
+.toggle-pill--sm {
+  font-size: 0.78rem;
+  padding: 0.15rem 0.45rem;
+}
+
+/* ---- status text ---- */
+.err {
+  color: var(--err);
+  font-size: 0.88rem;
+}
+.ok {
+  color: var(--ok);
+  font-size: 0.88rem;
+}
+.hint {
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+.muted {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.codes {
+  font-family: var(--mono);
+  display: grid;
+  grid-template-columns: repeat(2, max-content);
+  gap: 0.25rem 1.5rem;
+}
+.taxonomy,
+.switcher {
+  margin-top: 1.1rem;
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+.taxonomy form,
+.switcher__create {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.switcher select {
+  font-weight: 600;
+}
+/* ---- note list row: two left-aligned rows. Overrides the generic
+   .list li (which centers and right-floats buttons). ---- */
+.list li.noteitem {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.35rem;
+}
+/* Must out-specify `.list li button { margin-left:auto }` (0,1,2),
+   else the title button gets right-shifted (empty space at left). */
+.list li.noteitem button {
+  margin-left: 0;
+}
+.noteitem__main {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 0.5rem;
+  flex-wrap: nowrap;
+  width: 100%;
+}
+.noteitem__title {
+  flex: 0 1 auto;
+  background: none;
+  border: none;
+  margin: 0;
+  padding: 0;
+  font: inherit;
+  font-weight: 600;
+  color: var(--text-h);
+  cursor: pointer;
+  text-align: left;
+}
+.noteitem__title:hover {
+  color: var(--accent);
+}
+.noteitem__preview {
+  margin-left: auto;
+  max-width: 55%;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--muted);
+  font-size: 0.85rem;
+  border-left: 1px solid var(--border);
+  padding-left: 0.6rem;
+}
+.noteitem__meta {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+.noteitem__tags {
+  display: flex;
+  gap: 0.3rem;
+  flex-wrap: wrap;
+}
+.noteitem__actions {
+  display: flex;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+  margin-left: auto; /* group actions to the right of row 2 */
+}
+
+/* ---- clients & projects: aligned rows + a real form grid ---- */
+.cprow {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.cprow__toggle {
+  flex: 0 0 auto;
+  width: 1.6rem;
+}
+.cprow__sp {
+  flex: 1 1 auto;
+}
+.cpform {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+  gap: 0.6rem 0.9rem;
+  margin: 0.6rem 0 0.2rem;
+  padding: 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-2);
+}
+.cpform label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+.cpform label input,
+.cpform label select {
+  width: 100%;
+}
+.cpform input[type='color'] {
+  height: 2.1rem;
+  padding: 0.1rem;
+}
+.cpform__chk {
+  flex-direction: row !important;
+  align-items: center;
+  gap: 0.4rem;
+  align-self: end;
+  font-size: 0.85rem;
+  color: var(--text);
+}
+.cpform__chk input {
+  width: auto !important;
+}
+.cpform__wide {
+  grid-column: 1 / -1;
+}
+.cpform__actions {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.list.nested {
+  margin: 0.35rem 0 0.5rem 1.3rem;
+  padding-left: 0.7rem;
+  border-left: 2px solid var(--border);
+}
+
+.swatch {
+  display: inline-block;
+  width: 0.7rem;
+  height: 0.7rem;
+  border-radius: 3px;
+  border: 1px solid var(--border);
+  vertical-align: middle;
+}
+
+.banner {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-2);
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+/* ---- modal (notes editor: leave only on purpose) ---- */
+.modal__backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background: rgba(8, 9, 13, 0.55);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 3vh 2vw;
+  overflow: auto;
+}
+.modal__panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+  width: min(1200px, 96vw);
+  height: 92vh;
+  display: flex;
+  flex-direction: column;
+}
+.modal__head,
+.modal__foot {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.7rem 1rem;
+  flex: 0 0 auto;
+}
+.modal__head {
+  border-bottom: 1px solid var(--border);
+}
+.modal__foot {
+  border-top: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+.modal__sp {
+  flex: 1;
+}
+/* Only the body scrolls; head + foot stay put. */
+.modal__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 1rem;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+}
+/* The editor grows to use the available height. The min-height floor
+   lives HERE, on the flex item modal__body lays out, not on the editor
+   leaf: if the leaf carried the floor it could exceed this (shrunk)
+   wrapper and, since the wrapper does not clip, spill out the bottom
+   and overlap the Attachments block below (the v1.2.58 regression).
+   With the floor on the wrapper, modal__body (overflow:auto) scrolls
+   when the whole body can't fit, instead of the editor overflowing. */
+.modal__body .grow {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 12rem;
+}
+.modal__body .grow .rte {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.modal__body .grow .rte .ProseMirror,
+.modal__body .grow .rte .rte__raw {
+  flex: 1 1 auto;
+  /* No floor on the leaf: it fills the .grow wrapper exactly (which
+     carries the real floor) and never exceeds it. */
+  min-height: 0;
+  /* Long content scrolls INSIDE the editor box; it never overflows to
+     overlap the Attachments below, and the wheel scrolls the editor,
+     not the outer modal/window (the reported markdown-mode bugs). */
+  overflow: auto;
+  /* The flex box owns the height; a drag-resize handle would let the
+     textarea grow past its slot and cover the Attachments. */
+  resize: none;
+}
+/* Attachments are a fixed-size block after the editor: never shrunk,
+   never pushed out of the note, and never covered by the editor. */
+.modal__body .atts {
+  flex: 0 0 auto;
+}
+/* Full-bleed sheet on phones — opt-in via ``modal--sheet`` (the
+   create-note modal). The shared inset dialog wastes the screen on a
+   360px viewport and, fixed at 92vh, leaves the foot under the soft
+   keyboard. Scoped so the small confirm / lightbox modals that reuse
+   ``.modal__*`` stay as compact dialogs. Only the OUTER panel/backdrop
+   geometry changes: .modal__body stays the single scroller and the
+   .grow/.rte editor-overflow contract (above) is untouched, so 100dvh
+   only gives the body more height to distribute. */
+@media (max-width: 640px) {
+  .modal--sheet.modal__backdrop {
+    padding: 0;
+  }
+  .modal--sheet .modal__panel {
+    width: 100%;
+    max-width: none;
+    height: 100dvh;
+    border: 0;
+    border-radius: 0;
+  }
+  .modal--sheet .modal__head {
+    flex-wrap: wrap;
+  }
+}
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+}
+.chip--rm {
+  cursor: pointer;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text);
+  border-radius: 999px;
+  padding: 0.1rem 0.55rem;
+  font-size: 0.78rem;
+}
+.chip--rm:hover {
+  border-color: var(--err);
+  color: var(--err);
+}
+
+.xml {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.75rem;
+  font-size: 0.78rem;
+  max-height: 22rem;
+  overflow: auto;
+}
+
+/* ---- compact data table (invoice lines) ---- */
+.tbl {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.86rem;
+  margin: 0.5rem 0;
+}
+.tbl th,
+.tbl td {
+  text-align: left;
+  padding: 0.35rem 0.5rem;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+.tbl th {
+  color: var(--muted);
+  font-weight: 600;
+}
+
+/* ---- dependency DAG / gantt ---- */
+.dag {
+  display: block;
+  background: var(--surface);
+}
+.dagbar {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  margin-top: 0.6rem;
+}
+.dag__legend {
+  font-size: 0.72rem;
+}
+.dagwrap {
+  overflow: auto;
+  max-height: 70vh;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  margin: 0.5rem 0;
+}
+.dag__lblbg {
+  fill: var(--surface);
+  stroke: var(--border);
+}
+.dag__node {
+  fill: var(--surface-2);
+  stroke: var(--border);
+}
+.dag__node--blocked {
+  stroke: var(--accent);
+  stroke-width: 2;
+}
+.dag__edge {
+  stroke: var(--muted);
+  stroke-width: 1.5;
+}
+.dag__lbl {
+  fill: var(--text-h);
+  font-size: 11px;
+  font-weight: 700;
+  text-anchor: middle;
+  dominant-baseline: middle;
+}
+.dag__title {
+  fill: var(--text-h);
+  font-size: 12px;
+  font-weight: 600;
+}
+.dag__state {
+  fill: var(--muted);
+  font-size: 11px;
+}
+.dag__node--btn {
+  cursor: pointer;
+}
+.dag__node--sel {
+  stroke: var(--accent);
+  stroke-width: 3;
+}
+.dag__title--link {
+  cursor: pointer;
+}
+.dag__title--link:hover {
+  text-decoration: underline;
+}
+.dag__lbl--btn {
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+/* ---- markdown editor / view ---- */
+.mde {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.mde__tabs {
+  display: flex;
+  gap: 0.4rem;
+}
+.mde__ref {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.mde__preview {
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 0.6rem 0.8rem;
+  background: var(--surface-2);
+  min-height: 6rem;
+}
+.md {
+  color: var(--text);
+  font-size: 0.92rem;
+}
+.md p {
+  margin: 0 0 0.6rem;
+}
+.md :where(h1, h2, h3) {
+  margin: 0.6rem 0 0.4rem;
+}
+.md code {
+  font-family: var(--mono);
+  font-size: 0.85em;
+  background: var(--surface-2);
+  padding: 0.1rem 0.3rem;
+  border-radius: 4px;
+}
+.md pre {
+  background: var(--surface-2);
+  padding: 0.7rem;
+  border-radius: 7px;
+  overflow: auto;
+}
+/* Mermaid diagrams: shared by the read-side ```mermaid block (Markdown.tsx,
+   rendered bare without a <pre> wrapper) and the editor code-block preview
+   (MermaidCodeBlock.tsx). Center the graph, let a wide one scroll, and cap
+   the SVG to the content width. */
+.mermaid-block {
+  margin: 0.6rem 0;
+  text-align: center;
+  overflow-x: auto;
+}
+.mermaid-block svg {
+  max-width: 100%;
+  height: auto;
+}
+.mermaid-block--error {
+  text-align: left;
+}
+.mermaid-block__source {
+  margin: 0;
+  background: var(--surface-2);
+  padding: 0.7rem;
+  border-radius: 7px;
+  overflow: auto;
+  font-family: var(--mono);
+  font-size: 0.85em;
+  white-space: pre;
+}
+.mermaid-block__hint {
+  display: block;
+  margin-top: 0.3rem;
+  color: var(--muted);
+  font-size: 0.85em;
+}
+/* Code-block node view in the WYSIWYG editor. The editable <pre><code>
+   mirrors the read-side .md pre; the mermaid variant stacks a live diagram
+   preview beneath the source, separated by a hairline. */
+.rte-cb pre {
+  margin: 0.4rem 0;
+  background: var(--surface-2);
+  padding: 0.7rem;
+  border-radius: 7px;
+  overflow: auto;
+}
+.rte-cb pre code {
+  background: none;
+  padding: 0;
+}
+.rte-cb__preview {
+  margin: 0.2rem 0 0.6rem;
+  padding-top: 0.4rem;
+  border-top: 1px dashed var(--border);
+}
+/* Graph-only default for a mermaid block: hide the editable source <pre>
+   (kept mounted for ProseMirror) and drop the hairline that separated it
+   from the preview, so the editor matches the read-side diagram. The `>`
+   only targets the source pre, never the error-fallback pre nested inside
+   .rte-cb__preview. */
+.rte-cb--rendered > pre {
+  display: none;
+}
+.rte-cb--rendered .rte-cb__preview {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: none;
+}
+.rte-cb__toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 0.2rem;
+}
+.rte-cb__toggle {
+  font-size: 0.78em;
+  color: var(--muted);
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 0.1rem 0.5rem;
+  cursor: pointer;
+}
+.rte-cb__toggle:hover {
+  color: var(--text);
+  background: var(--surface-2);
+}
+.md a.chip {
+  text-decoration: none;
+}
+/* Task mention chips (task 25fa3ab3): closed tasks render in gray
+   strikethrough; open tasks keep the regular chip color but expose
+   the workflow state in muted parentheses after the title. */
+.chip--task-closed .chip__label {
+  text-decoration: line-through;
+  color: var(--muted);
+}
+.chip--task-closed {
+  color: var(--muted);
+}
+.chip__state {
+  color: var(--muted);
+  font-size: 0.85em;
+  margin-left: 0.1rem;
+}
+/* Prefix mention chip (task b9924a0d): backticked UUID-prefix in note
+   markdown resolves to a clickable chip with a kind glyph and the
+   entity title. Pending state keeps a code-like look so the layout
+   doesn't reflow when the lookup resolves; unresolved (no entity in
+   the workspace) stays as a muted code so the reader still sees the
+   prefix instead of empty space. */
+.md-prefix {
+  font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 0.92em;
+  background: var(--surface-2);
+  padding: 0.05rem 0.35rem;
+  border-radius: 4px;
+}
+.md-prefix--pending {
+  color: var(--muted);
+}
+.md-prefix--unresolved {
+  color: var(--muted);
+  text-decoration: line-through dotted;
+  text-decoration-color: var(--muted);
+}
+.md-prefix-chip .chip__glyph {
+  font-size: 0.85em;
+  margin-right: 0.2rem;
+  opacity: 0.8;
+}
+.md-prefix-chip .chip__more {
+  color: var(--muted);
+  font-size: 0.85em;
+  margin-left: 0.15rem;
+}
+.route-not-found,
+.route-disambig,
+.route-loading {
+  padding: 1.5rem 2rem;
+  max-width: 720px;
+}
+.route-disambig__list {
+  list-style: none;
+  padding: 0;
+  display: grid;
+  gap: 0.4rem;
+  margin-top: 0.8rem;
+}
+/* In-editor UUID-prefix chips (entityPrefix decoration). The note body
+   is read/written in the WYSIWYG RichEditor, so backticked prefixes get
+   the same clickable affordance the read-only MarkdownView chips have.
+   It only decorates the existing inline <code>; navigation is the
+   global click interceptor in AppShell (data-entity-prefix). */
+.entity-ref {
+  cursor: pointer;
+  border-radius: 4px;
+  border-bottom: 1px dotted var(--accent);
+}
+.entity-ref:hover {
+  background: var(--accent-weak);
+}
+.entity-ref--unresolved {
+  cursor: text;
+  border-bottom: none;
+}
+.entity-ref--unresolved:hover {
+  background: none;
+}
+.entity-ref--closed {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+.entity-ref--loading {
+  opacity: 0.85;
+}
+
+/* Cmd/Ctrl+K command palette: title search + UUID-code resolver. */
+.cmdk {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 12vh;
+}
+.cmdk__box {
+  width: min(680px, 92vw);
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.35);
+  overflow: hidden;
+}
+.cmdk__input {
+  width: 100%;
+  box-sizing: border-box;
+  border: none;
+  outline: none;
+  padding: 0.9rem 1rem;
+  font-size: 1rem;
+  background: transparent;
+  color: var(--text-h);
+  border-bottom: 1px solid var(--border);
+}
+.cmdk__list {
+  list-style: none;
+  margin: 0;
+  padding: 0.3rem;
+  max-height: 50vh;
+  overflow-y: auto;
+}
+.cmdk__row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.6rem;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.cmdk__row--sel {
+  background: var(--surface-2);
+}
+.cmdk__glyph {
+  opacity: 0.7;
+  width: 1rem;
+  text-align: center;
+}
+.cmdk__title {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cmdk__badge {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0 0.3rem;
+}
+.cmdk__sub {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+.cmdk__empty {
+  padding: 0.8rem;
+  color: var(--muted);
+}
+.cmdk__section {
+  padding: 0.45rem 0.6rem 0.2rem;
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+}
+.cmdk__code {
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+.cmdk__hl {
+  background: var(--accent-weak);
+  color: inherit;
+  border-radius: 2px;
+  padding: 0 1px;
+}
+/* ---- Garden health dashboard (ADR-0035) ---- */
+.ghealth {
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 1rem;
+}
+.ghealth__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+}
+.ghealth__back {
+  color: var(--muted);
+  text-decoration: none;
+  font-size: 0.9rem;
+}
+.ghealth__back:hover {
+  color: var(--text-h);
+}
+.ghealth__intro {
+  color: var(--muted);
+  margin: 0.2rem 0 1rem;
+}
+.ghealth__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 0.8rem;
+}
+.ghealth__card {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  padding: 0.8rem 0.9rem;
+}
+.ghealth__label {
+  font-size: 0.85rem;
+  font-weight: 600;
+  margin: 0 0 0.3rem;
+  color: var(--text-h);
+}
+.ghealth__value {
+  font-size: 1.8rem;
+  font-variant-numeric: tabular-nums;
+  margin: 0;
+  color: var(--text-h);
+}
+/* "Show, never judge": below the floor the reading renders in muted
+   red -- a reading, not a verdict (no warning icon, no red banner). */
+.ghealth__value--below {
+  color: #b3534b;
+}
+.ghealth__value--empty {
+  font-size: 1rem;
+  color: var(--muted);
+}
+.ghealth__floor {
+  font-size: 0.75rem;
+  color: var(--muted);
+  margin: 0.1rem 0 0.4rem;
+}
+.ghealth__spark {
+  display: block;
+  color: var(--accent);
+  margin: 0.2rem 0 0.4rem;
+}
+.ghealth__explain {
+  font-size: 0.8rem;
+  color: var(--muted);
+  margin: 0.3rem 0 0;
+  line-height: 1.35;
+}
+.ghealth__reason {
+  font-size: 0.75rem;
+  color: var(--muted);
+  font-style: italic;
+  margin: 0.3rem 0 0;
+}
+/* Direction hint / trend-lead sublabel: a small muted gloss next to the
+   reading, so a number says which way is "healthy" without a verdict. */
+.ghealth__dir,
+.ghealth__sub {
+  font-size: 0.68rem;
+  color: var(--muted);
+  font-weight: 400;
+  margin-left: 0.4rem;
+  font-variant-numeric: normal;
+}
+/* Secondary "now: <abs>" line under a trend-led headline. */
+.ghealth__abs {
+  font-size: 0.8rem;
+  color: var(--muted);
+  margin: 0.05rem 0 0.3rem;
+  font-variant-numeric: tabular-nums;
+}
+/* 30-day change + range context lines. */
+.ghealth__delta,
+.ghealth__range {
+  font-size: 0.75rem;
+  color: var(--muted);
+  margin: 0.1rem 0 0;
+  font-variant-numeric: tabular-nums;
+}
+/* "Not yet measured": sensors planned but not wired to a data source.
+   Listed apart so a permanently empty reading never dilutes the live
+   sensors or reads as broken. */
+.ghealth__pending {
+  margin-top: 1.4rem;
+  border-top: 1px solid var(--border);
+  padding-top: 0.9rem;
+}
+.ghealth__pending-head {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text-h);
+  margin: 0 0 0.2rem;
+}
+.ghealth__pending-intro {
+  font-size: 0.8rem;
+  color: var(--muted);
+  margin: 0 0 0.6rem;
+}
+.ghealth__pending-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 0.5rem;
+}
+.ghealth__pending-item {
+  display: grid;
+  gap: 0.15rem;
+  padding: 0.5rem 0.7rem;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+}
+.ghealth__pending-label {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+.ghealth__pending-explain {
+  font-size: 0.78rem;
+  color: var(--muted);
+  line-height: 1.35;
+}
+.ghealth__pending-reason {
+  font-size: 0.72rem;
+  color: var(--muted);
+  font-style: italic;
+}
+/* "What changed" timeline (ADR-0035 §84): factual events below the cards
+   that may explain a sensor shift. Show, never judge. */
+.ghealth__timeline {
+  margin-top: 1.4rem;
+  border-top: 1px solid var(--border);
+  padding-top: 0.9rem;
+}
+.ghealth__timeline-head {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text-h);
+  margin: 0 0 0.2rem;
+}
+.ghealth__timeline-intro {
+  font-size: 0.8rem;
+  color: var(--muted);
+  margin: 0 0 0.6rem;
+}
+.ghealth__timeline-empty {
+  font-size: 0.8rem;
+  color: var(--muted);
+  font-style: italic;
+}
+.ghealth__timeline-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 0.4rem;
+}
+.ghealth__timeline-item {
+  display: grid;
+  grid-template-columns: 7.5rem 1fr;
+  gap: 0.6rem;
+  align-items: baseline;
+  padding: 0.35rem 0.7rem;
+  border-left: 2px solid var(--border);
+}
+.ghealth__timeline-date {
+  font-size: 0.74rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.ghealth__timeline-label {
+  font-size: 0.82rem;
+  line-height: 1.35;
+}
+/* ADR-0037 learning signals: reject-hotspots + 30-day prior drift.
+   Theme-safe (vars only); the signed drift bars carry their own hues. */
+.ghealth__learning {
+  margin-top: 1.5rem;
+}
+.ghealth__learning-intro {
+  color: var(--muted);
+  font-size: 0.85rem;
+  margin: 0.2rem 0 0.8rem;
+}
+.ghealth__learning-cols {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  gap: 1.2rem;
+}
+.ghealth__learning-sub-head {
+  font-size: 0.92rem;
+  margin: 0 0 0.2rem;
+}
+.ghealth__learning-sub {
+  color: var(--muted);
+  font-size: 0.78rem;
+  margin: 0 0 0.5rem;
+}
+.ghealth__learning-empty {
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-style: italic;
+}
+.ghealth__hotspot-list,
+.ghealth__drift-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+.ghealth__hotspot-item,
+.ghealth__drift-item {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  font-size: 0.82rem;
+}
+.ghealth__hotspot-type {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 0.4rem;
+  padding: 0 0.3rem;
+}
+.ghealth__hotspot-id {
+  font-family: var(--mono, monospace);
+  font-size: 0.74rem;
+  color: var(--muted);
+}
+.ghealth__hotspot-count {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+}
+.ghealth__drift-delta {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+.ghealth__drift-chart {
+  display: block;
+  margin: 0.2rem 0 0.6rem;
+}
+/* ADR-0036 event-bus audit panel: the coordinated event stream. Theme-safe
+   (no hardcoded colours): actor class reads from its label, not a hue. */
+.ghaudit__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+}
+.ghaudit__back {
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+.ghaudit__intro {
+  font-size: 0.85rem;
+  color: var(--muted);
+  margin: 0.2rem 0 0.9rem;
+}
+.ghaudit__empty {
+  font-size: 0.85rem;
+  color: var(--muted);
+  font-style: italic;
+}
+.ghaudit__list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 0.3rem;
+}
+.ghaudit__item {
+  display: grid;
+  grid-template-columns: 8.5rem 5rem 6rem 1fr auto;
+  gap: 0.6rem;
+  align-items: baseline;
+  padding: 0.35rem 0.6rem;
+  border-left: 2px solid var(--border);
+  font-size: 0.82rem;
+}
+.ghaudit__time {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.ghaudit__actor {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 0.05rem 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--muted);
+  justify-self: start;
+}
+.ghaudit__actor--agent,
+.ghaudit__actor--system {
+  font-weight: 600;
+  color: var(--text-h);
+}
+.ghaudit__kind {
+  font-weight: 600;
+}
+.ghaudit__detail {
+  display: flex;
+  gap: 0.4rem;
+  align-items: baseline;
+  color: var(--muted);
+  min-width: 0;
+}
+.ghaudit__action {
+  color: var(--text-h);
+}
+.ghaudit__node {
+  font-size: 0.72rem;
+  opacity: 0.7;
+}
+.ghaudit__applied {
+  font-size: 0.72rem;
+  color: var(--muted);
+  justify-self: end;
+}
+/* A live card is clickable: it opens the 90-day per-metric drill-down. */
+.ghealth__card--clickable {
+  cursor: pointer;
+}
+.ghealth__card--clickable:hover {
+  border-color: var(--accent);
+}
+.ghealth__card--clickable:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+/* Per-metric drill-down overlay: the 90-day trend with the floor line. */
+.ghealth__drill {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  z-index: 60;
+}
+.ghealth__drill-panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1rem 1.1rem;
+  width: 100%;
+  max-width: 640px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.25);
+}
+.ghealth__drill-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.4rem;
+}
+.ghealth__drill-head h2 {
+  font-size: 1rem;
+  margin: 0;
+  color: var(--text-h);
+}
+.ghealth__drill-close {
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-size: 1.4rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 0.2rem;
+}
+.ghealth__drill-close:hover {
+  color: var(--text-h);
+}
+.ghealth__drill-chart {
+  display: block;
+  color: var(--accent);
+  margin: 0.3rem 0;
+}
+.ghealth__drill-stats {
+  font-size: 0.85rem;
+  color: var(--muted);
+  margin: 0.4rem 0 0;
+  font-variant-numeric: tabular-nums;
+}
+.ghealth__drill-span {
+  font-size: 0.72rem;
+  color: var(--muted);
+  margin: 0.15rem 0 0;
+  font-variant-numeric: tabular-nums;
+}
+.ghealth__drill-empty {
+  font-size: 0.85rem;
+  color: var(--muted);
+  margin: 0.6rem 0;
+}
+/* Link to the health dashboard from the garden tab bar (pushed right). */
+.garden__health-link {
+  margin-left: auto;
+  align-self: center;
+  color: var(--muted);
+  text-decoration: none;
+  font-size: 0.85rem;
+}
+.garden__health-link:hover {
+  color: var(--text-h);
+}
+/* GFM tables: render them as readable tables with subtle borders.
+   ``.md`` is the wrapper produced by MarkdownView (the single
+   markdown renderer in the codebase). */
+.md table {
+  border-collapse: collapse;
+  margin: 0.6rem 0;
+  width: 100%;
+  max-width: 100%;
+  display: block;
+  overflow-x: auto;
+  font-size: 0.88rem;
+}
+.md table th,
+.md table td {
+  border: 1px solid var(--border);
+  padding: 0.35rem 0.6rem;
+  vertical-align: top;
+  text-align: left;
+}
+.md table thead th {
+  background: var(--surface-2);
+  font-weight: 600;
+}
+.md table tbody tr:nth-child(even) td {
+  background: var(--surface-2);
+}
+.md blockquote {
+  margin: 0.4rem 0;
+  padding: 0.1rem 0.8rem;
+  border-left: 3px solid var(--border);
+  color: var(--muted);
+}
+.md ul[data-task-list],
+.md ul.contains-task-list {
+  list-style: none;
+  padding-left: 1rem;
+}
+.md ul[data-task-list] li input[type='checkbox'],
+.md ul.contains-task-list li input[type='checkbox'] {
+  margin-right: 0.4rem;
+}
+
+/* ---- WYSIWYG (TipTap) ---- */
+/* The toolbar stays in reach while writing a long note/document: it
+   pins to the top of whatever scrolls (the modal body for notes, the
+   window for the task description) so you never have to scroll back up
+   to toggle WYSIWYG/markdown, format, or insert an image. An opaque
+   background + bottom border keep the prose from showing through as it
+   scrolls underneath. */
+.rte__bar {
+  position: sticky;
+  /* On a route page the window scrolls under the sticky topbar, so the
+     toolbar must pin just below it (not at 0, where the topbar — higher
+     z-index — would cover it). Inside the notes modal the scroll
+     container is .modal__body, so it is reset to 0 below. */
+  top: var(--header-h);
+  z-index: 5;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.35rem 0;
+  margin-bottom: 0.3rem;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+/* Left cluster: the collapse toggle + (when shown) the formatting
+   buttons. Kept together so the toggle stays put while the buttons wrap
+   beside it; the actions cluster floats to the right via the bar's
+   space-between. */
+.rte__bar-left {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.2rem;
+  min-width: 0;
+}
+.rte__tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.2rem;
+}
+/* The show/hide switch is always present, even when the buttons are
+   collapsed, so the bar can be reopened with one tap. */
+.rte__collapse {
+  min-width: 1.9rem;
+  font-weight: 600;
+}
+/* Thin divider between the annotation triggers and the formatting set. */
+.rte__sep {
+  align-self: stretch;
+  width: 1px;
+  margin: 0.15rem 0.25rem;
+  background: var(--border);
+}
+/* In the notes modal the editor scrolls inside .modal__body, whose top
+   edge is the right anchor for the sticky toolbar (no topbar in the
+   overlay). */
+.modal__body .rte__bar {
+  top: 0;
+}
+.rte__fmt {
+  min-width: 1.9rem;
+  font-weight: 600;
+}
+.rte__fmt--on {
+  background: var(--accent);
+  color: var(--accent-fg);
+  border-color: var(--accent);
+}
+/* Compact "go to %" field in the toolbar; trims the number spinners so
+   it stays the width of a couple of digits next to the goto arrows. */
+.rte__goto-pct {
+  width: 3.2rem;
+  font: inherit;
+  padding: 0.1rem 0.3rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--text);
+}
+.rte__goto-pct::-webkit-outer-spin-button,
+.rte__goto-pct::-webkit-inner-spin-button {
+  appearance: none;
+  margin: 0;
+}
+.rte__raw {
+  width: 100%;
+  min-height: 7rem;
+  /* Expandable: drag to grow when jotting a long note. */
+  resize: vertical;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 0.55rem 0.7rem;
+  background: var(--surface);
+  color: var(--text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.85rem;
+  outline: none;
+}
+/* Comfortable, roomy editor (notes): a big box, not a caselina. */
+.rte--lg .rte__raw,
+.rte--lg .ProseMirror {
+  min-height: 22rem;
+}
+.rte__err {
+  margin: 0.25rem 0 0;
+  font-size: 0.82rem;
+}
+/* Embedded markdown images: capped at the editor/view width so a
+ * full-resolution screenshot does not blow up the layout. ``--loading``
+ * is the placeholder span shown while the auth-fetch is in flight. */
+.md-img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 6px;
+  vertical-align: middle;
+}
+.md-img-wrap {
+  display: inline-block;
+  line-height: 0;
+}
+.md-img--loading {
+  display: inline-block;
+  width: 1.2em;
+  height: 1.2em;
+  border-radius: 4px;
+  background: var(--surface-sunken, var(--surface));
+  border: 1px dashed var(--border);
+  vertical-align: middle;
+}
+/* Unresolvable image reference (unknown filename, or the auth fetch
+   failed): a visible, bounded placeholder showing the alt/filename so it
+   reads as a broken image rather than spinning forever. */
+.md-img--broken {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3em;
+  max-width: 100%;
+  padding: 0.15em 0.45em;
+  border-radius: 4px;
+  background: var(--surface-sunken, var(--surface));
+  border: 1px dashed var(--danger, var(--border));
+  color: var(--muted);
+  font-size: 0.85em;
+  vertical-align: middle;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.md-img--broken::before {
+  content: '🖼';
+  opacity: 0.6;
+}
+/* Non-image attachment linked in the body: filename with a leading
+   paperclip. The icon is CSS-only so the link's text content stays the
+   bare filename (the click-interceptor reads it to name the download). */
+.md-att {
+  cursor: pointer;
+}
+.md-att::before {
+  content: '📎';
+  margin-right: 0.25em;
+  font-size: 0.9em;
+}
+
+/* `![]()` block media embeds. A lone-image paragraph is unwrapped to
+   .md-embed so a <figure>/<pre> sits in a clean block context (never
+   nested in a <p>). */
+.md-embed {
+  margin: 0.6em 0;
+}
+/* Image with an opt-in caption (the markdown title: ![alt](src "caption")). */
+.md-figure {
+  margin: 0;
+  display: inline-block;
+  max-width: 100%;
+}
+.md-figcaption {
+  margin-top: 0.3em;
+  font-size: 0.85em;
+  font-style: italic;
+  color: var(--muted);
+  text-align: center;
+}
+.md-media {
+  margin: 0;
+}
+.md-media--audio audio,
+.md-media--video video {
+  display: block;
+  max-width: 100%;
+}
+.md-media--audio audio {
+  width: min(100%, 28rem);
+}
+.md-media--video video {
+  max-height: 60vh;
+  border-radius: 6px;
+  background: #000;
+}
+/* Embedded text file: filename header + monospace (or rendered-markdown)
+   body, bounded so a long file scrolls in place instead of pushing the
+   note. */
+.md-media--text {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--surface-sunken, var(--surface));
+}
+.md-textfile__name {
+  display: block;
+  padding: 0.3em 0.6em;
+  font-size: 0.8em;
+  font-weight: 600;
+  font-family: var(--mono, monospace);
+  color: var(--muted);
+  background: var(--surface-2, rgba(0, 0, 0, 0.04));
+  border-bottom: 1px solid var(--border);
+}
+.md-textfile {
+  margin: 0;
+  max-height: 28rem;
+  overflow: auto;
+  padding: 0.6em 0.8em;
+  font-size: 0.85em;
+  line-height: 1.45;
+  white-space: pre;
+}
+.md-textfile code {
+  background: none;
+  padding: 0;
+  font-family: var(--mono, monospace);
+}
+.md-textfile__md {
+  max-height: 28rem;
+  overflow: auto;
+  padding: 0.2em 0.8em;
+}
+.md-textfile__more {
+  margin: 0;
+  padding: 0.3em 0.8em 0.5em;
+  font-size: 0.8em;
+}
+
+/* Attachment picker (editor toolbar → link an attachment). */
+.attref__backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 60;
+}
+.attref {
+  width: min(420px, 92vw);
+  max-height: 70vh;
+  overflow: auto;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 14px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.25);
+}
+.attref__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.attref__title {
+  font-weight: 600;
+}
+.attref__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.attref__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border: none;
+  background: none;
+  border-radius: 6px;
+  cursor: pointer;
+  text-align: left;
+  color: inherit;
+}
+.attref__item:hover {
+  background: var(--surface-sunken, var(--border));
+}
+.attref__name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.attref__size {
+  color: var(--muted);
+  font-size: 0.85em;
+}
+.attref__foot {
+  margin-top: 10px;
+  display: flex;
+  justify-content: flex-end;
+}
+.rte__raw:focus {
+  border-color: var(--accent);
+}
+.rte .ProseMirror {
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 0.55rem 0.7rem;
+  min-height: 7rem;
+  background: var(--surface);
+  outline: none;
+}
+.rte .ProseMirror:focus-within {
+  border-color: var(--accent);
+}
+.rte .ProseMirror p {
+  margin: 0 0 0.5rem;
+}
+.rte .ProseMirror a {
+  color: var(--accent);
+}
+.rte .ProseMirror code {
+  font-family: var(--mono);
+  background: var(--surface-2);
+  padding: 0.1rem 0.3rem;
+  border-radius: 4px;
+}
+/* GFM task lists. The TaskList extension renders <ul data-type="taskList">
+   with each <li data-type="taskItem"> containing a <label><input
+   type="checkbox"></label><div>. Hide the default bullet, align the
+   checkbox to the first line of content, allow ticking inline. */
+.rte .ProseMirror ul[data-type='taskList'] {
+  list-style: none;
+  padding-left: 0;
+}
+.rte .ProseMirror ul[data-type='taskList'] li {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.4rem;
+}
+.rte .ProseMirror ul[data-type='taskList'] li > label {
+  flex: 0 0 auto;
+  margin-top: 0.3rem;
+  user-select: none;
+}
+.rte .ProseMirror ul[data-type='taskList'] li > div {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.rte .ProseMirror ul[data-type='taskList'] li[data-checked='true'] > div {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+/* GFM tables in the editor. */
+.rte .ProseMirror table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 0.5rem 0;
+  table-layout: fixed;
+}
+.rte .ProseMirror th,
+.rte .ProseMirror td {
+  border: 1px solid var(--border);
+  padding: 0.35rem 0.5rem;
+  vertical-align: top;
+  text-align: left;
+}
+.rte .ProseMirror th {
+  background: var(--surface-2);
+  font-weight: 600;
+}
+/* The active cell selection highlight (table editing). */
+.rte .ProseMirror .selectedCell {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+}
+.mention-pop {
+  position: fixed;
+  z-index: 1000;
+  min-width: 14rem;
+  max-height: 15rem;
+  overflow: auto;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+  padding: 0.25rem;
+  font-size: 0.85rem;
+}
+.mention-pop__row {
+  padding: 0.35rem 0.5rem;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.mention-pop__row--sel,
+.mention-pop__row:hover {
+  background: var(--accent-weak);
+  color: var(--accent);
+}
+
+/* ---- quick add + task rows ---- */
+.quickadd {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin: 0.5rem 0 0.75rem;
+}
+.quickadd__title {
+  flex: 1;
+  min-width: 14rem;
+}
+.tasklist .taskrow {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: nowrap;
+}
+
+/* View tabs (Kanban / List) — segmented control next to the filter row. */
+.viewtabs {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--surface);
+}
+.viewtabs__tab {
+  background: transparent;
+  border: 0;
+  padding: 0.3rem 0.8rem;
+  font-size: 0.85rem;
+  cursor: pointer;
+  color: inherit;
+}
+.viewtabs__tab + .viewtabs__tab { border-left: 1px solid var(--border); }
+.viewtabs__tab--active {
+  background: var(--accent);
+  color: var(--accent-fg);
+  font-weight: 600;
+}
+
+/* Recent-tasks widget: an inset panel pinned at the top of /tasks
+   (last N tasks by created/modified, newest first). A subtle surface-2
+   box so it reads as a distinct shortcut without competing with the
+   main card; rows keep the .list li look (surface) and pop against it. */
+.recentwidget {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  padding: 0.5rem 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+.recentwidget__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+.recentwidget__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  background: transparent;
+  border: 0;
+  padding: 0.1rem 0;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-h);
+  cursor: pointer;
+}
+.recentwidget__caret {
+  font-size: 0.7rem;
+  color: var(--muted);
+}
+/* Override the global column-layout `label` so the count control sits
+   inline (label text + number box on one row). */
+.recentwidget__count {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+.recentwidget__count input {
+  width: 3.2rem;
+  padding: 0.15rem 0.3rem;
+}
+.recentlist {
+  margin: 0;
+}
+.recentrow {
+  flex-wrap: nowrap;
+  padding: 0.4rem 0.6rem;
+}
+.recentrow__title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.recentrow__meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+.recentrow__when {
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+/* Kanban board. Horizontal scroll if more columns than fit. Each
+   column holds a sorted stack of cards. Columns and cards keep a
+   compact visual to fit several side-by-side on a typical 13" laptop. */
+.kanban {
+  display: flex;
+  gap: 0.7rem;
+  overflow-x: auto;
+  padding-bottom: 0.4rem;
+  align-items: flex-start;
+}
+.kanban__col {
+  flex: 0 0 16rem;
+  min-width: 14rem;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100svh - 18rem);
+}
+.kanban__col--initial { border-top: 3px solid var(--accent); }
+.kanban__col--terminal { opacity: 0.85; }
+.kanban__col--hover { border-color: var(--accent); background: var(--surface); }
+.kanban__col--reject { opacity: 0.55; }
+.kanban__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.5rem 0.7rem;
+  border-bottom: 1px solid var(--border);
+  font-weight: 600;
+  font-size: 0.85rem;
+}
+.kanban__count {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0 0.45rem;
+  font-size: 0.75rem;
+  color: var(--muted);
+  font-weight: 400;
+}
+.kanban__cards {
+  list-style: none;
+  margin: 0;
+  padding: 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  overflow-y: auto;
+  flex: 1;
+}
+.kanban__card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.5rem 0.6rem;
+  cursor: grab;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.04);
+  /* Suppress text selection while dragging so the cursor stays the
+     hand and the drag image is the card, not a selected text span. */
+  user-select: none;
+  -webkit-user-select: none;
+}
+.kanban__card:active { cursor: grabbing; }
+.kanban__card--dragging { opacity: 0.5; }
+/* Inner interactive elements shouldn't start their own drag. The
+   Link explicitly opts out via draggable={false} too — the CSS rule
+   below covers any nested image / chip / etc. that the browser
+   would otherwise grab. */
+.kanban__card a,
+.kanban__card .chip,
+.kanban__card .aibadge {
+  -webkit-user-drag: none;
+}
+.kanban__card-head {
+  display: flex;
+  /* Wrap so a RUNNING timer's wide actions cluster (pause + memo +
+     stop-with-live-readout ⏱■ H:MM:SS) drops onto its own line below the
+     title instead of crushing it. On a 16rem card the title + a running
+     timer can't share one row; without wrap the title was squeezed below
+     a single word's width and wrapped one-character-per-line, while the
+     non-shrinkable IdentityBadge spilled over the actions. */
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 0.4rem;
+}
+.kanban__card-actions {
+  display: flex;
+  gap: 0.25rem;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+.kanban__timer {
+  padding: 0.1rem 0.4rem;
+  font-size: 0.78rem;
+  line-height: 1.2;
+}
+.kanban__title {
+  font-weight: 500;
+  color: inherit;
+  text-decoration: none;
+  word-break: break-word;
+  /* flex-basis 0 makes the line-break decision depend on min-width
+     alone, not on title length: the title's packing width is always the
+     6rem floor, so the two idle start glyphs (⏱▶ ⏱▶▶) always fit beside
+     it while the wider running-timer cluster (pause+memo+stop readout)
+     always wraps below it (see .kanban__card-head) — regardless of how
+     long the title is. The floor also keeps the title at least a word
+     wide, so it never wraps one-character-per-line nor lets the
+     non-shrinkable IdentityBadge overflow the actions. flex-grow then
+     expands the title to fill whatever space its line has left. */
+  flex: 1 1 0;
+  min-width: 6rem;
+}
+.kanban__title:hover { text-decoration: underline; }
+.kanban__meta {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.8rem;
+}
+.kanban__tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+}
+.kanban__empty {
+  list-style: none;
+  font-size: 0.78rem;
+  color: var(--muted);
+  padding: 0.5rem 0.2rem;
+  text-align: center;
+  font-style: italic;
+}
+@media (max-width: 768px) {
+  .kanban__col { flex-basis: 14rem; max-height: none; }
+}
+.taskrow__title {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-weight: 600;
+  color: var(--text-h);
+  /* Single line + ellipsis: a long title must never spill over the
+     tags / priority columns. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.taskrow__title:hover {
+  color: var(--accent);
+}
+.taskrow__meta {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-left: auto;
+  /* Pin priority+state+timer to a single line: a long task title that
+     wraps to two rows must not push the timer buttons (⏱▶ / ⏱▶▶) to
+     a new line below. The whole meta block stays inline next to the
+     title — title shrinks, meta does not. */
+  flex-shrink: 0;
+  flex-wrap: nowrap;
+  white-space: nowrap;
+}
+.taskrow__meta > * {
+  flex-shrink: 0;
+}
+.chip.prio {
+  font-variant-numeric: tabular-nums;
+}
+.aibadge {
+  display: inline-block;
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #fff;
+  background: #7c3aed;
+  border-radius: 4px;
+  padding: 0.05rem 0.32rem;
+  margin-right: 0.4rem;
+  vertical-align: middle;
+}
+.taskrow__tags {
+  display: flex;
+  gap: 0.3rem;
+  flex-wrap: wrap;
+  max-width: 40%;
+  overflow: hidden;
+}
+.taskrow__sel {
+  flex: none;
+  margin: 0;
+}
+.taskrow__state {
+  font-size: 0.8rem;
+  padding: 0.1rem 0.3rem;
+}
+/* Phone: the task row stacks — title on its own line (wrapping in full),
+   the no-shrink meta cluster (due/priority/state/timer) on the next —
+   instead of squeezing the title to zero width beside the meta. */
+@media (max-width: 640px) {
+  .tasklist .taskrow {
+    flex-wrap: wrap;
+  }
+  .taskrow__title {
+    flex: 1 1 8rem;
+    white-space: normal;
+  }
+  .taskrow__tags {
+    max-width: 100%;
+  }
+  .taskrow__meta {
+    width: 100%;
+    margin-left: 0;
+    flex-wrap: wrap;
+  }
+}
+.taskrow__sep {
+  align-self: stretch;
+  width: 1px;
+  background: var(--border);
+  margin: 0 0.2rem;
+}
+.est__sel {
+  width: auto;
+  min-width: 7rem;
+  max-width: 10rem;
+}
+.deppick {
+  position: relative;
+}
+.deppick__list {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 20;
+  min-width: 16rem;
+  max-height: 14rem;
+  overflow-y: auto;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18);
+}
+.deppick__row {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  border: none;
+  border-radius: 0;
+  padding: 0.35rem 0.6rem;
+}
+.deppick__row:hover,
+.deppick__row--sel {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
+/* Public auth screens: centre the lone card (was pinned top-left). */
+.authwrap {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 2rem 1rem;
+}
+.authwrap .card {
+  width: min(420px, 100%);
+  margin: 0;
+}
+
+/* Admin elevation (sudo-style): ghost "Admin" entry control and the
+   prominent active-mode badge, both in the topbar. */
+.topbar__admin,
+.badge--admin {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  white-space: nowrap;
+}
+/* Advisory deadline urgency badges (ADR-0013): the deterministic signal
+   that explains WHY a task ranks where it does. Colour escalates with the
+   deadline_bucket; comfortable is muted, none renders no badge at all. */
+.urg {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.05rem 0.45rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  border: 1px solid var(--border);
+  margin-left: 0.35rem;
+  white-space: nowrap;
+}
+.urg--overdue {
+  color: var(--err);
+  border-color: color-mix(in srgb, var(--err) 45%, transparent);
+  background: color-mix(in srgb, var(--err) 12%, transparent);
+}
+.urg--at_risk {
+  color: #b45309;
+  border-color: #fcd34d;
+  background: #fef3c7;
+}
+.urg--tight {
+  color: #6b4e0f;
+  border-color: color-mix(in srgb, #b45309 30%, transparent);
+  background: color-mix(in srgb, #fcd34d 18%, transparent);
+}
+.urg--comfortable {
+  color: var(--muted);
+  background: var(--surface-2);
+}
+:root[data-theme='dark'] .urg--at_risk {
+  color: #fbbf24;
+  border-color: #6b4e0f;
+  background: #3a2c08;
+}
+:root[data-theme='dark'] .urg--tight {
+  color: #e0b341;
+  border-color: #5a430d;
+  background: #2c2207;
+}
+
+/* Opt-in 'Help me decide' narration panel (req #4b). The deterministic
+   ranking above is authoritative; this only summarises it. */
+.aiadvice {
+  margin-top: 0.5rem;
+  padding: 0.7rem 0.9rem;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+}
+.aiadvice h3 {
+  margin: 0 0 0.3rem;
+  font-size: 0.95rem;
+}
+.aiadvice p {
+  margin: 0.2rem 0;
+  white-space: pre-wrap;
+}
+
+/* Divider between the primary 'what now' answer and the secondary
+   'Other planning tools' disclosure (T10). */
+.sep {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 1rem 0 0.6rem;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.28rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  border: 1px solid transparent;
+  cursor: pointer;
+}
+.badge--admin {
+  --amber: #b45309;
+  background: #fef3c7;
+  color: var(--amber);
+  border-color: #fcd34d;
+}
+:root[data-theme='dark'] .badge--admin {
+  background: #3a2c08;
+  color: #fbbf24;
+  border-color: #6b4e0f;
+}
+.badge--admin:hover {
+  filter: brightness(0.97);
+}
+.adminacts {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+/* Graph tag filter: unmistakable selected vs unselected (the old
+   chip/chip--rm pair was visually identical, so selection looked
+   inert). */
+.tagfilter {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0.5rem 0;
+}
+.chip--on,
+.chip--off {
+  cursor: pointer;
+}
+.chip--on {
+  background: var(--accent);
+  color: var(--accent-fg);
+  border-color: var(--accent);
+}
+.chip--off {
+  background: transparent;
+  color: var(--muted);
+  border-color: var(--border);
+  font-weight: 500;
+}
+.chip--off:hover {
+  color: var(--text-h);
+  border-color: var(--accent);
+}
+
+/* Clients & projects: clean two-row items, contextual add, meta chips.
+   (Replaces the cramped single-line cprow layout the user disliked.) */
+.grow {
+  flex: 1 1 auto;
+}
+.cptoolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.4rem;
+}
+.cptoolbar h2 {
+  margin: 0;
+}
+.cpcheck {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+/* .cpitem is a `.list li`, which is display:flex — that laid the head,
+   the edit form and the children side by side (the edit form became a
+   thin floating column). Force a vertical block card and neutralise
+   the inherited `.list li button { margin-left:auto }`. */
+.list li.cpitem {
+  display: block;
+  padding: 0.7rem 0.9rem;
+}
+.list li.cpitem button {
+  margin-left: 0;
+}
+.cpitem__head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem 0.6rem;
+  flex-wrap: wrap;
+}
+.cpitem__head .btn--sm {
+  flex: 0 0 auto;
+}
+/* Nested project rows: lighter than the client card. */
+.cpchildren .list.nested {
+  margin: 0.45rem 0 0;
+  border-left: 0;
+  padding-left: 0;
+}
+.cpchildren .list.nested li.cpitem {
+  padding: 0.5rem 0.7rem;
+  background: var(--surface-2);
+}
+.cpcaret {
+  background: none;
+  border: 0;
+  color: var(--muted);
+  padding: 0 0.15rem;
+  font-size: 0.9rem;
+  cursor: pointer;
+  width: 1.3rem;
+}
+.cpitem__name {
+  font-weight: 600;
+  color: var(--text-h);
+}
+.cpitem__name--btn {
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  font-size: inherit;
+}
+.cpitem__name--btn:hover {
+  color: var(--accent);
+}
+.cpmeta {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  align-items: center;
+}
+.tag {
+  font-size: 0.72rem;
+  padding: 0.05rem 0.45rem;
+  border-radius: 999px;
+  background: var(--accent-weak);
+  color: var(--accent);
+  white-space: nowrap;
+}
+.tag--muted {
+  background: var(--surface-2);
+  color: var(--muted);
+}
+/* Humus provenance badge on /memory search hits (ADR-0034): a leaf +
+   'humus' label on results surfaced from archived material. The light
+   moss tint keeps var(--text) readable on both themes. */
+.tag--humus {
+  background: color-mix(in srgb, var(--moss) 18%, var(--surface-2));
+  color: var(--text);
+  border: 1px solid color-mix(in srgb, var(--moss) 35%, var(--border));
+}
+.cpchildren {
+  margin: 0.4rem 0 0.2rem 1.45rem;
+  padding-left: 0.7rem;
+  border-left: 2px solid var(--border);
+}
+.cpadd {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+.cpadd input {
+  flex: 1 1 auto;
+  max-width: 22rem;
+}
+
+/* Reusable tag picker: assigned chips + searchable, scrollable list of
+   addable tags (the catalogue can be large). */
+.tagpick {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.tagpick__search {
+  max-width: 22rem;
+}
+.tagpick__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 13rem;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface);
+}
+.tagpick__list > li + li {
+  border-top: 1px solid var(--border);
+}
+.tagpick__empty {
+  padding: 0.5rem 0.6rem;
+}
+.tagpick__opt {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: 0;
+  color: var(--text-h);
+  padding: 0.4rem 0.6rem;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+.tagpick__opt:hover {
+  background: var(--accent-weak);
+}
+
+.timewhen {
+  display: block;
+  font-size: 0.76rem;
+  margin-top: 0.1rem;
+}
+
+/* Topbar workspace-role switcher (sudo-style; only for owner/admin). */
+.rolesw {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+.rolesw__lbl {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.rolesw select {
+  padding: 0.2rem 0.4rem;
+  font-size: 0.78rem;
+}
+
+/* Acting-as mode chip (multi-state: User / Owner / Admin). */
+.modechip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.28rem 0.65rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  border: 1px solid var(--border);
+  cursor: pointer;
+}
+.modechip--user {
+  background: var(--surface-2);
+  color: var(--muted);
+}
+.modechip--owner {
+  background: var(--accent);
+  color: var(--accent-fg);
+  border-color: var(--accent);
+}
+.modechip--admin {
+  background: #fef3c7;
+  color: #b45309;
+  border-color: #fcd34d;
+}
+:root[data-theme='dark'] .modechip--admin {
+  background: #3a2c08;
+  color: #fbbf24;
+  border-color: #6b4e0f;
+}
+.modechip:hover {
+  filter: brightness(0.98);
+  border-color: var(--accent);
+}
+
+/* In-context task timer (e.g. inside a task's work note). */
+.tasktimer {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+/* Task detail: issue-tracker layout. Full-width header + title, then a
+   two-pane body (content column + sticky properties rail) that collapses
+   to a single column with a collapsible properties panel below 820px. */
+.taskdetail {
+  /* Re-cap the --wide card so the two columns stay readable on very wide
+     screens (≈ 56rem content + 19rem rail). */
+  max-width: 78rem;
+}
+.taskdetail__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.4rem 0.8rem;
+  flex-wrap: wrap;
+}
+.taskdetail__back {
+  margin: 0;
+}
+.taskdetail__headeractions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.taskdetail__savestate {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.taskdetail__headersep {
+  width: 1px;
+  align-self: stretch;
+  min-height: 1.4rem;
+  background: var(--border);
+  margin: 0 0.15rem;
+}
+.taskdetail__badges {
+  margin: 0;
+}
+.taskdetail__titleform {
+  margin: 0;
+}
+.taskdetail__title {
+  font-size: 1.15rem;
+  font-weight: 600;
+}
+.taskdetail__grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 19rem;
+  gap: 1.4rem;
+  align-items: start;
+}
+.taskdetail__main {
+  grid-column: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+}
+.taskdetail__aside {
+  grid-column: 2;
+  grid-row: 1;
+  position: sticky;
+  top: calc(var(--header-h) + 0.75rem);
+  align-self: start;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: 0.6rem 0.8rem;
+  max-height: calc(100svh - var(--header-h) - 1.5rem);
+  overflow-y: auto;
+}
+.taskdetail__asideh {
+  margin: 0.1rem 0 0.4rem;
+  font-size: 0.95rem;
+}
+.taskdetail__asidebody {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+/* Unified relationships group reuses the body tab styling. */
+.taskdetail__connh {
+  margin-bottom: 0.2rem;
+}
+.taskdetail__connections .tabs {
+  display: flex;
+  gap: 0.25rem;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 0.6rem;
+  flex-wrap: wrap;
+}
+.taskdetail__connections .tabs__tab {
+  background: transparent;
+  border: none;
+  padding: 0.35rem 0.75rem;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  color: inherit;
+  font: inherit;
+}
+.taskdetail__connections .tabs__tab.is-active {
+  border-bottom-color: var(--accent);
+  font-weight: 600;
+}
+@media (max-width: 820px) {
+  .taskdetail__grid {
+    display: flex;
+    flex-direction: column;
+  }
+  /* Properties move above the content as a collapsible panel. */
+  .taskdetail__aside {
+    order: -1;
+    position: static;
+    max-height: none;
+    border: none;
+    background: transparent;
+    padding: 0;
+    margin-bottom: 0.3rem;
+  }
+  .taskdetail__propstoggle {
+    width: 100%;
+    text-align: left;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 0.5rem 0.7rem;
+    cursor: pointer;
+    font: inherit;
+    font-weight: 600;
+    color: inherit;
+  }
+  .taskdetail__aside .taskdetail__asidebody {
+    padding: 0.5rem 0.2rem 0.2rem;
+  }
+}
+/* Running stop button carries the live readout; tabular figures keep
+   its width from jittering as the seconds tick. It is a filled accent
+   chip (green background), so the readout must use ``--accent-fg`` --
+   the foreground designed to contrast the accent. Using ``--accent``
+   here printed green-on-green and was unreadable. */
+.tasktimer__stop {
+  font-variant-numeric: tabular-nums;
+  color: var(--accent-fg);
+}
+.notebanner {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  padding: 0.5rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-2);
+  font-size: 0.84rem;
+}
+
+/* ---- Note detail page (NoteDetailRoute) ----
+   The note editor moved from a non-responsive 92vh modal to a full page
+   mirroring TaskDetailRoute: a body-led main column, a collapsible
+   "Details" rail (linked task + timer + tags) and a tabbed "Connections"
+   region. Structure/layout only; the create modal on /notes keeps the
+   .modal__* rules. */
+.notedetail {
+  max-width: 78rem;
+}
+.notedetail__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.4rem 0.8rem;
+  flex-wrap: wrap;
+}
+.notedetail__back {
+  margin: 0;
+}
+.notedetail__headeractions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.notedetail__savestate {
+  white-space: nowrap;
+}
+.notedetail__headersep {
+  width: 1px;
+  align-self: stretch;
+  min-height: 1.4rem;
+  background: var(--border);
+  margin: 0 0.15rem;
+}
+/* Destructive cluster (Archive / Trash / Erase) is an atomic, right-
+   aligned, divided unit so a wrap never lands Save next to Erase. */
+.notedetail__headeractions-danger {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  margin-left: auto;
+  padding-left: 0.6rem;
+  border-left: 1px solid var(--border);
+}
+.notedetail__titleform {
+  margin: 0.6rem 0 0;
+}
+.notedetail__title {
+  width: 100%;
+  font-size: 1.15rem;
+  font-weight: 600;
+}
+.notedetail__title-h {
+  margin: 0.4rem 0;
+}
+.chip--copy {
+  cursor: pointer;
+}
+.notedetail__grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 19rem;
+  gap: 1.4rem;
+  align-items: start;
+  margin-top: 0.7rem;
+}
+.notedetail__main {
+  grid-column: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+}
+.notedetail__aside {
+  grid-column: 2;
+  grid-row: 1;
+  position: sticky;
+  top: calc(var(--header-h) + 0.75rem);
+  align-self: start;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: 0.6rem 0.8rem;
+  max-height: calc(100svh - var(--header-h) - 1.5rem);
+  overflow-y: auto;
+}
+.notedetail__asideh {
+  margin: 0.1rem 0 0.4rem;
+  font-size: 0.95rem;
+}
+.notedetail__asidebody {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+.notedetail__propstoggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem;
+  width: 100%;
+  text-align: left;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.5rem 0.7rem;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 600;
+  color: inherit;
+}
+.notedetail__propstoggle-caret {
+  font-size: 0.85em;
+  line-height: 1;
+}
+/* Collapsed (desktop): the rail shrinks to a slim auto-width column
+   holding just the caret toggle, and the body's ``1fr`` reclaims the
+   freed space. The toggle keeps its full a11y name via title/aria; only
+   the visible text label is dropped. */
+.notedetail__grid--asideclosed {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+.notedetail__aside--collapsed {
+  width: auto;
+  padding: 0.3rem;
+}
+.notedetail__aside--collapsed .notedetail__propstoggle {
+  width: auto;
+}
+.notedetail__aside--collapsed .notedetail__propstoggle-label {
+  display: none;
+}
+.notedetail__connections {
+  margin-top: 1.2rem;
+}
+.notedetail__connh {
+  margin-bottom: 0.2rem;
+}
+.notedetail__connections .tabs {
+  display: flex;
+  gap: 0.25rem;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 0.6rem;
+  flex-wrap: wrap;
+}
+.notedetail__connections .tabs__tab {
+  background: transparent;
+  border: none;
+  padding: 0.35rem 0.75rem;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  color: inherit;
+  font: inherit;
+}
+.notedetail__connections .tabs__tab.is-active {
+  border-bottom-color: var(--accent);
+  font-weight: 600;
+}
+@media (max-width: 820px) {
+  /* The Details rail can't sit beside the body: it stacks BELOW the
+     content (the note body leads) as a collapsible panel. */
+  .notedetail__grid {
+    display: flex;
+    flex-direction: column;
+  }
+  .notedetail__aside {
+    position: static;
+    max-height: none;
+    border: none;
+    background: transparent;
+    padding: 0;
+    margin-top: 0.3rem;
+  }
+  .notedetail__asidebody {
+    padding: 0.5rem 0.2rem 0.2rem;
+  }
+  /* On mobile the rail stacks vertically, so "collapse" just hides the
+     body — keep the toggle full-width with its text label (the slim
+     desktop rail treatment does not apply). */
+  .notedetail__aside--collapsed .notedetail__propstoggle {
+    width: 100%;
+  }
+  .notedetail__aside--collapsed .notedetail__propstoggle-label {
+    display: inline;
+  }
+}
+/* The linked task's title, shown inline in the work-note banner and
+   doubling as the "open task" link. Weighted up so it reads as the
+   subject of the sentence, not as boilerplate. */
+.notebanner__task {
+  font-weight: 600;
+  color: var(--text-h);
+}
+
+/* Time: inline entry edit + clickable by-task report rows. */
+.entryedit {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+  margin-top: 0.35rem;
+}
+.entryedit select,
+.entryedit input {
+  font-size: 0.8rem;
+  padding: 0.2rem 0.35rem;
+}
+.entryedit__select--invalid {
+  border-color: var(--err);
+  outline: 1px solid var(--err);
+  background: color-mix(in srgb, var(--err) 8%, var(--surface-2));
+}
+.entryedit__warn {
+  flex-basis: 100%;
+  color: var(--err);
+  font-size: 0.78rem;
+  line-height: 1.25;
+}
+.byrow {
+  cursor: pointer;
+}
+.byrow:hover {
+  background: var(--surface-2);
+}
+
+/* Time report: distribution donut + legend, grouped date range. */
+.timepie {
+  display: flex;
+  align-items: center;
+  gap: 1.2rem;
+  flex-wrap: wrap;
+  margin: 0.6rem 0 0.4rem;
+}
+.pielegend {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 16rem;
+  flex: 1 1 16rem;
+}
+.pielegend li {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.82rem;
+}
+.pieswatch {
+  width: 0.7rem;
+  height: 0.7rem;
+  border-radius: 2px;
+  flex: 0 0 auto;
+}
+.daterange {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 0.6rem;
+  flex: 0 0 auto;
+}
+.periodbar {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  margin: 0.3rem 0;
+}
+.periodbar__nav {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin-left: 0.4rem;
+}
+.periodbar__label {
+  min-width: 12rem;
+  text-align: center;
+}
+.perioddiff {
+  font-size: 1rem;
+  margin: 0.5rem 0 0.3rem;
+  padding: 0.6rem 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-2);
+}
+.perioddiff__cur { font-size: 1.1rem; }
+.perioddiff__delta { font-size: 0.85rem; margin-left: 0.4rem; }
+
+/* Attachments: chip list, image thumbnails, click-to-zoom lightbox. */
+.atts {
+  margin: 0.5rem 0;
+}
+.atts__head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin-bottom: 0.35rem;
+}
+.atts__lbl {
+  font-weight: 600;
+  font-size: 0.85rem;
+}
+.atts__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+.att {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.att__thumb {
+  padding: 0;
+  border: 1px solid var(--border, #ccc);
+  border-radius: 4px;
+  background: none;
+  cursor: zoom-in;
+  line-height: 0;
+}
+.att__thumb img {
+  width: 44px;
+  height: 44px;
+  object-fit: cover;
+  border-radius: 3px;
+  display: block;
+}
+.att__icon {
+  width: 44px;
+  height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.2rem;
+}
+.att__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.att__thumb--pdf,
+.att__thumb--audio,
+.att__thumb--video,
+.att__thumb--text {
+  width: 44px;
+  height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--accent, #b5179e);
+  background: var(--surface-2, #f4f4f6);
+}
+.att__thumb--audio,
+.att__thumb--video {
+  font-size: 1.1rem;
+}
+.lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(0, 0, 0, 0.82);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: zoom-out;
+  padding: 2rem;
+}
+.lightbox img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+/* PDF preview: iframe spans the lightbox area but keeps a max size
+   so the browser-native PDF chrome stays usable on large monitors.
+   `cursor: default` overrides the parent's `zoom-out` (the iframe
+   doesn't close on click — only the backdrop does). */
+.lightbox__pdf {
+  width: min(100%, 1100px);
+  height: min(100%, 90vh);
+  border: 0;
+  background: #fff;
+  cursor: default;
+}
+/* Side panel used for the mobile PDF fallback, the loading state,
+   and the error / too-large branches. Sits centred on the backdrop
+   with normal cursor (not zoom-out — clicks INSIDE the panel must
+   not close the modal). */
+.lightbox__panel {
+  max-width: min(90vw, 28rem);
+  padding: 1.25rem 1.5rem;
+  background: var(--surface, #fff);
+  color: var(--text, #111);
+  border-radius: 8px;
+  cursor: default;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  align-items: flex-start;
+}
+.lightbox__panel .btn--sm {
+  align-self: flex-start;
+}
+.lightbox__panel audio {
+  width: min(70vw, 30rem);
+}
+/* Video preview spans the lightbox like the PDF iframe; transparent panel
+   so only the player chrome shows. */
+.lightbox__panel--video {
+  background: transparent;
+  padding: 0;
+}
+.lightbox__video {
+  max-width: min(100%, 1100px);
+  max-height: 90vh;
+  border-radius: 6px;
+  background: #000;
+  cursor: default;
+}
+/* Text preview: a wide scrollable monospace panel. */
+.lightbox__panel--text {
+  max-width: min(92vw, 56rem);
+  width: 100%;
+  align-items: stretch;
+}
+.lightbox__text {
+  margin: 0;
+  max-height: 70vh;
+  overflow: auto;
+  padding: 0.8em 1em;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  white-space: pre;
+  background: var(--surface-sunken, var(--surface));
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.mch__row {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+/* Scheduler legend: critical vs slack swatches. */
+.sched__legend {
+  align-items: center;
+  gap: 1rem;
+  font-size: 0.82rem;
+  margin: 0.4rem 0;
+}
+.sched__sw {
+  display: inline-block;
+  width: 0.8rem;
+  height: 0.8rem;
+  border-radius: 2px;
+  vertical-align: -1px;
+  margin-right: 0.3rem;
+  background: var(--accent, #4a6b3e);
+}
+.sched__sw--crit {
+  background: #dc2626;
+  opacity: 1;
+}
+
+/* Invoice document preview panel + labelled line form. */
+.docpanel {
+  border: 1px solid var(--border, #ccc);
+  border-radius: 6px;
+  padding: 0.7rem 0.9rem;
+  margin: 0.6rem 0;
+}
+.docpanel__head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+.docpanel__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+  gap: 0.8rem;
+  font-size: 0.86rem;
+}
+.docpanel__causale {
+  margin-top: 0.5rem;
+  font-style: italic;
+}
+.docpanel__xml {
+  margin-top: 0.6rem;
+  border-top: 1px solid var(--border, #ccc);
+  padding-top: 0.6rem;
+}
+.docpanel__xml .docpanel__head {
+  margin-bottom: 0.4rem;
+}
+.lineform label {
+  display: flex;
+  flex-direction: column;
+  font-size: 0.78rem;
+  gap: 0.15rem;
+}
+
+/* Pomodoro widget — sits in topbar__actions. The trigger button shows
+   phase icon + mm:ss + a thin progress bar; clicking it opens a popover
+   anchored below it with controls, edit-running, and inline settings. */
+.pomodoro {
+  position: relative;
+  font-family: var(--font);
+}
+.pomodoro__trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.32rem 0.6rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 0.85rem;
+  cursor: pointer;
+  color: inherit;
+}
+.pomodoro__trigger:hover { background: var(--surface-2); }
+.pomodoro__trigger--running { border-color: var(--accent); }
+.pomodoro__trigger--paused { opacity: 0.75; }
+.pomodoro__icon { font-size: 1rem; line-height: 1; }
+.pomodoro__mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.pomodoro__count {
+  background: var(--surface-2);
+  border-radius: 999px;
+  padding: 0 0.4rem;
+  font-size: 0.75rem;
+}
+.pomodoro__bar {
+  display: inline-block;
+  width: 4.5rem;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--surface-2);
+  overflow: hidden;
+  position: relative;
+}
+.pomodoro__bar-fill {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.25s linear;
+}
+.pomodoro__trigger--idle .pomodoro__bar { display: none; }
+.pomodoro__pop {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  width: min(20rem, calc(100vw - 1rem));
+  padding: 0.7rem 0.85rem 0.8rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  z-index: 950;
+}
+.pomodoro__pop-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+}
+.pomodoro__pop-head > .pomodoro__phase {
+  /* The phase chip lives between the title and the close X; let it
+     absorb the slack so the X always sits at the right edge. */
+  margin-left: auto;
+  margin-right: 0;
+}
+.pomodoro__close {
+  border: 0;
+  background: transparent;
+  font-size: 1.4rem;
+  line-height: 1;
+  /* ~44px tap target. The wider chrome around the X is just padding,
+     not a visible border, so the popover header stays tidy. */
+  padding: 0.45rem 0.6rem;
+  margin: -0.4rem -0.4rem -0.4rem 0;
+  cursor: pointer;
+  color: inherit;
+  border-radius: 6px;
+}
+.pomodoro__close:hover {
+  background: var(--surface-2);
+}
+.pomodoro__phase {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+.pomodoro__time {
+  margin: 0;
+  font-size: 2rem;
+  letter-spacing: 0.02em;
+}
+.pomodoro__cycle { display: flex; gap: 0.3rem; }
+.pomodoro__dot {
+  width: 0.6rem;
+  height: 0.6rem;
+  border-radius: 50%;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+}
+.pomodoro__dot--on { background: var(--accent); border-color: var(--accent); }
+.pomodoro__actions { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+.pomodoro__edit,
+.pomodoro__settings {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.45rem 0.6rem 0.55rem;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.pomodoro__edit legend,
+.pomodoro__settings legend {
+  font-size: 0.75rem;
+  color: var(--muted);
+  padding: 0 0.25rem;
+}
+.pomodoro__edit-row { display: flex; flex-wrap: wrap; gap: 0.3rem; align-items: center; }
+.pomodoro__edit-set {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.8rem;
+}
+.pomodoro__settings-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.35rem 0.6rem;
+}
+.pomodoro__settings-grid label {
+  display: flex;
+  flex-direction: column;
+  font-size: 0.75rem;
+  color: var(--muted);
+  gap: 0.15rem;
+}
+.pomodoro__settings-grid input[type='number'] {
+  width: 100%;
+  box-sizing: border-box;
+}
+.pomodoro__settings-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  font-size: 0.8rem;
+}
+.pomodoro__foot {
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+@media (max-width: 640px) {
+  .pomodoro__bar { width: 2.4rem; }
+}
+/* On phones the popover would either spill off-screen on the right or
+   pin the user against a corner. ``.pomodoro--modal`` (set by the
+   trigger when below POMODORO_MODAL_QUERY) re-positions the existing
+   popover as a centred fixed dialog with its own backdrop. The
+   anchored markup is unchanged: only the placement differs.
+   Threshold kept slightly above the 640 small-phone breakpoint so
+   landscape phones also get the modal. */
+.pomodoro__backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 999;
+  background: rgba(8, 9, 13, 0.45);
+  border: 0;
+  cursor: pointer;
+}
+.pomodoro--modal .pomodoro__pop {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  right: auto;
+  transform: translate(-50%, -50%);
+  width: min(22rem, calc(100vw - 1.5rem));
+  max-height: min(85vh, 36rem);
+  overflow-y: auto;
+  z-index: 1000;
+}
+
+/* IdentityBadge: visually distinct from .chip (tags) — same row
+   geometry but rectangular, muted, with a leading SVG. Two tonal
+   variants by kind so the bot/human distinction reads at a glance.
+   docs/adr/0028 Punto 4. */
+.idbadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.05rem 0.4rem;
+  border-radius: 4px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  line-height: 1.2;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text-h);
+}
+.idbadge svg {
+  flex: 0 0 auto;
+}
+.idbadge__handle {
+  white-space: nowrap;
+  letter-spacing: 0.01em;
+}
+.idbadge--bot {
+  color: var(--violet);
+  border-color: color-mix(in srgb, var(--violet) 33%, transparent);
+  background: color-mix(in srgb, var(--violet) 10%, transparent);
+}
+.idbadge--human {
+  color: var(--muted);
+  background: transparent;
+}
+.idfacet {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+}
+
+/* Chip variants used on note rows:
+   - chip--derived: counter "{n} task" on the note row when the note
+     has spawned tasks (kind=derived_from / promoted_from).
+   - chip--promoted: the note has been transplanted (read-only). */
+.chip--derived {
+  background: color-mix(in srgb, var(--ok) 14%, transparent);
+  border-color: color-mix(in srgb, var(--ok) 40%, transparent);
+  color: color-mix(in srgb, var(--ok) 55%, var(--text-h));
+  cursor: help;
+}
+.chip--promoted {
+  background: color-mix(in srgb, var(--violet) 12%, transparent);
+  border-color: color-mix(in srgb, var(--violet) 40%, transparent);
+  color: var(--violet);
+}
+.chip--maturity {
+  text-transform: capitalize;
+}
+.chip--seed { color: var(--mat-seed); border-color: color-mix(in srgb, var(--mat-seed) 40%, transparent); background: color-mix(in srgb, var(--mat-seed) 12%, transparent); }
+.chip--growing { color: var(--mat-growing); border-color: color-mix(in srgb, var(--mat-growing) 40%, transparent); background: color-mix(in srgb, var(--mat-growing) 12%, transparent); }
+.chip--mature { color: var(--mat-mature); border-color: color-mix(in srgb, var(--mat-mature) 40%, transparent); background: color-mix(in srgb, var(--mat-mature) 12%, transparent); }
+.chip--dormant { color: var(--mat-dormant); border-color: color-mix(in srgb, var(--mat-dormant) 40%, transparent); background: color-mix(in srgb, var(--mat-dormant) 12%, transparent); }
+.chip--linkkind {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.72rem;
+  letter-spacing: 0.02em;
+}
+
+/* ============================================================
+   /garden — note maturity lifecycle view (ADR-0029 P2)
+   ============================================================
+   Three tab strips over the same data set; each plant is a card
+   with a leading maturity glyph, title + preview, and compact
+   actions. Responsive: on mobile the actions wrap below the
+   card body and the textual button labels collapse to glyphs.
+*/
+/* Multi-part note editor (task 29761355 Phase 4). Each part is a
+   self-contained block with a collapse toggle, an ord label, a
+   lang chip, reorder buttons and a danger remove. The body opens
+   into the existing RichEditor when expanded; collapsed shows the
+   first non-empty line as preview. Tight vertical rhythm so a
+   note with N parts stays readable in the modal viewport. */
+.parts-editor {
+  margin-top: 1rem;
+  border-top: 1px solid var(--border);
+  padding-top: 0.8rem;
+}
+.parts-editor__head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.6rem;
+}
+.parts-editor__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.parts-editor__item {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+.parts-editor__item-head {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.35rem 0.5rem;
+  border-bottom: 1px solid transparent;
+  /* Wrap rather than force a body-wide horizontal scrollbar when the
+     row's controls can't all fit on one line (narrow viewports). */
+  flex-wrap: wrap;
+}
+.parts-editor__title-h {
+  margin: 0;
+  font-size: 0.95rem;
+}
+/* Icon-only row controls: a comfortable centered hit area, enlarged to
+   ~40px on phones (the dense desktop row stays compact). */
+.parts-editor__icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+.parts-editor__rowactions {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+/* Isolate the destructive × from the additive move / add-below group so
+   it is not a mis-tap neighbour of "Add below". */
+.parts-editor__remove {
+  margin-left: 0.3rem;
+}
+.parts-editor__body .rte .ProseMirror
+  > :where(p, h1, h2, h3, h4, h5, h6, ul, ol, blockquote) {
+  /* Cap the reading measure on flow text only; the editor box, tables
+     and code fences stay full width. */
+  max-width: 72ch;
+}
+@media (max-width: 640px) {
+  .parts-editor__add-label {
+    display: none;
+  }
+  .parts-editor__icon-btn {
+    min-width: 2.5rem;
+    min-height: 2.5rem;
+  }
+}
+.parts-editor__item:not(:has(.parts-editor__body)) .parts-editor__item-head {
+  border-bottom-color: transparent;
+}
+.parts-editor__toggle {
+  background: transparent;
+  border: 0;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 0.9rem;
+  padding: 0 0.2rem;
+}
+.parts-editor__ord {
+  font-family: var(--mono);
+  font-size: 0.78rem;
+}
+.parts-editor__preview {
+  font-size: 0.85rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.parts-editor__spacer {
+  flex: 1 1 auto;
+}
+.parts-editor__body {
+  padding: 0.5rem;
+  border-top: 1px solid var(--border);
+}
+.parts-editor__title {
+  /* Optional per-part label (migration 0017). Sits above the
+     markdown body, slightly de-emphasised so the body still reads
+     as the main surface. ``maxLength`` mirrors the 300-char DB
+     limit. The dashed border uses --muted (≈5-6:1 on the surface in
+     both themes), not --border (<3:1): the field must read as
+     editable before focus, where it switches to a solid accent edge. */
+  width: 100%;
+  margin-bottom: 0.4rem;
+  font-weight: 600;
+  background: transparent;
+  border: 1px dashed var(--muted);
+  border-radius: 4px;
+  padding: 0.3rem 0.5rem;
+  color: var(--text-h);
+}
+.parts-editor__title:focus {
+  border-style: solid;
+  border-color: var(--accent);
+  outline: none;
+}
+.parts-editor__actions {
+  display: flex;
+  gap: 0.4rem;
+  margin-top: 0.5rem;
+}
+.chip--lang {
+  background: var(--accent-weak);
+  color: var(--accent);
+  border-color: var(--accent-weak);
+  font-family: var(--mono);
+}
+
+/* Subtle 'humus' background on /garden (task 0f71f60a / 56d80038):
+   the page sits on top of the standard card surface, here tinted by
+   two very-low-alpha radial pools (bark + moss) so the section reads
+   as a forest floor without distracting from the content. The
+   gradient is opaque-less so the underlying ``--surface`` colour
+   (whichever the theme picks) still drives contrast for inner rows. */
+.card.garden {
+  background:
+    radial-gradient(
+      ellipse at 15% 0%,
+      color-mix(in oklab, var(--bark) 7%, transparent) 0%,
+      transparent 60%
+    ),
+    radial-gradient(
+      ellipse at 85% 100%,
+      color-mix(in oklab, var(--moss) 6%, transparent) 0%,
+      transparent 55%
+    ),
+    var(--surface);
+}
+.garden__tabs {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  margin: 0.6rem 0 1rem 0;
+}
+.garden__tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.35rem 0.7rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text-h);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.garden__tab:hover {
+  border-color: var(--accent);
+}
+.garden__tab--active {
+  background: var(--accent);
+  color: var(--accent-fg);
+  border-color: var(--accent);
+}
+.garden__tab-count {
+  display: inline-flex;
+  min-width: 1.4rem;
+  height: 1.2rem;
+  align-items: center;
+  justify-content: center;
+  padding: 0 0.35rem;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.12);
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1;
+}
+.garden__tab--active .garden__tab-count {
+  background: rgba(255, 255, 255, 0.28);
+  color: inherit;
+}
+.garden__empty {
+  margin: 1.2rem 0;
+}
+.garden__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.plant {
+  display: flex;
+  align-items: stretch;
+  gap: 0.7rem;
+  padding: 0.7rem 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  transition: border-color 0.15s, transform 0.15s;
+}
+.plant:hover { border-color: var(--accent); }
+.plant__open {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.7rem;
+  background: none;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  min-width: 0;
+}
+.plant__glyph {
+  flex: 0 0 auto;
+  font-size: 1.4rem;
+  line-height: 1.2;
+  user-select: none;
+}
+.plant__body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 0;
+}
+.plant__title {
+  font-weight: 600;
+  color: var(--text-h);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.plant__open:hover .plant__title { color: var(--accent); }
+.plant__preview {
+  color: var(--muted);
+  font-size: 0.85rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+.plant__chip {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  padding: 0.05rem 0.45rem;
+  border-radius: 4px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  border: 1px solid color-mix(in srgb, var(--violet) 40%, transparent);
+  background: color-mix(in srgb, var(--violet) 12%, transparent);
+  color: var(--violet);
+  margin-top: 0.2rem;
+}
+.plant__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem;
+  flex: 0 0 auto;
+}
+.plant__maturity {
+  font: inherit;
+  font-size: 0.8rem;
+  padding: 0.2rem 0.4rem;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  max-width: 10rem;
+}
+.plant__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.3rem 0.55rem;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text-h);
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: none;
+}
+.plant__btn:hover { border-color: var(--accent); color: var(--accent); }
+.plant__btn--ghost { background: transparent; }
+.plant__btn[disabled] { opacity: 0.5; cursor: not-allowed; }
+
+/* Mobile (<= 640px): stack the actions on a second row and collapse
+   button labels to their leading glyph. The select keeps its full
+   label (the glyph alone wouldn't disambiguate four maturity states). */
+@media (max-width: 640px) {
+  .plant {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.5rem;
+  }
+  .plant__actions {
+    justify-content: flex-end;
+  }
+  .plant__btn-label {
+    display: none;
+  }
+  .plant__btn {
+    padding: 0.35rem 0.45rem;
+    font-size: 0.95rem;
+  }
+}
+
+.plant-detail__chips {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.6rem;
+}
+.plant-detail__body {
+  margin: 0.4rem 0 1rem 0;
+}
+.plant-detail__section {
+  margin-top: 1rem;
+}
+.plant-detail__section h3 {
+  font-size: 0.95rem;
+  margin: 0.6rem 0 0.3rem 0;
+}
+.plant-detail__links {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+.plant-detail__links li {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+/* Garden mindmap (ADR-0029 P2): graph view of notes + their typed
+   links + tag-derived edges. The container is sized so the canvas
+   has a stable footprint regardless of how many notes are present. */
+.garden__mindmap {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.garden__mindmap-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  padding: 0.35rem 0;
+}
+.garden__mindmap-search {
+  background: var(--surface-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.3rem 0.6rem;
+  font-size: 0.85rem;
+  min-width: 200px;
+}
+.garden__mindmap-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+  cursor: pointer;
+}
+.garden__mindmap-toggle input { accent-color: var(--accent); }
+.garden__mindmap-legend {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  font-size: 0.75rem;
+  color: var(--muted);
+  margin-left: auto;
+  flex-wrap: wrap;
+}
+.garden__mindmap-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+.garden__mindmap-legend-swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+}
+.garden__mindmap-canvas {
+  height: 70vh;
+  min-height: 480px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: linear-gradient(
+    180deg,
+    var(--surface) 0%,
+    color-mix(in srgb, var(--brand) 7%, var(--surface)) 100%
+  );
+  overflow: hidden;
+}
+.garden__mindmap-canvas .react-flow__renderer {
+  background: transparent;
+}
+.garden__mindmap-canvas .react-flow__minimap,
+.garden__mindmap-canvas .react-flow__controls {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.garden__mindmap-canvas .react-flow__controls-button {
+  background: var(--surface-2);
+  color: var(--text);
+  border-bottom: 1px solid var(--border);
+}
+.garden__mindmap-canvas .react-flow__controls-button:hover {
+  background: var(--surface);
+  color: var(--accent);
+}
+/* Level-of-detail: zoomed far out, chips collapse to just their
+   maturity glyph so the overview reads as a field of plants ("the
+   forest from above") rather than a smudge of unreadable text. Driven
+   by a single data-lod attribute flipped on a zoom-threshold crossing;
+   pure CSS, no per-node React work. */
+.garden__mindmap-canvas[data-lod='far'] .mm-node__title,
+.garden__mindmap-canvas[data-lod='far'] .mm-node__tags,
+.garden__mindmap-canvas[data-lod='far'] .mm-node__centrality {
+  display: none;
+}
+.garden__mindmap-canvas[data-lod='far'] .mm-node {
+  padding: 0.3rem 0.4rem;
+}
+
+.mm-node {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.4rem 0.65rem;
+  background: var(--surface-2);
+  border: 1.5px solid var(--border);
+  border-radius: 10px;
+  color: var(--text);
+  font-size: 0.85rem;
+  max-width: 240px;
+  cursor: grab;
+  transition: border-color 120ms ease, transform 120ms ease, opacity 120ms ease,
+    box-shadow 220ms ease;
+}
+.mm-node:active { cursor: grabbing; }
+.mm-node:hover { border-color: var(--moss); }
+.mm-node--dimmed { opacity: 0.55; }
+.mm-node--promoted { border-style: dashed; }
+/* The highlight is a transient action signal (search hit) and so
+   keeps the CTA accent ring; the organic moss is reserved for the
+   resting/hover state. The inline box-shadow set by the bloom halo
+   composes with this one via comma. */
+.mm-node--highlighted {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 30%, transparent);
+}
+/* Focus+context: hovering or pinning a node lights it and its direct
+   neighbours and recedes the rest, so a single node's links read out
+   of the field. Declared after --dimmed so the stronger focus fade
+   wins when a faded node is also maturity-dimmed. The .mm-node
+   transition (border/opacity) already animates the change. */
+.mm-node--neighbor {
+  opacity: 1;
+}
+.mm-node--faded {
+  opacity: 0.2;
+  filter: grayscale(0.4);
+}
+.mm-node--focus {
+  border-color: var(--moss);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--moss) 35%, transparent);
+  z-index: 5;
+}
+/* Edge opacity for focus/fade is written inline by the displayEdges
+   overlay onto the <path> (inline style beats CSS there); React Mycelium
+   puts the mm-edge--* class on the wrapper <g>, so the transition has
+   to target the inner path or it never fires. */
+.react-flow__edge.mm-edge--faded .react-flow__edge-path,
+.react-flow__edge.mm-edge--focus .react-flow__edge-path {
+  transition: opacity 140ms ease;
+}
+.mm-node__glyph {
+  font-size: 1.05rem;
+  line-height: 1;
+}
+.mm-node__title {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-h);
+}
+/* Tag dots: each generic/client/project tag of the note becomes a
+   small bloom on the node. Overflow collapses into a +N badge so
+   wide tag lists don't blow the node width. */
+.mm-node__tags {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex: 0 0 auto;
+}
+.mm-node__tag-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--moss);
+  border: 1px solid color-mix(in srgb, var(--surface) 50%, transparent);
+  box-shadow: 0 0 2px color-mix(in srgb, var(--bloom) 60%, transparent);
+}
+.mm-node__tag-more {
+  font-size: 0.62rem;
+  color: var(--muted);
+  padding: 0 0.18rem;
+  border-radius: 4px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  line-height: 1.4;
+}
+/* Walk overlay (task 5bf31b63): nodes on the walk path get a halo
+   in --bloom + a step badge; the seed gets a thicker, warmer ring. */
+.mm-node--walk {
+  box-shadow: 0 0 12px color-mix(in srgb, var(--bloom) 55%, transparent);
+  z-index: 2;
+}
+.mm-node--walk-seed {
+  box-shadow: 0 0 18px color-mix(in srgb, var(--bloom) 85%, transparent);
+  border-color: var(--bloom);
+  z-index: 3;
+}
+.mm-node__walk-step {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  font-size: 0.62rem;
+  font-variant-numeric: tabular-nums;
+  background: var(--bloom);
+  color: var(--surface);
+  border-radius: 999px;
+  min-width: 16px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 4px;
+  line-height: 1;
+  border: 1px solid var(--surface);
+}
+.mm-node__centrality {
+  font-size: 0.6rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+  padding: 0 0.25rem;
+  margin-left: 0.25rem;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--bloom) 18%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--bloom) 35%, var(--border));
+  line-height: 1.4;
+  flex: 0 0 auto;
+}
+/* Humus provenance (ADR-0034 transparency): a node reached via the
+   archived 'humus' source during a free-wander gets a leaf marker at
+   top-left (opposite the walk-step badge), mirrored by the .tag--humus
+   badge on /memory search hits. */
+.mm-node__humus {
+  position: absolute;
+  top: -6px;
+  left: -6px;
+  font-size: 0.72rem;
+  line-height: 1;
+  filter: drop-shadow(0 0 2px var(--surface));
+  pointer-events: none;
+  z-index: 3;
+}
+.mm-node__handle {
+  width: 9px;
+  height: 9px;
+  background: var(--moss);
+  border: 1.5px solid var(--surface);
+  border-radius: 999px;
+}
+.mm-node__handle--in { background: var(--muted); }
+
+.modal__panel--narrow { max-width: 420px; }
+.garden__mindmap-kindlist {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin: 0.5rem 0;
+}
+.garden__mindmap-kindopt {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.3rem 0.4rem;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.garden__mindmap-kindopt:hover { background: var(--surface-2); }
+
+/* Task body tabs: description vs checklist. Both fields are always
+   available on every task (no modality); the tab strip just decides
+   which one the user is looking at right now. */
+.taskdetail__body .tabs {
+  display: flex;
+  gap: 0.25rem;
+  border-bottom: 1px solid var(--border, #ccc);
+  margin-bottom: 0.5rem;
+}
+.taskdetail__body .tabs__tab {
+  background: transparent;
+  border: none;
+  padding: 0.35rem 0.75rem;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  color: inherit;
+  font: inherit;
+}
+.taskdetail__body .tabs__tab.is-active {
+  border-bottom-color: var(--accent, #5b8cff);
+  font-weight: 600;
+}
+
+.checklist {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.checklist__items {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.checklist__row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+.checklist__row-main {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.checklist__row.is-done .checklist__text {
+  text-decoration: line-through;
+  opacity: 0.6;
+}
+.checklist .ghost.icon.is-active {
+  opacity: 1;
+}
+.checklist__note {
+  padding-left: 1.6rem;
+}
+.checklist__note-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.3rem;
+}
+.note-checklist {
+  margin-top: 1rem;
+}
+.note-checklist__heading {
+  font-size: 0.95rem;
+  margin: 0 0 0.4rem;
+}
+.checklist__text {
+  flex: 1;
+  min-width: 0;
+}
+.checklist__add {
+  display: flex;
+  gap: 0.4rem;
+}
+.checklist__add input {
+  flex: 1;
+}
+.checklist__footer {
+  display: flex;
+  justify-content: flex-end;
+}
+.checklist .ghost.icon {
+  padding: 0.15rem 0.4rem;
+  line-height: 1;
+}
+
+/* Recovery-history panel (entity_revision): timeline + inline diff
+ * for the selected revision. Visible at the bottom of TaskDetailRoute
+ * and inside the note-edit modal. */
+.revisions-panel {
+  margin-top: 1.2rem;
+}
+/* Collapsible header: the panel ships collapsed; a single button
+ * (caret + h3) toggles visibility of the timeline below. */
+.revisions-panel__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  color: inherit;
+}
+.revisions-panel__toggle h3 {
+  margin: 0;
+}
+.revisions-panel__caret {
+  font-size: 0.85em;
+  line-height: 1;
+  width: 1ch;
+  display: inline-block;
+}
+.revisions-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+.revision-row {
+  border: 1px solid var(--border);
+  border-radius: 0.4rem;
+  padding: 0.4rem 0.6rem;
+  background: var(--surface-1);
+}
+/* Per-row editable summary label. Replaces the changed_fields list
+ * (still surfaced as the placeholder/fallback when no summary is
+ * set) so the timeline reads as "what happened" instead of "which
+ * columns changed". */
+.revision-label {
+  margin-top: 0.15rem;
+}
+.revision-label__text {
+  background: transparent;
+  border: 0;
+  padding: 0;
+  cursor: text;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  width: 100%;
+}
+.revision-label__text--fallback {
+  color: var(--text-d);
+  font-style: italic;
+}
+.revision-label__input {
+  width: 100%;
+  padding: 0.1rem 0.3rem;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 0.2rem;
+  font: inherit;
+}
+.revision-row.revision-open {
+  background: var(--surface-2);
+  border-style: dashed;
+}
+.revision-row.revision-selected {
+  border-color: var(--accent, var(--border));
+}
+.revision-meta-btn {
+  appearance: none;
+  background: none;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+}
+.revision-meta-btn[disabled] {
+  cursor: default;
+}
+.revision-meta {
+  display: flex;
+  gap: 0.6rem;
+  align-items: baseline;
+  font-size: 0.85rem;
+}
+.revision-version {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  color: var(--text-h);
+}
+.revision-time { font-variant-numeric: tabular-nums; }
+.revision-channel { color: var(--muted); }
+.revision-open-badge,
+.revision-restored-badge {
+  font-size: 0.7rem;
+  padding: 0.05rem 0.35rem;
+  border-radius: 0.3rem;
+  background: var(--surface-3, var(--surface-2));
+  color: var(--muted);
+}
+.revision-fields {
+  font-size: 0.85rem;
+  color: var(--muted);
+  margin-top: 0.15rem;
+  word-break: break-word;
+}
+.revision-diff {
+  margin-top: 0.5rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--border);
+}
+.revision-diff-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+.revision-diff-table th,
+.revision-diff-table td {
+  text-align: left;
+  padding: 0.25rem 0.4rem;
+  vertical-align: top;
+  border-bottom: 1px solid var(--border);
+}
+.revision-diff-snap,
+.revision-diff-curr {
+  font-family: var(--mono, monospace);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-width: 18rem;
+}
+.revision-diff-snap { background: var(--surface-2); }
+.revision-diff-footer {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 0.5rem;
+}
+
+/* --- Inline annotations (comments + suggestions) ------------------- */
+.anno-panel {
+  margin-top: 0.75rem;
+  border-top: 1px solid var(--border, #ddd);
+  padding-top: 0.5rem;
+  font-size: 0.9rem;
+}
+.anno-panel__head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.4rem;
+}
+.anno-panel__spacer {
+  flex: 1;
+}
+.anno-panel__filter {
+  font-size: 0.8rem;
+  opacity: 0.8;
+}
+.anno-panel__list,
+.anno__replies {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.anno__replies {
+  margin-top: 0.4rem;
+  padding-left: 1rem;
+  border-left: 2px solid var(--border, #eee);
+}
+.anno {
+  border: 1px solid var(--border, #e3e3e3);
+  border-radius: 6px;
+  padding: 0.4rem 0.5rem;
+  background: var(--surface, #fafafa);
+}
+.anno--suggestion {
+  border-left: 3px solid #d08700;
+}
+.anno--resolved,
+.anno--accepted,
+.anno--rejected {
+  opacity: 0.6;
+}
+.anno__head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.78rem;
+}
+.anno__author {
+  font-family: var(--mono, monospace);
+  opacity: 0.75;
+}
+.anno__status {
+  text-transform: uppercase;
+  font-size: 0.68rem;
+  letter-spacing: 0.03em;
+  padding: 0 0.3rem;
+  border-radius: 3px;
+  background: var(--surface-2);
+  color: var(--text);
+}
+.anno__status--open {
+  background: color-mix(in srgb, var(--accent) 18%, var(--surface));
+  color: var(--text-h);
+}
+.anno__status--accepted {
+  background: color-mix(in srgb, var(--ok) 18%, var(--surface));
+  color: var(--text-h);
+}
+.anno__status--rejected {
+  background: color-mix(in srgb, var(--err) 18%, var(--surface));
+  color: var(--text-h);
+}
+.anno__quote {
+  font-style: italic;
+  opacity: 0.7;
+}
+.anno__diff {
+  margin: 0.25rem 0;
+}
+.anno-del {
+  color: var(--err);
+  text-decoration: line-through;
+}
+.anno-ins {
+  color: color-mix(in srgb, var(--ok) 60%, var(--text-h));
+  text-decoration: none;
+  background: color-mix(in srgb, var(--ok) 15%, var(--surface));
+}
+.anno__body {
+  /* Holds a rendered MarkdownView (its `.md` owns spacing); no pre-wrap,
+     which would otherwise inject stray whitespace into the rendered HTML. */
+  margin: 0.25rem 0;
+}
+.anno__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin-top: 0.3rem;
+}
+.anno__reply-box,
+.anno__edit,
+.anno-panel__composer,
+.anno-panel__suggest {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin-top: 0.4rem;
+}
+.anno-panel__composer textarea,
+.anno-panel__suggest input,
+.anno-panel__composer input,
+.anno__reply-box textarea,
+.anno__edit textarea {
+  width: 100%;
+  font: inherit;
+  padding: 0.3rem;
+  border: 1px solid var(--border, #ccc);
+  border-radius: 4px;
+}
+.anno-panel__composer-actions {
+  display: flex;
+  gap: 0.3rem;
+}
+.parts-editor__comments {
+  margin-top: 0.4rem;
+}
+
+/* Inline decorations painted over the live prose by the editor. */
+.anno-mark--comment {
+  background: rgba(255, 214, 102, 0.4);
+  border-bottom: 1px solid #d9a400;
+  cursor: pointer;
+}
+.anno-mark--del {
+  color: var(--err);
+  text-decoration: line-through;
+  text-decoration-color: var(--err);
+  cursor: pointer;
+}
+.anno-mark--ins {
+  color: color-mix(in srgb, var(--ok) 60%, var(--text-h));
+  background: color-mix(in srgb, var(--ok) 15%, var(--surface));
+  border-radius: 2px;
+  padding: 0 1px;
+  cursor: pointer;
+}
+/* The comment highlight is a fixed amber tuned for light prose; in dark
+   it must blend toward the dark surface (less alpha) so the prose text on
+   top keeps AA, and the underline uses the theme bark. Both dark paths
+   (forced + OS-auto) are covered to match the palette's parity rule. */
+:root[data-theme='dark'] .anno-mark--comment,
+:root:not([data-theme='light']):not([data-theme='dark']) .anno-mark--comment {
+  background: color-mix(in srgb, #ffd666 22%, var(--surface));
+  border-bottom-color: var(--bark);
+}
+
+/* "Go to text": the panel's locate button (.anno__locate) scrolls the
+   editor to the anchored passage and adds this class for a short pulse so
+   the eye lands on it. Pulses box-shadow only (never the mark's own amber
+   / strikethrough), so it reads in either theme without clobbering the
+   mark underneath. */
+@keyframes anno-flash {
+  0% {
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 75%, transparent);
+  }
+  70% {
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
+.anno-mark--flash {
+  animation: anno-flash 1.4s ease-out;
+  border-radius: 3px;
+  /* The mark is an inline span; without this a passage that wraps across
+     lines gets ONE box-shadow rectangle around the union box (slice),
+     cutting through unrelated text. clone gives each line fragment its
+     own ring. */
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+/* No pulse under reduced motion: hold a steady ring instead (the host
+   removes the class after ~1.5s either way). */
+@media (prefers-reduced-motion: reduce) {
+  .anno-mark--flash {
+    animation: none;
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 45%, transparent);
+    border-radius: 3px;
+    box-decoration-break: clone;
+    -webkit-box-decoration-break: clone;
+  }
+}
+.anno__locate {
+  /* Nudge the crosshair glyph up to optical size among the text buttons. */
+  font-size: 0.95rem;
+  line-height: 1;
+}
+/* Transient hint when "go to text" finds no target (passage edited away
+   or the editor is in source/raw mode). Muted, reads in both themes. */
+.anno__locate-miss {
+  align-self: center;
+  font-size: 0.72rem;
+  font-style: italic;
+  color: color-mix(in srgb, var(--text) 55%, transparent);
+}
+/* Per-card "this suggestion's target text drifted" badge: a stale Accept
+   would just 400 again, so the card shows this instead and offers the ⌖
+   manual-apply path. Warn-toned, readable in both themes. */
+.anno__stale {
+  align-self: center;
+  font-size: 0.72rem;
+  font-style: italic;
+  color: var(--err);
+}
+/* In-flight spinner for a busy action button (accept/reject/resolve/
+   reopen): inherits the button's text colour so it reads in both themes,
+   reusing the running-spin keyframes. */
+.btn-spinner {
+  display: inline-block;
+  width: 0.85em;
+  height: 0.85em;
+  margin-right: 0.35em;
+  vertical-align: -0.1em;
+  border: 2px solid color-mix(in srgb, currentColor 30%, transparent);
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: running-spin 0.7s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .btn-spinner {
+    animation-duration: 2s;
+  }
+}
+
+/* Inline annotation UX: compose + action popovers (InlineAnnotator).
+   Both are position:fixed, anchored to viewport coordinates computed
+   from the editor selection / clicked mark. The Comment / Suggest
+   triggers no longer float on the selection — they live in the editor's
+   sticky toolbar (.rte__annotate). */
+.anno-pop {
+  z-index: 2001;
+  width: 320px;
+  max-width: calc(100vw - 16px);
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.5rem;
+  background: var(--surface, #fff);
+  border: 1px solid var(--border, #ccc);
+  border-radius: 8px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.22);
+}
+.anno-pop__input {
+  width: 100%;
+  font: inherit;
+  padding: 0.35rem;
+  border: 1px solid var(--border, #ccc);
+  border-radius: 4px;
+  box-sizing: border-box;
+}
+.anno-pop__quote {
+  font-size: 0.8rem;
+  font-style: italic;
+  opacity: 0.75;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.anno-pop__diff {
+  font-size: 0.9rem;
+}
+.anno-pop__body {
+  font-size: 0.9rem;
+  white-space: pre-wrap;
+}
+.anno-pop__replies {
+  margin: 0;
+  padding-left: 1rem;
+  font-size: 0.8rem;
+  opacity: 0.85;
+}
+.anno-pop__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+.anno-pop__err {
+  margin: 0;
+  font-size: 0.8rem;
+}
+
+/* The action popover (clicking an existing comment/suggestion) is a
+   centered modal: a full-screen backdrop whose click closes it, with the
+   dialog centred inside. This replaces the old mark-anchored placement,
+   which could drop the dialog's buttons below the viewport's bottom. */
+.anno-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(0, 0, 0, 0.32);
+}
+.anno-pop--modal {
+  /* Centred by the backdrop's flexbox, not by viewport coordinates. */
+  position: static;
+  width: 380px;
+  max-width: 100%;
+  /* Bounded height so a long comment scrolls inside the dialog instead of
+     growing past the screen. */
+  max-height: min(85vh, 640px);
+}
+.anno-pop__scroll {
+  /* The variable-height content (quote/diff, body, replies, edit/reply
+     fields). Scrolls within the dialog; min-height:0 lets it actually
+     shrink inside the flex column so overflow-y engages. */
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+.anno-pop__footer {
+  /* Pinned below the scroll region: the action buttons stay visible no
+     matter how tall the comment is. */
+  flex: 0 0 auto;
+  padding-top: 0.4rem;
+  border-top: 1px solid var(--border, #e5e5e5);
+}

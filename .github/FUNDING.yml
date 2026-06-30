@@ -1,0 +1,11 @@
+# GitHub Sponsors button on the repo page.
+# Activate channels by uncommenting and filling in the value(s). The
+# Sponsor button appears as soon as at least one entry is set.
+#
+# Adding extra channels (Liberapay, custom URL, etc.) is fine: the
+# button opens a popover that lists all configured channels.
+github: angleto
+# liberapay: angleto
+# ko_fi: angleto
+# custom:
+#   - https://xeno.garden/sponsor

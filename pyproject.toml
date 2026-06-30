@@ -1,0 +1,91 @@
+# Workspace root (virtuale): non e un pacchetto pubblicabile.
+# I membri sono i pacchetti del monorepo. Vedi docs/architecture.md.
+
+[tool.uv.workspace]
+members = ["core", "api", "mcp", "worker", "sdi-inbound", "cli"]
+
+[tool.uv.sources]
+mycelium-core = { workspace = true }
+mycelium-api = { workspace = true }
+mycelium-mcp = { workspace = true }
+mycelium-worker = { workspace = true }
+mycelium-sdi-inbound = { workspace = true }
+mycelium-cli = { workspace = true }
+
+[dependency-groups]
+dev = [
+    "ruff>=0.6",
+    "mypy>=1.11",
+    "pytest>=8",
+    "pytest-asyncio>=0.24",
+    "httpx>=0.27",
+    "anyio>=4",
+    "respx>=0.21",
+    # Graph clustering (Leiden) is the garden mindmap's real "glades"
+    # source (ADR-0040 / ADR-0031). Production opts in via mycelium-core's
+    # ``clustering`` extra (heavy C deps, graceful degrade when absent),
+    # but dev and CI install it by default here so the mindmap renders
+    # real communities and the cluster tests exercise the live Leiden
+    # path instead of the tag-glade fallback.
+    "python-igraph>=0.11",
+    "leidenalg>=0.10",
+]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+src = [
+    "core/src",
+    "api/src",
+    "mcp/src",
+    "worker/src",
+    "sdi-inbound/src",
+    "cli/src",
+]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "ASYNC", "S", "RUF"]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests legitimately use assert and dummy credentials.
+"**/tests/**" = ["S101", "S105", "S106", "S107"]
+# Alembic migrations build static, authored DDL/DML strings (never
+# user input); S608's SQL-injection premise does not apply.
+"core/migrations/**" = ["S608"]
+# Typer's idiomatic ``param = typer.Option(...) / typer.Argument(...)``
+# pattern trips B008 on every command signature. The mutable default
+# is also fine: Typer parses each invocation independently and does
+# not mutate the sentinel.
+"cli/src/mycelium_cli/cmds/**" = ["B008"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+plugins = ["pydantic.mypy"]
+namespace_packages = true
+explicit_package_bases = true
+mypy_path = "core/src:api/src:mcp/src:worker/src:sdi-inbound/src:cli/src"
+
+# Untyped third-party libs: pgvector ships no py.typed;
+# sentence-transformers is an optional extra (lazily imported);
+# reportlab (invoice PDF generator) ships no py.typed; boto3 (S3
+# attachment backend, lazily imported) ships no inline types and the
+# repo convention is ignore_missing_imports, not a stubs dep.
+[[tool.mypy.overrides]]
+module = [
+    "pgvector.*",
+    "sentence_transformers.*",
+    "pyotp.*",
+    "qrcode.*",
+    "reportlab.*",
+    "boto3.*",
+    "lxml.*",
+    "igraph.*",
+    "leidenalg.*",
+    "pywebpush.*",
+]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["core/tests", "api/tests", "cli/tests", "worker/tests"]

@@ -1,0 +1,291 @@
+{
+  "ts": "2026-05-25",
+  "python": "3.12.13",
+  "env": {
+    "MYCELIUM_EMBEDDER": ""
+  },
+  "registry": {
+    "n_http_tools": 4,
+    "n_stdio_tools": 154,
+    "tools_list_http_bytes": 2470,
+    "tools_list_stdio_full_bytes": 87869,
+    "tools_list_stdio_stripped_bytes": 72158,
+    "per_tool_total_full_bytes": 87714,
+    "per_tool_total_stripped_bytes": 72003,
+    "per_tool_total_desc_bytes": 17713,
+    "per_tool_avg_full_bytes": 569,
+    "per_tool_avg_stripped_bytes": 467,
+    "top10_heaviest_full": [
+      {
+        "name": "create_task",
+        "full_bytes": 2235,
+        "stripped_bytes": 2132,
+        "schema_props": 18
+      },
+      {
+        "name": "update_task",
+        "full_bytes": 2124,
+        "stripped_bytes": 2021,
+        "schema_props": 18
+      },
+      {
+        "name": "update_client",
+        "full_bytes": 1579,
+        "stripped_bytes": 1476,
+        "schema_props": 16
+      },
+      {
+        "name": "executor_update",
+        "full_bytes": 1456,
+        "stripped_bytes": 1353,
+        "schema_props": 13
+      },
+      {
+        "name": "executor_create",
+        "full_bytes": 1421,
+        "stripped_bytes": 1318,
+        "schema_props": 13
+      },
+      {
+        "name": "memory_write",
+        "full_bytes": 1415,
+        "stripped_bytes": 1312,
+        "schema_props": 11
+      },
+      {
+        "name": "update_time_entry",
+        "full_bytes": 1375,
+        "stripped_bytes": 1272,
+        "schema_props": 11
+      },
+      {
+        "name": "list_notes",
+        "full_bytes": 1135,
+        "stripped_bytes": 1033,
+        "schema_props": 9
+      },
+      {
+        "name": "add_time_entry",
+        "full_bytes": 1126,
+        "stripped_bytes": 1024,
+        "schema_props": 9
+      },
+      {
+        "name": "memory_search",
+        "full_bytes": 1126,
+        "stripped_bytes": 1023,
+        "schema_props": 9
+      }
+    ],
+    "top10_verbose_descriptions": [
+      {
+        "name": "create_task",
+        "desc_bytes": 439
+      },
+      {
+        "name": "memory_write",
+        "desc_bytes": 391
+      },
+      {
+        "name": "start_timer",
+        "desc_bytes": 383
+      },
+      {
+        "name": "add_task_participant",
+        "desc_bytes": 371
+      },
+      {
+        "name": "update_task",
+        "desc_bytes": 368
+      },
+      {
+        "name": "update_time_entry",
+        "desc_bytes": 368
+      },
+      {
+        "name": "recompute_schedule",
+        "desc_bytes": 356
+      },
+      {
+        "name": "dispatch_approve",
+        "desc_bytes": 322
+      },
+      {
+        "name": "dispatch_tick",
+        "desc_bytes": 320
+      },
+      {
+        "name": "agent_run_start",
+        "desc_bytes": 320
+      }
+    ]
+  },
+  "search_tools": {
+    "create a task": {
+      "results": 8,
+      "bytes": 1038
+    },
+    "list my notes": {
+      "results": 8,
+      "bytes": 988
+    },
+    "stop the running timer": {
+      "results": 8,
+      "bytes": 1018
+    },
+    "send invoice for this client": {
+      "results": 8,
+      "bytes": 1006
+    },
+    "find appointments today": {
+      "results": 8,
+      "bytes": 912
+    },
+    "embed a memory blob": {
+      "results": 8,
+      "bytes": 1067
+    },
+    "assign tag to project": {
+      "results": 8,
+      "bytes": 1012
+    }
+  },
+  "serializers": {
+    "task_brief_bytes": 613,
+    "task_full_bytes": 937,
+    "task_picker_projected_bytes": 98,
+    "note_with_transcript_1500_bytes": 2012,
+    "note_without_transcript_bytes": 496,
+    "note_picker_projected_bytes": 103,
+    "tag_brief_bytes": 94,
+    "list_tasks_50_brief_bytes": 30650,
+    "list_tasks_50_full_bytes": 46850,
+    "list_tasks_50_picker_bytes": 4900,
+    "list_notes_50_with_transcript_bytes": 100600,
+    "list_notes_50_without_transcript_bytes": 24800,
+    "list_notes_50_picker_bytes": 5150
+  },
+  "corpus": {
+    "plans_user": {
+      "exists": true,
+      "root": "/Users/angelo/.claude/plans",
+      "files": 31,
+      "bytes": 636815,
+      "lines": 9322,
+      "top5": [
+        {
+          "path": "voglio-che-sia-presente-polished-music.md",
+          "bytes": 61295,
+          "lines": 884
+        },
+        {
+          "path": "zazzy-honking-nygaard.md",
+          "bytes": 32519,
+          "lines": 337
+        },
+        {
+          "path": "voglio-che-fai-questa-zippy-moonbeam.md",
+          "bytes": 31107,
+          "lines": 382
+        },
+        {
+          "path": "leggi-l-analisi-specifica-modulo-remedia-imperative-eclipse.md",
+          "bytes": 30949,
+          "lines": 421
+        },
+        {
+          "path": "abbiamo-il-tempo-per-wiggly-horizon.md",
+          "bytes": 30149,
+          "lines": 436
+        }
+      ]
+    },
+    "memory_project": {
+      "exists": true,
+      "root": "/Users/angelo/.claude/projects/-Users-angelo-data-WORK-flow/memory",
+      "files": 12,
+      "bytes": 55014,
+      "lines": 659,
+      "top5": [
+        {
+          "path": "flow-dev-gotchas.md",
+          "bytes": 7261,
+          "lines": 109
+        },
+        {
+          "path": "flow-locked-rules.md",
+          "bytes": 6908,
+          "lines": 83
+        },
+        {
+          "path": "flow-deploy.md",
+          "bytes": 6425,
+          "lines": 62
+        },
+        {
+          "path": "flow-mechanism-decisions.md",
+          "bytes": 5888,
+          "lines": 72
+        },
+        {
+          "path": "flow-build-snapshot.md",
+          "bytes": 5836,
+          "lines": 76
+        }
+      ]
+    },
+    "docs_repo": {
+      "exists": true,
+      "root": "/Users/angelo/data/WORK/flow/docs",
+      "files": 45,
+      "bytes": 235542,
+      "lines": 4874,
+      "top5": [
+        {
+          "path": "mcp-coverage.md",
+          "bytes": 44429,
+          "lines": 796
+        },
+        {
+          "path": "functional-requirements.md",
+          "bytes": 18964,
+          "lines": 363
+        },
+        {
+          "path": "adr/0029-note-garden-ecosystem.md",
+          "bytes": 17200,
+          "lines": 393
+        },
+        {
+          "path": "adr/0027-adjudication-framework.md",
+          "bytes": 15539,
+          "lines": 330
+        },
+        {
+          "path": "roadmap.md",
+          "bytes": 9190,
+          "lines": 156
+        }
+      ]
+    },
+    "claude_md_user": {
+      "exists": true,
+      "bytes": 4667
+    },
+    "claude_md_repo": {
+      "exists": false,
+      "bytes": 0
+    },
+    "settings_local_repo": {
+      "exists": true,
+      "bytes": 67
+    }
+  },
+  "summary": {
+    "tools_list_http_tokens_est": 617,
+    "tools_list_stdio_full_tokens_est": 21967,
+    "tools_list_stdio_stripped_tokens_est": 18039,
+    "stripping_savings_bytes": 15711,
+    "corpus_total_bytes": 932105
+  }
+}

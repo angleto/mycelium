@@ -1,0 +1,132 @@
+# Mycelium — image build & push (public repo, free CI).
+# ==================================================
+# Builds linux/arm64 images (backend, worker, frontend) from this repo
+# at a chosen ref and pushes them to GHCR using the workflow's own
+# GITHUB_TOKEN. The cluster rollout (`kubectl apply`) is done locally
+# by the operator via `./redeploy.sh` against a gitignored kubeconfig
+# and a secrets bundle that never leaves the operator's machine.
+#
+# The Dockerfiles always come from the workflow ref (this commit on
+# the default branch). The app source comes from the user-supplied
+# `mycelium_ref` input — so we can build past tags whose source tree did
+# not yet contain `docker/`.
+
+name: build-images
+
+on:
+  workflow_dispatch:
+    inputs:
+      mycelium_ref:
+        description: "Ref to build from (tag/branch/SHA). Default: main"
+        required: true
+        default: "main"
+      image_tag:
+        description: "Image tag to push (e.g. 1.0.0, edge)"
+        required: true
+        default: "edge"
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: mycelium-build-images-${{ github.event.inputs.image_tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    # Native arm64 hosted runner (free for public repos): builds the
+    # linux/arm64 images directly, no QEMU. The previous QEMU-on-amd64
+    # emulation made the 3-image build heavy and flaky (~15 min, periodic
+    # resource-exhaustion failures needing manual re-runs).
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - name: Checkout workflow ref (Dockerfiles)
+        uses: actions/checkout@v4
+        with:
+          path: workflow-ref
+
+      - name: Checkout source @ ref
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.mycelium_ref || github.ref }}
+          path: mycelium-src
+
+      - name: Compute image tag
+        id: tag
+        run: |
+          set -euo pipefail
+          if [ -n "${{ github.event.inputs.image_tag }}" ]; then
+            TAG="${{ github.event.inputs.image_tag }}"
+          else
+            # tag push: strip leading "v" (v1.0.0 -> 1.0.0)
+            TAG="${GITHUB_REF_NAME#v}"
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Image tag: $TAG"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Overlay workflow docker/ into source context
+        # The Dockerfiles reference `docker/nginx.conf` etc. relative to
+        # the build context; past tags (e.g. v1.0.0) do not yet carry
+        # `docker/` in-tree. Copy from workflow-ref so any mycelium_ref builds.
+        # `cp -r SRC DST` when DST exists nests SRC inside DST (e.g.
+        # docker/docker/sdi-inbound.Dockerfile), which silently breaks
+        # any Dockerfile added on the workflow ref but not yet on the
+        # source ref. `cp -r SRC/. DST/` copies the CONTENTS and merges
+        # over DST in-place — the only correct shape here.
+        run: |
+          mkdir -p mycelium-src/docker
+          cp -r workflow-ref/docker/. mycelium-src/docker/
+
+      - name: Resolve source SHA
+        id: src
+        working-directory: mycelium-src
+        run: |
+          SHA=$(git rev-parse HEAD)
+          BUILT_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "built_at=$BUILT_AT" >> "$GITHUB_OUTPUT"
+          echo "Source SHA: $SHA  Built at: $BUILT_AT"
+
+      - name: Build + push linux/arm64 images
+        working-directory: mycelium-src
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+          GIT_SHA: ${{ steps.src.outputs.sha }}
+          BUILT_AT: ${{ steps.src.outputs.built_at }}
+        run: |
+          set -euo pipefail
+          for c in backend worker frontend sdi-inbound; do
+            echo "::group::build $c:$TAG"
+            # Registry layer cache (per component): the ephemeral runner has
+            # no local cache, so without this every build recompiles every
+            # layer from scratch. Combined with the Dockerfile layer-split
+            # (heavy ML deps before the code COPY), the stable torch layer is
+            # imported from :buildcache instead of rebuilt — fast builds, and
+            # a stable layer digest so nodes re-pull only the thin app layer
+            # (d11a0b0f). A missing :buildcache (first run) is a clean miss.
+            docker buildx build --platform linux/arm64 \
+              -f docker/$c.Dockerfile \
+              --build-arg MYCELIUM_VERSION="$TAG" \
+              --build-arg MYCELIUM_GIT_SHA="$GIT_SHA" \
+              --build-arg MYCELIUM_BUILD_AT="$BUILT_AT" \
+              --cache-from type=registry,ref=ghcr.io/angleto/mycelium/$c:buildcache \
+              --cache-to type=registry,ref=ghcr.io/angleto/mycelium/$c:buildcache,mode=max \
+              -t ghcr.io/angleto/mycelium/$c:"$TAG" \
+              --push .
+            echo "::endgroup::"
+          done
+          echo "Pushed: ghcr.io/angleto/mycelium/{backend,worker,frontend,sdi-inbound}:$TAG"

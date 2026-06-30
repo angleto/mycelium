@@ -1,0 +1,14 @@
+{
+  "venvPath": ".",
+  "venv": ".venv",
+  "pythonVersion": "3.12",
+  "typeCheckingMode": "basic",
+  "extraPaths": [
+    "core/src",
+    "api/src",
+    "mcp/src",
+    "worker/src",
+    "sdi-inbound/src",
+    "cli/src"
+  ]
+}

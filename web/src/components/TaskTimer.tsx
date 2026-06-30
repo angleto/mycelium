@@ -1,0 +1,146 @@
+import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
+import { api, errMessage, workspaceHeader } from '../api/client'
+import { hms, activeElapsedSec, isPaused } from '../lib/time'
+import { useRunningTimers, refreshRunning } from '../lib/useRunningTimer'
+import { MemoPopover } from './MemoPopover'
+
+// Start/stop the timer for ONE task, with a live elapsed readout.
+// Reused wherever you work "on a task" outside the time view — e.g.
+// inside a task's work note — so the time is still billed to the task
+// (task → project → client). When mounted in a note, `noteId` is
+// recorded as provenance on the entry (the work was done in that note).
+//
+// State is server-authoritative: a running timer is a server row;
+// elapsed is derived from the server `started_at` via the shared
+// useRunningTimers source, never accumulated client-side. Closing the
+// lid / disconnecting / reloading cannot drift or lose time, and a
+// stop done elsewhere is reflected on resume.
+export function TaskTimer({
+  taskId,
+  noteId,
+  labeled = false,
+}: {
+  taskId: string
+  noteId?: string
+  // Show a text label next to the start glyphs (⏱▶ Start / ⏱▶▶ Start
+  // parallel) instead of the icon alone. Used where there is room and
+  // the affordance must be obvious -- e.g. the note's work-note banner,
+  // where an icon-only control was easy to miss. Left off in the
+  // compact call sites (task list rows, kanban cards).
+  labeled?: boolean
+}) {
+  const { t } = useTranslation()
+  const { running, now } = useRunningTimers()
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+  const entry = running.find((r) => r.task_id === taskId) ?? null
+  const paused = entry != null && isPaused(entry)
+
+  async function start(parallel: boolean) {
+    setBusy(true)
+    setErr(null)
+    const { error } = await api.POST('/time/start', {
+      params: { header: workspaceHeader() },
+      body: { task_id: taskId, parallel, note_id: noteId ?? null },
+    })
+    setBusy(false)
+    if (error) {
+      setErr(errMessage(error))
+      return
+    }
+    await refreshRunning()
+  }
+
+  async function stop() {
+    setBusy(true)
+    setErr(null)
+    const { error } = await api.POST('/time/stop', {
+      params: { header: workspaceHeader() },
+      body: { task_id: taskId },
+    })
+    setBusy(false)
+    if (error) {
+      setErr(errMessage(error))
+      return
+    }
+    await refreshRunning()
+  }
+
+  // Pause keeps the entry open (server banks the elapsed and freezes it);
+  // resume reopens a live segment. Both are server-authoritative, so the
+  // readout reflects server truth after the reconcile.
+  async function pauseOrResume(paused: boolean) {
+    setBusy(true)
+    setErr(null)
+    const { error } = await api.POST(paused ? '/time/resume' : '/time/pause', {
+      params: { header: workspaceHeader() },
+      body: { task_id: taskId },
+    })
+    setBusy(false)
+    if (error) {
+      setErr(errMessage(error))
+      return
+    }
+    await refreshRunning()
+  }
+
+  // The shared timer control: ⏱▶ start (serial), ⏱▶▶ start parallel,
+  // and — while a timer is open — ⏱⏸ pause / ⏱▶ resume next to ⏱■ stop
+  // with a live readout (frozen while paused). Same buttons everywhere
+  // (task list, kanban, task detail, work notes) — server-authoritative.
+  return (
+    <span className="tasktimer">
+      {entry ? (
+        <>
+          <button
+            type="button"
+            className="btn--ghost btn--sm tasktimer__pause"
+            disabled={busy}
+            title={paused ? t('time.resume') : t('time.pause')}
+            aria-label={paused ? t('time.resume') : t('time.pause')}
+            onClick={() => void pauseOrResume(paused)}
+          >
+            {paused ? '⏱▶' : '⏱⏸'}
+            {labeled ? ` ${paused ? t('time.resume') : t('time.pause')}` : ''}
+          </button>
+          <MemoPopover entry={entry} />
+          <button
+            type="button"
+            className={`btn--sm tasktimer__stop${paused ? ' is-paused' : ''}`}
+            disabled={busy}
+            title={t('time.stop')}
+            aria-label={t('time.stop')}
+            onClick={() => void stop()}
+          >
+            ⏱■ {hms(activeElapsedSec(entry, now))}
+          </button>
+        </>
+      ) : (
+        <>
+          <button
+            type="button"
+            className="btn--ghost btn--sm"
+            disabled={busy}
+            title={t('time.startSerial')}
+            aria-label={t('time.startSerial')}
+            onClick={() => void start(false)}
+          >
+            ⏱▶{labeled ? ` ${t('time.startSerial')}` : ''}
+          </button>
+          <button
+            type="button"
+            className="btn--ghost btn--sm"
+            disabled={busy}
+            title={t('time.startParallel')}
+            aria-label={t('time.startParallel')}
+            onClick={() => void start(true)}
+          >
+            ⏱▶▶{labeled ? ` ${t('time.startParallel')}` : ''}
+          </button>
+        </>
+      )}
+      {err && <span className="err">{err}</span>}
+    </span>
+  )
+}

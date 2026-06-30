@@ -1,0 +1,51 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.eggs/
+build/
+dist/
+
+# Tooling caches
+.ruff_cache/
+.mypy_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Env / secrets
+.env
+.env.*
+envtest
+envtest.*
+*.local
+web/e2e-prod/.auth/
+
+# Local-only material (out-of-band keys, CSRs, scratch credentials).
+# Anything dropped under /private/ never enters git history.
+/private/
+
+# Defensive: private keys and key bundles never go in the repo, no
+# matter where they land. Public certs (.crt) are intentionally left
+# trackable.
+*.key
+*.pem
+*.csr
+*.p12
+*.pfx
+
+# Node / web
+node_modules/
+web/dist/
+web/.vite/
+
+# OS / editor
+.DS_Store
+*.swp
+
+# Local working files dropped in the repo root: PDFs we read for spec
+# or invoice samples, and Claude Code's per-session metadata. Never
+# part of the project.
+*.pdf
+.claude/

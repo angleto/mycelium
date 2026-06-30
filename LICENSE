@@ -1,0 +1,78 @@
+Mycelium — a multi-tenant personal work hub.
+Copyright (C) 2026  Angelo Leto
+
+SPDX-License-Identifier: AGPL-3.0-or-later
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as
+published by the Free Software Foundation, either version 3 of the
+License, or (at your option) any later version, subject to the
+additional terms set out below under AGPLv3 section 7(b).
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public
+License along with this program.  If not, see
+<https://www.gnu.org/licenses/>.
+
+If you modify this program, or any covered work, and run it as a
+network service, AGPL-3.0 section 13 requires you to offer the
+Corresponding Source of your modified version to its remote users.
+
+-------------------------------------------------------------------------------
+Additional terms under AGPLv3 section 7(b)
+-------------------------------------------------------------------------------
+
+Pursuant to AGPLv3 section 7(b), every covered work, modified or
+unmodified, source or object form, MUST preserve the author and
+project attribution set out in the NOTICE file in this repository.
+
+The attribution must remain visible in:
+
+  (i)   the source distribution (the NOTICE file itself);
+  (ii)  the accompanying documentation;
+  (iii) the user-visible interfaces of running instances, including
+        (where applicable) "About"/"Version" screens, startup
+        banners, command-line `--version` and `--help` output, and
+        the interactive network interfaces served to remote users
+        as required by AGPLv3 section 13.
+
+This is a non-removable additional term within the meaning of
+AGPLv3 section 7. It may not be stripped, obscured, or relocated
+to a position that diminishes its visibility when redistributing
+or modifying this program. The NOTICE file itself must be preserved
+unmodified except for additions consistent with AGPLv3 section 7.
+
+-------------------------------------------------------------------------------
+Alternative commercial license
+-------------------------------------------------------------------------------
+
+This program is additionally available under a separate commercial
+license for parties who cannot, or do not wish to, comply with the
+obligations of AGPL-3.0-or-later (in particular the AGPL section 13
+network-use source disclosure and the section 7(b) attribution
+requirement set out above). The commercial license is offered at
+the discretion of the copyright holder; contact angelo@leto.blue
+for terms.
+
+-------------------------------------------------------------------------------
+NOTE — full AGPL license text
+-------------------------------------------------------------------------------
+
+This file carries the binding AGPL-3.0-or-later grant, notice, and
+the AGPLv3 section 7(b) additional term above. The complete,
+verbatim GNU Affero General Public License v3.0 text must be
+distributed alongside it. The build environment used to prepare
+this release has no outbound network access, so the ~34 KB canonical
+FSF text was not vendored here automatically. Drop it in with:
+
+    curl -L https://www.gnu.org/licenses/agpl-3.0.txt -o LICENSE.AGPL-3.0.txt
+
+(or replace this file's body with that text, keeping the copyright
+line, the AGPLv3 section 7(b) additional term, and the alternative
+commercial license note above). The canonical FSF text is
+authoritative for the AGPL grant; the section 7(b) additional term
+and the commercial license note remain binding alongside it.
