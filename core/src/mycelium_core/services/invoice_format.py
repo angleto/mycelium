@@ -205,18 +205,19 @@ def _fatturapa_phone(value: str | None) -> str | None:
 
 
 def _fatturapa_email(value: str | None) -> str | None:
-    """Normalise a stored email to the FatturaPA ``Email`` constraint (XSD
-    pattern ``\\p{IsBasicLatin}{7,256}`` -- 7 to 256 BasicLatin chars). Trim
-    surrounding whitespace; emit only when the result is pure BasicLatin
-    (ASCII) and within length, else None to OMIT the optional element rather
-    than scarto the document (e.g. an IDN/unicode address, or a stub shorter
-    than 7 chars)."""
+    """Normalise a stored email to the FatturaPA ``EmailContattiType`` facet:
+    length 7-256, pure BasicLatin (ASCII), AND the XSD pattern ``.+@.+[.]+.+``
+    (something, ``@``, a host, a dot, a TLD). Trim surrounding whitespace; emit
+    only when ALL hold, else None to OMIT the optional element rather than
+    scarto the document. A malformed courtesy email (a typo, ``user@host`` with
+    no dot, an IDN/unicode or too-short stub) must never invalidate the whole
+    fiscal invoice -- same contract as the phone path above."""
     if not value:
         return None
     v = value.strip()
-    if not v.isascii():
+    if not v.isascii() or not (7 <= len(v) <= 256):
         return None
-    return v if 7 <= len(v) <= 256 else None
+    return v if re.fullmatch(r".+@.+[.]+.+", v) else None
 
 
 def _fatturapa_civico(value: str | None) -> str | None:

@@ -557,6 +557,11 @@ def test_fatturapa_email_validates_or_omits() -> None:
     assert _fatturapa_email("  info@acme.it  ") == "info@acme.it"
     assert _fatturapa_email("a@b.co") is None  # 6 chars < 7
     assert _fatturapa_email("posta@società.it") is None  # non-ASCII (IDN)
+    # Must match the EmailContattiType pattern .+@.+[.]+.+, else OMIT (never
+    # scarto the whole document over an optional courtesy contact).
+    assert _fatturapa_email("user@host") is None  # no dot after @
+    assert _fatturapa_email("mario.rossi") is None  # no @
+    assert _fatturapa_email("notanemail") is None
     assert _fatturapa_email(None) is None
 
 
