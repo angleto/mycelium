@@ -226,6 +226,8 @@ function IssuerCounters({ profileId }: { profileId: string }) {
 const EMPTY = {
   label: '',
   legal_name: '',
+  first_name: '',
+  last_name: '',
   country_code: 'IT',
   vat_number: '',
   tax_code: '',
@@ -345,7 +347,9 @@ export function IssuerProfiles() {
       setEdit(p.id)
       setForm({
         label: p.label,
-        legal_name: p.legal_name,
+        legal_name: p.legal_name ?? '',
+        first_name: p.first_name ?? '',
+        last_name: p.last_name ?? '',
         country_code: p.country_code ?? 'IT',
         vat_number: p.vat_number ?? '',
         tax_code: p.tax_code ?? '',
@@ -385,11 +389,19 @@ export function IssuerProfiles() {
   async function save(e: FormEvent) {
     e.preventDefault()
     setErr(null)
+    // FatturaPA Anagrafica choice: Denominazione (legal_name) OR Nome+Cognome.
+    // Reject the empty case client-side (the API enforces it too).
+    if (!form.legal_name.trim() && !(form.first_name.trim() && form.last_name.trim())) {
+      setErr(t('cp.nameRequired'))
+      return
+    }
     const h = workspaceHeader()
     const termsDays = form.default_payment_terms_days.trim()
     const common = {
       label: form.label,
-      legal_name: form.legal_name,
+      legal_name: form.legal_name || null,
+      first_name: form.first_name || null,
+      last_name: form.last_name || null,
       vat_number: form.vat_number || null,
       tax_code: form.tax_code || null,
       address: form.address,
@@ -520,7 +532,8 @@ export function IssuerProfiles() {
         <ul className="list">
           {profiles.map((p) => (
             <li key={p.id}>
-              <strong>{p.label}</strong> · {p.legal_name}
+              <strong>{p.label}</strong> ·{' '}
+              {p.legal_name || `${p.first_name ?? ''} ${p.last_name ?? ''}`.trim()}
               {p.vat_number ? ` · ${p.vat_number}` : ''}{' '}
               {p.is_default && (
                 <span className="muted">[{t('invoices.isDefault')}]</span>
@@ -587,10 +600,32 @@ export function IssuerProfiles() {
             <label>
               {t('cp.f.legal_name')}
               <input
-                required
                 value={form.legal_name}
                 onChange={(e) =>
                   setForm({ ...form, legal_name: e.target.value })
+                }
+              />
+            </label>
+          </div>
+          {/* Anagrafica choice: legal entity uses Ragione sociale above; a
+              persona fisica (ditta individuale) leaves it empty and fills
+              Nome + Cognome here. Exactly one mode is required (validated). */}
+          <div className="row">
+            <label>
+              {t('cp.f.first_name')}
+              <input
+                value={form.first_name}
+                onChange={(e) =>
+                  setForm({ ...form, first_name: e.target.value })
+                }
+              />
+            </label>
+            <label>
+              {t('cp.f.last_name')}
+              <input
+                value={form.last_name}
+                onChange={(e) =>
+                  setForm({ ...form, last_name: e.target.value })
                 }
               />
             </label>

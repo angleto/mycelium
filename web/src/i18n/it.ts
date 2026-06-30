@@ -1199,8 +1199,11 @@ export const it: Catalog = {
       'Imposta prima il sezionale del cliente (verrà generato automaticamente alla prima fattura).',
     startingNumberNoIssuer:
       'Crea prima un profilo emittente in Impostazioni.',
+    nameRequired: 'Inserisci la Ragione sociale oppure Nome e Cognome.',
     f: {
       legal_name: 'Ragione sociale',
+      first_name: 'Nome',
+      last_name: 'Cognome',
       tax_code: 'Codice fiscale',
       country_code: 'Paese (IVA)',
       vat_number: 'Partita IVA',

@@ -713,7 +713,9 @@ async def get_preview(
     inv, p = await svc.get_preview(ctx.session, org_id=ctx.org_id, invoice_id=invoice_id)
     issuer = (
         _party_out(
-            p.issuer.legal_name,
+            # Display name: Denominazione, else the persona-fisica Nome Cognome.
+            p.issuer.legal_name
+            or f"{p.issuer.first_name or ''} {p.issuer.last_name or ''}".strip(),
             vat_number=p.issuer.vat_number,
             tax_code=p.issuer.tax_code,
             tax_regime=p.issuer.tax_regime,

@@ -113,7 +113,11 @@ class IssuerProfile(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, B
     country_code: Mapped[str] = mapped_column(String(2), nullable=False, server_default="IT")
     vat_number: Mapped[str | None] = mapped_column(String(28), nullable=True)
     tax_code: Mapped[str | None] = mapped_column(String(16), nullable=True)
-    legal_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    # Anagrafica is a FatturaPA choice: Denominazione (legal_name) for a legal
+    # entity OR Nome+Cognome for a persona fisica. legal_name is nullable so a
+    # persona-fisica issuer can be saved with only first/last; the "exactly one
+    # naming mode complete" invariant is enforced in the service (_valid_anagrafica).
+    legal_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
     # Persona fisica: when both set, FatturaPA emits Anagrafica/Nome+Cognome
     # instead of Denominazione (AnagraficaType is a choice; max 60 latin).
     first_name: Mapped[str | None] = mapped_column(String(60), nullable=True)

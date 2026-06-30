@@ -232,16 +232,18 @@ def _fatturapa_civico(value: str | None) -> str | None:
 
 
 def _emit_anagrafica(
-    parent: ET.Element, *, legal_name: str, first_name: str | None, last_name: str | None
+    parent: ET.Element, *, legal_name: str | None, first_name: str | None, last_name: str | None
 ) -> None:
     """FatturaPA Anagrafica is a choice: Denominazione OR Nome+Cognome. Emit
-    Nome+Cognome for a persona fisica when BOTH are set, else Denominazione."""
+    Nome+Cognome for a persona fisica when BOTH are set, else Denominazione.
+    Callers guarantee one mode is complete (_valid_anagrafica); the ``or ""``
+    only avoids a None text node if that invariant is ever violated."""
     an = _sub(parent, "Anagrafica")
     if first_name and last_name:
         _sub(an, "Nome", first_name)
         _sub(an, "Cognome", last_name)
     else:
-        _sub(an, "Denominazione", legal_name)
+        _sub(an, "Denominazione", legal_name or "")
 
 
 def _build_xml(

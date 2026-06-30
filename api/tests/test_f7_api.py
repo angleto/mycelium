@@ -304,3 +304,94 @@ async def test_preview_carries_issuer_contacts_with_visibility() -> None:
         assert issuer["show_pec"] is False
         # Client civic number is projected too (cessionario address).
         assert pv["client"]["civic_number"] == "19/B"
+
+
+async def test_persona_fisica_issuer_optional_legal_name() -> None:
+    # FatturaPA Anagrafica is a choice: a persona-fisica issuer may carry only
+    # Nome+Cognome (no Denominazione). The profile saves without legal_name, the
+    # preview surfaces the resolved "Nome Cognome" display, but a profile with
+    # NEITHER naming mode is rejected.
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as c:
+        a = (
+            await c.post(
+                "/auth/signup",
+                json={"email": _email(), "password": "pw-strong-123", "workspace_name": "A"},
+            )
+        ).json()
+        h = {
+            "Authorization": f"Bearer {a['token']}",
+            "X-Workspace-Id": a["workspace_id"],
+            "X-Workspace-Role": "owner",
+        }
+        # Neither legal_name nor first+last -> rejected.
+        bad = await c.post(
+            "/issuer-profiles",
+            headers=h,
+            json={
+                "label": "X",
+                "vat_number": "01234567890",
+                "address": "Via Roma 1",
+                "postal_code": "00100",
+                "city": "Roma",
+            },
+        )
+        assert bad.status_code == 400
+        # Persona fisica: only Nome+Cognome, legal_name omitted -> saved.
+        p = await c.post(
+            "/issuer-profiles",
+            headers=h,
+            json={
+                "label": "Ditta",
+                "first_name": "Mario",
+                "last_name": "Rossi",
+                "vat_number": "01234567890",
+                "tax_code": "RSSMRA80A01H501U",
+                "tax_regime": "RF19",
+                "address": "Via Roma 1",
+                "postal_code": "00100",
+                "city": "Roma",
+                "province": "RM",
+            },
+        )
+        assert p.status_code == 200
+        prof = p.json()
+        assert prof["legal_name"] is None
+        assert prof["first_name"] == "Mario" and prof["last_name"] == "Rossi"
+        client = (
+            await c.post(
+                "/clients",
+                headers=h,
+                json={
+                    "name": "Acme",
+                    "legal_name": "Acme Srl",
+                    "country_code": "IT",
+                    "vat_number": "09876543210",
+                    "sdi_code": "ABCDEFG",
+                    "address": "Via Milano 2",
+                    "postal_code": "20100",
+                    "city": "Milano",
+                    "province": "MI",
+                },
+            )
+        ).json()
+        inv = (
+            await c.post(
+                "/invoices",
+                headers=h,
+                json={"client_tag_id": client["id"], "year": 2026, "issuer_profile_id": prof["id"]},
+            )
+        ).json()
+        await c.post(
+            f"/invoices/{inv['id']}/lines",
+            headers=h,
+            json={"description": "consulting", "unit_price": "100.00"},
+        )
+        # Preview display name resolves to "Nome Cognome" (legal_name is empty).
+        pv = (await c.get(f"/invoices/{inv['id']}/preview", headers=h)).json()
+        assert pv["issuer"]["legal_name"] == "Mario Rossi"
+        # The emitted XML carries Nome/Cognome, no cedente Denominazione.
+        xml = (await c.get(f"/invoices/{inv['id']}/xml", headers=h)).json()["xml"]
+        assert "<Nome>Mario</Nome>" in xml and "<Cognome>Rossi</Cognome>" in xml
+        cedente = xml.split("<CedentePrestatore>")[1].split("</CedentePrestatore>")[0]
+        assert "<Denominazione>" not in cedente

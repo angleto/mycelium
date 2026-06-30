@@ -2685,7 +2685,10 @@ class TextBlockCapabilityOut(BaseModel):
 
 class IssuerProfileIn(BaseModel):
     label: str = Field(min_length=1, max_length=120)
-    legal_name: str = Field(min_length=1, max_length=200)
+    # FatturaPA Anagrafica is a choice: Denominazione (legal_name) OR
+    # Nome+Cognome (first_name+last_name). legal_name is optional so a persona
+    # fisica can omit it; the service enforces that one mode is complete.
+    legal_name: str | None = Field(default=None, max_length=200)
     vat_number: str | None = Field(default=None, max_length=28)
     tax_code: str | None = Field(default=None, max_length=16)
     tax_regime: str = Field(default="RF01", max_length=4)
@@ -2764,7 +2767,7 @@ class IssuerProfilePatchIn(BaseModel):
 class IssuerProfileOut(BaseModel):
     id: uuid.UUID
     label: str
-    legal_name: str
+    legal_name: str | None
     vat_number: str | None
     tax_code: str | None
     tax_regime: str

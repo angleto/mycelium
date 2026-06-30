@@ -489,7 +489,13 @@ def build_pdf(
             issuer_extra.append(f"{_L(loc, 'pec')}: {issuer.pec}")
     cedente = _party(
         _L(loc, "issuer"),
-        issuer.legal_name if issuer is not None else "",
+        # legal_name is optional for a persona-fisica issuer; fall back to the
+        # Nome Cognome that the XML emits as Anagrafica.
+        (
+            issuer.legal_name or f"{issuer.first_name or ''} {issuer.last_name or ''}".strip()
+            if issuer is not None
+            else ""
+        ),
         issuer.vat_number if issuer is not None else None,
         issuer.tax_code if issuer is not None else None,
         _addr(

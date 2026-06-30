@@ -8486,7 +8486,7 @@ export interface components {
             /** Label */
             label: string;
             /** Legal Name */
-            legal_name: string;
+            legal_name?: string | null;
             /** Vat Number */
             vat_number?: string | null;
             /** Tax Code */
@@ -8584,7 +8584,7 @@ export interface components {
             /** Label */
             label: string;
             /** Legal Name */
-            legal_name: string;
+            legal_name: string | null;
             /** Vat Number */
             vat_number: string | null;
             /** Tax Code */

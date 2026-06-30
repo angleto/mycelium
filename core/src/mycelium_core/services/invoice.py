@@ -168,7 +168,7 @@ async def create_issuer_profile(
     org_id: uuid.UUID,
     actor_id: uuid.UUID,
     label: str,
-    legal_name: str,
+    legal_name: str | None = None,
     vat_number: str | None = None,
     tax_code: str | None = None,
     tax_regime: str = "RF01",
@@ -199,6 +199,13 @@ async def create_issuer_profile(
     is_default: bool = False,
 ) -> IssuerProfile:
     await require_role(session, org_id, actor_id, Role.admin)
+    # Anagrafica choice: a profile must carry Denominazione (legal_name) OR
+    # Nome+Cognome (both), never neither -- otherwise it can never emit a valid
+    # FatturaPA Anagrafica.
+    if not _valid_anagrafica(legal_name, first_name, last_name):
+        raise DomainError(
+            MessageCode.FISCAL_PROFILE_REQUIRED, detail="legal_name|first_name+last_name"
+        )
     # The first profile is always the default; an explicit default
     # demotes the others (partial unique index: one default per org).
     existing = await list_issuer_profiles(session, org_id=org_id)
@@ -294,6 +301,12 @@ async def update_issuer_profile(
         )
     for field, value in values.items():
         setattr(p, field, value)
+    # Anagrafica invariant on the merged row: a patch that would clear the last
+    # naming mode (e.g. blanking legal_name without Nome+Cognome) is rejected.
+    if not _valid_anagrafica(p.legal_name, p.first_name, p.last_name):
+        raise DomainError(
+            MessageCode.FISCAL_PROFILE_REQUIRED, detail="legal_name|first_name+last_name"
+        )
     if "vat_number" in values or "country_code" in values:
         new_paese, p.vat_number = normalize_vat(p.vat_number, p.country_code)
         if new_paese is not None:
@@ -1151,6 +1164,16 @@ async def _client(session: AsyncSession, client_tag_id: uuid.UUID) -> ClientProf
     return cp
 
 
+def _valid_anagrafica(
+    legal_name: str | None, first_name: str | None, last_name: str | None
+) -> bool:
+    """FatturaPA Anagrafica is a choice: exactly one naming mode must be
+    complete -- ``Denominazione`` (legal_name) OR ``Nome``+``Cognome`` (both).
+    Neither-set yields an empty/partial Anagrafica that SdI scarta, so the
+    write paths and the transmit gate enforce this."""
+    return bool(legal_name) or bool(first_name and last_name)
+
+
 def _validate(
     fiscal: IssuerProfile | None,
     client: ClientProfile,
@@ -1161,13 +1184,15 @@ def _validate(
     missing = [
         f
         for f, v in (
-            ("legal_name", fiscal.legal_name),
             ("address", fiscal.address),
             ("postal_code", fiscal.postal_code),
             ("city", fiscal.city),
         )
         if not v
     ]
+    # Anagrafica: Denominazione (legal_name) OR Nome+Cognome (persona fisica).
+    if not _valid_anagrafica(fiscal.legal_name, fiscal.first_name, fiscal.last_name):
+        missing.append("legal_name|first_name+last_name")
     # The cedente's IdFiscaleIVA (P.IVA) is mandatory in FatturaPA (the
     # CodiceFiscale alone is not enough for the issuer; the cessionario may
     # have just a CodiceFiscale, the cedente may not).

@@ -1199,8 +1199,11 @@ export const en = {
       "Set the client's sezionale first (it is auto-generated on the first invoice).",
     startingNumberNoIssuer:
       'Create an issuer profile in Settings first.',
+    nameRequired: 'Enter either a Legal name or First + Last name.',
     f: {
       legal_name: 'Legal name',
+      first_name: 'First name',
+      last_name: 'Last name',
       tax_code: 'Tax code',
       country_code: 'Country (VAT)',
       vat_number: 'VAT number',

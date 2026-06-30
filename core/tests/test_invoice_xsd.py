@@ -139,6 +139,69 @@ def test_fpa12_for_six_char_codice_validates() -> None:
     assert validate_fatturapa(xml) == []
 
 
+def test_persona_fisica_emits_nome_cognome_not_denominazione() -> None:
+    # A forfettario ditta individuale is a persona fisica: with first/last set
+    # and NO legal_name, the cedente Anagrafica must be Nome+Cognome (what the
+    # AdE itself emits), never Denominazione -- and still XSD-validate.
+    issuer = IssuerProfile(
+        country_code="IT",
+        vat_number="01112223334",
+        tax_code="RSSMRA80A01H501U",
+        legal_name=None,
+        first_name="Mario",
+        last_name="Rossi",
+        tax_regime="RF19",
+        address="Via Roma 1",
+        postal_code="00100",
+        city="Roma",
+        province="RM",
+        country="IT",
+    )
+    client = ClientProfile(
+        legal_name="Acme Srl",
+        country_code="IT",
+        vat_number="09876543210",
+        tax_code="09876543210",
+        sdi_code="ABCDEFG",
+        pec=None,
+        address="Via Milano 2",
+        postal_code="20100",
+        city="Milano",
+        province="MI",
+        country="IT",
+    )
+    invoice = Invoice(
+        document_type=DocumentType.TD01,
+        currency="EUR",
+        issued_at=dt.datetime(2026, 3, 1, tzinfo=dt.UTC),
+        series="A",
+        number=1,
+        taxable=Decimal("100.00"),
+        vat=Decimal("0.00"),
+        stamp_duty=Decimal("0.00"),
+        total=Decimal("100.00"),
+        purpose=None,
+        notes=None,
+        payment_iban=None,
+        payment_due_date=None,
+    )
+    line = InvoiceLine(
+        line_no=1,
+        description="x",
+        quantity=Decimal(1),
+        unit_price=Decimal("100.00"),
+        vat_rate=Decimal(0),
+        vat_nature="N2.2",
+    )
+    xml = _build_xml(invoice, issuer, client, [line], "202600001")
+    assert "<Nome>Mario</Nome><Cognome>Rossi</Cognome>" in xml.replace("\n", "").replace(" ", "")
+    # The cedente block carries no Denominazione (the cessionario, a legal
+    # entity, still does).
+    cedente = xml.split("<CedentePrestatore>")[1].split("</CedentePrestatore>")[0]
+    assert "<Denominazione>" not in cedente
+    assert validate_fatturapa(xml) == []
+
+
 def test_bare_id_codice_strips_redundant_country_prefix() -> None:
     # A VAT stored with a leading country prefix matching IdPaese is emitted
     # bare; a clean VAT and a codice fiscale (3rd char is a letter) are left
