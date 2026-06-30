@@ -137,7 +137,12 @@ def set_channel_override(fn: _FactoryFn | None) -> None:
     _override = fn
 
 
-def get_channel() -> SdiChannel:
+def get_channel(endpoint_override: str | None = None) -> SdiChannel:
+    """The configured transmission channel. ``endpoint_override`` lets the
+    caller inject the RiceviFile URL chosen at runtime (the test<->production
+    switch in ``system_settings``); when None the legacy ``sdi_endpoint_url``
+    env value is used. Only the live send path needs the endpoint, so the
+    preview (which reads only ``intermediary``) can call this with no override."""
     if _override is not None:
         return _override()
     s = get_settings()
@@ -148,7 +153,7 @@ def get_channel() -> SdiChannel:
                 vat_number=s.sdi_intermediary_id_codice,
                 legal_name=s.sdi_intermediary_denominazione,
             ),
-            endpoint_url=s.sdi_endpoint_url,
+            endpoint_url=endpoint_override or s.sdi_endpoint_url,
             client_cert=s.sdi_client_cert,
             client_key=s.sdi_client_key,
             ca_bundle=s.sdi_ca_bundle or None,

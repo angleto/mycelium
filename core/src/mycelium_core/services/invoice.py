@@ -80,6 +80,7 @@ from mycelium_core.services.payment_methods import (
 from mycelium_core.services.rbac import require_role
 from mycelium_core.services.sdi_mandate import get_active_mandate
 from mycelium_core.services.sdi_transport import fatturapa_filename, transmission_progressivo
+from mycelium_core.services.system_settings import resolve_sdi_endpoint
 from mycelium_core.vat import is_valid_vat_code, normalize_vat
 
 # --- issuer profiles (the invoice "intestazione") ---
@@ -1378,7 +1379,10 @@ async def transmit(
     lines = await list_lines(session, org_id=org_id, invoice_id=invoice_id)
     _validate(fiscal, client, lines)
     assert fiscal is not None  # _validate raised otherwise  # noqa: S101
-    ch = channel or get_channel()
+    # Pick the RiceviFile endpoint at runtime from the DB switch (test vs
+    # production), so the environment flips from Settings without a redeploy.
+    sdi_endpoint = await resolve_sdi_endpoint(session)
+    ch = channel or get_channel(endpoint_override=sdi_endpoint)
     intermediary = ch.intermediary
     # The payload identity (cedente-as-trasmittente for self-transmission, else
     # the intermediary block) is resolved by the shared helper so the downloadable

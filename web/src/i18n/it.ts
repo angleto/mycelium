@@ -626,6 +626,21 @@ export const it: Catalog = {
     usedAsLogo: 'Impostato come logo di {{label}}.',
     issuer: 'Emittente',
   },
+  sdi: {
+    title: 'Ambiente SdI (trasmissione)',
+    hint: 'Sceglie a quale endpoint SdI vengono trasmesse le fatture, a runtime, senza redeploy. Produzione = invii fiscali reali. I due URL (test/produzione) stanno in configurazione; qui si attiva l’uno o l’altro, in modo mutuamente esclusivo.',
+    notSdicoop:
+      'Canale non in modalità sdicoop: la trasmissione è export manuale, lo switch non ha effetto sull’invio.',
+    useTest: 'Usa Test',
+    useProd: 'Usa Produzione',
+    testActive: 'attivo: TEST',
+    prodActive: 'attivo: PRODUZIONE',
+    prodWarn: 'Attenzione: in Produzione ogni trasmissione è una fattura fiscale reale verso SdI.',
+    activeEndpoint: 'Endpoint attivo',
+    confirmProd:
+      'Passare a PRODUZIONE? Le prossime trasmissioni saranno fatture fiscali reali verso SdI.',
+    switched: 'Ambiente aggiornato.',
+  },
   mfa: {
     title: 'Autenticazione a due fattori',
     enabled: 'Attiva',

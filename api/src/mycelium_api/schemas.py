@@ -138,6 +138,21 @@ class AdminUserPatchIn(BaseModel):
     is_active: bool | None = None
 
 
+class SdiEnvironmentOut(BaseModel):
+    """Global SdI environment switch (admin). ``environment`` selects which
+    endpoint the live RiceviFile send targets; the two URLs come from config."""
+
+    environment: str  # 'test' | 'production'
+    sdicoop_active: bool
+    test_url: str
+    prod_url: str
+    active_endpoint: str
+
+
+class SdiEnvironmentIn(BaseModel):
+    environment: Literal["test", "production"]
+
+
 class VerifyEmailIn(BaseModel):
     token: str = Field(min_length=16, max_length=256)
 

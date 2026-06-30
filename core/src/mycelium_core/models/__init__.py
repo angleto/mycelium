@@ -136,6 +136,7 @@ from mycelium_core.models.search_click import (
     SEARCH_CLICK_QUERY_MAX,
     SearchClick,
 )
+from mycelium_core.models.system_settings import SystemSettings
 from mycelium_core.models.tag import Tag, TagKind
 from mycelium_core.models.tag_scope import TagScope
 from mycelium_core.models.task import (
@@ -281,6 +282,7 @@ __all__ = [
     "SearchClick",
     "StorageKind",
     "StorageRate",
+    "SystemSettings",
     "Tag",
     "TagKind",
     "TagScope",

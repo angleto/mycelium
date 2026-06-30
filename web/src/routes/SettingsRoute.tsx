@@ -17,6 +17,7 @@ import { AvatarSettings } from '../components/AvatarSettings'
 import { AttachmentSettings } from '../components/AttachmentSettings'
 import { EmbedderProviderSettings } from '../components/EmbedderProviderSettings'
 import { LlmProviderSettings } from '../components/LlmProviderSettings'
+import { SdiSettings } from '../components/SdiSettings'
 import { MemoryChannelsAdmin } from '../components/MemoryChannelsAdmin'
 import { RetrievalSettings } from '../components/RetrievalSettings'
 import { PomodoroSettings } from '../components/PomodoroSettings'
@@ -183,6 +184,7 @@ export function SettingsRoute() {
     {me?.is_admin && isAdminMode() && <MemoryChannelsAdmin />}
     {me?.is_admin && isAdminMode() && <RetrievalSettings />}
     {me?.is_admin && isAdminMode() && <AttachmentSettings />}
+    {me?.is_admin && isAdminMode() && <SdiSettings />}
     {/* ExecutorsAdmin removed in v1.2.27, #21 Stage B */}
     <IssuerProfiles />
     <EstimatePresets />

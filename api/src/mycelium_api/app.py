@@ -14,6 +14,7 @@ from starlette.responses import JSONResponse, Response
 
 from mycelium_api.routers import (
     actors,
+    admin_sdi,
     admin_users,
     advisory,
     agent_runs,
@@ -224,6 +225,7 @@ def create_app() -> FastAPI:
 
     app.include_router(auth.router)
     app.include_router(admin_users.router)
+    app.include_router(admin_sdi.router)
     app.include_router(mfa.router)
     app.include_router(workspace.router)
     app.include_router(tags.router)

@@ -479,7 +479,14 @@ class Settings(BaseSettings):
     sdi_intermediary_id_paese: str = "IT"
     sdi_intermediary_id_codice: str = ""
     sdi_intermediary_denominazione: str = ""
+    # The SdICoop RiceviFile endpoint. ``sdi_endpoint_url`` is the legacy single
+    # value (still honoured as a fallback). The two env-specific URLs below let
+    # the active one be picked AT RUNTIME from the DB (system_settings.
+    # sdi_environment) instead of an env-var redeploy: only the test<->prod URL
+    # differs (the channel cert/key + trust bundle + intermediary are shared).
     sdi_endpoint_url: str = ""
+    sdi_endpoint_url_test: str = ""
+    sdi_endpoint_url_prod: str = ""
     sdi_client_cert: str = ""
     sdi_client_key: str = ""
     sdi_ca_bundle: str = ""
@@ -549,12 +556,18 @@ class Settings(BaseSettings):
                         "MYCELIUM_SDI_INTERMEDIARY_DENOMINAZIONE",
                         self.sdi_intermediary_denominazione,
                     ),
-                    ("MYCELIUM_SDI_ENDPOINT_URL", self.sdi_endpoint_url),
                     ("MYCELIUM_SDI_CLIENT_CERT", self.sdi_client_cert),
                     ("MYCELIUM_SDI_CLIENT_KEY", self.sdi_client_key),
                 )
                 if not value
             ]
+            # At least one endpoint must be configured; the active one is chosen
+            # at runtime (system_settings.sdi_environment) between the legacy
+            # single URL and the env-specific test/prod URLs.
+            if not (
+                self.sdi_endpoint_url or self.sdi_endpoint_url_test or self.sdi_endpoint_url_prod
+            ):
+                missing.append("MYCELIUM_SDI_ENDPOINT_URL (or _TEST/_PROD)")
             if missing:
                 raise ValueError("sdi_channel='sdicoop' requires: " + ", ".join(sorted(missing)))
         return self

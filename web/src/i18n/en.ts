@@ -625,6 +625,21 @@ export const en = {
     usedAsLogo: 'Set as the logo for {{label}}.',
     issuer: 'Issuer',
   },
+  sdi: {
+    title: 'SdI environment (transmission)',
+    hint: 'Chooses which SdI endpoint invoices are transmitted to, at runtime, without a redeploy. Production = real fiscal sends. The two URLs (test/production) live in config; this activates one or the other, mutually exclusive.',
+    notSdicoop:
+      'Channel is not in sdicoop mode: transmission is manual export, so the switch has no effect on sending.',
+    useTest: 'Use Test',
+    useProd: 'Use Production',
+    testActive: 'active: TEST',
+    prodActive: 'active: PRODUCTION',
+    prodWarn: 'Warning: in Production every transmission is a real fiscal invoice to SdI.',
+    activeEndpoint: 'Active endpoint',
+    confirmProd:
+      'Switch to PRODUCTION? The next transmissions will be real fiscal invoices to SdI.',
+    switched: 'Environment updated.',
+  },
   mfa: {
     title: 'Two-factor authentication',
     enabled: 'Enabled',
