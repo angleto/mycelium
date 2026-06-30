@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="it">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Mycelium-QR test</title>
+    <style>
+      body {
+        font-family: system-ui, sans-serif;
+        margin: 2rem;
+        background: #f5f5f5;
+        color: #222;
+      }
+      canvas {
+        border: 1px solid #ccc;
+        width: 320px;
+        height: 320px;
+        background: #fff;
+      }
+      .row {
+        display: flex;
+        gap: 1.2rem;
+        align-items: center;
+        margin: 1rem 0;
+      }
+      .ok {
+        color: #1f8a52;
+        font-weight: 600;
+      }
+      .no {
+        color: #c0392b;
+        font-weight: 700;
+      }
+      code {
+        background: #e8e8e8;
+        padding: 2px 6px;
+        border-radius: 4px;
+      }
+      button {
+        padding: 0.4rem 0.9rem;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Mycelium-QR (vCard scansionabile)</h1>
+    <canvas id="qr"></canvas>
+    <div class="row">
+      <label>Sfondo <input type="color" id="bg" value="#4a6b3e" /></label>
+      <label>Rete <input type="color" id="net" value="#ffffff" /></label>
+      <button id="regen">Rigenera</button>
+    </div>
+    <div class="row">
+      <label>ECC
+        <select id="ecl">
+          <option value="L">L (meno denso)</option>
+          <option value="M">M</option>
+          <option value="Q">Q</option>
+          <option value="H" selected>H (max ridondanza)</option>
+        </select>
+      </label>
+    </div>
+    <fieldset style="margin:0.5rem 0;border:1px solid #ddd;border-radius:6px">
+      <legend>Dati nella vCard</legend>
+      <label><input type="checkbox" id="f_name" checked /> Nome</label>
+      <label><input type="checkbox" id="f_org" checked /> Azienda</label>
+      <label><input type="checkbox" id="f_vat" /> P.IVA</label>
+      <label><input type="checkbox" id="f_cf" /> C.F.</label>
+      <label><input type="checkbox" id="f_email" /> Email</label>
+      <label><input type="checkbox" id="f_phone" checked /> Telefono</label>
+      <label><input type="checkbox" id="f_address" /> Indirizzo</label>
+    </fieldset>
+    <p id="status"></p>
+    <p id="info" style="color:#555"></p>
+    <p>Fingerprint: <code id="fp"></code></p>
+    <p>Inquadra col telefono: apre il contatto vCard dell'emittente.</p>
+    <script type="module" src="/src/qr-test-main.ts"></script>
+  </body>
+</html>
