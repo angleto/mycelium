@@ -21,16 +21,25 @@ export function useMe(): { me: Me | null; loading: boolean } {
 
   useEffect(() => {
     if (!token) return
-    if (cache && cache.token === token) return
     let active = true
-    void (async () => {
+    const load = async () => {
       const { data } = await api.GET('/auth/me')
       if (!active || !data) return
       cache = { token, me: data }
       setFetched(cache)
-    })()
+    }
+    if (!cache || cache.token !== token) void load()
+    // After the user saves a new avatar, the cached me.avatar_* is stale;
+    // refetch so every consumer (topbar, the issuer logo that reuses the
+    // avatar) picks up the new seed/colours without a full reload.
+    const onAvatarUpdated = () => {
+      cache = null
+      void load()
+    }
+    window.addEventListener('avatar-updated', onAvatarUpdated)
     return () => {
       active = false
+      window.removeEventListener('avatar-updated', onAvatarUpdated)
     }
   }, [token])
 

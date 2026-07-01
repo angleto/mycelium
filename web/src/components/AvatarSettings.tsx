@@ -1,21 +1,29 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { authFetch, errMessage } from '../api/client'
+import { useMe } from '../auth/useMe'
 import { randomFingerprint, renderMyceliumOnly } from '../lib/myceliumQr'
 
 // The user's avatar: a pure mycelial network (decorative, not a QR), unique per
-// fingerprint. Colours are user-chosen; "regenerate" reseeds -> a different
-// organism. The seed + colours are stored so an issuer profile can reuse the
-// same avatar as its logo (optionally combined with a scannable QR there).
+// fingerprint. On open it shows the SAVED avatar (me.avatar_seed/bg/net) so it
+// is stable and matches the logo that reuses it; "regenerate" grows a new one.
+// The seed + colours are stored so an issuer profile can reuse the same avatar.
 export function AvatarSettings() {
   const { t } = useTranslation()
-  const [bg, setBg] = useState('#4a6b3e')
-  const [net, setNet] = useState('#ffffff')
-  const [seed, setSeed] = useState(randomFingerprint())
+  const { me } = useMe()
+  // A local override once the user regenerates or recolours; until then the
+  // avatar is DERIVED from the saved one (no random-on-mount, no drift).
+  const [edit, setEdit] = useState<{ seed: string; bg: string; net: string } | null>(null)
+  // Stable fallback for a user who has never saved an avatar yet.
+  const fallbackSeed = useRef(randomFingerprint())
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState<string | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
+
+  const seed = edit?.seed ?? me?.avatar_seed ?? fallbackSeed.current
+  const bg = edit?.bg ?? me?.avatar_bg ?? '#4a6b3e'
+  const net = edit?.net ?? me?.avatar_net ?? '#ffffff'
 
   const draw = useCallback(() => {
     const canvas = canvasRef.current
@@ -56,6 +64,9 @@ export function AvatarSettings() {
       return
     }
     setMsg(t('avatar.saved'))
+    // Refresh me everywhere (topbar + the logo config that reuses the avatar)
+    // and drop the local override so we now track the freshly-saved value.
+    setEdit(null)
     window.dispatchEvent(new Event('avatar-updated'))
   }
 
@@ -73,13 +84,24 @@ export function AvatarSettings() {
         <div className="row" style={{ flexWrap: 'wrap' }}>
           <label>
             {t('avatar.bg')}{' '}
-            <input type="color" value={bg} onChange={(e) => setBg(e.target.value)} />
+            <input
+              type="color"
+              value={bg}
+              onChange={(e) => setEdit({ seed, bg: e.target.value, net })}
+            />
           </label>
           <label>
             {t('avatar.net')}{' '}
-            <input type="color" value={net} onChange={(e) => setNet(e.target.value)} />
+            <input
+              type="color"
+              value={net}
+              onChange={(e) => setEdit({ seed, bg, net: e.target.value })}
+            />
           </label>
-          <button type="button" onClick={() => setSeed(randomFingerprint())}>
+          <button
+            type="button"
+            onClick={() => setEdit({ seed: randomFingerprint(), bg, net })}
+          >
             {t('avatar.regenerate')}
           </button>
         </div>

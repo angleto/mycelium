@@ -64,8 +64,14 @@ async def test_avatar_upload_fetch_and_has_avatar_flag() -> None:
         assert got.content == _PNG
         assert got.headers.get("cache-control") == "no-store"
 
-        # /auth/me now reflects it.
-        assert (await c.get("/auth/me", headers=h)).json()["has_avatar"] is True
+        # /auth/me now reflects it AND returns the styling identity, so the
+        # avatar card can show the SAVED avatar and an issuer logo can reuse
+        # the exact same mycelium (seed + colours).
+        me2 = (await c.get("/auth/me", headers=h)).json()
+        assert me2["has_avatar"] is True
+        assert me2["avatar_seed"] == "MYC-abc123"
+        assert me2["avatar_bg"] == "#4a6b3e"
+        assert me2["avatar_net"] == "#ffffff"
 
 
 async def test_avatar_rejects_non_image() -> None:
