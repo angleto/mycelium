@@ -1537,6 +1537,13 @@ async def reopen_rejected(
     inv.sdi_status = SdiStatus.none
     # Not under AdE conservation until it actually transits SdI on the re-send.
     inv.conservation_status = ConservationStatus.out_of_coverage
+    # Drop the superseded transmission's SdI notifications: the scarto belonged
+    # to the file being redone, so keeping it would make the reopened+resent
+    # invoice still show the old NS ("rejected") in its timeline. A fresh outcome
+    # after the re-send adds a new row.
+    await session.execute(
+        delete(InvoiceNotification).where(InvoiceNotification.invoice_id == inv.id)
+    )
     inv.version += 1
     await session.flush()
     await audit.log(

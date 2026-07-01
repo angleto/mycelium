@@ -427,6 +427,9 @@ async def test_scarto_reopen_resends_under_same_number_and_date(_sdicoop: None) 
         assert re.number == n1
         assert re.xml is None and re.identificativo_sdi is None
         assert re.sdi_status is SdiStatus.none
+        # The superseded scarto notification is cleared (no stale NS lingers in
+        # the timeline of the reopened+resent invoice).
+        assert await inv.list_invoice_notifications(s, org_id=org, invoice_id=d.id) == []
         # Re-transmit reuses the SAME numero + data.
         tx2 = await inv.transmit(s, org_id=org, actor_id=user, invoice_id=d.id)
         assert tx2.state is InvoiceState.transmitted
