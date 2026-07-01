@@ -3,17 +3,13 @@ import {
   useEffect,
   useRef,
   useState,
-  type ChangeEvent,
   type FormEvent,
 } from 'react'
 import { useTranslation } from 'react-i18next'
 import { api, authFetch, errMessage, workspaceHeader } from '../api/client'
 import { useSession } from '../auth/useSession'
 import type { components } from '../api/schema'
-
-// Logo formats the backend accepts (PNG/JPEG; reportlab raster). Kept in
-// sync with mycelium_core.services.invoice.LOGO_MIMES.
-const LOGO_ACCEPT = 'image/png,image/jpeg'
+import { IssuerLogoConfig } from './IssuerLogoConfig'
 
 type Profile = components['schemas']['IssuerProfileOut']
 type Counter = components['schemas']['InvoiceCounterOut']
@@ -297,7 +293,6 @@ export function IssuerProfiles() {
   // blob: the endpoint is bearer-protected, so an <img src> to it would
   // 401). Revoked before replacing / on close.
   const [logoUrl, setLogoUrl] = useState<string | null>(null)
-  const [logoBusy, setLogoBusy] = useState(false)
   // Monotonic token so overlapping showLogo calls (rapid profile
   // switching) don't race: only the latest commits its blob URL, and a
   // superseded fetch neither creates a leaked URL nor shows a stale logo.
@@ -502,32 +497,6 @@ export function IssuerProfiles() {
       return
     }
     await load()
-  }
-
-  async function uploadLogo(e: ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0]
-    e.target.value = '' // let the same file be re-picked after a failure
-    if (!file || edit === 'new' || edit === null) return
-    setErr(null)
-    setMsg(null)
-    setLogoBusy(true)
-    try {
-      const body = new FormData()
-      body.append('file', file)
-      const res = await authFetch(`/issuer-profiles/${edit}/logo`, {
-        method: 'POST',
-        body,
-      })
-      if (!res.ok) {
-        setErr(errMessage(await res.json().catch(() => null)))
-        return
-      }
-      await showLogo(edit)
-      await load()
-      setMsg(t('invoices.saved'))
-    } finally {
-      setLogoBusy(false)
-    }
   }
 
   async function removeLogo() {
@@ -862,26 +831,27 @@ export function IssuerProfiles() {
                   className="issuer-logo"
                 />
               )}
-              <div className="row">
-                <label className="btn--sm btn--ghost">
-                  {logoBusy ? '…' : t('invoices.logoUpload')}
-                  <input
-                    type="file"
-                    accept={LOGO_ACCEPT}
-                    hidden
-                    onChange={(e) => void uploadLogo(e)}
+              {(() => {
+                const lp = profiles.find((p) => p.id === edit)
+                return lp ? (
+                  <IssuerLogoConfig
+                    profile={lp}
+                    onChanged={() => {
+                      void load()
+                      void showLogo(lp.id)
+                    }}
                   />
-                </label>
-                {logoUrl && (
-                  <button
-                    type="button"
-                    className="btn--sm btn--danger"
-                    onClick={() => void removeLogo()}
-                  >
-                    {t('invoices.logoRemove')}
-                  </button>
-                )}
-              </div>
+                ) : null
+              })()}
+              {logoUrl && (
+                <button
+                  type="button"
+                  className="btn--sm btn--danger"
+                  onClick={() => void removeLogo()}
+                >
+                  {t('invoices.logoRemove')}
+                </button>
+              )}
             </div>
           )}
           {/* Issuer-level payment fallbacks (used only if the client

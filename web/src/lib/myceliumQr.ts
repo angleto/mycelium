@@ -298,6 +298,9 @@ export function renderMyceliumOnly(
   ctx.lineJoin = 'round'
   const mx = size / 2
   const my = size / 2
+  // Keep the organism centred and INSIDE the frame: hyphae never grow past
+  // this radius (a margin short of the edge), so nothing is clipped by the box.
+  const bound = size * 0.44
 
   const grow = (x: number, y: number, ang: number, len: number, width: number, depth: number) => {
     if (len < unit * 0.8 || depth > 6) return
@@ -310,6 +313,8 @@ export function renderMyceliumOnly(
       const seg = len / steps
       const nx = px + Math.cos(a) * seg
       const ny = py + Math.sin(a) * seg
+      // Stop this filament at the boundary rather than letting it exit the box.
+      if ((nx - mx) ** 2 + (ny - my) ** 2 > bound * bound) break
       ctx.lineWidth = width
       ctx.beginPath()
       ctx.moveTo(px, py)

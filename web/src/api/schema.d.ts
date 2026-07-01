@@ -284,6 +284,24 @@ export interface paths {
         patch: operations["patch_user_admin_users__user_id__patch"];
         trace?: never;
     };
+    "/admin/sdi-environment": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Sdi Environment */
+        get: operations["get_sdi_environment_admin_sdi_environment_get"];
+        /** Set Sdi Environment */
+        put: operations["set_sdi_environment_admin_sdi_environment_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/mfa/status": {
         parameters: {
             query?: never;
@@ -5547,6 +5565,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/invoices/{invoice_id}/reopen": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reopen Rejected
+         * @description Return a scartato (SdI NS / rejected) invoice to draft to correct and
+         *     re-transmit under the same number + date (FatturaPA 5-day re-send).
+         */
+        post: operations["reopen_rejected_invoices__invoice_id__reopen_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/invoices/receipt": {
         parameters: {
             query?: never;
@@ -6429,6 +6468,11 @@ export interface components {
         Body_upload_issuer_logo_issuer_profiles__profile_id__logo_post: {
             /** File */
             file: string;
+            /**
+             * Kind
+             * @default image
+             */
+            kind?: string;
         };
         /** Body_upload_note_attachment_notes__note_id__attachments_post */
         Body_upload_note_attachment_notes__note_id__attachments_post: {
@@ -8643,6 +8687,10 @@ export interface components {
             logo_mime: string | null;
             /** Has Logo */
             has_logo: boolean;
+            /** Logo Kind */
+            logo_kind: string;
+            /** Logo Position */
+            logo_position: string;
             /** Is Default */
             is_default: boolean;
             /** Conservation Adhesion */
@@ -8710,6 +8758,10 @@ export interface components {
             default_payment_terms_days?: number | null;
             /** Letterhead */
             letterhead?: string | null;
+            /** Logo Kind */
+            logo_kind?: string | null;
+            /** Logo Position */
+            logo_position?: string | null;
             /** Is Default */
             is_default?: boolean | null;
         };
@@ -10265,6 +10317,31 @@ export interface components {
             label: string;
             /** Description */
             description: string;
+        };
+        /** SdiEnvironmentIn */
+        SdiEnvironmentIn: {
+            /**
+             * Environment
+             * @enum {string}
+             */
+            environment: "test" | "production";
+        };
+        /**
+         * SdiEnvironmentOut
+         * @description Global SdI environment switch (admin). ``environment`` selects which
+         *     endpoint the live RiceviFile send targets; the two URLs come from config.
+         */
+        SdiEnvironmentOut: {
+            /** Environment */
+            environment: string;
+            /** Sdicoop Active */
+            sdicoop_active: boolean;
+            /** Test Url */
+            test_url: string;
+            /** Prod Url */
+            prod_url: string;
+            /** Active Endpoint */
+            active_endpoint: string;
         };
         /** SdiMandateIn */
         SdiMandateIn: {
@@ -12122,6 +12199,72 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AdminUserOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_sdi_environment_admin_sdi_environment_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SdiEnvironmentOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_sdi_environment_admin_sdi_environment_put: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SdiEnvironmentIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SdiEnvironmentOut"];
                 };
             };
             /** @description Validation Error */
@@ -24541,6 +24684,42 @@ export interface operations {
         };
     };
     mark_paid_invoices__invoice_id__paid_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                invoice_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvoiceOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reopen_rejected_invoices__invoice_id__reopen_post: {
         parameters: {
             query?: never;
             header: {

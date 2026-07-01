@@ -601,7 +601,7 @@ export const it: Catalog = {
   },
   avatar: {
     title: 'Avatar',
-    hint: 'Un QR micelio scansionabile costruito dal tuo profilo emittente di default (una vCard). Scegli quali dati codificare, i colori e la ridondanza; i badge confermano che scansiona. Puoi usarlo opzionalmente come logo emittente sulle tue fatture.',
+    hint: 'Una rete miceliale unica generata da una fingerprint casuale. Scegli i colori; "rigenera" fa crescere un organismo diverso. Diventa il tuo avatar; un profilo emittente puo riusarlo come logo.',
     bg: 'Sfondo',
     net: 'Rete',
     regenerate: 'Rigenera',
@@ -626,6 +626,17 @@ export const it: Catalog = {
     useAsLogo: 'Usa come logo di {{label}}',
     usedAsLogo: 'Impostato come logo di {{label}}.',
     issuer: 'Emittente',
+  },
+  logo: {
+    hint: 'Il logo di intestazione sulle fatture: un\'immagine caricata, il tuo avatar micelio, o un "avatar + QR" (una card scansionabile di questo emittente). Un avatar/QR quadrato viene stampato in un box piu grande, cosi il QR resta scansionabile.',
+    saved: 'Logo aggiornato.',
+    position: 'Posizione',
+    pos: { left: 'Sinistra', right: 'Destra', top: 'Sopra' },
+    source: 'Logo',
+    src: { image: 'Immagine', avatar: 'Avatar', avatar_qr: 'Avatar + QR' },
+    useAvatar: 'Usa il mio avatar',
+    noAvatar: 'Nessun avatar salvato (creane uno in Impostazioni).',
+    useQr: 'Usa come logo',
   },
   sdi: {
     title: 'Ambiente SdI (trasmissione)',

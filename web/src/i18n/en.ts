@@ -600,7 +600,7 @@ export const en = {
   },
   avatar: {
     title: 'Avatar',
-    hint: 'A scannable mycelium QR built from your default issuer profile (a vCard). Pick which data to encode, the colours and the redundancy; the badges confirm it scans. You can optionally use it as the issuer logo on your invoices.',
+    hint: 'A unique mycelial network grown from a random fingerprint. Pick the colours; "regenerate" grows a different organism. It becomes your avatar; an issuer profile can reuse it as its logo.',
     bg: 'Background',
     net: 'Network',
     regenerate: 'Regenerate',
@@ -625,6 +625,17 @@ export const en = {
     useAsLogo: 'Use as logo for {{label}}',
     usedAsLogo: 'Set as the logo for {{label}}.',
     issuer: 'Issuer',
+  },
+  logo: {
+    hint: 'The letterhead logo on your invoices: an uploaded image, your mycelium avatar, or an "avatar + QR" (a scannable card of this issuer). A square avatar/QR prints in a larger box so the QR stays scannable.',
+    saved: 'Logo updated.',
+    position: 'Position',
+    pos: { left: 'Left', right: 'Right', top: 'Above' },
+    source: 'Logo',
+    src: { image: 'Image', avatar: 'Avatar', avatar_qr: 'Avatar + QR' },
+    useAvatar: 'Use my avatar',
+    noAvatar: 'No avatar saved yet (create one in Settings).',
+    useQr: 'Use as logo',
   },
   sdi: {
     title: 'SdI environment (transmission)',
