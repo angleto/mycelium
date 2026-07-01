@@ -4,7 +4,13 @@ import { api, authFetch, errMessage, workspaceHeader } from '../api/client'
 import { useMe } from '../auth/useMe'
 import type { components } from '../api/schema'
 import type { Ecl, VCardData } from '../lib/myceliumQr'
-import { buildVCard, qrMatrix, renderMyceliumQR, verifyDecode } from '../lib/myceliumQr'
+import {
+  buildVCard,
+  qrMatrix,
+  renderMyceliumOnly,
+  renderMyceliumQR,
+  verifyDecode,
+} from '../lib/myceliumQr'
 
 type Profile = components['schemas']['IssuerProfileOut']
 type Source = 'image' | 'avatar' | 'avatar_qr'
@@ -52,6 +58,7 @@ export function IssuerLogoConfig({
   const [msg, setMsg] = useState<string | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const avatarCanvasRef = useRef<HTMLCanvasElement | null>(null)
 
   const vdata = useCallback((): VCardData => {
     const person = [profile.first_name, profile.last_name].filter(Boolean).join(' ')
@@ -77,11 +84,22 @@ export function IssuerLogoConfig({
   const draw = useCallback(() => {
     const canvas = canvasRef.current
     if (!canvas || source !== 'avatar_qr' || !hasAvatar) return
+    // Render the user's actual avatar (same seed + colours) to an offscreen
+    // canvas and composite it in the QR centre, so the logo shows the avatar
+    // itself -- not a separate creature that would drift from it.
+    if (!avatarCanvasRef.current) avatarCanvasRef.current = document.createElement('canvas')
+    renderMyceliumOnly(avatarCanvasRef.current, {
+      seed: avatarSeed,
+      bg: avatarBg,
+      net: avatarNet,
+      size: 256,
+    })
     const vcard = buildVCard(vdata())
     renderMyceliumQR(canvas, qrMatrix(vcard, ecl), {
       seed: avatarSeed,
       bg: avatarBg,
       net: avatarNet,
+      center: avatarCanvasRef.current,
     })
     setOk(verifyDecode(canvas, vcard))
   }, [source, hasAvatar, vdata, ecl, avatarSeed, avatarBg, avatarNet])

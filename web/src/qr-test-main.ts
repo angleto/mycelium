@@ -60,6 +60,8 @@ function vcardData(): VCardData {
 // printed 300-dpi invoice gives ~260 px and scans far more easily.
 const printCanvas = document.createElement('canvas')
 const PRINT_PX = 130
+// The avatar composited into the QR centre (like the "avatar + QR" issuer logo).
+const avatarCanvas = document.createElement('canvas')
 
 function draw(): void {
   const printEl = document.getElementById('printstatus') as HTMLElement
@@ -74,7 +76,15 @@ function draw(): void {
   }
   const vcard = buildVCard(vcardData())
   const matrix = qrMatrix(vcard, eclSel.value as Ecl)
-  renderMyceliumQR(canvas, matrix, { seed, bg: bgInput.value, net: netInput.value })
+  // Composite the avatar (same seed + colours) in the centre: the QR's mycelium
+  // IS the avatar and stays fixed as the payload/fields change.
+  renderMyceliumOnly(avatarCanvas, { seed, bg: bgInput.value, net: netInput.value, size: 256 })
+  renderMyceliumQR(canvas, matrix, {
+    seed,
+    bg: bgInput.value,
+    net: netInput.value,
+    center: avatarCanvas,
+  })
   const ok = verifyDecode(canvas, vcard)
   statusEl.textContent = ok ? 'scansionabile (jsQR): OK ✓' : 'scansionabile (jsQR): NO ✗'
   statusEl.className = ok ? 'ok' : 'no'
@@ -85,6 +95,7 @@ function draw(): void {
     bg: bgInput.value,
     net: netInput.value,
     size: PRINT_PX,
+    center: avatarCanvas,
   })
   const okPrint = verifyDecode(printCanvas, vcard)
   printEl.textContent = okPrint

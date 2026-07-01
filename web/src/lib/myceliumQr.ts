@@ -102,6 +102,11 @@ export interface RenderOpts {
   bg: string
   net: string
   size?: number
+  // Optional image to composite in the CENTRE of the code (the user's avatar),
+  // instead of the built-in creature. ECC H recovers the occluded modules. When
+  // set, the centre is exactly this image -- stable regardless of the encoded
+  // payload -- so an "avatar + QR" logo never drifts from the avatar.
+  center?: HTMLCanvasElement | null
 }
 
 /** Draw the mycelium-styled QR onto a canvas. Quiet zone preserved; finders
@@ -211,7 +216,35 @@ export function renderMyceliumQR(
     }
   }
 
-  drawCreature(ctx, { cx: off + (n * cell) / 2, cy: off + (n * cell) / 2, r: n * cell * 0.18, cell, bg: opts.bg, net: opts.net, rnd })
+  // Centre element. The module loops above consumed ``rnd``, and their
+  // iteration count depends on the payload -- so the centre MUST use a fresh
+  // PRNG seeded only from ``seed``, otherwise it drifts whenever the encoded
+  // data changes. When an avatar image is supplied, the centre IS that avatar.
+  const ccx = off + (n * cell) / 2
+  const ccy = off + (n * cell) / 2
+  if (opts.center) {
+    const cr = n * cell * 0.2
+    ctx.fillStyle = opts.bg
+    ctx.beginPath()
+    ctx.arc(ccx, ccy, cr + cell * 1.1, 0, Math.PI * 2)
+    ctx.fill()
+    ctx.save()
+    ctx.beginPath()
+    ctx.arc(ccx, ccy, cr, 0, Math.PI * 2)
+    ctx.clip()
+    ctx.drawImage(opts.center, ccx - cr, ccy - cr, cr * 2, cr * 2)
+    ctx.restore()
+  } else {
+    drawCreature(ctx, {
+      cx: ccx,
+      cy: ccy,
+      r: n * cell * 0.18,
+      cell,
+      bg: opts.bg,
+      net: opts.net,
+      rnd: mulberry32(hashStr(`${opts.seed}:creature`)),
+    })
+  }
 }
 
 // The central "creature": a unique random mycelial network seeded by the
