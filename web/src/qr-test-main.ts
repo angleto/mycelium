@@ -55,11 +55,12 @@ function vcardData(): VCardData {
   }
 }
 
-// Offscreen render at the invoice logo box height (22 mm). At ~130 px it is
-// roughly a phone scanning the PDF on a low-dpi screen -- the worst case; a
-// printed 300-dpi invoice gives ~260 px and scans far more easily.
+// Offscreen render at the invoice logo box size (~40 mm square for an avatar/QR
+// logo). ~236 px is a low-dpi (150) screen scan of the printed box -- the worst
+// case; a 300-dpi print gives ~470 px and scans far more easily. A dense (many
+// vCard fields) code is naturally harder here, which is the honest signal.
 const printCanvas = document.createElement('canvas')
-const PRINT_PX = 130
+const PRINT_PX = 236
 // The avatar composited into the QR centre (like the "avatar + QR" issuer logo).
 const avatarCanvas = document.createElement('canvas')
 
@@ -89,7 +90,7 @@ function draw(): void {
   statusEl.textContent = ok ? 'scansionabile (jsQR): OK ✓' : 'scansionabile (jsQR): NO ✗'
   statusEl.className = ok ? 'ok' : 'no'
 
-  // Same figure at the invoice logo size (22 mm square).
+  // Same figure at the invoice logo box size (~40 mm square).
   renderMyceliumQR(printCanvas, matrix, {
     seed,
     bg: bgInput.value,
@@ -99,8 +100,8 @@ function draw(): void {
   })
   const okPrint = verifyDecode(printCanvas, vcard)
   printEl.textContent = okPrint
-    ? 'a 22 mm (logo fattura): OK ✓'
-    : 'a 22 mm (logo fattura): NO ✗ — troppo denso a 22mm (usa un box logo piu grande)'
+    ? 'a 40 mm (logo fattura): OK ✓'
+    : 'a 40 mm (logo fattura): NO ✗ — troppo denso a 40mm (usa un box logo piu grande)'
   printEl.className = okPrint ? 'ok' : 'no'
 
   fpEl.textContent = seed

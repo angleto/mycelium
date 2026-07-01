@@ -42,16 +42,24 @@ export function IssuerLogoConfig({
 
   const [source, setSource] = useState<Source>((profile.logo_kind as Source) || 'image')
   const [position, setPosition] = useState<string>(profile.logo_position || 'left')
-  const [ecl, setEcl] = useState<Ecl>('H')
-  const [fields, setFields] = useState<Record<Field, boolean>>({
-    name: true,
-    org: true,
-    vat: true,
-    cf: false,
-    email: false,
-    pec: false,
-    phone: false,
-    address: false,
+  // Restore the SAVED QR recipe (which fields + ECC) so a reload shows the
+  // exact configuration, not the defaults.
+  const [ecl, setEcl] = useState<Ecl>((profile.logo_qr_ecc as Ecl) || 'H')
+  const [fields, setFields] = useState<Record<Field, boolean>>(() => {
+    const saved = (profile.logo_qr_fields || '').split(',').filter(Boolean)
+    if (saved.length) {
+      return Object.fromEntries(FIELDS.map((f) => [f, saved.includes(f)])) as Record<Field, boolean>
+    }
+    return {
+      name: true,
+      org: true,
+      vat: true,
+      cf: false,
+      email: false,
+      pec: false,
+      phone: false,
+      address: false,
+    }
   })
   const [ok, setOk] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -126,6 +134,11 @@ export function IssuerLogoConfig({
     const body = new FormData()
     body.append('file', blob, filename)
     body.append('kind', kind)
+    if (kind === 'avatar_qr') {
+      // Persist the recipe so the card restores it on reload.
+      body.append('qr_fields', FIELDS.filter((f) => fields[f]).join(','))
+      body.append('qr_ecc', ecl)
+    }
     const res = await authFetch(`/issuer-profiles/${profile.id}/logo`, { method: 'POST', body })
     setBusy(false)
     if (!res.ok) {

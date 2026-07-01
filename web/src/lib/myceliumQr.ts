@@ -223,7 +223,11 @@ export function renderMyceliumQR(
   const ccx = off + (n * cell) / 2
   const ccy = off + (n * cell) / 2
   if (opts.center) {
-    const cr = n * cell * 0.2
+    // Shrink the centre for denser codes: a bigger payload -> more modules ->
+    // the fixed-fraction occlusion would exceed the ECC budget and stop
+    // scanning. Scale the avatar down as the version grows so it stays legible.
+    const frac = n <= 45 ? 0.19 : n <= 57 ? 0.16 : n <= 69 ? 0.135 : 0.115
+    const cr = n * cell * frac
     ctx.fillStyle = opts.bg
     ctx.beginPath()
     ctx.arc(ccx, ccy, cr + cell * 1.1, 0, Math.PI * 2)

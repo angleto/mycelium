@@ -199,6 +199,12 @@ class IssuerProfile(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, B
     # the letterhead title: left (default), right, or above.
     logo_kind: Mapped[str] = mapped_column(String(16), nullable=False, server_default="image")
     logo_position: Mapped[str] = mapped_column(String(8), nullable=False, server_default="left")
+    # The "avatar + QR" recipe, so the logo card restores the exact saved
+    # configuration on reload (not the defaults): which vCard fields are encoded
+    # (a comma-separated key list, e.g. "name,org,vat") and the QR error
+    # correction level. Only meaningful when ``logo_kind == 'avatar_qr'``.
+    logo_qr_fields: Mapped[str] = mapped_column(String(128), nullable=False, server_default="")
+    logo_qr_ecc: Mapped[str] = mapped_column(String(1), nullable=False, server_default="H")
 
 
 class InvoiceCounter(Base):

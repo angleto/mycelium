@@ -426,11 +426,15 @@ async def set_issuer_logo(
     mime: str,
     filename: str | None = None,
     kind: str = "image",
+    qr_fields: str | None = None,
+    qr_ecc: str | None = None,
 ) -> IssuerProfile:
     """Store/replace the issuer's letterhead logo. PNG/JPEG, size-capped.
 
     ``kind`` records how the image was produced (image | avatar | avatar_qr);
     it drives the courtesy-PDF logo box (a scannable QR gets a bigger square).
+    For an ``avatar_qr`` logo, ``qr_fields`` (comma-separated vCard keys) and
+    ``qr_ecc`` are persisted so the config card restores the exact selection.
     """
     await require_role(session, org_id, actor_id, Role.admin)
     if kind not in _LOGO_KINDS:
@@ -450,6 +454,11 @@ async def set_issuer_logo(
     p.logo_data = data
     p.logo_mime = mime
     p.logo_kind = kind
+    # Persist the QR recipe only for an avatar_qr logo, so switching to a plain
+    # image/avatar upload does not wipe the saved selection.
+    if kind == "avatar_qr":
+        p.logo_qr_fields = (qr_fields or "")[:128]
+        p.logo_qr_ecc = qr_ecc if qr_ecc in ("L", "M", "Q", "H") else "H"
     # logo_filename is VARCHAR(255); a longer client filename would raise a
     # DataError on flush. Truncate (display-only field).
     p.logo_filename = filename[:255] if filename else None

@@ -6473,6 +6473,16 @@ export interface components {
              * @default image
              */
             kind?: string;
+            /**
+             * Qr Fields
+             * @default
+             */
+            qr_fields?: string;
+            /**
+             * Qr Ecc
+             * @default H
+             */
+            qr_ecc?: string;
         };
         /** Body_upload_note_attachment_notes__note_id__attachments_post */
         Body_upload_note_attachment_notes__note_id__attachments_post: {
@@ -8691,6 +8701,10 @@ export interface components {
             logo_kind: string;
             /** Logo Position */
             logo_position: string;
+            /** Logo Qr Fields */
+            logo_qr_fields: string;
+            /** Logo Qr Ecc */
+            logo_qr_ecc: string;
             /** Is Default */
             is_default: boolean;
             /** Conservation Adhesion */

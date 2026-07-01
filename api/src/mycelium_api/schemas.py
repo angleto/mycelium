@@ -2822,6 +2822,8 @@ class IssuerProfileOut(BaseModel):
     has_logo: bool
     logo_kind: str
     logo_position: str
+    logo_qr_fields: str
+    logo_qr_ecc: str
     is_default: bool
     conservation_adhesion: str
     version: int

@@ -835,6 +835,7 @@ export function IssuerProfiles() {
                 const lp = profiles.find((p) => p.id === edit)
                 return lp ? (
                   <IssuerLogoConfig
+                    key={lp.id}
                     profile={lp}
                     onChanged={() => {
                       void load()
