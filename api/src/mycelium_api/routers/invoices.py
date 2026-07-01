@@ -14,7 +14,7 @@ import uuid
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, File, Query, Response, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, Query, Response, UploadFile, status
 
 from mycelium_api.deps import TenantCtx, tenant_ctx
 from mycelium_api.schemas import (
@@ -140,6 +140,8 @@ def _ip_out(p: IssuerProfile) -> IssuerProfileOut:
         letterhead=p.letterhead,
         logo_mime=p.logo_mime,
         has_logo=p.logo_mime is not None,
+        logo_kind=p.logo_kind,
+        logo_position=p.logo_position,
         is_default=p.is_default,
         conservation_adhesion=p.conservation_adhesion.value,
         version=p.version,
@@ -290,6 +292,7 @@ async def upload_issuer_logo(
     profile_id: uuid.UUID,
     ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
     file: Annotated[UploadFile, File()],
+    kind: Annotated[str, Form()] = "image",
 ) -> IssuerProfileOut:
     ensure_role(ctx.role, Role.owner)
     # Bound the read to the cap + 1 byte: the service rejects anything
@@ -303,6 +306,7 @@ async def upload_issuer_logo(
         data=data,
         mime=file.content_type or "",
         filename=file.filename,
+        kind=kind,
     )
     return _ip_out(p)
 

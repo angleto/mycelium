@@ -116,6 +116,8 @@ _PROFILE_FIELDS = frozenset(
         "default_payment_method_code",
         "default_payment_terms_days",
         "letterhead",
+        "logo_kind",
+        "logo_position",
     }
 )
 
@@ -300,6 +302,12 @@ async def update_issuer_profile(
         values["default_payment_terms_days"] = validate_terms_days(
             values["default_payment_terms_days"]  # type: ignore[arg-type]
         )
+    if "logo_kind" in values and values["logo_kind"] not in _LOGO_KINDS:
+        raise DomainError(MessageCode.DOMAIN_ERROR, detail=f"logo_kind {values['logo_kind']!r}")
+    if "logo_position" in values and values["logo_position"] not in _LOGO_POSITIONS:
+        raise DomainError(
+            MessageCode.DOMAIN_ERROR, detail=f"logo_position {values['logo_position']!r}"
+        )
     for field, value in values.items():
         setattr(p, field, value)
     # Anagrafica invariant on the merged row: a patch that would clear the last
@@ -401,6 +409,12 @@ async def delete_issuer_profile(
 LOGO_MAX_BYTES = IMAGE_MAX_BYTES
 LOGO_MIMES = IMAGE_MIMES
 
+# How a stored logo was produced, and where it prints relative to the
+# letterhead title. Validated at the service boundary; the PDF falls back to
+# sane defaults for anything else.
+_LOGO_KINDS = frozenset({"image", "avatar", "avatar_qr"})
+_LOGO_POSITIONS = frozenset({"left", "right", "top"})
+
 
 async def set_issuer_logo(
     session: AsyncSession,
@@ -411,9 +425,16 @@ async def set_issuer_logo(
     data: bytes,
     mime: str,
     filename: str | None = None,
+    kind: str = "image",
 ) -> IssuerProfile:
-    """Store/replace the issuer's letterhead logo. PNG/JPEG, size-capped."""
+    """Store/replace the issuer's letterhead logo. PNG/JPEG, size-capped.
+
+    ``kind`` records how the image was produced (image | avatar | avatar_qr);
+    it drives the courtesy-PDF logo box (a scannable QR gets a bigger square).
+    """
     await require_role(session, org_id, actor_id, Role.admin)
+    if kind not in _LOGO_KINDS:
+        raise DomainError(MessageCode.DOMAIN_ERROR, detail=f"logo kind '{kind}'")
     if mime not in LOGO_MIMES:
         raise DomainError(MessageCode.DOMAIN_ERROR, detail=f"logo mime '{mime}'")
     if not data:
@@ -428,6 +449,7 @@ async def set_issuer_logo(
     p = await get_issuer_profile(session, org_id=org_id, profile_id=profile_id)
     p.logo_data = data
     p.logo_mime = mime
+    p.logo_kind = kind
     # logo_filename is VARCHAR(255); a longer client filename would raise a
     # DataError on flush. Truncate (display-only field).
     p.logo_filename = filename[:255] if filename else None

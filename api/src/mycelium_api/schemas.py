@@ -2776,6 +2776,8 @@ class IssuerProfilePatchIn(BaseModel):
     default_payment_method_code: str | None = Field(default=None, max_length=4)
     default_payment_terms_days: int | None = Field(default=None, ge=0, le=365)
     letterhead: str | None = Field(default=None, max_length=2000)
+    logo_kind: str | None = Field(default=None, max_length=16)
+    logo_position: str | None = Field(default=None, max_length=8)
     is_default: bool | None = None
 
 
@@ -2812,6 +2814,8 @@ class IssuerProfileOut(BaseModel):
     letterhead: str | None
     logo_mime: str | None
     has_logo: bool
+    logo_kind: str
+    logo_position: str
     is_default: bool
     conservation_adhesion: str
     version: int

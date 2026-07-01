@@ -191,6 +191,14 @@ class IssuerProfile(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, B
     logo_mime: Mapped[str | None] = mapped_column(String(64), nullable=True)
     logo_filename: Mapped[str | None] = mapped_column(String(255), nullable=True)
     logo_data: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True, deferred=True)
+    # How the stored logo was produced: a plain uploaded "image", the user's
+    # "avatar" (pure mycelium), or "avatar_qr" (the scannable mycelium-QR). The
+    # bytes are always a PNG in ``logo_data``; ``logo_kind`` drives the PDF box
+    # (a QR needs a bigger square than the 58x22 landmark band) and lets the UI
+    # show which source is active. ``logo_position`` places the logo relative to
+    # the letterhead title: left (default), right, or above.
+    logo_kind: Mapped[str] = mapped_column(String(16), nullable=False, server_default="image")
+    logo_position: Mapped[str] = mapped_column(String(8), nullable=False, server_default="left")
 
 
 class InvoiceCounter(Base):

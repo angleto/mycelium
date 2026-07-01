@@ -291,24 +291,36 @@ def _addr(
     return "<br/>".join(p for p in parts if p)
 
 
-# Logo box: scaled to fit within this envelope (preserving aspect ratio)
-# at the top-left of the letterhead band. A courtesy mark, not a fiscal
-# element, so it stays modest.
+# Logo box envelopes (the image is scaled to fit, aspect preserved). A plain
+# wordmark uses the slim landscape band; an avatar / mycelium-QR is square and,
+# for a QR, must stay legible -- a 22mm QR is too dense to scan, so square logos
+# get a bigger box (~40mm). Courtesy marks, not fiscal elements.
 _LOGO_MAX_W = 58 * mm
 _LOGO_MAX_H = 22 * mm
+_LOGO_SQUARE = 40 * mm
+# Total content width the letterhead band spans (kept from the original layout).
+_LETTERHEAD_W = 172 * mm
 
 
-def _logo_image(logo: bytes | None) -> Image | None:
-    """A reportlab ``Image`` scaled to fit the logo box, or None if the
-    bytes are absent or not a fully decodable raster. Never raises: a
-    broken logo must not break the (courtesy) PDF."""
+def _logo_box(kind: str) -> tuple[float, float]:
+    """(max_w, max_h) envelope for the logo, by kind."""
+    if kind in ("avatar", "avatar_qr"):
+        return _LOGO_SQUARE, _LOGO_SQUARE
+    return _LOGO_MAX_W, _LOGO_MAX_H
+
+
+def _logo_image(logo: bytes | None, kind: str = "image", h_align: str = "LEFT") -> Image | None:
+    """A reportlab ``Image`` scaled to fit the logo box for ``kind``, or None if
+    the bytes are absent or not a fully decodable raster. Never raises: a broken
+    logo must not break the (courtesy) PDF."""
     if not logo or not logo_is_decodable(logo):
         return None
     try:
+        max_w, max_h = _logo_box(kind)
         iw, ih = ImageReader(BytesIO(logo)).getSize()
-        scale = min(_LOGO_MAX_W / iw, _LOGO_MAX_H / ih)
+        scale = min(max_w / iw, max_h / ih)
         img = Image(BytesIO(logo), width=iw * scale, height=ih * scale)
-        img.hAlign = "LEFT"
+        img.hAlign = h_align
     except Exception:
         # Any decode failure -> no logo; a broken image must never break
         # the courtesy PDF.
@@ -316,16 +328,32 @@ def _logo_image(logo: bytes | None) -> Image | None:
     return img
 
 
+_LETTERHEAD_TABLE_STYLE = TableStyle(
+    [
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 0),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+        ("TOPPADDING", (0, 0), (-1, -1), 0),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+    ]
+)
+
+
 def _letterhead_flow(
     issuer: IssuerProfile | None, logo: bytes | None, base: ParagraphStyle
 ) -> list[object]:
-    """The optional graphic header at the very top of the page: the
-    issuer logo (left) and/or the free-text ``letterhead`` block (right),
-    followed by a thin rule. Empty list when the issuer set neither."""
+    """The optional graphic header at the very top of the page: the issuer logo
+    and the free-text ``letterhead`` block, placed per the profile's
+    ``logo_position`` (left | right | top of the title), followed by a thin
+    rule. Empty list when the issuer set neither."""
     if issuer is None:
         return []
-    img = _logo_image(logo)
+    kind = getattr(issuer, "logo_kind", "image") or "image"
+    position = getattr(issuer, "logo_position", "left") or "left"
     text = (issuer.letterhead or "").strip()
+    # Align the image within its cell to the side it sits on.
+    h_align = "RIGHT" if position == "right" else ("CENTER" if position == "top" else "LEFT")
+    img = _logo_image(logo, kind, h_align)
     if img is None and not text:
         return []
     lh_style = ParagraphStyle("letterhead", parent=base, fontSize=9, leading=12)
@@ -335,19 +363,21 @@ def _letterhead_flow(
     para = Paragraph(escape(text).replace("\n", "<br/>"), lh_style) if text else None
     flow: list[object] = []
     if img is not None and para is not None:
-        band = Table([[img, para]], colWidths=[60 * mm, 112 * mm])
-        band.setStyle(
-            TableStyle(
-                [
-                    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                    ("LEFTPADDING", (0, 0), (-1, -1), 0),
-                    ("RIGHTPADDING", (0, 0), (-1, -1), 0),
-                    ("TOPPADDING", (0, 0), (-1, -1), 0),
-                    ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
-                ]
-            )
-        )
-        flow.append(band)
+        if position == "top":
+            # Logo above the title block.
+            flow.append(img)
+            flow.append(Spacer(1, 2 * mm))
+            flow.append(para)
+        else:
+            # Side by side: a wider column for a square avatar/QR than a
+            # slim wordmark, with the title taking the rest.
+            logo_w = (_LOGO_SQUARE + 6 * mm) if kind in ("avatar", "avatar_qr") else 60 * mm
+            text_w = _LETTERHEAD_W - logo_w
+            cells = [para, img] if position == "right" else [img, para]
+            widths = [text_w, logo_w] if position == "right" else [logo_w, text_w]
+            band = Table([cells], colWidths=widths)
+            band.setStyle(_LETTERHEAD_TABLE_STYLE)
+            flow.append(band)
     elif img is not None:
         flow.append(img)
     elif para is not None:
