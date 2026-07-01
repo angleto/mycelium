@@ -4,7 +4,7 @@ import { api, authFetch, errMessage, workspaceHeader } from '../api/client'
 import { useMe } from '../auth/useMe'
 import type { components } from '../api/schema'
 import type { Ecl, VCardData } from '../lib/myceliumQr'
-import { buildVCard, qrMatrix, randomFingerprint, renderMyceliumQR, verifyDecode } from '../lib/myceliumQr'
+import { buildVCard, qrMatrix, renderMyceliumQR, verifyDecode } from '../lib/myceliumQr'
 
 type Profile = components['schemas']['IssuerProfileOut']
 type Source = 'image' | 'avatar' | 'avatar_qr'
@@ -15,8 +15,9 @@ const POSITIONS = ['left', 'right', 'top'] as const
 
 // The issuer letterhead logo: choose an uploaded image, the user's mycelium
 // avatar, or a scannable "avatar + QR" (a mycelium-QR of this issuer's fiscal
-// vCard), and where it sits relative to the title. A square avatar/QR prints in
-// a larger box than a wordmark, so the QR stays scannable on the PDF.
+// vCard), and where it sits relative to the title. The avatar + QR reuses the
+// user's OWN avatar mycelium (same seed + colours) so the logo stays aligned
+// with the avatar -- only the encoded vCard fields + ECC are configurable here.
 export function IssuerLogoConfig({
   profile,
   onChanged,
@@ -26,10 +27,15 @@ export function IssuerLogoConfig({
 }) {
   const { t } = useTranslation()
   const { me } = useMe()
+  // The mycelium comes from the saved avatar; regenerating it happens in
+  // Settings, not here (so the logo never drifts from the avatar).
+  const avatarSeed = me?.avatar_seed ?? ''
+  const avatarBg = me?.avatar_bg || '#4a6b3e'
+  const avatarNet = me?.avatar_net || '#ffffff'
+  const hasAvatar = !!me?.has_avatar && !!avatarSeed
+
   const [source, setSource] = useState<Source>((profile.logo_kind as Source) || 'image')
   const [position, setPosition] = useState<string>(profile.logo_position || 'left')
-  const [bg, setBg] = useState('#4a6b3e')
-  const [net, setNet] = useState('#ffffff')
   const [ecl, setEcl] = useState<Ecl>('H')
   const [fields, setFields] = useState<Record<Field, boolean>>({
     name: true,
@@ -41,7 +47,6 @@ export function IssuerLogoConfig({
     phone: false,
     address: false,
   })
-  const [seed, setSeed] = useState(randomFingerprint())
   const [ok, setOk] = useState(false)
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState<string | null>(null)
@@ -71,11 +76,15 @@ export function IssuerLogoConfig({
 
   const draw = useCallback(() => {
     const canvas = canvasRef.current
-    if (!canvas || source !== 'avatar_qr') return
+    if (!canvas || source !== 'avatar_qr' || !hasAvatar) return
     const vcard = buildVCard(vdata())
-    renderMyceliumQR(canvas, qrMatrix(vcard, ecl), { seed, bg, net })
+    renderMyceliumQR(canvas, qrMatrix(vcard, ecl), {
+      seed: avatarSeed,
+      bg: avatarBg,
+      net: avatarNet,
+    })
     setOk(verifyDecode(canvas, vcard))
-  }, [source, vdata, ecl, seed, bg, net])
+  }, [source, hasAvatar, vdata, ecl, avatarSeed, avatarBg, avatarNet])
 
   useEffect(() => {
     draw()
@@ -173,7 +182,12 @@ export function IssuerLogoConfig({
       {source === 'image' && (
         <label className="btn--sm btn--ghost" style={{ marginTop: '0.5rem' }}>
           {busy ? '…' : t('invoices.logoUpload')}
-          <input type="file" accept="image/png,image/jpeg" hidden onChange={(e) => void uploadImageFile(e)} />
+          <input
+            type="file"
+            accept="image/png,image/jpeg"
+            hidden
+            onChange={(e) => void uploadImageFile(e)}
+          />
         </label>
       )}
 
@@ -182,72 +196,75 @@ export function IssuerLogoConfig({
           <button
             type="button"
             className="btn--sm"
-            disabled={busy || !me?.has_avatar}
+            disabled={busy || !hasAvatar}
             onClick={() => void applyAvatarAsLogo()}
           >
             {t('logo.useAvatar')}
           </button>
-          {!me?.has_avatar && <span className="hint">{t('logo.noAvatar')}</span>}
+          {!hasAvatar && <span className="hint">{t('logo.noAvatar')}</span>}
         </div>
       )}
 
-      {source === 'avatar_qr' && (
-        <div className="row" style={{ alignItems: 'flex-start', gap: '1.5rem', marginTop: '0.5rem' }}>
-          <canvas
-            ref={canvasRef}
-            style={{ width: 180, height: 180, border: '1px solid var(--border)' }}
-          />
-          <div>
-            <div className="row" style={{ flexWrap: 'wrap' }}>
-              <label>
-                {t('avatar.bg')}{' '}
-                <input type="color" value={bg} onChange={(e) => setBg(e.target.value)} />
-              </label>
-              <label>
-                {t('avatar.net')}{' '}
-                <input type="color" value={net} onChange={(e) => setNet(e.target.value)} />
-              </label>
-              <button type="button" className="btn--sm" onClick={() => setSeed(randomFingerprint())}>
-                {t('avatar.regenerate')}
-              </button>
-              <label>
-                {t('avatar.ecc')}{' '}
-                <select value={ecl} onChange={(e) => setEcl(e.target.value as Ecl)}>
-                  {ECLS.map((x) => (
-                    <option key={x} value={x}>
-                      {x}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </div>
-            <fieldset style={{ border: '1px solid var(--border)', borderRadius: 6, marginTop: '0.4rem' }}>
-              <legend>{t('avatar.fields')}</legend>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.3rem 1rem' }}>
-                {FIELDS.map((f) => (
-                  <label key={f} style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}>
-                    <input
-                      type="checkbox"
-                      checked={fields[f]}
-                      onChange={(e) => setFields({ ...fields, [f]: e.target.checked })}
-                    />
-                    {t(`avatar.field.${f}`)}
-                  </label>
-                ))}
+      {source === 'avatar_qr' &&
+        (!hasAvatar ? (
+          <p className="hint" style={{ marginTop: '0.5rem' }}>
+            {t('logo.noAvatar')}
+          </p>
+        ) : (
+          <div
+            className="row"
+            style={{ alignItems: 'flex-start', gap: '1.5rem', marginTop: '0.5rem' }}
+          >
+            <canvas
+              ref={canvasRef}
+              style={{ width: 180, height: 180, border: '1px solid var(--border)' }}
+            />
+            <div>
+              <p className="hint">{t('logo.qrHint')}</p>
+              <div className="row" style={{ flexWrap: 'wrap' }}>
+                <label>
+                  {t('avatar.ecc')}{' '}
+                  <select value={ecl} onChange={(e) => setEcl(e.target.value as Ecl)}>
+                    {ECLS.map((x) => (
+                      <option key={x} value={x}>
+                        {x}
+                      </option>
+                    ))}
+                  </select>
+                </label>
               </div>
-            </fieldset>
-            <p className={ok ? 'ok' : 'err'}>{ok ? t('avatar.scanOk') : t('avatar.scanNo')}</p>
-            <button
-              type="button"
-              className="btn--sm"
-              disabled={busy || !ok}
-              onClick={() => generateQrLogo()}
-            >
-              {t('logo.useQr')}
-            </button>
+              <fieldset
+                style={{ border: '1px solid var(--border)', borderRadius: 6, marginTop: '0.4rem' }}
+              >
+                <legend>{t('avatar.fields')}</legend>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.3rem 1rem' }}>
+                  {FIELDS.map((f) => (
+                    <label
+                      key={f}
+                      style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={fields[f]}
+                        onChange={(e) => setFields({ ...fields, [f]: e.target.checked })}
+                      />
+                      {t(`avatar.field.${f}`)}
+                    </label>
+                  ))}
+                </div>
+              </fieldset>
+              <p className={ok ? 'ok' : 'err'}>{ok ? t('avatar.scanOk') : t('avatar.scanNo')}</p>
+              <button
+                type="button"
+                className="btn--sm"
+                disabled={busy || !ok}
+                onClick={() => generateQrLogo()}
+              >
+                {t('logo.useQr')}
+              </button>
+            </div>
           </div>
-        </div>
-      )}
+        ))}
     </div>
   )
 }

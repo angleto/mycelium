@@ -123,6 +123,9 @@ async def me_endpoint(
         language=user.language,
         is_admin=user.is_admin,
         has_avatar=user.avatar_mime is not None,
+        avatar_seed=user.avatar_seed,
+        avatar_bg=user.avatar_bg,
+        avatar_net=user.avatar_net,
     )
 
 
@@ -154,6 +157,9 @@ async def patch_me_endpoint(
             language=updated.language,
             is_admin=updated.is_admin,
             has_avatar=updated.avatar_mime is not None,
+            avatar_seed=updated.avatar_seed,
+            avatar_bg=updated.avatar_bg,
+            avatar_net=updated.avatar_net,
         )
 
 
@@ -189,6 +195,9 @@ async def upload_avatar_endpoint(
             language=updated.language,
             is_admin=updated.is_admin,
             has_avatar=updated.avatar_mime is not None,
+            avatar_seed=updated.avatar_seed,
+            avatar_bg=updated.avatar_bg,
+            avatar_net=updated.avatar_net,
         )
 
 

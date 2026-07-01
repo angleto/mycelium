@@ -636,6 +636,7 @@ export const en = {
     useAvatar: 'Use my avatar',
     noAvatar: 'No avatar saved yet (create one in Settings).',
     useQr: 'Use as logo',
+    qrHint: "The mycelium is your avatar's (change it in Settings); here you only pick the encoded vCard fields and the redundancy.",
   },
   sdi: {
     title: 'SdI environment (transmission)',

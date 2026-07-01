@@ -105,9 +105,15 @@ class MeOut(BaseModel):
     # UI / notification locale ("it" | "en"); NULL = default ("en").
     language: str | None = None
     is_admin: bool
-    # Whether the user has a generated mycelium-QR avatar stored; the bytes
-    # are served separately by GET /auth/me/avatar.
+    # Whether the user has a generated mycelium avatar stored; the bytes are
+    # served separately by GET /auth/me/avatar.
     has_avatar: bool = False
+    # The avatar's fingerprint + colours, so a "avatar + QR" issuer logo can
+    # reuse the SAME mycelium (keeping the logo aligned with the avatar instead
+    # of drifting to a fresh random one).
+    avatar_seed: str | None = None
+    avatar_bg: str | None = None
+    avatar_net: str | None = None
 
 
 class MePatchIn(BaseModel):

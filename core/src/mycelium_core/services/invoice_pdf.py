@@ -388,6 +388,47 @@ def _letterhead_flow(
     return flow
 
 
+def _header_flow(
+    issuer: IssuerProfile | None,
+    logo: bytes | None,
+    base: ParagraphStyle,
+    title_para: Paragraph,
+    number_para: Paragraph,
+) -> list[object]:
+    """The page header. With ``logo_position`` left/right the logo sits BESIDE
+    the invoice title block (title + number + optional letterhead text) on one
+    row; with ``top`` (or no logo) the logo/letterhead band stays above and the
+    title drops below. A thin rule closes the header."""
+    position = (getattr(issuer, "logo_position", "left") if issuer else "top") or "left"
+    kind = (getattr(issuer, "logo_kind", "image") if issuer else "image") or "image"
+    if position in ("left", "right"):
+        img = _logo_image(logo, kind, "RIGHT" if position == "right" else "LEFT")
+        if img is not None:
+            title_col: list[object] = [title_para, number_para]
+            text = (issuer.letterhead or "").strip() if issuer else ""
+            if text:
+                lh_style = ParagraphStyle("letterhead", parent=base, fontSize=9, leading=12)
+                title_col.append(Paragraph(escape(text).replace("\n", "<br/>"), lh_style))
+            logo_w = (_LOGO_SQUARE + 6 * mm) if kind in ("avatar", "avatar_qr") else 60 * mm
+            text_w = _LETTERHEAD_W - logo_w
+            cells = [title_col, img] if position == "right" else [img, title_col]
+            widths = [text_w, logo_w] if position == "right" else [logo_w, text_w]
+            band = Table([cells], colWidths=widths)
+            band.setStyle(_LETTERHEAD_TABLE_STYLE)
+            return [
+                band,
+                Spacer(1, 2 * mm),
+                HRFlowable(width="100%", thickness=0.6, color=colors.HexColor("#888888")),
+                Spacer(1, 3 * mm),
+            ]
+    # position == "top", or no logo: the letterhead band above, title below.
+    flow: list[object] = list(_letterhead_flow(issuer, logo, base))
+    flow.append(title_para)
+    flow.append(number_para)
+    flow.append(Spacer(1, 4 * mm))
+    return flow
+
+
 def build_pdf(
     invoice: Invoice,
     issuer: IssuerProfile | None,
@@ -457,18 +498,15 @@ def build_pdf(
     date_fmt = client.invoice_date_format if client is not None else None
     issued = format_date((invoice.issued_at or dt.datetime.now(tz=dt.UTC)).date(), date_fmt)
 
-    # Optional graphic letterhead (issuer logo + header text) above the
-    # "Fattura" title.
-    flow.extend(_letterhead_flow(issuer, logo, base))
-    flow.append(Paragraph(_L(loc, "invoice"), h_title))
+    # Header: the logo sits left/right of the FATTURA title block, or (top)
+    # above the letterhead band with the title below. See _header_flow.
     draft_tag = f"  ({_L(loc, 'draft')})" if is_draft else ""
-    flow.append(
-        Paragraph(
-            f"{_L(loc, 'number')}: {display_number}{draft_tag}  ·  {issued}",
-            h_number,
-        )
+    title_para = Paragraph(_L(loc, "invoice"), h_title)
+    number_para = Paragraph(
+        f"{_L(loc, 'number')}: {display_number}{draft_tag}  ·  {issued}",
+        h_number,
     )
-    flow.append(Spacer(1, 4 * mm))
+    flow.extend(_header_flow(issuer, logo, base, title_para, number_para))
 
     # --- cedente (issuer) / cessionario (client) side by side ---
     def _party(

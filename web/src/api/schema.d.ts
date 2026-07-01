@@ -8897,6 +8897,12 @@ export interface components {
              * @default false
              */
             has_avatar?: boolean;
+            /** Avatar Seed */
+            avatar_seed?: string | null;
+            /** Avatar Bg */
+            avatar_bg?: string | null;
+            /** Avatar Net */
+            avatar_net?: string | null;
         };
         /**
          * MePatchIn

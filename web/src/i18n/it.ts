@@ -637,6 +637,7 @@ export const it: Catalog = {
     useAvatar: 'Usa il mio avatar',
     noAvatar: 'Nessun avatar salvato (creane uno in Impostazioni).',
     useQr: 'Usa come logo',
+    qrHint: 'Il micelio e quello del tuo avatar (cambialo in Impostazioni); qui scegli solo i campi vCard codificati e la ridondanza.',
   },
   sdi: {
     title: 'Ambiente SdI (trasmissione)',
