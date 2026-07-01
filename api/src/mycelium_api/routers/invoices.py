@@ -824,6 +824,22 @@ async def mark_paid(
     return _inv_out(inv)
 
 
+@router.post("/invoices/{invoice_id}/reopen", response_model=InvoiceOut)
+async def reopen_rejected(
+    invoice_id: uuid.UUID,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+) -> InvoiceOut:
+    """Return a scartato (SdI NS / rejected) invoice to draft to correct and
+    re-transmit under the same number + date (FatturaPA 5-day re-send)."""
+    inv = await svc.reopen_rejected(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        invoice_id=invoice_id,
+    )
+    return _inv_out(inv)
+
+
 @router.post("/invoices/receipt", response_model=InvoiceOut)
 async def ingest_receipt(
     body: ReceiptIn,

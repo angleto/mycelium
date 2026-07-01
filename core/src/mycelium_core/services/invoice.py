@@ -668,10 +668,15 @@ async def get_invoice(
     org_id: uuid.UUID,
     invoice_id: uuid.UUID,
     include_deleted: bool = False,
+    for_update: bool = False,
 ) -> Invoice:
-    inv = (
-        await session.execute(select(Invoice).where(Invoice.id == invoice_id))
-    ).scalar_one_or_none()
+    stmt = select(Invoice).where(Invoice.id == invoice_id)
+    if for_update:
+        # Serialise concurrent state transitions (transmit / reopen) on this
+        # row: a second caller blocks until the first commits, then sees the
+        # new state -- no double-transmit under two numbers, no reopen race.
+        stmt = stmt.with_for_update()
+    inv = (await session.execute(stmt)).scalar_one_or_none()
     # A trashed invoice is a 404 to every normal operation (it must be
     # restored first); the trash/restore path opts in via include_deleted.
     if inv is None or (inv.deleted_at is not None and not include_deleted):
@@ -1369,7 +1374,10 @@ async def transmit(
     progressivo: str | None = None,
     channel: SdiChannel | None = None,
 ) -> Invoice:
-    inv = await get_invoice(session, org_id=org_id, invoice_id=invoice_id)
+    # Lock the row for the whole transmit: a double-click (or two concurrent
+    # transmits) then serialises -- the second blocks until the first commits
+    # and fails _require_draft, instead of double-filing at SdI under two numbers.
+    inv = await get_invoice(session, org_id=org_id, invoice_id=invoice_id, for_update=True)
     _require_draft(inv)
     await require_role(session, org_id, actor_id, Role.member)
     # The chosen issuer identity (default if none); its header is frozen
@@ -1410,11 +1418,18 @@ async def transmit(
         totals.stamp_duty,
         totals.total,
     )
-    number = await _allocate_number(
-        session, org_id=org_id, issuer_profile_id=fiscal.id, series=inv.series, year=inv.year
-    )
-    inv.number = number
-    inv.issued_at = dt.datetime.now(tz=dt.UTC)
+    # A reopened scarto (rejected -> draft via reopen_rejected) keeps its
+    # already-allocated number and original date: FatturaPA treats a scartato
+    # document as never issued, so the correction is re-sent within 5 days under
+    # the SAME numero + data -- allocating a new number would leave a gap. A
+    # fresh draft (number/issued_at still None) allocates and stamps now.
+    if inv.number is None:
+        inv.number = await _allocate_number(
+            session, org_id=org_id, issuer_profile_id=fiscal.id, series=inv.series, year=inv.year
+        )
+    number = inv.number
+    if inv.issued_at is None:
+        inv.issued_at = dt.datetime.now(tz=dt.UTC)
     # The SdI file-name progressivo is max 5 alphanumeric chars (Specifiche
     # SDI, Allegato B). It must also be unique per trasmittente across every
     # file ever sent, which the per-org/per-issuer invoice number is NOT
@@ -1467,6 +1482,40 @@ async def transmit(
         entity_id=inv.id,
         action="transmit",
         diff={"number": f"{inv.series}-{number}", "channel": res.channel},
+    )
+    return inv
+
+
+async def reopen_rejected(
+    session: AsyncSession, *, org_id: uuid.UUID, actor_id: uuid.UUID, invoice_id: uuid.UUID
+) -> Invoice:
+    """Return a scartato (SdI NS / ``rejected``) invoice to ``draft`` so it can
+    be corrected and re-transmitted. FatturaPA: a scartato document was never
+    validly issued, so within 5 days it is re-sent under the SAME numero + data
+    (kept here; ``transmit`` reuses them). The stale rejected XML and the SdI
+    correlation are cleared so the next transmit rebuilds and re-files. Only a
+    ``rejected`` invoice may be reopened -- a delivered/accepted one is
+    corrected with a TD04 credit note, never reopened."""
+    await require_role(session, org_id, actor_id, Role.member)
+    inv = await get_invoice(session, org_id=org_id, invoice_id=invoice_id, for_update=True)
+    if inv.state is not InvoiceState.rejected:
+        raise ConflictError(MessageCode.INVOICE_NOT_REJECTED)
+    inv.state = InvoiceState.draft
+    inv.xml = None
+    inv.identificativo_sdi = None
+    inv.sdi_status = SdiStatus.none
+    # Not under AdE conservation until it actually transits SdI on the re-send.
+    inv.conservation_status = ConservationStatus.out_of_coverage
+    inv.version += 1
+    await session.flush()
+    await audit.log(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        entity="invoice",
+        entity_id=inv.id,
+        action="reopen",
+        diff={"from": "rejected", "number": f"{inv.series}-{inv.number}"},
     )
     return inv
 

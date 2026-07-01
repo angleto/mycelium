@@ -2034,6 +2034,7 @@ export const it: Catalog = {
     paid: 'Segna pagata',
     xml: 'Vedi XML',
     creditNote: 'Nota di credito (TD04)',
+    reopen: 'Correggi e re-invia',
     loading: 'Caricamento...',
     confirmDeleteDraft: 'Eliminare questa bozza di fattura?',
     confirmDeleteProfile: 'Eliminare questo profilo emittente?',

@@ -352,6 +352,55 @@ async def test_sdicoop_assigns_identificativo_and_receipt_correlation(
         assert rc.conservation_status is ConservationStatus.ade_covered
 
 
+async def test_scarto_reopen_resends_under_same_number_and_date(_sdicoop: None) -> None:
+    # FatturaPA scarto recovery: an NS (rejected) invoice reopens to draft
+    # KEEPING its number + date, and the re-send reuses them (a scartato
+    # document was never issued -> re-transmit within 5 days, no numbering gap).
+    org, user = await _org()
+    async with tenant_session(str(org), str(user)) as s:
+        client_id = await _setup(s, org, user)
+        d = await inv.create_draft(s, org_id=org, actor_id=user, client_tag_id=client_id, year=2026)
+        await inv.add_line(
+            s,
+            org_id=org,
+            actor_id=user,
+            invoice_id=d.id,
+            description="svc",
+            unit_price=Decimal(100),
+        )
+        from mycelium_core.services import sdi_mandate
+
+        issuer = await inv.get_default_issuer_profile(s, org_id=org)
+        assert issuer is not None
+        await sdi_mandate.grant_mandate(s, org_id=org, actor_id=user, issuer_profile_id=issuer.id)
+        tx = await inv.transmit(s, org_id=org, actor_id=user, invoice_id=d.id)
+        n1, data1 = tx.number, tx.issued_at
+        assert n1 is not None
+        # SdI scarto -> rejected.
+        rej = await inv.ingest_receipt(
+            s, org_id=org, actor_id=user, identificativo_sdi=tx.identificativo_sdi, outcome="NS"
+        )
+        assert rej.state is InvoiceState.rejected
+        # Reopen -> draft, number + date kept, stale XML / SdI correlation cleared.
+        re = await inv.reopen_rejected(s, org_id=org, actor_id=user, invoice_id=d.id)
+        assert re.state is InvoiceState.draft
+        assert re.number == n1
+        assert re.xml is None and re.identificativo_sdi is None
+        assert re.sdi_status is SdiStatus.none
+        # Re-transmit reuses the SAME numero + data.
+        tx2 = await inv.transmit(s, org_id=org, actor_id=user, invoice_id=d.id)
+        assert tx2.state is InvoiceState.transmitted
+        assert tx2.number == n1
+        assert tx2.issued_at == data1
+        # A transmitted (not rejected) invoice cannot be reopened.
+        raised = False
+        try:
+            await inv.reopen_rejected(s, org_id=org, actor_id=user, invoice_id=d.id)
+        except ConflictError:
+            raised = True
+        assert raised
+
+
 async def test_sdicoop_preview_stamps_intermediary_for_a_different_tenant(
     _sdicoop: None,
 ) -> None:

@@ -707,6 +707,19 @@ export function InvoicesRoute() {
     window.setTimeout(() => URL.revokeObjectURL(u), 60000)
   }
 
+  // Reopen a scartato (SdI NS / rejected) invoice back to draft so it can be
+  // corrected and re-sent under the same number + date. Untyped authFetch so
+  // this does not depend on a schema.d.ts regen.
+  async function reopen(id: string) {
+    setErr(null)
+    const res = await authFetch(`/invoices/${id}/reopen`, { method: 'POST' })
+    if (!res.ok) {
+      setErr(errMessage(await res.json().catch(() => null)))
+      return
+    }
+    await openInvoice(id)
+  }
+
   const tv = totals(lines)
   // Select-all over the billable report rows. Only rows with a usable
   // ``key`` are selectable (a null key has its per-row checkbox
@@ -1754,6 +1767,11 @@ export function InvoicesRoute() {
             )}
             {!isDraft && (
               <>
+                {sel.state === 'rejected' && (
+                  <button type="button" onClick={() => void reopen(sel.id)}>
+                    {t('invoices.reopen')}
+                  </button>
+                )}
                 <button type="button" onClick={() => void showXml(sel.id)}>
                   {t('invoices.xml')}
                 </button>

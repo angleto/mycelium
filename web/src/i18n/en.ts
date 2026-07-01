@@ -2033,6 +2033,7 @@ export const en = {
     paid: 'Mark paid',
     xml: 'View XML',
     creditNote: 'Credit note (TD04)',
+    reopen: 'Correct and re-send',
     loading: 'Loading...',
     confirmDeleteDraft: 'Delete this draft invoice?',
     confirmDeleteProfile: 'Delete this issuer profile?',

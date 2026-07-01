@@ -94,6 +94,7 @@ class MessageCode(enum.StrEnum):
     INTENT_UNRECOGNIZED = "intent.unrecognized"
     INVOICE_NOT_FOUND = "invoice.not_found"
     INVOICE_NOT_DRAFT = "invoice.not_draft"
+    INVOICE_NOT_REJECTED = "invoice.not_rejected"
     INVOICE_INVALID = "invoice.invalid"
     FISCAL_PROFILE_REQUIRED = "invoice.fiscal_profile_required"
     ISSUER_PROFILE_IN_USE = "invoice.issuer_profile_in_use"
@@ -321,6 +322,9 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
         MessageCode.INVOICE_NOT_FOUND: "Invoice not found",
         MessageCode.INVOICE_NOT_DRAFT: (
             "Invoice is emitted and immutable (only draft is editable)"
+        ),
+        MessageCode.INVOICE_NOT_REJECTED: (
+            "Only a rejected (SdI scarto) invoice can be reopened for correction"
         ),
         MessageCode.INVOICE_INVALID: ("Invalid invoice: {detail}"),
         MessageCode.FISCAL_PROFILE_REQUIRED: (
