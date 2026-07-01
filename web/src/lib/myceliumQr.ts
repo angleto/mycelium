@@ -275,6 +275,69 @@ function drawCreature(
   ctx.fill()
 }
 
+/** A pure mycelial network filling the frame — the decorative avatar (NOT a
+ * QR, not scannable). A random branching hypha web grown from the centre,
+ * seeded by the fingerprint so each is unique + reproducible; regenerate ->
+ * a new organism. Same colours as the QR variant. */
+export function renderMyceliumOnly(
+  canvas: HTMLCanvasElement,
+  opts: { seed: string; bg: string; net: string; size?: number },
+): void {
+  const size = opts.size ?? 512
+  canvas.width = size
+  canvas.height = size
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return
+  const rnd = mulberry32(hashStr(opts.seed))
+  const unit = size / 32
+  ctx.fillStyle = opts.bg
+  ctx.fillRect(0, 0, size, size)
+  ctx.strokeStyle = opts.net
+  ctx.fillStyle = opts.net
+  ctx.lineCap = 'round'
+  ctx.lineJoin = 'round'
+  const mx = size / 2
+  const my = size / 2
+
+  const grow = (x: number, y: number, ang: number, len: number, width: number, depth: number) => {
+    if (len < unit * 0.8 || depth > 6) return
+    const steps = 2 + Math.floor(rnd() * 3)
+    let px = x
+    let py = y
+    let a = ang
+    for (let i = 0; i < steps; i++) {
+      a += (rnd() - 0.5) * 0.7
+      const seg = len / steps
+      const nx = px + Math.cos(a) * seg
+      const ny = py + Math.sin(a) * seg
+      ctx.lineWidth = width
+      ctx.beginPath()
+      ctx.moveTo(px, py)
+      ctx.lineTo(nx, ny)
+      ctx.stroke()
+      px = nx
+      py = ny
+      if (depth < 5 && rnd() < 0.5) {
+        grow(px, py, a + (rnd() - 0.5) * 1.5, len * 0.62, width * 0.72, depth + 1)
+      }
+    }
+    // Spore swelling at the tip.
+    ctx.beginPath()
+    ctx.arc(px, py, Math.max(width * 1.1, unit * 0.32), 0, Math.PI * 2)
+    ctx.fill()
+  }
+
+  const arms = 6 + Math.floor(rnd() * 5)
+  for (let k = 0; k < arms; k++) {
+    const ang = (k / arms) * Math.PI * 2 + (rnd() - 0.5) * 0.5
+    grow(mx, my, ang, size * 0.42 * (0.8 + rnd() * 0.4), unit * 0.7, 0)
+  }
+  // Central hypha knot.
+  ctx.beginPath()
+  ctx.arc(mx, my, unit * 1.2, 0, Math.PI * 2)
+  ctx.fill()
+}
+
 /** Decode the rendered canvas with jsQR (trying the inverted image too, since
  * a white-network-on-coloured-bg is an inverted code) and check it equals the
  * expected payload. The in-app scannability self-check. */

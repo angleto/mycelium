@@ -7,6 +7,7 @@ import {
   buildVCard,
   qrMatrix,
   randomFingerprint,
+  renderMyceliumOnly,
   renderMyceliumQR,
   verifyDecode,
 } from './lib/myceliumQr'
@@ -17,6 +18,7 @@ const canvas = $<HTMLCanvasElement>('qr')
 const bgInput = $<HTMLInputElement>('bg')
 const netInput = $<HTMLInputElement>('net')
 const eclSel = $<HTMLSelectElement>('ecl')
+const modeSel = $<HTMLSelectElement>('mode')
 const regenBtn = $<HTMLButtonElement>('regen')
 const statusEl = $<HTMLElement>('status')
 const fpEl = $<HTMLElement>('fp')
@@ -60,6 +62,16 @@ const printCanvas = document.createElement('canvas')
 const PRINT_PX = 130
 
 function draw(): void {
+  const printEl = document.getElementById('printstatus') as HTMLElement
+  fpEl.textContent = seed
+  if (modeSel.value === 'mycelium') {
+    renderMyceliumOnly(canvas, { seed, bg: bgInput.value, net: netInput.value })
+    statusEl.textContent = 'solo micelio (avatar) — decorativo, non scansionabile'
+    statusEl.className = ''
+    printEl.textContent = ''
+    infoEl.textContent = 'micelio puro'
+    return
+  }
   const vcard = buildVCard(vcardData())
   const matrix = qrMatrix(vcard, eclSel.value as Ecl)
   renderMyceliumQR(canvas, matrix, { seed, bg: bgInput.value, net: netInput.value })
@@ -75,10 +87,9 @@ function draw(): void {
     size: PRINT_PX,
   })
   const okPrint = verifyDecode(printCanvas, vcard)
-  const printEl = document.getElementById('printstatus') as HTMLElement
   printEl.textContent = okPrint
     ? 'a 22 mm (logo fattura): OK ✓'
-    : 'a 22 mm (logo fattura): NO ✗ — troppo denso per quel formato'
+    : 'a 22 mm (logo fattura): NO ✗ — troppo denso a 22mm (usa un box logo piu grande)'
   printEl.className = okPrint ? 'ok' : 'no'
 
   fpEl.textContent = seed
@@ -89,7 +100,7 @@ regenBtn.addEventListener('click', () => {
   seed = randomFingerprint()
   draw()
 })
-for (const el of [bgInput, netInput, eclSel, ...Object.values(checks)]) {
+for (const el of [bgInput, netInput, eclSel, modeSel, ...Object.values(checks)]) {
   el.addEventListener('input', draw)
 }
 draw()
