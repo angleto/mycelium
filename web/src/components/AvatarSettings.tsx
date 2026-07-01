@@ -15,7 +15,7 @@ import {
 type Profile = components['schemas']['IssuerProfileOut']
 
 const ECLS: Ecl[] = ['L', 'M', 'Q', 'H']
-const FIELDS = ['name', 'org', 'vat', 'cf', 'email', 'phone', 'address'] as const
+const FIELDS = ['name', 'org', 'vat', 'cf', 'email', 'pec', 'phone', 'address'] as const
 type Field = (typeof FIELDS)[number]
 
 // Generate the user's mycelium-QR avatar from the default issuer profile's
@@ -38,6 +38,7 @@ export function AvatarSettings() {
     vat: false,
     cf: false,
     email: false,
+    pec: false,
     phone: true,
     address: false,
   })
@@ -81,6 +82,7 @@ export function AvatarSettings() {
       vat: fields.vat ? (p?.vat_number ?? null) : null,
       cf: fields.cf ? (p?.tax_code ?? null) : null,
       email: fields.email ? (p?.email ?? me?.email ?? null) : null,
+      pec: fields.pec ? (p?.pec ?? null) : null,
       phone: fields.phone ? (p?.phone ?? null) : null,
       address: addr || null,
     }
@@ -197,16 +199,21 @@ export function AvatarSettings() {
           </div>
           <fieldset style={{ border: '1px solid var(--border)', borderRadius: 6 }}>
             <legend>{t('avatar.fields')}</legend>
-            {FIELDS.map((f) => (
-              <label key={f}>
-                <input
-                  type="checkbox"
-                  checked={fields[f]}
-                  onChange={(e) => setFields({ ...fields, [f]: e.target.checked })}
-                />{' '}
-                {t(`avatar.field.${f}`)}
-              </label>
-            ))}
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.3rem 1rem' }}>
+              {FIELDS.map((f) => (
+                <label
+                  key={f}
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={fields[f]}
+                    onChange={(e) => setFields({ ...fields, [f]: e.target.checked })}
+                  />
+                  {t(`avatar.field.${f}`)}
+                </label>
+              ))}
+            </div>
           </fieldset>
           <p className={ok ? 'ok' : 'err'}>
             {ok ? t('avatar.scanOk') : t('avatar.scanNo')}

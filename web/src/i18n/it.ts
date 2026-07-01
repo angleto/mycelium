@@ -613,6 +613,7 @@ export const it: Catalog = {
       vat: 'P.IVA',
       cf: 'C.F.',
       email: 'Email',
+      pec: 'PEC',
       phone: 'Telefono',
       address: 'Indirizzo',
     },

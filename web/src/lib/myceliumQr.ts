@@ -50,6 +50,7 @@ export interface VCardData {
   vat?: string | null
   cf?: string | null
   email?: string | null
+  pec?: string | null
   phone?: string | null
   address?: string | null
 }
@@ -61,6 +62,7 @@ export function buildVCard(d: VCardData): string {
   const lines = ['BEGIN:VCARD', 'VERSION:3.0', `FN:${esc(d.fullName)}`]
   if (d.org) lines.push(`ORG:${esc(d.org)}`)
   if (d.email) lines.push(`EMAIL;TYPE=INTERNET:${esc(d.email)}`)
+  if (d.pec) lines.push(`EMAIL;TYPE=PEC:${esc(d.pec)}`)
   if (d.phone) lines.push(`TEL:${esc(d.phone)}`)
   if (d.address) lines.push(`ADR:;;${esc(d.address)};;;;`)
   const note = [d.vat ? `P.IVA ${d.vat}` : '', d.cf ? `C.F. ${d.cf}` : ''].filter(Boolean).join(' ')
@@ -208,6 +210,69 @@ export function renderMyceliumQR(
       ctx.fill()
     }
   }
+
+  drawCreature(ctx, { cx: off + (n * cell) / 2, cy: off + (n * cell) / 2, r: n * cell * 0.18, cell, bg: opts.bg, net: opts.net, rnd })
+}
+
+// The central "creature": a unique random mycelial network seeded by the
+// fingerprint, occupying the middle of the code. ECC H recovers the modules it
+// occludes (kept well under the error budget), so the QR still scans; the
+// creature is what makes each avatar recognisably distinct. Regenerate -> new
+// seed -> a different creature.
+function drawCreature(
+  ctx: CanvasRenderingContext2D,
+  o: { cx: number; cy: number; r: number; cell: number; bg: string; net: string; rnd: () => number },
+): void {
+  const { cx, cy, r, cell, bg, net, rnd } = o
+  // Clear a background disc (with a small gap) so the data modules under the
+  // creature are gone and it reads separately from the surrounding hyphae.
+  ctx.fillStyle = bg
+  ctx.beginPath()
+  ctx.arc(cx, cy, r + cell * 1.1, 0, Math.PI * 2)
+  ctx.fill()
+
+  ctx.strokeStyle = net
+  ctx.fillStyle = net
+  ctx.lineCap = 'round'
+  ctx.lineJoin = 'round'
+
+  const grow = (x: number, y: number, ang: number, len: number, width: number, depth: number) => {
+    if (len < cell * 0.7 || depth > 4) return
+    const steps = 2 + Math.floor(rnd() * 3)
+    let px = x
+    let py = y
+    let a = ang
+    for (let i = 0; i < steps; i++) {
+      a += (rnd() - 0.5) * 0.9
+      const seg = len / steps
+      const nx = px + Math.cos(a) * seg
+      const ny = py + Math.sin(a) * seg
+      ctx.lineWidth = width
+      ctx.beginPath()
+      ctx.moveTo(px, py)
+      ctx.lineTo(nx, ny)
+      ctx.stroke()
+      px = nx
+      py = ny
+      if (depth < 3 && rnd() < 0.45) {
+        grow(px, py, a + (rnd() - 0.5) * 1.6, len * 0.55, width * 0.7, depth + 1)
+      }
+    }
+    // A spore swelling at the filament tip.
+    ctx.beginPath()
+    ctx.arc(px, py, Math.max(width * 1.1, cell * 0.35), 0, Math.PI * 2)
+    ctx.fill()
+  }
+
+  const arms = 5 + Math.floor(rnd() * 4)
+  for (let k = 0; k < arms; k++) {
+    const ang = (k / arms) * Math.PI * 2 + (rnd() - 0.5) * 0.7
+    grow(cx, cy, ang, r * (0.75 + rnd() * 0.3), cell * 0.55, 0)
+  }
+  // Central hypha knot.
+  ctx.beginPath()
+  ctx.arc(cx, cy, cell * 0.95, 0, Math.PI * 2)
+  ctx.fill()
 }
 
 /** Decode the rendered canvas with jsQR (trying the inverted image too, since

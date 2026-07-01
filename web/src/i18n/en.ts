@@ -612,6 +612,7 @@ export const en = {
       vat: 'VAT no.',
       cf: 'Tax code',
       email: 'Email',
+      pec: 'PEC',
       phone: 'Phone',
       address: 'Address',
     },

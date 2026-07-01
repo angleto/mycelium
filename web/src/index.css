@@ -736,6 +736,9 @@ label > select,
   display: block;
   max-height: 64px;
   max-width: 220px;
+  width: auto;
+  height: auto;
+  object-fit: contain;
   margin: 0.3rem 0;
   padding: 4px;
   border: 1px solid var(--border);
