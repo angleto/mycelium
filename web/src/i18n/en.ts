@@ -1974,7 +1974,11 @@ export const en = {
       unpaid: 'Unpaid',
       paid: 'Paid',
     },
-    sdi: { timeline: 'SdI transmission timeline' },
+    sdi: {
+      timeline: 'SdI transmission timeline',
+      viewXml: 'view XML',
+      downloadXml: 'download XML',
+    },
     view: { active: 'Active', archived: 'Archived', trashed: 'Trash' },
     archive: 'Archive',
     unarchive: 'Unarchive',

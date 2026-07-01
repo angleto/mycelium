@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { api, authFetch, errMessage, workspaceHeader } from '../api/client'
 import { useSession } from '../auth/useSession'
@@ -160,6 +160,9 @@ export function InvoicesRoute() {
   const [view, setView] = useState<InvView>(() => readView())
   // SdI transmission timeline (RC/MC/NS/AT/NE/DT) of the open invoice.
   const [notifs, setNotifs] = useState<SdiNotif[]>([])
+  // ``?id=<invoice>`` deep-links a specific invoice: it opens on load and the
+  // param tracks the open modal, so a row can be referenced by URL.
+  const [searchParams, setSearchParams] = useSearchParams()
 
   // Persist the filter selection + view on every change.
   useEffect(() => {
@@ -350,7 +353,30 @@ export function InvoicesRoute() {
     setTriRows([])
     setTriSel(new Set())
     setTriLoaded(false)
-  }, [])
+    // Reflect the open invoice in the URL (?id=): shareable + deep-linkable.
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev)
+        next.set('id', id)
+        return next
+      },
+      { replace: true },
+    )
+  }, [setSearchParams])
+
+  // Close the modal and drop ``?id=`` — one place so every dismissal path
+  // (Escape, backdrop, Close, Cancel) keeps the URL in sync.
+  const closeInvoice = useCallback(() => {
+    setSel(null)
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev)
+        next.delete('id')
+        return next
+      },
+      { replace: true },
+    )
+  }, [setSearchParams])
 
   // The open invoice shows in a modal (no scrolling to the bottom of the
   // page): Escape dismisses it, alongside the backdrop click and the Close
@@ -358,11 +384,35 @@ export function InvoicesRoute() {
   useEffect(() => {
     if (!sel) return
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setSel(null)
+      if (e.key === 'Escape') closeInvoice()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [sel])
+  }, [sel, closeInvoice])
+
+  // Deep-link: ``?id=<invoice>`` opens that invoice once on load (a shareable
+  // URL that lands straight on the document, no searching).
+  const deepLinked = useRef(false)
+  useEffect(() => {
+    if (deepLinked.current) return
+    const id = searchParams.get('id')
+    if (id) {
+      deepLinked.current = true
+      // Deferred so the effect body itself never triggers openInvoice's
+      // synchronous setState (react-hooks/set-state-in-effect).
+      queueMicrotask(() => void openInvoice(id))
+    }
+  }, [searchParams, openInvoice])
+
+  // Bring the document panel into view when its XML content changes (invoice
+  // or signed notification). Kept in an effect so the click handlers never read
+  // the ref during render (react-hooks/refs).
+  useEffect(() => {
+    if (xml == null) return
+    requestAnimationFrame(() =>
+      xmlRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }),
+    )
+  }, [xml])
 
   async function reloadSel() {
     if (sel) await openInvoice(sel.id)
@@ -653,14 +703,10 @@ export function InvoicesRoute() {
       setErr(errMessage(error))
       return
     }
+    // The viewer renders in the document panel; the effect on ``xml`` brings
+    // it into view (both the panel-head and action-row buttons trigger it from
+    // far up/down the long modal).
     setXml(data.xml)
-    // The viewer renders inside the document panel; both the panel-head and
-    // the (emitted) action-row buttons can trigger it from far up/down the
-    // long modal, so bring it into view instead of silently appending it
-    // below the fold.
-    requestAnimationFrame(() =>
-      xmlRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }),
-    )
   }
 
   // Filename for the preview .xml. We do not try to mirror the SdI
@@ -689,6 +735,54 @@ export function InvoicesRoute() {
     const a = document.createElement('a')
     a.href = u
     a.download = xmlFilename()
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    window.setTimeout(() => URL.revokeObjectURL(u), 60000)
+  }
+
+  // The signed SdI notification XML (RC/MC/NS/...): the XAdES-signed proof of
+  // the outcome. View reuses the same document-panel viewer as the invoice XML.
+  async function showNotifXml(notificationId: string) {
+    if (!sel) return
+    setErr(null)
+    const { data, error } = await api.GET(
+      '/invoices/{invoice_id}/notifications/{notification_id}/xml',
+      {
+        params: {
+          header: workspaceHeader(),
+          path: { invoice_id: sel.id, notification_id: notificationId },
+        },
+      },
+    )
+    if (error || !data) {
+      setErr(errMessage(error))
+      return
+    }
+    setXml(data.xml)
+  }
+
+  async function downloadNotifXml(notificationId: string, fileName: string | null) {
+    if (!sel) return
+    setErr(null)
+    const { data, error } = await api.GET(
+      '/invoices/{invoice_id}/notifications/{notification_id}/xml',
+      {
+        params: {
+          header: workspaceHeader(),
+          path: { invoice_id: sel.id, notification_id: notificationId },
+        },
+      },
+    )
+    if (error || !data) {
+      setErr(errMessage(error))
+      return
+    }
+    const blob = new Blob([data.xml], { type: 'application/xml;charset=utf-8' })
+    const u = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = u
+    a.download = fileName ?? `sdi-${notificationId}.xml`
     document.body.appendChild(a)
     a.click()
     a.remove()
@@ -855,7 +949,7 @@ export function InvoicesRoute() {
       ) : (
         <ul className="list">
           {list.map((i) => (
-            <li key={i.id}>
+            <li key={i.id} className="invrow">
               <button
                 type="button"
                 className="btn--ghost btn--sm"
@@ -946,7 +1040,7 @@ export function InvoicesRoute() {
           role="dialog"
           aria-modal="true"
           onClick={(e) => {
-            if (e.target === e.currentTarget) setSel(null)
+            if (e.target === e.currentTarget) closeInvoice()
           }}
         >
         <div className="modal__panel">
@@ -958,7 +1052,7 @@ export function InvoicesRoute() {
             <button
               type="button"
               className="btn--ghost btn--sm"
-              onClick={() => setSel(null)}
+              onClick={() => closeInvoice()}
             >
               {t('notes.close')}
             </button>
@@ -1144,6 +1238,22 @@ export function InvoicesRoute() {
                         {' · '}
                         {n.received_at.slice(0, 19).replace('T', ' ')}
                         {n.esito ? ` · ${n.esito}` : ''}
+                        {' · '}
+                        <button
+                          type="button"
+                          className="sdi-timeline__act"
+                          onClick={() => void showNotifXml(n.id)}
+                        >
+                          {t('invoices.sdi.viewXml')}
+                        </button>
+                        {' '}
+                        <button
+                          type="button"
+                          className="sdi-timeline__act"
+                          onClick={() => void downloadNotifXml(n.id, n.file_name)}
+                        >
+                          {t('invoices.sdi.downloadXml')}
+                        </button>
                         {n.errors.length > 0 && (
                           <ul className="sdi-timeline__errors">
                             {n.errors.map((e, j) => (
@@ -1758,7 +1868,7 @@ export function InvoicesRoute() {
                           path: { invoice_id: sel.id },
                         },
                       }),
-                    ).then(() => setSel(null))
+                    ).then(() => closeInvoice())
                   }
                 >
                   {t('invoices.trash')}

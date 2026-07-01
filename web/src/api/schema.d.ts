@@ -5441,6 +5441,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/invoices/{invoice_id}/notifications/{notification_id}/xml": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Notification Xml
+         * @description The raw signed SdI notification XML (RC/MC/NS/AT/NE/DT) for view or
+         *     download: the XAdES-signed document SdI delivered, i.e. the legal proof of
+         *     the transmission outcome for this invoice.
+         */
+        get: operations["get_notification_xml_invoices__invoice_id__notifications__notification_id__xml_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/invoices/purge-test": {
         parameters: {
             query?: never;
@@ -8301,8 +8323,14 @@ export interface components {
          * @description One SdI notification in the invoice's transmission timeline. ``esito``
          *     is the buyer EC verdict (EC01 accepted / EC02 rejected) on an NE;
          *     ``errors`` is the rejection list on an NS (empty for every other kind).
+         *     ``id`` addresses the notification for the signed-XML view/download.
          */
         InvoiceNotificationOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
             /** Kind */
             kind: string;
             /**
@@ -10395,6 +10423,18 @@ export interface components {
             revoked_at: string | null;
             /** Version */
             version: number;
+        };
+        /**
+         * SdiNotificationXmlOut
+         * @description The raw signed SdI notification XML (RC/MC/NS/...) for view/download,
+         *     plus its SdI file name. The XML is the XAdES-signed document SdI delivered:
+         *     the legal proof of the transmission outcome.
+         */
+        SdiNotificationXmlOut: {
+            /** Xml */
+            xml: string;
+            /** File Name */
+            file_name: string | null;
         };
         /**
          * SdiStatus
@@ -24470,6 +24510,43 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["InvoiceNotificationOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_notification_xml_invoices__invoice_id__notifications__notification_id__xml_get: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                invoice_id: string;
+                notification_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SdiNotificationXmlOut"];
                 };
             };
             /** @description Validation Error */

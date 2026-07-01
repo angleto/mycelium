@@ -41,6 +41,7 @@ from mycelium_api.schemas import (
     ReceiptIn,
     SdiMandateIn,
     SdiMandateOut,
+    SdiNotificationXmlOut,
     TransmitIn,
 )
 from mycelium_core.models.invoice import (
@@ -607,6 +608,7 @@ async def list_invoice_notifications(
         esito = n.payload.get("esito") if isinstance(n.payload, dict) else None
         out.append(
             InvoiceNotificationOut(
+                id=n.id,
                 kind=n.kind,
                 received_at=n.received_at,
                 file_name=n.file_name,
@@ -616,6 +618,27 @@ async def list_invoice_notifications(
             )
         )
     return out
+
+
+@router.get(
+    "/invoices/{invoice_id}/notifications/{notification_id}/xml",
+    response_model=SdiNotificationXmlOut,
+)
+async def get_notification_xml(
+    invoice_id: uuid.UUID,
+    notification_id: uuid.UUID,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+) -> SdiNotificationXmlOut:
+    """The raw signed SdI notification XML (RC/MC/NS/AT/NE/DT) for view or
+    download: the XAdES-signed document SdI delivered, i.e. the legal proof of
+    the transmission outcome for this invoice."""
+    xml, file_name = await svc.get_invoice_notification_xml(
+        ctx.session,
+        org_id=ctx.org_id,
+        invoice_id=invoice_id,
+        notification_id=notification_id,
+    )
+    return SdiNotificationXmlOut(xml=xml, file_name=file_name)
 
 
 @router.post("/invoices/purge-test", response_model=PurgeTestInvoicesOut)

@@ -187,6 +187,12 @@ async def test_f7_api_flow() -> None:
         body = tx.json()
         assert body["number"] == 1 and body["state"] == "transmitted"
         assert body["total"] == "244.00"  # 200 + 22%
+        # SdI notification timeline + signed-XML download endpoint are wired:
+        # the list is addressable (200) and a bogus notification id is a 404.
+        notifs = await c.get(f"/invoices/{inv['id']}/notifications", headers=h)
+        assert notifs.status_code == 200 and isinstance(notifs.json(), list)
+        miss = await c.get(f"/invoices/{inv['id']}/notifications/{uuid.uuid4()}/xml", headers=h)
+        assert miss.status_code == 404
         assert body["conservation_status"] == "out_of_coverage"
 
         xml = (await c.get(f"/invoices/{inv['id']}/xml", headers=h)).json()["xml"]

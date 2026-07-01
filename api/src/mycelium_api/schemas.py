@@ -2980,6 +2980,15 @@ class InvoiceXmlOut(BaseModel):
     xml: str
 
 
+class SdiNotificationXmlOut(BaseModel):
+    """The raw signed SdI notification XML (RC/MC/NS/...) for view/download,
+    plus its SdI file name. The XML is the XAdES-signed document SdI delivered:
+    the legal proof of the transmission outcome."""
+
+    xml: str
+    file_name: str | None
+
+
 class InvoiceNotificationError(BaseModel):
     """One ``Errore`` from a NotificaScarto error list."""
 
@@ -2990,8 +2999,10 @@ class InvoiceNotificationError(BaseModel):
 class InvoiceNotificationOut(BaseModel):
     """One SdI notification in the invoice's transmission timeline. ``esito``
     is the buyer EC verdict (EC01 accepted / EC02 rejected) on an NE;
-    ``errors`` is the rejection list on an NS (empty for every other kind)."""
+    ``errors`` is the rejection list on an NS (empty for every other kind).
+    ``id`` addresses the notification for the signed-XML view/download."""
 
+    id: uuid.UUID
     kind: str
     received_at: datetime.datetime
     file_name: str | None

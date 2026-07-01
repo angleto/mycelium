@@ -416,11 +416,24 @@ async def test_scarto_reopen_resends_under_same_number_and_date(_sdicoop: None) 
         tx = await inv.transmit(s, org_id=org, actor_id=user, invoice_id=d.id)
         n1, data1 = tx.number, tx.issued_at
         assert n1 is not None
-        # SdI scarto -> rejected.
-        rej = await inv.ingest_receipt(
-            s, org_id=org, actor_id=user, identificativo_sdi=tx.identificativo_sdi, outcome="NS"
+        # SdI scarto -> rejected, with a real NS notification on the timeline.
+        from mycelium_core.services.sdi_inbound import ParsedNotification
+
+        rej = await inv.ingest_active_notification(
+            s,
+            org_id=org,
+            actor_id=user,
+            parsed=ParsedNotification(
+                outcome="NS",
+                identificativo_sdi=tx.identificativo_sdi,
+                message_id="MSG-NS-1",
+                file_name="IT_NS_001.xml",
+                esito=None,
+                raw_xml=b"<ns3:NotificaScarto/>",
+            ),
         )
         assert rej.state is InvoiceState.rejected
+        assert len(await inv.list_invoice_notifications(s, org_id=org, invoice_id=d.id)) == 1
         # Reopen -> draft, number + date kept, stale XML / SdI correlation cleared.
         re = await inv.reopen_rejected(s, org_id=org, actor_id=user, invoice_id=d.id)
         assert re.state is InvoiceState.draft
@@ -442,6 +455,56 @@ async def test_scarto_reopen_resends_under_same_number_and_date(_sdicoop: None) 
         except ConflictError:
             raised = True
         assert raised
+
+
+async def test_notification_signed_xml_is_retrievable(_sdicoop: None) -> None:
+    # The signed SdI notification XML (the XAdES proof of the outcome) is
+    # retrievable for view/download, scoped to the invoice + tenant; a wrong
+    # notification id is a 404.
+    from mycelium_core.services import sdi_mandate
+    from mycelium_core.services.sdi_inbound import ParsedNotification
+
+    org, user = await _org()
+    async with tenant_session(str(org), str(user)) as s:
+        client_id = await _setup(s, org, user)
+        d = await inv.create_draft(s, org_id=org, actor_id=user, client_tag_id=client_id, year=2026)
+        await inv.add_line(
+            s,
+            org_id=org,
+            actor_id=user,
+            invoice_id=d.id,
+            description="svc",
+            unit_price=Decimal(100),
+        )
+        issuer = await inv.get_default_issuer_profile(s, org_id=org)
+        assert issuer is not None
+        await sdi_mandate.grant_mandate(s, org_id=org, actor_id=user, issuer_profile_id=issuer.id)
+        tx = await inv.transmit(s, org_id=org, actor_id=user, invoice_id=d.id)
+        assert tx.identificativo_sdi is not None
+        signed = b"<ns3:RicevutaConsegna><ds:Signature/></ns3:RicevutaConsegna>"
+        await inv.ingest_active_notification(
+            s,
+            org_id=org,
+            actor_id=user,
+            parsed=ParsedNotification(
+                outcome="RC",
+                identificativo_sdi=tx.identificativo_sdi,
+                message_id="MSG-RC-1",
+                file_name="IT_RC_001.xml",
+                esito=None,
+                raw_xml=signed,
+            ),
+        )
+        [n] = await inv.list_invoice_notifications(s, org_id=org, invoice_id=d.id)
+        xml, file_name = await inv.get_invoice_notification_xml(
+            s, org_id=org, invoice_id=d.id, notification_id=n.id
+        )
+        assert xml == signed.decode()
+        assert file_name == "IT_RC_001.xml"
+        with pytest.raises(NotFoundError):
+            await inv.get_invoice_notification_xml(
+                s, org_id=org, invoice_id=d.id, notification_id=uuid.uuid4()
+            )
 
 
 async def test_sdicoop_preview_stamps_intermediary_for_a_different_tenant(

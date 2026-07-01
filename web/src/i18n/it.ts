@@ -1975,7 +1975,11 @@ export const it: Catalog = {
       unpaid: 'Non pagata',
       paid: 'Pagata',
     },
-    sdi: { timeline: 'Cronologia trasmissione SdI' },
+    sdi: {
+      timeline: 'Cronologia trasmissione SdI',
+      viewXml: 'vedi XML',
+      downloadXml: 'scarica XML',
+    },
     view: { active: 'Attive', archived: 'Archiviate', trashed: 'Cestino' },
     archive: 'Archivia',
     unarchive: 'Disarchivia',

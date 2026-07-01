@@ -1167,6 +1167,32 @@ async def list_invoice_notifications(
     )
 
 
+async def get_invoice_notification_xml(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    invoice_id: uuid.UUID,
+    notification_id: uuid.UUID,
+) -> tuple[str, str | None]:
+    """The raw signed SdI notification XML (RC/MC/NS/AT/NE/DT) for view or
+    download: the XAdES-signed document SdI delivered -- the legal proof of the
+    transmission outcome. Scoped to the invoice + tenant (404 if the invoice is
+    not the tenant's or no such notification hangs off it). ``raw_xml`` decodes
+    as UTF-8 (SdI notifiche are enveloped-signature XML, not a p7m envelope)."""
+    await get_invoice(session, org_id=org_id, invoice_id=invoice_id)
+    n = (
+        await session.execute(
+            select(InvoiceNotification).where(
+                InvoiceNotification.id == notification_id,
+                InvoiceNotification.invoice_id == invoice_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if n is None:
+        raise NotFoundError(MessageCode.INVOICE_NOT_FOUND)
+    return bytes(n.raw_xml).decode("utf-8", "replace"), n.file_name
+
+
 async def _resolve_issuer(
     session: AsyncSession, *, org_id: uuid.UUID, inv: Invoice
 ) -> IssuerProfile | None:
