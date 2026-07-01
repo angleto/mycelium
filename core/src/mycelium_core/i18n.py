@@ -95,6 +95,7 @@ class MessageCode(enum.StrEnum):
     INVOICE_NOT_FOUND = "invoice.not_found"
     INVOICE_NOT_DRAFT = "invoice.not_draft"
     INVOICE_NOT_REJECTED = "invoice.not_rejected"
+    CREDIT_NOTE_PARENT_INVALID = "invoice.credit_note_parent_invalid"
     INVOICE_INVALID = "invoice.invalid"
     FISCAL_PROFILE_REQUIRED = "invoice.fiscal_profile_required"
     ISSUER_PROFILE_IN_USE = "invoice.issuer_profile_in_use"
@@ -325,6 +326,10 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
         ),
         MessageCode.INVOICE_NOT_REJECTED: (
             "Only a rejected (SdI scarto) invoice can be reopened for correction"
+        ),
+        MessageCode.CREDIT_NOTE_PARENT_INVALID: (
+            "A credit note requires an emitted invoice; a draft is not yet issued "
+            "and a scartato one is corrected by resend, not a credit note"
         ),
         MessageCode.INVOICE_INVALID: ("Invalid invoice: {detail}"),
         MessageCode.FISCAL_PROFILE_REQUIRED: (

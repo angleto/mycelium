@@ -1531,8 +1531,15 @@ async def create_credit_note(
     """TD04 credit note linked to a transmitted invoice (ADR-0009: the
     only post-emission correction). Copies the parent's lines."""
     parent = await get_invoice(session, org_id=org_id, invoice_id=parent_invoice_id)
-    if parent.state is InvoiceState.draft:
-        raise ConflictError(MessageCode.INVOICE_NOT_DRAFT)
+    # A TD04 corrects an EMITTED invoice. A draft is not yet issued; a scartato
+    # (rejected) one was never validly issued -> it is corrected by resend
+    # (reopen_rejected), not by a credit note against a non-existent document.
+    if parent.state not in (
+        InvoiceState.transmitted,
+        InvoiceState.delivered,
+        InvoiceState.accepted,
+    ):
+        raise ConflictError(MessageCode.CREDIT_NOTE_PARENT_INVALID)
     note = await create_draft(
         session,
         org_id=org_id,

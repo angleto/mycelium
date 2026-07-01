@@ -288,6 +288,46 @@ async def test_td04_credit_note_links_parent() -> None:
         assert str(parent.id) not in (ntx.xml or "")
 
 
+async def test_credit_note_refused_on_draft_or_scarto_parent(_sdicoop: None) -> None:
+    # A TD04 corrects an EMITTED invoice. A draft (not issued) and a scartato
+    # (rejected -> never issued, use reopen) parent are both refused.
+    org, user = await _org()
+    async with tenant_session(str(org), str(user)) as s:
+        client_id = await _setup(s, org, user)
+        d = await inv.create_draft(s, org_id=org, actor_id=user, client_tag_id=client_id, year=2026)
+        await inv.add_line(
+            s,
+            org_id=org,
+            actor_id=user,
+            invoice_id=d.id,
+            description="svc",
+            unit_price=Decimal(100),
+        )
+        # Draft parent -> refused.
+        raised = False
+        try:
+            await inv.create_credit_note(s, org_id=org, actor_id=user, parent_invoice_id=d.id)
+        except ConflictError:
+            raised = True
+        assert raised
+        from mycelium_core.services import sdi_mandate
+
+        issuer = await inv.get_default_issuer_profile(s, org_id=org)
+        assert issuer is not None
+        await sdi_mandate.grant_mandate(s, org_id=org, actor_id=user, issuer_profile_id=issuer.id)
+        tx = await inv.transmit(s, org_id=org, actor_id=user, invoice_id=d.id)
+        await inv.ingest_receipt(
+            s, org_id=org, actor_id=user, identificativo_sdi=tx.identificativo_sdi, outcome="NS"
+        )
+        # Scartato (rejected) parent -> refused (use reopen, not a credit note).
+        raised = False
+        try:
+            await inv.create_credit_note(s, org_id=org, actor_id=user, parent_invoice_id=d.id)
+        except ConflictError:
+            raised = True
+        assert raised
+
+
 @pytest.fixture
 def _sdicoop() -> Iterator[None]:
     class FakeCoop:
