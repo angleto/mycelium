@@ -19,16 +19,31 @@ from mycelium_core.crypto import decrypt_secret
 from mycelium_core.services.llm_resolver import get_org_llm_provider
 
 # Curated Scaleway serverless chat models. SHORT ids, as returned by the
-# live ``/v1/models`` (verified against the real endpoint 2026-06-04); the
-# canonical ``provider/model:quant`` form is NOT what ``/v1/models`` lists,
-# so the roster intersection must use the short form. Stale entries here
-# simply never surface (they're intersected with the live list).
+# live ``/v1/models`` (verified against the real endpoint 2026-06-04; roster
+# refreshed + BENCHED 2026-07-02, task 50501e45: 9 generalists x 4 sources,
+# claim-survival under a shared judge + human blind rank); the canonical
+# ``provider/model:quant`` form is NOT what ``/v1/models`` lists, so the
+# roster intersection must use the short form. Stale entries here simply
+# never surface (they're intersected with the live list).
+#
+# Deliberately NOT listed (measured/vetted exclusions, 2026-07-02):
+#   * qwen3.5-397b-a17b -- reasoning flagship: fills ``reasoning`` and hits
+#     finish_reason=length/timeout before emitting content on default params.
+#   * devstral-2 / qwen3-coder / holo2 / pixtral / voxtral / whisper --
+#     task-specialised (code/UI/vision/audio), not vetted for general org LLM.
 CURATED_SCALEWAY_MODELS: tuple[str, ...] = (
-    "mistral-small-3.2-24b-instruct-2506",  # fast/cheap default, EU
-    "gpt-oss-120b",  # frontier-ish general, cheap reasoning
-    "qwen3-235b-a22b-instruct-2507",  # large general + long context
-    "gemma-3-27b-it",  # vision (text+image)
-    "llama-3.3-70b-instruct",  # general chat
+    # Bench winner: fidelity 1.0 across all sources, clean shape, lean
+    # (~280 tok/atom, ~4.5s), follows the note's language with the distill
+    # prompt's closing imperative. Recommended org default.
+    "mistral-medium-3.5-128b",
+    "mistral-small-3.2-24b-instruct-2506",  # cheapest/fastest; weakest in the human blind rank
+    "gpt-oss-120b",  # human-blind favourite BUT the bench's only factual hallucination
+    "qwen3-235b-a22b-instruct-2507",  # large general, long context; follows source language
+    "gemma-3-27b-it",  # vision (text+image); ignores language instructions
+    "llama-3.3-70b-instruct",  # general chat; bench: 1 shape fail + 1 fabricated addition
+    "glm-5.2",  # clean atoms; verbose (reasoning billed as completion, ~4-6x tokens)
+    "gemma-4-26b-a4b-it",  # clean atoms; verbose (~6x tokens), follows source language
+    "qwen3.6-35b-a3b",  # clean atoms; most verbose (~10x tokens), slowest
 )
 
 
