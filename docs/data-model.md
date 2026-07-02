@@ -167,6 +167,21 @@ org-scoped entity. Memory is partitioned by `org_id`.
   audit)`
 - `conservation_records(invoice_id|receipt_id, provider[ade_free],
   adhesion_status, in_coverage bool, hash?, conserved_at?)`
+- `invoices` also carries `progressivo_invio` / `nome_file` (the emitted SdI
+  file identity, recorded at transmit and reused on a resend; ADR-0045).
+- `issuer_api_keys(id, org_id, issuer_profile_id FK cascade, created_by FK
+  users set-null, name, key_public_id UNIQUE, secret_hash UNIQUE (=HMAC-SHA256
+  (pepper, raw)), permissions text[], previous_secret_hash?, rotated_at?,
+  previous_secret_expires_at?, previous_secret_last_used_at?, expires_at NOT
+  NULL, last_used_at?, revoked_at?, version)` -- a per-issuer credential for the
+  public Invoice API (`/api/v1`); ENABLE RLS so the SECURITY DEFINER
+  `authenticate_issuer_api_key` reads a row with no tenant GUC (ADR-0045).
+- `api_idempotency(id, org_id, issuer_profile_id, endpoint, idempotency_key,
+  request_hash, response_snapshot jsonb?, invoice_id?, created_at)` -- UNIQUE
+  `(issuer_profile_id, endpoint, idempotency_key)`, FORCE RLS; the atomic claim
+  that stops a retry double-filing an invoice.
+- `issuer_key_rate_limit(key_id, endpoint_class, org_id, window_start, count)` --
+  the per-key fixed-window rate bucket (FORCE RLS).
 
 ## Notifications, collaboration, audit
 

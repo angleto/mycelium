@@ -9,6 +9,7 @@ import { useTranslation } from 'react-i18next'
 import { api, authFetch, errMessage, workspaceHeader } from '../api/client'
 import { useSession } from '../auth/useSession'
 import type { components } from '../api/schema'
+import { IssuerApiKeys } from './IssuerApiKeys'
 import { IssuerLogoConfig } from './IssuerLogoConfig'
 
 type Profile = components['schemas']['IssuerProfileOut']
@@ -287,6 +288,7 @@ export function IssuerProfiles() {
   // so the form never submits both (the API stays lenient for legacy rows).
   const [subjectType, setSubjectType] = useState<'company' | 'person'>('company')
   const [showCounters, setShowCounters] = useState<string | null>(null)
+  const [showApiKeys, setShowApiKeys] = useState<string | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const [msg, setMsg] = useState<string | null>(null)
   // Object URL of the currently-edited profile's logo (auth-fetched as a
@@ -565,7 +567,15 @@ export function IssuerProfiles() {
               >
                 {t('invoices.counters')}
               </button>
+              <button
+                type="button"
+                className="btn--sm btn--ghost"
+                onClick={() => setShowApiKeys(showApiKeys === p.id ? null : p.id)}
+              >
+                {t('issuerApiKeys.button')}
+              </button>
               {showCounters === p.id && <IssuerCounters profileId={p.id} />}
+              {showApiKeys === p.id && <IssuerApiKeys profileId={p.id} />}
             </li>
           ))}
         </ul>

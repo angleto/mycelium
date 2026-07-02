@@ -5697,6 +5697,239 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/issuer-profiles/{issuer_profile_id}/api-keys": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Keys
+         * @description List the issuer's keys, newest first (active + revoked; the UI
+         *     distinguishes via ``revoked_at``). Member-level read -- no secret is shown.
+         */
+        get: operations["list_keys_issuer_profiles__issuer_profile_id__api_keys_get"];
+        put?: never;
+        /**
+         * Mint Key
+         * @description Mint a key (owner-gated in the service). ``raw`` is the only time the
+         *     plaintext secret is sent -- copy it now.
+         */
+        post: operations["mint_key_issuer_profiles__issuer_profile_id__api_keys_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/issuer-profiles/{issuer_profile_id}/api-keys/{key_id}/rotate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Rotate Key
+         * @description Issue a new secret for the key (owner-gated). ``grace_seconds`` (default =
+         *     the configured value, 0 = hard rotation) keeps the previous secret valid for a
+         *     bounded window; a new ``raw`` is returned once.
+         */
+        post: operations["rotate_key_issuer_profiles__issuer_profile_id__api_keys__key_id__rotate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/issuer-profiles/{issuer_profile_id}/api-keys/{key_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Revoke Key
+         * @description Revoke a key (owner-gated; kills both the current and any grace secret).
+         *     Idempotent.
+         */
+        delete: operations["revoke_key_issuer_profiles__issuer_profile_id__api_keys__key_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/invoices": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Invoices */
+        get: operations["list_invoices_api_v1_invoices_get"];
+        put?: never;
+        /**
+         * Compose
+         * @description Compose a TD01 draft (header + lines); optionally transmit in one shot.
+         */
+        post: operations["compose_api_v1_invoices_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/invoices/{invoice_id}/transmit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Transmit */
+        post: operations["transmit_api_v1_invoices__invoice_id__transmit_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/invoices/credit-note": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Credit Note
+         * @description Create AND transmit a TD04 credit note for a parent under THIS issuer.
+         */
+        post: operations["credit_note_api_v1_invoices_credit_note_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/invoices/{invoice_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Invoice */
+        get: operations["get_invoice_api_v1_invoices__invoice_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Events
+         * @description A cursor feed of invoice state changes for this key's issuer, oldest
+         *     first: poll with ``since`` = the previous page's last ``updated_at``.
+         */
+        get: operations["events_api_v1_events_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/invoices/{invoice_id}/notifications": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Notifications */
+        get: operations["list_notifications_api_v1_invoices__invoice_id__notifications_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/invoices/{invoice_id}/xml": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Download Xml */
+        get: operations["download_xml_api_v1_invoices__invoice_id__xml_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/invoices/{invoice_id}/pdf": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Download Pdf */
+        get: operations["download_pdf_api_v1_invoices__invoice_id__pdf_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/invoices/{invoice_id}/notifications/{notification_id}/xml": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Download Receipt */
+        get: operations["download_receipt_api_v1_invoices__invoice_id__notifications__notification_id__xml_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/received-invoices/{received_invoice_id}/esito-committente": {
         parameters: {
             query?: never;
@@ -6643,6 +6876,11 @@ export interface components {
             /** Built At */
             built_at: string;
         };
+        /**
+         * BuyerVerdict
+         * @enum {string}
+         */
+        BuyerVerdict: "none" | "accepted" | "rejected" | "deemed_accepted";
         /** ByokFactorIn */
         ByokFactorIn: {
             /** Factor */
@@ -8563,6 +8801,107 @@ export interface components {
             /** Xml */
             xml: string;
         };
+        /**
+         * IssuerApiKeyCreateIn
+         * @description Mint a per-issuer-profile API key for the public Invoice REST API.
+         */
+        IssuerApiKeyCreateIn: {
+            /** Name */
+            name: string;
+            /** Permissions */
+            permissions?: string[];
+            /** Ttl Days */
+            ttl_days?: number | null;
+        };
+        /**
+         * IssuerApiKeyCreateOut
+         * @description Mint / rotate response. ``raw`` is the ONLY place the plaintext secret
+         *     ever leaves the server; copy it now (or rotate).
+         */
+        IssuerApiKeyCreateOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Issuer Profile Id
+             * Format: uuid
+             */
+            issuer_profile_id: string;
+            /** Name */
+            name: string;
+            /** Prefix */
+            prefix: string;
+            /** Permissions */
+            permissions: string[];
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
+            /** Last Used At */
+            last_used_at: string | null;
+            /** Previous Secret Last Used At */
+            previous_secret_last_used_at: string | null;
+            /** Rotated At */
+            rotated_at: string | null;
+            /** Revoked At */
+            revoked_at: string | null;
+            /** Days To Expiry */
+            days_to_expiry: number;
+            /** Raw */
+            raw: string;
+        };
+        /**
+         * IssuerApiKeyOut
+         * @description Persisted key metadata; the secret never appears here (only on
+         *     :class:`IssuerApiKeyCreateOut`). ``prefix`` is the non-secret display handle
+         *     ``mycelium_ik_<key_public_id>``; ``days_to_expiry`` is derived for the UI.
+         */
+        IssuerApiKeyOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Issuer Profile Id
+             * Format: uuid
+             */
+            issuer_profile_id: string;
+            /** Name */
+            name: string;
+            /** Prefix */
+            prefix: string;
+            /** Permissions */
+            permissions: string[];
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
+            /** Last Used At */
+            last_used_at: string | null;
+            /** Previous Secret Last Used At */
+            previous_secret_last_used_at: string | null;
+            /** Rotated At */
+            rotated_at: string | null;
+            /** Revoked At */
+            revoked_at: string | null;
+            /** Days To Expiry */
+            days_to_expiry: number;
+        };
         /** IssuerProfileIn */
         IssuerProfileIn: {
             /** Label */
@@ -9905,6 +10244,155 @@ export interface components {
             expected_version: number;
             /** Workflow Id */
             workflow_id?: string | null;
+        };
+        /**
+         * PublicClientIn
+         * @description Inline cessionario. Requires the ``invoice:client_write`` permission;
+         *     resolved-or-created idempotently by (country, VAT) / codice fiscale.
+         */
+        PublicClientIn: {
+            /** Legal Name */
+            legal_name?: string | null;
+            /** First Name */
+            first_name?: string | null;
+            /** Last Name */
+            last_name?: string | null;
+            /** Country Code */
+            country_code?: string | null;
+            /** Vat Number */
+            vat_number?: string | null;
+            /** Tax Code */
+            tax_code?: string | null;
+            /** Address */
+            address?: string | null;
+            /** Civic Number */
+            civic_number?: string | null;
+            /** Postal Code */
+            postal_code?: string | null;
+            /** City */
+            city?: string | null;
+            /** Province */
+            province?: string | null;
+            /** Country */
+            country?: string | null;
+            /** Sdi Code */
+            sdi_code?: string | null;
+            /** Pec */
+            pec?: string | null;
+        };
+        /** PublicComposeIn */
+        PublicComposeIn: {
+            /** Client Tag Id */
+            client_tag_id?: string | null;
+            client?: components["schemas"]["PublicClientIn"] | null;
+            /** Series */
+            series?: string | null;
+            /** Purpose */
+            purpose?: string | null;
+            /** Lines */
+            lines: components["schemas"]["PublicLineIn"][];
+            /**
+             * Transmit
+             * @default false
+             */
+            transmit?: boolean;
+        };
+        /** PublicCreditNoteIn */
+        PublicCreditNoteIn: {
+            /**
+             * Parent Invoice Id
+             * Format: uuid
+             */
+            parent_invoice_id: string;
+            /** Purpose */
+            purpose?: string | null;
+        };
+        /**
+         * PublicEventOut
+         * @description One entry in the state-change feed (``GET /events?since=``).
+         */
+        PublicEventOut: {
+            /**
+             * Invoice Id
+             * Format: uuid
+             */
+            invoice_id: string;
+            state: components["schemas"]["InvoiceState"];
+            sdi_status: components["schemas"]["SdiStatus"];
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /** PublicInvoiceOut */
+        PublicInvoiceOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Client Tag Id
+             * Format: uuid
+             */
+            client_tag_id: string;
+            /** Issuer Profile Id */
+            issuer_profile_id: string | null;
+            document_type: components["schemas"]["DocumentType"];
+            /** Series */
+            series: string;
+            /** Year */
+            year: number;
+            /** Number */
+            number: number | null;
+            state: components["schemas"]["InvoiceState"];
+            sdi_status: components["schemas"]["SdiStatus"];
+            payment_status: components["schemas"]["PaymentStatus"];
+            buyer_verdict: components["schemas"]["BuyerVerdict"];
+            conservation_status: components["schemas"]["ConservationStatus"];
+            /** Currency */
+            currency: string;
+            /** Taxable */
+            taxable: string;
+            /** Vat */
+            vat: string;
+            /** Stamp Duty */
+            stamp_duty: string;
+            /** Total */
+            total: string;
+            /** Identificativo Sdi */
+            identificativo_sdi: string | null;
+            /** Purpose */
+            purpose: string | null;
+        };
+        /** PublicLineIn */
+        PublicLineIn: {
+            /** Description */
+            description: string;
+            /** Unit Price */
+            unit_price: number | string;
+            /**
+             * Quantity
+             * @default 1
+             */
+            quantity?: number | string;
+            /** Vat Rate */
+            vat_rate?: number | string | null;
+            /** Vat Nature */
+            vat_nature?: string | null;
+        };
+        /** PublicNotificationOut */
+        PublicNotificationOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Kind */
+            kind: string;
+            /** Message Id */
+            message_id: string | null;
         };
         /** PurgeTestInvoicesOut */
         PurgeTestInvoicesOut: {
@@ -25021,6 +25509,496 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["InvoiceOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_keys_issuer_profiles__issuer_profile_id__api_keys_get: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                issuer_profile_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IssuerApiKeyOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    mint_key_issuer_profiles__issuer_profile_id__api_keys_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                issuer_profile_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IssuerApiKeyCreateIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IssuerApiKeyCreateOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    rotate_key_issuer_profiles__issuer_profile_id__api_keys__key_id__rotate_post: {
+        parameters: {
+            query?: {
+                grace_seconds?: number | null;
+            };
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                issuer_profile_id: string;
+                key_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IssuerApiKeyCreateOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    revoke_key_issuer_profiles__issuer_profile_id__api_keys__key_id__delete: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                issuer_profile_id: string;
+                key_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_invoices_api_v1_invoices_get: {
+        parameters: {
+            query?: {
+                client_tag_id?: string | null;
+                state?: components["schemas"]["InvoiceState"] | null;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublicInvoiceOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    compose_api_v1_invoices_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string | null;
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PublicComposeIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublicInvoiceOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    transmit_api_v1_invoices__invoice_id__transmit_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string | null;
+                authorization?: string | null;
+            };
+            path: {
+                invoice_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublicInvoiceOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    credit_note_api_v1_invoices_credit_note_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string | null;
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PublicCreditNoteIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublicInvoiceOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_invoice_api_v1_invoices__invoice_id__get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                invoice_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublicInvoiceOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    events_api_v1_events_get: {
+        parameters: {
+            query?: {
+                since?: string | null;
+                limit?: number;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublicEventOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_notifications_api_v1_invoices__invoice_id__notifications_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                invoice_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublicNotificationOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    download_xml_api_v1_invoices__invoice_id__xml_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                invoice_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    download_pdf_api_v1_invoices__invoice_id__pdf_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                invoice_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    download_receipt_api_v1_invoices__invoice_id__notifications__notification_id__xml_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                invoice_id: string;
+                notification_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */

@@ -228,6 +228,15 @@ single GUI/REST/MCP choke point).
   (RF19 default); persona fisica `Nome`/`Cognome` (Anagrafica choice);
   `Provincia` validated against the Italian list. External (F7c): accreditation
   + certificates + WSDL/esito verification against the AdE test environment.
+- External API (ADR-0045): a public REST surface `/api/v1`, authenticated by a
+  per-issuer-profile API key (system-generated secret, keyed-hash at rest,
+  rotate/revoke, mandatory 365d-capped expiry), lets an integrator compose /
+  transmit / track invoices for one issuer -- issuer-hard-scoped, with a
+  mandatory idempotency key and a per-key rate limit. Key management is owner-
+  gated REST + GUI (`/issuer-profiles/{id}/api-keys`). Over MCP the same core is
+  read-and-write (compose / transmit / status / list / issuer profiles / XML),
+  gated by the `invoices:read` / `invoices:write` scopes. Deferred: signed
+  webhooks, IP allowlist, lost-ACK file-name durability.
 
 ## FR-10 MCP server (co-equal)
 
