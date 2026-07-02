@@ -406,6 +406,14 @@ class Settings(BaseSettings):
     reranker_min_query_tokens: int = 3
     reranker_min_candidates: int = 5
 
+    # Humus retrieval branch (ADR-0034) master switch. Humus is the PARALLEL
+    # source that late-fuses distilled/consolidated atoms into the focused walk
+    # with a small boost + a 30% hard cap. Default ON = historical behaviour;
+    # this is an operator kill-switch AND the lever the humus empirical gate
+    # (task 4836a6cc / note 9a2adb4a) uses to A/B the branch's marginal value.
+    # An explicit ``humus=`` arg to ``memory.retrieve`` overrides it per-call.
+    humus_enabled: bool = True
+
     # Recovery-history retention worker (entity_revision). The sweep
     # has two parts: a coarsening pass that keeps 1 revision/day past
     # ``revisions_retain_full_days`` and 1 revision/week past

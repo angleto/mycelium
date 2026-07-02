@@ -500,11 +500,26 @@ async def retrieve_with_meta(
     channel_key: str | None = None,
     embedder: Embedder | None = None,
     rerank: bool = False,
+    humus: bool | None = None,
+    humus_kinds: frozenset[str] | None = None,
+    exclude_humus_from_base: bool = False,
 ) -> tuple[list[Hit], RetrievalMeta]:
     """Like :func:`retrieve` but also returns a :class:`RetrievalMeta` so the
     caller can distinguish 'nothing relevant' from 'dense recall silently
     collapsed to keyword-only' (task 4f3c2207). ``retrieve`` is the thin
-    hits-only wrapper over this."""
+    hits-only wrapper over this.
+
+    Humus knobs (the empirical-gate levers, task 4836a6cc; all default to the
+    historical behaviour so an untouched caller is byte-identical):
+    ``humus`` None -> ``settings.humus_enabled`` (default True); an explicit
+    bool overrides per-call (like ``rerank``). ``humus_kinds`` restricts the
+    humus BRANCH to given ``humus_kind`` values (None = all) -- branch
+    attribution only, the atoms stay retrievable via the base branches. When
+    ``exclude_humus_from_base`` the humus-atom blobs are removed from EVERY
+    branch (Config C: atoms as if never written), used to prove a
+    consolidation query is answered by no raw blob; it implies the humus
+    branch off (the two knobs are mutually exclusive -- a branch over an
+    excluded set could only be empty)."""
     await require_role(session, org_id, actor_id, Role.member)
     channel_id = await _resolve_channel_tag_id(
         session, org_id=org_id, channel_tag_id=channel_tag_id, channel_key=channel_key
@@ -567,6 +582,7 @@ async def retrieve_with_meta(
         RerankGate,
         RRFFusionStage,
         SemanticDenseStage,
+        humus_note_blob_exclusion,
         proposed_note_blob_exclusion,
     )
 
@@ -585,6 +601,12 @@ async def retrieve_with_meta(
     # humus stage inherits this base context. Unconditional + a no-op when no
     # proposed note exists, so behaviour is byte-identical until the gate runs.
     tag_clauses: tuple[ColumnElement[bool], ...] = (proposed_note_blob_exclusion(org_id),)
+    # Config C of the humus A/B (task 4836a6cc): remove humus-atom blobs from
+    # every branch (lexical/dense inherit tag_clauses, and the humus branch's
+    # own predicate AND-ed with this NOT IN yields empty), so the pipeline
+    # behaves as if the atoms were never written.
+    if exclude_humus_from_base:
+        tag_clauses = (*tag_clauses, humus_note_blob_exclusion(org_id))
     if wanted:
         tagged = (
             select(MemoryBlobTag.blob_id)
@@ -616,6 +638,15 @@ async def retrieve_with_meta(
     # stage is a no-op so the pipeline cost is bounded by RRF.
     settings = _get_settings()
     use_rerank = rerank or settings.reranker_enabled
+    # Humus branch on/off: an explicit ``humus=`` wins; else the workspace
+    # default (``settings.humus_enabled``, historically True). When off, both
+    # the humus source stage and its cap are dropped from the pipeline.
+    # ``exclude_humus_from_base`` forces the branch off: the branch predicate
+    # ANDs the base tag_clauses (which then contain the exclusion), so a
+    # branch over an excluded set could only run empty -- short-circuit it.
+    use_humus = settings.humus_enabled if humus is None else humus
+    if exclude_humus_from_base:
+        use_humus = False
     sem_min_sim = await semantic_min_similarity(session, org_id)
     # The grader/abstain floor: an explicit caller value wins; otherwise
     # fall back to the per-org setting (WS-B1). Resolving it here means
@@ -629,10 +660,15 @@ async def retrieve_with_meta(
     stages: list[_Stage] = [
         LexicalFTSStage(oversample=_OVERSAMPLE),
         SemanticDenseStage(oversample=_OVERSAMPLE, min_similarity=sem_min_sim),
+    ]
+    if use_humus:
         # Parallel humus source (ADR-0034): archived material re-enters the
         # focused walk, late-fused below with a fixed boost + small k, then
         # hard-capped (HumusCapStage) so it never crowds out live notes.
-        HumusStage(oversample=_OVERSAMPLE, min_similarity=sem_min_sim),
+        stages.append(
+            HumusStage(oversample=_OVERSAMPLE, min_similarity=sem_min_sim, kinds=humus_kinds)
+        )
+    stages.append(
         RRFFusionStage(
             k=_RRF_K,
             weights={
@@ -640,10 +676,12 @@ async def retrieve_with_meta(
                 "lexical_stem": _LEXICAL_STEM_WEIGHT,
                 "semantic": _SEMANTIC_RRF_WEIGHT,
                 "semantic_hosted": _SEMANTIC_RRF_WEIGHT,
+                # Harmless when the humus branch is off (no candidate carries a
+                # ``humus`` stage score, so the weight applies to nothing).
                 "humus": _HUMUS_RRF_BOOST,
             },
-        ),
-    ]
+        )
+    )
     if use_rerank:
         stages.append(
             CrossEncoderRerankerStage(
@@ -668,10 +706,15 @@ async def retrieve_with_meta(
             # (conceptual) queries, so recall there is unchanged.
             RelativeFloorStage(ratio=_RELATIVE_FLOOR_RATIO),
             GraderMinStage(min_score=effective_grader_min),
-            # Hard cap on humus slots (ADR-0034): runs after ordering so the
-            # kept humus are the most relevant; freed slots fall to live
-            # candidates ranked just below, then LimitStage truncates.
-            HumusCapStage(ratio=_HUMUS_FOCUSED_CAP, limit=limit),
+        ]
+    )
+    if use_humus:
+        # Hard cap on humus slots (ADR-0034): runs after ordering so the
+        # kept humus are the most relevant; freed slots fall to live
+        # candidates ranked just below, then LimitStage truncates.
+        stages.append(HumusCapStage(ratio=_HUMUS_FOCUSED_CAP, limit=limit))
+    stages.extend(
+        [
             LimitStage(k=limit),
             AccessCounterStage(),
         ]
@@ -758,11 +801,14 @@ async def retrieve(
     channel_key: str | None = None,
     embedder: Embedder | None = None,
     rerank: bool = False,
+    humus: bool | None = None,
+    humus_kinds: frozenset[str] | None = None,
+    exclude_humus_from_base: bool = False,
 ) -> list[Hit]:
     """Hybrid RRF retrieval -> the ranked hits. Thin wrapper over
     :func:`retrieve_with_meta` for the callers that don't need the recall
     diagnostics (the majority); the meta variant powers the MCP search
-    tools."""
+    tools. See :func:`retrieve_with_meta` for the humus knobs."""
     hits, _meta = await retrieve_with_meta(
         session,
         org_id=org_id,
@@ -777,6 +823,9 @@ async def retrieve(
         channel_key=channel_key,
         embedder=embedder,
         rerank=rerank,
+        humus=humus,
+        humus_kinds=humus_kinds,
+        exclude_humus_from_base=exclude_humus_from_base,
     )
     return hits
 

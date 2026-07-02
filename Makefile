@@ -1,4 +1,4 @@
-.PHONY: sync lint fmt type test eval mcp-coverage mcp-coverage-check up down \
+.PHONY: sync lint fmt type test eval eval-humus mcp-coverage mcp-coverage-check up down \
         db-bootstrap migrate db-harden revision run-api run-mcp run-worker run-sdi
 
 sync:
@@ -22,6 +22,14 @@ test:
 # local baseline check.
 eval:
 	uv run pytest core/tests/test_eval_offline.py -q
+
+# Humus retrieval A/B over a REAL corpus (task 4836a6cc / note 9a2adb4a §4):
+# same run_humus_ab matrix as the CI test, from gold JSONL files. Provide the
+# files (and optionally org/actor, else an owner is auto-resolved):
+#   make eval-humus RAW=raw.jsonl CON=consolidation.jsonl [ORG=<uuid> ACTOR=<uuid>]
+eval-humus:
+	uv run python scripts/eval_humus_ab.py --raw "$(RAW)" --consolidation "$(CON)" \
+		$(if $(ORG),--org $(ORG),) $(if $(ACTOR),--actor $(ACTOR),)
 
 # Regenerate the auto-generated tool inventory in docs/mcp-coverage.md from
 # the live registry (counts + per-domain listing never drift from code).

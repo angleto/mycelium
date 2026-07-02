@@ -54,14 +54,58 @@ from mycelium_core.services.retrieval.types import (
 HUMUS_PROVENANCE = "humus"
 
 
-def humus_blob_predicate(org_id: uuid.UUID) -> ColumnElement[bool]:
+def humus_blob_predicate(
+    org_id: uuid.UUID, kinds: frozenset[str] | None = None
+) -> ColumnElement[bool]:
     """SQL predicate selecting blobs whose source note carries
     ``humus_flag``. A note blob is ``BlobSource(source_kind='note_part',
     source_id=str(part.id))`` (services.note_search) and ``humus_flag``
     lives on ``notes``, so the join is blob -> note_part -> note. The
     ``note_part`` filter bounds the join to note blobs; ``NotePart.id`` is
-    cast to text (always safe) to meet the text ``source_id`` column."""
+    cast to text (always safe) to meet the text ``source_id`` column.
+
+    ``kinds`` optionally restricts to specific ``humus_kind`` values
+    (``distillation`` | ``pattern`` | ``season``); None/empty = every humus
+    atom (historical behaviour). NOTE the limit of this lever: it narrows the
+    humus BRANCH (which atoms get the boost + the ``provenance='humus'``
+    marker), it does NOT remove the other kinds from retrieval -- every atom
+    stays reachable through the base lexical/dense branches. Per-kind
+    atom-PRESENCE A/B is done at the case level (ConsolidationCase sources),
+    not with this knob."""
+    conds = [
+        BlobSource.source_kind == "note_part",
+        BlobSource.org_id == org_id,
+        Note.humus_flag.is_(True),
+        # ADR-0043 D2: an autonomously-generated humus note awaiting
+        # human review (``review_state='proposed'``) is withheld from the
+        # walk until approved. NULL/'approved' both pass (IS DISTINCT FROM).
+        Note.review_state.is_distinct_from("proposed"),
+    ]
+    if kinds:
+        conds.append(Note.humus_kind.in_(tuple(kinds)))
     return MemoryBlob.id.in_(
+        select(BlobSource.blob_id)
+        .join(NotePart, cast(NotePart.id, String) == BlobSource.source_id)
+        .join(Note, Note.id == NotePart.note_id)
+        .where(*conds)
+    )
+
+
+def humus_note_blob_exclusion(org_id: uuid.UUID) -> ColumnElement[bool]:
+    """SQL predicate EXCLUDING every humus-atom blob (source note carries
+    ``humus_flag``) from a retrieval branch. ANDed into the base
+    ``tag_clauses`` when ``memory.retrieve(..., exclude_humus_from_base=True)``
+    so the lexical AND dense branches behave as if the atoms were never
+    written -- the 'atoms fully absent' arm (Config C) of the humus empirical
+    A/B (task 4836a6cc), used to check that a consolidation query is genuinely
+    answered by NO raw blob. Unconditional NOT IN: an empty subquery is a
+    no-op, so it never fires unless the caller opts in.
+
+    No ``review_state`` filter here, deliberately: ``proposed`` notes are
+    already withheld from every branch by ``proposed_note_blob_exclusion``
+    (always ANDed into the base tag_clauses in ``memory.retrieve``), so this
+    exclusion only needs to remove the remaining, effective atoms."""
+    return MemoryBlob.id.notin_(
         select(BlobSource.blob_id)
         .join(NotePart, cast(NotePart.id, String) == BlobSource.source_id)
         .join(Note, Note.id == NotePart.note_id)
@@ -69,10 +113,6 @@ def humus_blob_predicate(org_id: uuid.UUID) -> ColumnElement[bool]:
             BlobSource.source_kind == "note_part",
             BlobSource.org_id == org_id,
             Note.humus_flag.is_(True),
-            # ADR-0043 D2: an autonomously-generated humus note awaiting
-            # human review (``review_state='proposed'``) is withheld from the
-            # walk until approved. NULL/'approved' both pass (IS DISTINCT FROM).
-            Note.review_state.is_distinct_from("proposed"),
         )
     )
 
@@ -101,6 +141,10 @@ class HumusStage(Stage):
     name: str = "humus"
     oversample: int = 50
     min_similarity: float = 0.0
+    # Optional restriction to specific ``humus_kind`` values; None = all
+    # (historical). Branch attribution only -- see humus_blob_predicate:
+    # atoms of the other kinds remain retrievable via the base branches.
+    kinds: frozenset[str] | None = None
 
     async def run(
         self,
@@ -115,7 +159,7 @@ class HumusStage(Stage):
         # immutability contract of RetrievalContext.
         sub_ctx = replace(
             ctx,
-            tag_clauses=(*ctx.tag_clauses, humus_blob_predicate(ctx.org_id)),
+            tag_clauses=(*ctx.tag_clauses, humus_blob_predicate(ctx.org_id, self.kinds)),
         )
         sub_stages: list[Stage] = [
             LexicalFTSStage(oversample=self.oversample),
