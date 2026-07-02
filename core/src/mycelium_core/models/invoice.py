@@ -22,6 +22,7 @@ from sqlalchemy import (
     Date,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     LargeBinary,
     Numeric,
@@ -244,6 +245,9 @@ class Invoice(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, Base):
         UniqueConstraint(
             "issuer_profile_id", "series", "year", "number", name="uq_invoices_issuer"
         ),
+        # Client-scoped newest-first lookup ("last invoice of client X") at
+        # thousands scale (task 19b7e874).
+        Index("ix_invoices_org_client", "org_id", "client_tag_id"),
     )
 
     client_tag_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
@@ -295,6 +299,11 @@ class Invoice(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, Base):
     stamp_duty: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False, server_default="0")
     total: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False, server_default="0")
     identificativo_sdi: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    # SdI transmission filename artifacts, persisted before dispatch and reused
+    # verbatim on a retry so a resend collides with SdI's own NomeFile dedupe
+    # rather than double-filing (task 19b7e874, fiscal durability).
+    progressivo_invio: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    nome_file: Mapped[str | None] = mapped_column(String(80), nullable=True)
     sdi_status: Mapped[SdiStatus] = mapped_column(
         SAEnum(SdiStatus, name="sdi_status", native_enum=True, create_type=False),
         nullable=False,

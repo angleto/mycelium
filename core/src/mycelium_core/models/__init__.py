@@ -17,6 +17,7 @@ from mycelium_core.models.annotation import (
     ANNOTATION_STATUSES,
     Annotation,
 )
+from mycelium_core.models.api_idempotency import ApiIdempotency
 from mycelium_core.models.attachment import Attachment
 from mycelium_core.models.auth_tokens import (
     EmailVerificationToken,
@@ -92,6 +93,8 @@ from mycelium_core.models.invoice import (
     SdiStatus,
     SdiTransmissionCounter,
 )
+from mycelium_core.models.issuer_api_key import IssuerApiKey
+from mycelium_core.models.issuer_key_rate_limit import IssuerKeyRateLimit
 from mycelium_core.models.kg import KG_ENTITY_TYPES, KgEdge, KgEntity
 from mycelium_core.models.membership import Membership, Role
 from mycelium_core.models.memory_blob import BlobSource, MemoryBlob, Tier
@@ -182,6 +185,7 @@ __all__ = [
     "AgentRunStatus",
     "AgentToken",
     "Annotation",
+    "ApiIdempotency",
     "Attachment",
     "AutonomousDispatch",
     "Base",
@@ -233,6 +237,8 @@ __all__ = [
     "InvoiceLine",
     "InvoiceNotification",
     "InvoiceState",
+    "IssuerApiKey",
+    "IssuerKeyRateLimit",
     "IssuerProfile",
     "KgEdge",
     "KgEntity",

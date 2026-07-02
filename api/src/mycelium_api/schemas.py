@@ -3255,6 +3255,44 @@ class AgentTokenCreateOut(BaseModel):
     raw: str
 
 
+class IssuerApiKeyCreateIn(BaseModel):
+    """Mint a per-issuer-profile API key for the public Invoice REST API."""
+
+    name: str = Field(min_length=1, max_length=120)
+    # Least-privilege default: read-only. The service validates each value
+    # against the whitelist and rejects unknowns.
+    permissions: list[str] = Field(default_factory=lambda: ["invoice:read"])
+    # Mandatory expiry: ``None`` maps to the service's default (and cap) of
+    # 365 days -- there is no never-expiring key.
+    ttl_days: int | None = Field(default=None, ge=1, le=365)
+
+
+class IssuerApiKeyOut(BaseModel):
+    """Persisted key metadata; the secret never appears here (only on
+    :class:`IssuerApiKeyCreateOut`). ``prefix`` is the non-secret display handle
+    ``mycelium_ik_<key_public_id>``; ``days_to_expiry`` is derived for the UI."""
+
+    id: uuid.UUID
+    issuer_profile_id: uuid.UUID
+    name: str
+    prefix: str
+    permissions: list[str]
+    created_at: datetime.datetime
+    expires_at: datetime.datetime
+    last_used_at: datetime.datetime | None
+    previous_secret_last_used_at: datetime.datetime | None
+    rotated_at: datetime.datetime | None
+    revoked_at: datetime.datetime | None
+    days_to_expiry: int
+
+
+class IssuerApiKeyCreateOut(IssuerApiKeyOut):
+    """Mint / rotate response. ``raw`` is the ONLY place the plaintext secret
+    ever leaves the server; copy it now (or rotate)."""
+
+    raw: str
+
+
 # ---------- AI assistants (ADR-0XX, replaces /settings/mcp manual setup)
 class ScopeCatalogEntry(BaseModel):
     """One row of the scope catalog returned by ``GET /ai-assistants/

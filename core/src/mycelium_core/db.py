@@ -53,10 +53,10 @@ def get_sessionmaker() -> async_sessionmaker[AsyncSession]:
 
 
 # Closed set of actor kinds; mirrored at the DB level by the
-# ``ck_activity_log_actor_kind`` CHECK constraint (migration 0083).
-# Kept as a literal type rather than an Enum so it remains a plain
-# string at the GUC boundary.
-ActorKind = str  # human_direct | human_api | human_telegram | agent_run | mcp_token | system
+# ``ck_activity_log_actor_kind`` CHECK constraint (baseline 0001, widened in
+# migration 0077 to add ``issuer_api_key``). Kept as a literal type rather than
+# an Enum so it remains a plain string at the GUC boundary.
+ActorKind = str  # human_direct|human_api|human_telegram|agent_run|mcp_token|system|issuer_api_key
 
 
 @asynccontextmanager

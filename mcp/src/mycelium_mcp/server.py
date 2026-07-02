@@ -40,7 +40,7 @@ from mycelium_core.models.email import (
     EmailResponderJob,
 )
 from mycelium_core.models.executor import Executor, ExecutorKind
-from mycelium_core.models.invoice import Invoice
+from mycelium_core.models.invoice import Invoice, InvoiceState
 from mycelium_core.models.memory_blob import MemoryBlob
 from mycelium_core.models.note import Note, NoteKind, NoteTurn
 from mycelium_core.models.notification import NotificationChannelKind, RecurrenceFreq
@@ -193,6 +193,39 @@ async def _resolve_agent_context(
     )
     identity_id = row.scalar_one_or_none()
     return identity_id, token_id
+
+
+async def _require_scope(session: AsyncSession, scope_key: str) -> None:
+    """Reject an assistant-scoped MCP call that lacks ``scope_key``.
+
+    The per-tool scope gate (the deferred item in ``mcp_scopes.py``), wired here
+    for the invoice tools. Least-authority default: it binds ONLY when the call
+    is an HTTP agent-token request bound to an ``ai_assistants`` row that carries
+    a scope list. A legacy bare token (``assistant_id IS NULL``) and the stdio /
+    human-bearer paths keep their previous full access, so nothing existing
+    breaks; a scoped assistant is denied any tool outside its ``scope``."""
+    principal = _PRINCIPAL.get()
+    if principal is None:
+        return
+    _user_id, _org, token_id = principal
+    if token_id is None:
+        return
+    from sqlalchemy import select as _sel
+
+    from mycelium_core.models.agent_token import AgentToken
+    from mycelium_core.models.ai_assistant import AiAssistant
+
+    scope = (
+        await session.execute(
+            _sel(AiAssistant.scope)
+            .join(AgentToken, AgentToken.assistant_id == AiAssistant.id)
+            .where(AgentToken.id == token_id)
+        )
+    ).scalar_one_or_none()
+    if scope is None:
+        return  # bare token (no bound assistant) -> legacy full access
+    if scope_key not in (scope or []):
+        raise ForbiddenError(MessageCode.MCP_SCOPE_DENIED, scope=scope_key)
 
 
 @mcp.tool()
@@ -6306,6 +6339,7 @@ async def set_issuer_profile(
     one exists, else creates it (and flags it default). ``sdi_code`` is
     this issuer's own reception CodiceDestinatario (passive SdI cycle)."""
     async with _tenant(token, org_id) as (s, org, user):
+        await _require_scope(s, "invoices:write")
         current = await invoice_svc.get_default_issuer_profile(s, org_id=org)
         if current is None:
             p = await invoice_svc.create_issuer_profile(
@@ -6356,6 +6390,7 @@ async def create_invoice(
 ) -> dict[str, Any]:
     """Create a draft invoice."""
     async with _tenant(token, org_id) as (s, org, user):
+        await _require_scope(s, "invoices:write")
         inv = await invoice_svc.create_draft(
             s,
             org_id=org,
@@ -6386,6 +6421,7 @@ async def add_invoice_line(
     default silently produced regime-inconsistent lines for forfettario
     issuers, which SdI rejects."""
     async with _tenant(token, org_id) as (s, org, user):
+        await _require_scope(s, "invoices:write")
         ln = await invoice_svc.add_line(
             s,
             org_id=org,
@@ -6405,6 +6441,7 @@ async def transmit_invoice(token: str, org_id: str, invoice_id: str) -> dict[str
     """Validate, allocate the progressive number and transmit (channel
     injected; manual export by default)."""
     async with _tenant(token, org_id) as (s, org, user):
+        await _require_scope(s, "invoices:write")
         inv = await invoice_svc.transmit(
             s, org_id=org, actor_id=user, invoice_id=uuid.UUID(invoice_id)
         )
@@ -6417,6 +6454,7 @@ async def invoice_credit_note(
 ) -> dict[str, Any]:
     """Create a TD04 credit note linked to a transmitted invoice."""
     async with _tenant(token, org_id) as (s, org, user):
+        await _require_scope(s, "invoices:write")
         inv = await invoice_svc.create_credit_note(
             s,
             org_id=org,
@@ -6433,6 +6471,7 @@ async def ingest_sdi_receipt(
 ) -> dict[str, Any]:
     """Correlate an SdI receipt (RC/MC/NS/AT) by IdentificativoSdI."""
     async with _tenant(token, org_id) as (s, org, user):
+        await _require_scope(s, "invoices:write")
         inv = await invoice_svc.ingest_receipt(
             s,
             org_id=org,
@@ -6441,6 +6480,74 @@ async def ingest_sdi_receipt(
             outcome=outcome,
         )
         return _invoice(inv)
+
+
+@mcp.tool()
+async def list_invoices(
+    token: str,
+    org_id: str,
+    client_tag_id: str | None = None,
+    issuer_profile_id: str | None = None,
+    state: str | None = None,
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    """List invoices, newest first. Filter by ``client_tag_id`` (the recipient)
+    -- the FIRST result is that client's most recent invoice ("controlla
+    l'ultima fattura del cliente XY") -- and/or ``issuer_profile_id`` (the
+    cedente), and/or ``state`` (draft|transmitted|delivered|accepted|rejected).
+    Read-only (scope ``invoices:read``)."""
+    async with _tenant(token, org_id) as (s, org, _user):
+        await _require_scope(s, "invoices:read")
+        rows = await invoice_svc.list_invoices(
+            s,
+            org_id=org,
+            client_tag_id=uuid.UUID(client_tag_id) if client_tag_id else None,
+            issuer_profile_id=uuid.UUID(issuer_profile_id) if issuer_profile_id else None,
+            state=InvoiceState(state) if state else None,
+        )
+        return [_invoice(i) for i in rows[: max(1, limit)]]
+
+
+@mcp.tool()
+async def get_invoice(token: str, org_id: str, invoice_id: str) -> dict[str, Any]:
+    """Read one invoice's status + data (state, SdI status, number, total,
+    conservation). Read-only (scope ``invoices:read``)."""
+    async with _tenant(token, org_id) as (s, org, _user):
+        await _require_scope(s, "invoices:read")
+        inv = await invoice_svc.get_invoice(s, org_id=org, invoice_id=uuid.UUID(invoice_id))
+        return _invoice(inv)
+
+
+@mcp.tool()
+async def get_invoice_xml(token: str, org_id: str, invoice_id: str) -> dict[str, Any]:
+    """Return an invoice's FatturaPA XML inline (the frozen transmitted document,
+    or a live preview for a draft). XML is text, so it travels over MCP directly;
+    for the courtesy PDF (binary) download it from the REST ``/api/v1`` surface.
+    Read-only (scope ``invoices:read``)."""
+    async with _tenant(token, org_id) as (s, org, _user):
+        await _require_scope(s, "invoices:read")
+        xml = await invoice_svc.get_xml_preview(s, org_id=org, invoice_id=uuid.UUID(invoice_id))
+        return {"invoice_id": invoice_id, "xml": xml}
+
+
+@mcp.tool()
+async def list_issuer_profiles(token: str, org_id: str) -> list[dict[str, Any]]:
+    """List the workspace's issuer profiles (the cedente VAT subjects) so an
+    agent can pick which identity to invoice under. Read-only (scope
+    ``invoices:read``)."""
+    async with _tenant(token, org_id) as (s, org, _user):
+        await _require_scope(s, "invoices:read")
+        rows = await invoice_svc.list_issuer_profiles(s, org_id=org)
+        return [
+            {
+                "id": str(p.id),
+                "label": p.label,
+                "legal_name": p.legal_name,
+                "vat_number": p.vat_number,
+                "is_default": p.is_default,
+            }
+            for p in rows
+        ]
 
 
 # --- F8: notifications / recurrence / reminders (FR-12) ---

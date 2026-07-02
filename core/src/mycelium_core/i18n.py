@@ -100,6 +100,16 @@ class MessageCode(enum.StrEnum):
     FISCAL_PROFILE_REQUIRED = "invoice.fiscal_profile_required"
     ISSUER_PROFILE_IN_USE = "invoice.issuer_profile_in_use"
     ISSUER_PROFILE_SOLE_DEFAULT = "invoice.issuer_profile_sole_default"
+    ISSUER_PROFILE_NOT_FOUND = "invoice.issuer_profile_not_found"
+    ISSUER_API_KEY_NOT_FOUND = "issuer_api_key.not_found"
+    ISSUER_API_KEY_PERMISSION_INVALID = "issuer_api_key.permission_invalid"
+    ISSUER_API_KEY_PERMISSION_DENIED = "issuer_api_key.permission_denied"
+    IDEMPOTENCY_KEY_REQUIRED = "idempotency.key_required"
+    IDEMPOTENCY_BODY_MISMATCH = "idempotency.body_mismatch"
+    IDEMPOTENCY_IN_PROGRESS = "idempotency.in_progress"
+    COMPOSE_RECIPIENT_INVALID = "invoice.compose_recipient_invalid"
+    RATE_LIMITED = "rate.limited"
+    MCP_SCOPE_DENIED = "mcp.scope_denied"
     MANDATE_REQUIRED = "invoice.mandate_required"
     MANDATE_NOT_FOUND = "invoice.mandate_not_found"
     NOTIFICATION_NOT_FOUND = "notification.not_found"
@@ -341,6 +351,26 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
         MessageCode.ISSUER_PROFILE_SOLE_DEFAULT: (
             "Set another profile as default before deleting this one"
         ),
+        MessageCode.ISSUER_PROFILE_NOT_FOUND: "Issuer profile not found",
+        MessageCode.ISSUER_API_KEY_NOT_FOUND: "Issuer API key not found",
+        MessageCode.ISSUER_API_KEY_PERMISSION_INVALID: (
+            "One or more requested permissions are not valid for an issuer API key"
+        ),
+        MessageCode.ISSUER_API_KEY_PERMISSION_DENIED: (
+            "The API key does not carry the permission required for this operation"
+        ),
+        MessageCode.IDEMPOTENCY_KEY_REQUIRED: "The Idempotency-Key header is required",
+        MessageCode.IDEMPOTENCY_BODY_MISMATCH: (
+            "This Idempotency-Key was already used with a different request"
+        ),
+        MessageCode.IDEMPOTENCY_IN_PROGRESS: (
+            "A request with this Idempotency-Key is still in progress"
+        ),
+        MessageCode.COMPOSE_RECIPIENT_INVALID: (
+            "Provide exactly one of client_tag_id or an inline client"
+        ),
+        MessageCode.RATE_LIMITED: "Rate limit exceeded for this API key; retry later",
+        MessageCode.MCP_SCOPE_DENIED: "This assistant's scope does not permit this tool",
         MessageCode.MANDATE_REQUIRED: (
             "No active SdI transmission mandate for this issuer profile; grant one "
             "before transmitting through the accredited channel"

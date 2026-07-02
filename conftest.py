@@ -13,6 +13,8 @@ import os
 os.environ.setdefault("MYCELIUM_JWT_SECRET", "test-only-secret-min-32-bytes-aaaaaaaaaa")
 # Valid Fernet key (urlsafe-b64 of 32 zero bytes); test-only.
 os.environ.setdefault("MYCELIUM_SECRET_KEY", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
+# Dedicated pepper for the issuer-API-key keyed hash (>=32 chars); test-only.
+os.environ.setdefault("MYCELIUM_ISSUER_KEY_PEPPER", "test-only-issuer-key-pepper-aaaaaaaaaaaa")
 
 import pathlib
 from collections.abc import AsyncIterator, Iterator

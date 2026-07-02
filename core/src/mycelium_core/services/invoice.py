@@ -1494,7 +1494,14 @@ async def transmit(
     # dedicated monotonic per-trasmittente sequence rendered base36 width 5
     # (``transmission_progressivo``); the trasmittente is the accredited
     # channel holder when Mycelium acts as intermediary, else the cedente itself.
-    if intermediary is not None:
+    if inv.progressivo_invio is not None and inv.nome_file is not None:
+        # F8 durability: a prior attempt already allocated this document's
+        # ProgressivoInvio / NomeFile -- reuse them verbatim so a resend collides
+        # with SdI's own file-name dedupe rather than double-filing under a fresh
+        # name. (reopen_rejected clears them, so a scarto still gets a new one.)
+        progressivo_str = inv.progressivo_invio
+        filename = inv.nome_file
+    elif intermediary is not None:
         seq = await _allocate_transmission_seq(session, intermediary_id=intermediary.vat_number)
         progressivo_str = transmission_progressivo(seq)
         filename = fatturapa_filename(
@@ -1508,6 +1515,9 @@ async def transmit(
             seq = await _allocate_transmission_seq(session, intermediary_id=cedente_id)
             progressivo_str = transmission_progressivo(seq)
         filename = fatturapa_filename(fiscal.country_code, cedente_id, progressivo_str)
+    # Record the emitted file identity on the invoice (audit + retry reuse above).
+    inv.progressivo_invio = progressivo_str
+    inv.nome_file = filename
     collegata = await _resolve_collegata(session, org_id=org_id, inv=inv)
     xml = _build_xml(
         inv,
@@ -1563,6 +1573,10 @@ async def reopen_rejected(
     inv.sdi_status = SdiStatus.none
     # Not under AdE conservation until it actually transits SdI on the re-send.
     inv.conservation_status = ConservationStatus.out_of_coverage
+    # A scartato file name is spent: the re-send draws a fresh ProgressivoInvio /
+    # NomeFile so the legitimate resend is not itself rejected as a duplicate.
+    inv.progressivo_invio = None
+    inv.nome_file = None
     # Drop the superseded transmission's SdI notifications: the scarto belonged
     # to the file being redone, so keeping it would make the reopened+resent
     # invoice still show the old NS ("rejected") in its timeline. A fresh outcome
@@ -1908,6 +1922,7 @@ async def list_invoices(
     states: Sequence[InvoiceState] | None = None,
     payment_status: PaymentStatus | None = None,
     client_tag_id: uuid.UUID | None = None,
+    issuer_profile_id: uuid.UUID | None = None,
     view: InvoiceView = "active",
 ) -> list[Invoice]:
     """List invoices, newest first. ``state`` (single) is kept for
@@ -1932,7 +1947,29 @@ async def list_invoices(
         stmt = stmt.where(Invoice.payment_status == payment_status)
     if client_tag_id is not None:
         stmt = stmt.where(Invoice.client_tag_id == client_tag_id)
+    if issuer_profile_id is not None:
+        # Hard issuer scoping for the per-issuer-key API surface (task 19b7e874).
+        stmt = stmt.where(Invoice.issuer_profile_id == issuer_profile_id)
     stmt = stmt.order_by(Invoice.year.desc(), Invoice.number.desc().nullslast())
+    return list((await session.execute(stmt)).scalars().all())
+
+
+async def list_invoice_changes(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    issuer_profile_id: uuid.UUID,
+    since: dt.datetime | None = None,
+    limit: int = 100,
+) -> list[Invoice]:
+    """Issuer-scoped 'events' feed: invoices whose state last changed after
+    ``since`` (their ``updated_at``), oldest change first, so the public API can
+    hand integrators a cursor over changes instead of the whole table. The
+    caller advances ``since`` to the last row's ``updated_at`` (task 19b7e874)."""
+    stmt = select(Invoice).where(Invoice.issuer_profile_id == issuer_profile_id)
+    if since is not None:
+        stmt = stmt.where(Invoice.updated_at > since)
+    stmt = stmt.order_by(Invoice.updated_at.asc(), Invoice.id.asc()).limit(min(max(limit, 1), 500))
     return list((await session.execute(stmt)).scalars().all())
 
 

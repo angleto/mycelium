@@ -25,7 +25,7 @@ from mycelium_core.models.attachment import Attachment
 from mycelium_core.models.membership import Role
 from mycelium_core.models.user import User
 from mycelium_core.security import decode_token_async
-from mycelium_core.services import capability_tokens
+from mycelium_core.services import capability_tokens, issuer_api_keys
 from mycelium_core.services.auth import assert_token_not_revoked
 from mycelium_core.services.rbac import _RANK, get_role
 
@@ -291,6 +291,66 @@ async def tenant_ctx(
         x_admin_mode=x_admin_mode,
     ) as ctx:
         yield ctx
+
+
+@dataclass(frozen=True, slots=True)
+class IssuerKeyCtx:
+    """Request context for the public Invoice API, authenticated by a
+    per-issuer-profile API key (task 19b7e874). The principal is the KEY, not a
+    user: authorization is a pure function of ``permissions`` + a pinned
+    ``member`` role, so it is unaffected by the minting user's live role or
+    deletion (H1). Every by-id route must scope to ``issuer_profile_id`` (H2)."""
+
+    session: AsyncSession
+    org_id: uuid.UUID
+    issuer_profile_id: uuid.UUID
+    permissions: frozenset[str]
+    key_id: uuid.UUID
+
+
+async def issuer_key_ctx(
+    authorization: Annotated[str | None, Header()] = None,
+) -> AsyncIterator[IssuerKeyCtx]:
+    """Public Invoice API dependency. Resolves ``Authorization: Bearer
+    mycelium_ik_...`` to an org+issuer-bound principal (no X-Workspace-Id: the
+    key carries its tenant), opens an RLS tenant session as an
+    ``issuer_api_key`` actor with the role PINNED to ``member`` (H1), and yields
+    the ctx. A missing/malformed header is a distinct 401 (auth.missing_bearer);
+    an unknown/revoked/expired key is a COLLAPSED 401 (auth.token_invalid) so the
+    surface is not a key-existence oracle."""
+    if not authorization or not authorization.lower().startswith("bearer "):
+        raise AuthError(MessageCode.AUTH_MISSING_BEARER)
+    raw = authorization[7:].strip()
+    princ = await issuer_api_keys.authenticate(raw)
+    if princ is None:
+        raise AuthError(MessageCode.AUTH_TOKEN_INVALID)
+    async with tenant_session(
+        str(princ.org_id),
+        str(princ.key_id),
+        actor_kind="issuer_api_key",
+        actor_subject_id=str(princ.key_id),
+    ) as session:
+        # Pin the effective role so the reused service layer authorizes on
+        # (key permissions + member), never on a human's stored membership.
+        await session.execute(
+            text("SELECT set_config('app.current_role', :r, true)"),
+            {"r": Role.member.value},
+        )
+        yield IssuerKeyCtx(
+            session=session,
+            org_id=princ.org_id,
+            issuer_profile_id=princ.issuer_profile_id,
+            permissions=frozenset(princ.permissions),
+            key_id=princ.key_id,
+        )
+
+
+def require_perm(ctx: IssuerKeyCtx, permission: str) -> None:
+    """Exact-match per-endpoint permission gate, fail-closed on an unknown
+    string. ``invoice:credit_note`` / ``invoice:compose`` never implicitly grant
+    ``invoice:send`` or client-write."""
+    if permission not in ctx.permissions:
+        raise ForbiddenError(MessageCode.ISSUER_API_KEY_PERMISSION_DENIED, permission=permission)
 
 
 @asynccontextmanager

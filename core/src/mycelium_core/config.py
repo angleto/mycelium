@@ -53,6 +53,31 @@ class Settings(BaseSettings):
         description="Fernet key for the opaque-secret envelope.",
     )
 
+    # Dedicated pepper for the issuer-API-key keyed hash
+    # (HMAC-SHA256(pepper, raw)); key-separated from ``secret_key`` so the two
+    # blast radii are independent. No default: fail-closed, provided via
+    # MYCELIUM_ISSUER_KEY_PEPPER. A DB-only dump is inert without it. It cannot
+    # be rotated without re-minting every key (no raw is stored), so treat it as
+    # long-lived secret-manager material.
+    issuer_key_pepper: str = Field(
+        min_length=32,
+        description="Dedicated pepper for the issuer-API-key keyed hash.",
+    )
+    # Rotation grace: how long the PREVIOUS issuer-key secret keeps
+    # authenticating after a rotate(). Default 0 = hard rotation; a per-call
+    # value is clamped to the ceiling (compromise -> grace 0 / revoke).
+    issuer_key_rotation_grace_seconds: int = 0
+    issuer_key_rotation_grace_max_seconds: int = 3600
+    # Max (and default) issuer-key lifetime. No never-expiring key.
+    issuer_key_max_lifetime_seconds: int = 365 * 24 * 3600
+    # Per-key rate limiter (shared Postgres fixed-window counter): the window and
+    # the per-window budget per endpoint class. Irreversible/expensive verbs
+    # (transmit, credit-note) get a strict budget; reads a looser one.
+    issuer_key_rate_window_seconds: int = 60
+    issuer_key_rate_limit_read: int = 300
+    issuer_key_rate_limit_write: int = 60
+    issuer_key_rate_limit_transmit: int = 30
+
     # Memory embeddings (docs/adr/0005). Single embedding store at a
     # fixed fleet dim: every embedder (local or hosted) MUST emit this
     # dim. 1024 = bge-m3 native AND under pgvector's HNSW 2000-dim

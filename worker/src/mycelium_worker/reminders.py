@@ -32,6 +32,7 @@ from mycelium_core.config import get_settings
 from mycelium_core.db import admin_session, tenant_session
 from mycelium_core.models.membership import Membership, Role
 from mycelium_core.models.organization import Organization
+from mycelium_core.services import issuer_api_keys as issuer_api_keys_svc
 from mycelium_core.services import notifications as notif_svc
 
 _log = logging.getLogger("mycelium.worker.reminders")
@@ -86,6 +87,8 @@ async def run_once() -> tuple[int, int]:
                 continue
             async with tenant_session(str(org_id), str(owner), actor_kind="system") as s:
                 enq = await notif_svc.scan_reminders(s, org_id=org_id, actor_id=owner)
+                # Issuer-API-key expiry warnings (G2): idempotent per key/threshold.
+                enq += await issuer_api_keys_svc.scan_issuer_key_expiry(s, org_id=org_id)
                 res = await notif_svc.dispatch_pending(s, org_id=org_id, actor_id=owner)
             if enq or res.sent or res.failed or res.suppressed:
                 _log.info(

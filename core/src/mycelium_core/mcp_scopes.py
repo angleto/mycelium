@@ -45,6 +45,12 @@ SCOPE_CATALOG: tuple[ScopeDef, ...] = (
     ScopeDef("comments:read", "read", "Read comments", "Read task comments."),
     ScopeDef("dependencies:read", "read", "Read dependencies", "Read the task dependency graph."),
     ScopeDef("budgets:read", "read", "Read budgets", "Read budget envelopes and balances."),
+    ScopeDef(
+        "invoices:read",
+        "read",
+        "Read invoices",
+        "List and read invoices (status, number, totals) and their FatturaPA XML.",
+    ),
     # --- write ---
     ScopeDef(
         "tasks:write", "write", "Write tasks", "Create, update and re-state tasks (no deletion)."

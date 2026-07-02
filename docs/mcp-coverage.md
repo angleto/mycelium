@@ -47,7 +47,7 @@ handles (see the generated `tasks` section below). An agent never needs to
 over-fetch the org table and filter in its head.
 
 <!-- BEGIN GENERATED: mcp tool inventory (scripts/gen_mcp_coverage.py) -->
-**241 tools across 13 domains.** This inventory is generated from the live registry by `scripts/gen_mcp_coverage.py` — do not edit by hand; run `make mcp-coverage` to refresh. The one-line summary is each tool's first docstring line, so it cannot drift from the code.
+**245 tools across 13 domains.** This inventory is generated from the live registry by `scripts/gen_mcp_coverage.py` — do not edit by hand; run `make mcp-coverage` to refresh. The one-line summary is each tool's first docstring line, so it cannot drift from the code.
 
 ### search (3)
 
@@ -224,7 +224,7 @@ over-fetch the org table and filter in its head.
 | `update_note` | Edit a note's title/body. A blank title is re-derived from the |
 | `update_note_part` | Edit a part's body / lang. ``expected_version`` enforces |
 
-### billing (14)
+### billing (17)
 
 | Tool | Summary |
 |---|---|
@@ -233,8 +233,11 @@ over-fetch the org table and filter in its head.
 | `create_budget` | Create a budget envelope (period_kind: month\|quarter\|year\|custom). |
 | `create_invoice` | Create a draft invoice. |
 | `delete_budget` | Delete a budget envelope. |
+| `get_invoice` | Read one invoice's status + data (state, SdI status, number, total, |
+| `get_invoice_xml` | Return an invoice's FatturaPA XML inline (the frozen transmitted document, |
 | `grant_credits` | Admin: top up credits (manual grant; v1 has no payment gateway). |
 | `list_budgets` | List budget envelopes. |
+| `list_invoices` | List invoices, newest first. Filter by ``client_tag_id`` (the recipient) |
 | `list_rate_cards` | List the org rate cards. |
 | `list_usage` | List recent metered usage records. |
 | `meter_usage` | Idempotent metered debit (re-running the same operation_id does |
@@ -318,7 +321,7 @@ over-fetch the org table and filter in its head.
 | `upload_attachment_capability` | Mint ONE single-use capability token that UPLOADS a file to a note or |
 | `upload_attachment_instructions` | Recipe for a TOKEN-FREE large-file upload (MRI, DICOM, PDF, ...). |
 
-### misc (32)
+### misc (33)
 
 | Tool | Summary |
 |---|---|
@@ -345,6 +348,7 @@ over-fetch the org table and filter in its head.
 | `list_annotations` | List the annotations (comments + suggestions) on a markdown document, |
 | `list_assigned_annotations` | The "assigned to me" inbox: annotations assigned to ``assignee_handle`` |
 | `list_dependencies` | List task dependencies, newest first, optionally only those touching a |
+| `list_issuer_profiles` | List the workspace's issuer profiles (the cedente VAT subjects) so an |
 | `list_time_entries` | List time entries, optionally filtered by task or user. |
 | `ping` | Liveness probe; returns the mycelium-core version. |
 | `reopen_annotation` | Reopen a resolved comment thread. |

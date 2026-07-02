@@ -35,6 +35,7 @@ from mycelium_api.routers import (
     export,
     garden,
     invoices,
+    issuer_api_keys,
     llm_provider,
     lookup,
     memory,
@@ -44,6 +45,7 @@ from mycelium_api.routers import (
     notifications,
     oauth,
     oauth_google,
+    public_invoices,
     received_invoices,
     schedule,
     search,
@@ -215,6 +217,14 @@ def create_app() -> FastAPI:
     # only when origins are configured (MYCELIUM_CORS_ORIGINS).
     origins = get_settings().cors_origin_list
     if origins:
+        if "*" in origins:
+            # A wildcard origin WITH credentials is spec-violating and would also
+            # cover the machine-to-machine /api/v1 and /mcp surfaces. Fail fast at
+            # startup rather than ship an exploitable CORS config (task 19b7e874).
+            raise RuntimeError(
+                "MYCELIUM_CORS_ORIGINS must list explicit origins, not '*' "
+                "(credentialled CORS cannot use a wildcard)."
+            )
         app.add_middleware(
             CORSMiddleware,
             allow_origins=origins,
@@ -266,6 +276,8 @@ def create_app() -> FastAPI:
     app.include_router(attachments.router)
     app.include_router(capabilities.router)
     app.include_router(invoices.router)
+    app.include_router(issuer_api_keys.router)
+    app.include_router(public_invoices.router)
     app.include_router(received_invoices.router)
     app.include_router(notifications.router)
     app.include_router(oauth_google.router)

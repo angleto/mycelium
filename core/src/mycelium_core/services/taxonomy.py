@@ -120,6 +120,48 @@ async def create_tag(
     return tag
 
 
+def _new_client_profile(
+    tag_id: uuid.UUID,
+    org_id: uuid.UUID,
+    profile: ClientInput,
+    country_code: str | None,
+    vat_number: str | None,
+) -> ClientProfile:
+    """Map a ``ClientInput`` (+ normalized VAT) to a ``ClientProfile`` row.
+    Shared by ``create_client`` and ``resolve_or_create_client`` so the two
+    paths never drift on which fields are persisted."""
+    return ClientProfile(
+        tag_id=tag_id,
+        org_id=org_id,
+        legal_name=profile.legal_name,
+        first_name=profile.first_name,
+        last_name=profile.last_name,
+        country_code=country_code,
+        vat_number=vat_number,
+        tax_code=profile.tax_code,
+        address=profile.address,
+        civic_number=profile.civic_number,
+        postal_code=profile.postal_code,
+        city=profile.city,
+        province=profile.province,
+        country=profile.country,
+        sdi_code=profile.sdi_code,
+        pec=profile.pec,
+        invoice_series=profile.invoice_series,
+        payment_iban=profile.payment_iban,
+        description=profile.description,
+        default_billable=profile.default_billable,
+        hourly_rate=profile.hourly_rate,
+        currency=profile.currency,
+        timezone=profile.timezone,
+        default_payment_conditions_code=profile.default_payment_conditions_code,
+        default_payment_method_code=profile.default_payment_method_code,
+        default_payment_terms_days=profile.default_payment_terms_days,
+        invoice_language=profile.invoice_language,
+        invoice_date_format=validate_date_format(profile.invoice_date_format),
+    )
+
+
 async def create_client(
     session: AsyncSession,
     *,
@@ -135,38 +177,7 @@ async def create_client(
     country_code, vat_number = normalize_vat(profile.vat_number, profile.country_code)
     if not is_valid_vat_code(vat_number, country_code):
         raise DomainError(MessageCode.INVOICE_INVALID, detail=f"client vat_number '{vat_number}'")
-    session.add(
-        ClientProfile(
-            tag_id=tag.id,
-            org_id=org_id,
-            legal_name=profile.legal_name,
-            first_name=profile.first_name,
-            last_name=profile.last_name,
-            country_code=country_code,
-            vat_number=vat_number,
-            tax_code=profile.tax_code,
-            address=profile.address,
-            civic_number=profile.civic_number,
-            postal_code=profile.postal_code,
-            city=profile.city,
-            province=profile.province,
-            country=profile.country,
-            sdi_code=profile.sdi_code,
-            pec=profile.pec,
-            invoice_series=profile.invoice_series,
-            payment_iban=profile.payment_iban,
-            description=profile.description,
-            default_billable=profile.default_billable,
-            hourly_rate=profile.hourly_rate,
-            currency=profile.currency,
-            timezone=profile.timezone,
-            default_payment_conditions_code=profile.default_payment_conditions_code,
-            default_payment_method_code=profile.default_payment_method_code,
-            default_payment_terms_days=profile.default_payment_terms_days,
-            invoice_language=profile.invoice_language,
-            invoice_date_format=validate_date_format(profile.invoice_date_format),
-        )
-    )
+    session.add(_new_client_profile(tag.id, org_id, profile, country_code, vat_number))
     await session.flush()
     await audit.log(
         session,
@@ -175,6 +186,97 @@ async def create_client(
         entity="tag",
         entity_id=tag.id,
         action="create_client",
+    )
+    return tag
+
+
+async def _find_client_by_fiscal_id(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    country_code: str | None,
+    vat_number: str | None,
+    tax_code: str | None,
+) -> Tag | None:
+    """The client tag whose profile matches the fiscal identity: by (country,
+    VAT) when a VAT is present, else by codice fiscale. RLS-scoped + explicit
+    org filter."""
+    stmt = (
+        select(Tag)
+        .join(ClientProfile, ClientProfile.tag_id == Tag.id)
+        .where(Tag.org_id == org_id, Tag.kind == TagKind.client)
+    )
+    if vat_number:
+        stmt = stmt.where(
+            ClientProfile.country_code == country_code,
+            ClientProfile.vat_number == vat_number,
+        )
+    else:
+        stmt = stmt.where(ClientProfile.tax_code == tax_code)
+    return (await session.execute(stmt.limit(1))).scalar_one_or_none()
+
+
+async def _insert_client_tag_dedup(
+    session: AsyncSession, org_id: uuid.UUID, name: str, disambiguator: str | None
+) -> Tag:
+    """Insert a client tag; if the name is taken by a differently-identified
+    client, disambiguate (the fiscal-id resolve already missed, so a name clash
+    is a genuinely different counterpart)."""
+    try:
+        return await _insert_tag(session, org_id, TagKind.client, name[:120], None)
+    except DomainError:
+        suffix = disambiguator or uuid.uuid4().hex[:6]
+        alt = f"{name} ({suffix})"[:120]
+        try:
+            return await _insert_tag(session, org_id, TagKind.client, alt, None)
+        except DomainError:
+            uniq = f"{name} ({uuid.uuid4().hex[:8]})"[:120]
+            return await _insert_tag(session, org_id, TagKind.client, uniq, None)
+
+
+async def resolve_or_create_client(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    name: str,
+    profile: ClientInput,
+) -> Tag:
+    """MEMBER-authorized resolve-or-create for an invoice recipient (task
+    19b7e874). The issuer-API-key compose path may pass inline cessionario data
+    instead of a pre-created ``client_tag_id``; this is deliberately member-level
+    (NOT the admin-gated ``create_client``) so an issuer key can invoice a new
+    counterpart without holding the client-directory admin right -- while a
+    confused deputy still cannot do arbitrary client CRUD. Idempotent on the
+    fiscal identity: an existing (country, VAT) or codice-fiscale match is reused."""
+    await require_role(session, org_id, actor_id, Role.member)
+    country_code, vat_number = normalize_vat(profile.vat_number, profile.country_code)
+    if vat_number and not is_valid_vat_code(vat_number, country_code):
+        raise DomainError(MessageCode.INVOICE_INVALID, detail=f"client vat_number '{vat_number}'")
+    tax_code = (profile.tax_code or "").strip() or None
+    if not vat_number and not tax_code:
+        raise DomainError(
+            MessageCode.INVOICE_INVALID, detail="client requires vat_number or tax_code"
+        )
+    existing = await _find_client_by_fiscal_id(
+        session,
+        org_id=org_id,
+        country_code=country_code,
+        vat_number=vat_number,
+        tax_code=tax_code,
+    )
+    if existing is not None:
+        return existing
+    tag = await _insert_client_tag_dedup(session, org_id, name, vat_number or tax_code)
+    session.add(_new_client_profile(tag.id, org_id, profile, country_code, vat_number))
+    await session.flush()
+    await audit.log(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        entity="tag",
+        entity_id=tag.id,
+        action="resolve_or_create_client",
     )
     return tag
 
