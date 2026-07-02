@@ -82,7 +82,13 @@ _DISTILL_SYSTEM = (
     "generalise beyond it, or invent anything not explicitly stated; if a "
     "point is uncertain or unsupported by the source, omit it. "
     "No filler, no apology, no restate of the brief. Preserve the input "
-    "language (Italian or English matching the input)."
+    "language (Italian or English matching the input). "
+    # Bench 2026-07-02 (task 50501e45): the soft "preserve the input language"
+    # above is IGNORED by the lean production candidates (mistral-small and
+    # gemma-3 wrote English atoms for Italian notes); this closing imperative
+    # is the exact phrasing the bench validated as effective (mistral-small
+    # and mistral-medium both switched to Italian with it appended).
+    "Write the distillation in the same language as the note."
 )
 # Fidelity verify pass (task a44e72a4): a second model reads the SOURCE and
 # the DRAFT distillation and returns a corrected distillation that keeps ONLY
