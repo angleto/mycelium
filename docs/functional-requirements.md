@@ -212,9 +212,13 @@ single GUI/REST/MCP choke point).
 - Immutability: a state machine; only `draft` is deletable; issued =
   append-only; correction only via a TD04 credit note.
 - Numbering: progressive per (Org, series, year), concurrency-safe
-  (sequence or `FOR UPDATE`), allocated only at the
-  draft -> transmitted transition in the same transaction; never
-  reused.
+  (`FOR UPDATE`), allocated only at the draft -> transmitted transition;
+  never reused. Since ADR-0046 the allocation (numero +
+  `ProgressivoInvio`/`NomeFile` + frozen XML) is COMMITTED before the SdI
+  dispatch, so a lost acknowledgement can never roll an identifier back
+  into the counters; a retry re-sends the same file under the same name
+  (SdI dedupes by file name) and the inbound reconcile correlates by
+  `NomeFile`.
 - History search; mark paid (manual reconciliation in v1); TD04 credit
   note.
 - Implemented (F7b, config-gated on `MYCELIUM_SDI_CHANNEL=sdicoop`): official
@@ -235,8 +239,12 @@ single GUI/REST/MCP choke point).
   mandatory idempotency key and a per-key rate limit. Key management is owner-
   gated REST + GUI (`/issuer-profiles/{id}/api-keys`). Over MCP the same core is
   read-and-write (compose / transmit / status / list / issuer profiles / XML),
-  gated by the `invoices:read` / `invoices:write` scopes. Deferred: signed
-  webhooks, IP allowlist, lost-ACK file-name durability.
+  gated by the `invoices:read` / `invoices:write` scopes. Lost-ACK durability
+  shipped as the two-phase transmit (ADR-0046): unsettled dispatches are
+  retryable (same `Idempotency-Key` RESUMES the same invoice; the dispatch
+  lease arbitrates), `sdi_dispatch_started_at` is exposed on the invoice
+  payloads, and `transmitted -> draft` is a legal observable transition on a
+  definitely-failed first dispatch. Deferred: signed webhooks, IP allowlist.
 
 ## FR-10 MCP server (co-equal)
 

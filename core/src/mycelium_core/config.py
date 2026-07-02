@@ -78,6 +78,15 @@ class Settings(BaseSettings):
     issuer_key_rate_limit_write: int = 60
     issuer_key_rate_limit_transmit: int = 30
 
+    # Two-phase transmit (ADR-0046). The dispatch wall time is bounded
+    # explicitly (httpx's 30 s timeout is PER PHASE -- connect/write/read --
+    # so it does not bound the total); the lease must comfortably exceed
+    # that bound so an expired lease provably implies no in-flight dispatch.
+    # After expiry a crashed/unsettled dispatch becomes retryable (the retry
+    # re-sends the SAME NomeFile; SdI dedupes by file name).
+    sdi_dispatch_timeout_seconds: int = 120
+    sdi_dispatch_lease_seconds: int = 300
+
     # Memory embeddings (docs/adr/0005). Single embedding store at a
     # fixed fleet dim: every embedder (local or hosted) MUST emit this
     # dim. 1024 = bge-m3 native AND under pgvector's HNSW 2000-dim

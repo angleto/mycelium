@@ -17,17 +17,22 @@ arithmetically validated (full XSD validation is a hardening add-on).
 
 from __future__ import annotations
 
+import asyncio
 import datetime as dt
+import logging
 import re
 import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
 from decimal import Decimal
 
+import httpx
 from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from mycelium_core.config import get_settings
+from mycelium_core.db import tenant_checkpoint, tenant_rollback
 from mycelium_core.errors import ConflictError, DomainError, NotFoundError
 from mycelium_core.i18n import MessageCode
 from mycelium_core.it_provinces import is_valid_provincia
@@ -80,8 +85,13 @@ from mycelium_core.services.payment_methods import (
 from mycelium_core.services.rbac import require_role
 from mycelium_core.services.sdi_mandate import get_active_mandate
 from mycelium_core.services.sdi_transport import fatturapa_filename, transmission_progressivo
-from mycelium_core.services.system_settings import resolve_sdi_endpoint
+from mycelium_core.services.system_settings import (
+    endpoint_for,
+    get_sdi_environment,
+)
 from mycelium_core.vat import is_valid_vat_code, normalize_vat
+
+log = logging.getLogger(__name__)
 
 # --- issuer profiles (the invoice "intestazione") ---
 
@@ -706,7 +716,13 @@ async def get_invoice(
         # Serialise concurrent state transitions (transmit / reopen) on this
         # row: a second caller blocks until the first commits, then sees the
         # new state -- no double-transmit under two numbers, no reopen race.
-        stmt = stmt.with_for_update()
+        # populate_existing is load-bearing (ADR-0046): the invoice may
+        # already sit in the session identity map from an unlocked read
+        # (e.g. the public API's issuer scope check); without it the SELECT
+        # FOR UPDATE would return the STALE cached object after waiting for
+        # a concurrent transmit's pre-dispatch commit, and the lease gate
+        # would never fire.
+        stmt = stmt.with_for_update().execution_options(populate_existing=True)
     inv = (await session.execute(stmt)).scalar_one_or_none()
     # A trashed invoice is a 404 to every normal operation (it must be
     # restored first); the trash/restore path opts in via include_deleted.
@@ -878,6 +894,13 @@ async def update_draft(
     unknown = set(values) - _DRAFT_UPDATABLE
     if unknown:
         raise DomainError(MessageCode.DOMAIN_ERROR, detail=", ".join(sorted(unknown)))
+    if "series" in values and values["series"] != inv.series and inv.number is not None:
+        # A draft that already carries an allocated number (a reopened scarto,
+        # or a definite-fail revert) has its numero identity fixed under its
+        # sezionale: moving series would re-use the number in another sequence.
+        raise ConflictError(
+            MessageCode.INVOICE_INVALID, detail="series locked after number allocation"
+        )
     # Validate the closed-enum / range fields before we touch the row.
     if "payment_conditions_code" in values:
         values["payment_conditions_code"] = validate_condizioni(
@@ -1422,6 +1445,102 @@ def _payload_intermediary(
     return None if cedente_vat == intermediary.vat_number else intermediary
 
 
+def _require_transmittable(inv: Invoice) -> bool:
+    """Transmit gate (ADR-0046). Admits a draft (first attempt) or a RETRY of
+    a dispatch that never produced an outcome: state=transmitted with a NULL
+    ``identificativo_sdi`` and an EXPIRED dispatch lease. The lease is the
+    single in-flight arbiter: fresh -> a concurrent/unsettled attempt owns the
+    invoice (409); cleared -> the attempt settled (a manual-export transmit
+    also ends ident-less but with the lease cleared, so it is NOT retryable).
+    Returns True on the retry leg."""
+    if inv.state is InvoiceState.draft:
+        return False
+    if inv.state is InvoiceState.transmitted and inv.identificativo_sdi is None:
+        lease = inv.sdi_dispatch_started_at
+        if lease is None:
+            raise ConflictError(MessageCode.INVOICE_NOT_DRAFT)
+        age = dt.datetime.now(tz=dt.UTC) - lease
+        if age < dt.timedelta(seconds=get_settings().sdi_dispatch_lease_seconds):
+            raise ConflictError(MessageCode.INVOICE_TRANSMIT_IN_PROGRESS)
+        return True
+    raise ConflictError(MessageCode.INVOICE_NOT_DRAFT)
+
+
+def _dispatch_definitely_not_filed(exc: BaseException) -> bool:
+    """True when the failed dispatch PROVABLY left nothing at SdI, so the
+    invoice may return to draft. Only two shapes qualify: the connection was
+    never established (no request bytes sent), or RiceviFile answered with an
+    explicit ``Errore`` (received but refused). Everything else -- timeouts
+    after connect, send/read errors, HTTP 5xx, a malformed response -- is
+    AMBIGUOUS: SdI may hold the file, so the identifiers stay burned and a
+    retry re-sends the SAME NomeFile (SdI dedupes by file name)."""
+    from mycelium_core.services.sdi_transport import SdiFileRejectedError, SdiLocalConfigError
+
+    if isinstance(exc, SdiFileRejectedError | SdiLocalConfigError):
+        return True
+    return isinstance(exc, httpx.ConnectError | httpx.ConnectTimeout)
+
+
+async def _record_dispatch_failure(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    invoice_id: uuid.UUID,
+    exc: BaseException,
+    retrying: bool,
+) -> None:
+    """Phase 3, failure leg (ADR-0046). Runs AFTER the pre-dispatch commit,
+    so the request transaction that is about to roll back (the caller
+    re-raises) must not take this record with it: the leg commits itself via
+    ``tenant_checkpoint``.
+
+    Definitely-not-filed AND the attempt started from draft -> back to
+    draft, KEEPING number/issued_at/progressivo/nome_file for verbatim reuse
+    (nothing is at SdI; the fresh XML of the next attempt sails under the
+    same name). On a RETRY the definite verdict only covers THIS attempt --
+    the earlier lost-ACK one may have filed -- so the invoice stays parked
+    (transmitted, ident-less, frozen XML kept). Ambiguous -> parked, lease
+    untouched: retryable the moment the lease expires, resending the same
+    frozen file.
+
+    The row is re-read fresh (populate_existing; include_deleted, because a
+    concurrent trash in the unlocked dispatch window must not lose the
+    record of a dispatched file) and the leg no-ops if the inbound reconcile
+    settled the invoice while the dispatch was in flight (a late RC adopting
+    the ident): a settled fiscal document is never reverted."""
+    inv = await get_invoice(
+        session, org_id=org_id, invoice_id=invoice_id, for_update=True, include_deleted=True
+    )
+    if not (inv.state is InvoiceState.transmitted and inv.identificativo_sdi is None):
+        # Settled while dispatching (inbound reconcile adopted the ident):
+        # a settled document is never reverted; just drop the stale lease.
+        if inv.sdi_dispatch_started_at is not None:
+            inv.sdi_dispatch_started_at = None
+            await session.flush()
+            await tenant_checkpoint(session)
+        return
+    if _dispatch_definitely_not_filed(exc) and not retrying:
+        inv.state = InvoiceState.draft
+        inv.xml = None
+        inv.sdi_dispatch_started_at = None
+        action = "transmit_failed"
+    else:
+        action = "transmit_unconfirmed"
+    inv.version += 1
+    await session.flush()
+    await audit.log(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        entity="invoice",
+        entity_id=inv.id,
+        action=action,
+        diff={"error": f"{type(exc).__name__}: {exc}"[:300], "nome_file": inv.nome_file},
+    )
+    await tenant_checkpoint(session)
+
+
 async def transmit(
     session: AsyncSession,
     *,
@@ -1431,31 +1550,37 @@ async def transmit(
     progressivo: str | None = None,
     channel: SdiChannel | None = None,
 ) -> Invoice:
-    # Lock the row for the whole transmit: a double-click (or two concurrent
-    # transmits) then serialises -- the second blocks until the first commits
-    # and fails _require_draft, instead of double-filing at SdI under two numbers.
+    """Two-phase durable transmit (ADR-0046).
+
+    Phase 1 (prepare) locks the row, validates, allocates the fiscal
+    identifiers (numero, ProgressivoInvio, NomeFile), freezes the XML, stamps
+    the dispatch lease, and COMMITS via ``tenant_checkpoint``: everything a
+    file at SdI could be identified by is durable BEFORE a byte leaves, and
+    the counters can never hand the same identity to another document.
+    Phase 2 dispatches with no lock or transaction held. Phase 3 records the
+    outcome: success rides the caller's transaction (atomic with the public
+    API's idempotency snapshot); failure self-commits via
+    ``_record_dispatch_failure`` and re-raises.
+    """
+    # PHASE 1 -- prepare. The row lock serialises concurrent transmits until
+    # the pre-dispatch commit; from then on the dispatch lease arbitrates.
     inv = await get_invoice(session, org_id=org_id, invoice_id=invoice_id, for_update=True)
-    _require_draft(inv)
+    retrying = _require_transmittable(inv)
     await require_role(session, org_id, actor_id, Role.member)
-    # The chosen issuer identity (default if none); its header is frozen
-    # into inv.xml below, so later edits never touch this document.
-    fiscal = await _resolve_issuer(session, org_id=org_id, inv=inv)
-    client = await _client(session, inv.client_tag_id)
-    lines = await list_lines(session, org_id=org_id, invoice_id=invoice_id)
-    _validate(fiscal, client, lines)
-    assert fiscal is not None  # _validate raised otherwise  # noqa: S101
     # Pick the RiceviFile endpoint at runtime from the DB switch (test vs
     # production), so the environment flips from Settings without a redeploy.
-    sdi_endpoint = await resolve_sdi_endpoint(session)
-    ch = channel or get_channel(endpoint_override=sdi_endpoint)
+    sdi_env = await get_sdi_environment(session)
+    if retrying and inv.sdi_env_used is not None and inv.sdi_env_used != sdi_env:
+        # The NomeFile dedupe safety net holds only within ONE environment: a
+        # retry after an environment flip could file the same name/bytes into
+        # an environment that never saw the lost attempt, with the two
+        # environments' notifications then cross-contaminating correlation.
+        raise ConflictError(
+            MessageCode.INVOICE_TRANSMIT_ENV_CHANGED,
+            detail=f"{inv.sdi_env_used} -> {sdi_env}",
+        )
+    ch = channel or get_channel(endpoint_override=endpoint_for(sdi_env))
     intermediary = ch.intermediary
-    # The payload identity (cedente-as-trasmittente for self-transmission, else
-    # the intermediary block) is resolved by the shared helper so the downloadable
-    # ANTEPRIMA preview is byte-faithful to what we actually emit here. The
-    # channel-level ``intermediary`` below still drives the mandate requirement
-    # and the trasmittente sequence (ADR-0011), even when self-transmission
-    # strips the block from the document body.
-    payload_intermediary = _payload_intermediary(fiscal, intermediary)
     if intermediary is not None:
         # Transmitting via the accredited channel = Mycelium acts as intermediary
         # for this VAT subject; an active SdiMandate is required (ADR-0011).
@@ -1468,77 +1593,162 @@ async def transmit(
         )
         if mandate is None:
             raise ConflictError(MessageCode.MANDATE_REQUIRED)
-    totals = _compute_totals(lines, fiscal)
-    inv.taxable, inv.vat, inv.stamp_duty, inv.total = (
-        totals.taxable,
-        totals.vat,
-        totals.stamp_duty,
-        totals.total,
-    )
-    # A reopened scarto (rejected -> draft via reopen_rejected) keeps its
-    # already-allocated number and original date: FatturaPA treats a scartato
-    # document as never issued, so the correction is re-sent within 5 days under
-    # the SAME numero + data -- allocating a new number would leave a gap. A
-    # fresh draft (number/issued_at still None) allocates and stamps now.
-    if inv.number is None:
-        inv.number = await _allocate_number(
-            session, org_id=org_id, issuer_profile_id=fiscal.id, series=inv.series, year=inv.year
-        )
-    number = inv.number
-    if inv.issued_at is None:
-        inv.issued_at = dt.datetime.now(tz=dt.UTC)
-    # The SdI file-name progressivo is max 5 alphanumeric chars (Specifiche
-    # SDI, Allegato B). It must also be unique per trasmittente across every
-    # file ever sent, which the per-org/per-issuer invoice number is NOT
-    # (it resets each year and is scoped differently). So both paths draw a
-    # dedicated monotonic per-trasmittente sequence rendered base36 width 5
-    # (``transmission_progressivo``); the trasmittente is the accredited
-    # channel holder when Mycelium acts as intermediary, else the cedente itself.
-    if inv.progressivo_invio is not None and inv.nome_file is not None:
-        # F8 durability: a prior attempt already allocated this document's
-        # ProgressivoInvio / NomeFile -- reuse them verbatim so a resend collides
-        # with SdI's own file-name dedupe rather than double-filing under a fresh
-        # name. (reopen_rejected clears them, so a scarto still gets a new one.)
+    if retrying and inv.xml is not None:
+        # Retry of an unsettled dispatch: the FROZEN document is the fiscal
+        # source of truth (the lost attempt may have filed exactly these
+        # bytes), so it is re-sent BYTE-IDENTICAL under the same NomeFile --
+        # SdI dedupes by file name, so a landed original makes the resend
+        # collide instead of double-filing. No live re-validation, no totals
+        # recompute: the live issuer/client cards may have changed since the
+        # freeze and must not be able to block or diverge from the resend.
+        assert inv.progressivo_invio is not None and inv.nome_file is not None  # noqa: S101
         progressivo_str = inv.progressivo_invio
         filename = inv.nome_file
-    elif intermediary is not None:
-        seq = await _allocate_transmission_seq(session, intermediary_id=intermediary.vat_number)
-        progressivo_str = transmission_progressivo(seq)
-        filename = fatturapa_filename(
-            intermediary.country_code, intermediary.vat_number, progressivo_str
-        )
+        xml = inv.xml
+        # Persisted proof that a resend happened: the duplicate-echo guard on
+        # a same-ident NS 00002 is only sound when we really re-sent the name.
+        inv.sdi_resent_at = dt.datetime.now(tz=dt.UTC)
     else:
-        cedente_id = fiscal.vat_number or fiscal.tax_code or ""
-        if progressivo is not None:
-            progressivo_str = progressivo
-        else:
-            seq = await _allocate_transmission_seq(session, intermediary_id=cedente_id)
+        # The chosen issuer identity (default if none); its header is frozen
+        # into inv.xml below, so later edits never touch this document.
+        fiscal = await _resolve_issuer(session, org_id=org_id, inv=inv)
+        client = await _client(session, inv.client_tag_id)
+        lines = await list_lines(session, org_id=org_id, invoice_id=invoice_id)
+        _validate(fiscal, client, lines)
+        assert fiscal is not None  # _validate raised otherwise  # noqa: S101
+        # The payload identity (cedente-as-trasmittente for self-transmission,
+        # else the intermediary block) is resolved by the shared helper so the
+        # downloadable ANTEPRIMA preview is byte-faithful to what we actually
+        # emit here. The channel-level ``intermediary`` above still drives the
+        # mandate requirement and the trasmittente sequence (ADR-0011), even
+        # when self-transmission strips the block from the document body.
+        payload_intermediary = _payload_intermediary(fiscal, intermediary)
+        totals = _compute_totals(lines, fiscal)
+        inv.taxable, inv.vat, inv.stamp_duty, inv.total = (
+            totals.taxable,
+            totals.vat,
+            totals.stamp_duty,
+            totals.total,
+        )
+        # A reopened scarto (rejected -> draft via reopen_rejected) keeps its
+        # already-allocated number and original date: FatturaPA treats a
+        # scartato document as never issued, so the correction is re-sent
+        # within 5 days under the SAME numero + data -- allocating a new
+        # number would leave a gap. A fresh draft (number/issued_at still
+        # None) allocates and stamps now.
+        if inv.number is None:
+            inv.number = await _allocate_number(
+                session,
+                org_id=org_id,
+                issuer_profile_id=fiscal.id,
+                series=inv.series,
+                year=inv.year,
+            )
+        if inv.issued_at is None:
+            inv.issued_at = dt.datetime.now(tz=dt.UTC)
+        # The SdI file-name progressivo is max 5 alphanumeric chars (Specifiche
+        # SDI, Allegato B). It must also be unique per trasmittente across every
+        # file ever sent, which the per-org/per-issuer invoice number is NOT
+        # (it resets each year and is scoped differently). So both paths draw a
+        # dedicated monotonic per-trasmittente sequence rendered base36 width 5
+        # (``transmission_progressivo``); the trasmittente is the accredited
+        # channel holder when Mycelium acts as intermediary, else the cedente
+        # itself.
+        if inv.progressivo_invio is not None and inv.nome_file is not None:
+            # F8 durability: a prior attempt already allocated this document's
+            # ProgressivoInvio / NomeFile (e.g. a definite-fail revert kept
+            # them on the draft) -- reuse them verbatim so a resend collides
+            # with SdI's own file-name dedupe rather than double-filing under
+            # a fresh name. (reopen_rejected clears them, so a scarto still
+            # gets a new one.)
+            progressivo_str = inv.progressivo_invio
+            filename = inv.nome_file
+        elif intermediary is not None:
+            seq = await _allocate_transmission_seq(session, intermediary_id=intermediary.vat_number)
             progressivo_str = transmission_progressivo(seq)
-        filename = fatturapa_filename(fiscal.country_code, cedente_id, progressivo_str)
-    # Record the emitted file identity on the invoice (audit + retry reuse above).
-    inv.progressivo_invio = progressivo_str
-    inv.nome_file = filename
-    collegata = await _resolve_collegata(session, org_id=org_id, inv=inv)
-    xml = _build_xml(
-        inv,
-        fiscal,
-        client,
-        lines,
-        progressivo_str,
-        collegata=collegata,
-        intermediary=payload_intermediary,
-    )
-    # Validate against the official FatturaPA XSD before emission: SdI
-    # scarta anything non-conformant, so an invalid document must never
-    # leave draft. Surfaced as the domain error the UI already renders.
-    xsd_errors = validate_fatturapa(xml)
-    if xsd_errors:
-        raise DomainError(MessageCode.INVOICE_INVALID, detail="; ".join(xsd_errors[:5]))
-    inv.xml = xml
+            filename = fatturapa_filename(
+                intermediary.country_code, intermediary.vat_number, progressivo_str
+            )
+        else:
+            cedente_id = fiscal.vat_number or fiscal.tax_code or ""
+            if progressivo is not None:
+                progressivo_str = progressivo
+            else:
+                seq = await _allocate_transmission_seq(session, intermediary_id=cedente_id)
+                progressivo_str = transmission_progressivo(seq)
+            filename = fatturapa_filename(fiscal.country_code, cedente_id, progressivo_str)
+        # Record the emitted file identity on the invoice (audit + retry reuse).
+        inv.progressivo_invio = progressivo_str
+        inv.nome_file = filename
+        collegata = await _resolve_collegata(session, org_id=org_id, inv=inv)
+        xml = _build_xml(
+            inv,
+            fiscal,
+            client,
+            lines,
+            progressivo_str,
+            collegata=collegata,
+            intermediary=payload_intermediary,
+        )
+        # Validate against the official FatturaPA XSD before emission: SdI
+        # scarta anything non-conformant, so an invalid document must never
+        # leave draft. Surfaced as the domain error the UI already renders.
+        xsd_errors = validate_fatturapa(xml)
+        if xsd_errors:
+            raise DomainError(MessageCode.INVOICE_INVALID, detail="; ".join(xsd_errors[:5]))
+        inv.xml = xml
+    number = inv.number
     inv.state = InvoiceState.transmitted
-    res = await ch.transmit(xml=xml, invoice_id=str(inv.id), filename=filename)
-    inv.identificativo_sdi = res.identificativo_sdi
-    inv.conservation_status = res.conservation
+    inv.sdi_dispatch_started_at = dt.datetime.now(tz=dt.UTC)
+    inv.sdi_env_used = sdi_env
+    await session.flush()
+    # Pre-dispatch commit (ADR-0046): identifiers, frozen XML, counters and
+    # the lease become durable; the row locks release. From here on the DB
+    # always knows which file may exist at SdI, whatever happens next.
+    await tenant_checkpoint(session)
+
+    # PHASE 2 -- dispatch. No lock, no open invoice transaction: the SdI
+    # round-trip blocks nobody, and a crash here leaves a retryable invoice,
+    # not an unrecorded file. The wall time is bounded explicitly (httpx's
+    # timeout is per phase, not total) so an expired lease provably implies
+    # no in-flight dispatch. asyncio cancellation (client disconnect) is
+    # deliberately NOT caught: the lease expiry handles that path.
+    try:
+        async with asyncio.timeout(get_settings().sdi_dispatch_timeout_seconds):
+            res = await ch.transmit(xml=xml, invoice_id=str(inv.id), filename=filename)
+    except Exception as exc:
+        await _record_dispatch_failure(
+            session,
+            org_id=org_id,
+            actor_id=actor_id,
+            invoice_id=inv.id,
+            exc=exc,
+            retrying=retrying,
+        )
+        if isinstance(exc, DomainError):
+            raise
+        if _dispatch_definitely_not_filed(exc) and not retrying:
+            # Provably nothing at SdI: surface the transport error as-is
+            # (the invoice is back in draft, identifiers kept for reuse).
+            raise
+        raise ConflictError(MessageCode.INVOICE_TRANSMIT_UNCONFIRMED) from exc
+
+    # PHASE 3 -- success. Re-lock (fresh read) and record; rides the caller's
+    # transaction so the public API's idempotency snapshot commits atomically
+    # with it. If the inbound reconcile adopted an identifier while the
+    # dispatch was in flight (a late RC for the previous attempt's filing),
+    # the reconciled state wins: this attempt's sync ident belongs to a
+    # duplicate filing that SdI will scarto as a NomeFile echo.
+    # include_deleted: recording the outcome of a file that already left must
+    # not depend on the trash flag (a concurrent trash landed in the unlocked
+    # dispatch window).
+    inv = await get_invoice(
+        session, org_id=org_id, invoice_id=invoice_id, for_update=True, include_deleted=True
+    )
+    if inv.state is InvoiceState.transmitted and inv.identificativo_sdi is None:
+        inv.identificativo_sdi = res.identificativo_sdi
+        inv.conservation_status = res.conservation
+    inv.sdi_dispatch_started_at = None
     inv.version += 1
     await session.flush()
     await audit.log(
@@ -1577,6 +1787,8 @@ async def reopen_rejected(
     # NomeFile so the legitimate resend is not itself rejected as a duplicate.
     inv.progressivo_invio = None
     inv.nome_file = None
+    inv.sdi_dispatch_started_at = None
+    inv.sdi_resent_at = None
     # Drop the superseded transmission's SdI notifications: the scarto belonged
     # to the file being redone, so keeping it would make the reopened+resent
     # invoice still show the old NS ("rejected") in its timeline. A fresh outcome
@@ -1618,6 +1830,15 @@ async def create_credit_note(
         InvoiceState.accepted,
     ):
         raise ConflictError(MessageCode.CREDIT_NOTE_PARENT_INVALID)
+    if (
+        parent.state is InvoiceState.transmitted
+        and parent.identificativo_sdi is None
+        and parent.sdi_dispatch_started_at is not None
+    ):
+        # The parent's dispatch has not settled (ADR-0046 in-flight or
+        # unconfirmed window): correcting a document that may not exist at
+        # SdI yet is premature -- retry once the transmission settles.
+        raise ConflictError(MessageCode.INVOICE_TRANSMIT_IN_PROGRESS)
     note = await create_draft(
         session,
         org_id=org_id,
@@ -1679,11 +1900,20 @@ async def soft_delete_invoice(
     session: AsyncSession, *, org_id: uuid.UUID, actor_id: uuid.UUID, invoice_id: uuid.UUID
 ) -> Invoice:
     """Move an invoice to the recycle bin (reversible). Allowed in any
-    state: trashing only hides the row, it never deletes the document, so
-    it does not break the immutability of a transmitted invoice (which is
-    kept for the fiscal record and can only be restored, never purged)."""
+    SETTLED state: trashing only hides the row, it never deletes the
+    document, so it does not break the immutability of a transmitted invoice
+    (which is kept for the fiscal record and can only be restored, never
+    purged). An UNSETTLED dispatch (ADR-0046: transmitted, ident-less, lease
+    set) is refused: its outcome still has to be recorded/reconciled, and
+    hiding the row mid-flight would strand the retry/resume path."""
     inv = await get_invoice(session, org_id=org_id, invoice_id=invoice_id)
     await require_role(session, org_id, actor_id, Role.member)
+    if (
+        inv.state is InvoiceState.transmitted
+        and inv.identificativo_sdi is None
+        and inv.sdi_dispatch_started_at is not None
+    ):
+        raise ConflictError(MessageCode.INVOICE_TRANSMIT_IN_PROGRESS)
     inv.deleted_at = dt.datetime.now(tz=dt.UTC)
     inv.version += 1
     await session.flush()
@@ -1760,6 +1990,77 @@ _EC_VERDICT: dict[str, tuple[BuyerVerdict, InvoiceState]] = {
     "EC02": (BuyerVerdict.rejected, InvoiceState.rejected),
 }
 
+# The SdI scarto code meaning "this FILE NAME was already filed": 00002 nome
+# file duplicato. A byte-identical resend under the same NomeFile (the only
+# resend the two-phase transmit produces) is rejected at SdI's nomenclature
+# stage with 00002 alone, so an NS carrying ONLY 00002 is the dedupe echo of
+# a re-sent file whose original filing lives on (ADR-0046) -- it must not
+# reject the invoice. NOTE: 00404 "fattura duplicata" is deliberately NOT
+# here: content checks never run on a name-deduped resend, so a 00404 always
+# refers to a genuine competing filing (e.g. the same numero sent through
+# another channel) and must reject normally.
+_DUPLICATE_ECHO_CODES = frozenset({"00002"})
+
+
+def _is_duplicate_echo(raw_xml: bytes) -> bool:
+    """True when an NS's error list is non-empty and every code is a
+    duplicate-echo code (00002). A mixed scarto (a real content error
+    alongside the duplicate code) is NOT an echo and rejects normally."""
+    from mycelium_core.services.sdi_inbound import parse_scarto_errors
+
+    errors = parse_scarto_errors(raw_xml)
+    codes = {e["codice"] for e in errors if e.get("codice")}
+    return bool(codes) and codes <= _DUPLICATE_ECHO_CODES
+
+
+async def _archive_notification_without_transition(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID | None,
+    inv: Invoice,
+    parsed: ParsedNotificationLike,
+    reason: str,
+) -> Invoice:
+    """Store a notification for the audit trail WITHOUT any state transition:
+    either a duplicate-echo NS (the scarto only proves the same document
+    already lives at SdI) or a filename-fallback match against an invoice
+    that is not in the in-flight shape (state guard)."""
+    log.warning(
+        "sdi notification archived without transition (%s): invoice=%s outcome=%s ident=%s",
+        reason,
+        inv.id,
+        parsed.outcome,
+        parsed.identificativo_sdi,
+    )
+    notif = InvoiceNotification(
+        org_id=org_id,
+        invoice_id=inv.id,
+        kind=parsed.outcome,
+        file_name=parsed.file_name,
+        message_id=parsed.message_id,
+        raw_xml=parsed.raw_xml,
+        payload={"outcome": parsed.outcome, "stored_without_transition": reason},
+    )
+    session.add(notif)
+    try:
+        await session.flush()
+    except IntegrityError:
+        # Same-notification redelivery; the first insertion won. Re-arm the
+        # GUCs so the rest of the request keeps its tenant context.
+        await tenant_rollback(session)
+        return inv
+    await audit.log(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        entity="invoice",
+        entity_id=inv.id,
+        action="sdi_notification",
+        diff={"outcome": parsed.outcome, "stored_without_transition": reason},
+    )
+    return inv
+
 
 async def ingest_active_notification(
     session: AsyncSession,
@@ -1774,14 +2075,95 @@ async def ingest_active_notification(
     deemed acceptance (15-day window expired). Every notification, including
     the raw signed XML, is appended to ``invoice_notifications`` for audit;
     the unique ``(invoice_id, kind, message_id)`` index makes SdI retries
-    idempotent."""
+    idempotent.
+
+    Lost-ACK reconcile (ADR-0046): when the IdentificativoSdI matches no
+    invoice (the sync ACK of the dispatch was lost, so it was never stored),
+    the notification is correlated by ``NomeFile`` instead -- the file name is
+    committed BEFORE dispatch, so it is always on record. An ident-less
+    invoice ADOPTS the notification's identifier. When the invoice already
+    carries a DIFFERENT identifier (a retry re-sent the same file and both
+    filings raced), the real filing's outcome wins: positive outcomes adopt
+    the incoming identifier; an NS whose errors are all duplicate-echo codes
+    (00002 nome file duplicato / 00404 fattura duplicata) is evidence the
+    SAME document already lives at SdI, so it is archived without any state
+    transition."""
+    # FOR UPDATE + populate_existing: the ingest races the two-phase
+    # transmit's unlocked dispatch window, so the row must be locked and
+    # read FRESH (a stale identity-map object would clobber a concurrent
+    # phase-3 write, and vice versa).
     inv = (
         await session.execute(
-            select(Invoice).where(Invoice.identificativo_sdi == parsed.identificativo_sdi)
+            select(Invoice)
+            .where(Invoice.identificativo_sdi == parsed.identificativo_sdi)
+            .with_for_update()
+            .execution_options(populate_existing=True)
         )
     ).scalar_one_or_none()
+    if inv is None and parsed.file_name:
+        inv = (
+            await session.execute(
+                select(Invoice)
+                .where(Invoice.nome_file == parsed.file_name)
+                .order_by(Invoice.created_at.desc())
+                .limit(1)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        ).scalar_one_or_none()
     if inv is None:
         raise NotFoundError(MessageCode.INVOICE_NOT_FOUND)
+    adopted = False
+    adopted_from: str | None = None
+    if inv.identificativo_sdi != parsed.identificativo_sdi:
+        if parsed.outcome == "NS" and _is_duplicate_echo(parsed.raw_xml):
+            return await _archive_notification_without_transition(
+                session,
+                org_id=org_id,
+                actor_id=actor_id,
+                inv=inv,
+                parsed=parsed,
+                reason="duplicate_echo",
+            )
+        if inv.state is not InvoiceState.transmitted:
+            # Filename-fallback match against an invoice that is not in the
+            # in-flight shape (e.g. a definite-fail revert kept the name on a
+            # draft, or the document already settled under another filing):
+            # never adopt, never transition -- archive for the trail.
+            return await _archive_notification_without_transition(
+                session,
+                org_id=org_id,
+                actor_id=actor_id,
+                inv=inv,
+                parsed=parsed,
+                reason="state_guard",
+            )
+        # Adopt the incoming identifier: either the invoice never had one
+        # (lost ACK) or the incoming filing is the one SdI actually processed.
+        adopted = True
+        adopted_from = inv.identificativo_sdi
+        inv.identificativo_sdi = parsed.identificativo_sdi
+    elif (
+        parsed.outcome == "NS"
+        and inv.sdi_resent_at is not None
+        and _is_duplicate_echo(parsed.raw_xml)
+    ):
+        # Same identifier, but the scarto only says "this file name was
+        # already filed", and we HAVE a persisted proof that this invoice was
+        # re-sent (``sdi_resent_at``, stamped on the retry leg): the resend
+        # echoed off SdI's dedupe while the original filing lives on. Not a
+        # rejection of the document. Without that proof a pure-00002 NS on
+        # the recorded identifier is a genuine scarto (e.g. a first send
+        # whose name was burned by a pre-ADR-0046 rollback) and must reject
+        # normally, or the 5-day correction window would be silently missed.
+        return await _archive_notification_without_transition(
+            session,
+            org_id=org_id,
+            actor_id=actor_id,
+            inv=inv,
+            parsed=parsed,
+            reason="duplicate_echo",
+        )
     now = dt.datetime.now(tz=dt.UTC)
     payload: dict[str, object] = {}
     if parsed.outcome in _RECEIPT_MAP:
@@ -1816,6 +2198,13 @@ async def ingest_active_notification(
         payload = {"outcome": "DT"}
     else:
         raise DomainError(MessageCode.DOMAIN_ERROR)
+    if adopted:
+        # Trace the lost-ACK / raced-resend reconcile in the audit payload.
+        payload["adopted_identificativo_from"] = adopted_from or ""
+    # A notification settling the invoice ends any unsettled dispatch: drop
+    # the lease so the invoice stops advertising itself as retry-pending
+    # (SPA affordance, public sdi_dispatch_started_at, credit-note guard).
+    inv.sdi_dispatch_started_at = None
     inv.version += 1
 
     notif = InvoiceNotification(
@@ -1834,8 +2223,9 @@ async def ingest_active_notification(
         # SdI re-delivered a notification with the same (invoice, kind,
         # message_id); the prior ingest already applied it. Roll back the
         # whole transaction so the verdict columns stay coherent with the
-        # audit row that wins (the first insertion).
-        await session.rollback()
+        # audit row that wins (the first insertion); re-arm the GUCs so the
+        # rest of the request keeps its tenant context.
+        await tenant_rollback(session)
         return inv
 
     await audit.log(

@@ -6475,6 +6475,11 @@ def _invoice(i: Invoice) -> dict[str, Any]:
         "total": str(i.total),
         "identificativo_sdi": i.identificativo_sdi,
         "sdi_status": i.sdi_status.value,
+        # Non-null = an unsettled dispatch owns the invoice (ADR-0046);
+        # with a null identificativo_sdi it marks the invoice retryable.
+        "sdi_dispatch_started_at": (
+            i.sdi_dispatch_started_at.isoformat() if i.sdi_dispatch_started_at else None
+        ),
         "conservation_status": i.conservation_status.value,
         "version": i.version,
     }

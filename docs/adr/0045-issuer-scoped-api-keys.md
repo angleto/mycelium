@@ -68,11 +68,13 @@ emitted `ProgressivoInvio` / `NomeFile` are recorded on the invoice.
 
 - The pepper cannot be rotated without re-minting every key (no raw is stored):
   treat it as long-lived secret-manager material, held out of the DB/backups.
-- Full lost-ACK durability (committing the file name before dispatch so a resend
-  collides with SdI's own dedupe) is deferred: it needs a two-phase / outbox
-  restructure of the live transmit path (`get_invoice` holds a row lock, so a
-  nested pre-dispatch commit would deadlock), and is not worth destabilising the
-  live fiscal path autonomously. Only the additive file-name recording shipped.
+- Full lost-ACK durability shipped as ADR-0046 (two-phase transmit: the fiscal
+  identity — numero, `ProgressivoInvio`/`NomeFile`, frozen XML — is committed
+  BEFORE dispatch, a retry re-sends the same bytes under the same name, and
+  the inbound reconcile correlates by `NomeFile`). The blockers noted at
+  deferral time (the request-long row lock and the transaction-local RLS
+  GUCs) are resolved by `tenant_checkpoint` on a checkpoint-friendly
+  `tenant_session`, not by a nested session.
 - Deferred follow-ons: signed outbound webhooks, optional per-key IP allowlist,
   full security alerting, a binary PDF download over MCP (the XML is text and
   ships inline; the PDF is on `/api/v1`), a per-issuer least-privilege allowlist

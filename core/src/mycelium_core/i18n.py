@@ -95,6 +95,9 @@ class MessageCode(enum.StrEnum):
     INVOICE_NOT_FOUND = "invoice.not_found"
     INVOICE_NOT_DRAFT = "invoice.not_draft"
     INVOICE_NOT_REJECTED = "invoice.not_rejected"
+    INVOICE_TRANSMIT_IN_PROGRESS = "invoice.transmit_in_progress"
+    INVOICE_TRANSMIT_UNCONFIRMED = "invoice.transmit_unconfirmed"
+    INVOICE_TRANSMIT_ENV_CHANGED = "invoice.transmit_env_changed"
     CREDIT_NOTE_PARENT_INVALID = "invoice.credit_note_parent_invalid"
     INVOICE_INVALID = "invoice.invalid"
     FISCAL_PROFILE_REQUIRED = "invoice.fiscal_profile_required"
@@ -336,6 +339,19 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
         ),
         MessageCode.INVOICE_NOT_REJECTED: (
             "Only a rejected (SdI scarto) invoice can be reopened for correction"
+        ),
+        MessageCode.INVOICE_TRANSMIT_IN_PROGRESS: (
+            "A transmission of this invoice is already in progress; retry after it settles"
+        ),
+        MessageCode.INVOICE_TRANSMIT_UNCONFIRMED: (
+            "The SdI dispatch outcome is unknown (lost acknowledgement); the invoice is "
+            "held as transmitted and a retry will re-send the SAME file, which SdI "
+            "deduplicates by file name"
+        ),
+        MessageCode.INVOICE_TRANSMIT_ENV_CHANGED: (
+            "The SdI environment changed since this invoice's unsettled dispatch "
+            "({detail}); the file-name dedupe safety net does not cross environments, "
+            "so the retry is refused"
         ),
         MessageCode.CREDIT_NOTE_PARENT_INVALID: (
             "A credit note requires an emitted invoice; a draft is not yet issued "

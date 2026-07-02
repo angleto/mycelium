@@ -141,6 +141,20 @@ def _decode_soap_response(content: bytes, content_type: str | None) -> bytes:
     return content
 
 
+class SdiFileRejectedError(ValueError):
+    """RiceviFile answered with an explicit ``Errore`` (EI01 file vuoto /
+    EI02 servizio non disponibile / EI03 utente non abilitato): SdI received
+    the request but did NOT accept the file. A distinct type (still a
+    ValueError for compatibility) so the two-phase transmit can classify it
+    as provably-not-filed and return the invoice to draft (ADR-0046)."""
+
+
+class SdiLocalConfigError(ValueError):
+    """The mTLS context could not even be built (missing/broken client cert,
+    key or CA bundle): the failure happened BEFORE any connection, so the
+    two-phase transmit classifies it as provably-not-filed (ADR-0046)."""
+
+
 def parse_ricevifile_response(body: bytes) -> str:
     """Extract ``IdentificativoSdI`` from a RiceviFile SOAP response.
 
@@ -167,7 +181,7 @@ def parse_ricevifile_response(body: bytes) -> str:
         elif local == "Errore" and (el.text or "").strip():
             errore = el.text.strip()
     if errore:
-        raise ValueError(f"RiceviFile rejected the file: Errore={errore}")
+        raise SdiFileRejectedError(f"RiceviFile rejected the file: Errore={errore}")
     if identificativo:
         return identificativo
     excerpt = body[:400].decode("utf-8", "replace")
@@ -188,7 +202,11 @@ async def send_via_sdicoop(
     surface as ``httpx.HTTPError``; a malformed/fault response as
     ``ValueError``. Config-gated; never exercised in CI."""
     envelope = build_ricevifile_envelope(filename=filename, xml=xml)
-    ctx = _mtls_ssl_context(client_cert=client_cert, client_key=client_key, ca_bundle=ca_bundle)
+    try:
+        ctx = _mtls_ssl_context(client_cert=client_cert, client_key=client_key, ca_bundle=ca_bundle)
+    except (ssl.SSLError, OSError, ValueError) as exc:
+        # Failed before any connection existed: provably nothing reached SdI.
+        raise SdiLocalConfigError(f"mTLS context: {exc}") from exc
     async with httpx.AsyncClient(verify=ctx, timeout=_SEND_TIMEOUT_S) as client:
         resp = await client.post(
             endpoint_url,

@@ -304,6 +304,23 @@ class Invoice(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, Base):
     # rather than double-filing (task 19b7e874, fiscal durability).
     progressivo_invio: Mapped[str | None] = mapped_column(String(10), nullable=True)
     nome_file: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    # Dispatch lease for the two-phase transmit (ADR-0046): stamped in the
+    # pre-dispatch commit, cleared when the attempt is recorded. While fresh,
+    # a concurrent transmit is refused; expired with a NULL identificativo_sdi
+    # it marks the invoice retryable (crash mid-dispatch / lost ACK).
+    sdi_dispatch_started_at: Mapped[datetime.datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # Persisted proof that this invoice's frozen file was RE-SENT (the retry
+    # leg stamps it): the duplicate-echo guard on a same-ident NS 00002 is
+    # only sound when a resend really happened (ADR-0046).
+    sdi_resent_at: Mapped[datetime.datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # The SdI environment (test|production) active at the pre-dispatch commit:
+    # the NomeFile dedupe only holds within one environment, so a retry under
+    # a flipped runtime switch is refused (ADR-0046).
+    sdi_env_used: Mapped[str | None] = mapped_column(String(16), nullable=True)
     sdi_status: Mapped[SdiStatus] = mapped_column(
         SAEnum(SdiStatus, name="sdi_status", native_enum=True, create_type=False),
         nullable=False,

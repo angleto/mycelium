@@ -18,8 +18,13 @@ is append-only and immutable; the only logical "removal" is a TD04
 credit note linked via `parent_invoice_id`. Explicit carve-out in FR-1:
 soft-delete does not apply to issued invoices and conserved documents.
 The progressive number per (Org, series, year) is allocated
-concurrency-safe only at the draft -> transmitted transition, in the
-same transaction, and never reused (see FR-9).
+concurrency-safe only at the draft -> transmitted transition and never
+reused; since ADR-0046 it is committed durably BEFORE the SdI dispatch
+(together with `ProgressivoInvio`/`NomeFile` and the frozen XML), so no
+identifier that may have reached SdI can ever be rolled back and
+reassigned. A definitely-failed first dispatch may legally return the
+invoice to `draft` keeping its allocated identity for verbatim reuse
+(see FR-9, ADR-0046).
 
 ## Consequences
 

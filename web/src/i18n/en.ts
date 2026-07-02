@@ -2082,6 +2082,9 @@ export const en = {
     total: 'Total',
     saved: 'Saved.',
     transmit: 'Transmit',
+    retransmit: 'Retry transmission',
+    retransmitHint:
+      'The SdI dispatch outcome is unknown; the retry re-sends the SAME file (SdI deduplicates by file name)',
     deleteDraft: 'Delete draft',
     paid: 'Mark paid',
     xml: 'View XML',

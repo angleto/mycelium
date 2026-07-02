@@ -168,7 +168,13 @@ org-scoped entity. Memory is partitioned by `org_id`.
 - `conservation_records(invoice_id|receipt_id, provider[ade_free],
   adhesion_status, in_coverage bool, hash?, conserved_at?)`
 - `invoices` also carries `progressivo_invio` / `nome_file` (the emitted SdI
-  file identity, recorded at transmit and reused on a resend; ADR-0045).
+  file identity, COMMITTED before dispatch and reused verbatim on a resend;
+  partial index `ix_invoices_nome_file` — it is the lost-ACK correlation key),
+  `sdi_dispatch_started_at` (the two-phase dispatch lease: non-null = an
+  unsettled dispatch owns the invoice; expired + null `identificativo_sdi` =
+  retryable) and `sdi_env_used` (the SdI environment stamped at the
+  pre-dispatch commit; a retry under a flipped environment is refused).
+  ADR-0045/ADR-0046.
 - `issuer_api_keys(id, org_id, issuer_profile_id FK cascade, created_by FK
   users set-null, name, key_public_id UNIQUE, secret_hash UNIQUE (=HMAC-SHA256
   (pepper, raw)), permissions text[], previous_secret_hash?, rotated_at?,

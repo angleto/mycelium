@@ -8726,6 +8726,8 @@ export interface components {
             /** Identificativo Sdi */
             identificativo_sdi: string | null;
             sdi_status: components["schemas"]["SdiStatus"];
+            /** Sdi Dispatch Started At */
+            sdi_dispatch_started_at: string | null;
             payment_status: components["schemas"]["PaymentStatus"];
             conservation_status: components["schemas"]["ConservationStatus"];
             /** Deleted At */
@@ -10452,6 +10454,8 @@ export interface components {
             total: string;
             /** Identificativo Sdi */
             identificativo_sdi: string | null;
+            /** Sdi Dispatch Started At */
+            sdi_dispatch_started_at: string | null;
             /** Purpose */
             purpose: string | null;
         };

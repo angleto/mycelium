@@ -1882,6 +1882,27 @@ export function InvoicesRoute() {
                     {t('invoices.reopen')}
                   </button>
                 )}
+                {sel.state === 'transmitted' &&
+                  !sel.identificativo_sdi &&
+                  sel.sdi_dispatch_started_at && (
+                    <button
+                      type="button"
+                      title={t('invoices.retransmitHint')}
+                      onClick={() =>
+                        void act(
+                          api.POST('/invoices/{invoice_id}/transmit', {
+                            params: {
+                              header: workspaceHeader(),
+                              path: { invoice_id: sel.id },
+                            },
+                            body: {},
+                          }),
+                        ).then(() => void openInvoice(sel.id))
+                      }
+                    >
+                      {t('invoices.retransmit')}
+                    </button>
+                  )}
                 <button type="button" onClick={() => void showXml(sel.id)}>
                   {t('invoices.xml')}
                 </button>

@@ -11,7 +11,12 @@ the mutation, so a retry never files a second fiscal document:
   with its snapshot -> it REPLAYS instead of mutating.
 
 A reuse of the key with a different request body is a 422; a claim that exists but
-has no snapshot yet (a still-in-flight or crashed sibling) is a 409.
+has no snapshot yet (a still-in-flight or crashed sibling) is a 409 -- UNLESS the
+claim already carries its invoice: the two-phase transmit (ADR-0046) commits the
+claim together with the pre-dispatch invoice state, so a snapshot-less claim with
+an ``invoice_id`` marks an unsettled DISPATCH, not a live sibling. The retry then
+RESUMES the same invoice's transmission (``resume_invoice_id``) instead of failing
+or composing a duplicate; the invoice-level dispatch lease arbitrates concurrency.
 """
 
 from __future__ import annotations
@@ -43,6 +48,10 @@ class Claim:
     is_new: bool
     row_id: uuid.UUID | None
     replay: dict[str, Any] | None
+    # Set when a prior attempt with this key committed its pre-dispatch state
+    # but never settled (ADR-0046): the caller must RESUME transmitting this
+    # invoice instead of re-executing the mutation from scratch.
+    resume_invoice_id: uuid.UUID | None = None
 
 
 async def claim(
@@ -81,8 +90,29 @@ async def claim(
     if existing.request_hash != request_hash:
         raise UnprocessableError(MessageCode.IDEMPOTENCY_BODY_MISMATCH)
     if existing.response_snapshot is None:
+        if existing.invoice_id is not None:
+            # The prior attempt's pre-dispatch commit (ADR-0046) persisted the
+            # claim with its invoice: resume that invoice's transmission (the
+            # dispatch lease 409s a still-live sibling; an expired one retries).
+            return Claim(
+                is_new=False,
+                row_id=existing.id,
+                replay=None,
+                resume_invoice_id=existing.invoice_id,
+            )
         raise ConflictError(MessageCode.IDEMPOTENCY_IN_PROGRESS)
     return Claim(is_new=False, row_id=existing.id, replay=existing.response_snapshot)
+
+
+async def attach_invoice(
+    session: AsyncSession, *, row_id: uuid.UUID, invoice_id: uuid.UUID
+) -> None:
+    """Bind the claim to its invoice BEFORE the dispatch, so the pre-dispatch
+    commit (ADR-0046 phase 1) persists the pair atomically and a retry after
+    a crash/unsettled dispatch can resume instead of double-composing."""
+    await session.execute(
+        update(ApiIdempotency).where(ApiIdempotency.id == row_id).values(invoice_id=invoice_id)
+    )
 
 
 async def store(
@@ -99,4 +129,4 @@ async def store(
     )
 
 
-__all__ = ["Claim", "claim", "request_digest", "store"]
+__all__ = ["Claim", "attach_invoice", "claim", "request_digest", "store"]

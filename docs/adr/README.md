@@ -49,3 +49,9 @@ Format: Status, Context, Decision, Consequences, Alternatives rejected.
 - [0038 UUID-prefix entity resolver (`/lookup/{prefix}`)](0038-uuid-prefix-resolver.md)
 - [0039 Fungal decomposition pipeline (humus producer)](0039-fungal-decomposition-pipeline.md)
 - [0040 Mycelial 4-verb note-note link model](0040-mycelial-link-model.md) — revises ADR-0029 D3
+- [0041 Autonomous retention spares the originals](0041-autonomous-retention-spares-originals.md)
+- [0042 Tasks as graph nodes + complete auto-classify-on-ingest](0042-tasks-as-graph-nodes-and-complete-autoclassify.md)
+- [0043 Human-gated review state for AI-generated nodes](0043-human-gated-review-state-for-ai-generated-nodes.md)
+- [0044 Temporal knowledge graph (Track B)](0044-temporal-knowledge-graph.md)
+- [0045 Issuer-scoped API keys, public Invoice API, MCP invoice tools](0045-issuer-scoped-api-keys.md)
+- [0046 Two-phase durable invoice transmit (lost-ACK safety)](0046-two-phase-durable-transmit.md)

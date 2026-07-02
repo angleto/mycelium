@@ -2083,6 +2083,9 @@ export const it: Catalog = {
     total: 'Totale',
     saved: 'Salvato.',
     transmit: 'Trasmetti',
+    retransmit: 'Ritenta trasmissione',
+    retransmitHint:
+      "L'esito dell'invio a SdI non è noto; il nuovo tentativo re-invia lo STESSO file (SdI deduplica per nome file)",
     deleteDraft: 'Elimina bozza',
     paid: 'Segna pagata',
     xml: 'Vedi XML',

@@ -90,7 +90,24 @@ async def tenant_session(
 
     sm = get_sessionmaker()
     async with sm() as session:
-        async with session.begin():
+        # Explicit begin/commit instead of the ``session.begin()`` context
+        # manager: SQLAlchemy forbids further statements after a mid-CM
+        # commit, and the two-phase transmit (ADR-0046) must be able to
+        # ``tenant_checkpoint`` -- commit the prepared fiscal identifiers and
+        # keep working on the same session. Semantics are unchanged for every
+        # other caller: begin-on-first-statement (autobegin), commit on clean
+        # exit, rollback on exception.
+        try:
+            # Stashed so ``tenant_rollback`` can re-arm after an ABORTED
+            # transaction (an aborted tx cannot be queried for its GUCs).
+            session.info["tenant_gucs"] = (
+                org_id,
+                user_id,
+                project_id or "",
+                actor_kind,
+                actor_subject_id or "",
+                "",
+            )
             await session.execute(
                 text(
                     "SELECT set_config('app.current_org', :org, true),"
@@ -109,15 +126,112 @@ async def tenant_session(
             )
             yield session
             # Resync task-search index for any task/checklist row that
-            # mutated inside this transaction. Sits inside the outer
-            # ``begin()`` so the blob upsert is atomic with the source
-            # mutation (FTS is visible the instant the commit lands;
-            # the embedding vector is best-effort within a 2 s timeout
-            # and the backfill worker fills the rest).
+            # mutated inside this transaction. Sits before the commit so
+            # the blob upsert is atomic with the source mutation (FTS is
+            # visible the instant the commit lands; the embedding vector
+            # is best-effort within a 2 s timeout and the backfill worker
+            # fills the rest).
             await flush_task_search_dirty(session)
             # Same chokepoint for the note index: one blob per note PART,
             # resync'd atomically with the part mutation.
             await flush_note_search_dirty(session)
+            trans = session.sync_session.get_transaction()
+            if trans is not None and not trans.is_active:
+                # A flush error contained by a savepoint pattern (e.g. the
+                # EXCLUDE-overlap 409s) deactivates the outer transaction
+                # while the request still renders a handled error response.
+                # The old ``session.begin()`` CM rolled this back silently
+                # on exit; keep that contract instead of raising
+                # PendingRollbackError from an unconditional commit.
+                await session.rollback()
+            else:
+                await session.commit()
+        except BaseException:
+            await session.rollback()
+            raise
+
+
+async def _capture_gucs(session: AsyncSession) -> tuple[str, ...]:
+    row = (
+        await session.execute(
+            text(
+                "SELECT current_setting('app.current_org', true),"
+                "       current_setting('app.current_user', true),"
+                "       current_setting('app.current_project', true),"
+                "       current_setting('app.current_actor_kind', true),"
+                "       current_setting('app.current_actor_subject', true),"
+                "       current_setting('app.current_role', true)"
+            )
+        )
+    ).one()
+    return tuple(v or "" for v in row)
+
+
+async def _rearm_gucs(session: AsyncSession, captured: tuple[str, ...]) -> None:
+    await session.execute(
+        text(
+            "SELECT set_config('app.current_org', :org, true),"
+            "       set_config('app.current_user', :usr, true),"
+            "       set_config('app.current_project', :prj, true),"
+            "       set_config('app.current_actor_kind', :ak, true),"
+            "       set_config('app.current_actor_subject', :asubj, true),"
+            "       set_config('app.current_role', :role, true)"
+        ),
+        {
+            "org": captured[0],
+            "usr": captured[1],
+            "prj": captured[2],
+            "ak": captured[3],
+            "asubj": captured[4],
+            "role": captured[5],
+        },
+    )
+
+
+async def tenant_checkpoint(session: AsyncSession) -> None:
+    """Commit the current tenant transaction and re-arm the GUCs in a fresh one.
+
+    The durability primitive of the two-phase transmit (ADR-0046): phase 1
+    calls this to make the fiscal identifiers (numero, ProgressivoInvio,
+    NomeFile, frozen XML) durable BEFORE the SdI dispatch, releasing the row
+    locks; the caller keeps using the same session afterwards.
+
+    The GUCs are ``set_config(..., is_local => true)`` = transaction-local,
+    so they die with the commit; this helper captures every tenant GUC
+    (including ``app.current_role``, pinned to ``member`` by the public-API
+    issuer-key path) and restores it as the FIRST statement of the next
+    transaction -- RLS never sees a statement without its tenant context.
+
+    The task/note search-dirty flush hooks run before the commit, exactly as
+    at the end of ``tenant_session``, so an FTS blob never lags the source
+    row it indexes. CAVEAT: only the ``app.current_*`` GUC set is captured;
+    do not checkpoint inside a ``with_actor`` or ``kg_allow_erase`` window
+    (any other transaction-local GUC is silently dropped).
+    """
+    from mycelium_core.services.note_search import flush_note_search_dirty
+    from mycelium_core.services.task_search import flush_task_search_dirty
+
+    captured = await _capture_gucs(session)
+    await flush_task_search_dirty(session)
+    await flush_note_search_dirty(session)
+    await session.commit()
+    await _rearm_gucs(session, captured)
+
+
+async def tenant_rollback(session: AsyncSession) -> None:
+    """Roll back the current tenant transaction and re-arm the GUCs in a
+    fresh one, so the caller can keep using the session (mirror of
+    ``tenant_checkpoint`` for the abort path, e.g. the SdI-notification
+    redelivery dedupe that rolls back a duplicate ingest).
+
+    The GUCs are re-armed from the values stashed at ``tenant_session`` open
+    (an aborted transaction cannot be queried), so a mid-request
+    ``app.current_role`` pin or ``with_actor`` override is NOT restored --
+    use only on paths that set neither (the system ingest paths)."""
+    captured = session.info.get("tenant_gucs")
+    await session.rollback()
+    if captured is not None:
+        await _rearm_gucs(session, captured)
 
 
 @asynccontextmanager

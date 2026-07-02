@@ -10,6 +10,12 @@ The check runs in the request transaction, so it counts committed requests; a
 request that later fails rolls its increment back. Once the stored count reaches
 the limit, every further request increments to limit+1, raises, and rolls back to
 the limit -- so the window stays capped.
+
+Exception (ADR-0046): a transmit-class request that reaches the two-phase
+pre-dispatch checkpoint commits its increment there, so a dispatch that later
+fails still consumes budget. That is the right accounting -- a real SdI
+dispatch attempt was made -- but it means retries through an SdI outage spend
+the transmit budget.
 """
 
 from __future__ import annotations

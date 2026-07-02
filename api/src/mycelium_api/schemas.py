@@ -2975,6 +2975,11 @@ class InvoiceOut(BaseModel):
     total: Decimal
     identificativo_sdi: str | None
     sdi_status: SdiStatus
+    # Non-null while a dispatch is unsettled (ADR-0046): together with
+    # state=transmitted and a null identificativo_sdi it marks the invoice
+    # retryable (the SPA's "Ritrasmetti" affordance keys on this, NOT on the
+    # bare null ident, which a successful manual export also has).
+    sdi_dispatch_started_at: datetime.datetime | None
     payment_status: PaymentStatus
     conservation_status: ConservationStatus
     deleted_at: datetime.datetime | None

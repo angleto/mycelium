@@ -87,6 +87,7 @@ def _inv_out(i: Invoice) -> InvoiceOut:
         total=i.total,
         identificativo_sdi=i.identificativo_sdi,
         sdi_status=i.sdi_status,
+        sdi_dispatch_started_at=i.sdi_dispatch_started_at,
         payment_status=i.payment_status,
         conservation_status=i.conservation_status,
         deleted_at=i.deleted_at,

@@ -388,3 +388,217 @@ def test_t25_cors_wildcard_refused_at_startup(monkeypatch: pytest.MonkeyPatch) -
     finally:
         monkeypatch.delenv("MYCELIUM_CORS_ORIGINS", raising=False)
         get_settings.cache_clear()
+
+
+# --- T17 (ADR-0046): idempotent resume of an unsettled dispatch ------------
+
+
+class _FlakyCoop:
+    """Scripted fake SdICoop: pops the next step per call (an exception to
+    raise AFTER recording the send, None for success); records filenames."""
+
+    name = "sdicoop"
+
+    def __init__(self, script: list[Exception | None]) -> None:
+        self.script = list(script)
+        self.sent: list[str] = []
+
+    @property
+    def intermediary(self):
+        from mycelium_core.sdi_channel import IntermediaryIdentity
+
+        return IntermediaryIdentity(
+            country_code="IT", vat_number="11122233344", legal_name="Mycelium Intermediary Srl"
+        )
+
+    async def transmit(self, *, xml: str, invoice_id: str, filename: str):
+        from mycelium_core.models.invoice import ConservationStatus
+        from mycelium_core.sdi_channel import TransmitResult
+
+        self.sent.append(filename)
+        step = self.script.pop(0) if self.script else None
+        if step is not None:
+            raise step
+        return TransmitResult(
+            identificativo_sdi=f"SDI{uuid.uuid4().hex[:10].upper()}",
+            conservation=ConservationStatus.ade_pending,
+            channel=self.name,
+        )
+
+
+async def _grant_mandate(org: uuid.UUID, user: uuid.UUID, issuer: uuid.UUID) -> None:
+    from mycelium_core.services import sdi_mandate
+
+    async with tenant_session(str(org), str(user)) as s:
+        await sdi_mandate.grant_mandate(s, org_id=org, actor_id=user, issuer_profile_id=issuer)
+
+
+async def _expire_lease(org: uuid.UUID, user: uuid.UUID, invoice_id: uuid.UUID) -> None:
+    from sqlalchemy import text
+
+    async with tenant_session(str(org), str(user)) as s:
+        await s.execute(
+            text(
+                "UPDATE invoices SET sdi_dispatch_started_at = now() - interval '1 hour' "
+                "WHERE id = :iid"
+            ),
+            {"iid": str(invoice_id)},
+        )
+
+
+async def test_t17g_same_key_retry_resumes_unsettled_compose_and_transmit() -> None:
+    import httpx as _httpx
+
+    from mycelium_core.sdi_channel import set_channel_override
+
+    org, user, issuer, client = await _base()
+    await _grant_mandate(org, user, issuer)
+    key = await _key(org, user, issuer, [PERM_COMPOSE, PERM_SEND])
+    flaky = _FlakyCoop([_httpx.ReadTimeout("lost ack"), None])
+    set_channel_override(lambda: flaky)
+    try:
+        async with _client() as c:
+            # Attempt 1: the dispatch outcome is unknown -> 409 unconfirmed,
+            # but the draft + fiscal identity + the claim are durable.
+            r1 = await c.post(
+                "/api/v1/invoices",
+                headers=_h(key, "t17g"),
+                json=_compose_body(client, transmit=True),
+            )
+            assert r1.status_code == 409
+            assert r1.json()["code"] == "invoice.transmit_unconfirmed"
+            async with tenant_session(str(org), str(user)) as s:
+                rows = (await s.execute(select(Invoice))).scalars().all()
+                assert len(rows) == 1  # ONE invoice, no orphan
+                inv_id = rows[0].id
+                assert rows[0].nome_file is not None
+
+            # Same-key retry inside the lease: still owned by the attempt.
+            r2 = await c.post(
+                "/api/v1/invoices",
+                headers=_h(key, "t17g"),
+                json=_compose_body(client, transmit=True),
+            )
+            assert r2.status_code == 409
+            assert r2.json()["code"] == "invoice.transmit_in_progress"
+
+            # Same-key retry after lease expiry: RESUMES the same invoice
+            # (no second compose), re-sends the SAME file name, succeeds.
+            await _expire_lease(org, user, inv_id)
+            r3 = await c.post(
+                "/api/v1/invoices",
+                headers=_h(key, "t17g"),
+                json=_compose_body(client, transmit=True),
+            )
+            assert r3.status_code == 200
+            assert uuid.UUID(r3.json()["id"]) == inv_id
+            assert r3.json()["identificativo_sdi"]
+            assert flaky.sent == [flaky.sent[0]] * 2  # same NomeFile twice
+
+            # A further same-key call replays the snapshot, no new dispatch.
+            r4 = await c.post(
+                "/api/v1/invoices",
+                headers=_h(key, "t17g"),
+                json=_compose_body(client, transmit=True),
+            )
+            assert r4.status_code == 200
+            assert uuid.UUID(r4.json()["id"]) == inv_id
+            assert len(flaky.sent) == 2
+            async with tenant_session(str(org), str(user)) as s:
+                rows = (await s.execute(select(Invoice))).scalars().all()
+                assert len(rows) == 1  # still exactly one invoice
+    finally:
+        set_channel_override(None)
+
+
+async def test_t17g2_transmit_endpoint_same_key_resume() -> None:
+    import httpx as _httpx
+
+    from mycelium_core.sdi_channel import set_channel_override
+
+    org, user, issuer, client = await _base()
+    await _grant_mandate(org, user, issuer)
+    key = await _key(org, user, issuer, [PERM_COMPOSE, PERM_SEND])
+    flaky = _FlakyCoop([_httpx.ReadTimeout("lost ack"), None])
+    async with _client() as c:
+        r = await c.post(
+            "/api/v1/invoices", headers=_h(key, "t17g2-compose"), json=_compose_body(client)
+        )
+        assert r.status_code == 200
+        inv_id = uuid.UUID(r.json()["id"])
+    set_channel_override(lambda: flaky)
+    try:
+        async with _client() as c:
+            r1 = await c.post(f"/api/v1/invoices/{inv_id}/transmit", headers=_h(key, "t17g2"))
+            assert r1.status_code == 409
+            assert r1.json()["code"] == "invoice.transmit_unconfirmed"
+            await _expire_lease(org, user, inv_id)
+            r2 = await c.post(f"/api/v1/invoices/{inv_id}/transmit", headers=_h(key, "t17g2"))
+            assert r2.status_code == 200
+            assert uuid.UUID(r2.json()["id"]) == inv_id
+            assert len(flaky.sent) == 2 and flaky.sent[0] == flaky.sent[1]
+    finally:
+        set_channel_override(None)
+
+
+async def test_t17g3_same_key_retry_after_inbound_settle_returns_the_settled_invoice() -> None:
+    # The lost filing's RC can land BEFORE the integrator retries: the
+    # same-key retry must converge to the settled invoice (200), not 409
+    # forever on a successfully filed document.
+    import httpx as _httpx
+
+    from mycelium_core.sdi_channel import set_channel_override
+    from mycelium_core.services.sdi_inbound import ParsedNotification
+
+    org, user, issuer, client = await _base()
+    await _grant_mandate(org, user, issuer)
+    key = await _key(org, user, issuer, [PERM_COMPOSE, PERM_SEND])
+    flaky = _FlakyCoop([_httpx.ReadTimeout("lost ack")])
+    set_channel_override(lambda: flaky)
+    try:
+        async with _client() as c:
+            r1 = await c.post(
+                "/api/v1/invoices",
+                headers=_h(key, "t17g3"),
+                json=_compose_body(client, transmit=True),
+            )
+            assert r1.status_code == 409
+            async with tenant_session(str(org), str(user)) as s:
+                row = (await s.execute(select(Invoice))).scalars().one()
+                inv_id, nome = row.id, row.nome_file
+            # The original filing's RC arrives (NomeFile reconcile).
+            parsed = ParsedNotification(
+                outcome="RC",
+                identificativo_sdi="424242099",
+                message_id="MG3",
+                file_name=nome,
+                esito=None,
+                raw_xml=b"<RicevutaConsegna/>",
+            )
+            from mycelium_core.services import invoice as inv_svc
+
+            async with tenant_session(str(org), str(user)) as s:
+                await inv_svc.ingest_active_notification(
+                    s, org_id=org, actor_id=user, parsed=parsed
+                )
+            # Same-key retry: converges to the settled invoice, no dispatch.
+            r2 = await c.post(
+                "/api/v1/invoices",
+                headers=_h(key, "t17g3"),
+                json=_compose_body(client, transmit=True),
+            )
+            assert r2.status_code == 200
+            assert uuid.UUID(r2.json()["id"]) == inv_id
+            assert r2.json()["identificativo_sdi"] == "424242099"
+            assert r2.json()["state"] == "delivered"
+            assert len(flaky.sent) == 1  # nothing re-dispatched
+            # And the key now replays deterministically.
+            r3 = await c.post(
+                "/api/v1/invoices",
+                headers=_h(key, "t17g3"),
+                json=_compose_body(client, transmit=True),
+            )
+            assert r3.status_code == 200
+            assert uuid.UUID(r3.json()["id"]) == inv_id
+    finally:
+        set_channel_override(None)

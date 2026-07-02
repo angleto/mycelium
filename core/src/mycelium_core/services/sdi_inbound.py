@@ -175,15 +175,26 @@ def parse_scarto_errors(raw: bytes) -> list[dict[str, str]]:
     return errors
 
 
-async def _resolve_org(identificativo: str) -> uuid.UUID | None:
+async def _resolve_org(identificativo: str, file_name: str | None = None) -> uuid.UUID | None:
     """Cross-org correlation by IdentificativoSdI via the SECURITY DEFINER
-    resolver (bypasses RLS for this one lookup only; migration 0074)."""
+    resolver (bypasses RLS for this one lookup only; migration 0074). When
+    the identifier matches nothing (the dispatch ACK was lost, so it was
+    never stored) fall back to the NomeFile resolver (migration 0079): the
+    file name is committed BEFORE dispatch, so a file that reached SdI is
+    always correlatable (ADR-0046)."""
     async with admin_session() as s:
         val = (
             await s.execute(
                 text("SELECT sdi_resolve_invoice_org(:ident)"), {"ident": identificativo}
             )
         ).scalar()
+        if val is None and file_name:
+            val = (
+                await s.execute(
+                    text("SELECT sdi_resolve_invoice_org_by_filename(:fname)"),
+                    {"fname": file_name},
+                )
+            ).scalar()
     if val is None:
         return None
     return uuid.UUID(str(val))
@@ -198,7 +209,7 @@ async def ingest_notification(raw: bytes) -> Invoice | None:
     without our outbound EC). We resolve transmitter first; if that misses,
     a DT also probes the receiver side via the passive resolver."""
     parsed = parse_notification(raw)
-    org_id = await _resolve_org(parsed.identificativo_sdi)
+    org_id = await _resolve_org(parsed.identificativo_sdi, parsed.file_name)
     if org_id is not None:
         async with tenant_session(str(org_id), _SYSTEM_USER) as s:
             return await invoice_svc.ingest_active_notification(

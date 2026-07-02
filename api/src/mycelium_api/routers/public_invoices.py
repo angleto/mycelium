@@ -120,6 +120,12 @@ class PublicInvoiceOut(BaseModel):
     stamp_duty: Decimal
     total: Decimal
     identificativo_sdi: str | None
+    # Non-null while a dispatch is unsettled (ADR-0046): a transmit that
+    # returned 409 invoice.transmit_unconfirmed stays in this shape until a
+    # retry (same Idempotency-Key resumes it) or the inbound reconcile
+    # settles it. Integrators can poll this field to distinguish an
+    # unsettled dispatch from a settled ident-less manual export.
+    sdi_dispatch_started_at: datetime.datetime | None
     purpose: str | None
 
 
@@ -183,6 +189,30 @@ async def _load_invoice_for_key(ctx: IssuerKeyCtx, invoice_id: uuid.UUID) -> Inv
     return inv
 
 
+async def _resume_transmit(ctx: IssuerKeyCtx, invoice_id: uuid.UUID) -> Invoice:
+    """Resume leg of a same-key retry on an unsettled dispatch (ADR-0046).
+
+    The claim was committed by the pre-dispatch checkpoint with its invoice
+    attached; if the invoice SETTLED in the meantime (the inbound reconcile
+    adopted the identifier, or a crashed attempt's success was recovered),
+    the idempotent outcome of the original request is the invoice's CURRENT
+    state -- calling transmit again would 409 on a successfully filed
+    document and poison the key forever. Only a still-retryable shape (a
+    reverted draft, or parked transmitted with the lease set) re-dispatches;
+    the in-flight case is refused by the lease inside ``transmit``."""
+    inv = await _load_invoice_for_key(ctx, invoice_id)
+    retryable = inv.state is InvoiceState.draft or (
+        inv.state is InvoiceState.transmitted
+        and inv.identificativo_sdi is None
+        and inv.sdi_dispatch_started_at is not None
+    )
+    if retryable:
+        return await invoice_svc.transmit(
+            ctx.session, org_id=ctx.org_id, actor_id=ctx.key_id, invoice_id=invoice_id
+        )
+    return inv
+
+
 async def _resolve_recipient(ctx: IssuerKeyCtx, body: PublicComposeIn) -> uuid.UUID:
     if (body.client_tag_id is None) == (body.client is None):
         raise UnprocessableError(MessageCode.COMPOSE_RECIPIENT_INVALID)
@@ -243,40 +273,49 @@ async def compose(
         idempotency_key=key,
         request_hash=req_hash,
     )
-    if not claimed.is_new:
-        assert claimed.replay is not None  # noqa: S101
+    if claimed.replay is not None:
         return PublicInvoiceOut.model_validate(claimed.replay)
-    assert claimed.row_id is not None  # is_new -> the claim row exists  # noqa: S101
-    client_tag_id = await _resolve_recipient(ctx, body)
-    inv = await invoice_svc.create_draft(
-        ctx.session,
-        org_id=ctx.org_id,
-        actor_id=ctx.key_id,
-        client_tag_id=client_tag_id,
-        issuer_profile_id=ctx.issuer_profile_id,
-        series=body.series,
-        purpose=body.purpose,
-        document_type=DocumentType.TD01,
-    )
-    for ln in body.lines:
-        await invoice_svc.add_line(
+    assert claimed.row_id is not None  # claim row exists on every non-replay leg  # noqa: S101
+    if claimed.resume_invoice_id is not None:
+        # A prior attempt with this key committed its pre-dispatch state but
+        # never settled (ADR-0046): resume THAT invoice instead of composing
+        # a duplicate (the lease arbitrates liveness; a settled invoice is
+        # returned as-is).
+        inv = await _resume_transmit(ctx, claimed.resume_invoice_id)
+    else:
+        client_tag_id = await _resolve_recipient(ctx, body)
+        inv = await invoice_svc.create_draft(
             ctx.session,
             org_id=ctx.org_id,
             actor_id=ctx.key_id,
-            invoice_id=inv.id,
-            description=ln.description,
-            unit_price=ln.unit_price,
-            quantity=ln.quantity,
-            vat_rate=ln.vat_rate,
-            vat_nature=ln.vat_nature,
+            client_tag_id=client_tag_id,
+            issuer_profile_id=ctx.issuer_profile_id,
+            series=body.series,
+            purpose=body.purpose,
+            document_type=DocumentType.TD01,
         )
-    if body.transmit:
-        inv = await invoice_svc.transmit(
-            ctx.session, org_id=ctx.org_id, actor_id=ctx.key_id, invoice_id=inv.id
-        )
-    else:
-        # Re-read so the totals recomputed by add_line are reflected.
-        inv = await invoice_svc.get_invoice(ctx.session, org_id=ctx.org_id, invoice_id=inv.id)
+        for ln in body.lines:
+            await invoice_svc.add_line(
+                ctx.session,
+                org_id=ctx.org_id,
+                actor_id=ctx.key_id,
+                invoice_id=inv.id,
+                description=ln.description,
+                unit_price=ln.unit_price,
+                quantity=ln.quantity,
+                vat_rate=ln.vat_rate,
+                vat_nature=ln.vat_nature,
+            )
+        if body.transmit:
+            # Bind the claim to the draft BEFORE the dispatch so the
+            # pre-dispatch commit persists the pair and a retry resumes.
+            await idem.attach_invoice(ctx.session, row_id=claimed.row_id, invoice_id=inv.id)
+            inv = await invoice_svc.transmit(
+                ctx.session, org_id=ctx.org_id, actor_id=ctx.key_id, invoice_id=inv.id
+            )
+        else:
+            # Re-read so the totals recomputed by add_line are reflected.
+            inv = await invoice_svc.get_invoice(ctx.session, org_id=ctx.org_id, invoice_id=inv.id)
     out = _out(inv)
     await idem.store(
         ctx.session, row_id=claimed.row_id, snapshot=out.model_dump(mode="json"), invoice_id=inv.id
@@ -303,13 +342,21 @@ async def transmit(
         idempotency_key=key,
         request_hash=req_hash,
     )
-    if not claimed.is_new:
-        assert claimed.replay is not None  # noqa: S101
+    if claimed.replay is not None:
         return PublicInvoiceOut.model_validate(claimed.replay)
-    assert claimed.row_id is not None  # is_new -> the claim row exists  # noqa: S101
-    inv = await invoice_svc.transmit(
-        ctx.session, org_id=ctx.org_id, actor_id=ctx.key_id, invoice_id=invoice_id
-    )
+    assert claimed.row_id is not None  # claim row exists on every non-replay leg  # noqa: S101
+    if claimed.is_new:
+        # Bind the claim to its invoice BEFORE the dispatch: the pre-dispatch
+        # commit (ADR-0046) then persists the pair, and a retry after an
+        # unsettled dispatch resumes instead of 409ing forever.
+        await idem.attach_invoice(ctx.session, row_id=claimed.row_id, invoice_id=invoice_id)
+        inv = await invoice_svc.transmit(
+            ctx.session, org_id=ctx.org_id, actor_id=ctx.key_id, invoice_id=invoice_id
+        )
+    else:
+        # Resume leg: targets the same invoice by construction (the request
+        # hash pins invoice_id); a settled invoice is returned as-is.
+        inv = await _resume_transmit(ctx, invoice_id)
     out = _out(inv)
     await idem.store(
         ctx.session, row_id=claimed.row_id, snapshot=out.model_dump(mode="json"), invoice_id=inv.id
@@ -337,20 +384,26 @@ async def credit_note(
         idempotency_key=key,
         request_hash=req_hash,
     )
-    if not claimed.is_new:
-        assert claimed.replay is not None  # noqa: S101
+    if claimed.replay is not None:
         return PublicInvoiceOut.model_validate(claimed.replay)
-    assert claimed.row_id is not None  # is_new -> the claim row exists  # noqa: S101
-    note = await invoice_svc.create_credit_note(
-        ctx.session,
-        org_id=ctx.org_id,
-        actor_id=ctx.key_id,
-        parent_invoice_id=body.parent_invoice_id,
-        purpose=body.purpose,
-    )
-    note = await invoice_svc.transmit(
-        ctx.session, org_id=ctx.org_id, actor_id=ctx.key_id, invoice_id=note.id
-    )
+    assert claimed.row_id is not None  # claim row exists on every non-replay leg  # noqa: S101
+    if claimed.resume_invoice_id is not None:
+        # Resume the unsettled TD04 (ADR-0046) instead of creating a second
+        # one; a settled TD04 is returned as-is.
+        note = await _resume_transmit(ctx, claimed.resume_invoice_id)
+    else:
+        note = await invoice_svc.create_credit_note(
+            ctx.session,
+            org_id=ctx.org_id,
+            actor_id=ctx.key_id,
+            parent_invoice_id=body.parent_invoice_id,
+            purpose=body.purpose,
+        )
+        # Bind the claim to the TD04 BEFORE the dispatch (retry -> resume).
+        await idem.attach_invoice(ctx.session, row_id=claimed.row_id, invoice_id=note.id)
+        note = await invoice_svc.transmit(
+            ctx.session, org_id=ctx.org_id, actor_id=ctx.key_id, invoice_id=note.id
+        )
     out = _out(note)
     await idem.store(
         ctx.session, row_id=claimed.row_id, snapshot=out.model_dump(mode="json"), invoice_id=note.id
