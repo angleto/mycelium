@@ -47,7 +47,7 @@ handles (see the generated `tasks` section below). An agent never needs to
 over-fetch the org table and filter in its head.
 
 <!-- BEGIN GENERATED: mcp tool inventory (scripts/gen_mcp_coverage.py) -->
-**245 tools across 13 domains.** This inventory is generated from the live registry by `scripts/gen_mcp_coverage.py` — do not edit by hand; run `make mcp-coverage` to refresh. The one-line summary is each tool's first docstring line, so it cannot drift from the code.
+**246 tools across 13 domains.** This inventory is generated from the live registry by `scripts/gen_mcp_coverage.py` — do not edit by hand; run `make mcp-coverage` to refresh. The one-line summary is each tool's first docstring line, so it cannot drift from the code.
 
 ### search (3)
 
@@ -321,7 +321,7 @@ over-fetch the org table and filter in its head.
 | `upload_attachment_capability` | Mint ONE single-use capability token that UPLOADS a file to a note or |
 | `upload_attachment_instructions` | Recipe for a TOKEN-FREE large-file upload (MRI, DICOM, PDF, ...). |
 
-### misc (33)
+### misc (34)
 
 | Tool | Summary |
 |---|---|
@@ -341,6 +341,7 @@ over-fetch the org table and filter in its head.
 | `garden_review_approve` | Approve a proposed humus note (ADR-0043): it becomes effective and |
 | `garden_review_pending` | Review inbox (ADR-0043): the workspace's AUTONOMOUSLY-generated humus |
 | `garden_review_reject` | Reject a proposed humus note (ADR-0043): soft-delete it so a weak |
+| `help` | Answer questions about Mycelium ITSELF -- its features, configuration and |
 | `ingest_sdi_receipt` | Correlate an SdI receipt (RC/MC/NS/AT) by IdentificativoSdI. |
 | `kg_entities` | Look up knowledge-graph entities whose name matches ``query`` (ADR-0044). |
 | `kg_extract` | Extract a TEMPORAL KNOWLEDGE GRAPH (typed entities + relation facts) |

@@ -672,6 +672,7 @@ export const it: Catalog = {
     version: 'Versione',
     commit: 'Commit',
     builtAt: 'Build del',
+    apiDocs: 'Documentazione API REST',
   },
   switcher: {
     label: 'Workspace',

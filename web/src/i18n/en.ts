@@ -671,6 +671,7 @@ export const en = {
     version: 'Version',
     commit: 'Commit',
     builtAt: 'Built at',
+    apiDocs: 'REST API documentation',
   },
   switcher: {
     label: 'Workspace',

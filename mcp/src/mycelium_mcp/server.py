@@ -16,6 +16,7 @@ from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
 from decimal import Decimal
+from pathlib import Path
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
@@ -232,6 +233,135 @@ async def _require_scope(session: AsyncSession, scope_key: str) -> None:
 def ping() -> str:
     """Liveness probe; returns the mycelium-core version."""
     return f"mycelium-core {__version__}"
+
+
+_OVERVIEW = (
+    "Mycelium is a multi-tenant personal work hub: tasks with dependency-aware "
+    "scheduling, time tracking and billing, notes with a knowledge graph, a "
+    "client/project taxonomy, workflows, email and calendar, and Italian "
+    "electronic invoicing (FatturaPA / SdI). The MCP surface is co-equal to the "
+    "web GUI over one service layer (ADR-0001). Configuration is via MYCELIUM_* "
+    "environment variables (see the 'configuration' field). Design and feature "
+    "docs are listed under 'doc_topics' -- call help('<topic>') for a document's "
+    "full text; use search_tools(query) to find a tool for a task; the REST API "
+    "reference is at /apidocs."
+)
+
+
+def _docs_dir() -> Path | None:
+    """Locate the maintained ``docs/`` directory: an explicit ``MYCELIUM_DOCS_DIR``
+    override, else walk up from this module (repo root in dev, ``/app`` in the
+    backend image, whose Dockerfile ships ``docs/``). ``None`` when absent, so
+    ``help`` degrades to the derived config reference."""
+    import os
+
+    override = os.environ.get("MYCELIUM_DOCS_DIR")
+    if override and Path(override).is_dir():
+        return Path(override)
+    for parent in Path(__file__).resolve().parents:
+        cand = parent / "docs"
+        if (cand / "functional-requirements.md").is_file():
+            return cand
+    return None
+
+
+def _config_reference() -> list[dict[str, Any]]:
+    """The environment-variable configuration reference, DERIVED from the
+    Settings model so it never drifts from the code. Only names + non-secret
+    defaults are exposed: a required secret (jwt_secret, secret_key,
+    issuer_key_pepper, the DB URLs) has no default, so no secret value leaks."""
+    from mycelium_core.config import Settings
+
+    rows: list[dict[str, Any]] = []
+    for name, field in Settings.model_fields.items():
+        required = field.is_required()
+        default: Any = None
+        if not required:
+            try:
+                default = field.get_default(call_default_factory=True)
+            except Exception:
+                default = None
+        if not isinstance(default, str | int | float | bool | None):
+            default = str(default)
+        rows.append(
+            {
+                "env": f"MYCELIUM_{name.upper()}",
+                "required": required,
+                "default": default,
+                "description": field.description,
+            }
+        )
+    return rows
+
+
+@mcp.tool()
+def help(topic: str | None = None) -> dict[str, Any]:
+    """Answer questions about Mycelium ITSELF -- its features, configuration and
+    documentation. Call with NO ``topic`` for an overview + the full
+    environment-variable configuration reference + the list of documentation
+    topics. Call with a ``topic`` ('invoicing', 'architecture', 'data-model',
+    'functional-requirements', 'mcp-coverage', or any ``docs/`` filename; or
+    'configuration') to get that document's full text. To discover the available
+    TOOLS use ``search_tools``; the REST API reference is served at ``/apidocs``.
+    Read-only, no workspace needed."""
+    import difflib
+
+    docs = _docs_dir()
+    names = sorted(p.stem for p in docs.glob("*.md")) if docs else []
+    # Hide the many numbered ADRs from the top-level index; still fetchable by
+    # their exact name (e.g. help('0045-issuer-scoped-api-keys')).
+    topics = [n for n in names if not n[:1].isdigit()]
+
+    if topic:
+        key = topic.strip().lower().replace(" ", "-")
+        if key in ("config", "configuration", "settings", "env"):
+            return {"topic": "configuration", "config": _config_reference()}
+        if docs:
+            lower = {n.lower(): n for n in names}
+            match = lower.get(key)
+            if match is None:
+                close = difflib.get_close_matches(key, list(lower), n=1, cutoff=0.6)
+                match = lower[close[0]] if close else None
+            if match:
+                return {
+                    "topic": match,
+                    "content": (docs / f"{match}.md").read_text(encoding="utf-8"),
+                }
+            # No filename match: fall back to a content search so an arbitrary
+            # keyword ('invoicing', 'scheduling', ...) still returns the most
+            # relevant document plus the other docs that mention it.
+            term = topic.strip().lower()
+            scored: list[tuple[int, str, str]] = []
+            for n in names:
+                try:
+                    text = (docs / f"{n}.md").read_text(encoding="utf-8")
+                except OSError:
+                    continue
+                hits = text.lower().count(term)
+                if hits:
+                    scored.append((hits, n, text))
+            if scored:
+                scored.sort(key=lambda s: (-s[0], s[1]))
+                return {
+                    "topic": scored[0][1],
+                    "content": scored[0][2],
+                    "also_matching": [n for _, n, _ in scored[1:6]],
+                }
+        return {
+            "error": f"no document matches '{topic}'",
+            "doc_topics": topics,
+            "hint": "call help() with no topic for the index, or help('configuration')",
+        }
+
+    return {
+        "overview": _OVERVIEW,
+        "configuration": _config_reference(),
+        "doc_topics": topics,
+        "pointers": {
+            "tools": "use search_tools(query) to find an MCP tool for a task",
+            "rest_api": "the REST API reference (OpenAPI) is served at /apidocs",
+        },
+    }
 
 
 def _tag(t: Tag) -> dict[str, Any]:

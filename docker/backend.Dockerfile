@@ -49,6 +49,9 @@ COPY api api
 COPY mcp mcp
 COPY worker worker
 COPY sdi-inbound sdi-inbound
+# The maintained docs ship in the image so the MCP ``help`` tool can serve them
+# as the system's own knowledge (docs are the source of truth; no separate FAQ).
+COPY docs docs
 # ``--inexact`` so installing the workspace members does not prune the ML
 # extras added above (optional, not in the default lock resolution).
 RUN --mount=type=cache,target=/root/.cache/uv uv sync --no-dev --inexact

@@ -66,6 +66,11 @@ export function BuildInfo() {
           <dd>{info.built_at ? formatBuildAt(info.built_at) : '—'}</dd>
         </dl>
       )}
+      <p>
+        <a href="/api/apidocs" target="_blank" rel="noopener noreferrer">
+          {t('buildinfo.apiDocs')}
+        </a>
+      </p>
     </section>
   )
 }

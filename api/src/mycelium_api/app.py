@@ -10,7 +10,8 @@ from typing import Any
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from starlette.responses import JSONResponse, Response
+from fastapi.openapi.docs import get_redoc_html
+from starlette.responses import HTMLResponse, JSONResponse, Response
 
 from mycelium_api.routers import (
     actors,
@@ -208,6 +209,17 @@ def create_app() -> FastAPI:
     @app.get("/healthz", tags=["meta"])
     async def healthz() -> dict[str, str]:
         return {"status": "ok"}
+
+    @app.get("/apidocs", include_in_schema=False)
+    async def apidocs() -> HTMLResponse:
+        # Human-facing REST API reference (ReDoc over the auto-generated
+        # OpenAPI -- zero maintenance, always in sync with the routes). A
+        # RELATIVE ``openapi_url`` so the page works behind the ``/api`` reverse
+        # proxy (which strips the prefix) without ``root_path`` (which would
+        # perturb the OAuth metadata URLs): at ``/api/apidocs`` the browser
+        # resolves ``openapi.json`` to ``/api/openapi.json`` -> backend
+        # ``/openapi.json``. Linked from the SPA "About this build" panel.
+        return get_redoc_html(openapi_url="openapi.json", title="Mycelium API")
 
     for exc_type, status in _STATUS.items():
         app.add_exception_handler(exc_type, _make_handler(status))
