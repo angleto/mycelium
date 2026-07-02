@@ -44,6 +44,12 @@ CURATED_SCALEWAY_MODELS: tuple[str, ...] = (
     "glm-5.2",  # clean atoms; verbose (reasoning billed as completion, ~4-6x tokens)
     "gemma-4-26b-a4b-it",  # clean atoms; verbose (~6x tokens), follows source language
     "qwen3.6-35b-a3b",  # clean atoms; most verbose (~10x tokens), slowest
+    # Forward-looking (Angelo, 2026-07-02): on the supported-models docs page
+    # but NOT yet served -- /v1/models omits it and a direct call returns
+    # 422 MODEL NOT FOUND. The live intersection hides it until Scaleway
+    # serves it, then it surfaces in the picker automatically. NOT benched
+    # yet: run it through the distillation bench before choosing it.
+    "mistral-large-3-675b-instruct-2512",
 )
 
 

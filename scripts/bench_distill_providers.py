@@ -18,6 +18,7 @@ Design invariants:
 Providers are OpenAI-compatible chat/completions endpoints:
   scaleway -> https://api.scaleway.ai/v1      (env SCALEWAY_API_KEY)
   openai   -> https://api.openai.com/v1       (env OPENAI_API_KEY)
+  mistral  -> https://api.mistral.ai/v1       (env MISTRAL_API_KEY)
   anthropic-> via its OpenAI-compat endpoint  (env ANTHROPIC_API_KEY,
               https://api.anthropic.com/v1)
 
@@ -56,8 +57,15 @@ import httpx
 from mycelium_core.services.decomposition import _DISTILL_SYSTEM, _VERIFY_SYSTEM
 
 _ENDPOINTS = {
-    "scaleway": ("https://api.scaleway.ai/v1", "SCALEWAY_API_KEY"),
+    # SCALEWAY_BASE_URL override pins a PROJECT-scoped endpoint
+    # (https://api.scaleway.ai/{PROJECT_ID}/v1), so calls cannot land on the
+    # default project by mistake.
+    "scaleway": (
+        os.environ.get("SCALEWAY_BASE_URL", "https://api.scaleway.ai/v1"),
+        "SCALEWAY_API_KEY",
+    ),
     "openai": ("https://api.openai.com/v1", "OPENAI_API_KEY"),
+    "mistral": ("https://api.mistral.ai/v1", "MISTRAL_API_KEY"),
     "anthropic": ("https://api.anthropic.com/v1", "ANTHROPIC_API_KEY"),
 }
 _BULLET = re.compile(r"^\s*[-*]\s+", re.MULTILINE)
@@ -117,7 +125,9 @@ def _format_ok(text: str) -> bool:
     bullets = _claims(text)
     kw = re.search(r"keywords?\s*:\s*(.+)", text, re.IGNORECASE)
     n_kw = len(kw.group(1).split(",")) if kw else 0
-    has_lesson = bool(re.search(r"^\s*(lesson|lezione)\b", text, re.IGNORECASE | re.MULTILINE))
+    # Tolerant: models legitimately wrap the label ("**Lesson:**", "(1) One-sentence
+    # lesson:") -- look for the word anywhere in the head instead of at line start.
+    has_lesson = bool(re.search(r"\b(lesson|lezione)\b", text[:200], re.IGNORECASE))
     return has_lesson and 1 <= len(bullets) <= 5 and 0 < n_kw <= 3
 
 
@@ -131,7 +141,12 @@ def main() -> None:
         default=[],
         help="label:path.jsonl of pre-produced atoms ({source_id,text}) to include",
     )
-    ap.add_argument("--judge", required=True, help="judge spec provider:model (NOT a candidate)")
+    ap.add_argument(
+        "--judge",
+        default="none",
+        help="judge spec provider:model (NOT a candidate), or 'none' to skip the "
+        "API judge (a human/external judge scores the emitted atom files)",
+    )
     ap.add_argument("--out", required=True, help="output directory")
     args = ap.parse_args()
 
@@ -155,6 +170,12 @@ def main() -> None:
             res = _chat(spec, _DISTILL_SYSTEM, src["text"])
             res.source_id = src["id"]
             atoms.append(asdict(res))
+            # Persist immediately: a crash on a later model must not lose
+            # already-paid-for atoms (bit us with a flagship-model timeout).
+            safe = spec.replace(":", "_").replace("/", "_")
+            pdir = out / "atoms" / safe
+            pdir.mkdir(parents=True, exist_ok=True)
+            (pdir / f"{src['id']}.md").write_text(res.text)
             print(f"[distill] {spec} x {src['id']}: {res.tokens_out} tok out, {res.latency_s}s")
     # baseline atoms enter judging + blind without API calls
     for spec in args.baseline:
@@ -182,10 +203,13 @@ def main() -> None:
             print(f"[skip] atom for unknown source {a['source_id']}")
             continue
         n0 = len(_claims(a["text"]))
-        judge_user = f"SOURCE:\n{src['text']}\n\nDRAFT:\n{a['text']}"
-        corrected = _chat(args.judge, _VERIFY_SYSTEM, judge_user)
-        n1 = len(_claims(corrected.text))
-        survival = round(n1 / n0, 3) if n0 else 0.0
+        if args.judge == "none":
+            n1, survival = -1, None  # judged externally (worksheet = atom files)
+        else:
+            judge_user = f"SOURCE:\n{src['text']}\n\nDRAFT:\n{a['text']}"
+            corrected = _chat(args.judge, _VERIFY_SYSTEM, judge_user)
+            n1 = len(_claims(corrected.text))
+            survival = round(n1 / n0, 3) if n0 else 0.0
         results.append(
             {
                 **a,
@@ -199,7 +223,8 @@ def main() -> None:
         p = out / "atoms" / safe_model
         p.mkdir(exist_ok=True)
         (p / f"{a['source_id']}.md").write_text(a["text"])
-        print(f"[judge] {a['model']} x {a['source_id']}: survival {n1}/{n0} = {survival}")
+        if survival is not None:
+            print(f"[judge] {a['model']} x {a['source_id']}: survival {n1}/{n0} = {survival}")
 
     # 2. blind pack: per source, atoms under letter codes; mapping kept apart
     mapping: dict[str, dict[str, str]] = {}
@@ -229,7 +254,8 @@ def main() -> None:
     for r in results:
         by_model.setdefault(r["model"], []).append(r)
     for model, rows in sorted(by_model.items()):
-        surv = sorted(r["claim_survival"] for r in rows)[len(rows) // 2]
+        survs = sorted(r["claim_survival"] for r in rows if r["claim_survival"] is not None)
+        surv = survs[len(survs) // 2] if survs else float("nan")
         lat = sorted(r["latency_s"] for r in rows)[len(rows) // 2]
         fmt = sum(1 for r in rows if r["format_ok"])
         tok = sum(r["tokens_out"] for r in rows)
