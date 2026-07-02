@@ -47,7 +47,7 @@ handles (see the generated `tasks` section below). An agent never needs to
 over-fetch the org table and filter in its head.
 
 <!-- BEGIN GENERATED: mcp tool inventory (scripts/gen_mcp_coverage.py) -->
-**246 tools across 13 domains.** This inventory is generated from the live registry by `scripts/gen_mcp_coverage.py` — do not edit by hand; run `make mcp-coverage` to refresh. The one-line summary is each tool's first docstring line, so it cannot drift from the code.
+**247 tools across 13 domains.** This inventory is generated from the live registry by `scripts/gen_mcp_coverage.py` — do not edit by hand; run `make mcp-coverage` to refresh. The one-line summary is each tool's first docstring line, so it cannot drift from the code.
 
 ### search (3)
 
@@ -168,7 +168,7 @@ over-fetch the org table and filter in its head.
 | `memory_write` | Write a memory blob (embedding metered when produced; degrades |
 | `set_email_ingest_to_memory` | Toggle whether this account's synced (non-bulk) messages are |
 
-### notes (51)
+### notes (52)
 
 | Tool | Summary |
 |---|---|
@@ -195,6 +195,7 @@ over-fetch the org table and filter in its head.
 | `get_or_create_task_note` | Open a task's "work note" (creating it on first call). Idempotent: |
 | `get_text_block_capability` | Mint a multi-use ``<kind>:read`` capability for a task description |
 | `invoice_credit_note` | Create a TD04 credit note linked to a transmitted invoice. |
+| `list_distillation_candidates` | Are there distillations to do? (task 4995a32f). Distillation is graph |
 | `list_email_messages` | List ingested messages, optionally filtered by account. |
 | `list_note_parts` | Outline (table of contents) of a note's markdown parts in ``ord`` |
 | `list_note_revisions` | Recovery-history timeline for a note, most recent first. |
