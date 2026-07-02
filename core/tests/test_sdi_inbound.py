@@ -30,15 +30,20 @@ from mycelium_core.services.taxonomy import ClientInput, create_client
 # signature-relaxed (XAdES verification is a separate, post-v1 concern).
 
 
-def _rc(ident: str) -> bytes:
+def _rc(
+    ident: str,
+    *,
+    nome_file: str = "IT01234567890_00001.xml",
+    message_id: str = "MID00001",
+) -> bytes:
     return (
         f'<m:RicevutaConsegna xmlns:m="{NS_MESSAGGI}" versione="1.0">'
         f"<IdentificativoSdI>{ident}</IdentificativoSdI>"
-        f"<NomeFile>IT01234567890_00001.xml</NomeFile>"
+        f"<NomeFile>{nome_file}</NomeFile>"
         f"<DataOraRicezione>2026-05-25T10:00:00</DataOraRicezione>"
         f"<DataOraConsegna>2026-05-25T10:01:00</DataOraConsegna>"
         f"<Destinatario><Codice>ABCDEFG</Codice><Descrizione>Acme</Descrizione></Destinatario>"
-        f"<MessageId>MID00001</MessageId>"
+        f"<MessageId>{message_id}</MessageId>"
         f"</m:RicevutaConsegna>"
     ).encode()
 
@@ -230,8 +235,96 @@ async def test_inbound_ingest_correlates_cross_org_and_marks_delivered(_coop: No
     assert updated.state is InvoiceState.delivered
     assert updated.conservation_status is ConservationStatus.ade_covered
 
-    # An unknown IdentificativoSdI yields None (SdI may retry; never a 500).
-    assert await ingest_notification(_rc("999999999999")) is None
+    # A notification matching NOTHING (unknown IdentificativoSdI AND unknown
+    # NomeFile -- since ADR-0046 a known file name is a legitimate lost-ACK
+    # correlation key) yields None (SdI may retry; never a 500).
+    assert (
+        await ingest_notification(_rc("999999999999", nome_file="IT99999999999_ZZZZZ.xml")) is None
+    )
+
+
+async def test_inbound_lost_ack_reconciles_by_nome_file(_coop: None) -> None:
+    """ADR-0046 end-to-end reconcile: the dispatch ACK was lost (invoice
+    parked transmitted/ident-less), then the filing's RC arrives with an
+    identifier we never saw -- the NomeFile fallback resolves the org AND
+    the invoice, which adopts the identifier and settles."""
+    import httpx
+
+    from mycelium_core.errors import ConflictError
+    from mycelium_core.sdi_channel import IntermediaryIdentity as _II
+    from mycelium_core.sdi_channel import TransmitResult as _TR
+
+    class LostAckCoop:
+        name = "sdicoop"
+
+        @property
+        def intermediary(self) -> _II | None:
+            return _II(country_code="IT", vat_number="11122233344", legal_name="Mycelium Srl")
+
+        async def transmit(self, *, xml: str, invoice_id: str, filename: str) -> _TR:
+            raise httpx.ReadTimeout("lost ack")
+
+    org, user = await _org()
+    async with tenant_session(str(org), str(user)) as s:
+        issuer = await inv.create_issuer_profile(
+            s,
+            org_id=org,
+            actor_id=user,
+            label="P",
+            legal_name="Acme Srl",
+            vat_number="01234567890",
+            address="Via Roma 1",
+            postal_code="00100",
+            city="Roma",
+            is_default=True,
+        )
+        client = await create_client(
+            s,
+            org_id=org,
+            actor_id=user,
+            name="C",
+            profile=ClientInput(
+                legal_name="Client SpA",
+                country_code="IT",
+                vat_number="09876543210",
+                sdi_code="ABCDEFG",
+                address="Via Milano 2",
+                postal_code="20100",
+                city="Milano",
+            ),
+        )
+        await mandate.grant_mandate(s, org_id=org, actor_id=user, issuer_profile_id=issuer.id)
+        d = await inv.create_draft(s, org_id=org, actor_id=user, client_tag_id=client.id, year=2026)
+        await inv.add_line(
+            s,
+            org_id=org,
+            actor_id=user,
+            invoice_id=d.id,
+            description="svc",
+            unit_price=Decimal(100),
+        )
+        invoice_id = d.id
+    with pytest.raises(ConflictError):
+        async with tenant_session(str(org), str(user)) as s:
+            await inv.transmit(
+                s, org_id=org, actor_id=user, invoice_id=invoice_id, channel=LostAckCoop()
+            )
+    async with tenant_session(str(org), str(user)) as s:
+        parked = await inv.get_invoice(s, org_id=org, invoice_id=invoice_id)
+        nome_file = parked.nome_file
+        assert parked.identificativo_sdi is None and nome_file is not None
+
+    # No tenant context, unknown identifier: only the NomeFile can correlate.
+    # Ident + MessageId are derived per run: the suite shares a dirty DB, so a
+    # fixed identifier would collide with a previous run's adopted value.
+    fresh_ident = str(int(uuid.uuid4().hex[:11], 16) % 10**12)
+    updated = await ingest_notification(
+        _rc(fresh_ident, nome_file=nome_file, message_id=f"M{uuid.uuid4().hex[:8]}")
+    )
+    assert updated is not None
+    assert updated.identificativo_sdi == fresh_ident
+    assert updated.state is InvoiceState.delivered
+    assert updated.sdi_status is SdiStatus.RC
 
 
 async def _setup_transmitted_invoice(coop: None) -> str:

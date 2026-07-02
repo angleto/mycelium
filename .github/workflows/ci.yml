@@ -47,6 +47,10 @@ jobs:
     env:
       MYCELIUM_JWT_SECRET: ci-only-secret-minimum-32-bytes-xxxxxxxx
       MYCELIUM_SECRET_KEY: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+      # Fail-closed like the JWT secret (issuer-key feature): the app boots
+      # Settings directly here, with no pytest conftest default to fall
+      # back on.
+      MYCELIUM_ISSUER_KEY_PEPPER: ci-only-pepper-minimum-32-bytes-xxxxxxxx
       MYCELIUM_DATABASE_URL_SYNC: postgresql+psycopg://mycelium:mycelium@localhost:5432/mycelium
       MYCELIUM_DATABASE_URL: postgresql+asyncpg://mycelium_app:mycelium_app@localhost:5432/mycelium
       MYCELIUM_DB_APP_PASSWORD: mycelium_app
@@ -116,6 +120,10 @@ jobs:
     env:
       MYCELIUM_JWT_SECRET: ci-only-secret-minimum-32-bytes-xxxxxxxx
       MYCELIUM_SECRET_KEY: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+      # Fail-closed like the JWT secret (issuer-key feature): the app boots
+      # Settings directly here, with no pytest conftest default to fall
+      # back on.
+      MYCELIUM_ISSUER_KEY_PEPPER: ci-only-pepper-minimum-32-bytes-xxxxxxxx
       MYCELIUM_DATABASE_URL_SYNC: postgresql+psycopg://mycelium:mycelium@localhost:5432/mycelium
       MYCELIUM_DATABASE_URL: postgresql+asyncpg://mycelium_app:mycelium_app@localhost:5432/mycelium
       MYCELIUM_DB_APP_PASSWORD: mycelium_app
