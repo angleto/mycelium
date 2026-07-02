@@ -639,9 +639,13 @@ def test_distill_prompt_grounds_claims_in_the_source() -> None:
     p = decomp._DISTILL_SYSTEM.lower()
     assert "ground every claim" in p
     assert "not explicitly stated" in p or "do not infer" in p
-    assert "preserve the input language" in p
     # Bench 2026-07-02: the closing imperative small models actually obey.
+    # Deliberately language-AGNOSTIC (no IT/EN enumeration): any input
+    # language (German, Spanish, French, ...) must be followed.
     assert "same language as the note" in p
+    assert "italian or english" not in p  # no language enumeration anywhere
+    assert "italian or english" not in decomp._PATTERN_SYSTEM.lower()
+    assert "italian or english" not in decomp._SEASON_SYSTEM.lower()
 
 
 async def test_verify_pass_drops_unsupported_claims_when_enabled(

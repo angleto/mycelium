@@ -81,13 +81,13 @@ _DISTILL_SYSTEM = (
     "Ground every claim strictly in the source text: do not infer, "
     "generalise beyond it, or invent anything not explicitly stated; if a "
     "point is uncertain or unsupported by the source, omit it. "
-    "No filler, no apology, no restate of the brief. Preserve the input "
-    "language (Italian or English matching the input). "
-    # Bench 2026-07-02 (task 50501e45): the soft "preserve the input language"
-    # above is IGNORED by the lean production candidates (mistral-small and
-    # gemma-3 wrote English atoms for Italian notes); this closing imperative
-    # is the exact phrasing the bench validated as effective (mistral-small
-    # and mistral-medium both switched to Italian with it appended).
+    "No filler, no apology, no restate of the brief. "
+    # Bench 2026-07-02 (task 50501e45): a soft mid-prompt "preserve the input
+    # language" was IGNORED by the lean production candidates (mistral-small
+    # and gemma-3 wrote English atoms for Italian notes); this closing
+    # imperative is the phrasing the bench validated as effective. It is
+    # deliberately language-AGNOSTIC (no IT/EN enumeration): a note in German,
+    # Spanish, French or any other language gets its atom in that language.
     "Write the distillation in the same language as the note."
 )
 # Fidelity verify pass (task a44e72a4): a second model reads the SOURCE and
@@ -412,14 +412,15 @@ _PATTERN_SYSTEM = (
     "through-lines ACROSS them (not a summary of each). Reply with: (1) a "
     "one-line theme, (2) three to five patterns as bullets, each naming what "
     "recurs and where, (3) one open question the set leaves unresolved. No "
-    "filler, no restating the brief. Italian or English matching the input."
+    "filler, no restating the brief. "
+    "Write in the same language as the source notes."
 )
 _SEASON_SYSTEM = (
     "You are a forester writing a seasonal retrospective -- 'what I cultivated "
     "this season'. Given the season's archived notes, synthesise: (1) the "
     "season's headline, (2) three to five themes that grew, (3) what went "
     "dormant or was abandoned, (4) one seed to plant next season. No filler. "
-    "Italian or English matching the input."
+    "Write in the same language as the source notes."
 )
 
 # Bounds so a synthesis stays one cheap LLM call regardless of corpus size.
