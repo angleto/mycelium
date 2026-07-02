@@ -185,6 +185,41 @@ export const it: Catalog = {
     pickerPh: 'Cerca note…',
     unknownNote: '(nota non disponibile)',
   },
+  gardenReview: {
+    navTitle: 'Suggerimenti',
+    title: 'Distillazioni suggerite',
+    back: '← Giardino',
+    intro:
+      'La memoria è un grafo ricercabile; la distillazione ne è la manutenzione. Qui i nodi da compattare e gli archi da curare suggeriti, più gli atomi in attesa di revisione. Niente parte da solo: sei tu (o un agente) ad agire su un suggerimento.',
+    empty: 'Nulla da distillare al momento.',
+    none: 'Nessuno.',
+    distill: 'Distilla',
+    approve: 'Approva',
+    reject: 'Rifiuta',
+    viaAgent: 'via agente/MCP',
+    viaAgentHint:
+      'Nessun endpoint one-click ancora: eseguilo con un modello forte via MCP (o un agente), poi rivedi il risultato qui.',
+    kind: {
+      distill: 'nota',
+      pattern: 'pattern',
+      season: 'stagione',
+    },
+    nodes: {
+      title: 'Nodi da distillare',
+      hint: 'Materiale inerte che può essere compattato in un atomo più denso.',
+    },
+    edges: {
+      title: 'Archi da curare',
+      hint: 'Link da aggiungere (forte affinità, nessun link manuale) o da potare (un link “related” la cui base è decaduta).',
+      add: 'aggiungi related',
+      prune: 'pota related',
+    },
+    pending: {
+      title: 'In attesa di revisione',
+      hint: 'Atomi prodotti in autonomia, trattenuti finché non li approvi (ADR-0043).',
+      model: 'modello produttore',
+    },
+  },
   gardenSuggest: {
     title: 'Suggerimenti del giardino',
     headHint: 'Proposte dal grafo — accetta per applicare, scarta per rifiutare (ADR-0032).',

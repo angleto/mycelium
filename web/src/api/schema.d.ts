@@ -4823,6 +4823,33 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/garden/candidates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Garden Candidates
+         * @description Distillation candidates (task 4995a32f): "are there distillations to
+         *     do?". Distillation is graph maintenance, so this returns both NODE
+         *     candidates (inert notes/clusters/quarters to compact into atoms) and
+         *     EDGE candidates (links to add via tag/co-activity affinity, or prune
+         *     when their basis has decayed). A pure read, no LLM; the caller acts on a
+         *     candidate with distill_note / extract_cluster_pattern / synthesize_season
+         *     or by creating/removing a link, then reviews. RLS-scoped; ``project_id``
+         *     from the tenant context narrows the perimeter.
+         */
+        get: operations["garden_candidates_garden_candidates_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/garden/review/pending": {
         parameters: {
             query?: never;
@@ -7896,6 +7923,68 @@ export interface components {
             action: string;
             /** Applied */
             applied: boolean;
+        };
+        /**
+         * GardenCandidateEdge
+         * @description An EDGE curation candidate (task 4995a32f): distillation as graph
+         *     maintenance. ``op`` is add (a strong tag/co-activity pair with no
+         *     manual link) or prune (a ``related`` link whose basis has decayed).
+         */
+        GardenCandidateEdge: {
+            /** Op */
+            op: string;
+            /**
+             * Src Note Id
+             * Format: uuid
+             */
+            src_note_id: string;
+            /**
+             * Dst Note Id
+             * Format: uuid
+             */
+            dst_note_id: string;
+            /** Link Kind */
+            link_kind: string;
+            /** Src Title */
+            src_title: string;
+            /** Dst Title */
+            dst_title: string;
+            /** Reason */
+            reason: string;
+            /** Score */
+            score: number;
+        };
+        /**
+         * GardenCandidateNode
+         * @description A NODE distillation candidate (task 4995a32f): inert material that
+         *     could be compacted into a denser atom. ``kind`` is distill|pattern|
+         *     season; ``note_ids`` are the source(s) to feed to the matching
+         *     decomposition tool.
+         */
+        GardenCandidateNode: {
+            /** Kind */
+            kind: string;
+            /** Note Ids */
+            note_ids: string[];
+            /** Title */
+            title: string;
+            /** Reason */
+            reason: string;
+            /** Score */
+            score: number;
+            /** Preview */
+            preview: string;
+        };
+        /**
+         * GardenCandidatesOut
+         * @description Distillation candidates: nodes to compact + edges to add/prune.
+         *     Pure read; nothing is distilled until the caller acts on a candidate.
+         */
+        GardenCandidatesOut: {
+            /** Nodes */
+            nodes: components["schemas"]["GardenCandidateNode"][];
+            /** Edges */
+            edges: components["schemas"]["GardenCandidateEdge"][];
         };
         /**
          * GardenClassifyOut
@@ -23503,6 +23592,43 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["GardenApplyOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    garden_candidates_garden_candidates_get: {
+        parameters: {
+            query?: {
+                kind?: "all" | "distill" | "pattern" | "season" | "link_add" | "link_prune";
+                limit?: number;
+            };
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GardenCandidatesOut"];
                 };
             };
             /** @description Validation Error */

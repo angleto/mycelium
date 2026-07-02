@@ -186,6 +186,41 @@ export const en = {
     pickerPh: 'Search notes…',
     unknownNote: '(note unavailable)',
   },
+  gardenReview: {
+    navTitle: 'Suggestions',
+    title: 'Suggested distillations',
+    back: '← Garden',
+    intro:
+      'Memory is a searchable graph; distillation is its maintenance. These are the suggested nodes to compact and edges to curate, plus atoms awaiting review. Nothing runs on its own — you (or an agent) act on a suggestion.',
+    empty: 'Nothing to distil right now.',
+    none: 'None.',
+    distill: 'Distil',
+    approve: 'Approve',
+    reject: 'Reject',
+    viaAgent: 'via agent/MCP',
+    viaAgentHint:
+      'No one-click endpoint yet: run this with a strong model via MCP (or an agent), then review the result here.',
+    kind: {
+      distill: 'note',
+      pattern: 'pattern',
+      season: 'season',
+    },
+    nodes: {
+      title: 'Nodes to distil',
+      hint: 'Inert material that could be compacted into a denser atom.',
+    },
+    edges: {
+      title: 'Edges to curate',
+      hint: 'Links to add (strong affinity, no manual link) or prune (a “related” link whose basis has decayed).',
+      add: 'add related',
+      prune: 'prune related',
+    },
+    pending: {
+      title: 'Awaiting review',
+      hint: 'Autonomously-produced atoms held until you approve them (ADR-0043).',
+      model: 'producing model',
+    },
+  },
   gardenSuggest: {
     title: 'Garden suggestions',
     headHint: 'Proposals from the graph — accept to apply, dismiss to decline (ADR-0032).',

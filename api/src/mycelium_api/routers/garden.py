@@ -32,6 +32,9 @@ from mycelium_api.schemas import (
     GardenAcceptRatioOut,
     GardenApplyIn,
     GardenApplyOut,
+    GardenCandidateEdge,
+    GardenCandidateNode,
+    GardenCandidatesOut,
     GardenClassifyOut,
     GardenClustersOut,
     GardenClusterSuggestionOut,
@@ -60,6 +63,7 @@ from mycelium_api.schemas import (
 )
 from mycelium_core.config import get_settings
 from mycelium_core.models.precomputed_suggestion import PrecomputedSuggestion
+from mycelium_core.services import candidates as candidates_svc
 from mycelium_core.services import event_bus
 from mycelium_core.services import garden_classify as classify_svc
 from mycelium_core.services import garden_health as health_svc
@@ -411,6 +415,36 @@ async def garden_apply(
         suggestion_type=body.suggestion_type,
         action=body.action,
         applied=body.action in ("accept", "override"),
+    )
+
+
+@router.get("/candidates", response_model=GardenCandidatesOut)
+async def garden_candidates(
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+    kind: Annotated[
+        Literal["all", "distill", "pattern", "season", "link_add", "link_prune"],
+        Query(),
+    ] = "all",
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+) -> GardenCandidatesOut:
+    """Distillation candidates (task 4995a32f): "are there distillations to
+    do?". Distillation is graph maintenance, so this returns both NODE
+    candidates (inert notes/clusters/quarters to compact into atoms) and
+    EDGE candidates (links to add via tag/co-activity affinity, or prune
+    when their basis has decayed). A pure read, no LLM; the caller acts on a
+    candidate with distill_note / extract_cluster_pattern / synthesize_season
+    or by creating/removing a link, then reviews. RLS-scoped; ``project_id``
+    from the tenant context narrows the perimeter."""
+    result = await candidates_svc.list_distillation_candidates(
+        ctx.session,
+        org_id=ctx.org_id,
+        project_id=ctx.project_id,
+        kind=kind,
+        limit=limit,
+    )
+    return GardenCandidatesOut(
+        nodes=[GardenCandidateNode(**n) for n in result["nodes"]],
+        edges=[GardenCandidateEdge(**e) for e in result["edges"]],
     )
 
 

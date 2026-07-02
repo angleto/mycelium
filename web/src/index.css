@@ -2535,6 +2535,75 @@ button.btn--danger:hover {
   color: var(--muted);
   justify-self: end;
 }
+/* Distillation-candidate surfacing (task 4995a32f): nodes to compact,
+   edges to curate, atoms awaiting review. */
+.ghreview__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+}
+.ghreview__back {
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+.ghreview__intro {
+  font-size: 0.85rem;
+  color: var(--muted);
+  margin: 0.2rem 0 0.9rem;
+  max-width: 60ch;
+}
+.ghreview__empty {
+  font-size: 0.9rem;
+  color: var(--muted);
+  font-style: italic;
+}
+.ghreview__section {
+  margin: 0 0 1.4rem;
+}
+.ghreview__sectionhead {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  margin-bottom: 0.15rem;
+}
+.ghreview__sectionhead h2 {
+  font-size: 1rem;
+  margin: 0;
+}
+.ghreview__list {
+  list-style: none;
+  padding: 0;
+  margin: 0.4rem 0 0;
+  display: grid;
+  gap: 0.35rem;
+}
+.ghreview__item {
+  display: flex;
+  gap: 0.6rem;
+  align-items: center;
+  padding: 0.4rem 0.6rem;
+  border-left: 2px solid var(--border);
+  font-size: 0.85rem;
+}
+.ghreview__glyph {
+  font-size: 1rem;
+}
+.ghreview__body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 0;
+  flex: 1;
+}
+.ghreview__title {
+  font-weight: 600;
+  color: var(--text-h);
+}
+.ghreview__reason {
+  font-size: 0.78rem;
+  color: var(--muted);
+}
 /* A live card is clickable: it opens the 90-day per-metric drill-down. */
 .ghealth__card--clickable {
   cursor: pointer;

@@ -67,6 +67,7 @@ from mycelium_core.services import attachments as attachments_svc
 from mycelium_core.services import billing as billing_svc
 from mycelium_core.services import budgets as budgets_svc
 from mycelium_core.services import calendar as calendars
+from mycelium_core.services import candidates as candidates_svc
 from mycelium_core.services import coordination as coordination_svc
 from mycelium_core.services import decomposition as decomposition_svc
 from mycelium_core.services import dependencies, scheduler, tasks, taxonomy
@@ -5174,6 +5175,34 @@ async def synthesize_season(token: str, org_id: str, year: int, quarter: int) ->
             "model_id": res.model_id,
             "created": res.created,
         }
+
+
+@mcp.tool()
+async def list_distillation_candidates(
+    token: str, org_id: str, kind: str = "all", limit: int = 50
+) -> dict[str, Any]:
+    """Are there distillations to do? (task 4995a32f). Distillation is graph
+    MAINTENANCE, so this surfaces two families of candidate, read-only and
+    with no LLM call:
+
+    - NODE candidates (compact inert material into a denser atom): ``distill``
+      (one inert note), ``pattern`` (a Leiden cluster of >=2 archived notes),
+      ``season`` (a quarter's archived notes). Act with ``distill_note`` /
+      ``extract_cluster_pattern`` / ``synthesize_season`` -- pass your OWN
+      strong model's output via ``distilled_text`` (no org credits spent), or
+      omit it to use the org's hosted provider (metered).
+    - EDGE candidates (curate the link graph): ``link_add`` (a strong
+      tag/co-activity pair with no manual link -> create a ``related`` link),
+      ``link_prune`` (a ``related`` link whose basis has decayed).
+
+    ``kind`` filters to one family (all|distill|pattern|season|link_add|
+    link_prune). After acting, autonomously-produced atoms go through
+    ``garden_review_pending`` -> ``garden_review_approve``. Member role;
+    RLS-scoped."""
+    async with _tenant(token, org_id) as (s, org, _user):
+        return await candidates_svc.list_distillation_candidates(
+            s, org_id=org, kind=kind, limit=limit
+        )
 
 
 @mcp.tool()

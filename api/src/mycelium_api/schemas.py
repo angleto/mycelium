@@ -1295,6 +1295,43 @@ class GardenReviewPendingItem(BaseModel):
     created_at: datetime.datetime
 
 
+class GardenCandidateNode(BaseModel):
+    """A NODE distillation candidate (task 4995a32f): inert material that
+    could be compacted into a denser atom. ``kind`` is distill|pattern|
+    season; ``note_ids`` are the source(s) to feed to the matching
+    decomposition tool."""
+
+    kind: str
+    note_ids: list[uuid.UUID]
+    title: str
+    reason: str
+    score: float
+    preview: str
+
+
+class GardenCandidateEdge(BaseModel):
+    """An EDGE curation candidate (task 4995a32f): distillation as graph
+    maintenance. ``op`` is add (a strong tag/co-activity pair with no
+    manual link) or prune (a ``related`` link whose basis has decayed)."""
+
+    op: str
+    src_note_id: uuid.UUID
+    dst_note_id: uuid.UUID
+    link_kind: str
+    src_title: str
+    dst_title: str
+    reason: str
+    score: float
+
+
+class GardenCandidatesOut(BaseModel):
+    """Distillation candidates: nodes to compact + edges to add/prune.
+    Pure read; nothing is distilled until the caller acts on a candidate."""
+
+    nodes: list[GardenCandidateNode]
+    edges: list[GardenCandidateEdge]
+
+
 class GardenReviewActionIn(BaseModel):
     """Approve, or reject, one proposed node by id (ADR-0043). ``reason`` is
     an optional note recorded on a reject (ignored by approve)."""

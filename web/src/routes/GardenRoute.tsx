@@ -96,6 +96,10 @@ export function GardenRoute() {
   // First-load flag: show the empty-state copy only once the fetch has
   // resolved, never during the initial (possibly slow) load.
   const [loading, setLoading] = useState(true)
+  // Suggested-work count for the Review sub-nav badge: distillation
+  // candidates (nodes + edges) + autonomous atoms awaiting approval. A
+  // cheap read; the panel itself lives on /garden/review.
+  const [suggestCount, setSuggestCount] = useState<number | null>(null)
 
   useEffect(() => {
     try {
@@ -142,6 +146,27 @@ export function GardenRoute() {
       } finally {
         if (active) setLoading(false)
       }
+    })()
+    return () => {
+      active = false
+    }
+  }, [])
+
+  useEffect(() => {
+    let active = true
+    void (async () => {
+      const [cand, rev] = await Promise.all([
+        api.GET('/garden/candidates', {
+          params: { header: workspaceHeader(), query: { kind: 'all', limit: 50 } },
+        }),
+        api.GET('/garden/review/pending', {
+          params: { header: workspaceHeader(), query: { limit: 50 } },
+        }),
+      ])
+      if (!active) return
+      const nCand = (cand.data?.nodes?.length ?? 0) + (cand.data?.edges?.length ?? 0)
+      const nRev = rev.data?.length ?? 0
+      setSuggestCount(nCand + nRev)
     })()
     return () => {
       active = false
@@ -324,6 +349,13 @@ export function GardenRoute() {
         </Link>
         <Link to="/garden/audit" className="garden__health-link">
           {t('gardenAudit.title')} →
+        </Link>
+        <Link to="/garden/review" className="garden__health-link">
+          {t('gardenReview.navTitle')}
+          {suggestCount != null && suggestCount > 0 && (
+            <span className="garden__tab-count">{suggestCount}</span>
+          )}{' '}
+          →
         </Link>
       </div>
 
