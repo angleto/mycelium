@@ -25,6 +25,7 @@ import uuid
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from mycelium_core import security_events
 from mycelium_core.errors import QuotaExceededError
 from mycelium_core.i18n import MessageCode
 
@@ -60,6 +61,15 @@ async def check(
         )
     ).scalar_one()
     if count > limit:
+        # Structured security telemetry (task d3dd69c3): a key hammering its
+        # budget is brute-force / runaway-integration signal for the log stack.
+        security_events.emit(
+            "issuer_key.rate_limited",
+            key_id=str(key_id),
+            org_id=str(org_id),
+            endpoint_class=endpoint_class,
+            limit=limit,
+        )
         raise QuotaExceededError(MessageCode.RATE_LIMITED)
 
 

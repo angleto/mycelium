@@ -7,17 +7,19 @@ DB, here we only authenticate/authorize.
 
 from __future__ import annotations
 
+import ipaddress
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import Annotated, Any
 
-from fastapi import Depends, Header
+from fastapi import Depends, Header, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from mycelium_core.config import get_settings
 from mycelium_core.db import admin_session, tenant_session
 from mycelium_core.errors import AuthError, ForbiddenError, NotFoundError
 from mycelium_core.i18n import MessageCode
@@ -308,7 +310,51 @@ class IssuerKeyCtx:
     key_id: uuid.UUID
 
 
+def _resolve_issuer_client_ip(request: Request) -> str | None:
+    """Best-effort TRUSTWORTHY source address for the issuer-key IP allowlist.
+
+    Deliberately NOT ``request.client.host``: production runs uvicorn with
+    ``--proxy-headers --forwarded-allow-ips '*'``, which overwrites
+    ``scope['client']`` with the LEFTMOST X-Forwarded-For token -- fully
+    client-forgeable. Instead this reads the RAW ``X-Forwarded-For`` header
+    (which uvicorn leaves intact) and resolves the client as the rightmost
+    entry that is NOT one of the configured trusted proxies: an attacker
+    cannot insert a hop to the right of the real remote address nginx appends
+    (``$proxy_add_x_forwarded_for``), so the result is not forgeable to an
+    arbitrary allowlisted value -- provided (a) ``issuer_key_trusted_proxies``
+    lists the real infra hops and (b) the pod is reachable only via the proxy
+    (NetworkPolicy), else a direct-to-pod caller controls the whole chain.
+
+    Returns None (-> the caller fails the request CLOSED for a restricted key)
+    when there is a forwarding chain but no configured trust anchor, when the
+    header is malformed, or when every hop is a trusted proxy (the edge did
+    not preserve the client). A request with no forwarding header at all
+    (direct connection / the in-process test transport) uses the real peer.
+    """
+    xff = request.headers.get("x-forwarded-for")
+    if not xff:
+        return request.client.host if request.client else None
+    trusted = get_settings().issuer_key_trusted_proxies
+    if not trusted:
+        return None
+    try:
+        nets = [ipaddress.ip_network(c, strict=False) for c in trusted]
+    except ValueError:
+        return None
+    for hop in reversed([h.strip() for h in xff.split(",")]):
+        if not hop:
+            continue
+        try:
+            addr = ipaddress.ip_address(hop)
+        except ValueError:
+            return None  # a malformed hop poisons the chain -> fail closed
+        if not any(addr in net for net in nets):
+            return hop
+    return None
+
+
 async def issuer_key_ctx(
+    request: Request,
     authorization: Annotated[str | None, Header()] = None,
 ) -> AsyncIterator[IssuerKeyCtx]:
     """Public Invoice API dependency. Resolves ``Authorization: Bearer
@@ -316,12 +362,16 @@ async def issuer_key_ctx(
     key carries its tenant), opens an RLS tenant session as an
     ``issuer_api_key`` actor with the role PINNED to ``member`` (H1), and yields
     the ctx. A missing/malformed header is a distinct 401 (auth.missing_bearer);
-    an unknown/revoked/expired key is a COLLAPSED 401 (auth.token_invalid) so the
-    surface is not a key-existence oracle."""
+    an unknown/revoked/expired key AND a source outside the key's allowlist are
+    the same COLLAPSED 401 (auth.token_invalid) so the surface is neither a
+    key-existence nor an allowlist oracle. The source address is resolved by
+    ``_resolve_issuer_client_ip`` (trusted-proxy aware, fail-closed), NOT from
+    the client-forgeable ``request.client``."""
     if not authorization or not authorization.lower().startswith("bearer "):
         raise AuthError(MessageCode.AUTH_MISSING_BEARER)
     raw = authorization[7:].strip()
-    princ = await issuer_api_keys.authenticate(raw)
+    client_ip = _resolve_issuer_client_ip(request)
+    princ = await issuer_api_keys.authenticate(raw, client_ip=client_ip)
     if princ is None:
         raise AuthError(MessageCode.AUTH_TOKEN_INVALID)
     async with tenant_session(

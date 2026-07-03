@@ -22,6 +22,7 @@ from sqlalchemy import select
 
 from mycelium_api.deps import TenantCtx, tenant_ctx
 from mycelium_api.schemas import (
+    IssuerApiKeyAllowlistIn,
     IssuerApiKeyCreateIn,
     IssuerApiKeyCreateOut,
     IssuerApiKeyOut,
@@ -49,6 +50,7 @@ def _out(k: IssuerApiKey) -> IssuerApiKeyOut:
         rotated_at=k.rotated_at,
         revoked_at=k.revoked_at,
         days_to_expiry=(k.expires_at - now).days,
+        ip_allowlist=list(k.ip_allowlist) if k.ip_allowlist else None,
     )
 
 
@@ -100,6 +102,7 @@ async def mint_key(
         name=body.name,
         permissions=body.permissions,
         ttl_days=body.ttl_days,
+        ip_allowlist=body.ip_allowlist,
     )
     return _create_out(res.key, res.raw)
 
@@ -126,6 +129,30 @@ async def rotate_key(
         grace_seconds=grace_seconds,
     )
     return _create_out(res.key, res.raw)
+
+
+@router.put(
+    "/issuer-profiles/{issuer_profile_id}/api-keys/{key_id}/allowlist",
+    response_model=IssuerApiKeyOut,
+)
+async def set_key_allowlist(
+    issuer_profile_id: uuid.UUID,
+    key_id: uuid.UUID,
+    body: IssuerApiKeyAllowlistIn,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+) -> IssuerApiKeyOut:
+    """Replace the key's CIDR allowlist (owner-gated in the service) without
+    re-minting: the secret is untouched, so integrators keep working while the
+    network restriction is tightened or lifted (None/empty = unrestricted)."""
+    await _assert_key_in_issuer(ctx, issuer_profile_id, key_id)
+    row = await svc.set_ip_allowlist(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        key_id=key_id,
+        ip_allowlist=body.ip_allowlist,
+    )
+    return _out(row)
 
 
 @router.delete(

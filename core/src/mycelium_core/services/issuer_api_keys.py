@@ -24,14 +24,16 @@ from __future__ import annotations
 import datetime
 import hashlib
 import hmac
+import ipaddress
 import secrets
 import uuid
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from mycelium_core import security_events
 from mycelium_core.config import get_settings
 from mycelium_core.db import admin_session
 from mycelium_core.errors import NotFoundError, UnprocessableError
@@ -72,10 +74,84 @@ def _pepper() -> bytes:
     return get_settings().issuer_key_pepper.encode("utf-8")
 
 
-def _hash(raw: str) -> bytes:
+def _previous_pepper() -> bytes | None:
+    """The rotation-window pepper (task d3dd69c3), or None outside a window.
+    New material (mint/rotate) ALWAYS hashes under the current pepper; the
+    previous one is verify-only."""
+    prev = get_settings().issuer_key_pepper_previous
+    return prev.encode("utf-8") if prev else None
+
+
+def _hash(raw: str, pepper: bytes | None = None) -> bytes:
     """Keyed hash. Deterministic (indexed equality lookup), pepper-bound so a
     stolen DB alone cannot verify a candidate secret."""
-    return hmac.new(_pepper(), raw.encode("utf-8"), hashlib.sha256).digest()
+    return hmac.new(pepper or _pepper(), raw.encode("utf-8"), hashlib.sha256).digest()
+
+
+# Defence-in-depth cap: an allowlist is a handful of egress blocks, not a
+# routing table; a huge list would also slow the per-request gate.
+_IP_ALLOWLIST_MAX: int = 32
+
+
+def _normalize_ip_allowlist(entries: Sequence[str] | None) -> list[str] | None:
+    """Validate + canonicalize a CIDR allowlist. ``None``/empty -> None (no
+    restriction). Accepts single addresses ('203.0.113.7') and networks
+    ('203.0.113.0/24', IPv6 included); stored as the canonical
+    ``ip_network(..., strict=False)`` string so the enforcement parse can
+    never fail on stored data."""
+    if not entries:
+        return None
+    if len(entries) > _IP_ALLOWLIST_MAX:
+        raise UnprocessableError(
+            MessageCode.ISSUER_API_KEY_IP_ALLOWLIST_INVALID,
+            detail=f"more than {_IP_ALLOWLIST_MAX} entries",
+        )
+    nets: set[str] = set()
+    for entry in entries:
+        candidate = entry.strip()
+        if not candidate:
+            continue
+        try:
+            net = ipaddress.ip_network(candidate, strict=False)
+        except ValueError as exc:
+            raise UnprocessableError(
+                MessageCode.ISSUER_API_KEY_IP_ALLOWLIST_INVALID,
+                detail=f"{candidate!r}: {exc}",
+            ) from exc
+        # Collapse an IPv4-mapped IPv6 form (::ffff:203.0.113.0/120) to the
+        # equivalent IPv4 network: matching unwraps mapped SOURCES to v4, so a
+        # stored mapped ENTRY would otherwise be dead (never matches). Mirror
+        # the unwrap here so validation and enforcement agree.
+        if isinstance(net, ipaddress.IPv6Network):
+            mapped = getattr(net.network_address, "ipv4_mapped", None)
+            if mapped is not None:
+                net = ipaddress.ip_network(f"{mapped}/{net.prefixlen - 96}", strict=False)
+        nets.add(str(net))
+    return sorted(nets) or None
+
+
+def _ip_allowed(client_ip: str | None, allowlist: Sequence[str]) -> bool:
+    """True iff the source address falls inside at least one allowlisted
+    block. Fail-closed: a restricted key with no resolvable source address
+    (or an unparseable one) is denied -- defence in depth must not silently
+    open when the proxy chain misbehaves."""
+    if client_ip is None:
+        return False
+    try:
+        addr = ipaddress.ip_address(client_ip)
+    except ValueError:
+        return False
+    # A dual-stack edge can hand the v4 source as an IPv4-mapped IPv6
+    # address (::ffff:203.0.113.7); unwrap it so v4 allowlist entries match.
+    if isinstance(addr, ipaddress.IPv6Address) and addr.ipv4_mapped is not None:
+        addr = addr.ipv4_mapped
+    for net in allowlist:
+        try:
+            if addr in ipaddress.ip_network(net, strict=False):
+                return True
+        except ValueError:  # pragma: no cover - stored values are canonical
+            continue
+    return False
 
 
 def _generate_raw() -> str:
@@ -131,6 +207,14 @@ class AuthenticatedIssuerKey:
     # True when the GRACE (previous) secret matched -- telemetry / rotation
     # observability for the caller.
     matched_previous: bool = False
+    # The key's CIDR allowlist (None = unrestricted); enforced in
+    # ``authenticate`` before the principal is handed to the caller.
+    ip_allowlist: list[str] | None = None
+    # The matched secret's last use BEFORE this authentication's throttled
+    # bump -- drives the dormant-key security event.
+    last_used_at: datetime.datetime | None = None
+    # True when the PREVIOUS pepper verified the hash (rotation window).
+    matched_previous_pepper: bool = False
 
 
 async def mint(
@@ -142,13 +226,16 @@ async def mint(
     name: str,
     permissions: Sequence[str] = _DEFAULT_PERMISSIONS,
     ttl_days: int | None = None,
+    ip_allowlist: Sequence[str] | None = None,
 ) -> MintResult:
     """Owner-gated. Mint a fresh issuer-scoped key. The secret is
     system-generated; the caller supplies no key material. ``ttl_days=None``
     defaults to (and is capped at) the max lifetime -- there is no never-expiring
-    key."""
+    key. ``ip_allowlist`` (optional CIDR blocks) restricts where the key may
+    authenticate from."""
     await require_role(session, org_id, actor_id, Role.owner)
     perms = _normalize_permissions(permissions)
+    allowlist = _normalize_ip_allowlist(ip_allowlist)
     issuer = (
         await session.execute(
             select(IssuerProfile).where(
@@ -168,6 +255,7 @@ async def mint(
         key_public_id=_generate_public_id(),
         secret_hash=_hash(raw),
         permissions=perms,
+        ip_allowlist=allowlist,
         expires_at=_resolve_expiry(ttl_days),
     )
     session.add(row)
@@ -183,9 +271,44 @@ async def mint(
             "name": name,
             "issuer_profile_id": str(issuer_profile_id),
             "permissions": perms,
+            "ip_allowlist": allowlist,
         },
     )
     return MintResult(key=row, raw=raw)
+
+
+async def set_ip_allowlist(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    key_id: uuid.UUID,
+    ip_allowlist: Sequence[str] | None,
+) -> IssuerApiKey:
+    """Owner-gated. Replace a key's CIDR allowlist without re-minting (the
+    secret is untouched, integrators keep working). ``None``/empty removes
+    the restriction. Bumps ``version`` (optimistic concurrency)."""
+    await require_role(session, org_id, actor_id, Role.owner)
+    row = (
+        await session.execute(
+            select(IssuerApiKey).where(IssuerApiKey.id == key_id, IssuerApiKey.org_id == org_id)
+        )
+    ).scalar_one_or_none()
+    if row is None:
+        raise NotFoundError(MessageCode.ISSUER_API_KEY_NOT_FOUND)
+    row.ip_allowlist = _normalize_ip_allowlist(ip_allowlist)
+    row.version += 1
+    await session.flush()
+    await audit.log(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        entity="issuer_api_key",
+        entity_id=row.id,
+        action="ip_allowlist_set",
+        diff={"ip_allowlist": row.ip_allowlist},
+    )
+    return row
 
 
 async def list_keys(
@@ -289,15 +412,90 @@ async def authenticate(
     raw: str,
     *,
     session: AsyncSession | None = None,
+    client_ip: str | None = None,
 ) -> AuthenticatedIssuerKey | None:
     """Resolve a raw issuer key to its principal, or ``None`` if unknown /
-    revoked / expired / outside the grace window. Crosses the tenant boundary
-    via the SECURITY DEFINER ``authenticate_issuer_api_key`` (migration 0077),
-    which two-probes (current-hash-wins), gates revoke/expiry, and bumps the
-    throttled last-used telemetry."""
+    revoked / expired / outside the grace window / outside the key's IP
+    allowlist. Crosses the tenant boundary via the SECURITY DEFINER
+    ``authenticate_issuer_api_key`` (migrations 0077/0080), which two-probes
+    (current-hash-wins), gates revoke/expiry, and bumps the throttled
+    last-used telemetry.
+
+    Pepper-rotation window (task d3dd69c3): on a current-pepper miss, the
+    hash computed with ``issuer_key_pepper_previous`` (when configured) gets
+    a second probe, so existing keys keep authenticating while each one is
+    re-minted under the new pepper. Every deny and every anomalous accept
+    emits a structured security event (mycelium.security logger); the raw
+    secret never appears in any of them."""
     if not is_issuer_api_key(raw):
         return None
-    secret_hash = _hash(raw)
+    principal = await _probe(_hash(raw), session)
+    matched_previous_pepper = False
+    if principal is None:
+        prev_pepper = _previous_pepper()
+        if prev_pepper is not None:
+            principal = await _probe(_hash(raw, prev_pepper), session)
+            matched_previous_pepper = principal is not None
+    if principal is None:
+        security_events.emit("issuer_key.auth_failed", ip=client_ip)
+        return None
+    if principal.ip_allowlist:
+        if client_ip is None:
+            # Fail-closed: a restricted key whose SOURCE could not be
+            # attributed to a trustworthy value (the forwarding chain is not
+            # configured / not trusted -- see deps._resolve_issuer_client_ip)
+            # is denied, never trusted on a client-forgeable header. Distinct
+            # event so ops can tell a misconfigured trust chain from a real
+            # off-net attempt.
+            security_events.emit(
+                "issuer_key.ip_unresolved",
+                key_id=str(principal.key_id),
+                org_id=str(principal.org_id),
+            )
+            return None
+        if not _ip_allowed(client_ip, principal.ip_allowlist):
+            security_events.emit(
+                "issuer_key.ip_denied",
+                key_id=str(principal.key_id),
+                org_id=str(principal.org_id),
+                ip=client_ip,
+            )
+            return None
+    if matched_previous_pepper:
+        security_events.emit(
+            "issuer_key.previous_pepper_used",
+            key_id=str(principal.key_id),
+            org_id=str(principal.org_id),
+            ip=client_ip,
+        )
+    if principal.matched_previous:
+        security_events.emit(
+            "issuer_key.grace_secret_used",
+            key_id=str(principal.key_id),
+            org_id=str(principal.org_id),
+            ip=client_ip,
+        )
+    dormant_days = get_settings().issuer_key_dormant_days
+    if (
+        principal.last_used_at is not None
+        and dormant_days > 0
+        and principal.last_used_at
+        < datetime.datetime.now(tz=datetime.UTC) - datetime.timedelta(days=dormant_days)
+    ):
+        security_events.emit(
+            "issuer_key.dormant_key_used",
+            key_id=str(principal.key_id),
+            org_id=str(principal.org_id),
+            ip=client_ip,
+            dormant_days=dormant_days,
+            last_used_at=principal.last_used_at,
+        )
+    if matched_previous_pepper:
+        return replace(principal, matched_previous_pepper=True)
+    return principal
+
+
+async def _probe(secret_hash: bytes, session: AsyncSession | None) -> AuthenticatedIssuerKey | None:
     if session is not None:
         return await _call_authenticate_fn(session, secret_hash)
     async with admin_session() as s:
@@ -382,7 +580,7 @@ async def _call_authenticate_fn(
     result = await session.execute(
         text(
             "SELECT out_key_id, out_org_id, out_issuer_profile_id, "
-            "out_permissions, out_matched_previous "
+            "out_permissions, out_matched_previous, out_ip_allowlist, out_last_used_at "
             "FROM authenticate_issuer_api_key(:h)"
         ),
         {"h": secret_hash},
@@ -391,12 +589,15 @@ async def _call_authenticate_fn(
     if row is None or row[0] is None:
         return None
     perms = [str(p) for p in (row[3] or [])]
+    allowlist = [str(n) for n in row[5]] if row[5] else None
     return AuthenticatedIssuerKey(
         key_id=row[0],
         org_id=row[1],
         issuer_profile_id=row[2],
         permissions=perms,
         matched_previous=bool(row[4]),
+        ip_allowlist=allowlist,
+        last_used_at=row[6],
     )
 
 
@@ -418,4 +619,5 @@ __all__ = [
     "revoke",
     "rotate",
     "scan_issuer_key_expiry",
+    "set_ip_allowlist",
 ]

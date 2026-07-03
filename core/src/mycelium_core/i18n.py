@@ -106,6 +106,7 @@ class MessageCode(enum.StrEnum):
     ISSUER_PROFILE_NOT_FOUND = "invoice.issuer_profile_not_found"
     ISSUER_API_KEY_NOT_FOUND = "issuer_api_key.not_found"
     ISSUER_API_KEY_PERMISSION_INVALID = "issuer_api_key.permission_invalid"
+    ISSUER_API_KEY_IP_ALLOWLIST_INVALID = "issuer_api_key.ip_allowlist_invalid"
     ISSUER_API_KEY_PERMISSION_DENIED = "issuer_api_key.permission_denied"
     IDEMPOTENCY_KEY_REQUIRED = "idempotency.key_required"
     IDEMPOTENCY_BODY_MISMATCH = "idempotency.body_mismatch"
@@ -375,6 +376,7 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
         MessageCode.ISSUER_API_KEY_PERMISSION_DENIED: (
             "The API key does not carry the permission required for this operation"
         ),
+        MessageCode.ISSUER_API_KEY_IP_ALLOWLIST_INVALID: ("Invalid IP allowlist entry: {detail}"),
         MessageCode.IDEMPOTENCY_KEY_REQUIRED: "The Idempotency-Key header is required",
         MessageCode.IDEMPOTENCY_BODY_MISMATCH: (
             "This Idempotency-Key was already used with a different request"

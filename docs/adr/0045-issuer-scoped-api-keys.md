@@ -66,7 +66,10 @@ emitted `ProgressivoInvio` / `NomeFile` are recorded on the invoice.
 
 ## Consequences
 
-- The pepper cannot be rotated without re-minting every key (no raw is stored):
+- The pepper is rotatable only through the dual-pepper window
+  (`MYCELIUM_ISSUER_KEY_PEPPER_PREVIOUS`, task d3dd69c3) plus a re-mint of
+  every key -- no raw is stored, so hashes cannot be recomputed. Procedure and
+  the security-event telemetry in `docs/runbooks/issuer-key-pepper.md`; still
   treat it as long-lived secret-manager material, held out of the DB/backups.
 - Full lost-ACK durability shipped as ADR-0046 (two-phase transmit: the fiscal
   identity — numero, `ProgressivoInvio`/`NomeFile`, frozen XML — is committed
@@ -75,10 +78,15 @@ emitted `ProgressivoInvio` / `NomeFile` are recorded on the invoice.
   deferral time (the request-long row lock and the transaction-local RLS
   GUCs) are resolved by `tenant_checkpoint` on a checkpoint-friendly
   `tenant_session`, not by a nested session.
-- Deferred follow-ons: signed outbound webhooks, optional per-key IP allowlist,
-  full security alerting, a binary PDF download over MCP (the XML is text and
-  ships inline; the PDF is on `/api/v1`), a per-issuer least-privilege allowlist
-  over MCP.
+- Ops hardening shipped (task d3dd69c3): optional per-key CIDR IP allowlist
+  (enforced app-side at authenticate, collapsed 401, owner-editable without
+  re-mint) and structured security events on the `mycelium.security` logger
+  (auth failures, allowlist denials, dormant-key wake-ups, rate-limit trips,
+  grace/previous-pepper use) -- thresholds delegated to the log stack (see the
+  runbook). Deferred follow-ons: signed outbound webhooks, in-app anomaly
+  detection over those events, a binary PDF download over MCP (the XML is text
+  and ships inline; the PDF is on `/api/v1`), a per-issuer least-privilege
+  allowlist over MCP.
 
 ## Alternatives rejected
 

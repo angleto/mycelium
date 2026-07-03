@@ -3307,6 +3307,15 @@ class IssuerApiKeyCreateIn(BaseModel):
     # Mandatory expiry: ``None`` maps to the service's default (and cap) of
     # 365 days -- there is no never-expiring key.
     ttl_days: int | None = Field(default=None, ge=1, le=365)
+    # Optional CIDR allowlist (single IPs or networks, v4/v6); None/empty =
+    # no restriction. Validated + canonicalized by the service.
+    ip_allowlist: list[str] | None = Field(default=None, max_length=32)
+
+
+class IssuerApiKeyAllowlistIn(BaseModel):
+    """Replace a key's CIDR allowlist without re-minting (owner-gated)."""
+
+    ip_allowlist: list[str] | None = Field(default=None, max_length=32)
 
 
 class IssuerApiKeyOut(BaseModel):
@@ -3326,6 +3335,7 @@ class IssuerApiKeyOut(BaseModel):
     rotated_at: datetime.datetime | None
     revoked_at: datetime.datetime | None
     days_to_expiry: int
+    ip_allowlist: list[str] | None
 
 
 class IssuerApiKeyCreateOut(IssuerApiKeyOut):

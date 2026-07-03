@@ -25,6 +25,7 @@ from sqlalchemy import (
     Index,
     LargeBinary,
     String,
+    Text,
     UniqueConstraint,
     text,
 )
@@ -86,6 +87,11 @@ class IssuerApiKey(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, Ba
     permissions: Mapped[list[str]] = mapped_column(
         ARRAY(String), nullable=False, server_default=text("'{}'::text[]")
     )
+    # Optional CIDR allowlist (task d3dd69c3): NULL/empty = no restriction.
+    # Canonical ``ipaddress.ip_network`` strings, validated at the service
+    # layer; enforced app-side in ``authenticate`` (defence in depth for a
+    # fiscal send credential -- the credential alone stops sufficing off-net).
+    ip_allowlist: Mapped[list[str] | None] = mapped_column(ARRAY(Text), nullable=True)
     # Rotation-with-grace: the previous secret authenticates until its expiry
     # (default grace 0 -> hard rotation). Partial-unique in the migration.
     previous_secret_hash: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)

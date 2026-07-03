@@ -191,3 +191,108 @@ async def test_t35_expiry_warning_scan_idempotent() -> None:
         )
     assert len(rows) == 1  # exactly one, despite two scans and a second (far) key
     assert rows[0].dedupe_key == f"issuer_key_expiry:{kid}:30:email"
+
+
+async def test_t37_allowlist_mint_update_and_public_api_enforcement() -> None:
+    # ASGITransport presents client ip 127.0.0.1 to the app, so an allowlist
+    # containing 127.0.0.1/32 admits the request and a disjoint one denies it
+    # with the COLLAPSED 401 (no allowlist oracle).
+    async with _client() as c:
+        h, issuer = await _setup(c)
+        m = await c.post(
+            f"/issuer-profiles/{issuer}/api-keys",
+            headers=h,
+            json={
+                "name": "restricted",
+                "permissions": ["invoice:read"],
+                "ip_allowlist": ["127.0.0.1"],
+            },
+        )
+        assert m.status_code == 200, m.text
+        key = m.json()
+        assert key["ip_allowlist"] == ["127.0.0.1/32"]
+        raw = key["raw"]
+
+        ok = await c.get("/api/v1/invoices", headers=_bearer(raw))
+        assert ok.status_code == 200, ok.text
+
+        # Tighten to a disjoint network WITHOUT re-minting: same secret, 401.
+        u = await c.put(
+            f"/issuer-profiles/{issuer}/api-keys/{key['id']}/allowlist",
+            headers=h,
+            json={"ip_allowlist": ["10.0.0.0/8"]},
+        )
+        assert u.status_code == 200, u.text
+        assert u.json()["ip_allowlist"] == ["10.0.0.0/8"]
+        denied = await c.get("/api/v1/invoices", headers=_bearer(raw))
+        assert denied.status_code == 401
+        assert denied.json()["code"] == "auth.token_invalid"  # collapsed
+
+        # Lift the restriction: the same secret works again.
+        u2 = await c.put(
+            f"/issuer-profiles/{issuer}/api-keys/{key['id']}/allowlist",
+            headers=h,
+            json={"ip_allowlist": None},
+        )
+        assert u2.status_code == 200
+        again = await c.get("/api/v1/invoices", headers=_bearer(raw))
+        assert again.status_code == 200
+
+
+async def test_t37c_invalid_allowlist_rejected() -> None:
+    async with _client() as c:
+        h, issuer = await _setup(c)
+        bad = await c.post(
+            f"/issuer-profiles/{issuer}/api-keys",
+            headers=h,
+            json={"name": "bad", "ip_allowlist": ["not-a-cidr"]},
+        )
+        assert bad.status_code == 422
+        assert bad.json()["code"] == "issuer_api_key.ip_allowlist_invalid"
+
+
+async def test_t37d_forwarded_for_spoof_is_defeated(monkeypatch) -> None:
+    # End-to-end through the app: with the trusted-proxy chain configured, the
+    # allowlist matches the RIGHTMOST non-proxy hop (what nginx appends), so a
+    # left-prepended allowlisted IP cannot bypass it; with NO trusted proxies
+    # a forwarded request fails closed.
+    from mycelium_core.config import get_settings
+
+    async with _client() as c:
+        h, issuer = await _setup(c)
+        m = await c.post(
+            f"/issuer-profiles/{issuer}/api-keys",
+            headers=h,
+            json={"name": "r", "permissions": ["invoice:read"], "ip_allowlist": ["203.0.113.0/24"]},
+        )
+        assert m.status_code == 200, m.text
+        raw = m.json()["raw"]
+
+        monkeypatch.setenv("MYCELIUM_ISSUER_KEY_TRUSTED_PROXIES", '["10.0.0.0/8"]')
+        get_settings.cache_clear()
+        try:
+            # Real client (rightmost non-proxy) inside the allowlist -> 200.
+            ok = await c.get(
+                "/api/v1/invoices",
+                headers={**_bearer(raw), "X-Forwarded-For": "203.0.113.7, 10.0.0.5"},
+            )
+            assert ok.status_code == 200, ok.text
+            # Spoof: allowlisted IP prepended, but the real appended hop is
+            # off-net -> that hop wins -> collapsed 401.
+            spoof = await c.get(
+                "/api/v1/invoices",
+                headers={**_bearer(raw), "X-Forwarded-For": "203.0.113.7, 198.51.100.9"},
+            )
+            assert spoof.status_code == 401
+            assert spoof.json()["code"] == "auth.token_invalid"
+        finally:
+            monkeypatch.delenv("MYCELIUM_ISSUER_KEY_TRUSTED_PROXIES", raising=False)
+            get_settings.cache_clear()
+
+        # No trusted proxies configured + a forwarded request -> fail closed.
+        denied = await c.get(
+            "/api/v1/invoices",
+            headers={**_bearer(raw), "X-Forwarded-For": "203.0.113.7"},
+        )
+        assert denied.status_code == 401
+        assert denied.json()["code"] == "auth.token_invalid"

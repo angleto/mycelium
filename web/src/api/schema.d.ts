@@ -5772,6 +5772,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/issuer-profiles/{issuer_profile_id}/api-keys/{key_id}/allowlist": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Key Allowlist
+         * @description Replace the key's CIDR allowlist (owner-gated in the service) without
+         *     re-minting: the secret is untouched, so integrators keep working while the
+         *     network restriction is tightened or lifted (None/empty = unrestricted).
+         */
+        put: operations["set_key_allowlist_issuer_profiles__issuer_profile_id__api_keys__key_id__allowlist_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/issuer-profiles/{issuer_profile_id}/api-keys/{key_id}": {
         parameters: {
             query?: never;
@@ -8893,6 +8915,14 @@ export interface components {
             xml: string;
         };
         /**
+         * IssuerApiKeyAllowlistIn
+         * @description Replace a key's CIDR allowlist without re-minting (owner-gated).
+         */
+        IssuerApiKeyAllowlistIn: {
+            /** Ip Allowlist */
+            ip_allowlist?: string[] | null;
+        };
+        /**
          * IssuerApiKeyCreateIn
          * @description Mint a per-issuer-profile API key for the public Invoice REST API.
          */
@@ -8903,6 +8933,8 @@ export interface components {
             permissions?: string[];
             /** Ttl Days */
             ttl_days?: number | null;
+            /** Ip Allowlist */
+            ip_allowlist?: string[] | null;
         };
         /**
          * IssuerApiKeyCreateOut
@@ -8946,6 +8978,8 @@ export interface components {
             revoked_at: string | null;
             /** Days To Expiry */
             days_to_expiry: number;
+            /** Ip Allowlist */
+            ip_allowlist: string[] | null;
             /** Raw */
             raw: string;
         };
@@ -8992,6 +9026,8 @@ export interface components {
             revoked_at: string | null;
             /** Days To Expiry */
             days_to_expiry: number;
+            /** Ip Allowlist */
+            ip_allowlist: string[] | null;
         };
         /** IssuerProfileIn */
         IssuerProfileIn: {
@@ -25754,6 +25790,47 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["IssuerApiKeyCreateOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_key_allowlist_issuer_profiles__issuer_profile_id__api_keys__key_id__allowlist_put: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                issuer_profile_id: string;
+                key_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IssuerApiKeyAllowlistIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IssuerApiKeyOut"];
                 };
             };
             /** @description Validation Error */

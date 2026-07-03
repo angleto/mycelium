@@ -56,13 +56,38 @@ class Settings(BaseSettings):
     # Dedicated pepper for the issuer-API-key keyed hash
     # (HMAC-SHA256(pepper, raw)); key-separated from ``secret_key`` so the two
     # blast radii are independent. No default: fail-closed, provided via
-    # MYCELIUM_ISSUER_KEY_PEPPER. A DB-only dump is inert without it. It cannot
-    # be rotated without re-minting every key (no raw is stored), so treat it as
+    # MYCELIUM_ISSUER_KEY_PEPPER. A DB-only dump is inert without it. Rotation
+    # requires the dual-pepper window below plus a re-mint of every key (no raw
+    # is stored); see docs/runbooks/issuer-key-pepper.md. Treat it as
     # long-lived secret-manager material.
     issuer_key_pepper: str = Field(
         min_length=32,
         description="Dedicated pepper for the issuer-API-key keyed hash.",
     )
+    # Pepper-rotation window (task d3dd69c3): when set, ``authenticate`` also
+    # probes the hash computed with the PREVIOUS pepper (second probe, only on
+    # a current-pepper miss), so existing keys keep working while each one is
+    # re-minted under the new pepper. Unset it once every key is re-minted.
+    # A previous-pepper match emits a security event (rotation progress /
+    # compromise telemetry). See docs/runbooks/issuer-key-pepper.md.
+    issuer_key_pepper_previous: str | None = Field(
+        default=None,
+        min_length=32,
+        description="Previous issuer-key pepper, valid during a rotation window.",
+    )
+    # A key silent for this many days that suddenly authenticates emits the
+    # ``issuer_key.dormant_key_used`` security event (stolen-credential signal).
+    issuer_key_dormant_days: int = 30
+    # Trusted reverse-proxy hops (CIDR) in front of the backend, for the
+    # issuer-key IP-allowlist SOURCE resolution (task d3dd69c3). The real
+    # client is the rightmost X-Forwarded-For entry that is NOT one of these.
+    # EMPTY (default) means the forwarding chain is not trusted, so a key that
+    # HAS an allowlist fails CLOSED behind a proxy (the source is
+    # unattributable) -- the allowlist is a security control only once this is
+    # configured to the actual infra proxies AND the pod is reachable only via
+    # them (NetworkPolicy). See docs/runbooks/issuer-key-pepper.md. Set as
+    # JSON, e.g. MYCELIUM_ISSUER_KEY_TRUSTED_PROXIES='["10.0.0.0/8"]'.
+    issuer_key_trusted_proxies: list[str] = Field(default_factory=list)
     # Rotation grace: how long the PREVIOUS issuer-key secret keeps
     # authenticating after a rotate(). Default 0 = hard rotation; a per-call
     # value is clamped to the ceiling (compromise -> grace 0 / revoke).

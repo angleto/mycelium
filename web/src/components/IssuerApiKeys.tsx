@@ -19,6 +19,15 @@ const PERMISSIONS = [
   'invoice:client_write',
 ] as const
 
+// Split a comma/space-separated CIDR list; empty -> null (unrestricted).
+function parseAllowlist(text: string): string[] | null {
+  const entries = text
+    .split(/[\s,]+/)
+    .map((s) => s.trim())
+    .filter(Boolean)
+  return entries.length > 0 ? entries : null
+}
+
 export function IssuerApiKeys({ profileId }: { profileId: string }) {
   const { t } = useTranslation()
   const [rows, setRows] = useState<ApiKey[]>([])
@@ -30,6 +39,8 @@ export function IssuerApiKeys({ profileId }: { profileId: string }) {
   const [name, setName] = useState('')
   const [perms, setPerms] = useState<string[]>(['invoice:read'])
   const [ttlDays, setTtlDays] = useState<number | ''>('')
+  // Comma-separated CIDR blocks; empty = unrestricted.
+  const [allowlist, setAllowlist] = useState('')
 
   // Held in state only after a successful mint/rotate; never persisted, cleared
   // on dismiss / remount.
@@ -73,6 +84,7 @@ export function IssuerApiKeys({ profileId }: { profileId: string }) {
       name,
       permissions: perms,
       ttl_days: typeof ttlDays === 'number' ? ttlDays : null,
+      ip_allowlist: parseAllowlist(allowlist),
     }
     const { data, error } = await api.POST(
       '/issuer-profiles/{issuer_profile_id}/api-keys',
@@ -87,6 +99,7 @@ export function IssuerApiKeys({ profileId }: { profileId: string }) {
     setName('')
     setPerms(['invoice:read'])
     setTtlDays('')
+    setAllowlist('')
     reload()
   }
 
@@ -107,6 +120,28 @@ export function IssuerApiKeys({ profileId }: { profileId: string }) {
       return
     }
     setCreated(data ?? null)
+    reload()
+  }
+
+  async function onEditAllowlist(k: ApiKey) {
+    const current = (k.ip_allowlist ?? []).join(', ')
+    const input = window.prompt(t('issuerApiKeys.allowlistPrompt'), current)
+    if (input === null) return
+    setErr(null)
+    const { error } = await api.PUT(
+      '/issuer-profiles/{issuer_profile_id}/api-keys/{key_id}/allowlist',
+      {
+        params: {
+          header: workspaceHeader(),
+          path: { issuer_profile_id: profileId, key_id: k.id },
+        },
+        body: { ip_allowlist: parseAllowlist(input) },
+      },
+    )
+    if (error) {
+      setErr(errMessage(error))
+      return
+    }
     reload()
   }
 
@@ -185,10 +220,18 @@ export function IssuerApiKeys({ profileId }: { profileId: string }) {
                   | {t('issuerApiKeys.lastUsedAt')}: {new Date(k.last_used_at).toLocaleString()}
                 </span>
               )}{' '}
+              {k.ip_allowlist && k.ip_allowlist.length > 0 && (
+                <span className="muted">
+                  | {t('issuerApiKeys.allowlist')}: <code>{k.ip_allowlist.join(', ')}</code>
+                </span>
+              )}{' '}
               {k.revoked_at ? (
                 <em>({t('issuerApiKeys.revoked')})</em>
               ) : (
                 <>
+                  <button type="button" className="btn--sm" onClick={() => void onEditAllowlist(k)}>
+                    {t('issuerApiKeys.editAllowlist')}
+                  </button>{' '}
                   <button type="button" className="btn--sm" onClick={() => void onRotate(k.id)}>
                     {t('issuerApiKeys.rotate')}
                   </button>{' '}
@@ -236,7 +279,16 @@ export function IssuerApiKeys({ profileId }: { profileId: string }) {
               value={ttlDays}
               onChange={(e) => setTtlDays(e.target.value === '' ? '' : Number(e.target.value))}
             />
-          </label>{' '}
+          </label>
+          <label>
+            {t('issuerApiKeys.allowlist')}
+            <input
+              value={allowlist}
+              placeholder="203.0.113.0/24, 198.51.100.7"
+              onChange={(e) => setAllowlist(e.target.value)}
+            />
+          </label>
+          <p className="hint">{t('issuerApiKeys.allowlistHint')}</p>{' '}
           <button type="submit" className="btn--sm">
             {t('issuerApiKeys.confirmMint')}
           </button>{' '}

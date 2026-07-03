@@ -244,7 +244,11 @@ single GUI/REST/MCP choke point).
   retryable (same `Idempotency-Key` RESUMES the same invoice; the dispatch
   lease arbitrates), `sdi_dispatch_started_at` is exposed on the invoice
   payloads, and `transmitted -> draft` is a legal observable transition on a
-  definitely-failed first dispatch. Deferred: signed webhooks, IP allowlist.
+  definitely-failed first dispatch. Ops hardening (task d3dd69c3): per-key CIDR IP
+  allowlist (optional, owner-editable without re-mint, collapsed 401) +
+  structured security events (`mycelium.security` logger) + the dual-pepper
+  rotation window (`docs/runbooks/issuer-key-pepper.md`). Deferred: signed
+  webhooks, in-app anomaly detection.
 
 ## FR-10 MCP server (co-equal)
 
