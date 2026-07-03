@@ -29,6 +29,7 @@ from mycelium_core.models.memory_blob import MemoryBlob
 from mycelium_core.models.note import Note
 from mycelium_core.models.note_part_index_pointer import NotePartIndexPointer
 from mycelium_core.services import graph as graph_svc
+from mycelium_core.services import graph_local
 from mycelium_core.services import memory as memory_svc
 from mycelium_core.services.rbac import require_role
 
@@ -168,8 +169,11 @@ async def walk_context(
     ``focused`` ranks the seed's neighbourhood by personalised-PageRank mass
     (the "neighbourhood of attention"); ``free_wander`` runs a Node2Vec
     second-order biased random walk (humus-biased, ADR-0034) for cross-domain
-    serendipity. Each step carries title + snippet + provenance. RLS-scoped;
-    member role required. Read-only, vendor-neutral (no LLM).
+    serendipity; ``bounded`` runs the best-first thresholded traversal of
+    ``graph_local.bounded_neighborhood`` (Fase 1, task 561c6aca) whose cost is
+    independent of org size -- ``step`` is the hop distance and ``weight`` the
+    best path weight. Each step carries title + snippet + provenance.
+    RLS-scoped; member role required. Read-only, vendor-neutral (no LLM).
 
     Mirrors the ``GET /garden/walk`` route so the SPA and an MCP agent share
     one traversal; ``graph_focus_context`` remains the QUERY-aware variant."""
@@ -203,6 +207,15 @@ async def walk_context(
                 continue
             seen.add(nid)
             pairs.append((nid, i, 1.0 / max(1, i)))
+    elif mode == "bounded":
+        hood = await graph_local.bounded_neighborhood(
+            session,
+            org_id=org_id,
+            actor_id=actor_id,
+            seed_note_id=seed_id,
+            node_budget=budget,
+        )
+        pairs = [(n.note_id, n.hop, n.weight) for n in hood.nodes]
     else:
         # Unknown mode: refuse rather than silently default (docs/adr/0021).
         raise DomainError(MessageCode.DOMAIN_ERROR)

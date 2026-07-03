@@ -3861,9 +3861,12 @@ async def graph_walk(
     ordered by induced mass (its "neighbourhood of attention").
     ``mode='free_wander'`` runs a Node2Vec biased random walk that drifts
     across the graph for cross-domain serendipity (humus-biased, ADR-0034).
-    Each step carries ``title`` + ``snippet`` + ``provenance`` so you can
-    navigate multi-hop WITHOUT a lookup per node. For a QUERY-aware reading
-    set use ``graph_focus_context`` instead. Read-only; no LLM."""
+    ``mode='bounded'`` runs the best-first thresholded traversal (Fase 1,
+    task 561c6aca): same reading-set shape, cost independent of the org's
+    graph size -- ``step`` is the hop distance, ``weight`` the best path
+    weight. Each step carries ``title`` + ``snippet`` + ``provenance`` so you
+    can navigate multi-hop WITHOUT a lookup per node. For a QUERY-aware
+    reading set use ``graph_focus_context`` instead. Read-only; no LLM."""
     async with _tenant(token, org_id) as (s, org, user):
         steps = await focus_context_svc.walk_context(
             s,

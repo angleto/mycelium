@@ -65,7 +65,7 @@ from mycelium_api.schemas import (
 from mycelium_core.config import get_settings
 from mycelium_core.models.precomputed_suggestion import PrecomputedSuggestion
 from mycelium_core.services import candidates as candidates_svc
-from mycelium_core.services import event_bus
+from mycelium_core.services import event_bus, graph_local
 from mycelium_core.services import garden_classify as classify_svc
 from mycelium_core.services import garden_health as health_svc
 from mycelium_core.services import garden_learning as learning_svc
@@ -636,15 +636,20 @@ async def garden_walk(
     ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
     seed: Annotated[uuid.UUID, Query(description="Note id to seed the walk on")],
     mode: Annotated[
-        Literal["focused", "free_wander"],
-        Query(description="focused = PPR seeded; free_wander = Node2Vec walk"),
+        Literal["focused", "free_wander", "bounded"],
+        Query(
+            description=(
+                "focused = PPR seeded; free_wander = Node2Vec walk; "
+                "bounded = best-first thresholded (size-independent)"
+            )
+        ),
     ] = "focused",
     budget: Annotated[int, Query(ge=1, le=200)] = 24,
     p: Annotated[float, Query(gt=0.0, le=10.0)] = 1.0,
     q: Annotated[float, Query(gt=0.0, le=10.0)] = 1.0,
     seed_rng: Annotated[int | None, Query(ge=0)] = None,
 ) -> GardenWalkOut:
-    """Two graph walks rooted at ``seed``.
+    """Three graph walks rooted at ``seed``.
 
     ``focused`` runs personalised PageRank teleporting on ``seed`` and
     returns the top ``budget`` nodes by induced mass. Use when the
@@ -654,7 +659,33 @@ async def garden_walk(
     of length ``budget`` from ``seed`` with parameters ``p`` (return
     bias) and ``q`` (in-out bias). Use for cross-domain exploration
     in the mindmap pollinator-trail animation.
+
+    ``bounded`` runs the best-first thresholded traversal (Fase 1, task
+    561c6aca): DB work O(budget), independent of the org's graph size;
+    ``step`` is the hop distance, ``weight`` the best path weight.
     """
+    if mode == "bounded":
+        hood = await graph_local.bounded_neighborhood(
+            ctx.session,
+            org_id=ctx.org_id,
+            actor_id=ctx.user_id,
+            seed_note_id=seed,
+            node_budget=budget,
+        )
+        humus_b = await svc.humus_note_ids(ctx.session, org_id=ctx.org_id)
+        return GardenWalkOut(
+            seed=seed,
+            mode=mode,
+            steps=[
+                GardenWalkStep(
+                    note_id=n.note_id,
+                    step=n.hop,
+                    weight=n.weight,
+                    provenance="humus" if n.note_id in humus_b else None,
+                )
+                for n in hood.nodes
+            ],
+        )
     if mode == "focused":
         ranks = await svc.compute_personalized_pagerank(
             ctx.session, org_id=ctx.org_id, seed_ids=[seed]
