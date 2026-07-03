@@ -105,6 +105,7 @@ class MessageCode(enum.StrEnum):
     ISSUER_PROFILE_SOLE_DEFAULT = "invoice.issuer_profile_sole_default"
     ISSUER_PROFILE_NOT_FOUND = "invoice.issuer_profile_not_found"
     ISSUER_API_KEY_NOT_FOUND = "issuer_api_key.not_found"
+    ISSUER_API_KEY_NOT_REVOKED = "issuer_api_key.not_revoked"
     ISSUER_API_KEY_PERMISSION_INVALID = "issuer_api_key.permission_invalid"
     ISSUER_API_KEY_IP_ALLOWLIST_INVALID = "issuer_api_key.ip_allowlist_invalid"
     ISSUER_API_KEY_PERMISSION_DENIED = "issuer_api_key.permission_denied"
@@ -371,6 +372,9 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
         ),
         MessageCode.ISSUER_PROFILE_NOT_FOUND: "Issuer profile not found",
         MessageCode.ISSUER_API_KEY_NOT_FOUND: "Issuer API key not found",
+        MessageCode.ISSUER_API_KEY_NOT_REVOKED: (
+            "Revoke the key before deleting it (only a revoked key can be purged)"
+        ),
         MessageCode.ISSUER_API_KEY_PERMISSION_INVALID: (
             "One or more requested permissions are not valid for an issuer API key"
         ),

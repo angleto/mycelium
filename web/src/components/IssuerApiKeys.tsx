@@ -164,6 +164,27 @@ export function IssuerApiKeys({ profileId }: { profileId: string }) {
     reload()
   }
 
+  // Hard-delete an ALREADY-revoked key so the dead row leaves the list.
+  async function onPurge(keyId: string) {
+    if (!window.confirm(t('issuerApiKeys.purgeConfirm'))) return
+    setErr(null)
+    const { error } = await api.DELETE(
+      '/issuer-profiles/{issuer_profile_id}/api-keys/{key_id}',
+      {
+        params: {
+          header: workspaceHeader(),
+          path: { issuer_profile_id: profileId, key_id: keyId },
+          query: { hard: true },
+        },
+      },
+    )
+    if (error) {
+      setErr(errMessage(error))
+      return
+    }
+    reload()
+  }
+
   async function copy(text: string) {
     try {
       await navigator.clipboard.writeText(text)
@@ -226,7 +247,16 @@ export function IssuerApiKeys({ profileId }: { profileId: string }) {
                 </span>
               )}{' '}
               {k.revoked_at ? (
-                <em>({t('issuerApiKeys.revoked')})</em>
+                <>
+                  <em>({t('issuerApiKeys.revoked')})</em>{' '}
+                  <button
+                    type="button"
+                    className="btn--sm btn--danger"
+                    onClick={() => void onPurge(k.id)}
+                  >
+                    {t('issuerApiKeys.delete')}
+                  </button>
+                </>
               ) : (
                 <>
                   <button type="button" className="btn--sm" onClick={() => void onEditAllowlist(k)}>

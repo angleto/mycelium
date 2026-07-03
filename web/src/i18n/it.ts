@@ -2249,6 +2249,8 @@ export const it: Catalog = {
     daysSuffix: 'g',
     lastUsedAt: 'Ultimo uso',
     revoked: 'revocata',
+    delete: 'Rimuovi',
+    purgeConfirm: 'Rimuovere definitivamente questa chiave revocata? Sparisce dalla lista; resta la traccia di audit di ciò che ha fatto.',
   },
   error: { generic: 'Si e verificato un errore.', network: 'Errore di rete.' },
 }

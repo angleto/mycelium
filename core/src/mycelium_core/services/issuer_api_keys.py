@@ -36,7 +36,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from mycelium_core import security_events
 from mycelium_core.config import get_settings
 from mycelium_core.db import admin_session
-from mycelium_core.errors import NotFoundError, UnprocessableError
+from mycelium_core.errors import ConflictError, NotFoundError, UnprocessableError
 from mycelium_core.i18n import MessageCode
 from mycelium_core.models.invoice import IssuerProfile
 from mycelium_core.models.issuer_api_key import IssuerApiKey
@@ -408,6 +408,44 @@ async def revoke(
     )
 
 
+async def purge(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    key_id: uuid.UUID,
+) -> None:
+    """Owner-gated HARD delete of an ALREADY-REVOKED key, so a dead entry can
+    be removed from the list instead of lingering forever. Fail-closed on an
+    active key: the flow is revoke first (the secret stops authenticating),
+    then purge -- so this can never silently kill a live credential. The
+    activity_log keeps the key id as a recorded value (not an FK), so the
+    audit of what the key transmitted survives the row deletion; the only FK
+    (issuer_key_rate_limit) cascades. Idempotent: purging a gone key is a
+    no-op (404 only if it never existed under this org... treated as done)."""
+    await require_role(session, org_id, actor_id, Role.owner)
+    row = (
+        await session.execute(
+            select(IssuerApiKey).where(IssuerApiKey.id == key_id, IssuerApiKey.org_id == org_id)
+        )
+    ).scalar_one_or_none()
+    if row is None:
+        return
+    if row.revoked_at is None:
+        raise ConflictError(MessageCode.ISSUER_API_KEY_NOT_REVOKED)
+    await session.delete(row)
+    await session.flush()
+    await audit.log(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        entity="issuer_api_key",
+        entity_id=key_id,
+        action="purge",
+        diff={"key_public_id": row.key_public_id, "name": row.name},
+    )
+
+
 async def authenticate(
     raw: str,
     *,
@@ -616,6 +654,7 @@ __all__ = [
     "is_issuer_api_key",
     "list_keys",
     "mint",
+    "purge",
     "revoke",
     "rotate",
     "scan_issuer_key_expiry",

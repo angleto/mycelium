@@ -5065,7 +5065,7 @@ export interface paths {
         };
         /**
          * Garden Walk
-         * @description Two graph walks rooted at ``seed``.
+         * @description Three graph walks rooted at ``seed``.
          *
          *     ``focused`` runs personalised PageRank teleporting on ``seed`` and
          *     returns the top ``budget`` nodes by induced mass. Use when the
@@ -5075,6 +5075,10 @@ export interface paths {
          *     of length ``budget`` from ``seed`` with parameters ``p`` (return
          *     bias) and ``q`` (in-out bias). Use for cross-domain exploration
          *     in the mindmap pollinator-trail animation.
+         *
+         *     ``bounded`` runs the best-first thresholded traversal (Fase 1, task
+         *     561c6aca): DB work O(budget), independent of the org's graph size;
+         *     ``step`` is the hop distance, ``weight`` the best path weight.
          */
         get: operations["garden_walk_garden_walk_get"];
         put?: never;
@@ -5868,8 +5872,10 @@ export interface paths {
         post?: never;
         /**
          * Revoke Key
-         * @description Revoke a key (owner-gated; kills both the current and any grace secret).
-         *     Idempotent.
+         * @description Owner-gated. Default (``hard=false``): REVOKE the key (kills both the
+         *     current and any grace secret); idempotent. ``hard=true``: PURGE -- hard
+         *     delete an already-revoked key so the dead entry disappears from the list
+         *     (409 issuer_api_key.not_revoked on an active key: revoke it first).
          */
         delete: operations["revoke_key_issuer_profiles__issuer_profile_id__api_keys__key_id__delete"];
         options?: never;
@@ -24115,8 +24121,8 @@ export interface operations {
             query: {
                 /** @description Note id to seed the walk on */
                 seed: string;
-                /** @description focused = PPR seeded; free_wander = Node2Vec walk */
-                mode?: "focused" | "free_wander";
+                /** @description focused = PPR seeded; free_wander = Node2Vec walk; bounded = best-first thresholded (size-independent) */
+                mode?: "focused" | "free_wander" | "bounded";
                 budget?: number;
                 p?: number;
                 q?: number;
@@ -26052,7 +26058,9 @@ export interface operations {
     };
     revoke_key_issuer_profiles__issuer_profile_id__api_keys__key_id__delete: {
         parameters: {
-            query?: never;
+            query?: {
+                hard?: boolean;
+            };
             header: {
                 "x-workspace-id": string;
                 "x-project-id"?: string | null;

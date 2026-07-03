@@ -163,11 +163,17 @@ async def revoke_key(
     issuer_profile_id: uuid.UUID,
     key_id: uuid.UUID,
     ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+    hard: Annotated[bool, Query()] = False,
 ) -> None:
-    """Revoke a key (owner-gated; kills both the current and any grace secret).
-    Idempotent."""
+    """Owner-gated. Default (``hard=false``): REVOKE the key (kills both the
+    current and any grace secret); idempotent. ``hard=true``: PURGE -- hard
+    delete an already-revoked key so the dead entry disappears from the list
+    (409 issuer_api_key.not_revoked on an active key: revoke it first)."""
     await _assert_key_in_issuer(ctx, issuer_profile_id, key_id)
-    await svc.revoke(ctx.session, org_id=ctx.org_id, actor_id=ctx.user_id, key_id=key_id)
+    if hard:
+        await svc.purge(ctx.session, org_id=ctx.org_id, actor_id=ctx.user_id, key_id=key_id)
+    else:
+        await svc.revoke(ctx.session, org_id=ctx.org_id, actor_id=ctx.user_id, key_id=key_id)
 
 
 __all__ = ["router"]

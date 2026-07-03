@@ -2247,6 +2247,8 @@ export const en = {
     daysSuffix: 'd',
     lastUsedAt: 'Last used',
     revoked: 'revoked',
+    delete: 'Delete',
+    purgeConfirm: 'Permanently delete this revoked key? It disappears from the list; the audit trail of what it did is kept.',
   },
   error: { generic: 'Something went wrong.', network: 'Network error.' },
 }

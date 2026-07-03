@@ -301,3 +301,37 @@ def test_resolver_returns_rightmost_untrusted_defeating_a_left_spoof() -> None:
     assert _resolve("10.0.0.5, 10.0.0.6", "10.0.0.6", proxies) is None
     # a malformed hop poisons the chain (fail closed).
     assert _resolve("garbage, 10.0.0.5", "10.0.0.5", proxies) is None
+
+
+# --- purge (hard-delete a revoked key) --------------------------------------
+
+
+async def test_purge_removes_a_revoked_key() -> None:
+    from sqlalchemy import select as _select
+
+    from mycelium_core.errors import ConflictError
+    from mycelium_core.models.issuer_api_key import IssuerApiKey
+
+    org, user = await _org()
+    issuer = await _issuer(org, user)
+    key_id, _raw = await _mint(org, user, issuer)
+
+    # Cannot purge an ACTIVE key (must revoke first).
+    with pytest.raises(ConflictError):
+        async with tenant_session(str(org), str(user)) as s:
+            await svc.purge(s, org_id=org, actor_id=user, key_id=key_id)
+
+    async with tenant_session(str(org), str(user)) as s:
+        await svc.revoke(s, org_id=org, actor_id=user, key_id=key_id)
+    # Now purge succeeds and the row is gone.
+    async with tenant_session(str(org), str(user)) as s:
+        await svc.purge(s, org_id=org, actor_id=user, key_id=key_id)
+    async with tenant_session(str(org), str(user)) as s:
+        gone = (
+            await s.execute(_select(IssuerApiKey).where(IssuerApiKey.id == key_id))
+        ).scalar_one_or_none()
+        assert gone is None
+        assert all(k.id != key_id for k in await svc.list_keys(s, org_id=org))
+    # Idempotent: purging a gone key is a no-op (not a 404).
+    async with tenant_session(str(org), str(user)) as s:
+        await svc.purge(s, org_id=org, actor_id=user, key_id=key_id)

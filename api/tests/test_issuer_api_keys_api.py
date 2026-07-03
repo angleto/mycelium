@@ -296,3 +296,39 @@ async def test_t37d_forwarded_for_spoof_is_defeated(monkeypatch) -> None:
         )
         assert denied.status_code == 401
         assert denied.json()["code"] == "auth.token_invalid"
+
+
+async def test_purge_revoked_key_via_rest() -> None:
+    async with _client() as c:
+        h, issuer = await _setup(c)
+        m = await c.post(
+            f"/issuer-profiles/{issuer}/api-keys",
+            headers=h,
+            json={"name": "to-purge", "permissions": ["invoice:read"]},
+        )
+        assert m.status_code == 200, m.text
+        kid = m.json()["id"]
+
+        # hard=true on an ACTIVE key -> 409 not_revoked (revoke first).
+        r = await c.request(
+            "DELETE", f"/issuer-profiles/{issuer}/api-keys/{kid}?hard=true", headers=h
+        )
+        assert r.status_code == 409
+        assert r.json()["code"] == "issuer_api_key.not_revoked"
+
+        # Soft delete (revoke) -> still in the list, revoked.
+        assert (
+            await c.request("DELETE", f"/issuer-profiles/{issuer}/api-keys/{kid}", headers=h)
+        ).status_code == 204
+        lst = (await c.get(f"/issuer-profiles/{issuer}/api-keys", headers=h)).json()
+        row = next(k for k in lst if k["id"] == kid)
+        assert row["revoked_at"] is not None
+
+        # hard=true -> purged, gone from the list.
+        assert (
+            await c.request(
+                "DELETE", f"/issuer-profiles/{issuer}/api-keys/{kid}?hard=true", headers=h
+            )
+        ).status_code == 204
+        lst2 = (await c.get(f"/issuer-profiles/{issuer}/api-keys", headers=h)).json()
+        assert all(k["id"] != kid for k in lst2)
