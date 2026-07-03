@@ -102,6 +102,9 @@ class Settings(BaseSettings):
     issuer_key_rate_limit_read: int = 300
     issuer_key_rate_limit_write: int = 60
     issuer_key_rate_limit_transmit: int = 30
+    # Max drafts per POST /api/v1/invoices/batch (compose-only bulk). Bounds the
+    # per-request work; the rate limit charges one "write" per element.
+    issuer_batch_max_items: int = 200
 
     # Two-phase transmit (ADR-0046). The dispatch wall time is bounded
     # explicitly (httpx's 30 s timeout is PER PHASE -- connect/write/read --

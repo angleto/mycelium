@@ -5999,6 +5999,35 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/invoices/batch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Compose Batch
+         * @description Compose up to ``issuer_batch_max_items`` TD01 drafts in one request.
+         *
+         *     COMPOSE-ONLY: no transmit (so no number allocation, no SdI) -- transmit each
+         *     returned draft id on the per-invoice path, which owns the ADR-0046 dispatch
+         *     durability + fiscal-numbering guarantees. BEST-EFFORT: each item runs in its
+         *     own SAVEPOINT, so one bad item (invalid recipient/line) becomes a per-item
+         *     error without rolling back the rest. Idempotency is at the BATCH level:
+         *     replaying the same Idempotency-Key + body returns the stored results without
+         *     re-creating drafts. Charged as one ``write`` against the per-key rate limit
+         *     (the item cap bounds the work; per-item charging would defeat bulk).
+         */
+        post: operations["compose_batch_api_v1_invoices_batch_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/invoices/{invoice_id}/transmit": {
         parameters: {
             query?: never;
@@ -10560,6 +10589,51 @@ export interface components {
             expected_version: number;
             /** Workflow Id */
             workflow_id?: string | null;
+        };
+        /** PublicBatchIn */
+        PublicBatchIn: {
+            /** Items */
+            items: components["schemas"]["PublicBatchItemIn"][];
+        };
+        /**
+         * PublicBatchItemIn
+         * @description One draft in a batch compose. Same recipient/lines shape as the
+         *     per-invoice compose, but transmit is deliberately absent: a batch is
+         *     compose-only (drafts, no number allocation, no SdI), so the fiscal
+         *     numbering + ADR-0046 dispatch durability stay on the per-invoice transmit
+         *     path. Transmit each returned draft id individually.
+         */
+        PublicBatchItemIn: {
+            /** Client Tag Id */
+            client_tag_id?: string | null;
+            client?: components["schemas"]["PublicClientIn"] | null;
+            /** Series */
+            series?: string | null;
+            /** Purpose */
+            purpose?: string | null;
+            /** Lines */
+            lines: components["schemas"]["PublicLineIn"][];
+        };
+        /** PublicBatchItemOut */
+        PublicBatchItemOut: {
+            /** Index */
+            index: number;
+            /** Status */
+            status: string;
+            invoice?: components["schemas"]["PublicInvoiceOut"] | null;
+            /** Error Code */
+            error_code?: string | null;
+            /** Error Detail */
+            error_detail?: string | null;
+        };
+        /** PublicBatchOut */
+        PublicBatchOut: {
+            /** Created */
+            created: number;
+            /** Failed */
+            failed: number;
+            /** Results */
+            results: components["schemas"]["PublicBatchItemOut"][];
         };
         /**
          * PublicClientIn
@@ -26605,6 +26679,42 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PublicInvoiceOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    compose_batch_api_v1_invoices_batch_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string | null;
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PublicBatchIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublicBatchOut"];
                 };
             };
             /** @description Validation Error */

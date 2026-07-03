@@ -109,6 +109,7 @@ class MessageCode(enum.StrEnum):
     ISSUER_API_KEY_PERMISSION_INVALID = "issuer_api_key.permission_invalid"
     ISSUER_API_KEY_IP_ALLOWLIST_INVALID = "issuer_api_key.ip_allowlist_invalid"
     ISSUER_API_KEY_PERMISSION_DENIED = "issuer_api_key.permission_denied"
+    INVOICE_BATCH_TOO_LARGE = "invoice.batch_too_large"
     WEBHOOK_ENDPOINT_NOT_FOUND = "webhook_endpoint.not_found"
     WEBHOOK_ENDPOINT_NOT_REVOKED = "webhook_endpoint.not_revoked"
     WEBHOOK_URL_INVALID = "webhook_endpoint.url_invalid"
@@ -386,6 +387,7 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
             "The API key does not carry the permission required for this operation"
         ),
         MessageCode.ISSUER_API_KEY_IP_ALLOWLIST_INVALID: ("Invalid IP allowlist entry: {detail}"),
+        MessageCode.INVOICE_BATCH_TOO_LARGE: "Too many items in the batch: {detail}",
         MessageCode.WEBHOOK_ENDPOINT_NOT_FOUND: "Webhook endpoint not found",
         MessageCode.WEBHOOK_ENDPOINT_NOT_REVOKED: (
             "Revoke the endpoint before deleting it (only a revoked endpoint can be purged)"

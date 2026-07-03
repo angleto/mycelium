@@ -602,3 +602,110 @@ async def test_t17g3_same_key_retry_after_inbound_settle_returns_the_settled_inv
             assert uuid.UUID(r3.json()["id"]) == inv_id
     finally:
         set_channel_override(None)
+
+
+# --- batch compose (task 5e3de508 item a) -----------------------------------
+
+
+async def _draft_count(org: uuid.UUID, user: uuid.UUID, issuer: uuid.UUID) -> int:
+    async with tenant_session(str(org), str(user)) as s:
+        rows = (
+            await s.execute(select(Invoice.id).where(Invoice.issuer_profile_id == issuer))
+        ).all()
+        return len(rows)
+
+
+async def test_batch_creates_drafts() -> None:
+    org, user, issuer, client = await _base()
+    raw = await _key(org, user, issuer, [PERM_COMPOSE, PERM_READ])
+    body = {"items": [_compose_body(client) for _ in range(3)]}
+    # strip the transmit key (batch items have no transmit field)
+    for it in body["items"]:
+        it.pop("transmit", None)
+    async with _client() as c:
+        r = await c.post("/api/v1/invoices/batch", headers=_h(raw, "batch-1"), json=body)
+        assert r.status_code == 200, r.text
+        out = r.json()
+        assert out["created"] == 3 and out["failed"] == 0
+        assert all(x["status"] == "created" for x in out["results"])
+        # compose-only: no number allocated yet
+        assert all(x["invoice"]["number"] is None for x in out["results"])
+    assert await _draft_count(org, user, issuer) == 3
+
+
+async def test_batch_best_effort_isolates_bad_item() -> None:
+    org, user, issuer, client = await _base()
+    raw = await _key(org, user, issuer, [PERM_COMPOSE])
+    good = _compose_body(client)
+    good.pop("transmit", None)
+    bad = {"lines": [_LINE]}  # neither client_tag_id nor inline client -> error
+    async with _client() as c:
+        r = await c.post(
+            "/api/v1/invoices/batch",
+            headers=_h(raw, "batch-2"),
+            json={"items": [good, bad, dict(good)]},
+        )
+        assert r.status_code == 200, r.text
+        out = r.json()
+        assert out["created"] == 2 and out["failed"] == 1
+        err = next(x for x in out["results"] if x["status"] == "error")
+        assert err["index"] == 1
+        assert err["error_code"] == "invoice.compose_recipient_invalid"
+    # the bad item's SAVEPOINT rolled back -> only 2 drafts persisted
+    assert await _draft_count(org, user, issuer) == 2
+
+
+async def test_batch_idempotent_replay() -> None:
+    org, user, issuer, client = await _base()
+    raw = await _key(org, user, issuer, [PERM_COMPOSE])
+    good = _compose_body(client)
+    good.pop("transmit", None)
+    body = {"items": [good, dict(good)]}
+    async with _client() as c:
+        first = (
+            await c.post("/api/v1/invoices/batch", headers=_h(raw, "b-idem"), json=body)
+        ).json()
+        second = (
+            await c.post("/api/v1/invoices/batch", headers=_h(raw, "b-idem"), json=body)
+        ).json()
+    ids1 = [x["invoice"]["id"] for x in first["results"]]
+    ids2 = [x["invoice"]["id"] for x in second["results"]]
+    assert ids1 == ids2  # replay, not re-created
+    assert await _draft_count(org, user, issuer) == 2
+
+
+async def test_batch_requires_idempotency_key() -> None:
+    org, user, issuer, client = await _base()
+    raw = await _key(org, user, issuer, [PERM_COMPOSE])
+    good = _compose_body(client)
+    good.pop("transmit", None)
+    async with _client() as c:
+        r = await c.post("/api/v1/invoices/batch", headers=_h(raw), json={"items": [good]})
+        assert r.status_code == 400 and r.json()["code"] == "idempotency.key_required"
+
+
+async def test_batch_cap_exceeded(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(get_settings(), "issuer_batch_max_items", 2)
+    org, user, issuer, client = await _base()
+    raw = await _key(org, user, issuer, [PERM_COMPOSE])
+    good = _compose_body(client)
+    good.pop("transmit", None)
+    async with _client() as c:
+        r = await c.post(
+            "/api/v1/invoices/batch",
+            headers=_h(raw, "b-cap"),
+            json={"items": [good, dict(good), dict(good)]},
+        )
+        assert r.status_code == 422 and r.json()["code"] == "invoice.batch_too_large"
+
+
+async def test_batch_requires_compose_perm() -> None:
+    org, user, issuer, client = await _base()
+    raw = await _key(org, user, issuer, [PERM_READ])  # no compose
+    good = _compose_body(client)
+    good.pop("transmit", None)
+    async with _client() as c:
+        r = await c.post(
+            "/api/v1/invoices/batch", headers=_h(raw, "b-perm"), json={"items": [good]}
+        )
+        assert r.status_code == 403

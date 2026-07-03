@@ -94,6 +94,24 @@ class PublicComposeIn(BaseModel):
     transmit: bool = False
 
 
+class PublicBatchItemIn(BaseModel):
+    """One draft in a batch compose. Same recipient/lines shape as the
+    per-invoice compose, but transmit is deliberately absent: a batch is
+    compose-only (drafts, no number allocation, no SdI), so the fiscal
+    numbering + ADR-0046 dispatch durability stay on the per-invoice transmit
+    path. Transmit each returned draft id individually."""
+
+    client_tag_id: uuid.UUID | None = None
+    client: PublicClientIn | None = None
+    series: str | None = None
+    purpose: str | None = None
+    lines: list[PublicLineIn] = Field(min_length=1)
+
+
+class PublicBatchIn(BaseModel):
+    items: list[PublicBatchItemIn] = Field(min_length=1)
+
+
 class PublicCreditNoteIn(BaseModel):
     parent_invoice_id: uuid.UUID
     purpose: str | None = None
@@ -127,6 +145,20 @@ class PublicInvoiceOut(BaseModel):
     # unsettled dispatch from a settled ident-less manual export.
     sdi_dispatch_started_at: datetime.datetime | None
     purpose: str | None
+
+
+class PublicBatchItemOut(BaseModel):
+    index: int
+    status: str  # "created" | "error"
+    invoice: PublicInvoiceOut | None = None
+    error_code: str | None = None
+    error_detail: str | None = None
+
+
+class PublicBatchOut(BaseModel):
+    created: int
+    failed: int
+    results: list[PublicBatchItemOut]
 
 
 class PublicNotificationOut(BaseModel):
@@ -249,6 +281,37 @@ async def _resolve_recipient(ctx: IssuerKeyCtx, body: PublicComposeIn) -> uuid.U
     return tag.id
 
 
+async def _compose_draft(ctx: IssuerKeyCtx, body: PublicComposeIn) -> Invoice:
+    """Resolve the recipient, create a TD01 draft, append the lines, and return
+    it re-read (so add_line's recomputed totals are reflected). The single
+    draft-creation path -- both the per-invoice compose and the batch endpoint
+    go through here, so they can never drift."""
+    client_tag_id = await _resolve_recipient(ctx, body)
+    inv = await invoice_svc.create_draft(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.key_id,
+        client_tag_id=client_tag_id,
+        issuer_profile_id=ctx.issuer_profile_id,
+        series=body.series,
+        purpose=body.purpose,
+        document_type=DocumentType.TD01,
+    )
+    for ln in body.lines:
+        await invoice_svc.add_line(
+            ctx.session,
+            org_id=ctx.org_id,
+            actor_id=ctx.key_id,
+            invoice_id=inv.id,
+            description=ln.description,
+            unit_price=ln.unit_price,
+            quantity=ln.quantity,
+            vat_rate=ln.vat_rate,
+            vat_nature=ln.vat_nature,
+        )
+    return await invoice_svc.get_invoice(ctx.session, org_id=ctx.org_id, invoice_id=inv.id)
+
+
 # --- endpoints -------------------------------------------------------------
 
 
@@ -283,29 +346,7 @@ async def compose(
         # returned as-is).
         inv = await _resume_transmit(ctx, claimed.resume_invoice_id)
     else:
-        client_tag_id = await _resolve_recipient(ctx, body)
-        inv = await invoice_svc.create_draft(
-            ctx.session,
-            org_id=ctx.org_id,
-            actor_id=ctx.key_id,
-            client_tag_id=client_tag_id,
-            issuer_profile_id=ctx.issuer_profile_id,
-            series=body.series,
-            purpose=body.purpose,
-            document_type=DocumentType.TD01,
-        )
-        for ln in body.lines:
-            await invoice_svc.add_line(
-                ctx.session,
-                org_id=ctx.org_id,
-                actor_id=ctx.key_id,
-                invoice_id=inv.id,
-                description=ln.description,
-                unit_price=ln.unit_price,
-                quantity=ln.quantity,
-                vat_rate=ln.vat_rate,
-                vat_nature=ln.vat_nature,
-            )
+        inv = await _compose_draft(ctx, body)
         if body.transmit:
             # Bind the claim to the draft BEFORE the dispatch so the
             # pre-dispatch commit persists the pair and a retry resumes.
@@ -313,13 +354,72 @@ async def compose(
             inv = await invoice_svc.transmit(
                 ctx.session, org_id=ctx.org_id, actor_id=ctx.key_id, invoice_id=inv.id
             )
-        else:
-            # Re-read so the totals recomputed by add_line are reflected.
-            inv = await invoice_svc.get_invoice(ctx.session, org_id=ctx.org_id, invoice_id=inv.id)
     out = _out(inv)
     await idem.store(
         ctx.session, row_id=claimed.row_id, snapshot=out.model_dump(mode="json"), invoice_id=inv.id
     )
+    return out
+
+
+@router.post("/invoices/batch", response_model=PublicBatchOut)
+async def compose_batch(
+    body: PublicBatchIn,
+    ctx: Annotated[IssuerKeyCtx, Depends(issuer_key_ctx)],
+    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
+) -> PublicBatchOut:
+    """Compose up to ``issuer_batch_max_items`` TD01 drafts in one request.
+
+    COMPOSE-ONLY: no transmit (so no number allocation, no SdI) -- transmit each
+    returned draft id on the per-invoice path, which owns the ADR-0046 dispatch
+    durability + fiscal-numbering guarantees. BEST-EFFORT: each item runs in its
+    own SAVEPOINT, so one bad item (invalid recipient/line) becomes a per-item
+    error without rolling back the rest. Idempotency is at the BATCH level:
+    replaying the same Idempotency-Key + body returns the stored results without
+    re-creating drafts. Charged as one ``write`` against the per-key rate limit
+    (the item cap bounds the work; per-item charging would defeat bulk)."""
+    require_perm(ctx, PERM_COMPOSE)
+    cap = get_settings().issuer_batch_max_items
+    if len(body.items) > cap:
+        raise UnprocessableError(MessageCode.INVOICE_BATCH_TOO_LARGE, detail=f"max {cap} per batch")
+    await _rate(ctx, "write")
+    key = _require_idem(idempotency_key)
+    req_hash = idem.request_digest(body.model_dump(mode="json"))
+    claimed = await idem.claim(
+        ctx.session,
+        org_id=ctx.org_id,
+        issuer_profile_id=ctx.issuer_profile_id,
+        endpoint="compose_batch",
+        idempotency_key=key,
+        request_hash=req_hash,
+    )
+    if claimed.replay is not None:
+        return PublicBatchOut.model_validate(claimed.replay)
+    assert claimed.row_id is not None  # claim row exists on every non-replay leg  # noqa: S101
+    results: list[PublicBatchItemOut] = []
+    for i, item in enumerate(body.items):
+        as_compose = PublicComposeIn(
+            client_tag_id=item.client_tag_id,
+            client=item.client,
+            series=item.series,
+            purpose=item.purpose,
+            lines=item.lines,
+            transmit=False,
+        )
+        try:
+            async with ctx.session.begin_nested():
+                inv = await _compose_draft(ctx, as_compose)
+            results.append(PublicBatchItemOut(index=i, status="created", invoice=_out(inv)))
+        except DomainError as exc:
+            # Per-item isolation: the SAVEPOINT rolled this item's partial work
+            # back; record the error and keep going.
+            results.append(
+                PublicBatchItemOut(
+                    index=i, status="error", error_code=exc.code.value, error_detail=str(exc)
+                )
+            )
+    created = sum(1 for r in results if r.status == "created")
+    out = PublicBatchOut(created=created, failed=len(results) - created, results=results)
+    await idem.store(ctx.session, row_id=claimed.row_id, snapshot=out.model_dump(mode="json"))
     return out
 
 
