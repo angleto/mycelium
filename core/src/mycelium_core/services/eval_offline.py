@@ -162,6 +162,10 @@ async def run_eval(
             humus=humus,
             humus_kinds=humus_kinds,
             exclude_humus_from_base=exclude_humus_from_base,
+            # Eval sweeps are probes: they must not leave retrieval
+            # traces (Fase 0, task 561c6aca) or measurement would forge
+            # the search demand the graph aggregation reads.
+            probe=True,
         )
         if meta.abstained:
             abstained_cases += 1

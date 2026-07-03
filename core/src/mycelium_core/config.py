@@ -465,6 +465,14 @@ class Settings(BaseSettings):
     reranker_min_query_tokens: int = 3
     reranker_min_candidates: int = 5
 
+    # Fase 0 of the search-informed graph (task 561c6aca): append-only
+    # trace of the returned top-m per search (``retrieval_trace``
+    # table), the raw signal the offline aggregation turns into
+    # ``note_edge_usage`` counters. Cost is one INSERT per non-probe
+    # search; flip off to shed even that on read-heavy deployments.
+    # Probe traffic (the eval harness) is never traced regardless.
+    retrieval_trace_enabled: bool = True
+
     # Humus retrieval branch (ADR-0034) master switch. Humus is the PARALLEL
     # source that late-fuses distilled/consolidated atoms into the focused walk
     # with a small boost + a 30% hard cap. Default ON = historical behaviour;

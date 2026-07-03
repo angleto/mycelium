@@ -503,11 +503,17 @@ async def retrieve_with_meta(
     humus: bool | None = None,
     humus_kinds: frozenset[str] | None = None,
     exclude_humus_from_base: bool = False,
+    probe: bool = False,
 ) -> tuple[list[Hit], RetrievalMeta]:
     """Like :func:`retrieve` but also returns a :class:`RetrievalMeta` so the
     caller can distinguish 'nothing relevant' from 'dense recall silently
     collapsed to keyword-only' (task 4f3c2207). ``retrieve`` is the thin
     hits-only wrapper over this.
+
+    ``probe`` marks measurement traffic (the eval harness): a probe run
+    is never recorded in ``retrieval_trace`` (Fase 0, task 561c6aca), so
+    eval sweeps cannot forge the search demand the graph aggregation
+    reads. Everything else about the pipeline is identical.
 
     Humus knobs (the empirical-gate levers, task 4836a6cc; all default to the
     historical behaviour so an untouched caller is byte-identical):
@@ -580,6 +586,7 @@ async def retrieve_with_meta(
         OrderingStage,
         RelativeFloorStage,
         RerankGate,
+        RetrievalTraceStage,
         RRFFusionStage,
         SemanticDenseStage,
         humus_note_blob_exclusion,
@@ -719,6 +726,12 @@ async def retrieve_with_meta(
             AccessCounterStage(),
         ]
     )
+    # Fase 0 (task 561c6aca): trace the served top-m for the offline
+    # edge-usage aggregation. Mounted last so it records exactly what
+    # the caller gets; never mounted for probe (eval) traffic so
+    # measurement runs don't forge search demand.
+    if settings.retrieval_trace_enabled and not probe:
+        stages.append(RetrievalTraceStage())
     pipeline = RetrievalPipeline(stages=stages)
     top = await pipeline.run(query, ctx)
 
@@ -804,6 +817,7 @@ async def retrieve(
     humus: bool | None = None,
     humus_kinds: frozenset[str] | None = None,
     exclude_humus_from_base: bool = False,
+    probe: bool = False,
 ) -> list[Hit]:
     """Hybrid RRF retrieval -> the ranked hits. Thin wrapper over
     :func:`retrieve_with_meta` for the callers that don't need the recall
@@ -826,6 +840,7 @@ async def retrieve(
         humus=humus,
         humus_kinds=humus_kinds,
         exclude_humus_from_base=exclude_humus_from_base,
+        probe=probe,
     )
     return hits
 

@@ -107,6 +107,7 @@ from mycelium_core.models.note import (
     TurnRole,
 )
 from mycelium_core.models.note_coactivity import NoteCoactivity
+from mycelium_core.models.note_edge_usage import NoteEdgeUsage
 from mycelium_core.models.note_link import (
     NOTE_NOTE_LINK_KINDS,
     NOTE_TASK_LINK_KINDS,
@@ -249,6 +250,7 @@ __all__ = [
     "Necessity",
     "Note",
     "NoteCoactivity",
+    "NoteEdgeUsage",
     "NoteKind",
     "NoteMaturity",
     "NoteNoteLink",

@@ -25,6 +25,7 @@ from mycelium_core.services.retrieval.stages.rerank import (
     RerankGate,
 )
 from mycelium_core.services.retrieval.stages.semantic import SemanticDenseStage
+from mycelium_core.services.retrieval.stages.trace import RetrievalTraceStage
 
 __all__ = [
     "AccessCounterStage",
@@ -39,6 +40,7 @@ __all__ = [
     "RRFFusionStage",
     "RelativeFloorStage",
     "RerankGate",
+    "RetrievalTraceStage",
     "SemanticDenseStage",
     "humus_note_blob_exclusion",
     "proposed_note_blob_exclusion",
