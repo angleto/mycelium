@@ -1,0 +1,11 @@
+{"qid": "sf1", "category": "single-fact", "fact_id": "f1", "rank": 1, "impossible": false, "abstained": false, "top_score": 0.031, "served_tokens": 300, "gold_tokens": 120, "ndcg": 1.0}
+{"qid": "sf2", "category": "single-fact", "fact_id": "f1", "rank": 2, "impossible": false, "abstained": false, "top_score": 0.028, "served_tokens": 250, "gold_tokens": 120, "ndcg": 0.63093}
+{"qid": "sf3", "category": "single-fact", "fact_id": "f2", "rank": null, "impossible": false, "abstained": false, "top_score": 0.012, "served_tokens": 400, "gold_tokens": 100, "ndcg": 0.0}
+{"qid": "sf4", "category": "single-fact", "fact_id": "f3", "rank": 1, "impossible": false, "abstained": false, "top_score": 0.033, "served_tokens": 150, "gold_tokens": 150, "ndcg": 1.0}
+{"qid": "mh1", "category": "multi-hop", "fact_id": "f4", "rank": 3, "impossible": false, "abstained": false, "top_score": 0.021, "served_tokens": 600, "gold_tokens": 240}
+{"qid": "mh2", "category": "multi-hop", "fact_id": "f5", "rank": null, "impossible": false, "abstained": false, "top_score": 0.009, "served_tokens": 500, "gold_tokens": 260}
+{"qid": "imp1", "category": "impossible", "fact_id": "f6", "rank": null, "impossible": true, "abstained": true, "top_score": 0.004, "served_tokens": 0, "gold_tokens": 0}
+{"qid": "imp2", "category": "impossible", "fact_id": "f7", "rank": null, "impossible": true, "abstained": false, "top_score": 0.011, "served_tokens": 90, "gold_tokens": 0}
+{"qid": "per1", "category": "perimeter", "fact_id": "f8", "rank": null, "impossible": false, "abstained": false, "top_score": 0.0, "served_tokens": 0, "gold_tokens": 0, "event": false}
+{"qid": "per2", "category": "perimeter", "fact_id": "f9", "rank": null, "impossible": false, "abstained": false, "top_score": 0.0, "served_tokens": 0, "gold_tokens": 0, "event": false}
+{"qid": "per3", "category": "perimeter", "fact_id": "f10", "rank": null, "impossible": false, "abstained": false, "top_score": 0.0, "served_tokens": 0, "gold_tokens": 0, "event": false}

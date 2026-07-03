@@ -1,0 +1,10 @@
+{
+  "k": 10,
+  "seed": 42,
+  "alpha": 0.05,
+  "n_resamples": 200,
+  "primary": [
+    {"name": "single-fact-recall", "category": "single-fact", "metric": "recall", "threshold": 0.5},
+    {"name": "perimeter-leak", "category": "perimeter", "metric": "zero_event", "max_bound": 0.7}
+  ]
+}
