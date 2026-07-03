@@ -23,9 +23,10 @@ Notes:
   subsumes the "active watering" clause (watering is the ``subject``
   link kind).
 - There is no separate ``last_edit_at`` column, so the quiet window uses
-  ``updated_at``. The spec's draft/lock/protected clauses are no-ops
-  until those columns exist (kept here as a documented gap, not a silent
-  omission).
+  ``updated_at``. The spec's draft/lock clauses are no-ops until those
+  columns exist (kept here as a documented gap, not a silent omission);
+  the ``protected`` clause is live since migration 0081 (Fase P, task
+  561c6aca): protected prose is never eligible for decomposition.
 - All callers run inside a tenant session, so RLS scopes the queries to
   the org; the predicates add no explicit org filter.
 """
@@ -82,9 +83,11 @@ async def is_inert(
     quiet_days: int = QUIET_WINDOW_DAYS,
 ) -> bool:
     """True if the note is eligible for autonomous decomposition: it is
-    archived or dormant, has no open linked work, and has not been edited
-    within the quiet window. (Draft/lock/protected clauses from the spec
-    are no-ops until those columns exist.)"""
+    not ``protected``, is archived or dormant, has no open linked work,
+    and has not been edited within the quiet window. (Draft/lock clauses
+    from the spec are no-ops until those columns exist.)"""
+    if note.protected:
+        return False
     if not (note.is_archived or note.maturity == NoteMaturity.dormant.value):
         return False
     now = now or dt.datetime.now(dt.UTC)

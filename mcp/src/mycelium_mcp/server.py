@@ -5040,6 +5040,30 @@ async def archive_note(
 
 
 @mcp.tool()
+async def protect_note(
+    token: str,
+    org_id: str,
+    note_id: str,
+    expected_version: int,
+    protected: bool = True,
+) -> dict[str, Any]:
+    """Mark a note as finished prose the distiller must never compact
+    (Fase P, task 561c6aca) -- excluded from is_inert and every distillation
+    candidate/surface. ``protected=False`` releases it. The user has the
+    last word."""
+    async with _tenant(token, org_id) as (s, org, user):
+        version = await notes_svc.protect_note(
+            s,
+            org_id=org,
+            actor_id=user,
+            note_id=uuid.UUID(note_id),
+            expected_version=expected_version,
+            protected=protected,
+        )
+        return {"note_id": note_id, "version": version}
+
+
+@mcp.tool()
 async def delete_note(
     token: str, org_id: str, note_id: str, expected_version: int
 ) -> dict[str, Any]:
@@ -5261,6 +5285,28 @@ async def garden_review_reject(
             "note_id": str(note.id),
             "rejected": note.deleted_at is not None,
             "origin_model_id": note.origin_model_id,
+        }
+
+
+@mcp.tool()
+async def note_restore_source(
+    token: str, org_id: str, note_id: str, reason: str | None = None
+) -> dict[str, Any]:
+    """Fase P (task 561c6aca), "ripristina originale": given a humus ATOM,
+    un-archive its ``hypha_of`` source notes (the originals are preserved,
+    never mutated) and retire the atom (an approved atom is demoted then
+    rejected; nothing is hard-deleted -- the provenance chain stays
+    queryable). Restoring is choosing the layer under the lens. Idempotent.
+    Member role."""
+    async with _tenant(token, org_id) as (s, org, user):
+        res = await garden_review_svc.restore_source(
+            s, org_id=org, actor_id=user, atom_note_id=uuid.UUID(note_id), reason=reason
+        )
+        return {
+            "atom_note_id": str(res.atom_note_id),
+            "source_ids": [str(x) for x in res.source_ids],
+            "restored_source_ids": [str(x) for x in res.restored_source_ids],
+            "atom_retired": res.atom_retired,
         }
 
 

@@ -407,6 +407,42 @@ export function NoteDetailRoute() {
     navigate('/notes')
   }
 
+  // Fase P: ``protected`` marks finished prose the distiller never
+  // compacts. Reversible toggle, stays on the page (unlike archive).
+  async function protectNote() {
+    if (!note) return
+    setErr(null)
+    const opts = {
+      params: { header: workspaceHeader(), path: { note_id: id } },
+      body: { expected_version: note.version },
+    }
+    const { error } = note.protected
+      ? await api.POST('/notes/{note_id}/unprotect', opts)
+      : await api.POST('/notes/{note_id}/protect', opts)
+    if (error) {
+      setErr(errMessage(error))
+      return
+    }
+    await refreshNote()
+  }
+
+  // Fase P: on a humus atom, "ripristina originale" revives the hypha_of
+  // source(s) and retires the atom (reversible: nothing is hard-deleted).
+  async function restoreSource() {
+    if (!note) return
+    setErr(null)
+    const { data, error } = await api.POST('/garden/review/restore-source', {
+      params: { header: workspaceHeader() },
+      body: { note_id: id },
+    })
+    if (error) {
+      setErr(errMessage(error))
+      return
+    }
+    const target = data?.restored_source_ids?.[0] ?? data?.source_ids?.[0]
+    navigate(target ? `/notes/${target}` : '/notes')
+  }
+
   async function delNote() {
     if (!note) return
     setErr(null)
@@ -591,6 +627,24 @@ export function NoteDetailRoute() {
           >
             {t('notes.fromSelection')}
           </button>
+          <button
+            type="button"
+            className="btn--ghost btn--sm"
+            title={t('notes.protectHint')}
+            onClick={() => void protectNote()}
+          >
+            {note.protected ? t('notes.unprotect') : t('notes.protect')}
+          </button>
+          {note.humus_kind != null && (
+            <button
+              type="button"
+              className="btn--ghost btn--sm"
+              title={t('notes.restoreSourceHint')}
+              onClick={() => void restoreSource()}
+            >
+              {t('notes.restoreSource')}
+            </button>
+          )}
           <div className="notedetail__headeractions-danger">
             <button
               type="button"

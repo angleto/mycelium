@@ -47,7 +47,7 @@ handles (see the generated `tasks` section below). An agent never needs to
 over-fetch the org table and filter in its head.
 
 <!-- BEGIN GENERATED: mcp tool inventory (scripts/gen_mcp_coverage.py) -->
-**247 tools across 13 domains.** This inventory is generated from the live registry by `scripts/gen_mcp_coverage.py` — do not edit by hand; run `make mcp-coverage` to refresh. The one-line summary is each tool's first docstring line, so it cannot drift from the code.
+**249 tools across 13 domains.** This inventory is generated from the live registry by `scripts/gen_mcp_coverage.py` — do not edit by hand; run `make mcp-coverage` to refresh. The one-line summary is each tool's first docstring line, so it cannot drift from the code.
 
 ### search (3)
 
@@ -168,7 +168,7 @@ over-fetch the org table and filter in its head.
 | `memory_write` | Write a memory blob (embedding metered when produced; degrades |
 | `set_email_ingest_to_memory` | Toggle whether this account's synced (non-bulk) messages are |
 
-### notes (52)
+### notes (54)
 
 | Tool | Summary |
 |---|---|
@@ -203,10 +203,12 @@ over-fetch the org table and filter in its head.
 | `list_task_participants` | List the additional identities pinned to an appointment-task |
 | `list_turns` | List the turns of a conversation note, in order. Returns the paginated |
 | `merge_notes` | Fold the source note's parts into the target (task 7070a456 |
+| `note_restore_source` | Fase P (task 561c6aca), "ripristina originale": given a humus ATOM, |
 | `patch_note_part_body_capability` | Mint a single-use ``note_part_body:patch`` capability and return a |
 | `patch_text_block_capability` | Mint a single-use ``<kind>:patch`` capability for a task description |
 | `prepend_note_part` | Prepend markdown ``text`` to the FRONT of a note part without |
 | `promote_note_to_task` | Transplant the note to a task. The note becomes read-only |
+| `protect_note` | Mark a note as finished prose the distiller must never compact |
 | `remove_note_tag` | Detach a tag from a note. |
 | `remove_task_participant` | Unpin an identity from an appointment-task. No-op if the |
 | `reorder_note_parts` | Rewrite the entire ordering of a note's parts. ``part_ids`` |

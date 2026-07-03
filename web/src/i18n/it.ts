@@ -1897,6 +1897,13 @@ export const it: Catalog = {
     tags: 'Tag',
     addTag: 'Aggiungi tag…',
     deleteBtn: 'Sposta nel cestino',
+    protect: 'Proteggi prosa',
+    unprotect: 'Rimuovi protezione',
+    protectHint:
+      'La prosa protetta non viene mai compattata dalla distillazione',
+    restoreSource: 'Ripristina originale',
+    restoreSourceHint:
+      "Riporta in vita la nota sorgente preservata e ritira quest'atomo (reversibile)",
     confirmErase:
       'Cancellare definitivamente "{{title}}" e la sua memoria? Operazione irreversibile.',
     copyId: 'Copia ID nota',

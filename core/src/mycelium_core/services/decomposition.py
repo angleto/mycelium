@@ -205,6 +205,11 @@ async def distill_note(
     """
     await require_role(session, org_id, actor_id, Role.member)
     source = await notes_svc.get_note(session, org_id=org_id, note_id=note_id)
+    # Fase P (task 561c6aca): protected prose is never compacted -- refuse
+    # up-front rather than silently skipping, so an explicit caller learns
+    # WHY (the candidate surfaces already exclude protected notes).
+    if source.protected:
+        raise DomainError(MessageCode.NOTE_PROTECTED)
     # WS-F3: snapshot the source version BEFORE the slow LLM call, so the
     # humus flip at the end can be guarded with optimistic concurrency -- a
     # concurrent edit/unarchive in that window bumps the version and the
@@ -565,6 +570,10 @@ async def extract_cluster_pattern(
                     Note.org_id == org_id,
                     Note.deleted_at.is_(None),
                     Note.is_archived.is_(True),
+                    # Fase P: a protected member is dropped exactly like a
+                    # non-archived one, BEFORE sort/truncate/signature -- the
+                    # candidate surface mirrors this so signatures agree.
+                    Note.protected.is_(False),
                 )
             )
         )
@@ -630,6 +639,7 @@ async def synthesize_season(
                     Note.org_id == org_id,
                     Note.deleted_at.is_(None),
                     Note.is_archived.is_(True),
+                    Note.protected.is_(False),
                     Note.created_at >= start,
                     Note.created_at < end,
                 )

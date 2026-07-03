@@ -813,6 +813,29 @@ async def archive_note(
     )
 
 
+async def protect_note(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    note_id: uuid.UUID,
+    expected_version: int,
+    protected: bool = True,
+) -> int:
+    """Fase P (task 561c6aca): mark finished prose the distiller must never
+    compact (or release it with ``protected=False``). The flag gates
+    ``is_inert`` and every distillation surface; the user has the last word."""
+    return await _note_set(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        note_id=note_id,
+        expected_version=expected_version,
+        values={"protected": protected},
+        action="protect",
+    )
+
+
 async def soft_delete_note(
     session: AsyncSession,
     *,

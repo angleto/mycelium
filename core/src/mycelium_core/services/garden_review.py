@@ -34,11 +34,12 @@ from dataclasses import dataclass
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from mycelium_core.errors import NotFoundError
+from mycelium_core.errors import DomainError, NotFoundError
 from mycelium_core.i18n import MessageCode
 from mycelium_core.models.event_outbox import EventOutbox
 from mycelium_core.models.membership import Role
 from mycelium_core.models.note import Note
+from mycelium_core.models.note_link import NoteNoteLink
 from mycelium_core.services import audit, event_bus
 from mycelium_core.services import notes as notes_svc
 from mycelium_core.services.rbac import require_role
@@ -265,6 +266,114 @@ async def accept_ratio_by_model(
         )
     out.sort(key=lambda m: m.approved + m.rejected, reverse=True)
     return out
+
+
+# ── Fase P (task 561c6aca): the hypha_of chain IS the stack ────────────────
+
+
+@dataclass(frozen=True)
+class RestoreSourceResult:
+    """Outcome of :func:`restore_source`: the atom retired and the preserved
+    sources brought back to life. ``restored_source_ids`` are the sources this
+    call actually un-archived (an already-live source needs no restore)."""
+
+    atom_note_id: uuid.UUID
+    source_ids: list[uuid.UUID]
+    restored_source_ids: list[uuid.UUID]
+    atom_retired: bool
+
+
+async def restore_source(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    atom_note_id: uuid.UUID,
+    reason: str | None = None,
+) -> RestoreSourceResult:
+    """Design §6 ("ripristina"): choose the layer under the lens. Un-archive
+    the atom's ``hypha_of`` sources (the originals are preserved, never
+    mutated -- invariant 8a26c000) and retire the atom. Nothing is ever
+    hard-deleted.
+
+    Retiring an EFFECTIVE (approved) atom has no direct house verb --
+    ``reject_node`` only accepts ``review_state='proposed'``, and archiving
+    would NOT retire it (archived blobs stay retrievable; only the
+    ``proposed`` filter withholds blobs at the retrieval layer, see
+    ``proposed_note_blob_exclusion``). So an approved atom is first demoted
+    back to ``proposed`` (audited, the exact inverse of ``approve_node``) and
+    then rejected: the end state (``review_state='proposed'`` +
+    ``deleted_at``) is byte-identical to a normal reject -- withheld from
+    retrieval, hidden from listings, reversible via the normal restore path.
+
+    Idempotent: an already-retired atom skips the retire step but still
+    revives any archived source."""
+    await require_role(session, org_id, actor_id, Role.member)
+    atom = await session.get(Note, atom_note_id)
+    if atom is None or atom.org_id != org_id:
+        raise NotFoundError(MessageCode.NOTE_NOT_FOUND)
+    if not atom.humus_flag:
+        # Only a humus atom is a lens over preserved sources.
+        raise DomainError(MessageCode.DOMAIN_ERROR)
+    sources = list(
+        (
+            await session.execute(
+                select(Note)
+                .join(NoteNoteLink, NoteNoteLink.parent_note_id == Note.id)
+                .where(
+                    NoteNoteLink.org_id == org_id,
+                    NoteNoteLink.child_note_id == atom_note_id,
+                    NoteNoteLink.kind == "hypha_of",
+                    Note.deleted_at.is_(None),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if not sources:
+        # An atom without hypha_of provenance has no layer to restore.
+        raise DomainError(MessageCode.DOMAIN_ERROR)
+    restored: list[uuid.UUID] = []
+    for src in sources:
+        if src.is_archived:
+            await notes_svc.archive_note(
+                session,
+                org_id=org_id,
+                actor_id=actor_id,
+                note_id=src.id,
+                expected_version=src.version,
+                archived=False,
+            )
+            restored.append(src.id)
+    retired = False
+    if atom.deleted_at is None:
+        if atom.review_state == _APPROVED:
+            atom.review_state = _PROPOSED
+            await session.flush()
+            await audit.log(
+                session,
+                org_id=org_id,
+                actor_id=actor_id,
+                entity="note",
+                entity_id=atom_note_id,
+                action="garden_review:demote",
+                diff={"review_state": {"old": _APPROVED, "new": _PROPOSED}},
+            )
+        await reject_node(
+            session,
+            org_id=org_id,
+            actor_id=actor_id,
+            note_id=atom_note_id,
+            reason=reason or "restore_source",
+        )
+        retired = True
+    return RestoreSourceResult(
+        atom_note_id=atom_note_id,
+        source_ids=[s.id for s in sources],
+        restored_source_ids=restored,
+        atom_retired=retired,
+    )
 
 
 async def accept_ratio_overall(session: AsyncSession, *, org_id: uuid.UUID) -> float | None:

@@ -1347,6 +1347,17 @@ class GardenReviewActionOut(BaseModel):
     rejected: bool  # True when the action soft-deleted the node
 
 
+class GardenRestoreSourceOut(BaseModel):
+    """Fase P (task 561c6aca): outcome of "ripristina originale" on a humus
+    atom -- the sources revived and the atom retired (the ``hypha_of`` chain
+    is the stack; nothing is ever hard-deleted)."""
+
+    atom_note_id: uuid.UUID
+    source_ids: list[uuid.UUID]
+    restored_source_ids: list[uuid.UUID]
+    atom_retired: bool
+
+
 class GardenAcceptRatioOut(BaseModel):
     """Per-model reliability of AUTONOMOUSLY-generated proposals (ADR-0043
     D4): how often a human approved vs rejected this model's output. ``ratio``
@@ -2497,6 +2508,8 @@ class NoteOut(BaseModel):
     audio_ref: str | None
     audio_seconds: int | None = None
     is_archived: bool = False
+    # Fase P (task 561c6aca): finished prose the distiller never compacts.
+    protected: bool = False
     deleted_at: datetime.datetime | None = None
     tags: list[TagBrief] = []
     version: int
@@ -2506,6 +2519,10 @@ class NoteOut(BaseModel):
     # layer (transplanted to a task).
     maturity: str = "seed"
     promoted_at: datetime.datetime | None = None
+    # Humus atom subtype (distillation/pattern/season); None for ordinary
+    # notes. Lets the SPA show the "sorgente/ripristina" affordance
+    # (Fase P) only on atoms.
+    humus_kind: str | None = None
     # docs/adr/0029 P1: every task generated from this note
     # (kind ∈ {derived_from, promoted_from}), in emission order. The
     # SPA renders an "N tasks" chip on the note row from this list;

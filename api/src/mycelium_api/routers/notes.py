@@ -171,11 +171,13 @@ def _out(
         audio_ref=n.audio_ref,
         audio_seconds=n.audio_seconds,
         is_archived=n.is_archived,
+        protected=n.protected,
         deleted_at=n.deleted_at,
         tags=[_brief(t) for t in (tags or [])],
         version=n.version,
         maturity=n.maturity,
         promoted_at=n.promoted_at,
+        humus_kind=n.humus_kind,
         derived_task_ids=list(derived_task_ids or []),
         linked_task_count=linked_task_count,
         parts=list(parts or []),
@@ -1152,6 +1154,43 @@ async def unarchive_note(
         note_id=note_id,
         expected_version=body.expected_version,
         archived=False,
+    )
+    return VersionOut(id=note_id, version=v)
+
+
+@router.post("/{note_id}/protect", response_model=VersionOut)
+async def protect_note(
+    note_id: uuid.UUID,
+    body: ExpectedVersionIn,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+) -> VersionOut:
+    """Fase P (task 561c6aca): mark the note as finished prose the distiller
+    must never compact (excluded from every distillation candidate/surface).
+    The user has the last word; reversible via ``unprotect``."""
+    v = await svc.protect_note(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        note_id=note_id,
+        expected_version=body.expected_version,
+        protected=True,
+    )
+    return VersionOut(id=note_id, version=v)
+
+
+@router.post("/{note_id}/unprotect", response_model=VersionOut)
+async def unprotect_note(
+    note_id: uuid.UUID,
+    body: ExpectedVersionIn,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+) -> VersionOut:
+    v = await svc.protect_note(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        note_id=note_id,
+        expected_version=body.expected_version,
+        protected=False,
     )
     return VersionOut(id=note_id, version=v)
 

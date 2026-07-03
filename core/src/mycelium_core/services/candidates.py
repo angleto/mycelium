@@ -168,6 +168,10 @@ async def list_distillation_candidates(
                 Note.org_id == org_id,
                 Note.deleted_at.is_(None),
                 Note.humus_flag.is_(False),
+                # Fase P: protected prose never surfaces as a candidate
+                # (mirrors is_inert and the extraction-side filters, so a
+                # pattern signature never counts a protected member).
+                Note.protected.is_(False),
                 or_(
                     Note.is_archived.is_(True),
                     Note.maturity == NoteMaturity.dormant.value,
@@ -254,6 +258,7 @@ async def list_distillation_candidates(
             Note.deleted_at.is_(None),
             Note.is_archived.is_(True),
             Note.humus_flag.is_(False),
+            Note.protected.is_(False),
         )
         by_window: dict[tuple[int, int], list[uuid.UUID]] = defaultdict(list)
         for nid, created_at in (await session.execute(arch_stmt)).all():

@@ -54,6 +54,7 @@ from mycelium_api.schemas import (
     GardenLinkSuggestionsOut,
     GardenMaturitySuggestionOut,
     GardenRejectHotspotOut,
+    GardenRestoreSourceOut,
     GardenReviewActionIn,
     GardenReviewActionOut,
     GardenReviewPendingItem,
@@ -511,6 +512,30 @@ async def garden_review_reject(
         review_state=note.review_state,
         origin_model_id=note.origin_model_id,
         rejected=note.deleted_at is not None,
+    )
+
+
+@router.post("/review/restore-source", response_model=GardenRestoreSourceOut)
+async def garden_review_restore_source(
+    body: GardenReviewActionIn,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+) -> GardenRestoreSourceOut:
+    """Fase P (task 561c6aca), "ripristina originale": un-archive the humus
+    atom's ``hypha_of`` sources (preserved, never mutated) and retire the atom
+    (an approved atom is demoted then rejected; nothing is hard-deleted, the
+    chain stays queryable). Idempotent. Member role."""
+    res = await review_svc.restore_source(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        atom_note_id=body.note_id,
+        reason=body.reason,
+    )
+    return GardenRestoreSourceOut(
+        atom_note_id=res.atom_note_id,
+        source_ids=res.source_ids,
+        restored_source_ids=res.restored_source_ids,
+        atom_retired=res.atom_retired,
     )
 
 

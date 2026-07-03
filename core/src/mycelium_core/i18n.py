@@ -175,6 +175,7 @@ class MessageCode(enum.StrEnum):
     AI_ASSISTANT_INVALID_SCOPE = "ai_assistant.invalid_scope"
     NOTE_MATURITY_INVALID = "note.maturity_invalid"
     NOTE_PROMOTED_READONLY = "note.promoted_readonly"
+    NOTE_PROTECTED = "note.protected"
     NOTE_LINK_KIND_INVALID = "note.link.kind_invalid"
     NOTE_LINK_SELF = "note.link.self"
     NOTE_TASK_LINK_KIND_INVALID = "note.task_link.kind_invalid"
@@ -508,6 +509,9 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
         MessageCode.NOTE_MATURITY_INVALID: "Invalid maturity '{maturity}'. Allowed: {valid}.",
         MessageCode.NOTE_PROMOTED_READONLY: (
             "This note was transplanted to a task and is read-only."
+        ),
+        MessageCode.NOTE_PROTECTED: (
+            "This note is protected prose: the distiller never compacts it."
         ),
         MessageCode.NOTE_LINK_KIND_INVALID: "Invalid note link kind '{kind}'. Allowed: {valid}.",
         MessageCode.NOTE_LINK_SELF: "A note cannot be linked to itself.",

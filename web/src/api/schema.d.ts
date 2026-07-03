@@ -4282,6 +4282,45 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/notes/{note_id}/protect": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Protect Note
+         * @description Fase P (task 561c6aca): mark the note as finished prose the distiller
+         *     must never compact (excluded from every distillation candidate/surface).
+         *     The user has the last word; reversible via ``unprotect``.
+         */
+        post: operations["protect_note_notes__note_id__protect_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/notes/{note_id}/unprotect": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Unprotect Note */
+        post: operations["unprotect_note_notes__note_id__unprotect_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/notes/{note_id}/transcribe": {
         parameters: {
             query?: never;
@@ -4912,6 +4951,29 @@ export interface paths {
          *     Member role.
          */
         post: operations["garden_review_reject_garden_review_reject_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/garden/review/restore-source": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Garden Review Restore Source
+         * @description Fase P (task 561c6aca), "ripristina originale": un-archive the humus
+         *     atom's ``hypha_of`` sources (preserved, never mutated) and retire the atom
+         *     (an approved atom is demoted then rejected; nothing is hard-deleted, the
+         *     chain stays queryable). Idempotent. Member role.
+         */
+        post: operations["garden_review_restore_source_garden_review_restore_source_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -8382,6 +8444,25 @@ export interface components {
             last_declined_at: string;
         };
         /**
+         * GardenRestoreSourceOut
+         * @description Fase P (task 561c6aca): outcome of "ripristina originale" on a humus
+         *     atom -- the sources revived and the atom retired (the ``hypha_of`` chain
+         *     is the stack; nothing is ever hard-deleted).
+         */
+        GardenRestoreSourceOut: {
+            /**
+             * Atom Note Id
+             * Format: uuid
+             */
+            atom_note_id: string;
+            /** Source Ids */
+            source_ids: string[];
+            /** Restored Source Ids */
+            restored_source_ids: string[];
+            /** Atom Retired */
+            atom_retired: boolean;
+        };
+        /**
          * GardenReviewActionIn
          * @description Approve, or reject, one proposed node by id (ADR-0043). ``reason`` is
          *     an optional note recorded on a reject (ignored by approve).
@@ -9875,6 +9956,11 @@ export interface components {
              * @default false
              */
             is_archived?: boolean;
+            /**
+             * Protected
+             * @default false
+             */
+            protected?: boolean;
             /** Deleted At */
             deleted_at?: string | null;
             /**
@@ -9891,6 +9977,8 @@ export interface components {
             maturity?: string;
             /** Promoted At */
             promoted_at?: string | null;
+            /** Humus Kind */
+            humus_kind?: string | null;
             /** Derived Task Ids */
             derived_task_ids?: string[];
             /**
@@ -22546,6 +22634,86 @@ export interface operations {
             };
         };
     };
+    protect_note_notes__note_id__protect_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                note_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExpectedVersionIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VersionOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    unprotect_note_notes__note_id__unprotect_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                note_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExpectedVersionIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VersionOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     transcribe_notes__note_id__transcribe_post: {
         parameters: {
             query?: never;
@@ -23781,6 +23949,44 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["GardenReviewActionOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    garden_review_restore_source_garden_review_restore_source_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GardenReviewActionIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GardenRestoreSourceOut"];
                 };
             };
             /** @description Validation Error */

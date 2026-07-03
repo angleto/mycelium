@@ -1896,6 +1896,12 @@ export const en = {
     tags: 'Tags',
     addTag: 'Add tag…',
     deleteBtn: 'Move to Trash',
+    protect: 'Protect prose',
+    unprotect: 'Remove protection',
+    protectHint: 'Protected prose is never compacted by distillation',
+    restoreSource: 'Restore original',
+    restoreSourceHint:
+      'Revive the preserved source note and retire this atom (reversible)',
     confirmErase:
       'Permanently erase "{{title}}" and its memory? This cannot be undone.',
     copyId: 'Copy note ID',
