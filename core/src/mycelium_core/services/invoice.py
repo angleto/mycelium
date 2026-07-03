@@ -56,6 +56,7 @@ from mycelium_core.models.membership import Role
 from mycelium_core.models.sdi_notification import InvoiceNotification
 from mycelium_core.sdi_channel import IntermediaryIdentity, SdiChannel, get_channel
 from mycelium_core.services import audit
+from mycelium_core.services import webhooks as webhooks_svc
 from mycelium_core.services.image_validation import (
     IMAGE_MAX_BYTES,
     IMAGE_MIMES,
@@ -1760,6 +1761,17 @@ async def transmit(
         action="transmit",
         diff={"number": f"{inv.series}-{number}", "channel": res.channel},
     )
+    # ADR-0047: signed webhook. SAVEPOINT-wrapped in the service -- a fan-out
+    # fault can never abort this fiscal write. Dedupe on the invoice so the
+    # 'transmitted' event fires exactly once even across resend legs.
+    await webhooks_svc.enqueue_invoice_event(
+        session,
+        org_id=org_id,
+        invoice=inv,
+        event_type=webhooks_svc.EVENT_TRANSMITTED,
+        dedupe_key=f"transmitted:{inv.id}",
+        occurred_at=dt.datetime.now(tz=dt.UTC),
+    )
     return inv
 
 
@@ -1892,6 +1904,14 @@ async def mark_paid(
         entity="invoice",
         entity_id=invoice_id,
         action="mark_paid",
+    )
+    await webhooks_svc.enqueue_invoice_event(
+        session,
+        org_id=org_id,
+        invoice=inv,
+        event_type=webhooks_svc.EVENT_PAYMENT_RECORDED,
+        dedupe_key=f"payment_recorded:{inv.id}",
+        occurred_at=dt.datetime.now(tz=dt.UTC),
     )
     return inv
 
@@ -2164,6 +2184,11 @@ async def ingest_active_notification(
             parsed=parsed,
             reason="duplicate_echo",
         )
+    # Snapshot the pre-transition state so the webhook only fires on an ACTUAL
+    # transition (a redelivery of a settling notification returns early below;
+    # a second RC/AT that does not move the state must not re-fire).
+    prev_state = inv.state
+    webhook_event: str | None = None
     now = dt.datetime.now(tz=dt.UTC)
     payload: dict[str, object] = {}
     if parsed.outcome in _RECEIPT_MAP:
@@ -2172,6 +2197,11 @@ async def ingest_active_notification(
         inv.state = state
         inv.conservation_status = cons
         payload = {"outcome": parsed.outcome}
+        webhook_event = (
+            webhooks_svc.EVENT_DELIVERED
+            if state is InvoiceState.delivered
+            else webhooks_svc.EVENT_REJECTED
+        )
     elif parsed.outcome == "NE":
         # NE relays the buyer's EsitoCommittente. We layer the verdict on top
         # of the existing delivery state without clobbering RC/MC/AT.
@@ -2185,6 +2215,11 @@ async def ingest_active_notification(
         inv.buyer_verdict_at = now
         inv.state = state
         payload = {"outcome": "NE", "esito": parsed.esito}
+        webhook_event = (
+            webhooks_svc.EVENT_ACCEPTED
+            if state is InvoiceState.accepted
+            else webhooks_svc.EVENT_REJECTED
+        )
     elif parsed.outcome == "DT":
         # Deemed acceptance (15-day window expired). Only flip the verdict
         # if no explicit NE arrived earlier; preserve a buyer's explicit
@@ -2195,6 +2230,7 @@ async def ingest_active_notification(
             inv.buyer_verdict = BuyerVerdict.deemed_accepted
             inv.buyer_verdict_at = now
             inv.state = InvoiceState.accepted
+            webhook_event = webhooks_svc.EVENT_DEEMED_ACCEPTED
         payload = {"outcome": "DT"}
     else:
         raise DomainError(MessageCode.DOMAIN_ERROR)
@@ -2237,6 +2273,17 @@ async def ingest_active_notification(
         action="sdi_notification",
         diff=payload,
     )
+    # ADR-0047: fire only on a real state transition (SAVEPOINT-wrapped; a
+    # webhook fault can never abort this fiscal ingest write).
+    if webhook_event is not None and inv.state != prev_state:
+        await webhooks_svc.enqueue_invoice_event(
+            session,
+            org_id=org_id,
+            invoice=inv,
+            event_type=webhook_event,
+            dedupe_key=f"{webhook_event}:{inv.id}:{parsed.message_id}",
+            occurred_at=now,
+        )
     return inv
 
 

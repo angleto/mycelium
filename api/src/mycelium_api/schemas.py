@@ -3362,6 +3362,62 @@ class IssuerApiKeyCreateOut(IssuerApiKeyOut):
     raw: str
 
 
+# ---------- Signed invoice webhooks (task 2c23e955, ADR-0047)
+class WebhookEndpointIn(BaseModel):
+    """Create a signed-webhook endpoint bound to an issuer profile."""
+
+    name: str = Field(min_length=1, max_length=120)
+    url: str = Field(min_length=1, max_length=2048)
+    # Empty = subscribe to ALL invoice events; else a whitelist. Validated by
+    # the service against the event vocabulary.
+    event_types: list[str] = Field(default_factory=list)
+
+
+class WebhookEndpointUpdateIn(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    url: str | None = Field(default=None, min_length=1, max_length=2048)
+    event_types: list[str] | None = None
+    active: bool | None = None
+
+
+class WebhookEndpointOut(BaseModel):
+    """Endpoint metadata; the signing secret never appears here (only once on
+    :class:`WebhookEndpointCreateOut`)."""
+
+    id: uuid.UUID
+    issuer_profile_id: uuid.UUID
+    name: str
+    url: str
+    event_types: list[str]
+    active: bool
+    created_at: datetime.datetime
+    revoked_at: datetime.datetime | None
+
+
+class WebhookEndpointCreateOut(WebhookEndpointOut):
+    """Create / rotate response. ``secret`` is the ONLY place the plaintext
+    signing secret leaves the server; store it now."""
+
+    secret: str
+
+
+class WebhookDeliveryOut(BaseModel):
+    """One delivery attempt row for the endpoint's recent-activity view."""
+
+    id: uuid.UUID
+    event_type: str
+    invoice_id: uuid.UUID | None
+    status: str
+    attempt_count: int
+    max_attempts: int
+    next_attempt_at: datetime.datetime
+    last_attempt_at: datetime.datetime | None
+    delivered_at: datetime.datetime | None
+    response_code: int | None
+    last_error: str | None
+    created_at: datetime.datetime
+
+
 # ---------- AI assistants (ADR-0XX, replaces /settings/mcp manual setup)
 class ScopeCatalogEntry(BaseModel):
     """One row of the scope catalog returned by ``GET /ai-assistants/

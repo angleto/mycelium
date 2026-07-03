@@ -35,6 +35,7 @@ from mycelium_worker import (
     revisions_summary,
     task_search_backfill,
     telegram_assistant,
+    webhooks,
 )
 
 
@@ -78,6 +79,10 @@ def _enabled_jobs() -> list[Callable[[], Awaitable[None]]]:
     ]
     if get_settings().garden_loop_enabled:
         jobs.append(garden.run_forever)
+    # Signed invoice webhooks (ADR-0047): the delivery drain runs only when
+    # enabled, so an unconfigured deploy never touches the fiscal outbox.
+    if get_settings().webhooks_enabled:
+        jobs.append(webhooks.run_forever)
     return jobs
 
 

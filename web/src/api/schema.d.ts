@@ -5883,6 +5883,101 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/issuer-profiles/{issuer_profile_id}/webhook-endpoints": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Endpoints
+         * @description List the issuer's endpoints, newest first (active + revoked; the UI
+         *     distinguishes via ``revoked_at``). No secret is shown.
+         */
+        get: operations["list_endpoints_issuer_profiles__issuer_profile_id__webhook_endpoints_get"];
+        put?: never;
+        /**
+         * Create Endpoint
+         * @description Create an endpoint (owner-gated). ``secret`` is the only time the signing
+         *     secret is sent -- store it now.
+         */
+        post: operations["create_endpoint_issuer_profiles__issuer_profile_id__webhook_endpoints_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/issuer-profiles/{issuer_profile_id}/webhook-endpoints/{endpoint_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Endpoint
+         * @description Owner-gated. Default: REVOKE (deactivate + cancel pending deliveries;
+         *     idempotent). ``hard=true``: PURGE an already-revoked endpoint (409
+         *     webhook_endpoint.not_revoked on an active one -- revoke first).
+         */
+        delete: operations["delete_endpoint_issuer_profiles__issuer_profile_id__webhook_endpoints__endpoint_id__delete"];
+        options?: never;
+        head?: never;
+        /**
+         * Update Endpoint
+         * @description Edit name / url / subscribed events / active (owner-gated). A changed
+         *     URL is re-validated (https + public unicast).
+         */
+        patch: operations["update_endpoint_issuer_profiles__issuer_profile_id__webhook_endpoints__endpoint_id__patch"];
+        trace?: never;
+    };
+    "/issuer-profiles/{issuer_profile_id}/webhook-endpoints/{endpoint_id}/rotate-secret": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Rotate Secret
+         * @description Issue a new signing secret (owner-gated). ``grace_seconds`` keeps the
+         *     previous secret verifying so a receiver can roll over without missed events.
+         */
+        post: operations["rotate_secret_issuer_profiles__issuer_profile_id__webhook_endpoints__endpoint_id__rotate_secret_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/issuer-profiles/{issuer_profile_id}/webhook-endpoints/{endpoint_id}/deliveries": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Deliveries
+         * @description Recent delivery attempts for the endpoint (newest first) -- the SPA's
+         *     activity view for debugging a receiver.
+         */
+        get: operations["list_deliveries_issuer_profiles__issuer_profile_id__webhook_endpoints__endpoint_id__deliveries_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/invoices": {
         parameters: {
             query?: never;
@@ -12264,6 +12359,134 @@ export interface components {
             id: string;
             /** Version */
             version: number;
+        };
+        /**
+         * WebhookDeliveryOut
+         * @description One delivery attempt row for the endpoint's recent-activity view.
+         */
+        WebhookDeliveryOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Event Type */
+            event_type: string;
+            /** Invoice Id */
+            invoice_id: string | null;
+            /** Status */
+            status: string;
+            /** Attempt Count */
+            attempt_count: number;
+            /** Max Attempts */
+            max_attempts: number;
+            /**
+             * Next Attempt At
+             * Format: date-time
+             */
+            next_attempt_at: string;
+            /** Last Attempt At */
+            last_attempt_at: string | null;
+            /** Delivered At */
+            delivered_at: string | null;
+            /** Response Code */
+            response_code: number | null;
+            /** Last Error */
+            last_error: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /**
+         * WebhookEndpointCreateOut
+         * @description Create / rotate response. ``secret`` is the ONLY place the plaintext
+         *     signing secret leaves the server; store it now.
+         */
+        WebhookEndpointCreateOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Issuer Profile Id
+             * Format: uuid
+             */
+            issuer_profile_id: string;
+            /** Name */
+            name: string;
+            /** Url */
+            url: string;
+            /** Event Types */
+            event_types: string[];
+            /** Active */
+            active: boolean;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Revoked At */
+            revoked_at: string | null;
+            /** Secret */
+            secret: string;
+        };
+        /**
+         * WebhookEndpointIn
+         * @description Create a signed-webhook endpoint bound to an issuer profile.
+         */
+        WebhookEndpointIn: {
+            /** Name */
+            name: string;
+            /** Url */
+            url: string;
+            /** Event Types */
+            event_types?: string[];
+        };
+        /**
+         * WebhookEndpointOut
+         * @description Endpoint metadata; the signing secret never appears here (only once on
+         *     :class:`WebhookEndpointCreateOut`).
+         */
+        WebhookEndpointOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Issuer Profile Id
+             * Format: uuid
+             */
+            issuer_profile_id: string;
+            /** Name */
+            name: string;
+            /** Url */
+            url: string;
+            /** Event Types */
+            event_types: string[];
+            /** Active */
+            active: boolean;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Revoked At */
+            revoked_at: string | null;
+        };
+        /** WebhookEndpointUpdateIn */
+        WebhookEndpointUpdateIn: {
+            /** Name */
+            name?: string | null;
+            /** Url */
+            url?: string | null;
+            /** Event Types */
+            event_types?: string[] | null;
+            /** Active */
+            active?: boolean | null;
         };
         /** WhatNowIn */
         WhatNowIn: {
@@ -23822,7 +24045,7 @@ export interface operations {
     garden_candidates_garden_candidates_get: {
         parameters: {
             query?: {
-                kind?: "all" | "distill" | "pattern" | "season" | "link_add" | "link_prune";
+                kind?: "all" | "distill" | "pattern" | "season" | "link_add" | "link_prune" | "link_direct";
                 limit?: number;
             };
             header: {
@@ -26081,6 +26304,238 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_endpoints_issuer_profiles__issuer_profile_id__webhook_endpoints_get: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                issuer_profile_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WebhookEndpointOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_endpoint_issuer_profiles__issuer_profile_id__webhook_endpoints_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                issuer_profile_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WebhookEndpointIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WebhookEndpointCreateOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_endpoint_issuer_profiles__issuer_profile_id__webhook_endpoints__endpoint_id__delete: {
+        parameters: {
+            query?: {
+                hard?: boolean;
+            };
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                issuer_profile_id: string;
+                endpoint_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_endpoint_issuer_profiles__issuer_profile_id__webhook_endpoints__endpoint_id__patch: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                issuer_profile_id: string;
+                endpoint_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WebhookEndpointUpdateIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WebhookEndpointOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    rotate_secret_issuer_profiles__issuer_profile_id__webhook_endpoints__endpoint_id__rotate_secret_post: {
+        parameters: {
+            query?: {
+                grace_seconds?: number;
+            };
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                issuer_profile_id: string;
+                endpoint_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WebhookEndpointCreateOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_deliveries_issuer_profiles__issuer_profile_id__webhook_endpoints__endpoint_id__deliveries_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                issuer_profile_id: string;
+                endpoint_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WebhookDeliveryOut"][];
+                };
             };
             /** @description Validation Error */
             422: {

@@ -109,6 +109,10 @@ class MessageCode(enum.StrEnum):
     ISSUER_API_KEY_PERMISSION_INVALID = "issuer_api_key.permission_invalid"
     ISSUER_API_KEY_IP_ALLOWLIST_INVALID = "issuer_api_key.ip_allowlist_invalid"
     ISSUER_API_KEY_PERMISSION_DENIED = "issuer_api_key.permission_denied"
+    WEBHOOK_ENDPOINT_NOT_FOUND = "webhook_endpoint.not_found"
+    WEBHOOK_ENDPOINT_NOT_REVOKED = "webhook_endpoint.not_revoked"
+    WEBHOOK_URL_INVALID = "webhook_endpoint.url_invalid"
+    WEBHOOK_EVENT_TYPE_INVALID = "webhook_endpoint.event_type_invalid"
     IDEMPOTENCY_KEY_REQUIRED = "idempotency.key_required"
     IDEMPOTENCY_BODY_MISMATCH = "idempotency.body_mismatch"
     IDEMPOTENCY_IN_PROGRESS = "idempotency.in_progress"
@@ -382,6 +386,12 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
             "The API key does not carry the permission required for this operation"
         ),
         MessageCode.ISSUER_API_KEY_IP_ALLOWLIST_INVALID: ("Invalid IP allowlist entry: {detail}"),
+        MessageCode.WEBHOOK_ENDPOINT_NOT_FOUND: "Webhook endpoint not found",
+        MessageCode.WEBHOOK_ENDPOINT_NOT_REVOKED: (
+            "Revoke the endpoint before deleting it (only a revoked endpoint can be purged)"
+        ),
+        MessageCode.WEBHOOK_URL_INVALID: "Invalid webhook URL: {detail}",
+        MessageCode.WEBHOOK_EVENT_TYPE_INVALID: "Unknown webhook event type: {detail}",
         MessageCode.IDEMPOTENCY_KEY_REQUIRED: "The Idempotency-Key header is required",
         MessageCode.IDEMPOTENCY_BODY_MISMATCH: (
             "This Idempotency-Key was already used with a different request"

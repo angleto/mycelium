@@ -160,6 +160,7 @@ from mycelium_core.models.task_tag import TaskTag
 from mycelium_core.models.telegram import TelegramLink, TelegramLinkCode, TelegramUpdate
 from mycelium_core.models.time_entry import TimeEntry, TimeSource
 from mycelium_core.models.user import User
+from mycelium_core.models.webhook import WebhookDelivery, WebhookEndpoint
 from mycelium_core.models.workflow import (
     WorkflowDefinition,
     WorkflowState,
@@ -315,6 +316,8 @@ __all__ = [
     "User",
     "UserCalendar",
     "Wallet",
+    "WebhookDelivery",
+    "WebhookEndpoint",
     "WorkflowDefinition",
     "WorkflowState",
     "WorkflowTransition",

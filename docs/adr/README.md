@@ -55,3 +55,4 @@ Format: Status, Context, Decision, Consequences, Alternatives rejected.
 - [0044 Temporal knowledge graph (Track B)](0044-temporal-knowledge-graph.md)
 - [0045 Issuer-scoped API keys, public Invoice API, MCP invoice tools](0045-issuer-scoped-api-keys.md)
 - [0046 Two-phase durable invoice transmit (lost-ACK safety)](0046-two-phase-durable-transmit.md)
+- [0047 Signed outbound webhooks on invoice state changes](0047-signed-invoice-webhooks.md)

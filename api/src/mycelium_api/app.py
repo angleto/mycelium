@@ -55,6 +55,7 @@ from mycelium_api.routers import (
     tasks,
     telegram,
     time_tracking,
+    webhook_endpoints,
     workflows,
     workspace,
 )
@@ -289,6 +290,7 @@ def create_app() -> FastAPI:
     app.include_router(capabilities.router)
     app.include_router(invoices.router)
     app.include_router(issuer_api_keys.router)
+    app.include_router(webhook_endpoints.router)
     app.include_router(public_invoices.router)
     app.include_router(received_invoices.router)
     app.include_router(notifications.router)

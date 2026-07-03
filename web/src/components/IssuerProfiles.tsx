@@ -10,6 +10,7 @@ import { api, authFetch, errMessage, workspaceHeader } from '../api/client'
 import { useSession } from '../auth/useSession'
 import type { components } from '../api/schema'
 import { IssuerApiKeys } from './IssuerApiKeys'
+import { WebhookEndpoints } from './WebhookEndpoints'
 import { IssuerLogoConfig } from './IssuerLogoConfig'
 
 type Profile = components['schemas']['IssuerProfileOut']
@@ -289,6 +290,7 @@ export function IssuerProfiles() {
   const [subjectType, setSubjectType] = useState<'company' | 'person'>('company')
   const [showCounters, setShowCounters] = useState<string | null>(null)
   const [showApiKeys, setShowApiKeys] = useState<string | null>(null)
+  const [showWebhooks, setShowWebhooks] = useState<string | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const [msg, setMsg] = useState<string | null>(null)
   // Object URL of the currently-edited profile's logo (auth-fetched as a
@@ -574,8 +576,16 @@ export function IssuerProfiles() {
               >
                 {t('issuerApiKeys.button')}
               </button>
+              <button
+                type="button"
+                className="btn--sm btn--ghost"
+                onClick={() => setShowWebhooks(showWebhooks === p.id ? null : p.id)}
+              >
+                {t('webhooks.button')}
+              </button>
               {showCounters === p.id && <IssuerCounters profileId={p.id} />}
               {showApiKeys === p.id && <IssuerApiKeys profileId={p.id} />}
+              {showWebhooks === p.id && <WebhookEndpoints profileId={p.id} />}
             </li>
           ))}
         </ul>

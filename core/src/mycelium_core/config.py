@@ -112,6 +112,28 @@ class Settings(BaseSettings):
     sdi_dispatch_timeout_seconds: int = 120
     sdi_dispatch_lease_seconds: int = 300
 
+    # Signed outbound webhooks on invoice state changes (task 2c23e955,
+    # ADR-0047). Fail-closed: OFF by default, so an unconfigured deploy never
+    # emits or delivers. Enabling requires a worker restart (the delivery loop
+    # is registered at startup); events during a disabled window are dropped,
+    # not back-filled. The signing secret is Fernet-enveloped by
+    # ``secret_key`` (no new secret). See docs/runbooks + ADR-0047.
+    webhooks_enabled: bool = False
+    # Per-POST httpx timeout (scalar, all phases); the delivery is also wrapped
+    # in an outer asyncio.timeout so an unresponsive receiver cannot hold the
+    # worker. The lease MUST exceed both, so a crashed in-flight POST is
+    # reclaimed only once it provably cannot still be running.
+    webhook_delivery_timeout_seconds: int = 10
+    webhook_delivery_lease_seconds: int = 120
+    webhook_max_attempts: int = 12
+    webhook_backoff_base_seconds: int = 30
+    webhook_backoff_cap_seconds: int = 3600
+    webhook_poll_interval_seconds: int = 15
+    # Retention: a delivered/dead delivery row is purged after this (its
+    # payload_snapshot carries cessionario data; the invoice itself is the
+    # durable fiscal record).
+    webhook_delivery_retention_days: int = 90
+
     # Memory embeddings (docs/adr/0005). Single embedding store at a
     # fixed fleet dim: every embedder (local or hosted) MUST emit this
     # dim. 1024 = bge-m3 native AND under pgvector's HNSW 2000-dim
