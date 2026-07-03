@@ -128,6 +128,7 @@ async def run_eval(
     humus: bool | None = None,
     humus_kinds: frozenset[str] | None = None,
     exclude_humus_from_base: bool = False,
+    grader_min_rrf: float | None = None,
 ) -> EvalReport:
     """Run every gold case through the real ``memory.retrieve`` and
     aggregate recall@k + MRR, plus the dense-tier health of the org's
@@ -142,7 +143,12 @@ async def run_eval(
     The humus knobs (``humus`` / ``humus_kinds`` / ``exclude_humus_from_base``)
     are threaded to ``memory.retrieve_with_meta`` so the same harness runs the
     A/B configurations of the humus empirical gate (task 4836a6cc); they
-    default to the historical behaviour, so the CI gold gate is unaffected."""
+    default to the historical behaviour, so the CI gold gate is unaffected.
+
+    ``grader_min_rrf`` is the per-call grader/abstain floor override (same
+    semantics as ``memory.retrieve_with_meta``): it lets a bench sweep the
+    floor (task f0d24fdb) without touching the org setting. None (default)
+    keeps the org's configured floor, i.e. the historical behaviour."""
     results: list[CaseResult] = []
     found = 0
     rr_sum = 0.0
@@ -162,6 +168,7 @@ async def run_eval(
             humus=humus,
             humus_kinds=humus_kinds,
             exclude_humus_from_base=exclude_humus_from_base,
+            grader_min_rrf=grader_min_rrf,
             # Eval sweeps are probes: they must not leave retrieval
             # traces (Fase 0, task 561c6aca) or measurement would forge
             # the search demand the graph aggregation reads.

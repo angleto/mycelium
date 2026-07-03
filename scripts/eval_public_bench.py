@@ -58,6 +58,13 @@ async def main() -> None:
     ap.add_argument(
         "--limit-questions", type=int, default=None, help="per-instance question cap (LOCOMO)"
     )
+    ap.add_argument(
+        "--grader-floor",
+        type=float,
+        default=None,
+        help="per-call retrieval_grader_min_rrf override (floor sweep, task f0d24fdb); "
+        "RRF-fused domain, clamp at 0.05",
+    )
     args = ap.parse_args()
 
     instances = _load_instances(args.dataset, Path(args.path))
@@ -86,6 +93,7 @@ async def main() -> None:
                 instance=instance,
                 k=args.k,
                 limit_questions=args.limit_questions,
+                grader_min_rrf=args.grader_floor,
             )
             embedder_models.update(await bench.corpus_embedder_models(s, org_id=org))
         scores.append(score)
@@ -95,7 +103,9 @@ async def main() -> None:
             f"{len(instance.units)} units, {n_q} questions scored"
         )
 
-    report = bench.aggregate(args.dataset, args.k, scores, sorted(embedder_models))
+    report = bench.aggregate(
+        args.dataset, args.k, scores, sorted(embedder_models), grader_min_rrf=args.grader_floor
+    )
     print()
     print(report.render())
 

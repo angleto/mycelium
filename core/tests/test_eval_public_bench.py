@@ -226,6 +226,29 @@ async def test_ingest_and_score_locomo_with_abstention(_embedder: None) -> None:
     assert report.embedder_models  # honesty label always present
 
 
+async def test_grader_floor_threads_to_both_paths(_embedder: None) -> None:
+    """``grader_min_rrf`` reaches the scored path (run_eval) AND the
+    abstention path: at the 0.05 clamp every fused score is below the floor,
+    so scored questions miss and the adversarial question becomes correct --
+    the floor-sweep contract of task f0d24fdb."""
+    inst = bench.parse_locomo_sample(LOCOMO_SYNTHETIC)
+    org, user = await _seed_org()
+    async with tenant_session(str(org), str(user)) as s:
+        await bench.ingest_instance(s, org_id=org, actor_id=user, instance=inst)
+    async with tenant_session(str(org), str(user)) as s:
+        score = await bench.score_instance(
+            s, org_id=org, actor_id=user, instance=inst, k=5, grader_min_rrf=0.05
+        )
+    by_qid = {r.qid: r for r in score.results}
+    assert by_qid["conv-syn:0"].rank is None
+    assert by_qid["conv-syn:1"].rank is None
+    assert by_qid["conv-syn:2"].abstain_correct is True
+    report = bench.aggregate("locomo", 5, [score], ["fake"], grader_min_rrf=0.05)
+    assert report.grader_min_rrf == 0.05
+    assert report.recall_at_k == 0.0
+    assert report.abstention_correct_rate == 1.0
+
+
 async def test_skipped_unresolvable_evidence_is_reported(_embedder: None) -> None:
     """A question whose evidence ids resolve to no stored blob must be
     reported as skipped, never scored as an artificial miss."""
