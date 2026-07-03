@@ -534,10 +534,17 @@ export const en = {
     renamePrompt: 'New channel name',
     confirmDelete: 'Delete this channel?',
   },
+  models: {
+    groupTitle: 'AI models',
+    groupHint:
+      'Two independent roles: the generative model maintains memory (distillation, patterns, seasons, knowledge extraction); the embedding models turn text into vectors for search.',
+  },
   llmp: {
     title: 'AI model provider',
     intro:
-      'Choose which provider backs AI features for this workspace: the bundled local model, or a hosted provider on the platform key or your own (BYOK). A new key is validated before it is saved, and is never shown again.',
+      'The generative model the server uses to maintain memory: distillation, patterns, seasons, knowledge-graph extraction. It is not used by search. Choose the bundled local model, or a hosted provider on the platform key or your own (BYOK). A new key is validated before it is saved, and is never shown again.',
+    current: 'Active now: {{name}}',
+    modelDefault: 'default model',
     provider: 'Provider',
     provider_local: 'Local (bundled)',
     provider_openai: 'OpenAI',
@@ -566,9 +573,15 @@ export const en = {
     saveFactor: 'Save factor',
   },
   emp: {
-    title: 'Hosted embedder',
+    title: 'Search embedding models',
     intro:
-      'Optionally back semantic search with a hosted embedding model (Scaleway) per workspace. The local model (bge-m3) is always on; a hosted model is fused with it at search time and must emit the fleet dimension. A new key is validated before it is saved.',
+      'Embedding models turn text into vectors for search. The local model bge-m3 is always on and is the spine of retrieval; here you can optionally add the hosted EU tier (Scaleway), fused with the local one at search time. It must emit the fleet dimension; a new key is validated before it is saved.',
+    current_local: 'Active now: bge-m3 (local, always on)',
+    current_hosted: 'Active now: bge-m3 (local, always on) + Scaleway {{model}} (hosted EU)',
+    modelDefault: 'default model',
+    provider: 'Hosted tier',
+    provider_local: 'None: local bge-m3 only',
+    provider_scaleway: 'Scaleway (hosted EU)',
     keyInvalid:
       'The embedder key/model could not be validated (it must emit the required dimension). Check and retry.',
   },

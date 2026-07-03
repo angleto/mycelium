@@ -179,8 +179,14 @@ export function SettingsRoute() {
     <DayStartSettings />
     <AvatarSettings />
     <AiAssistantsSettings />
-    {me?.is_admin && isAdminMode() && <LlmProviderSettings />}
-    {me?.is_admin && isAdminMode() && <EmbedderProviderSettings />}
+    {me?.is_admin && isAdminMode() && (
+      <section className="models-group" aria-labelledby="models-group-title">
+        <h2 id="models-group-title">{t('models.groupTitle')}</h2>
+        <p className="hint">{t('models.groupHint')}</p>
+        <LlmProviderSettings />
+        <EmbedderProviderSettings />
+      </section>
+    )}
     {me?.is_admin && isAdminMode() && <MemoryChannelsAdmin />}
     {me?.is_admin && isAdminMode() && <RetrievalSettings />}
     {me?.is_admin && isAdminMode() && <AttachmentSettings />}

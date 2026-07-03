@@ -135,6 +135,16 @@ export function LlmProviderSettings() {
     <section className="card">
       <h2>{t('llmp.title')}</h2>
       <p className="hint">{t('llmp.intro')}</p>
+      {cur && (
+        <p className="muted">
+          {t('llmp.current', {
+            name:
+              cur.provider === 'local'
+                ? t('llmp.provider_local')
+                : `${t(`llmp.provider_${cur.provider}`)}: ${cur.model || t('llmp.modelDefault')}`,
+          })}
+        </p>
+      )}
       {err && <p className="err">{err}</p>}
       {msg && <p className="ok">{msg}</p>}
 

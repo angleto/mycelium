@@ -122,11 +122,18 @@ export function EmbedderProviderSettings() {
     <section className="card">
       <h2>{t('emp.title')}</h2>
       <p className="hint">{t('emp.intro')}</p>
+      {cur && (
+        <p className="muted">
+          {cur.provider === 'scaleway'
+            ? t('emp.current_hosted', { model: cur.model || t('emp.modelDefault') })
+            : t('emp.current_local')}
+        </p>
+      )}
       {err && <p className="err">{err}</p>}
       {msg && <p className="ok">{msg}</p>}
 
       <label>
-        {t('llmp.provider')}
+        {t('emp.provider')}
         <select
           value={provider}
           disabled={!loaded}
@@ -134,7 +141,7 @@ export function EmbedderProviderSettings() {
         >
           {PROVIDERS.map((p) => (
             <option key={p} value={p}>
-              {t(`llmp.provider_${p}`)}
+              {t(`emp.provider_${p}`)}
             </option>
           ))}
         </select>

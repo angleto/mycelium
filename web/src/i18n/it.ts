@@ -535,10 +535,17 @@ export const it: Catalog = {
     renamePrompt: 'Nuovo nome del canale',
     confirmDelete: 'Eliminare questo canale?',
   },
+  models: {
+    groupTitle: 'Modelli AI',
+    groupHint:
+      'Due ruoli indipendenti: il modello generativo manutiene la memoria (distillazione, pattern, season, estrazione di conoscenza); i modelli di embedding trasformano il testo in vettori per la ricerca.',
+  },
   llmp: {
     title: 'Provider del modello AI',
     intro:
-      'Scegli quale provider alimenta le funzioni AI di questo workspace: il modello locale integrato, oppure un provider hosted sulla chiave della piattaforma o sulla tua (BYOK). Una nuova chiave viene validata prima del salvataggio e non viene più mostrata.',
+      'Il modello generativo che il server usa per manutenere la memoria: distillazione, pattern, season, estrazione del grafo di conoscenza. Non è usato dalla ricerca. Scegli il modello locale integrato, oppure un provider hosted sulla chiave della piattaforma o sulla tua (BYOK). Una nuova chiave viene validata prima del salvataggio e non viene più mostrata.',
+    current: 'Attivo ora: {{name}}',
+    modelDefault: 'modello di default',
     provider: 'Provider',
     provider_local: 'Locale (integrato)',
     provider_openai: 'OpenAI',
@@ -567,9 +574,15 @@ export const it: Catalog = {
     saveFactor: 'Salva fattore',
   },
   emp: {
-    title: 'Embedder hosted',
+    title: 'Modelli di embedding (ricerca)',
     intro:
-      'Opzionalmente alimenta la ricerca semantica con un modello di embedding hosted (Scaleway) per workspace. Il modello locale (bge-m3) è sempre attivo; un modello hosted viene fuso con esso in fase di ricerca e deve emettere la dimensione del fleet. Una nuova chiave viene validata prima del salvataggio.',
+      'I modelli di embedding trasformano il testo in vettori per la ricerca. Il modello locale bge-m3 è sempre attivo ed è la spina dorsale del retrieval; qui puoi opzionalmente aggiungere il tier hosted EU (Scaleway), fuso con il locale in fase di ricerca. Deve emettere la dimensione del fleet; una nuova chiave viene validata prima del salvataggio.',
+    current_local: 'Attivo ora: bge-m3 (locale, sempre attivo)',
+    current_hosted: 'Attivo ora: bge-m3 (locale, sempre attivo) + Scaleway {{model}} (hosted EU)',
+    modelDefault: 'modello di default',
+    provider: 'Tier hosted',
+    provider_local: 'Nessuno: solo bge-m3 locale',
+    provider_scaleway: 'Scaleway (hosted EU)',
     keyInvalid:
       'Impossibile validare chiave/modello embedder (deve emettere la dimensione richiesta). Controlla e riprova.',
   },
