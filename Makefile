@@ -1,4 +1,4 @@
-.PHONY: sync lint fmt type test eval eval-humus mcp-coverage mcp-coverage-check up down \
+.PHONY: sync lint fmt type test eval eval-humus eval-bench mcp-coverage mcp-coverage-check up down \
         db-bootstrap migrate db-harden revision run-api run-mcp run-worker run-sdi
 
 sync:
@@ -30,6 +30,15 @@ eval:
 eval-humus:
 	uv run python scripts/eval_humus_ab.py --raw "$(RAW)" --consolidation "$(CON)" \
 		$(if $(ORG),--org $(ORG),) $(if $(ACTOR),--actor $(ACTOR),)
+
+# Public memory benchmarks (LongMemEval / LOCOMO, task cc4653bd): ingest an
+# operator-provided dataset file into throwaway orgs and score retrieval on
+# the same run_eval path as CI. NEVER against prod (creates orgs/blobs):
+#   make eval-bench DATASET=longmemeval FILE=~/.../longmemeval_oracle.json [K=10 LIMIT=20 QLIMIT=50]
+eval-bench:
+	uv run python scripts/eval_public_bench.py --dataset "$(DATASET)" --path "$(FILE)" \
+		$(if $(K),--k $(K),) $(if $(LIMIT),--limit-instances $(LIMIT),) \
+		$(if $(QLIMIT),--limit-questions $(QLIMIT),)
 
 # Regenerate the auto-generated tool inventory in docs/mcp-coverage.md from
 # the live registry (counts + per-domain listing never drift from code).
