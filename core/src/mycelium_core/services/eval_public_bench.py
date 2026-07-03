@@ -127,23 +127,32 @@ def parse_longmemeval_instance(obj: Mapping[str, Any]) -> BenchInstance:
             f"lengths differ ({len(session_ids)}/{len(dates)}/{len(sessions)})"
         )
     units: list[IngestUnit] = []
-    seen: set[str] = set()
+    seen: dict[str, str] = {}
     for sid_raw, date, turns in zip(session_ids, dates, sessions, strict=True):
         sid = str(sid_raw)[:_MAX_SOURCE_ID]
-        if sid in seen:  # third-party data: never let a dup silently merge
-            raise ValueError(f"{where}: duplicate haystack session id {sid!r}")
-        seen.add(sid)
-        lines = [f"[session date: {date}]"]
+        turn_lines = []
         for turn in turns:
             role = str(turn.get("role", "user"))
             content = str(turn.get("content", "")).strip()
             if content:
-                lines.append(f"{role}: {content}")
+                turn_lines.append(f"{role}: {content}")
+        body = "\n".join(turn_lines)
+        if sid in seen:
+            # The _s/_m haystacks sample padding sessions and can repeat one:
+            # the turns are identical but each occurrence gets its own
+            # sampled date, so the comparison must be on the BODY. An
+            # identical repeat is the same unit (keep the first, with its
+            # date); two DIFFERENT sessions under one id would silently
+            # merge -- that stays an error (third-party data).
+            if seen[sid] != body:
+                raise ValueError(f"{where}: duplicate haystack session id {sid!r}")
+            continue
+        seen[sid] = body
         units.append(
             IngestUnit(
                 source_kind=SOURCE_KIND_LONGMEMEVAL,
                 source_id=sid,
-                text="\n".join(lines),
+                text=f"[session date: {date}]\n{body}",
                 date=str(date),
             )
         )

@@ -161,6 +161,29 @@ def test_parse_longmemeval_abstention_and_errors() -> None:
         bench.parse_longmemeval_instance(no_evidence)
 
 
+def test_parse_longmemeval_duplicate_sessions() -> None:
+    """The _s/_m haystacks can repeat a padding session verbatim: an identical
+    repeat is skipped (one unit), while two DIFFERENT sessions under one id
+    still fail loudly (silent merge of third-party data)."""
+    base = LONGMEMEVAL_SYNTHETIC[0]
+    verbatim = dict(base)
+    verbatim["haystack_session_ids"] = ["s-a", "s-b", "s-a"]
+    # The repeat carries its OWN sampled date (as in the real _s data): the
+    # dedupe must compare session bodies, not the date-headed render.
+    verbatim["haystack_dates"] = [*base["haystack_dates"], "2023/05/27 (Sat) 09:00"]  # type: ignore[misc]
+    verbatim["haystack_sessions"] = [*base["haystack_sessions"], base["haystack_sessions"][0]]  # type: ignore[misc]
+    inst = bench.parse_longmemeval_instance(verbatim)
+    assert [u.source_id for u in inst.units] == ["s-a", "s-b"]
+    assert inst.units[0].text.startswith("[session date: 2023/05/20")  # first occurrence wins
+    conflicting = dict(verbatim)
+    conflicting["haystack_sessions"] = [
+        *base["haystack_sessions"],  # type: ignore[misc]
+        [{"role": "user", "content": "different text under the same id"}],
+    ]
+    with pytest.raises(ValueError, match="duplicate haystack session id"):
+        bench.parse_longmemeval_instance(conflicting)
+
+
 def test_parse_locomo_sample_shape() -> None:
     inst = bench.parse_locomo_sample(LOCOMO_SYNTHETIC)
     assert inst.instance_id == "conv-syn"
