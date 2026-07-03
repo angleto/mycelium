@@ -53,6 +53,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from mycelium_core.models.note import Note
 from mycelium_core.models.note_coactivity import NoteCoactivity
+from mycelium_core.models.note_edge_usage import NoteEdgeUsage
 from mycelium_core.models.note_link import NoteNoteLink, NoteTaskLink
 from mycelium_core.models.note_tag import NoteTag
 from mycelium_core.models.tag import Tag, TagKind
@@ -104,6 +105,24 @@ def _coactivity_weight(session_count: int) -> float:
     if session_count <= 0:
         return 0.0
     return 1.0 - 1.0 / (1.0 + _COACTIVITY_SCALE * session_count)
+
+
+# Search-informed usage scale (Fase 2, task 561c6aca). Same saturating
+# shape and the same 0.4 calibration as co-activity, applied to the
+# recency-decayed traversal mass: one fresh co-retrieval (decay_score
+# ~1.0) reads like one shared working session (~0.29), and search
+# demand alone never reaches 1 -- a manual link or shared tag still
+# dominates the soft-OR.
+_USAGE_SCALE = 0.4
+
+
+def _usage_weight(decay_score: float) -> float:
+    """Saturating [0, 1] contribution of a pair's recency-decayed
+    co-retrieval mass (``note_edge_usage.decay_score``). Zero (never
+    co-retrieved in the window) is neutral in the soft-OR."""
+    if decay_score <= 0:
+        return 0.0
+    return 1.0 - 1.0 / (1.0 + _USAGE_SCALE * decay_score)
 
 
 @dataclass(frozen=True)
@@ -398,6 +417,32 @@ async def compute_note_edge_weights(
         # Rows are stored canonical, but fold through _pair_key anyway so a
         # mismatch can never split a pair into two undirected edges.
         by_pair[_pair_key(note_a_id, note_b_id)].append(w_coact)
+
+    # Search-informed edge usage (Fase 2, task 561c6aca): the fourth
+    # source. Same shape as co-activity -- one cheap SELECT of the
+    # worker-materialised pair counters, each a saturating contribution
+    # in the soft-OR; pairs with search demand but no link/tag/co-work
+    # surface as independent evidence. Direction (forward/backward
+    # counts) deliberately NOT read here: the weight stays undirected
+    # (PageRank/betweenness/Leiden assume it), direction only feeds the
+    # link_direct candidate. Empty table -> nothing appended -> byte-
+    # identical to the three-source result (pinned in test).
+    usage_rows = (
+        await session.execute(
+            select(
+                NoteEdgeUsage.note_a_id,
+                NoteEdgeUsage.note_b_id,
+                NoteEdgeUsage.decay_score,
+            ).where(NoteEdgeUsage.org_id == org_id)
+        )
+    ).all()
+    for note_a_id, note_b_id, decay_score in usage_rows:
+        if note_a_id in proposed_note_ids or note_b_id in proposed_note_ids:
+            continue
+        w_usage = _usage_weight(decay_score)
+        if w_usage <= 0:
+            continue
+        by_pair[_pair_key(note_a_id, note_b_id)].append(w_usage)
 
     # Task edges (ADR-0042 D1), only when the weave is unified. Both tables
     # carry their own uniqueness (TaskRelation unique per pair, NoteTaskLink

@@ -11,12 +11,12 @@ cost of assembling a distillation/reading neighbourhood no longer scales
 with the graph (plan §2: best-first thresholded, the pre-APPR phase).
 
 Weight parity is a hard contract, pinned by test: for any pair the
-soft-OR of the same three evidence sources (typed links, shared-generic-tag
-Adamic-Adar, co-activity) must equal the full builder's weight -- the
+soft-OR of the same four evidence sources (typed links, shared-generic-tag
+Adamic-Adar, co-activity, search-informed edge usage) must equal the full builder's weight -- the
 helpers (``_KIND_WEIGHT``, ``_softor``, ``_adamic_adar_pair``,
-``_coactivity_weight``) are imported from ``graph``, never duplicated.
-``note_edge_usage`` (Fase 0 substrate) becomes the 4th soft-OR input in
-Phase 2; the seam is marked in ``local_edges``.
+``_coactivity_weight``, ``_usage_weight``) are imported from ``graph``, never duplicated.
+``note_edge_usage`` (materialised by Fase 2's ``refresh_edge_usage``) is
+the 4th soft-OR input, folded exactly like co-activity.
 
 Notes only: the unified include_tasks weave stays on the full builders
 until a bounded surface needs it.
@@ -38,6 +38,7 @@ from mycelium_core.models.membership import Role
 from mycelium_core.models.memory_blob import MemoryBlob
 from mycelium_core.models.note import Note
 from mycelium_core.models.note_coactivity import NoteCoactivity
+from mycelium_core.models.note_edge_usage import NoteEdgeUsage
 from mycelium_core.models.note_link import NoteNoteLink
 from mycelium_core.models.note_part_index_pointer import NotePartIndexPointer
 from mycelium_core.models.note_tag import NoteTag
@@ -47,6 +48,7 @@ from mycelium_core.services.graph import (
     _adamic_adar_pair,
     _coactivity_weight,
     _softor,
+    _usage_weight,
 )
 from mycelium_core.services.rbac import require_role
 
@@ -68,8 +70,8 @@ async def local_edges(
 ) -> dict[uuid.UUID, float]:
     """Weighted edges touching ``note_id``: ``{neighbour_id: weight}`` with
     the exact soft-OR the full builder would give the pair (parity pinned in
-    test_graph_local). Three bounded queries (links, co-activity, co-tag) +
-    two tag lookups; nothing scans the org.
+    test_graph_local). Four bounded queries (links, co-activity, edge usage,
+    co-tag) + a tag-degree lookup; nothing scans the org.
 
     Neighbours in ``review_state='proposed'`` are dropped (they are not
     graph nodes, ADR-0043) -- same filter as the full builder.
@@ -173,9 +175,29 @@ async def local_edges(
         if w_coact > 0:
             contribs[nb].append(w_coact)
 
-    # 4) note_edge_usage (Fase 0 substrate) drops in HERE as the 4th
-    #    soft-OR input once Phase 2 materialises it (same pair-keyed
-    #    lookup shape as co-activity). Empty table == absent == neutral.
+    # 4) Search-informed edge usage (Fase 2, pair-keyed canonical a<=b;
+    #    query both slots, mirror of co-activity). Empty table == absent
+    #    == neutral; parity with the full builder pinned in test.
+    usage_rows = (
+        await session.execute(
+            select(
+                NoteEdgeUsage.note_a_id, NoteEdgeUsage.note_b_id, NoteEdgeUsage.decay_score
+            ).where(
+                NoteEdgeUsage.org_id == org_id,
+                or_(
+                    NoteEdgeUsage.note_a_id == note_id,
+                    NoteEdgeUsage.note_b_id == note_id,
+                ),
+            )
+        )
+    ).all()
+    for a_id, b_id, decay_score in usage_rows:
+        nb = b_id if a_id == note_id else a_id
+        if nb == note_id:
+            continue
+        w_usage = _usage_weight(decay_score)
+        if w_usage > 0:
+            contribs[nb].append(w_usage)
 
     if not contribs:
         return {}

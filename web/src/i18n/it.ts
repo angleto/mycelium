@@ -210,9 +210,10 @@ export const it: Catalog = {
     },
     edges: {
       title: 'Archi da curare',
-      hint: 'Link da aggiungere (forte affinità, nessun link manuale) o da potare (un link “related” la cui base è decaduta).',
+      hint: 'Link da aggiungere (forte affinità, nessun link manuale), da potare (un link “related” la cui base è decaduta) o da promuovere a diretto (la ricerca attraversa la coppia in una sola direzione).',
       add: 'aggiungi related',
       prune: 'pota related',
+      direct: 'promuovi diretto',
     },
     pending: {
       title: 'In attesa di revisione',

@@ -350,6 +350,16 @@ class Settings(BaseSettings):
     # MYCELIUM_GARDEN_COACTIVITY_ENABLED=false to disable.
     garden_coactivity_enabled: bool = True
 
+    # Search-informed edge-usage aggregation (Fase 2, task 561c6aca).
+    # When set, each garden tick folds the windowed retrieval traces
+    # into note_edge_usage pair counters, the FOURTH soft-OR source of
+    # the unified note edge weight (and the link_direct candidate's
+    # substrate). Same posture as co-activity above: runs before the
+    # graph snapshot, ON by default, still gated by
+    # ``garden_loop_enabled``.
+    # MYCELIUM_GARDEN_EDGE_USAGE_ENABLED=false to disable.
+    garden_edge_usage_enabled: bool = True
+
     # Distillation fidelity verify pass (task a44e72a4). When set,
     # ``decomposition.distill_note`` runs a SECOND metered LLM pass that keeps
     # only the claims of the draft distillation explicitly supported by the

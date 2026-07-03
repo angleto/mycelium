@@ -423,7 +423,7 @@ async def garden_apply(
 async def garden_candidates(
     ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
     kind: Annotated[
-        Literal["all", "distill", "pattern", "season", "link_add", "link_prune"],
+        Literal["all", "distill", "pattern", "season", "link_add", "link_prune", "link_direct"],
         Query(),
     ] = "all",
     limit: Annotated[int, Query(ge=1, le=200)] = 50,

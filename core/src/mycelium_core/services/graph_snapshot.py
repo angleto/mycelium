@@ -29,6 +29,7 @@ from mycelium_core.config import get_settings
 from mycelium_core.models.garden_graph_snapshot import GardenGraphSnapshot
 from mycelium_core.models.note import Note
 from mycelium_core.models.note_coactivity import NoteCoactivity
+from mycelium_core.models.note_edge_usage import NoteEdgeUsage
 from mycelium_core.models.note_link import NoteNoteLink, NoteTaskLink
 from mycelium_core.models.note_tag import NoteTag
 from mycelium_core.models.task import Task
@@ -90,9 +91,28 @@ async def graph_signature(
             ).where(NoteCoactivity.org_id == org_id)
         )
     ).one()
+    # Search-informed edge usage (Fase 2): the fourth soft-OR source,
+    # fingerprinted like co-activity (count + traversal sum + latest
+    # traversal -- content, never computed_at). decay_score drift alone
+    # (same window, later refresh) deliberately does NOT bump the
+    # signature: an org with no new searches keeps its snapshot, exactly
+    # the no-op-rematerialise property the coactivity fingerprint has.
+    usage_n, usage_sum, max_usage_ts = (
+        await session.execute(
+            select(
+                func.count(),
+                func.coalesce(func.sum(NoteEdgeUsage.traversal_count), 0),
+                func.max(NoteEdgeUsage.last_traversed_at),
+            ).where(NoteEdgeUsage.org_id == org_id)
+        )
+    ).one()
     ts = max_link_ts.isoformat() if max_link_ts is not None else "-"
     cts = max_coact_ts.isoformat() if max_coact_ts is not None else "-"
-    sig = f"n{notes}:l{links}:t{note_tags}:{ts}:c{coact_n}/{coact_sum}/{cts}"
+    uts = max_usage_ts.isoformat() if max_usage_ts is not None else "-"
+    sig = (
+        f"n{notes}:l{links}:t{note_tags}:{ts}:c{coact_n}/{coact_sum}/{cts}"
+        f":u{usage_n}/{usage_sum}/{uts}"
+    )
     if not include_tasks:
         return sig
     tasks_n = (

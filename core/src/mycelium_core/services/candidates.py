@@ -26,6 +26,13 @@ families.
                        co-activity). Conservative: never touches
                        ``hypha_of``/``supersedes``/``contradicts`` (they
                        carry provenance / decisions).
+    * ``link_direct``: a pair search traffic keeps traversing in ONE
+                       direction (Fase 2 ``note_edge_usage`` counters):
+                       propose promoting to a directed ``hypha_of``
+                       link, entry note as parent. Heuristic on a
+                       similarity artifact (design risk #5), so the
+                       thresholds are conservative and the proposal is
+                       NEVER auto-applied.
 
 Everything runs in a tenant session (RLS scopes to the org). ``project_id``
 narrows to one project (the note<->project-tag junction); ``None`` is
@@ -48,6 +55,7 @@ from sqlalchemy.orm import aliased
 
 from mycelium_core.models.note import Note, NoteMaturity
 from mycelium_core.models.note_coactivity import NoteCoactivity
+from mycelium_core.models.note_edge_usage import NoteEdgeUsage
 from mycelium_core.models.note_link import NoteNoteLink
 from mycelium_core.models.note_tag import NoteTag
 from mycelium_core.services import graph as graph_svc
@@ -60,7 +68,16 @@ from mycelium_core.services.graph import _note_generic_tags, _pair_key
 # with thousands of inert notes never materialises them all.
 _SCAN_CAP = 2000
 
-CandidateKind = str  # "all" | "distill" | "pattern" | "season" | "link_add" | "link_prune"
+# link_direct gates (Fase 2, design risk #5: ranking adjacency is a
+# similarity artifact, not causality -- err far toward silence). A pair
+# must have been co-retrieved in at least this many distinct searches of
+# the window...
+_LINK_DIRECT_MIN_TRAVERSALS = 5
+# ...AND the dominant direction must beat the other by this factor
+# (against max(minor, 1), so a 5-0 skew qualifies and a 5-2 does not).
+_LINK_DIRECT_ASYMMETRY = 4
+
+CandidateKind = str  # all|distill|pattern|season|link_add|link_prune|link_direct
 
 
 @dataclass(frozen=True)
@@ -126,6 +143,7 @@ async def list_distillation_candidates(
     want_season = kind in ("all", "season")
     want_link_add = kind in ("all", "link_add")
     want_link_prune = kind in ("all", "link_prune")
+    want_link_direct = kind in ("all", "link_direct")
 
     project_ids: set[uuid.UUID] | None = None
     if project_id is not None:
@@ -291,7 +309,7 @@ async def list_distillation_candidates(
         nodes.extend(season_rows[:limit])
 
     # ---- EDGE candidates (need the weave + existing links) ---------------
-    if want_link_add or want_link_prune:
+    if want_link_add or want_link_prune or want_link_direct:
         linked_pairs: set[tuple[uuid.UUID, uuid.UUID]] = set()
         related_pairs: list[tuple[uuid.UUID, uuid.UUID]] = []
         link_rows = (
@@ -372,6 +390,64 @@ async def list_distillation_candidates(
                     )
                 )
             edges.extend(prune_rows[:limit])
+
+        # ---- EDGE / link_direct (search-informed direction, Fase 2) ------
+        # Ranking adjacency is a similarity artifact, not causality
+        # (design risk #5): promoting it to a directed ``hypha_of`` can
+        # fabricate the very structure the graph claims to discover. So
+        # the gate is conservative -- a real traffic mass AND a strong
+        # one-way skew -- and the outcome is only ever a PROPOSAL.
+        if want_link_direct:
+            related_set = set(related_pairs)
+            direct_rows: list[_EdgeCandidate] = []
+            usage_rows = (
+                await session.execute(
+                    select(
+                        NoteEdgeUsage.note_a_id,
+                        NoteEdgeUsage.note_b_id,
+                        NoteEdgeUsage.traversal_count,
+                        NoteEdgeUsage.forward_count,
+                        NoteEdgeUsage.backward_count,
+                    ).where(NoteEdgeUsage.org_id == org_id)
+                )
+            ).all()
+            for a_id, b_id, traversals, fwd, bwd in usage_rows:
+                pk = _pair_key(a_id, b_id)
+                # Only unlinked or ``related``-linked pairs: a pair that
+                # already carries a structural link (hypha_of etc.) is
+                # not a promotion target.
+                if pk in linked_pairs and pk not in related_set:
+                    continue
+                if project_ids is not None and (
+                    pk[0] not in project_ids or pk[1] not in project_ids
+                ):
+                    continue
+                dominant = max(fwd, bwd)
+                minor = min(fwd, bwd)
+                if traversals < _LINK_DIRECT_MIN_TRAVERSALS:
+                    continue
+                if dominant < _LINK_DIRECT_ASYMMETRY * max(minor, 1):
+                    continue
+                # forward = canonical-a ranked above canonical-b, so the
+                # dominant side's entry note becomes the parent.
+                entry_id, sub_id = (pk[0], pk[1]) if fwd >= bwd else (pk[1], pk[0])
+                direct_rows.append(
+                    _EdgeCandidate(
+                        op="direct",
+                        src_note_id=entry_id,
+                        dst_note_id=sub_id,
+                        link_kind="hypha_of",
+                        src_title="",
+                        dst_title="",
+                        reason=(
+                            f"la ricerca attraversa la coppia in una sola direzione "
+                            f"({dominant}/{dominant + minor} attraversamenti)"
+                        ),
+                        score=round(dominant / (dominant + minor), 6),
+                    )
+                )
+            direct_rows.sort(key=lambda c: (-c.score, str(c.src_note_id)))
+            edges.extend(direct_rows[:limit])
 
     # ---- fill titles for every note referenced (one batched query) -------
     needed: set[uuid.UUID] = set()

@@ -32,6 +32,7 @@ from mycelium_core.models.organization import Organization
 from mycelium_core.services import (
     autonomous_budget,
     coactivity,
+    edge_usage,
     garden_classify,
     garden_health,
     garden_learning,
@@ -139,6 +140,20 @@ async def run_once() -> int:
                             _log.info("coactivity refresh org=%s pairs=%d", org_id, n_pairs)
                 except Exception:
                     _log.exception("coactivity refresh failed for org=%s", org_id)
+            # Search-informed edge-usage materialisation (Fase 2, task
+            # 561c6aca): folds the windowed retrieval traces into
+            # note_edge_usage, the FOURTH soft-OR source. Same ordering
+            # constraint as co-activity (before the graph snapshot, whose
+            # signature folds in the usage fingerprint) and the same
+            # failure-isolation / sub-flag posture.
+            if get_settings().garden_edge_usage_enabled:
+                try:
+                    async with tenant_session(str(org_id), str(owner), actor_kind="system") as eus:
+                        n_pairs = await edge_usage.refresh_edge_usage(eus, org_id=org_id)
+                        if n_pairs:
+                            _log.info("edge-usage refresh org=%s pairs=%d", org_id, n_pairs)
+                except Exception:
+                    _log.exception("edge-usage refresh failed for org=%s", org_id)
             # Graph-analytics materialisation (task d8664631): PageRank +
             # Leiden + betweenness into garden_graph_snapshot. Signature-
             # gated, so an unchanged graph costs three COUNT queries; only

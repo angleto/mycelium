@@ -13,7 +13,8 @@ import type { components } from '../api/schema'
 //  - Nodi da distillare : distill | pattern | season candidates (compact
 //    inert material into a denser atom).
 //  - Archi da curare    : link_add (a strong tag/co-activity pair with no
-//    manual link) | link_prune (a `related` link whose basis has decayed).
+//    manual link) | link_prune (a `related` link whose basis has decayed)
+//    | link_direct (one-way search traversal -> promote to hypha_of).
 //  - In attesa di revisione : autonomously-produced humus atoms awaiting a
 //    human approve/reject (ADR-0043).
 //
@@ -198,14 +199,14 @@ export function GardenReviewRoute() {
                   return (
                     <li key={key} className="ghreview__item">
                       <span className="ghreview__glyph" aria-hidden="true">
-                        {e.op === 'add' ? '➕' : '✂️'}
+                        {e.op === 'add' ? '➕' : e.op === 'direct' ? '⤴️' : '✂️'}
                       </span>
                       <span className="ghreview__body">
                         <span className="ghreview__title">
                           <Link to={`/notes/${e.src_note_id}`}>
                             {e.src_title || e.src_note_id.slice(0, 8)}
                           </Link>{' '}
-                          <span aria-hidden="true">↔</span>{' '}
+                          <span aria-hidden="true">{e.op === 'direct' ? '→' : '↔'}</span>{' '}
                           <Link to={`/notes/${e.dst_note_id}`}>
                             {e.dst_title || e.dst_note_id.slice(0, 8)}
                           </Link>
@@ -213,7 +214,13 @@ export function GardenReviewRoute() {
                         <span className="ghreview__reason">{e.reason}</span>
                       </span>
                       <span className="chip">
-                        {t(e.op === 'add' ? 'gardenReview.edges.add' : 'gardenReview.edges.prune')}
+                        {t(
+                          e.op === 'add'
+                            ? 'gardenReview.edges.add'
+                            : e.op === 'direct'
+                              ? 'gardenReview.edges.direct'
+                              : 'gardenReview.edges.prune',
+                        )}
                       </span>
                       <span className="muted" title={t('gardenReview.viaAgentHint')}>
                         {t('gardenReview.viaAgent')}

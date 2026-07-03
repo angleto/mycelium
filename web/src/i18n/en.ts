@@ -211,9 +211,10 @@ export const en = {
     },
     edges: {
       title: 'Edges to curate',
-      hint: 'Links to add (strong affinity, no manual link) or prune (a “related” link whose basis has decayed).',
+      hint: 'Links to add (strong affinity, no manual link), prune (a “related” link whose basis has decayed) or promote to direct (search keeps traversing the pair one way).',
       add: 'add related',
       prune: 'prune related',
+      direct: 'promote direct',
     },
     pending: {
       title: 'Awaiting review',

@@ -5220,10 +5220,13 @@ async def list_distillation_candidates(
       omit it to use the org's hosted provider (metered).
     - EDGE candidates (curate the link graph): ``link_add`` (a strong
       tag/co-activity pair with no manual link -> create a ``related`` link),
-      ``link_prune`` (a ``related`` link whose basis has decayed).
+      ``link_prune`` (a ``related`` link whose basis has decayed),
+      ``link_direct`` (search traffic keeps traversing the pair in ONE
+      direction -> propose promoting to a directed ``hypha_of``, entry
+      note as parent; conservative heuristic, never auto-applied).
 
     ``kind`` filters to one family (all|distill|pattern|season|link_add|
-    link_prune). After acting, autonomously-produced atoms go through
+    link_prune|link_direct). After acting, autonomously-produced atoms go through
     ``garden_review_pending`` -> ``garden_review_approve``. Member role;
     RLS-scoped."""
     async with _tenant(token, org_id) as (s, org, _user):
