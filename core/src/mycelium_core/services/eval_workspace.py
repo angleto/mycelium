@@ -46,7 +46,7 @@ import json
 import math
 import random
 import uuid
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -108,8 +108,21 @@ _SCHEMA: dict[str, dict[str, tuple[str, str, bool, str]]] = {
         "porta": ("porta", "port", False, "port"),
         "endpoint": ("endpoint", "endpoint", False, "url"),
         "backup": ("piano di backup", "backup schedule", False, "schedule"),
+        "responsabile": ("responsabile", "owner", True, "person"),
     },
 }
+
+# Relational attributes whose value is a REGISTRY person entity (value_kind
+# 'person'): they are FORCED onto every entity of the type so the fact
+# registry always carries traversable chains (A2). project.referente is the
+# one T2's multi-hop walks; system.responsabile makes the relation graph
+# richer (a second relational kind). Sampling the value from the registry --
+# not a global name pool -- is what lets ``person_by_name`` resolve a chain.
+_RELATIONAL_ATTRS: dict[str, tuple[str, ...]] = {
+    "project": ("referente",),
+    "system": ("responsabile",),
+}
+_MAX_LEAD_PERSONS = 4  # small pool => a lead is referente of >=2 projects (fan-out)
 
 _PERSON_NAMES = (
     "Giulia Ferri",
@@ -178,6 +191,9 @@ class Fact:
     kg: bool = False
     old_value: str | None = None  # temporal history (anti-recency pairs)
     stale_unit_id: str | None = None  # unit realizing old_value
+    valid_from: str | None = None  # ISO date the CURRENT value took effect
+    old_valid_from: str | None = None  # ISO date the OLD value took effect
+    as_of_pin: str | None = None  # a date strictly between the two (for T2)
 
 
 @dataclasses.dataclass
@@ -211,6 +227,88 @@ class Enricher(Protocol):
 class NoopEnricher:
     def enrich(self, unit: Unit, facts: Sequence[Fact]) -> Unit:
         return unit
+
+
+# Published enrichment prompt (A11): the model rewrites the note as richer
+# prose but every VALUE currently in the text must survive verbatim -- the
+# generator VERIFIES this and keeps the template text on any loss, so an
+# enricher can never silently corrupt the ground truth.
+ENRICH_PROMPT = (
+    "Sei un collega che riscrive un appunto di lavoro rendendolo più naturale "
+    "e discorsivo, nella STESSA lingua. Vincolo assoluto: ogni valore concreto "
+    "già presente (date, importi, numeri, nomi propri, versioni, URL) deve "
+    "restare IDENTICO carattere per carattere. Non inventare fatti, non "
+    "rimuovere valori. Rispondi SOLO con il testo riscritto.\n\n{text}"
+)
+ENRICH_PROMPT_ID = "wseval-enrich-v1"
+
+
+def _values_present(text: str, facts: Sequence[Fact]) -> list[str]:
+    """The load-bearing value strings actually realized in this unit's text
+    (a distributed A-side legitimately lacks its value -- only what is present
+    must survive enrichment)."""
+    out: list[str] = []
+    for f in facts:
+        if f.value and f.value in text:
+            out.append(f.value)
+        if f.valid_from and f.valid_from in text:
+            out.append(f.valid_from)
+    return out
+
+
+class FakeEnricher:
+    """Deterministic stand-in for CI: wraps the text in extra prose while
+    preserving every value, so the seam and the verifier are exercised
+    without an LLM. ``corrupt=True`` drops values to prove the verifier
+    rejects a lossy enrichment."""
+
+    def __init__(self, *, corrupt: bool = False) -> None:
+        self._corrupt = corrupt
+        self.matrix = {
+            "provider": "fake",
+            "model": "fake-enricher",
+            "temperature": None,
+            "prompt": ENRICH_PROMPT_ID,
+        }
+
+    def enrich(self, unit: Unit, facts: Sequence[Fact]) -> Unit:
+        if self._corrupt:
+            body = unit.text
+            for v in _values_present(unit.text, facts):
+                body = body.replace(v, "REDACTED")
+            new_text = body
+        else:
+            new_text = f"Riepilogo della giornata.\n\n{unit.text}\n\nFine appunto."
+        return dataclasses.replace(unit, text=new_text, generation=dict(self.matrix))
+
+
+class LLMEnricher:
+    """Config-driven enricher: ``complete`` is a caller-wired ``prompt ->
+    text`` (the provider/HTTP client lives at the call site, so core never
+    imports provider code -- mirrors :class:`LLMParaphraser` in eval_queries).
+    Fact preservation is verified by :func:`generate_workspace`, not here."""
+
+    def __init__(
+        self,
+        complete: Callable[[str], str],
+        *,
+        provider: str,
+        model: str,
+        temperature: float | None = None,
+    ) -> None:
+        self._complete = complete
+        self.matrix = {
+            "provider": provider,
+            "model": model,
+            "temperature": temperature,
+            "prompt": ENRICH_PROMPT_ID,
+        }
+
+    def enrich(self, unit: Unit, facts: Sequence[Fact]) -> Unit:
+        rewritten = self._complete(ENRICH_PROMPT.format(text=unit.text)).strip()
+        if not rewritten:
+            return unit
+        return dataclasses.replace(unit, text=rewritten, generation=dict(self.matrix))
 
 
 # ── value generators ────────────────────────────────────────────────────────
@@ -252,6 +350,19 @@ def _value(rng: random.Random, kind: str, taken: set[str]) -> str:
             return v
     # Small pools (city/role/...) legitimately repeat across entities.
     return v
+
+
+def _history_dates(rng: random.Random) -> tuple[str, str, str]:
+    """(old_valid_from, as_of_pin, valid_from) as ISO dates with
+    old < pin < new, deterministic and plausibly spaced. Day-of-month is
+    fixed so the three dates cannot collide inside one month."""
+    old_month = rng.randint(1, 5)
+    new_month = rng.randint(8, 12)
+    pin_month = rng.randint(old_month + 1, new_month - 1)
+    old = f"2025-{old_month:02d}-05"
+    pin = f"2025-{pin_month:02d}-15"
+    new = f"2025-{new_month:02d}-25"
+    return old, pin, new
 
 
 # ── text realization (template-v1) ──────────────────────────────────────────
@@ -315,23 +426,40 @@ _FILLER = {
 }
 
 
+def _validity_clause(fact: Fact, lang: str) -> str:
+    """Realize the fact's effective date in-text so as-of/date-pinned queries
+    can match it lexically and semantically (A3). Empty when the fact has no
+    temporal validity."""
+    if not fact.valid_from:
+        return ""
+    return (
+        f" (in vigore dal {fact.valid_from})" if lang == "it" else f" (effective {fact.valid_from})"
+    )
+
+
 def _fact_sentence(rng: random.Random, fact: Fact, lang: str) -> str:
     label = _SCHEMA[fact.entity_type][fact.attribute][0 if lang == "it" else 1]
     if fact.anaphoric:
         frame = rng.choice(_ANAPHORIC_FRAMES[lang])
         it_l, en_l = _ETYPE_LABELS[fact.entity_type]
-        return frame.format(label=label, v=fact.value, etype_it=it_l, etype_en=en_l)
-    frame = rng.choice(_FACT_FRAMES[lang])
-    return frame.format(label=label, e=fact.entity_name, v=fact.value)
+        base = frame.format(label=label, v=fact.value, etype_it=it_l, etype_en=en_l)
+    else:
+        frame = rng.choice(_FACT_FRAMES[lang])
+        base = frame.format(label=label, e=fact.entity_name, v=fact.value)
+    return base + _validity_clause(fact, lang)
 
 
 def _fact_block(rng: random.Random, fact: Fact, lang: str, position: str) -> str:
     label = _SCHEMA[fact.entity_type][fact.attribute][0 if lang == "it" else 1]
+    # The effective date rides with the value in EVERY realization form (A3),
+    # so a date-pinned as-of query matches regardless of the fact's position
+    # class (table/list facts would otherwise carry the value but not the date).
+    clause = _validity_clause(fact, lang)
     if position == "table":
         head = "| campo | valore |" if lang == "it" else "| field | value |"
-        return f"{head}\n|---|---|\n| {label} {fact.entity_name} | {fact.value} |"
+        return f"{head}\n|---|---|\n| {label} {fact.entity_name} | {fact.value}{clause} |"
     if position == "list":
-        return f"- {label} {fact.entity_name}: {fact.value}"
+        return f"- {label} {fact.entity_name}: {fact.value}{clause}"
     return _fact_sentence(rng, fact, lang)
 
 
@@ -374,6 +502,7 @@ class Workspace:
     entities: list[Entity]
     ks_report: dict[str, float]
     attempts: int
+    enrich_report: dict[str, int] = dataclasses.field(default_factory=dict)
 
 
 def _stable_id(prefix: str, n: int) -> str:
@@ -438,8 +567,24 @@ def generate_workspace(
             ]
             for u in last.units
         }
-        enriched = [enricher.enrich(u, facts_by_unit.get(u.unit_id, [])) for u in last.units]
-        last = dataclasses.replace(last, units=enriched)
+        out: list[Unit] = []
+        reverted = 0
+        for u in last.units:
+            u_facts = facts_by_unit.get(u.unit_id, [])
+            must_keep = _values_present(u.text, u_facts)
+            enriched = enricher.enrich(u, u_facts)
+            if all(v in enriched.text for v in must_keep):
+                out.append(enriched)
+            else:
+                # Lossy enrichment: keep the verbatim template unit so the
+                # ground truth is never corrupted; count it (A11).
+                reverted += 1
+                out.append(u)
+        last = dataclasses.replace(
+            last,
+            units=out,
+            enrich_report={"enriched": len(out) - reverted, "reverted_on_loss": reverted},
+        )
     return last
 
 
@@ -504,18 +649,42 @@ def _generate_once(*, seed: int, scale: int, locale_mix: float, attempt: int) ->
     for ent in entities:
         by_type.setdefault(ent.entity_type, []).append(ent)
 
+    # Relational values come from the registry (A2): a small lead pool of
+    # person entities, preferring queryable ones, so referente/responsabile
+    # resolve to a real person that itself has queryable attributes (a
+    # traversable chain), and a lead is referente of >=2 projects (fan-out).
+    persons = by_type.get("person", [])
+    lead_persons = ([p for p in persons if p.queryable] or persons)[:_MAX_LEAD_PERSONS] or persons
+    rel_counter = 0
+
+    def _person_value() -> str:
+        nonlocal rel_counter
+        if not lead_persons:
+            return _value(rng, "person", taken)
+        v = lead_persons[rel_counter % len(lead_persons)].name
+        rel_counter += 1
+        return v
+
     for ent in entities:
         schema = _SCHEMA[ent.entity_type]
         attrs = rng.sample(sorted(schema), k=max(2, len(schema) - 1))
+        # Force relational attributes so the chain always exists (A2).
+        for rel in _RELATIONAL_ATTRS.get(ent.entity_type, ()):
+            if rel not in attrs:
+                attrs.append(rel)
         for attribute in attrs:
             _label_it, _label_en, history_able, vkind = schema[attribute]
             lang = "it" if rng.random() < locale_mix else "en"
             category = "gold" if ent.queryable else "decoy"
-            fact = _mk_fact(ent, attribute, _value(rng, vkind, taken), category, lang)
+            value = _person_value() if vkind == "person" else _value(rng, vkind, taken)
+            fact = _mk_fact(ent, attribute, value, category, lang)
             # Temporal history: gold facts (anti-recency pairs) AND a share of
-            # decoys (decoy history obligation §2).
+            # decoys (decoy history obligation §2). Dated (A3): the old value
+            # took effect at ``old_valid_from``, the current at ``valid_from``,
+            # with an ``as_of_pin`` strictly between for date-pinned queries.
             if history_able and (ent.queryable or rng.random() < 0.5):
-                fact.old_value = _value(rng, vkind, taken)
+                fact.old_value = _person_value() if vkind == "person" else _value(rng, vkind, taken)
+                fact.old_valid_from, fact.as_of_pin, fact.valid_from = _history_dates(rng)
             fact.kg = ent.entity_type in ("project", "person") and attribute in (
                 "referente",
                 "ruolo",
@@ -611,7 +780,11 @@ def _generate_once(*, seed: int, scale: int, locale_mix: float, attempt: int) ->
         ent = rng.choice(decoy_entities)
         attribute = rng.choice(sorted(_SCHEMA[ent.entity_type]))
         vkind = _SCHEMA[ent.entity_type][attribute][3]
-        fact = _mk_fact(ent, attribute, _value(rng, vkind, taken), "decoy", lang)
+        # Relational decoys point at registry persons too, so a referente
+        # value is ALWAYS a real entity name (A2): a global-pool name would be
+        # an obvious tell that the fact is noise.
+        value = _person_value() if vkind == "person" else _value(rng, vkind, taken)
+        fact = _mk_fact(ent, attribute, value, "decoy", lang)
         facts.append(fact)
         return fact
 
@@ -678,6 +851,9 @@ def _generate_once(*, seed: int, scale: int, locale_mix: float, attempt: int) ->
             lang=f.lang,
             category="collision_temporal",
             queryable=False,
+            # The stale unit realizes the OLD effective date so a date-pinned
+            # as-of query (pin between old and new) resolves to THIS unit.
+            valid_from=f.old_valid_from,
         )
         facts.append(stale)
         s_batch = [stale] + [_mk_decoy_fact(f.lang) for _ in range(rng.randint(0, 2))]
@@ -804,8 +980,10 @@ def write_artifacts(ws: Workspace, out_dir: Path, *, blank_content: bool = False
             "anaphoric": sum(1 for f in ws.facts if f.anaphoric),
             "collisions": sum(1 for f in ws.facts if f.category.startswith("collision")),
             "decoy_facts": sum(1 for f in ws.facts if f.category == "decoy"),
+            "dated_facts": sum(1 for f in ws.facts if f.valid_from),
             "entities": len(ws.entities),
         },
+        "enrich_report": ws.enrich_report,
         "quotas": {
             "distributed_fraction": DISTRIBUTED_FRACTION,
             "anaphora_fraction": ANAPHORA_FRACTION,

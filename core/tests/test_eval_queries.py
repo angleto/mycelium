@@ -73,6 +73,9 @@ def test_category_invariants() -> None:
     units = {u.unit_id: u for u in ws.units}
 
     # The core categories must exist at protocol scales (deterministic seed).
+    # multi_hop_2 is registry-backed now (A2): relational referente values are
+    # sampled from person entities, so the chain resolves under competitive
+    # fan-out.
     for cat in (
         "collision",
         "freshness",
@@ -81,15 +84,20 @@ def test_category_invariants() -> None:
         "impossible",
         "perimeter",
         "erasure",
+        "multi_hop_2",
     ):
         assert by_cat.get(cat), f"category {cat} missing at scale {_SCALE}"
 
     # Anti-recency (§3): the as_of gold IS the stale unit; the fresh unit is
-    # the tracked distractor a recency prior would wrongly serve.
+    # the tracked distractor a recency prior would wrongly serve. Date-pinned
+    # (A3): the pin sits strictly between the old and new effective dates.
     for r in by_cat["as_of_previous"]:
         f = facts[r.fact_id or ""]
         assert r.gold_unit_ids == [f.stale_unit_id]
         assert r.distractor_unit_ids == f.gold_unit_ids[:1]
+        if r.as_of_date:
+            assert f.old_valid_from and f.valid_from
+            assert f.old_valid_from < r.as_of_date < f.valid_from
 
     # Freshness: current gold, stale distractor.
     for r in by_cat["freshness"]:

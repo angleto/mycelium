@@ -102,6 +102,71 @@ def test_anti_surface_selfcheck_passes() -> None:
     assert ws.ks_report["position_tvd"] <= ws.ks_report["position_tvd_allowed"]
 
 
+def test_temporal_facts_are_dated_and_realized(tmp_path: Path) -> None:
+    """History-able facts carry ISO effective dates (A3) with
+    old < pin < new, and the dates surface in the unit texts so date-pinned
+    as-of queries can match them (fresh date in the primary unit, old date in
+    the stale unit)."""
+    ws = wsgen.generate_workspace(seed=_SEED, scale=_SCALE)
+    units = {u.unit_id: u for u in ws.units}
+    dated = [f for f in ws.facts if f.valid_from and f.old_valid_from]
+    assert dated, "history-able facts must be dated"
+    checked = 0
+    for f in dated:
+        assert f.old_valid_from < f.as_of_pin < f.valid_from  # type: ignore[operator]
+        if f.gold_unit_ids and f.value in units[f.gold_unit_ids[0]].text:
+            assert f.valid_from in units[f.gold_unit_ids[0]].text
+        if f.stale_unit_id:
+            assert f.old_valid_from in units[f.stale_unit_id].text
+            checked += 1
+    assert checked > 0
+
+
+def test_relational_values_are_registry_persons(tmp_path: Path) -> None:
+    """referente/responsabile values are names of PERSON entities in the
+    registry (A2), so the multi-hop chain project->lead->attribute resolves
+    (a global name pool would never match ``person_by_name``)."""
+    ws = wsgen.generate_workspace(seed=_SEED, scale=_SCALE)
+    person_names = {e.name for e in ws.entities if e.entity_type == "person"}
+    rel = [f for f in ws.facts if f.attribute in ("referente", "responsabile")]
+    assert rel, "relational facts must exist"
+    assert all(f.value in person_names for f in rel)
+    # Competitive fan-out: at least two leads are referente of a project whose
+    # target person carries >=2 non-role attributes.
+    referente = [f for f in rel if f.attribute == "referente"]
+    person_attrs: dict[str, set[str]] = {}
+    for f in ws.facts:
+        if f.entity_type == "person":
+            person_attrs.setdefault(f.entity_name, set()).add(f.attribute)
+    resolvable = [f for f in referente if len(person_attrs.get(f.value, set()) - {"ruolo"}) >= 2]
+    assert len(resolvable) >= 2
+
+
+def test_enricher_seam_preserves_or_reverts(tmp_path: Path) -> None:
+    """A well-behaved enricher rewrites every unit and records its matrix; a
+    lossy one is caught by the fact-preservation verifier and reverted to the
+    template text (A11) -- ground truth is never corrupted."""
+    good = wsgen.generate_workspace(seed=_SEED, scale=_SCALE, enricher=wsgen.FakeEnricher())
+    assert good.enrich_report["reverted_on_loss"] == 0
+    assert good.enrich_report["enriched"] == len(good.units)
+    assert all(u.generation["provider"] == "fake" for u in good.units)
+    # Every dated/queryable value still present after enrichment.
+    units = {u.unit_id: u for u in good.units}
+    for f in good.facts:
+        if f.queryable and f.gold_unit_ids and not f.distributed:
+            assert f.value in units[f.gold_unit_ids[0]].text
+    lossy = wsgen.generate_workspace(
+        seed=_SEED, scale=_SCALE, enricher=wsgen.FakeEnricher(corrupt=True)
+    )
+    # The verifier catches value loss and reverts (a unit that carries no
+    # in-text value has nothing to lose, so not necessarily 100%).
+    assert lossy.enrich_report["reverted_on_loss"] > 0
+    assert lossy.enrich_report["enriched"] < len(lossy.units)
+    assert lossy.enrich_report["reverted_on_loss"] + lossy.enrich_report["enriched"] == len(
+        lossy.units
+    )
+
+
 def test_blank_content_mode_leaks_no_fact_strings(tmp_path: Path) -> None:
     ws = wsgen.generate_workspace(seed=_SEED, scale=_SCALE)
     manifest = wsgen.write_artifacts(ws, tmp_path / "blank", blank_content=True)

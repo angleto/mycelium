@@ -112,6 +112,16 @@ _Q_ASOF_FRAMES = {
         "Which previous value did {qlabel} of {e} have?",
     ),
 }
+_Q_ASOF_DATED_FRAMES = {
+    "it": (
+        "Qual era {qlabel} di {e} alla data {d}?",
+        "Al {d}, che {qlabel} risultava per {e}?",
+    ),
+    "en": (
+        "What was {qlabel} of {e} as of {d}?",
+        "As of {d}, which {qlabel} was on record for {e}?",
+    ),
+}
 _Q_HOP2_FRAMES = {
     "it": ("Qual è {qlabel2} del referente del progetto {p}?",),
     "en": ("What is {qlabel2} of the lead of project {p}?",),
@@ -154,7 +164,7 @@ def _qlabel(fact_etype: str, attribute: str, lang: str) -> str:
 def t2_template_strings() -> set[str]:
     """Every surface template T2 can emit (for the disjointness test)."""
     out: set[str] = set()
-    for frames in (_Q_FRAMES, _Q_ASOF_FRAMES, _Q_HOP2_FRAMES, _Q_HOP3_FRAMES):
+    for frames in (_Q_FRAMES, _Q_ASOF_FRAMES, _Q_ASOF_DATED_FRAMES, _Q_HOP2_FRAMES, _Q_HOP3_FRAMES):
         for langset in frames.values():
             out.update(langset)
     for pair in _Q_LABELS.values():
@@ -190,6 +200,7 @@ class QueryRecord:
     distractor_unit_ids: list[str] = dataclasses.field(default_factory=list)
     hop_unit_ids: list[str] = dataclasses.field(default_factory=list)
     fan_out: int | None = None
+    as_of_date: str | None = None  # date pinned by an as_of_previous query (A3)
     expected_empty: bool = False
     home_project: str | None = None
     context_project: str | None = None
@@ -284,16 +295,39 @@ def build_queries(ws: Workspace, *, seed: int) -> list[QueryRecord]:
     units_by_id = {u.unit_id: u for u in ws.units}
     projects = sorted({u.project for u in ws.units})
 
+    # Resolve the multi-hop chains up front (project --referente--> person
+    # --attr--> value) so their target facts can be kept OUT of the
+    # perimeter/erasure reservation: a person-attribute fact used by a 2-hop
+    # AND a 3-hop query already fills its 2-query budget, and a perimeter/
+    # erasure record on the same fact would be silently trimmed by the cap.
+    referente = [
+        f
+        for f in ws.facts
+        if f.entity_type == "project" and f.attribute == "referente" and f.gold_unit_ids
+    ]
+    person_by_name: dict[str, list[Fact]] = {}
+    for f in ws.facts:
+        if f.entity_type == "person" and f.gold_unit_ids:
+            person_by_name.setdefault(f.entity_name, []).append(f)
+    chains: list[tuple[Fact, Fact]] = []
+    for rf in referente:
+        person_facts = [p for p in person_by_name.get(rf.value, []) if p.attribute != "ruolo"]
+        if len(person_facts) >= _MULTIHOP_MIN_FANOUT:
+            chains.append((rf, sorted(person_facts, key=lambda p: p.fact_id)[0]))
+    multihop_active = len(chains) >= _MULTIHOP_MIN_FANOUT
+    multihop_target_ids = {pf.fact_id for _rf, pf in chains} if multihop_active else set()
+
     # Perimeter/erasure facts are RESERVED up front: their scenario record is
     # the fact's second (and last) query, so the per-fact cap (§3) never
-    # silently starves the two categories. Only direct note-backed gold
-    # qualifies (the erase target must be a single note; the perimeter gold
-    # must live in exactly one project).
+    # silently starves the two categories. Only direct note-backed gold that is
+    # NOT a multi-hop target qualifies (the erase target must be a single note;
+    # the perimeter gold must live in exactly one project).
     direct_pool = [
         f
         for f in gold
         if not f.distributed
         and not (f.old_value and f.stale_unit_id)
+        and f.fact_id not in multihop_target_ids
         and units_by_id[f.gold_unit_ids[0]].unit_kind == "note"
     ]
     rng.shuffle(direct_pool)
@@ -314,6 +348,60 @@ def build_queries(ws: Workspace, *, seed: int) -> list[QueryRecord]:
             ):
                 out.extend(other.gold_unit_ids[:1])
         return out[:4]
+
+    # Multi-hop emission (chains resolved above). Placed BEFORE the per-fact
+    # partition so a person-attribute fact used by a 2-hop AND a 3-hop query
+    # fills its 2-query budget here and its direct query is the one trimmed by
+    # the cap (§3) -- otherwise a fired second phrasing upstream could evict
+    # the multi-hop pair.
+    if multihop_active:
+        fan_out = len(chains)
+        for rf, pf in chains:
+            lang, inverted = _query_lang(rng, pf.lang)
+            records.append(
+                QueryRecord(
+                    query_id=_qid(),
+                    category="multi_hop_2",
+                    query_text=rng.choice(_Q_HOP2_FRAMES[lang]).format(
+                        qlabel2=_qlabel("person", pf.attribute, lang), p=rf.entity_name
+                    ),
+                    lang=lang,
+                    fact_id=pf.fact_id,
+                    gold_unit_ids=pf.gold_unit_ids[:1],
+                    hop_unit_ids=rf.gold_unit_ids[:1],
+                    fan_out=fan_out,
+                    lang_inverted=inverted,
+                )
+            )
+            # 3-hop: anchor the project by ANOTHER of its attributes.
+            anchors = [
+                f
+                for f in ws.facts
+                if f.entity_id == rf.entity_id
+                and f.attribute not in ("referente",)
+                and f.gold_unit_ids
+            ]
+            if not anchors:
+                continue
+            anchor = sorted(anchors, key=lambda a: a.fact_id)[0]
+            lang3, inverted3 = _query_lang(rng, pf.lang)
+            records.append(
+                QueryRecord(
+                    query_id=_qid(),
+                    category="multi_hop_3",
+                    query_text=rng.choice(_Q_HOP3_FRAMES[lang3]).format(
+                        qlabel2=_qlabel("person", pf.attribute, lang3),
+                        qanchor=_qlabel("project", anchor.attribute, lang3),
+                        vanchor=anchor.value,
+                    ),
+                    lang=lang3,
+                    fact_id=pf.fact_id,
+                    gold_unit_ids=pf.gold_unit_ids[:1],
+                    hop_unit_ids=[*anchor.gold_unit_ids[:1], *rf.gold_unit_ids[:1]],
+                    fan_out=fan_out,
+                    lang_inverted=inverted3,
+                )
+            )
 
     # Partition: distributed > temporal pair > collision > single_fact.
     for f in gold:
@@ -349,19 +437,32 @@ def build_queries(ws: Workspace, *, seed: int) -> list[QueryRecord]:
                 )
             )
             lang2, inverted2 = _query_lang(rng, f.lang)
+            # Date-pinned when the registry carries validity dates (A3): the
+            # pin sits strictly between the old and new effective dates, so
+            # the version valid AT the pin is the OLD one. Falls back to the
+            # relative "before the latest update" phrasing when undated.
+            if f.as_of_pin:
+                qtext = rng.choice(_Q_ASOF_DATED_FRAMES[lang2]).format(
+                    qlabel=_qlabel(f.entity_type, f.attribute, lang2),
+                    e=f.entity_name,
+                    d=f.as_of_pin,
+                )
+            else:
+                qtext = rng.choice(_Q_ASOF_FRAMES[lang2]).format(
+                    qlabel=_qlabel(f.entity_type, f.attribute, lang2), e=f.entity_name
+                )
             records.append(
                 QueryRecord(
                     query_id=_qid(),
                     category="as_of_previous",
-                    query_text=rng.choice(_Q_ASOF_FRAMES[lang2]).format(
-                        qlabel=_qlabel(f.entity_type, f.attribute, lang2), e=f.entity_name
-                    ),
+                    query_text=qtext,
                     lang=lang2,
                     fact_id=f.fact_id,
                     # ANTI-RECENCY: the gold is the OLDER unit; the fresh one
                     # is the tracked distractor a recency prior would serve.
                     gold_unit_ids=[f.stale_unit_id],
                     distractor_unit_ids=f.gold_unit_ids[:1],
+                    as_of_date=f.as_of_pin,
                     lang_inverted=inverted2,
                 )
             )
@@ -392,73 +493,6 @@ def build_queries(ws: Workspace, *, seed: int) -> list[QueryRecord]:
                     gold_unit_ids=f.gold_unit_ids[:1],
                     distractor_unit_ids=siblings,
                     lang_inverted=inverted2,
-                )
-            )
-
-    # Multi-hop (project --referente--> person --attr--> value). Emitted only
-    # under COMPETITIVE fan-out: >=2 projects with a resolvable lead chain
-    # (branching at the project/person hop) and >=2 valued attributes on the
-    # target person (branching at the attribute hop).
-    referente = [
-        f
-        for f in ws.facts
-        if f.entity_type == "project" and f.attribute == "referente" and f.gold_unit_ids
-    ]
-    person_by_name: dict[str, list[Fact]] = {}
-    for f in ws.facts:
-        if f.entity_type == "person" and f.gold_unit_ids:
-            person_by_name.setdefault(f.entity_name, []).append(f)
-    chains: list[tuple[Fact, Fact]] = []
-    for rf in referente:
-        person_facts = [p for p in person_by_name.get(rf.value, []) if p.attribute != "ruolo"]
-        if len(person_facts) >= _MULTIHOP_MIN_FANOUT:
-            chains.append((rf, rng.choice(person_facts)))
-    if len(chains) >= _MULTIHOP_MIN_FANOUT:
-        fan_out = len(chains)
-        for rf, pf in chains:
-            lang, inverted = _query_lang(rng, pf.lang)
-            records.append(
-                QueryRecord(
-                    query_id=_qid(),
-                    category="multi_hop_2",
-                    query_text=rng.choice(_Q_HOP2_FRAMES[lang]).format(
-                        qlabel2=_qlabel("person", pf.attribute, lang), p=rf.entity_name
-                    ),
-                    lang=lang,
-                    fact_id=pf.fact_id,
-                    gold_unit_ids=pf.gold_unit_ids[:1],
-                    hop_unit_ids=rf.gold_unit_ids[:1],
-                    fan_out=fan_out,
-                    lang_inverted=inverted,
-                )
-            )
-            # 3-hop: anchor the project by ANOTHER of its attributes.
-            anchors = [
-                f
-                for f in ws.facts
-                if f.entity_id == rf.entity_id
-                and f.attribute not in ("referente",)
-                and f.gold_unit_ids
-            ]
-            if not anchors:
-                continue
-            anchor = rng.choice(anchors)
-            lang3, inverted3 = _query_lang(rng, pf.lang)
-            records.append(
-                QueryRecord(
-                    query_id=_qid(),
-                    category="multi_hop_3",
-                    query_text=rng.choice(_Q_HOP3_FRAMES[lang3]).format(
-                        qlabel2=_qlabel("person", pf.attribute, lang3),
-                        qanchor=_qlabel("project", anchor.attribute, lang3),
-                        vanchor=anchor.value,
-                    ),
-                    lang=lang3,
-                    fact_id=pf.fact_id,
-                    gold_unit_ids=pf.gold_unit_ids[:1],
-                    hop_unit_ids=[*anchor.gold_unit_ids[:1], *rf.gold_unit_ids[:1]],
-                    fan_out=fan_out,
-                    lang_inverted=inverted3,
                 )
             )
 
