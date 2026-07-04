@@ -76,6 +76,72 @@ async def test_rerank_failure_degrades_and_surfaces_in_meta() -> None:
     assert len(hits) >= 1  # results still returned (RRF order preserved)
 
 
+class _ConstLogitReranker:
+    """Returns a fixed logit for every doc, so the reranker-logit abstain
+    floor is exercised deterministically end-to-end (task f0d24fdb)."""
+
+    model_id = "const-logit"
+
+    def __init__(self, logit: float) -> None:
+        self._logit = logit
+
+    async def rerank(self, query: str, pairs: Sequence[str]) -> RerankResult:
+        return RerankResult(scores=[self._logit] * len(pairs), model_id=self.model_id)
+
+
+async def test_rerank_logit_grader_abstains_and_passes_end_to_end() -> None:
+    """The honest-abstain quality floor keys off the cross-encoder logit
+    (task f0d24fdb / N3), wired retrieve -> reranker -> grader: a fixed logit
+    of 0.0 (relevance prob 0.5) abstains under a 0.9 floor with the
+    logit-named reason, and passes under a 0.1 floor. Proves the whole
+    plumbing, not just the stage."""
+    org, user = await _org()
+    token = "zebra quumix vortex"  # 3 tokens -> passes the rerank query-len gate
+    async with tenant_session(str(org), str(user)) as s:
+        for i in range(6):  # >= reranker_min_candidates (5) so the reranker fires
+            await nt.create_note(
+                s,
+                org_id=org,
+                actor_id=user,
+                kind=NoteKind.text,
+                title=f"n{i}",
+                text=f"{token} note number {i}",
+            )
+    set_reranker_override(lambda: _ConstLogitReranker(0.0))  # sigmoid(0.0) == 0.5
+    try:
+        async with tenant_session(str(org), str(user)) as s:
+            hits_hi, meta_hi = await memory.retrieve_with_meta(
+                s,
+                org_id=org,
+                actor_id=user,
+                project_id=None,
+                query=token,
+                operation_id=f"rrklogit-hi-{uuid.uuid4().hex}",
+                limit=10,
+                rerank=True,
+                grader_min_rerank_logit=0.9,  # 0.9 > 0.5 -> abstain
+            )
+            assert hits_hi == []
+            assert meta_hi.abstained is True
+            assert meta_hi.abstain_reason == "grader_min_rerank_logit"
+        async with tenant_session(str(org), str(user)) as s:
+            hits_lo, meta_lo = await memory.retrieve_with_meta(
+                s,
+                org_id=org,
+                actor_id=user,
+                project_id=None,
+                query=token,
+                operation_id=f"rrklogit-lo-{uuid.uuid4().hex}",
+                limit=10,
+                rerank=True,
+                grader_min_rerank_logit=0.1,  # 0.1 < 0.5 -> hits kept
+            )
+            assert len(hits_lo) >= 1
+            assert meta_lo.abstained is False
+    finally:
+        set_reranker_override(None)
+
+
 def _meta(*, abstained: bool) -> memory.RetrievalMeta:
     return memory.RetrievalMeta(
         query_embedded=True,

@@ -325,6 +325,7 @@ async def score_instance(
     project_id: uuid.UUID | None = None,
     limit_questions: int | None = None,
     grader_min_rrf: float | None = None,
+    grader_min_rerank_logit: float | None = None,
 ) -> InstanceScore:
     """Score one already-ingested instance: scored questions go through
     ``eval_offline.run_eval`` (the CI gate's path); abstention questions call
@@ -349,6 +350,7 @@ async def score_instance(
                 operation_id=f"bench-{uuid.uuid4().hex}",
                 limit=k,
                 grader_min_rrf=grader_min_rrf,
+                grader_min_rerank_logit=grader_min_rerank_logit,
                 # Bench traffic is measurement: like run_eval (which covers
                 # the scored questions), it must not leave retrieval traces
                 # or the bench would forge search demand (Fase 0, 561c6aca).
@@ -385,6 +387,7 @@ async def score_instance(
             k=k,
             project_id=project_id,
             grader_min_rrf=grader_min_rrf,
+            grader_min_rerank_logit=grader_min_rerank_logit,
         )
         for (q, _case), case_result in zip(scored, report.cases, strict=True):
             results.append(
@@ -433,6 +436,7 @@ class BenchReport:
     per_category: tuple[CategoryScore, ...]
     embedder_models: tuple[str, ...]
     grader_min_rrf: float | None = None
+    grader_min_rerank_logit: float | None = None
 
     def render(self) -> str:
         lines = [
@@ -442,7 +446,8 @@ class BenchReport:
             f"{self.n_skipped_no_evidence})",
             f"embedder_models={list(self.embedder_models)}  "
             f"tokens/query (chars/4)={self.tokens_per_query:.0f}  "
-            f"grader_min_rrf={self.grader_min_rrf}",
+            f"grader_min_rrf={self.grader_min_rrf}  "
+            f"grader_min_rerank_logit={self.grader_min_rerank_logit}",
             f"overall  recall@{self.k}={self.recall_at_k:.3f}  MRR={self.mrr:.3f}  "
             f"abstention_correct={self.abstention_correct_rate:.3f}",
             f"{'category':<28}{'n':>5}  {'recall':>7} {'mrr':>7}",
@@ -467,6 +472,7 @@ def aggregate(
     scores: Sequence[InstanceScore],
     embedder_models: Sequence[str],
     grader_min_rrf: float | None = None,
+    grader_min_rerank_logit: float | None = None,
 ) -> BenchReport:
     all_results = [r for s in scores for r in s.results]
     scored = [r for r in all_results if not r.abstention]
@@ -520,4 +526,5 @@ def aggregate(
         per_category=tuple(cats),
         embedder_models=tuple(embedder_models),
         grader_min_rrf=grader_min_rrf,
+        grader_min_rerank_logit=grader_min_rerank_logit,
     )

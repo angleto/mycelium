@@ -129,3 +129,65 @@ async def test_offline_eval_dense_tier_is_healthy(_embedder: None) -> None:
     assert total >= len(_CORPUS)
     assert dense > 0  # dense tier alive
     assert dense == total  # no blob fell back to keyword-only (model_id='none')
+
+
+async def test_run_eval_threads_rerank_logit_floor(
+    _embedder: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The reranker-logit abstain floor (task f0d24fdb) threads through
+    ``run_eval`` so a bench can sweep the honest-abstain gate: with the
+    reranker firing, a floor above the top relevance probability abstains
+    every case (recall 0, abstained), below it recall is restored. Proves the
+    eval path reaches the grader, not just ``retrieve``."""
+    from mycelium_core.config import get_settings
+    from mycelium_core.reranker import RerankResult, set_reranker_override
+
+    class _ConstReranker:
+        model_id = "const"
+
+        async def rerank(self, query: str, pairs: object) -> RerankResult:
+            n = len(pairs)  # type: ignore[arg-type]
+            return RerankResult(scores=[0.0] * n, model_id=self.model_id)
+
+    token = "zebra quumix vortex"  # 3 tokens + 6 blobs -> the rerank gate fires
+    async with admin_session() as s:
+        r = await signup(s, email=_email(), password="pw-strong-123", org_name="EVALRR")
+    org, user = r.org_id, r.user_id
+    note_ids: list[uuid.UUID] = []
+    async with tenant_session(str(org), str(user)) as s:
+        for i in range(6):
+            note = await nt.create_note(
+                s, org_id=org, actor_id=user, kind=NoteKind.text, text=f"{token} note number {i}"
+            )
+            note_ids.append(note.id)
+    async with tenant_session(str(org), str(user)) as s:
+        gold = (
+            await s.execute(
+                select(NotePartIndexPointer.blob_id).where(
+                    NotePartIndexPointer.note_id == note_ids[0]
+                )
+            )
+        ).scalar_one()
+    cases = [GoldCase(query=token, expected=frozenset({gold}))]
+
+    # run_eval has no per-call rerank flag: the stage is added only when the
+    # reranker is enabled workspace-wide, so flip the env for this test.
+    monkeypatch.setenv("MYCELIUM_RERANKER_ENABLED", "true")
+    get_settings.cache_clear()
+    set_reranker_override(lambda: _ConstReranker())
+    try:
+        async with tenant_session(str(org), str(user)) as s:
+            hi = await eval_offline.run_eval(
+                s, org_id=org, actor_id=user, cases=cases, k=10, grader_min_rerank_logit=0.9
+            )
+        assert hi.recall_at_k == 0.0
+        assert hi.abstained_cases == 1
+        async with tenant_session(str(org), str(user)) as s:
+            lo = await eval_offline.run_eval(
+                s, org_id=org, actor_id=user, cases=cases, k=10, grader_min_rerank_logit=0.1
+            )
+        assert lo.recall_at_k == 1.0
+        assert lo.abstained_cases == 0
+    finally:
+        set_reranker_override(None)
+        get_settings.cache_clear()

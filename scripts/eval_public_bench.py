@@ -65,6 +65,14 @@ async def main() -> None:
         help="per-call retrieval_grader_min_rrf override (floor sweep, task f0d24fdb); "
         "RRF-fused domain, clamp at 0.05",
     )
+    ap.add_argument(
+        "--grader-rerank-floor",
+        type=float,
+        default=None,
+        help="per-call retrieval_grader_min_rerank_logit override (honest-abstain "
+        "sweep, task f0d24fdb): a [0,1] relevance-probability floor on the reranker "
+        "logit; only bites with --rerank / reranker enabled",
+    )
     args = ap.parse_args()
 
     instances = _load_instances(args.dataset, Path(args.path))
@@ -94,6 +102,7 @@ async def main() -> None:
                 k=args.k,
                 limit_questions=args.limit_questions,
                 grader_min_rrf=args.grader_floor,
+                grader_min_rerank_logit=args.grader_rerank_floor,
             )
             embedder_models.update(await bench.corpus_embedder_models(s, org_id=org))
         scores.append(score)
@@ -104,7 +113,12 @@ async def main() -> None:
         )
 
     report = bench.aggregate(
-        args.dataset, args.k, scores, sorted(embedder_models), grader_min_rrf=args.grader_floor
+        args.dataset,
+        args.k,
+        scores,
+        sorted(embedder_models),
+        grader_min_rrf=args.grader_floor,
+        grader_min_rerank_logit=args.grader_rerank_floor,
     )
     print()
     print(report.render())

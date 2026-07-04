@@ -628,3 +628,42 @@ async def test_grader_floor_helper_off_sentinels() -> None:
             .values(settings={mem.GRADER_MIN_RRF_KEY: 0.25})
         )
         assert await mem.grader_min_rrf_floor(s, org) == mem.GRADER_MIN_RRF_MAX
+
+
+async def test_grader_min_rerank_logit_floor_helper_off_sentinels() -> None:
+    """The reranker-logit quality floor helper (task f0d24fdb) returns None
+    (no abstain) for absent / zero / malformed settings, passes an in-domain
+    probability through, and clamps to [0, 1] (it is a probability, not a raw
+    logit)."""
+    from sqlalchemy import update
+
+    from mycelium_core.models.organization import Organization
+
+    org, user = await _org("GRADERR")
+    async with tenant_session(str(org), str(user)) as s:
+        assert await mem.grader_min_rerank_logit_floor(s, org) is None  # absent
+        await s.execute(
+            update(Organization)
+            .where(Organization.id == org)
+            .values(settings={mem.GRADER_MIN_RERANK_LOGIT_KEY: 0.0})
+        )
+        assert await mem.grader_min_rerank_logit_floor(s, org) is None  # zero = off
+        await s.execute(
+            update(Organization)
+            .where(Organization.id == org)
+            .values(settings={mem.GRADER_MIN_RERANK_LOGIT_KEY: "junk"})
+        )
+        assert await mem.grader_min_rerank_logit_floor(s, org) is None  # malformed
+        await s.execute(
+            update(Organization)
+            .where(Organization.id == org)
+            .values(settings={mem.GRADER_MIN_RERANK_LOGIT_KEY: 0.7})
+        )
+        assert await mem.grader_min_rerank_logit_floor(s, org) == 0.7  # in-domain prob
+        # Above the [0, 1] probability domain -> clamped to 1.0, not verbatim.
+        await s.execute(
+            update(Organization)
+            .where(Organization.id == org)
+            .values(settings={mem.GRADER_MIN_RERANK_LOGIT_KEY: 4.2})
+        )
+        assert await mem.grader_min_rerank_logit_floor(s, org) == 1.0

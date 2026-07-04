@@ -15,12 +15,21 @@ over "weak answer").
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 from sqlalchemy import select
 
 from mycelium_core.models.memory_blob import MemoryBlob
 from mycelium_core.services.retrieval.types import Candidate, RetrievalContext, Stage
+
+
+def _sigmoid(x: float) -> float:
+    """Numerically stable logistic sigmoid (overflow-safe both directions)."""
+    if x >= 0.0:
+        return 1.0 / (1.0 + math.exp(-x))
+    z = math.exp(x)
+    return z / (1.0 + z)
 
 
 @dataclass
@@ -59,8 +68,30 @@ class OrderingStage(Stage):
 
 @dataclass
 class GraderMinStage(Stage):
+    """Honest abstain: drop the whole result when the top hit is too weak,
+    so the caller gets "not in memory" over a confidently-wrong first hit.
+
+    Two floors, checked with a precedence rule (task f0d24fdb / N3):
+
+    * ``min_rerank_prob`` -- the QUALITY floor on the cross-encoder logit
+      (squashed to a [0,1] probability). This is the honest-abstain signal:
+      the logit scores query-doc relevance directly. It is only meaningful
+      when the reranker actually ran (it writes ``scores_by_stage["rerank"]``).
+    * ``min_score`` -- the coarse RRF floor on the FUSED score (WS-B1),
+      rank-based and measured near-useless for abstention (note 3276b266 §5),
+      kept for continuity.
+
+    PRECEDENCE: when the reranker ran AND a rerank floor is set, the rerank
+    floor is the SOLE authority and the RRF floor is skipped -- after
+    reranking ``candidates[0]`` is the top by logit, not by RRF, so a
+    high-quality hit that reranked up from a low RRF rank would be spuriously
+    cut by the RRF floor. With no rerank signal (or no rerank floor) the RRF
+    floor applies exactly as before, so a caller that leaves ``min_rerank_prob``
+    None is byte-identical to the historical behaviour."""
+
     name: str = "grader_min"
     min_score: float | None = None
+    min_rerank_prob: float | None = None
 
     async def run(
         self,
@@ -68,19 +99,31 @@ class GraderMinStage(Stage):
         ctx: RetrievalContext,
         candidates: list[Candidate],
     ) -> list[Candidate]:
-        if self.min_score is None or not candidates:
+        if not candidates:
             return candidates
-        # Floor on the FUSED RRF score, not the current ``score``: the
-        # optional reranker overwrites ``score`` with its own (differently
-        # scaled) value but preserves the fused score under "rrf", so the
-        # abstain threshold stays calibrated whether or not rerank ran.
         top = candidates[0]
+        reranked = "rerank" in top.scores_by_stage
+        # Quality gate takes precedence when the reranker ran (see class doc):
+        # grade on the logit of the item the cross-encoder ranked #1.
+        if self.min_rerank_prob is not None and reranked:
+            if _sigmoid(top.scores_by_stage["rerank"]) < self.min_rerank_prob:
+                ctx.extras["grader_abstained"] = True
+                ctx.extras["grader_abstain_reason"] = "grader_min_rerank_logit"
+                return []
+            return candidates
+        if self.min_score is None:
+            return candidates
+        # Coarse RRF floor on the FUSED score, not the current ``score``: the
+        # optional reranker overwrites ``score`` but preserves the fused score
+        # under "rrf", so the threshold stays calibrated. Reached only when
+        # there is no rerank quality signal to defer to.
         fused = top.scores_by_stage.get("rrf", top.score)
         if fused < self.min_score:
             # Record the abstain so RetrievalMeta can tell a deliberate
             # "no answer above the floor" from a genuinely empty index
             # (the empty result is otherwise byte-identical). WS-B1.
             ctx.extras["grader_abstained"] = True
+            ctx.extras["grader_abstain_reason"] = "grader_min_rrf"
             return []
         return candidates
 

@@ -129,6 +129,7 @@ async def run_eval(
     humus_kinds: frozenset[str] | None = None,
     exclude_humus_from_base: bool = False,
     grader_min_rrf: float | None = None,
+    grader_min_rerank_logit: float | None = None,
 ) -> EvalReport:
     """Run every gold case through the real ``memory.retrieve`` and
     aggregate recall@k + MRR, plus the dense-tier health of the org's
@@ -148,7 +149,10 @@ async def run_eval(
     ``grader_min_rrf`` is the per-call grader/abstain floor override (same
     semantics as ``memory.retrieve_with_meta``): it lets a bench sweep the
     floor (task f0d24fdb) without touching the org setting. None (default)
-    keeps the org's configured floor, i.e. the historical behaviour."""
+    keeps the org's configured floor, i.e. the historical behaviour.
+    ``grader_min_rerank_logit`` is the sibling override for the reranker-logit
+    quality floor (a [0,1] probability; only bites when the reranker ran), so
+    the bench can sweep the honest-abstain gate the same way."""
     results: list[CaseResult] = []
     found = 0
     rr_sum = 0.0
@@ -169,6 +173,7 @@ async def run_eval(
             humus_kinds=humus_kinds,
             exclude_humus_from_base=exclude_humus_from_base,
             grader_min_rrf=grader_min_rrf,
+            grader_min_rerank_logit=grader_min_rerank_logit,
             # Eval sweeps are probes: they must not leave retrieval
             # traces (Fase 0, task 561c6aca) or measurement would forge
             # the search demand the graph aggregation reads.
