@@ -8596,6 +8596,9 @@ export interface components {
          * GardenReviewActionIn
          * @description Approve, or reject, one proposed node by id (ADR-0043). ``reason`` is
          *     an optional note recorded on a reject (ignored by approve).
+         *     ``expected_version`` is the version the reviewer READ (served by the
+         *     pending listing): when set, the action fails with ``stale_version`` if
+         *     the node changed in between (TOCTOU guard, task 2e36e732).
          */
         GardenReviewActionIn: {
             /**
