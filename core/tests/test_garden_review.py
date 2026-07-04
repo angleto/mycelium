@@ -33,7 +33,7 @@ from mycelium_core.ai_providers import set_llm_override
 from mycelium_core.config import get_settings
 from mycelium_core.db import admin_session, tenant_session
 from mycelium_core.embedder import set_embedder_override
-from mycelium_core.errors import NotFoundError
+from mycelium_core.errors import ConflictError, NotFoundError
 from mycelium_core.models.activity_log import ActivityLog
 from mycelium_core.models.event_outbox import EventOutbox
 from mycelium_core.models.note import Note, NoteKind
@@ -424,3 +424,98 @@ async def test_garden_health_surfaces_the_accept_ratio_sensor() -> None:
         h1 = await garden_health.compute_health(s, org_id=org)
         assert h1.autonomous_accept_ratio.value == 1.0
         assert h1.autonomous_accept_ratio.floor == garden_health.AUTONOMOUS_ACCEPT_RATIO_FLOOR
+
+
+# ── TOCTOU guard: expected_version on approve/reject (task 2e36e732) ────────
+
+
+async def test_approve_with_stale_version_conflicts(_wire: None, _gate_on: None) -> None:
+    """The reviewer reads v, the note changes (any edit bumps the counter),
+    the approve pinned to v must fail with ``stale_version``: the human never
+    blesses content they have not seen."""
+    org, user = await _org()
+    async with tenant_session(str(org), str(user)) as s:
+        await _seed_billing(s, org, user)
+        nid = (await _make_proposed_pattern(s, org, user)).note_id
+    async with tenant_session(str(org), str(user)) as s:
+        note = await s.get(Note, nid)
+        assert note is not None
+        seen = note.version
+        # Any interposed edit (an agent touching distilled_text, a rename...)
+        # bumps the counter; the ORM bump stands in for every such path.
+        note.version += 1
+        await s.flush()
+        with pytest.raises(ConflictError):
+            await review.approve_node(
+                s, org_id=org, actor_id=user, note_id=nid, expected_version=seen
+            )
+        # The node is untouched: still proposed, approvable with a FRESH view.
+        fresh = await review.approve_node(
+            s, org_id=org, actor_id=user, note_id=nid, expected_version=note.version
+        )
+        assert fresh.review_state == "approved"
+
+
+async def test_approve_bumps_version_and_second_pinned_approve_is_stale(
+    _wire: None, _gate_on: None
+) -> None:
+    """Concurrent double-approve semantics pinned: with the same read version,
+    exactly one transition wins (and bumps the counter); the second pinned
+    approve gets ``stale_version``. An UNPINNED retry stays idempotent."""
+    org, user = await _org()
+    async with tenant_session(str(org), str(user)) as s:
+        await _seed_billing(s, org, user)
+        nid = (await _make_proposed_pattern(s, org, user)).note_id
+    async with tenant_session(str(org), str(user)) as s:
+        note = await s.get(Note, nid)
+        assert note is not None
+        seen = note.version
+        first = await review.approve_node(
+            s, org_id=org, actor_id=user, note_id=nid, expected_version=seen
+        )
+        assert first.review_state == "approved"
+        assert first.version == seen + 1
+        with pytest.raises(ConflictError):
+            await review.approve_node(
+                s, org_id=org, actor_id=user, note_id=nid, expected_version=seen
+            )
+        # Legacy/None path: idempotent no-op, unchanged behaviour.
+        again = await review.approve_node(s, org_id=org, actor_id=user, note_id=nid)
+        assert again.review_state == "approved"
+        assert again.version == seen + 1
+
+
+async def test_reject_with_stale_version_conflicts(_wire: None, _gate_on: None) -> None:
+    org, user = await _org()
+    async with tenant_session(str(org), str(user)) as s:
+        await _seed_billing(s, org, user)
+        nid = (await _make_proposed_pattern(s, org, user)).note_id
+    async with tenant_session(str(org), str(user)) as s:
+        note = await s.get(Note, nid)
+        assert note is not None
+        seen = note.version
+        note.version += 1
+        await s.flush()
+        with pytest.raises(ConflictError):
+            await review.reject_node(
+                s, org_id=org, actor_id=user, note_id=nid, expected_version=seen
+            )
+        rejected = await review.reject_node(
+            s, org_id=org, actor_id=user, note_id=nid, expected_version=note.version
+        )
+        assert rejected.deleted_at is not None
+        assert rejected.version == seen + 2  # interposed bump + reject bump
+
+
+async def test_list_pending_serves_the_version_pin(_wire: None, _gate_on: None) -> None:
+    """The inbox row carries the version the reviewer must echo back."""
+    org, user = await _org()
+    async with tenant_session(str(org), str(user)) as s:
+        await _seed_billing(s, org, user)
+        nid = (await _make_proposed_pattern(s, org, user)).note_id
+    async with tenant_session(str(org), str(user)) as s:
+        note = await s.get(Note, nid)
+        assert note is not None
+        rows = await review.list_pending(s, org_id=org)
+        mine = next(r for r in rows if r.note_id == nid)
+        assert mine.version == note.version

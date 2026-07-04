@@ -5253,6 +5253,7 @@ async def garden_review_pending(token: str, org_id: str, limit: int = 50) -> dic
                     "origin_model_id": p.origin_model_id,
                     "preview": p.preview,
                     "created_at": p.created_at.isoformat(),
+                    "version": p.version,
                 }
                 for p in pending
             ]
@@ -5260,37 +5261,58 @@ async def garden_review_pending(token: str, org_id: str, limit: int = 50) -> dic
 
 
 @mcp.tool()
-async def garden_review_approve(token: str, org_id: str, note_id: str) -> dict[str, Any]:
+async def garden_review_approve(
+    token: str, org_id: str, note_id: str, expected_version: int | None = None
+) -> dict[str, Any]:
     """Approve a proposed humus note (ADR-0043): it becomes effective and
     re-enters the retrieval walk / search / listings. Audited; emits a bus
-    ``commit`` event. Idempotent (a re-approve is a no-op). Member role."""
+    ``commit`` event. Idempotent (a re-approve is a no-op). Member role.
+    Pass ``expected_version`` (served by ``garden_review_pending``) to fail
+    with ``stale_version`` if the note changed after you read it -- the
+    TOCTOU guard (task 2e36e732); omit it for the legacy unguarded path."""
     async with _tenant(token, org_id) as (s, org, user):
         note = await garden_review_svc.approve_node(
-            s, org_id=org, actor_id=user, note_id=uuid.UUID(note_id)
+            s,
+            org_id=org,
+            actor_id=user,
+            note_id=uuid.UUID(note_id),
+            expected_version=expected_version,
         )
         return {
             "note_id": str(note.id),
             "review_state": note.review_state,
             "origin_model_id": note.origin_model_id,
+            "version": note.version,
         }
 
 
 @mcp.tool()
 async def garden_review_reject(
-    token: str, org_id: str, note_id: str, reason: str | None = None
+    token: str,
+    org_id: str,
+    note_id: str,
+    reason: str | None = None,
+    expected_version: int | None = None,
 ) -> dict[str, Any]:
     """Reject a proposed humus note (ADR-0043): soft-delete it so a weak
     summary never pollutes the corpus (reversible via the trash/restore path).
     Audited; emits a bus ``reject`` event carrying ``origin_model_id``.
-    Idempotent (a re-reject is a no-op). Member role."""
+    Idempotent (a re-reject is a no-op). Member role. ``expected_version``
+    mirrors ``garden_review_approve`` (TOCTOU guard, task 2e36e732)."""
     async with _tenant(token, org_id) as (s, org, user):
         note = await garden_review_svc.reject_node(
-            s, org_id=org, actor_id=user, note_id=uuid.UUID(note_id), reason=reason
+            s,
+            org_id=org,
+            actor_id=user,
+            note_id=uuid.UUID(note_id),
+            reason=reason,
+            expected_version=expected_version,
         )
         return {
             "note_id": str(note.id),
             "rejected": note.deleted_at is not None,
             "origin_model_id": note.origin_model_id,
+            "version": note.version,
         }
 
 

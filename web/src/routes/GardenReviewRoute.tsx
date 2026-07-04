@@ -92,17 +92,21 @@ export function GardenReviewRoute() {
   )
 
   const onReview = useCallback(
-    async (noteId: string, action: 'approve' | 'reject') => {
+    async (noteId: string, action: 'approve' | 'reject', expectedVersion: number) => {
       setBusy(`${action}:${noteId}`)
       setErr('')
       const path = action === 'approve' ? '/garden/review/approve' : '/garden/review/reject'
       const { error } = await api.POST(path, {
         params: { header: workspaceHeader() },
-        body: { note_id: noteId, reason: null },
+        // expected_version = the version this card rendered: the server
+        // rejects with stale_version if the note changed after we read it
+        // (TOCTOU guard, task 2e36e732).
+        body: { note_id: noteId, reason: null, expected_version: expectedVersion },
       })
       setBusy(null)
       if (error) {
         setErr(errMessage(error))
+        await reload() // refresh the card so the reviewer sees the CURRENT content
         return
       }
       await reload()
@@ -267,7 +271,7 @@ export function GardenReviewRoute() {
                       className="btn--ghost btn--sm"
                       disabled={busy === `approve:${r.note_id}`}
                       title={t('gardenReview.approve')}
-                      onClick={() => void onReview(r.note_id, 'approve')}
+                      onClick={() => void onReview(r.note_id, 'approve', r.version)}
                     >
                       ✓ {t('gardenReview.approve')}
                     </button>
@@ -276,7 +280,7 @@ export function GardenReviewRoute() {
                       className="btn--ghost btn--sm"
                       disabled={busy === `reject:${r.note_id}`}
                       title={t('gardenReview.reject')}
-                      onClick={() => void onReview(r.note_id, 'reject')}
+                      onClick={() => void onReview(r.note_id, 'reject', r.version)}
                     >
                       × {t('gardenReview.reject')}
                     </button>

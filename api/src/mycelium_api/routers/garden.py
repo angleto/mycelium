@@ -467,6 +467,7 @@ async def garden_review_pending(
             origin_model_id=p.origin_model_id,
             preview=p.preview,
             created_at=p.created_at,
+            version=p.version,
         )
         for p in pending
     ]
@@ -481,13 +482,18 @@ async def garden_review_approve(
     re-enters retrieval/search/listings. Audited; emits a bus ``commit``
     event. Idempotent. Member role."""
     note = await review_svc.approve_node(
-        ctx.session, org_id=ctx.org_id, actor_id=ctx.user_id, note_id=body.note_id
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        note_id=body.note_id,
+        expected_version=body.expected_version,
     )
     return GardenReviewActionOut(
         note_id=note.id,
         review_state=note.review_state,
         origin_model_id=note.origin_model_id,
         rejected=False,
+        version=note.version,
     )
 
 
@@ -506,12 +512,14 @@ async def garden_review_reject(
         actor_id=ctx.user_id,
         note_id=body.note_id,
         reason=body.reason,
+        expected_version=body.expected_version,
     )
     return GardenReviewActionOut(
         note_id=note.id,
         review_state=note.review_state,
         origin_model_id=note.origin_model_id,
         rejected=note.deleted_at is not None,
+        version=note.version,
     )
 
 

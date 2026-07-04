@@ -34,7 +34,7 @@ from dataclasses import dataclass
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from mycelium_core.errors import DomainError, NotFoundError
+from mycelium_core.errors import ConflictError, DomainError, NotFoundError
 from mycelium_core.i18n import MessageCode
 from mycelium_core.models.event_outbox import EventOutbox
 from mycelium_core.models.membership import Role
@@ -61,6 +61,10 @@ class PendingNode:
     origin_model_id: str | None
     preview: str
     created_at: dt.datetime
+    # The optimistic-concurrency pin the reviewer must echo back on
+    # approve/reject: guarantees the human approves the content they SAW
+    # (TOCTOU guard, task 2e36e732).
+    version: int
 
 
 async def list_pending(
@@ -96,6 +100,7 @@ async def list_pending(
                 origin_model_id=n.origin_model_id,
                 preview=(body or "").strip()[:_PREVIEW_CHARS],
                 created_at=n.created_at,
+                version=n.version,
             )
         )
     return out
@@ -112,20 +117,36 @@ async def _load_proposed(session: AsyncSession, *, org_id: uuid.UUID, note_id: u
 
 
 async def approve_node(
-    session: AsyncSession, *, org_id: uuid.UUID, actor_id: uuid.UUID, note_id: uuid.UUID
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    note_id: uuid.UUID,
+    expected_version: int | None = None,
 ) -> Note:
     """Approve a ``proposed`` node: ``review_state`` -> ``'approved'`` so it
     becomes effective (eligible for every retrieval/listing surface).
     Audited; emits a bus ``commit`` event (idempotent on the note id). A
     re-approve of an already-approved node is a no-op (idempotent); a node
-    that was never proposed is 404 (it is not a pending proposal)."""
+    that was never proposed is 404 (it is not a pending proposal).
+
+    ``expected_version`` is the TOCTOU guard (task 2e36e732): pass the
+    ``version`` the reviewer READ (``list_pending`` serves it) and the
+    approve fails with ``stale_version`` if the node changed in between --
+    the human never blesses content they have not seen. The check runs
+    BEFORE the idempotent short-circuit on purpose: a stale view is an
+    error even when the end state would coincide. ``None`` keeps the
+    legacy unguarded behaviour (idempotent MCP retries included)."""
     await require_role(session, org_id, actor_id, Role.member)
     note = await _load_proposed(session, org_id=org_id, note_id=note_id)
+    if expected_version is not None and note.version != expected_version:
+        raise ConflictError(MessageCode.CONFLICT_STALE_VERSION)
     if note.review_state == _APPROVED:
         return note  # idempotent: already approved
     if note.review_state != _PROPOSED:
         raise NotFoundError(MessageCode.NOTE_NOT_FOUND)
     note.review_state = _APPROVED
+    note.version += 1
     await session.flush()
     await audit.log(
         session,
@@ -163,21 +184,29 @@ async def reject_node(
     actor_id: uuid.UUID,
     note_id: uuid.UUID,
     reason: str | None = None,
+    expected_version: int | None = None,
 ) -> Note:
     """Reject a ``proposed`` node: soft-delete it (it never pollutes the
     corpus) and emit a bus ``reject`` event carrying ``origin_model_id`` (so
     the per-model accept-ratio / earned-autonomy signal, ADR-0043 D4, can be
     derived later). Reversible via the normal restore path. Idempotent if
-    already soft-deleted; 404 if the node was never proposed."""
+    already soft-deleted; 404 if the node was never proposed.
+
+    ``expected_version`` mirrors :func:`approve_node` (TOCTOU guard, task
+    2e36e732): checked before the idempotent short-circuit, ``None`` =
+    legacy unguarded behaviour."""
     await require_role(session, org_id, actor_id, Role.member)
     note = await session.get(Note, note_id)
     if note is None or note.org_id != org_id:
         raise NotFoundError(MessageCode.NOTE_NOT_FOUND)
+    if expected_version is not None and note.version != expected_version:
+        raise ConflictError(MessageCode.CONFLICT_STALE_VERSION)
     if note.deleted_at is not None:
         return note  # idempotent: already rejected/removed
     if note.review_state != _PROPOSED:
         raise NotFoundError(MessageCode.NOTE_NOT_FOUND)
     note.deleted_at = dt.datetime.now(dt.UTC)
+    note.version += 1
     await session.flush()
     await audit.log(
         session,
@@ -350,6 +379,7 @@ async def restore_source(
     if atom.deleted_at is None:
         if atom.review_state == _APPROVED:
             atom.review_state = _PROPOSED
+            atom.version += 1
             await session.flush()
             await audit.log(
                 session,
@@ -360,12 +390,16 @@ async def restore_source(
                 action="garden_review:demote",
                 diff={"review_state": {"old": _APPROVED, "new": _PROPOSED}},
             )
+        # Pin the version this flow just observed (post-demote): the same
+        # TOCTOU guard reviewers get, applied to the internal composition
+        # (task 2e36e732).
         await reject_node(
             session,
             org_id=org_id,
             actor_id=actor_id,
             note_id=atom_note_id,
             reason=reason or "restore_source",
+            expected_version=atom.version,
         )
         retired = True
     return RestoreSourceResult(

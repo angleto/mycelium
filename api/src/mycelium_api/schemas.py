@@ -1293,6 +1293,9 @@ class GardenReviewPendingItem(BaseModel):
     origin_model_id: str | None = None
     preview: str
     created_at: datetime.datetime
+    # Echo this back as ``expected_version`` on approve/reject: the TOCTOU
+    # guard that ensures the reviewer blesses the content they saw.
+    version: int
 
 
 class GardenCandidateNode(BaseModel):
@@ -1334,10 +1337,14 @@ class GardenCandidatesOut(BaseModel):
 
 class GardenReviewActionIn(BaseModel):
     """Approve, or reject, one proposed node by id (ADR-0043). ``reason`` is
-    an optional note recorded on a reject (ignored by approve)."""
+    an optional note recorded on a reject (ignored by approve).
+    ``expected_version`` is the version the reviewer READ (served by the
+    pending listing): when set, the action fails with ``stale_version`` if
+    the node changed in between (TOCTOU guard, task 2e36e732)."""
 
     note_id: uuid.UUID
     reason: str | None = None
+    expected_version: int | None = None
 
 
 class GardenReviewActionOut(BaseModel):
@@ -1345,6 +1352,7 @@ class GardenReviewActionOut(BaseModel):
     review_state: str | None  # 'approved' after approve; null after a reject
     origin_model_id: str | None = None
     rejected: bool  # True when the action soft-deleted the node
+    version: int  # post-action version (callers can chain guarded actions)
 
 
 class GardenRestoreSourceOut(BaseModel):

@@ -8605,6 +8605,8 @@ export interface components {
             note_id: string;
             /** Reason */
             reason?: string | null;
+            /** Expected Version */
+            expected_version?: number | null;
         };
         /** GardenReviewActionOut */
         GardenReviewActionOut: {
@@ -8619,6 +8621,8 @@ export interface components {
             origin_model_id?: string | null;
             /** Rejected */
             rejected: boolean;
+            /** Version */
+            version: number;
         };
         /**
          * GardenReviewPendingItem
@@ -8645,6 +8649,8 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+            /** Version */
+            version: number;
         };
         /** GardenTagSuggestionOut */
         GardenTagSuggestionOut: {

@@ -149,3 +149,36 @@ async def test_accept_ratio_endpoint_reflects_an_approval(_wire: None) -> None:
         assert row["approved"] == 1
         assert row["rejected"] == 0
         assert row["ratio"] == 1.0
+
+
+async def test_approve_with_expected_version_guard(_wire: None) -> None:
+    """The pending row serves the version pin; echoing it back guards the
+    approve (TOCTOU, task 2e36e732): a stale pin is a 409
+    ``concurrency.stale_version``, the fresh pin succeeds and the response
+    carries the post-action version."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as c:
+        h, org, user = await _signup(c)
+        nid = str(await _seed_proposed(org, user))
+
+        pending = (await c.get("/garden/review/pending", headers=h)).json()
+        row = next(p for p in pending if p["note_id"] == nid)
+        seen = row["version"]
+        assert isinstance(seen, int)
+
+        stale = await c.post(
+            "/garden/review/approve",
+            headers=h,
+            json={"note_id": nid, "expected_version": seen + 1},
+        )
+        assert stale.status_code == 409, stale.text
+        assert stale.json()["code"] == "concurrency.stale_version"
+
+        ok = await c.post(
+            "/garden/review/approve",
+            headers=h,
+            json={"note_id": nid, "expected_version": seen},
+        )
+        assert ok.status_code == 200, ok.text
+        assert ok.json()["review_state"] == "approved"
+        assert ok.json()["version"] == seen + 1
