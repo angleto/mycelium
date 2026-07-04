@@ -161,6 +161,7 @@ async def test_terms_days_auto_fills_payment_due_date() -> None:
                 json={"client_tag_id": client["id"], "year": 2026, "series": "A"},
             )
         ).json()
+        before = dt.datetime.now(dt.UTC).date()
         patched = (
             await c.patch(
                 f"/invoices/{inv['id']}",
@@ -168,10 +169,17 @@ async def test_terms_days_auto_fills_payment_due_date() -> None:
                 json={"payment_terms_days": 7},
             )
         ).json()
+        after = dt.datetime.now(dt.UTC).date()
         assert patched["payment_terms_days"] == 7
-        # The due date is base + 7 days; base is today in UTC.
-        expected = (dt.date.today() + dt.timedelta(days=7)).isoformat()
-        assert patched["payment_due_date"] == expected
+        # CONTRACT: the auto-filled due date is (issued_at or now).date() in
+        # UTC + terms_days -- the UTC calendar date, like every other date the
+        # invoice service derives (issued_at, credit-note date, default year).
+        # ``dt.date.today()`` is the LOCAL date and made this test fail every
+        # night between 00:00 and 02:00 Europe/Rome (task b710ca8b). Bracket
+        # the service's clock read so the test is deterministic at any hour,
+        # including across a midnight-UTC crossing.
+        allowed = {(d + dt.timedelta(days=7)).isoformat() for d in (before, after)}
+        assert patched["payment_due_date"] in allowed
 
 
 async def test_counter_override_rejects_value_below_max_emitted() -> None:
