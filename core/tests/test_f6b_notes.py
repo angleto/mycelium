@@ -208,3 +208,44 @@ async def test_notes_org_isolation(_providers: None) -> None:
     async with tenant_session(str(b_org), str(b_user)) as s:
         with pytest.raises(NotFoundError):
             await nt.get_note(s, org_id=b_org, note_id=n.id)
+
+
+async def test_share_via_project_tag_rescopes_memory_without_content_edit(
+    _providers: None,
+) -> None:
+    """Task 1d152747: attaching a project tag to a personal note re-scopes
+    its indexed blobs to the project perimeter immediately -- a peer finds it
+    without waiting for the next content edit -- and detaching reverts it."""
+    from mycelium_core.services import memory as memory_svc
+
+    org, user = await _org("NOTE-SHARE")
+    query = "quokka perimeter marker phrase"
+    async with tenant_session(str(org), str(user)) as s:
+        await _seed_billing(s, org, user)
+        proj = (await taxonomy.create_project(s, org_id=org, actor_id=user, name="shareproj")).id
+        # A personal note (no project); indexed at commit with project_id NULL.
+        note = await nt.create_note(s, org_id=org, actor_id=user, kind=NoteKind.text, text=query)
+    # Fresh transaction so the deferred indexing flush has landed.
+    async with tenant_session(str(org), str(user)) as s:
+        in_project = await memory_svc.retrieve(
+            s, org_id=org, actor_id=user, project_id=proj, query=query, operation_id="q0"
+        )
+        assert not in_project  # invisible in the project perimeter while personal
+        # Share it: a bare project re-tag, no content edit.
+        await nt.attach_tag(s, org_id=org, actor_id=user, note_id=note.id, tag_id=proj)
+        shared = await memory_svc.retrieve(
+            s, org_id=org, actor_id=user, project_id=proj, query=query, operation_id="q1"
+        )
+        assert shared  # now retrievable in the project WITHOUT a content edit
+        personal = await memory_svc.retrieve(
+            s, org_id=org, actor_id=user, project_id=None, query=query, operation_id="q2"
+        )
+        assert not personal  # and no longer in the personal (NULL) perimeter
+        # Un-share: detaching the project tag sends it back to personal.
+        await nt.detach_tag(s, org_id=org, actor_id=user, note_id=note.id, tag_id=proj)
+        assert not await memory_svc.retrieve(
+            s, org_id=org, actor_id=user, project_id=proj, query=query, operation_id="q3"
+        )
+        assert await memory_svc.retrieve(
+            s, org_id=org, actor_id=user, project_id=None, query=query, operation_id="q4"
+        )

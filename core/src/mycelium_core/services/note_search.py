@@ -426,6 +426,36 @@ async def _refresh_pointer_note(
     pointer.note_id = part.note_id
 
 
+async def rescope_note_blobs(
+    session: AsyncSession, *, org_id: uuid.UUID, note_id: uuid.UUID
+) -> None:
+    """Re-scope every already-indexed blob of a note to the note's CURRENT
+    project perimeter (its project tag, or NULL). The perimeter lives on the
+    blob's ``project_id``, set at index time; a note's project comes from a
+    project-kind tag, so adding/removing that tag changes the perimeter
+    without touching content. Project is metadata, not text -- one UPDATE,
+    no re-embed -- so a peer's search sees the new perimeter immediately
+    instead of only after the note's next content edit re-indexes it (task
+    1d152747). A note not yet flushed to the index has no pointers here and
+    is scoped correctly by the deferred index at commit."""
+    from mycelium_core.services.notes import project_tag_for_note
+
+    project_id = await project_tag_for_note(session, note_id=note_id)
+    await session.execute(
+        update(MemoryBlob)
+        .where(
+            MemoryBlob.org_id == org_id,
+            MemoryBlob.id.in_(
+                select(NotePartIndexPointer.blob_id).where(
+                    NotePartIndexPointer.note_id == note_id,
+                    NotePartIndexPointer.org_id == org_id,
+                )
+            ),
+        )
+        .values(project_id=project_id)
+    )
+
+
 # ---------------------------------------------------------------- tag wiring
 
 

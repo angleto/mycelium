@@ -346,5 +346,7 @@ async def test_personal_to_shared_trajectory() -> None:
     (rec,) = [r for r in runner.records if r.category == "ma_personal_to_shared"]
     assert rec.extra["hidden_before_share"] is True
     assert rec.extra["chain_has_owner"] is True
-    assert rec.extra["visible_after_touch"] is True
+    # The bare project re-tag re-scopes the perimeter with no content edit
+    # (task 1d152747): the peer sees the shared note immediately.
+    assert rec.extra["visible_after_tag"] is True
     assert rec.event is False

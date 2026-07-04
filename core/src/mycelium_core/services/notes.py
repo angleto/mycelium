@@ -332,8 +332,10 @@ async def attach_tag(
 ) -> None:
     await require_role(session, org_id, actor_id, Role.member)
     await get_note(session, org_id=org_id, note_id=note_id)
-    tag = (await session.execute(select(Tag.id).where(Tag.id == tag_id))).scalar_one_or_none()
-    if tag is None:
+    tag_kind = (
+        await session.execute(select(Tag.kind).where(Tag.id == tag_id))
+    ).scalar_one_or_none()
+    if tag_kind is None:
         raise NotFoundError(MessageCode.TAG_NOT_FOUND)
     try:
         async with session.begin_nested():
@@ -341,6 +343,13 @@ async def attach_tag(
             await session.flush()
     except IntegrityError:
         return
+    if tag_kind == TagKind.project:
+        # A project tag change moves the note's retrieval perimeter; re-scope
+        # its indexed blobs now so peers find it immediately (task 1d152747).
+        # Lazy import: note_search imports this module (project_tag_for_note).
+        from mycelium_core.services import note_search
+
+        await note_search.rescope_note_blobs(session, org_id=org_id, note_id=note_id)
     await audit.log(
         session,
         org_id=org_id,
@@ -360,9 +369,19 @@ async def detach_tag(
     tag_id: uuid.UUID,
 ) -> None:
     await require_role(session, org_id, actor_id, Role.member)
+    tag_kind = (
+        await session.execute(select(Tag.kind).where(Tag.id == tag_id))
+    ).scalar_one_or_none()
     await session.execute(
         delete(NoteTag).where(NoteTag.note_id == note_id, NoteTag.tag_id == tag_id)
     )
+    if tag_kind == TagKind.project:
+        # Un-sharing (removing the project tag) sends the note's blobs back to
+        # the note's current perimeter (another project tag or NULL) at once,
+        # not at the next content edit (task 1d152747).
+        from mycelium_core.services import note_search
+
+        await note_search.rescope_note_blobs(session, org_id=org_id, note_id=note_id)
     await audit.log(
         session,
         org_id=org_id,

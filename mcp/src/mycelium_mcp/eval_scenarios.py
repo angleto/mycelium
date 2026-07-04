@@ -1864,11 +1864,11 @@ async def run_personal_to_shared(
     project; the peer then finds it; the revision chain shows both actors.
 
     Uses the real perimeter mechanism (a note's project is a project-kind
-    tag → the blob's ``project_id``). Sharing re-tags the note; whether the
-    memory perimeter reindexes on a bare tag-attach is MEASURED, not assumed
-    — if the peer still can't find it after sharing, that is recorded as a
-    finding (the blob perimeter is set at index time), and the scenario then
-    forces a reindex via a content touch and re-measures."""
+    tag → the blob's ``project_id``). Sharing is a BARE re-tag with no
+    content edit, and the peer must find it IMMEDIATELY: the perimeter
+    re-scopes the note's blobs on the tag change (task 1d152747). This is
+    the regression guard for that fix — an event fires if the shared note is
+    not visible without a content touch."""
     project_id = ingest.project_ids.get(project_name)
     if project_id is None:
         runner.summary.skipped.append({"scenario": "personal_to_shared", "reason": "no project"})
@@ -1887,34 +1887,27 @@ async def run_personal_to_shared(
     )
     note_id = note["id"]
     note_blobs = await _resolve_blobs(runner, owner, uuid.UUID(note_id))
-    # (2) peer cannot find it in the project perimeter.
+    # (2) peer cannot find it in the project perimeter while it is personal.
     peer_pre = await runner.search(peer, f"combinazione {marker}", project_id=project_id)
     hidden_before_share = _rank_of(peer_pre, note_blobs) is None
-    # (3) share: attach the project tag.
+    # (3) share: attach the project tag — a bare re-tag, no content edit.
     shared = await runner.call(
         owner, "add_note_tag", {"note_id": note_id, "tag_id": str(project_id)}
     )
     share_ok = not (isinstance(shared, dict) and "error" in shared)
-    # (4a) measure visibility right after the bare re-tag.
-    peer_mid = await runner.search(peer, f"combinazione {marker}", project_id=project_id)
-    visible_after_tag = _rank_of(peer_mid, note_blobs) is not None
-    # (4b) force a reindex via a content touch, then re-measure.
-    await runner.call(
-        owner, "append_note_part", {"note_id": note_id, "chunk": f"Condiviso {marker}."}
-    )
-    note_blobs = await _resolve_blobs(runner, owner, uuid.UUID(note_id))
+    # (4) the peer must find it now, without any content touch.
     peer_post = await runner.search(peer, f"combinazione {marker}", project_id=project_id)
-    visible_after_touch = _rank_of(peer_post, note_blobs) is not None
-    # (5) provenance chain: both actors appear across the revisions.
+    visible_after_tag = _rank_of(peer_post, note_blobs) is not None
+    # (5) provenance chain: the author appears across the revisions.
     revs = await runner.call(peer, "list_note_revisions", {"note_id": note_id})
     rev_list = revs if isinstance(revs, list) else revs.get("revisions", [])
     actor_ids = {r.get("actor_id") for r in rev_list if isinstance(r, dict)}
     chain_ok = str(owner.user_id) in actor_ids
     if not visible_after_tag:
         runner.summary.notes.append(
-            "personal_to_shared: bare project re-tag did NOT reindex the memory "
-            "perimeter; the shared note became retrievable only after a content "
-            "touch (blob project_id is set at index time). Finding for the freeze."
+            "personal_to_shared: REGRESSION — a bare project re-tag did not "
+            "re-scope the memory perimeter; the shared note stayed invisible to "
+            "the peer without a content edit (task 1d152747)."
         )
     runner.records.append(
         ScenarioRecord(
@@ -1923,15 +1916,14 @@ async def run_personal_to_shared(
             fact_id=f"ma-ps-{marker}",
             rank=_rank_of(peer_post, note_blobs),
             # Event iff the end-state is wrong: peer saw it while personal, or
-            # cannot see it after sharing+touch, or the chain lost an actor.
-            event=(not hidden_before_share) or (not visible_after_touch) or (not chain_ok),
+            # cannot see it after the bare share, or the chain lost an actor.
+            event=(not hidden_before_share) or (not visible_after_tag) or (not chain_ok),
             scenario="personal_to_shared",
             actor=peer.name,
             extra={
                 "hidden_before_share": hidden_before_share,
                 "share_ok": share_ok,
                 "visible_after_tag": visible_after_tag,
-                "visible_after_touch": visible_after_touch,
                 "chain_has_owner": chain_ok,
             },
         )
