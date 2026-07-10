@@ -1074,7 +1074,32 @@ async def add_comment(token: str, org_id: str, task_id: str, body: str) -> dict[
             body=body,
             author_identity_id=author_id,
         )
-        return {"id": str(c.id), "task_id": task_id}
+        # ``version`` lets the caller delete this comment without a
+        # ``list_comments`` round-trip (delete_comment needs expected_version).
+        return {"id": str(c.id), "task_id": task_id, "version": c.version}
+
+
+@mcp.tool()
+async def delete_comment(
+    token: str, org_id: str, comment_id: str, expected_version: int
+) -> dict[str, Any]:
+    """Soft-delete a comment -- the inverse of ``add_comment`` (author or
+    admin only; the entry is retained in the recovery history). ``comment_id``
+    is the ``id`` returned by ``add_comment`` / ``list_comments``;
+    ``expected_version`` is that comment's ``version`` (optimistic-concurrency
+    guard -- fails if the comment changed since you read it). Accepts any
+    comment id, whether a task work-diary comment or an inline note comment."""
+    async with _tenant(token, org_id) as (s, org, user):
+        ident, _tok = await _resolve_agent_context(s, org)
+        v = await annotations_svc.soft_delete(
+            s,
+            org_id=org,
+            actor_id=user,
+            annotation_id=uuid.UUID(comment_id),
+            expected_version=expected_version,
+            actor_identity_id=ident,
+        )
+        return {"id": comment_id, "version": v, "deleted": True}
 
 
 @mcp.tool()

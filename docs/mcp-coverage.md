@@ -47,7 +47,7 @@ handles (see the generated `tasks` section below). An agent never needs to
 over-fetch the org table and filter in its head.
 
 <!-- BEGIN GENERATED: mcp tool inventory (scripts/gen_mcp_coverage.py) -->
-**249 tools across 13 domains.** This inventory is generated from the live registry by `scripts/gen_mcp_coverage.py` — do not edit by hand; run `make mcp-coverage` to refresh. The one-line summary is each tool's first docstring line, so it cannot drift from the code.
+**250 tools across 13 domains.** This inventory is generated from the live registry by `scripts/gen_mcp_coverage.py` — do not edit by hand; run `make mcp-coverage` to refresh. The one-line summary is each tool's first docstring line, so it cannot drift from the code.
 
 ### search (3)
 
@@ -286,7 +286,7 @@ over-fetch the org table and filter in its head.
 | `update_project` | Edit a project. Pass ``client_tag_id`` to reassign the project |
 | `update_tag` | Rename / recolor / set status of a tag (status: active\|archived). |
 
-### tasks (33)
+### tasks (34)
 
 | Tool | Summary |
 |---|---|
@@ -300,6 +300,7 @@ over-fetch the org table and filter in its head.
 | `count_tasks` | Count tasks matching the SAME filters as ``list_tasks`` with one |
 | `create_task` | Create a task. ``importance``/``urgency`` 1..5 Eisenhower |
 | `delete_attachment` | Hard-delete an attachment (the stored blob goes with the row). |
+| `delete_comment` | Soft-delete a comment -- the inverse of ``add_comment`` (author or |
 | `delete_task` | Soft-delete a task (recoverable via restore_task). |
 | `download_attachment_capability` | Mint ONE short-TTL capability token that downloads EVERY attachment |
 | `get_task` | Read one task with its full attribute set (for editing). Includes |
