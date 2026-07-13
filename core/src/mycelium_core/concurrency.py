@@ -10,7 +10,7 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
-from sqlalchemy import update
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import DeclarativeBase
 
@@ -46,5 +46,15 @@ async def optimistic_update(
     result = await session.execute(stmt)
     row = result.first()
     if row is None:
-        raise ConflictError(MessageCode.CONFLICT_STALE_VERSION)
+        # Stale (version mismatch) or missing (RLS/deleted). Surface the
+        # CURRENT version so the caller can re-read and reconcile instead of
+        # failing blind: a human+agent co-editing one comment hit this, and an
+        # opaque "can't save" read as a permissions problem (task 515e13fb).
+        # An extra param is ignored by the (field-less) message template.
+        current = (
+            await session.execute(select(table.c.version).where(table.c.id == pk))
+        ).scalar_one_or_none()
+        if current is None:
+            raise ConflictError(MessageCode.CONFLICT_STALE_VERSION)
+        raise ConflictError(MessageCode.CONFLICT_STALE_VERSION, current_version=int(current))
     return int(row[0])

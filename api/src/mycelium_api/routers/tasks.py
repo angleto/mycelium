@@ -17,7 +17,7 @@ from mycelium_api.deps import (
     task_description_write_ctx,
     tenant_ctx,
 )
-from mycelium_api.routers.annotations import annotation_out
+from mycelium_api.routers.annotations import annotation_out_one, annotations_out
 from mycelium_api.routers.attachments import att_out, read_capped, upload_file_field
 from mycelium_api.schemas import (
     AnnotationOut,
@@ -884,7 +884,7 @@ async def add_comment(
         task_id=task_id,
         body=body.body,
     )
-    return annotation_out(c)
+    return await annotation_out_one(ctx.session, ctx.org_id, c)
 
 
 @router.get("/{task_id}/comments", response_model=list[AnnotationOut])
@@ -892,7 +892,7 @@ async def list_comments(
     task_id: uuid.UUID, ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")]
 ) -> list[AnnotationOut]:
     rows = await svc.list_comments(ctx.session, org_id=ctx.org_id, task_id=task_id)
-    return [annotation_out(c) for c in rows]
+    return await annotations_out(ctx.session, ctx.org_id, rows)
 
 
 # Participants on appointment-tasks (migration 0095/0096, ADR-0008

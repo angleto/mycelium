@@ -6820,6 +6820,12 @@ export interface components {
             parent_id?: string | null;
             /** Author Identity Id */
             author_identity_id?: string | null;
+            /** Author Handle */
+            author_handle?: string | null;
+            /** Author Kind */
+            author_kind?: string | null;
+            /** Author Label */
+            author_label?: string | null;
             /** Resolved By Identity Id */
             resolved_by_identity_id?: string | null;
             /** Assigned To Identity Id */

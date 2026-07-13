@@ -1087,8 +1087,10 @@ async def delete_comment(
     admin only; the entry is retained in the recovery history). ``comment_id``
     is the ``id`` returned by ``add_comment`` / ``list_comments``;
     ``expected_version`` is that comment's ``version`` (optimistic-concurrency
-    guard -- fails if the comment changed since you read it). Accepts any
-    comment id, whether a task work-diary comment or an inline note comment."""
+    guard -- fails with ``concurrency.stale_version`` if the comment changed
+    since you read it; the error carries the CURRENT ``current_version`` so you
+    can re-read and retry, it is NOT a permissions error). Accepts any comment
+    id, whether a task work-diary comment or an inline note comment."""
     async with _tenant(token, org_id) as (s, org, user):
         ident, _tok = await _resolve_agent_context(s, org)
         v = await annotations_svc.soft_delete(
@@ -1705,7 +1707,14 @@ async def count_annotations(
 async def edit_annotation(
     token: str, org_id: str, annotation_id: str, body: str, expected_version: int
 ) -> dict[str, Any]:
-    """Edit an annotation's body (author or admin only)."""
+    """Edit an annotation's body (author or admin only). ``expected_version``
+    is an optimistic-concurrency guard: if someone else saved since you read
+    the annotation, this fails with ``concurrency.stale_version`` and the
+    error carries the CURRENT ``current_version`` in its params. That is NOT a
+    permissions error -- re-read the annotation (``list_annotations`` /
+    ``list_comments``), merge your change into the current body, and retry with
+    ``current_version``. Do not just resend with the new version blindly: a
+    full-body edit would overwrite the other author's change (lost update)."""
     async with _tenant(token, org_id) as (s, org, user):
         ident, _tok = await _resolve_agent_context(s, org)
         v = await annotations_svc.edit(

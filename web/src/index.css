@@ -5764,8 +5764,25 @@ button.btn--danger:hover {
   font-size: 0.78rem;
 }
 .anno__author {
+  font-weight: 600;
+  opacity: 0.9;
+}
+.anno__author--ai {
+  color: var(--accent);
+}
+/* The comment's OWN id (mono, muted, one-click copy) — distinct from the
+   author name beside it, so neither is mistaken for the other. */
+.anno__id {
   font-family: var(--mono, monospace);
-  opacity: 0.75;
+  font-size: 0.72rem;
+  opacity: 0.55;
+  cursor: pointer;
+  padding: 0 0.15rem;
+  border-radius: 3px;
+}
+.anno__id:hover {
+  opacity: 0.9;
+  background: var(--surface-2);
 }
 .anno__status {
   text-transform: uppercase;

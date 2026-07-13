@@ -66,10 +66,36 @@ async def _author_identity_id(
     return row.scalar_one_or_none()
 
 
-def annotation_out(a: Annotation) -> AnnotationOut:
+async def _author_idents(
+    session: AsyncSession, org_id: uuid.UUID, ids: set[uuid.UUID]
+) -> dict[uuid.UUID, tuple[str, str, str | None]]:
+    """Per-identity ``(handle, kind, label)`` for annotation authors, batched
+    (mirrors ``tasks._creator_idents``). ``label`` is ``ai_assistants.label``
+    when the author is an ai_assistant identity (its user-facing display name);
+    ``None`` for a human -- the login handle is in the ``handle`` slot."""
+    if not ids:
+        return {}
+    from mycelium_core.models.ai_assistant import AiAssistant
+
+    rows = (
+        await session.execute(
+            select(Identity.id, Identity.handle, Identity.kind, AiAssistant.label)
+            .outerjoin(AiAssistant, AiAssistant.id == Identity.ai_assistant_id)
+            .where(Identity.id.in_(ids), Identity.org_id == org_id)
+        )
+    ).all()
+    return {iid: (handle, kind.value, label) for iid, handle, kind, label in rows}
+
+
+def annotation_out(
+    a: Annotation, author: tuple[str, str, str | None] | None = None
+) -> AnnotationOut:
     """Map a row to the wire shape, collapsing the typed FKs back to the
-    generic ``doc_id``."""
+    generic ``doc_id``. ``author`` is the pre-resolved ``(handle, kind,
+    label)`` of ``author_identity_id`` (see ``_author_idents``); when omitted
+    the human-name fields stay ``None`` (the raw id is still present)."""
     doc_id = cast(uuid.UUID, a.task_id if a.doc_kind == "task_description" else a.note_part_id)
+    handle, kind, label = author if author is not None else (None, None, None)
     return AnnotationOut(
         id=a.id,
         doc_kind=a.doc_kind,
@@ -84,6 +110,9 @@ def annotation_out(a: Annotation) -> AnnotationOut:
         status=a.status,
         parent_id=a.parent_id,
         author_identity_id=a.author_identity_id,
+        author_handle=handle,
+        author_kind=kind,
+        author_label=label,
         resolved_by_identity_id=a.resolved_by_identity_id,
         assigned_to_identity_id=a.assigned_to_identity_id,
         resolved_at=a.resolved_at,
@@ -93,6 +122,28 @@ def annotation_out(a: Annotation) -> AnnotationOut:
         created_at=a.created_at,
         updated_at=a.updated_at,
     )
+
+
+async def annotations_out(
+    session: AsyncSession, org_id: uuid.UUID, rows: list[Annotation]
+) -> list[AnnotationOut]:
+    """Serialise a list of annotations, resolving every author identity to a
+    human ``(handle, kind, label)`` in one batched query (no N+1)."""
+    idmap = await _author_idents(
+        session, org_id, {a.author_identity_id for a in rows if a.author_identity_id}
+    )
+    return [
+        annotation_out(a, idmap.get(a.author_identity_id) if a.author_identity_id else None)
+        for a in rows
+    ]
+
+
+async def annotation_out_one(
+    session: AsyncSession, org_id: uuid.UUID, a: Annotation
+) -> AnnotationOut:
+    """Single-row ``annotations_out`` (resolves the one author)."""
+    (only,) = await annotations_out(session, org_id, [a])
+    return only
 
 
 @router.get("", response_model=list[AnnotationOut])
@@ -109,7 +160,7 @@ async def list_annotations(
         doc_id=doc_id,
         include_resolved=include_resolved,
     )
-    return [annotation_out(a) for a in rows]
+    return await annotations_out(ctx.session, ctx.org_id, rows)
 
 
 @router.post("/comment", response_model=AnnotationOut)
@@ -129,7 +180,7 @@ async def create_comment(
         anchor_suffix=body.anchor_suffix,
         parent_id=body.parent_id,
     )
-    return annotation_out(a)
+    return await annotation_out_one(ctx.session, ctx.org_id, a)
 
 
 @router.post("/comment/stream", response_model=AnnotationOut)
@@ -169,7 +220,7 @@ async def create_comment_stream(
         parent_id=parent_id,
         author_identity_id=author,
     )
-    return annotation_out(a)
+    return await annotation_out_one(ctx.session, ctx.org_id, a)
 
 
 @router.post("/suggestion", response_model=AnnotationOut)
@@ -189,7 +240,7 @@ async def propose_suggestion(
         anchor_prefix=body.anchor_prefix,
         anchor_suffix=body.anchor_suffix,
     )
-    return annotation_out(a)
+    return await annotation_out_one(ctx.session, ctx.org_id, a)
 
 
 @router.post("/suggestion/stream", response_model=AnnotationOut)
@@ -226,7 +277,7 @@ async def propose_suggestion_stream(
         anchor_suffix=anchor_suffix,
         author_identity_id=author,
     )
-    return annotation_out(a)
+    return await annotation_out_one(ctx.session, ctx.org_id, a)
 
 
 @router.get("/assigned", response_model=list[AnnotationOut])
@@ -256,7 +307,7 @@ async def list_assigned_annotations(
         assignee_identity_id=ident_id,
         include_resolved=include_resolved,
     )
-    return [annotation_out(a) for a in rows]
+    return await annotations_out(ctx.session, ctx.org_id, rows)
 
 
 @router.get("/{annotation_id}", response_model=AnnotationOut)
@@ -265,7 +316,7 @@ async def get_annotation(
     ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> AnnotationOut:
     a = await svc.get_annotation(ctx.session, org_id=ctx.org_id, annotation_id=annotation_id)
-    return annotation_out(a)
+    return await annotation_out_one(ctx.session, ctx.org_id, a)
 
 
 @router.patch("/{annotation_id}", response_model=VersionOut)

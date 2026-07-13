@@ -50,6 +50,18 @@ function shortId(id: string | null | undefined): string {
   return id ? id.slice(0, 8) : '—'
 }
 
+// The card badges the AUTHOR (a name, not a raw id) and, separately, the
+// comment's OWN id. Before, the only badge was shortId(author_identity_id),
+// which is the author id: it repeats across every comment by the same author
+// and was mistaken for a useless comment id (task 515e13fb).
+function authorLabel(a: Annotation): string {
+  return a.author_label || a.author_handle || shortId(a.author_identity_id)
+}
+function authorTitle(a: Annotation): string {
+  const who = a.author_handle ? `@${a.author_handle}` : (a.author_identity_id ?? '')
+  return a.author_kind === 'ai_assistant' ? `${who} (AI)` : who
+}
+
 export function AnnotationsPanel({
   docKind,
   docId,
@@ -108,6 +120,33 @@ export function AnnotationsPanel({
   const [sugOrig, setSugOrig] = useState('')
   const [sugProp, setSugProp] = useState('')
   const [sugWhy, setSugWhy] = useState('')
+
+  // Comment id copied-to-clipboard flash (per-card), so the now-visible
+  // comment id is one click to grab (e.g. for delete_comment / a permalink).
+  const [idCopied, setIdCopied] = useState<string | null>(null)
+  const copyId = async (id: string) => {
+    try {
+      await navigator.clipboard.writeText(id)
+      setIdCopied(id)
+      window.setTimeout(() => setIdCopied(null), 1500)
+    } catch {
+      /* clipboard unavailable (insecure context) — non-fatal */
+    }
+  }
+
+  // A version-guarded mutation that lost the optimistic race (someone else —
+  // a teammate, or an MCP agent — saved since this card was read). Refresh so
+  // the current text shows, then explain: never silently overwrite (lost
+  // update). This is the recoverable-conflict half of task 515e13fb.
+  const onStaleConflict = async () => {
+    await reload()
+    setErr(
+      t('annotations.staleConflict', {
+        defaultValue:
+          'This comment changed since you opened it (someone else saved). The card now shows the current text — review it, merge your change, and try again.',
+      }),
+    )
+  }
 
   const [replyTo, setReplyTo] = useState<string | null>(null)
   const [replyBody, setReplyBody] = useState('')
@@ -221,6 +260,8 @@ export function AnnotationsPanel({
         // body (drifted or ambiguous): flag THIS card so the failure is
         // attributable, not just a generic line at the panel top.
         setStaleIds((s) => new Set(s).add(a.id))
+      } else if (code === 'concurrency.stale_version') {
+        await onStaleConflict()
       }
     } finally {
       setPending(null)
@@ -263,7 +304,7 @@ export function AnnotationsPanel({
 
   const saveEdit = async (a: Annotation) => {
     if (!editBody.trim()) return
-    const { ok } = await send(`/annotations/${a.id}`, 'PATCH', {
+    const { ok, code } = await send(`/annotations/${a.id}`, 'PATCH', {
       body: editBody,
       expected_version: a.version,
     })
@@ -271,6 +312,9 @@ export function AnnotationsPanel({
       setEditId(null)
       setEditBody('')
       await reload()
+    } else if (code === 'concurrency.stale_version') {
+      // Keep the draft (don't close the editor) so the user can merge.
+      await onStaleConflict()
     }
   }
 
@@ -281,8 +325,12 @@ export function AnnotationsPanel({
       )
     )
       return
-    if ((await send(`/annotations/${a.id}?expected_version=${a.version}`, 'DELETE')).ok)
-      await reload()
+    const { ok, code } = await send(
+      `/annotations/${a.id}?expected_version=${a.version}`,
+      'DELETE',
+    )
+    if (ok) await reload()
+    else if (code === 'concurrency.stale_version') await onStaleConflict()
   }
 
   // A root stays visible when it (or any of its replies) is still open,
@@ -306,9 +354,23 @@ export function AnnotationsPanel({
     return (
       <li key={a.id} className={`anno anno--${a.kind} anno--${a.status}`}>
         <div className="anno__head">
-          <span className="anno__author" title={a.author_identity_id ?? ''}>
-            {shortId(a.author_identity_id)}
+          <span
+            className={`anno__author${a.author_kind === 'ai_assistant' ? ' anno__author--ai' : ''}`}
+            title={authorTitle(a)}
+          >
+            {authorLabel(a)}
           </span>
+          <code
+            className="anno__id"
+            title={
+              idCopied === a.id
+                ? t('annotations.idCopied', { defaultValue: 'Comment id copied' })
+                : t('annotations.copyId', { defaultValue: 'Copy comment id' })
+            }
+            onClick={() => void copyId(a.id)}
+          >
+            {shortId(a.id)}
+          </code>
           <span className={`anno__status anno__status--${a.status}`}>{a.status}</span>
           {a.anchor_quote && !isSuggestion && (
             <span className="anno__quote" title={a.anchor_quote}>

@@ -897,6 +897,15 @@ class AnnotationOut(BaseModel):
     status: str
     parent_id: uuid.UUID | None = None
     author_identity_id: uuid.UUID | None = None
+    # Resolved author (task 515e13fb): the SPA showed only the raw 8-char
+    # ``author_identity_id`` prefix on every card, which collapses across a
+    # single author's comments -- it is the AUTHOR id, never the comment id.
+    # Surface a human name (like ``TaskOut.created_by_*``): ``author_handle``
+    # is the identity handle, ``author_kind`` is 'user' | 'ai_assistant', and
+    # ``author_label`` is ``ai_assistants.label`` for an assistant (else None).
+    author_handle: str | None = None
+    author_kind: str | None = None
+    author_label: str | None = None
     resolved_by_identity_id: uuid.UUID | None = None
     assigned_to_identity_id: uuid.UUID | None = None
     resolved_at: datetime.datetime | None = None

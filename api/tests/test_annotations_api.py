@@ -57,6 +57,10 @@ async def test_task_comment_is_annotation_and_legacy_endpoint_works() -> None:
         assert a["kind"] == "comment"
         assert a["status"] == "open"
         assert a["author_identity_id"] is not None  # human author recorded via Identity
+        # Resolved author (task 515e13fb): a human name, not a raw id prefix.
+        assert a["author_kind"] == "user"
+        assert a["author_handle"]  # a real handle
+        assert a["author_label"] is None  # label is the ai_assistant display name only
 
         # a second diary entry via the generic endpoint
         await c.post(
