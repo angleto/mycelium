@@ -336,7 +336,7 @@ over-fetch the org table and filter in its head.
 | `count_annotations` | Count the annotations on a markdown document with ``COUNT`` queries |
 | `create_recurrence` | Make a task recurring (mutually exclusive with dependencies). |
 | `delete_annotation` | Soft-delete an annotation / withdraw a pending suggestion (author |
-| `edit_annotation` | Edit an annotation's body (author or admin only). |
+| `edit_annotation` | Edit an annotation's body (author or admin only). ``expected_version`` |
 | `edit_annotation_body_instructions` | Recipe for a TOKEN-FREE replace of an annotation's body (a |
 | `errands` | Place/context matcher: tasks for an errand run at a location and/or |
 | `extract_cluster_pattern` | Phase-2 decomposition (ADR-0039): synthesise a ``pattern`` humus note |

@@ -134,16 +134,36 @@ export function AnnotationsPanel({
     }
   }
 
-  // A version-guarded mutation that lost the optimistic race (someone else —
-  // a teammate, or an MCP agent — saved since this card was read). Refresh so
-  // the current text shows, then explain: never silently overwrite (lost
-  // update). This is the recoverable-conflict half of task 515e13fb.
+  // A NON-body mutation (resolve/reopen/accept/reject, or delete) that lost
+  // the optimistic race (someone else — a teammate, or an MCP agent — saved
+  // since this card was read). Reload so the card shows the current version,
+  // then explain. Safe to reload here: no editor is open hiding the change,
+  // and these actions do not blind-overwrite the body (task 515e13fb).
   const onStaleConflict = async () => {
     await reload()
     setErr(
       t('annotations.staleConflict', {
         defaultValue:
-          'This comment changed since you opened it (someone else saved). The card now shows the current text — review it, merge your change, and try again.',
+          'This comment changed since you opened it (someone else saved). The card now shows the current version — review it and try again if needed.',
+      }),
+    )
+  }
+
+  // An edit that lost the race is different: the editor is open holding the
+  // user's full-body draft, so reloading alone would HIDE the concurrent text
+  // and let a one-click re-save clobber it (lost update). Instead close the
+  // editor (so the card renders the CURRENT body) and stash the draft, so the
+  // user sees the other change first and re-applies their draft on top.
+  const [conflictDraft, setConflictDraft] = useState<{ id: string; body: string } | null>(null)
+  const onEditConflict = async (a: Annotation) => {
+    setConflictDraft({ id: a.id, body: editBody })
+    setEditId(null)
+    setEditBody('')
+    await reload()
+    setErr(
+      t('annotations.staleEditConflict', {
+        defaultValue:
+          'Someone else saved this comment since you opened it. The card now shows their version; your unsaved draft was kept — click “Re-apply my draft” to merge it on top, then save.',
       }),
     )
   }
@@ -311,10 +331,10 @@ export function AnnotationsPanel({
     if (ok) {
       setEditId(null)
       setEditBody('')
+      setConflictDraft((d) => (d?.id === a.id ? null : d))
       await reload()
     } else if (code === 'concurrency.stale_version') {
-      // Keep the draft (don't close the editor) so the user can merge.
-      await onStaleConflict()
+      await onEditConflict(a)
     }
   }
 
@@ -410,6 +430,35 @@ export function AnnotationsPanel({
               <MarkdownView text={a.body} parent={imageUploadParent} />
             </div>
           )
+        )}
+
+        {conflictDraft?.id === a.id && editId !== a.id && (
+          <div className="anno__conflict" role="status">
+            <span>
+              {t('annotations.draftKept', {
+                defaultValue: 'You have an unsaved draft from before this comment changed.',
+              })}
+            </span>
+            <button
+              type="button"
+              className="btn--sm"
+              onClick={() => {
+                setEditId(a.id)
+                setEditBody(conflictDraft.body)
+                setConflictDraft(null)
+                setErr('')
+              }}
+            >
+              {t('annotations.reapplyDraft', { defaultValue: 'Re-apply my draft' })}
+            </button>
+            <button
+              type="button"
+              className="btn--sm btn--ghost"
+              onClick={() => setConflictDraft(null)}
+            >
+              {t('annotations.discardDraft', { defaultValue: 'Discard draft' })}
+            </button>
+          </div>
         )}
 
         <div className="anno__actions">
