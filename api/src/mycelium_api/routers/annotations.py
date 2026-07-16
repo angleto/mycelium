@@ -167,7 +167,14 @@ async def list_annotations(
 async def create_comment(
     body: AnnotationCommentIn,
     ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+    claims: Annotated[dict[str, Any], Depends(current_claims)],
 ) -> AnnotationOut:
+    # Attribute an agent bearer's comment to its ai_assistant identity badge,
+    # exactly like /comment/stream and the MCP add_annotation tool. Without
+    # this the JSON create records the token-owner's *user* identity, so the
+    # author later can't edit/delete via the author gate unless it is admin
+    # (transport-invariant authorship: create here => edit/delete anywhere).
+    author = await _author_identity_id(ctx.session, org_id=ctx.org_id, claims=claims)
     a = await svc.create_comment(
         ctx.session,
         org_id=ctx.org_id,
@@ -179,6 +186,7 @@ async def create_comment(
         anchor_prefix=body.anchor_prefix,
         anchor_suffix=body.anchor_suffix,
         parent_id=body.parent_id,
+        author_identity_id=author,
     )
     return await annotation_out_one(ctx.session, ctx.org_id, a)
 
@@ -227,7 +235,9 @@ async def create_comment_stream(
 async def propose_suggestion(
     body: SuggestionIn,
     ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+    claims: Annotated[dict[str, Any], Depends(current_claims)],
 ) -> AnnotationOut:
+    author = await _author_identity_id(ctx.session, org_id=ctx.org_id, claims=claims)
     a = await svc.propose_suggestion(
         ctx.session,
         org_id=ctx.org_id,
@@ -239,6 +249,7 @@ async def propose_suggestion(
         rationale=body.rationale,
         anchor_prefix=body.anchor_prefix,
         anchor_suffix=body.anchor_suffix,
+        author_identity_id=author,
     )
     return await annotation_out_one(ctx.session, ctx.org_id, a)
 
@@ -324,7 +335,13 @@ async def edit_annotation(
     annotation_id: uuid.UUID,
     body: AnnotationEditIn,
     ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+    claims: Annotated[dict[str, Any], Depends(current_claims)],
 ) -> VersionOut:
+    # Resolve the agent's ai_assistant identity so an agent editing its OWN
+    # comment satisfies the author gate on authorship, not on the admin
+    # fallback (which a clamped/member effective role does not have). Parity
+    # with the /body/stream and /body/patch edit paths.
+    ident = await _author_identity_id(ctx.session, org_id=ctx.org_id, claims=claims)
     v = await svc.edit(
         ctx.session,
         org_id=ctx.org_id,
@@ -332,6 +349,7 @@ async def edit_annotation(
         annotation_id=annotation_id,
         body=body.body,
         expected_version=body.expected_version,
+        actor_identity_id=ident,
     )
     return VersionOut(id=annotation_id, version=v)
 
@@ -428,14 +446,20 @@ async def patch_annotation_body(
 async def delete_annotation(
     annotation_id: uuid.UUID,
     ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+    claims: Annotated[dict[str, Any], Depends(current_claims)],
     expected_version: Annotated[int, Query(ge=1)],
 ) -> VersionOut:
+    # Same authorship-not-admin resolution as the edit path: an agent must be
+    # able to delete/withdraw its OWN comment/suggestion under any effective
+    # role.
+    ident = await _author_identity_id(ctx.session, org_id=ctx.org_id, claims=claims)
     v = await svc.soft_delete(
         ctx.session,
         org_id=ctx.org_id,
         actor_id=ctx.user_id,
         annotation_id=annotation_id,
         expected_version=expected_version,
+        actor_identity_id=ident,
     )
     return VersionOut(id=annotation_id, version=v)
 
@@ -445,13 +469,18 @@ async def resolve_annotation(
     annotation_id: uuid.UUID,
     body: ExpectedVersionIn,
     ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+    claims: Annotated[dict[str, Any], Depends(current_claims)],
 ) -> VersionOut:
+    # Stamp resolved_by with the agent's ai_assistant badge (parity with the
+    # MCP resolve tool), not the token-owner's user identity.
+    by = await _author_identity_id(ctx.session, org_id=ctx.org_id, claims=claims)
     v = await svc.resolve(
         ctx.session,
         org_id=ctx.org_id,
         actor_id=ctx.user_id,
         annotation_id=annotation_id,
         expected_version=body.expected_version,
+        resolved_by_identity_id=by,
     )
     return VersionOut(id=annotation_id, version=v)
 
@@ -477,13 +506,16 @@ async def accept_suggestion(
     annotation_id: uuid.UUID,
     body: ExpectedVersionIn,
     ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+    claims: Annotated[dict[str, Any], Depends(current_claims)],
 ) -> VersionOut:
+    by = await _author_identity_id(ctx.session, org_id=ctx.org_id, claims=claims)
     v = await svc.accept_suggestion(
         ctx.session,
         org_id=ctx.org_id,
         actor_id=ctx.user_id,
         annotation_id=annotation_id,
         expected_version=body.expected_version,
+        resolved_by_identity_id=by,
     )
     return VersionOut(id=annotation_id, version=v)
 
@@ -493,13 +525,16 @@ async def reject_suggestion(
     annotation_id: uuid.UUID,
     body: ExpectedVersionIn,
     ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+    claims: Annotated[dict[str, Any], Depends(current_claims)],
 ) -> VersionOut:
+    by = await _author_identity_id(ctx.session, org_id=ctx.org_id, claims=claims)
     v = await svc.reject_suggestion(
         ctx.session,
         org_id=ctx.org_id,
         actor_id=ctx.user_id,
         annotation_id=annotation_id,
         expected_version=body.expected_version,
+        resolved_by_identity_id=by,
     )
     return VersionOut(id=annotation_id, version=v)
 
