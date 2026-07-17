@@ -89,6 +89,11 @@ export const en = {
         explain:
           'Credits the autonomous jobs (distillation, re-embedding) spent today against the daily cap. Lower is calmer; at the cap the metabolism pauses until tomorrow. Empty until you set a cap or while the kill switch is off.',
       },
+      trace_backlog: {
+        label: 'Trace backlog',
+        explain:
+          'Retrieval-trace rows older than the retention window: rows the fuel-retention sweep should have pruned. Healthy near zero; a growing count means the pruner is not running and the telemetry table accumulates unbounded.',
+      },
     },
     timeline: {
       title: 'What changed',

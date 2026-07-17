@@ -17,6 +17,7 @@ from mycelium_worker import (
     dispatch,
     email_sync,
     embedding_migration,
+    fuel_retention,
     garden,
     main,
     reminders,
@@ -46,6 +47,10 @@ def test_always_on_jobs_present_regardless_of_garden(monkeypatch: pytest.MonkeyP
         email_sync.run_forever,
         embedding_migration.run_forever,
         reminders.run_forever,
+        # ADR-0048: fuel-path retention is hygiene, never gated on the
+        # garden loop (the historical hole: the only trace pruner rode
+        # the default-off sweep).
+        fuel_retention.run_forever,
     )
     for enabled in (False, True):
         jobs = _jobs_with(garden_loop_enabled=enabled, monkeypatch=monkeypatch)

@@ -508,6 +508,23 @@ class Settings(BaseSettings):
     # Probe traffic (the eval harness) is never traced regardless.
     retrieval_trace_enabled: bool = True
 
+    # Fuel-path retention (ADR-0048, task 68052297). Historically the ONLY
+    # ``retrieval_trace`` pruning lived inside the edge-usage fold, which
+    # rides the default-off garden sweep -- so a stock deployment wrote
+    # traces forever and never deleted one. Pruning is HYGIENE, not
+    # metabolism: the dedicated ``fuel_retention`` worker job runs
+    # unconditionally (like ``revisions_retention``), and it deletes only
+    # rows the fold could never use again (the service floors the trace
+    # window at ``EDGE_USAGE_WINDOW_DAYS``, so retention can be raised but
+    # never undercut the aggregation window). ``search_clicks`` rides the
+    # same job on its own, longer window (it feeds the recall sensor and a
+    # future active-learning loop). ``activity_log`` is deliberately NOT
+    # retained-away: it is the append-only audit spine (decision recorded
+    # in ADR-0048).
+    retrieval_trace_retention_days: int = 90
+    search_click_retention_days: int = 365
+    fuel_retention_interval_seconds: int = 86400
+
     # Humus retrieval branch (ADR-0034) master switch. Humus is the PARALLEL
     # source that late-fuses distilled/consolidated atoms into the focused walk
     # with a small boost + a 30% hard cap. Default ON = historical behaviour;

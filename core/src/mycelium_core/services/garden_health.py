@@ -52,6 +52,7 @@ from mycelium_core.models.garden_health import GardenHealthDaily
 from mycelium_core.models.memory_blob import MemoryBlob
 from mycelium_core.models.note import Note
 from mycelium_core.models.note_link import NoteNoteLink
+from mycelium_core.models.retrieval_trace import RetrievalTrace
 from mycelium_core.models.search_click import SearchClick
 from mycelium_core.services import graph as graph_svc
 
@@ -137,6 +138,14 @@ class GardenHealth:
     # AUTONOMOUSLY-generated proposals, workspace-wide. The earned-autonomy
     # reliability signal; value=None + reason until any proposal is reviewed.
     autonomous_accept_ratio: Metric
+    # ADR-0048 (task 68052297): rows in ``retrieval_trace`` OLDER than the
+    # effective retention window -- rows the edge-usage fold can never read
+    # again, so with a healthy ``fuel_retention`` sweep this sits at ~0.
+    # A persistently growing reading means the pruner is not running and
+    # the fuel table is accumulating unbounded (the storage blind spot the
+    # 2026-07-17 memory audit flagged). Count shown as-is, no floor:
+    # "show, never judge".
+    trace_backlog: Metric
 
     def as_dict(self) -> dict[str, dict[str, Any]]:
         return {key: asdict(metric) for key, metric in vars(self).items()}
@@ -402,6 +411,32 @@ async def _fungal_lag(
     return round(median, 1), None
 
 
+async def _trace_backlog(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    now: datetime.datetime,
+) -> float:
+    """Count of ``retrieval_trace`` rows older than the effective
+    retention window (ADR-0048). The window is the same one the pruner
+    applies: the configured retention floored at the edge-usage
+    aggregation window, so a non-zero backlog is exactly the set of rows
+    the ``fuel_retention`` sweep should have deleted."""
+    from mycelium_core.config import get_settings
+    from mycelium_core.services.edge_usage import EDGE_USAGE_WINDOW_DAYS
+
+    days = max(get_settings().retrieval_trace_retention_days, EDGE_USAGE_WINDOW_DAYS)
+    cutoff = now - datetime.timedelta(days=days)
+    count = (
+        await session.execute(
+            select(func.count())
+            .select_from(RetrievalTrace)
+            .where(RetrievalTrace.org_id == org_id, RetrievalTrace.created_at < cutoff)
+        )
+    ).scalar_one()
+    return float(count)
+
+
 async def compute_health(
     session: AsyncSession,
     *,
@@ -459,6 +494,7 @@ async def compute_health(
             AUTONOMOUS_ACCEPT_RATIO_FLOOR,
             None if review_ratio is not None else _NO_REVIEWS,
         ),
+        trace_backlog=Metric(await _trace_backlog(session, org_id=org_id, now=now), None, None),
     )
 
 

@@ -88,6 +88,11 @@ export const it: Catalog = {
         explain:
           'Crediti spesi oggi dai job autonomi (distillazione, re-embedding) rispetto al tetto giornaliero. Più basso = più tranquillo; al tetto il metabolismo si ferma fino a domani. Vuoto finché non imposti un tetto o mentre l’interruttore è spento.',
       },
+      trace_backlog: {
+        label: 'Arretrato delle tracce',
+        explain:
+          'Righe di retrieval_trace più vecchie della finestra di retention: quelle che lo sweep di igiene avrebbe dovuto potare. In salute è vicino a zero; se cresce, il pruner non sta girando e la tabella di telemetria accumula senza limite.',
+      },
     },
     timeline: {
       title: 'Cosa è cambiato',

@@ -56,6 +56,10 @@ const META: Record<string, Meta> = {
   // Operational budget gauge (WS-F5): autonomous credits spent today vs the
   // daily cap. value/floor only when a cap is set; otherwise null+reason.
   autonomous_spend_today: { kind: 'scalar', dir: 'lower', gauge: true },
+  // ADR-0048: retrieval_trace rows older than the retention window -- rows
+  // the fuel_retention sweep should have pruned. Healthy ~0; growing means
+  // the pruner is not running and the fuel table accumulates unbounded.
+  trace_backlog: { kind: 'scalar', dir: 'lower' },
 }
 const ORDER = Object.keys(META)
 

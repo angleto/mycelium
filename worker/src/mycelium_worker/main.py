@@ -26,6 +26,7 @@ from mycelium_worker import (
     email_responder,
     email_sync,
     embedding_migration,
+    fuel_retention,
     garden,
     google_calendar,
     note_search_backfill,
@@ -54,6 +55,8 @@ def _enabled_jobs() -> list[Callable[[], Awaitable[None]]]:
      - task-search embedding backfill (timed-out re-embed safety net);
      - note-search pointer backfill (back-catalogue indexing);
      - revisions snapshot/retention/summary sweeps;
+     - fuel-path retention (ADR-0048: retrieval_trace / search_clicks
+       windows -- hygiene, so NOT gated on the garden loop);
      - embedding backfill (both tiers, per-org hosted via resolver).
 
     Opt-in:
@@ -75,6 +78,7 @@ def _enabled_jobs() -> list[Callable[[], Awaitable[None]]]:
         revisions.run_forever,
         revisions_retention.run_forever,
         revisions_summary.run_forever,
+        fuel_retention.run_forever,
         embedding_migration.run_forever,
     ]
     if get_settings().garden_loop_enabled:

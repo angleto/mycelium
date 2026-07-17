@@ -146,9 +146,17 @@ async def refresh_edge_usage(
 
     # Aged-out traces can never contribute again: retention delete first
     # (the (org_id, created_at) index serves both this and the read).
+    # The cutoff honours a LONGER configured retention (ADR-0048): the
+    # fold reads only the last EDGE_USAGE_WINDOW_DAYS regardless, but an
+    # operator who raised ``retrieval_trace_retention_days`` above the
+    # window must not have this delete silently undercut it.
+    from mycelium_core.config import get_settings
+
+    retention_days = max(EDGE_USAGE_WINDOW_DAYS, get_settings().retrieval_trace_retention_days)
+    retention_cutoff = now - datetime.timedelta(days=retention_days)
     await session.execute(
         delete(RetrievalTrace).where(
-            RetrievalTrace.org_id == org_id, RetrievalTrace.created_at < since
+            RetrievalTrace.org_id == org_id, RetrievalTrace.created_at < retention_cutoff
         )
     )
 
