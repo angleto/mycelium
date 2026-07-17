@@ -41,7 +41,16 @@ from __future__ import annotations
 import datetime
 import uuid
 
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, String, Text
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    PrimaryKeyConstraint,
+    String,
+    Text,
+    func,
+)
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -155,4 +164,31 @@ class Annotation(UUIDPKMixin, OrgScopedMixin, TimestampMixin, VersionMixin, Base
         ForeignKey("identities.id", ondelete="SET NULL"),
         nullable=True,
         index=True,
+    )
+
+
+class AnnotationUIState(Base):
+    """Per-user presentation state for an annotation card (migration 0084).
+
+    Mirrors ``NotePartUIState``: no row = expanded (the default), a row is
+    materialised lazily on the first toggle, and the composite PK keeps one
+    state per (user, annotation). Deliberately no ``org_id`` column: the
+    ``annotation_id`` FK already pins the row to an org-scoped comment, and
+    the RLS policy joins through it (see migration 0084).
+    """
+
+    __tablename__ = "annotation_ui_state"
+    __table_args__ = (
+        PrimaryKeyConstraint("user_id", "annotation_id", name="pk_annotation_ui_state"),
+    )
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    annotation_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("comments.id", ondelete="CASCADE"), nullable=False
+    )
+    collapsed: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
     )

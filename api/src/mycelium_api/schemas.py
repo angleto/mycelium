@@ -914,6 +914,26 @@ class AnnotationOut(BaseModel):
     version: int
     created_at: datetime.datetime
     updated_at: datetime.datetime
+    # Caller-scoped card collapse state (annotation_ui_state, migration
+    # 0084; mirrors ``NotePartOut.ui_collapsed``). Default false = expanded.
+    ui_collapsed: bool = False
+
+
+class AnnotationUIStateIn(BaseModel):
+    """Per-user collapse state for one annotation card. User-scoped,
+    last-write-wins (no version), like ``NotePartUIStateIn``."""
+
+    collapsed: bool
+
+
+class AnnotationUIStateBulkIn(BaseModel):
+    """Collapse/expand every top-level annotation card on one document for
+    the caller (the panel's collapse-all / expand-all). Replies keep their
+    own per-card state: folding a thread is the root card's job."""
+
+    doc_kind: Literal["note_part", "task_description"]
+    doc_id: uuid.UUID
+    collapsed: bool
 
 
 class AnnotationAssignIn(BaseModel):

@@ -50,7 +50,7 @@ def test_head_migration_downgrade_upgrade_roundtrip() -> None:
         with engine.connect() as conn:
             rev = conn.execute(sa.text("SELECT version_num FROM alembic_version")).scalar_one()
         # Head is the latest revision; the roundtrip must restore it exactly.
-        assert rev == "0083"
+        assert rev == "0084"
         # And the 0068 KG objects are still present at head (head integrity).
         with engine.connect() as conn:
             idx = conn.execute(

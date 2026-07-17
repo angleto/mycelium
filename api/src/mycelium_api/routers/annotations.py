@@ -27,6 +27,8 @@ from mycelium_api.schemas import (
     AnnotationCommentIn,
     AnnotationEditIn,
     AnnotationOut,
+    AnnotationUIStateBulkIn,
+    AnnotationUIStateIn,
     ExpectedVersionIn,
     SuggestionIn,
     VersionOut,
@@ -88,12 +90,17 @@ async def _author_idents(
 
 
 def annotation_out(
-    a: Annotation, author: tuple[str, str, str | None] | None = None
+    a: Annotation,
+    author: tuple[str, str, str | None] | None = None,
+    *,
+    ui_collapsed: bool = False,
 ) -> AnnotationOut:
     """Map a row to the wire shape, collapsing the typed FKs back to the
     generic ``doc_id``. ``author`` is the pre-resolved ``(handle, kind,
     label)`` of ``author_identity_id`` (see ``_author_idents``); when omitted
-    the human-name fields stay ``None`` (the raw id is still present)."""
+    the human-name fields stay ``None`` (the raw id is still present).
+    ``ui_collapsed`` is the caller's per-user card state (annotation_ui_state);
+    the default False = expanded matches "no row"."""
     doc_id = cast(uuid.UUID, a.task_id if a.doc_kind == "task_description" else a.note_part_id)
     handle, kind, label = author if author is not None else (None, None, None)
     return AnnotationOut(
@@ -121,28 +128,45 @@ def annotation_out(
         version=a.version,
         created_at=a.created_at,
         updated_at=a.updated_at,
+        ui_collapsed=ui_collapsed,
     )
 
 
 async def annotations_out(
-    session: AsyncSession, org_id: uuid.UUID, rows: list[Annotation]
+    session: AsyncSession,
+    org_id: uuid.UUID,
+    rows: list[Annotation],
+    *,
+    ui: dict[uuid.UUID, bool] | None = None,
 ) -> list[AnnotationOut]:
     """Serialise a list of annotations, resolving every author identity to a
-    human ``(handle, kind, label)`` in one batched query (no N+1)."""
+    human ``(handle, kind, label)`` in one batched query (no N+1). ``ui`` is
+    the caller's ``{annotation_id: collapsed}`` map (``get_ui_states_for_user``);
+    ids absent from it — or a ``None`` map — serialise as expanded."""
     idmap = await _author_idents(
         session, org_id, {a.author_identity_id for a in rows if a.author_identity_id}
     )
     return [
-        annotation_out(a, idmap.get(a.author_identity_id) if a.author_identity_id else None)
+        annotation_out(
+            a,
+            idmap.get(a.author_identity_id) if a.author_identity_id else None,
+            ui_collapsed=ui.get(a.id, False) if ui else False,
+        )
         for a in rows
     ]
 
 
 async def annotation_out_one(
-    session: AsyncSession, org_id: uuid.UUID, a: Annotation
+    session: AsyncSession,
+    org_id: uuid.UUID,
+    a: Annotation,
+    *,
+    ui_collapsed: bool = False,
 ) -> AnnotationOut:
     """Single-row ``annotations_out`` (resolves the one author)."""
-    (only,) = await annotations_out(session, org_id, [a])
+    (only,) = await annotations_out(
+        session, org_id, [a], ui={a.id: ui_collapsed} if ui_collapsed else None
+    )
     return only
 
 
@@ -160,7 +184,53 @@ async def list_annotations(
         doc_id=doc_id,
         include_resolved=include_resolved,
     )
-    return await annotations_out(ctx.session, ctx.org_id, rows)
+    ui = await svc.get_ui_states_for_user(
+        ctx.session, user_id=ctx.user_id, doc_kind=doc_kind, doc_id=doc_id
+    )
+    return await annotations_out(ctx.session, ctx.org_id, rows, ui=ui)
+
+
+# Per-user card collapse state (mirrors the note-part ui-state routes).
+# The bulk route is declared before the per-annotation one so the literal
+# ``ui-state`` segment is never captured as an ``annotation_id``.
+@router.put("/ui-state", response_model=list[AnnotationOut])
+async def set_all_annotations_ui_state(
+    body: AnnotationUIStateBulkIn,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+) -> list[AnnotationOut]:
+    """Collapse/expand every card on one document for the caller in a single
+    upsert, returning the refreshed list so the SPA syncs from one response."""
+    ui = await svc.set_ui_states_bulk(
+        ctx.session,
+        org_id=ctx.org_id,
+        user_id=ctx.user_id,
+        doc_kind=body.doc_kind,
+        doc_id=body.doc_id,
+        collapsed=body.collapsed,
+    )
+    rows = await svc.list_for_doc(
+        ctx.session, org_id=ctx.org_id, doc_kind=body.doc_kind, doc_id=body.doc_id
+    )
+    return await annotations_out(ctx.session, ctx.org_id, rows, ui=ui)
+
+
+@router.put("/{annotation_id}/ui-state", response_model=AnnotationOut)
+async def set_annotation_ui_state(
+    annotation_id: uuid.UUID,
+    body: AnnotationUIStateIn,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+) -> AnnotationOut:
+    """Persist the caller's collapse state for one card. User-scoped,
+    last-write-wins (no version): no row = expanded."""
+    await svc.set_ui_state(
+        ctx.session,
+        org_id=ctx.org_id,
+        user_id=ctx.user_id,
+        annotation_id=annotation_id,
+        collapsed=body.collapsed,
+    )
+    a = await svc.get_annotation(ctx.session, org_id=ctx.org_id, annotation_id=annotation_id)
+    return await annotation_out_one(ctx.session, ctx.org_id, a, ui_collapsed=body.collapsed)
 
 
 @router.post("/comment", response_model=AnnotationOut)
@@ -318,7 +388,12 @@ async def list_assigned_annotations(
         assignee_identity_id=ident_id,
         include_resolved=include_resolved,
     )
-    return await annotations_out(ctx.session, ctx.org_id, rows)
+    # The inbox spans documents, so the per-doc ui map doesn't apply;
+    # resolve the caller's collapse state by explicit ids instead.
+    ui = await svc.get_ui_states_by_ids(
+        ctx.session, user_id=ctx.user_id, annotation_ids=[a.id for a in rows]
+    )
+    return await annotations_out(ctx.session, ctx.org_id, rows, ui=ui)
 
 
 @router.get("/{annotation_id}", response_model=AnnotationOut)
@@ -327,7 +402,12 @@ async def get_annotation(
     ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> AnnotationOut:
     a = await svc.get_annotation(ctx.session, org_id=ctx.org_id, annotation_id=annotation_id)
-    return await annotation_out_one(ctx.session, ctx.org_id, a)
+    ui = await svc.get_ui_states_by_ids(
+        ctx.session, user_id=ctx.user_id, annotation_ids=[annotation_id]
+    )
+    return await annotation_out_one(
+        ctx.session, ctx.org_id, a, ui_collapsed=ui.get(annotation_id, False)
+    )
 
 
 @router.patch("/{annotation_id}", response_model=VersionOut)

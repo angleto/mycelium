@@ -27,13 +27,18 @@ import uuid
 from typing import cast
 
 from sqlalchemy import and_, func, or_, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from mycelium_core.concurrency import optimistic_update
 from mycelium_core.config import get_settings
 from mycelium_core.errors import DomainError, NotFoundError
 from mycelium_core.i18n import MessageCode
-from mycelium_core.models.annotation import ANNOTATION_DOC_KINDS, Annotation
+from mycelium_core.models.annotation import (
+    ANNOTATION_DOC_KINDS,
+    Annotation,
+    AnnotationUIState,
+)
 from mycelium_core.models.identity import Identity, IdentityKind
 from mycelium_core.models.membership import Role
 from mycelium_core.models.note_part import NotePart
@@ -777,3 +782,117 @@ async def reject_suggestion(
         action="reject",
     )
     return new_version
+
+
+# --------------------------------------------------------------------------
+# per-user UI state (card collapse/expand; mirrors services/note_parts)
+# --------------------------------------------------------------------------
+async def set_ui_state(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    user_id: uuid.UUID,
+    annotation_id: uuid.UUID,
+    collapsed: bool,
+) -> AnnotationUIState:
+    """Upsert the caller's collapse state for one annotation card.
+
+    User-scoped, last-write-wins (no version): this is presentation state,
+    not content, so it never conflicts with a concurrent body edit. No row
+    means expanded; the row is materialised lazily on the first toggle.
+    """
+    await require_role(session, org_id, user_id, Role.member)
+    # Defensive presence check so a foreign/unknown id is a clean 404
+    # (RLS would otherwise let the bare upsert fail on the FK).
+    await _get(session, org_id=org_id, annotation_id=annotation_id)
+    stmt = (
+        pg_insert(AnnotationUIState)
+        .values(user_id=user_id, annotation_id=annotation_id, collapsed=collapsed)
+        .on_conflict_do_update(
+            index_elements=[AnnotationUIState.user_id, AnnotationUIState.annotation_id],
+            set_={"collapsed": collapsed, "updated_at": func.now()},
+        )
+        .returning(AnnotationUIState)
+    )
+    return (await session.execute(stmt)).scalar_one()
+
+
+async def set_ui_states_bulk(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    user_id: uuid.UUID,
+    doc_kind: str,
+    doc_id: uuid.UUID,
+    collapsed: bool,
+) -> dict[uuid.UUID, bool]:
+    """Collapse/expand every top-level (non-deleted) card on a document for
+    the caller in a single multi-row upsert (the panel's collapse-all).
+
+    Replies are deliberately left out: folding a thread is the root card's
+    job, and bulldozing every reply's own state would mean re-expanding a
+    thread one reply at a time afterwards. A reply folded by hand keeps
+    that state across collapse-all / expand-all."""
+    await require_role(session, org_id, user_id, Role.member)
+    await _resolve_doc(session, org_id=org_id, doc_kind=doc_kind, doc_id=doc_id)
+    rows = await list_for_doc(session, org_id=org_id, doc_kind=doc_kind, doc_id=doc_id)
+    ids = [a.id for a in rows if a.parent_id is None]
+    if not ids:
+        return {}
+    stmt = (
+        pg_insert(AnnotationUIState)
+        .values([{"user_id": user_id, "annotation_id": aid, "collapsed": collapsed} for aid in ids])
+        .on_conflict_do_update(
+            index_elements=[AnnotationUIState.user_id, AnnotationUIState.annotation_id],
+            set_={"collapsed": collapsed, "updated_at": func.now()},
+        )
+    )
+    await session.execute(stmt)
+    return {aid: collapsed for aid in ids}
+
+
+async def get_ui_states_for_user(
+    session: AsyncSession,
+    *,
+    user_id: uuid.UUID,
+    doc_kind: str,
+    doc_id: uuid.UUID,
+) -> dict[uuid.UUID, bool]:
+    """``{annotation_id: collapsed}`` for the caller on one document. No
+    ``org_id`` parameter: RLS on both tables scopes the join, ``user_id`` is
+    the explicit filter; an id absent from the map means expanded."""
+    if doc_kind not in ANNOTATION_DOC_KINDS:
+        raise DomainError(MessageCode.ANNOTATION_DOC_KIND_INVALID)
+    stmt = (
+        select(AnnotationUIState.annotation_id, AnnotationUIState.collapsed)
+        .join(Annotation, Annotation.id == AnnotationUIState.annotation_id)
+        .where(AnnotationUIState.user_id == user_id, Annotation.doc_kind == doc_kind)
+    )
+    if doc_kind == "task_description":
+        stmt = stmt.where(Annotation.task_id == doc_id)
+    else:
+        stmt = stmt.where(Annotation.note_part_id == doc_id)
+    rows = (await session.execute(stmt)).all()
+    return {aid: bool(collapsed) for aid, collapsed in rows}
+
+
+async def get_ui_states_by_ids(
+    session: AsyncSession,
+    *,
+    user_id: uuid.UUID,
+    annotation_ids: list[uuid.UUID],
+) -> dict[uuid.UUID, bool]:
+    """``{annotation_id: collapsed}`` for the caller over an explicit id set
+    (the single-card GET and the cross-document assigned inbox, where the
+    per-doc helper doesn't apply). Ids without a row are simply absent."""
+    if not annotation_ids:
+        return {}
+    rows = (
+        await session.execute(
+            select(AnnotationUIState.annotation_id, AnnotationUIState.collapsed).where(
+                AnnotationUIState.user_id == user_id,
+                AnnotationUIState.annotation_id.in_(annotation_ids),
+            )
+        )
+    ).all()
+    return {aid: bool(collapsed) for aid, collapsed in rows}

@@ -16,6 +16,7 @@ from mycelium_core.models.annotation import (
     ANNOTATION_KINDS,
     ANNOTATION_STATUSES,
     Annotation,
+    AnnotationUIState,
 )
 from mycelium_core.models.api_idempotency import ApiIdempotency
 from mycelium_core.models.attachment import Attachment
@@ -187,6 +188,7 @@ __all__ = [
     "AgentRunStatus",
     "AgentToken",
     "Annotation",
+    "AnnotationUIState",
     "ApiIdempotency",
     "Attachment",
     "AutonomousDispatch",

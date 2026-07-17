@@ -333,3 +333,145 @@ async def test_cross_org_isolation() -> None:
             json={"doc_kind": "task_description", "doc_id": tid, "body": "peek"},
         )
         assert r.status_code == 404
+
+
+async def test_ui_state_persists_collapse_per_card() -> None:
+    """The SPA card collapse (migration 0084): no row = expanded; the
+    per-card PUT persists the caller's state across fresh reads (list and
+    single GET) and the upsert toggles back."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as c:
+        h = await _signup(c)
+        tid = (await c.post("/tasks", headers=h, json={"title": "collapse me"})).json()["id"]
+        a = (
+            await c.post(
+                "/annotations/comment",
+                headers=h,
+                json={"doc_kind": "task_description", "doc_id": tid, "body": "a long comment"},
+            )
+        ).json()
+        assert a["ui_collapsed"] is False
+
+        r = await c.put(f"/annotations/{a['id']}/ui-state", headers=h, json={"collapsed": True})
+        assert r.status_code == 200, r.text
+        assert r.json()["ui_collapsed"] is True
+
+        rows = (
+            await c.get(
+                "/annotations", headers=h, params={"doc_kind": "task_description", "doc_id": tid}
+            )
+        ).json()
+        assert [x["ui_collapsed"] for x in rows] == [True]
+        assert (await c.get(f"/annotations/{a['id']}", headers=h)).json()["ui_collapsed"] is True
+
+        r = await c.put(f"/annotations/{a['id']}/ui-state", headers=h, json={"collapsed": False})
+        assert r.status_code == 200
+        assert r.json()["ui_collapsed"] is False
+
+
+async def test_ui_state_bulk_collapse_all_and_empty_doc() -> None:
+    """``PUT /annotations/ui-state`` folds/unfolds every ROOT card on a
+    document in one upsert (also pinning that the literal ``ui-state``
+    segment is not captured as an annotation id). Replies keep their own
+    state — folding a thread is the root's job — and an annotation-less
+    document is a 200 [] no-op."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as c:
+        h = await _signup(c)
+        _nid, pid = await _note_with_part(c, h, "Body under discussion.")
+        roots = []
+        for i in range(3):
+            r = await c.post(
+                "/annotations/comment",
+                headers=h,
+                json={"doc_kind": "note_part", "doc_id": pid, "body": f"c{i}"},
+            )
+            roots.append(r.json()["id"])
+        reply_id = (
+            await c.post(
+                "/annotations/comment",
+                headers=h,
+                json={
+                    "doc_kind": "note_part",
+                    "doc_id": pid,
+                    "body": "a reply",
+                    "parent_id": roots[0],
+                },
+            )
+        ).json()["id"]
+
+        r = await c.put(
+            "/annotations/ui-state",
+            headers=h,
+            json={"doc_kind": "note_part", "doc_id": pid, "collapsed": True},
+        )
+        assert r.status_code == 200, r.text
+        state = {x["id"]: x["ui_collapsed"] for x in r.json()}
+        assert [state[rid] for rid in roots] == [True, True, True]
+        assert state[reply_id] is False  # replies untouched by collapse-all
+        fresh = (
+            await c.get("/annotations", headers=h, params={"doc_kind": "note_part", "doc_id": pid})
+        ).json()
+        assert {x["id"]: x["ui_collapsed"] for x in fresh} == state
+
+        r = await c.put(
+            "/annotations/ui-state",
+            headers=h,
+            json={"doc_kind": "note_part", "doc_id": pid, "collapsed": False},
+        )
+        assert all(x["ui_collapsed"] is False for x in r.json())
+
+        _nid2, pid2 = await _note_with_part(c, h, "No comments here.")
+        r = await c.put(
+            "/annotations/ui-state",
+            headers=h,
+            json={"doc_kind": "note_part", "doc_id": pid2, "collapsed": True},
+        )
+        assert r.status_code == 200
+        assert r.json() == []
+
+
+async def test_ui_state_is_per_user_and_org_scoped() -> None:
+    """Collapse state is the caller's own: a teammate in the same workspace
+    still sees the card expanded; a stranger from another org gets a clean
+    404 on the card id (RLS)."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as c:
+        owner_email = _email()
+        owner = (
+            await c.post("/auth/signup", json={"email": owner_email, "password": "pw-strong-123"})
+        ).json()
+        ws = owner["workspace_id"]
+        oh = {
+            "Authorization": f"Bearer {owner['token']}",
+            "X-Workspace-Id": ws,
+            "X-Workspace-Role": "owner",
+        }
+        guest_email = _email()
+        guest = (
+            await c.post("/auth/signup", json={"email": guest_email, "password": "pw-strong-123"})
+        ).json()
+        gh = {"Authorization": f"Bearer {guest['token']}", "X-Workspace-Id": ws}
+        added = await c.post(
+            "/workspaces/me/members", headers=oh, json={"email": guest_email, "role": "member"}
+        )
+        assert added.status_code == 200, added.text
+
+        tid = (await c.post("/tasks", headers=oh, json={"title": "shared"})).json()["id"]
+        a = (
+            await c.post(
+                "/annotations/comment",
+                headers=oh,
+                json={"doc_kind": "task_description", "doc_id": tid, "body": "hi"},
+            )
+        ).json()
+
+        await c.put(f"/annotations/{a['id']}/ui-state", headers=oh, json={"collapsed": True})
+        assert (await c.get(f"/annotations/{a['id']}", headers=oh)).json()["ui_collapsed"] is True
+        assert (await c.get(f"/annotations/{a['id']}", headers=gh)).json()["ui_collapsed"] is False
+
+        stranger = await _signup(c)
+        r = await c.put(
+            f"/annotations/{a['id']}/ui-state", headers=stranger, json={"collapsed": True}
+        )
+        assert r.status_code == 404

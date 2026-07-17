@@ -2827,6 +2827,9 @@ button.btn--danger:hover {
   border-radius: 7px;
   padding: 0.55rem 0.7rem;
   background: var(--surface);
+  /* The toolbar ⤒ jump: land the top edge below the app topbar + the
+     sticky .rte__bar instead of underneath them (cf. .anno). */
+  scroll-margin-top: calc(var(--header-h) + 2.6rem);
   color: var(--text);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 0.85rem;
@@ -3055,6 +3058,9 @@ button.btn--danger:hover {
   min-height: 7rem;
   background: var(--surface);
   outline: none;
+  /* The toolbar ⤒ jump: land the top edge below the app topbar + the
+     sticky .rte__bar instead of underneath them (cf. .rte__raw, .anno). */
+  scroll-margin-top: calc(var(--header-h) + 2.6rem);
 }
 .rte .ProseMirror:focus-within {
   border-color: var(--accent);
@@ -5748,6 +5754,35 @@ button.btn--danger:hover {
   border-radius: 6px;
   padding: 0.4rem 0.5rem;
   background: var(--surface, #fafafa);
+  /* The card-nav ⤒ lands the card top below the app topbar and any sticky
+     editor bar above the panel; ⤓ leaves a hair of slack under the card. */
+  scroll-margin-top: calc(var(--header-h) + 2.6rem);
+  scroll-margin-bottom: 0.5rem;
+}
+/* Chevron mirroring .parts-editor__toggle: fold/unfold one card. */
+.anno__toggle {
+  background: transparent;
+  border: 0;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 0.85rem;
+  padding: 0 0.15rem;
+}
+.anno__toggle:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+/* One-line teaser in the head of a collapsed card (cf.
+   .parts-editor__preview). */
+.anno__preview {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.anno__reply-count {
+  white-space: nowrap;
 }
 .anno--suggestion {
   border-left: 3px solid #d08700;
@@ -5839,11 +5874,40 @@ button.btn--danger:hover {
      which would otherwise inject stray whitespace into the rendered HTML. */
   margin: 0.25rem 0;
 }
+/* Sticky (bottom-anchored) counterpart of the sticky .rte__bar: on a
+   comment taller than the viewport the Resolve / Reply / Edit / × row and
+   the in-card ⤒ ⤓ nav pin to the bottom of whatever scrolls (the window,
+   or .modal__body in the notes modal) until the card's end passes. Opaque
+   background + top border, per the app's sticky-bar convention. */
 .anno__actions {
   display: flex;
   flex-wrap: wrap;
   gap: 0.3rem;
   margin-top: 0.3rem;
+  position: sticky;
+  bottom: 0;
+  z-index: 4;
+  background: var(--surface, #fafafa);
+  padding: 0.3rem 0;
+  border-top: 1px solid var(--border, #e3e3e3);
+}
+/* A collapsed card is one line: no need to reserve the bar chrome. */
+.anno--collapsed .anno__actions {
+  position: static;
+  border-top: 0;
+  padding: 0;
+  margin-top: 0.15rem;
+}
+/* Save / Cancel of the in-card editor, same sticky treatment. */
+.anno__edit-actions {
+  display: flex;
+  gap: 0.3rem;
+  position: sticky;
+  bottom: 0;
+  z-index: 4;
+  background: var(--surface, #fafafa);
+  padding: 0.3rem 0;
+  border-top: 1px solid var(--border, #e3e3e3);
 }
 .anno__reply-box,
 .anno__edit,

@@ -1481,6 +1481,48 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/annotations/ui-state": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set All Annotations Ui State
+         * @description Collapse/expand every card on one document for the caller in a single
+         *     upsert, returning the refreshed list so the SPA syncs from one response.
+         */
+        put: operations["set_all_annotations_ui_state_annotations_ui_state_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/annotations/{annotation_id}/ui-state": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Annotation Ui State
+         * @description Persist the caller's collapse state for one card. User-scoped,
+         *     last-write-wins (no version): no row = expanded.
+         */
+        put: operations["set_annotation_ui_state_annotations__annotation_id__ui_state_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/annotations/comment": {
         parameters: {
             query?: never;
@@ -6848,6 +6890,40 @@ export interface components {
              * Format: date-time
              */
             updated_at: string;
+            /**
+             * Ui Collapsed
+             * @default false
+             */
+            ui_collapsed?: boolean;
+        };
+        /**
+         * AnnotationUIStateBulkIn
+         * @description Collapse/expand every top-level annotation card on one document for
+         *     the caller (the panel's collapse-all / expand-all). Replies keep their
+         *     own per-card state: folding a thread is the root card's job.
+         */
+        AnnotationUIStateBulkIn: {
+            /**
+             * Doc Kind
+             * @enum {string}
+             */
+            doc_kind: "note_part" | "task_description";
+            /**
+             * Doc Id
+             * Format: uuid
+             */
+            doc_id: string;
+            /** Collapsed */
+            collapsed: boolean;
+        };
+        /**
+         * AnnotationUIStateIn
+         * @description Per-user collapse state for one annotation card. User-scoped,
+         *     last-write-wins (no version), like ``NotePartUIStateIn``.
+         */
+        AnnotationUIStateIn: {
+            /** Collapsed */
+            collapsed: boolean;
         };
         /** AppendMessageIn */
         AppendMessageIn: {
@@ -16234,6 +16310,84 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AnnotationOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_all_annotations_ui_state_annotations_ui_state_put: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AnnotationUIStateBulkIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnnotationOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_annotation_ui_state_annotations__annotation_id__ui_state_put: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                annotation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AnnotationUIStateIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnnotationOut"];
                 };
             };
             /** @description Validation Error */

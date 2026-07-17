@@ -1029,20 +1029,39 @@ export function RichEditor({
   // position, a robust proxy for "N% through the note" that works whether
   // the editor scrolls the page or a modal body). Selection/caret left
   // untouched. Powers the toolbar's start / end / "go to %" controls,
-  // handy on long note parts.
+  // handy on long note parts. In raw mode the textarea scrolls its own
+  // content proportionally (it has an inner scrollbar), so the controls
+  // keep working there too.
   const goToFraction = useCallback((f: number) => {
+    const clamped = Math.max(0, Math.min(1, f))
+    if (rawModeRef.current) {
+      const ta = rawRef.current
+      if (!ta) return
+      ta.scrollTop = clamped * (ta.scrollHeight - ta.clientHeight)
+      ta.scrollIntoView({
+        behavior: 'smooth',
+        block: clamped <= 0 ? 'start' : clamped >= 1 ? 'end' : 'center',
+      })
+      return
+    }
     const ed = editorRef.current
-    if (!ed || rawModeRef.current) return
-    if (f <= 0) {
+    if (!ed) return
+    if (clamped <= 0) {
+      // Some hosts (the note modal) make the ProseMirror element its own
+      // scroll container; scrollIntoView on a scroll container only moves
+      // its ancestors, so also reset its own scrollTop (a no-op when the
+      // page scrolls instead).
+      ed.view.dom.scrollTo({ top: 0, behavior: 'smooth' })
       ed.view.dom.scrollIntoView({ behavior: 'smooth', block: 'start' })
       return
     }
-    if (f >= 1) {
+    if (clamped >= 1) {
+      ed.view.dom.scrollTo({ top: ed.view.dom.scrollHeight, behavior: 'smooth' })
       ed.view.dom.scrollIntoView({ behavior: 'smooth', block: 'end' })
       return
     }
     const size = ed.state.doc.content.size
-    const pos = Math.max(1, Math.min(size - 1, Math.round(f * size)))
+    const pos = Math.max(1, Math.min(size - 1, Math.round(clamped * size)))
     const dom = ed.view.domAtPos(pos)
     const el = dom.node.nodeType === 3 ? dom.node.parentElement : (dom.node as HTMLElement)
     el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
@@ -1179,6 +1198,54 @@ export function RichEditor({
           >
             {showTools ? '⌄' : 'Aa'}
           </button>
+          {/* Position navigation: jump to the start / end of the document,
+              or type a percentage (e.g. 30) to land ~30% through it.
+              Deliberately OUTSIDE the collapsible tools span and not gated
+              on the annotation layer: every editor (comment cards and
+              composers included) keeps these reachable whenever the bar is
+              visible, in WYSIWYG and raw mode alike. */}
+          <button
+            type="button"
+            className="btn--ghost btn--sm rte__fmt rte__goto"
+            title={t('editor.goToStart', { defaultValue: 'Go to the start' })}
+            aria-label={t('editor.goToStart', { defaultValue: 'Go to the start' })}
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => goToFraction(0)}
+          >
+            ⤒
+          </button>
+          <button
+            type="button"
+            className="btn--ghost btn--sm rte__fmt rte__goto"
+            title={t('editor.goToEnd', { defaultValue: 'Go to the end' })}
+            aria-label={t('editor.goToEnd', { defaultValue: 'Go to the end' })}
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => goToFraction(1)}
+          >
+            ⤓
+          </button>
+          <input
+            type="number"
+            min={0}
+            max={100}
+            className="rte__goto-pct"
+            value={pctInput}
+            placeholder="%"
+            title={t('editor.goToPercent', {
+              defaultValue: 'Go to a percentage of the document (press Enter)',
+            })}
+            aria-label={t('editor.goToPercent', {
+              defaultValue: 'Go to a percentage of the document (press Enter)',
+            })}
+            onMouseDown={(e) => e.stopPropagation()}
+            onChange={(e) => setPctInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault()
+                goToPercent()
+              }
+            }}
+          />
           {showTools && (
           <span className="rte__tools">
           {/* Annotation triggers, when this editor carries the inline
@@ -1256,54 +1323,7 @@ export function RichEditor({
                   })}
                 </span>
               )}
-              {/* Divider: annotation navigation (left) vs document position
-                  navigation (right). */}
-              <span className="rte__sep" aria-hidden="true" />
-              {/* Position navigation, handy on long note parts: jump to the
-                  start / end, or type a percentage (e.g. 30) to land ~30%
-                  through the part. */}
-              <button
-                type="button"
-                className="btn--ghost btn--sm rte__fmt rte__annotate rte__goto"
-                title={t('editor.goToStart', { defaultValue: 'Go to the start' })}
-                aria-label={t('editor.goToStart', { defaultValue: 'Go to the start' })}
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => goToFraction(0)}
-              >
-                ⤒
-              </button>
-              <button
-                type="button"
-                className="btn--ghost btn--sm rte__fmt rte__annotate rte__goto"
-                title={t('editor.goToEnd', { defaultValue: 'Go to the end' })}
-                aria-label={t('editor.goToEnd', { defaultValue: 'Go to the end' })}
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => goToFraction(1)}
-              >
-                ⤓
-              </button>
-              <input
-                type="number"
-                min={0}
-                max={100}
-                className="rte__goto-pct"
-                value={pctInput}
-                placeholder="%"
-                title={t('editor.goToPercent', {
-                  defaultValue: 'Go to a percentage of the part (press Enter)',
-                })}
-                aria-label={t('editor.goToPercent', {
-                  defaultValue: 'Go to a percentage of the part (press Enter)',
-                })}
-                onMouseDown={(e) => e.stopPropagation()}
-                onChange={(e) => setPctInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    e.preventDefault()
-                    goToPercent()
-                  }
-                }}
-              />
+              {/* Divider: annotation navigation vs the format buttons. */}
               <span className="rte__sep" aria-hidden="true" />
             </>
           )}
