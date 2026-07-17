@@ -789,35 +789,107 @@ async def hard_delete_soft_deleted(
     it has derived nodes) is spared and stays soft-deleted indefinitely,
     recoverable. Explicit user / GDPR erasure is a separate, sovereign
     path and still cascades -- this guard only gates the timer.
+
+    Task c5da112c: the raw-SQL DELETE bypasses the ORM mapper listeners
+    that normally clean the search blobs, so the purged rows' INDEX
+    blobs are erased here too. Two deliberate constraints, because this
+    is the one AUTONOMOUS hard-delete path (§12):
+
+    - only INDEX provenance is erased -- ``note_part`` pairs and the
+      task's ``task_index_pointer`` blob. Whole-entity citation pairs
+      (``('note', id)`` / ``('task', id)``) are how independent agent
+      memories record where they came from; the timer must never
+      destroy those (the sovereign paths -- ``gdpr_erase``,
+      ``trash.empty_trash`` -- do cascade them, on an explicit human
+      act);
+    - the candidate rows are locked with ``FOR UPDATE`` before the part
+      ids / pointer ids are collected, so a concurrent transaction
+      cannot flip a row's eligibility (restore, humus demote, hypha
+      unlink) between the snapshot and the DELETE -- the ids collected
+      and the rows deleted are the same set by construction.
     """
-    tasks_res = await session.execute(
-        text(
-            """
-            DELETE FROM tasks
-            WHERE deleted_at IS NOT NULL
-              AND deleted_at < now() - make_interval(days => :d)
-            """
-        ),
-        {"d": after_days},
-    )
-    notes_res = await session.execute(
-        text(
-            """
-            DELETE FROM notes n
-            WHERE n.deleted_at IS NOT NULL
-              AND n.deleted_at < now() - make_interval(days => :d)
-              AND n.humus_flag = false
-              AND NOT EXISTS (
-                SELECT 1 FROM note_note_link l
-                WHERE l.parent_note_id = n.id AND l.kind = 'hypha_of'
-              )
-            """
-        ),
-        {"d": after_days},
-    )
-    tasks_deleted = int(getattr(tasks_res, "rowcount", 0) or 0)
-    notes_deleted = int(getattr(notes_res, "rowcount", 0) or 0)
-    return tasks_deleted, notes_deleted
+    from mycelium_core.services.memory import erase_blobs_for_sources
+
+    task_ids = [
+        row[0]
+        for row in (
+            await session.execute(
+                text(
+                    """
+                    SELECT id FROM tasks
+                    WHERE deleted_at IS NOT NULL
+                      AND deleted_at < now() - make_interval(days => :d)
+                    FOR UPDATE
+                    """
+                ),
+                {"d": after_days},
+            )
+        ).all()
+    ]
+    note_ids = [
+        row[0]
+        for row in (
+            await session.execute(
+                text(
+                    """
+                    SELECT n.id FROM notes n
+                    WHERE n.deleted_at IS NOT NULL
+                      AND n.deleted_at < now() - make_interval(days => :d)
+                      AND n.humus_flag = false
+                      AND NOT EXISTS (
+                        SELECT 1 FROM note_note_link l
+                        WHERE l.parent_note_id = n.id AND l.kind = 'hypha_of'
+                      )
+                    FOR UPDATE OF n
+                    """
+                ),
+                {"d": after_days},
+            )
+        ).all()
+    ]
+    if not task_ids and not note_ids:
+        return 0, 0
+    # Index provenance, gathered while the rows are locked and BEFORE the
+    # DELETE cascades destroy note_part / the pointers.
+    part_ids: list[uuid.UUID] = []
+    if note_ids:
+        part_ids = [
+            row[0]
+            for row in (
+                await session.execute(
+                    text("SELECT id FROM note_part WHERE note_id = ANY(:ids)"),
+                    {"ids": [str(n) for n in note_ids]},
+                )
+            ).all()
+        ]
+    task_blob_ids: list[uuid.UUID] = []
+    if task_ids:
+        task_blob_ids = [
+            row[0]
+            for row in (
+                await session.execute(
+                    text("SELECT blob_id FROM task_index_pointer WHERE task_id = ANY(:ids)"),
+                    {"ids": [str(t) for t in task_ids]},
+                )
+            ).all()
+        ]
+    if task_ids:
+        await session.execute(
+            text("DELETE FROM tasks WHERE id = ANY(:ids)"),
+            {"ids": [str(t) for t in task_ids]},
+        )
+    if note_ids:
+        await session.execute(
+            text("DELETE FROM notes WHERE id = ANY(:ids)"),
+            {"ids": [str(n) for n in note_ids]},
+        )
+    await erase_blobs_for_sources(session, sources=[("note_part", str(p)) for p in part_ids])
+    if task_blob_ids:
+        await session.execute(
+            text("DELETE FROM memory_blobs WHERE id = ANY(:ids)"),
+            {"ids": [str(b) for b in task_blob_ids]},
+        )
+    return len(task_ids), len(note_ids)
 
 
 async def find_visible_open_for(

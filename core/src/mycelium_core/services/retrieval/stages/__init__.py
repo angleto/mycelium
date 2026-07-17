@@ -11,6 +11,7 @@ from mycelium_core.services.retrieval.stages.humus import (
     HumusCapStage,
     HumusStage,
     humus_note_blob_exclusion,
+    ineffective_source_blob_exclusion,
     proposed_note_blob_exclusion,
 )
 from mycelium_core.services.retrieval.stages.lexical import LexicalFTSStage
@@ -43,5 +44,6 @@ __all__ = [
     "RetrievalTraceStage",
     "SemanticDenseStage",
     "humus_note_blob_exclusion",
+    "ineffective_source_blob_exclusion",
     "proposed_note_blob_exclusion",
 ]

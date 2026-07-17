@@ -209,3 +209,39 @@ gone). It restores `hypha_of → atom_of`, `related → references`,
   aggregated distillation.** Rejected: it would re-trace the genealogy
   the commons is meant to dissolve, and explode the link table on every
   Phase-2 synthesis. Pooled humus is anonymous by design (D3).
+
+## Amendment (2026-07-17) — D3's "anonymized commons" is superseded by the implementation
+
+Status: Accepted. Task: c5da112c (from the memory-system audit, note
+`bdc62d7a`).
+
+D3 decided that pooled Phase-2 humus (`pattern` / `season`) carries **no**
+per-source link — "once thinking rots into the shared substrate it loses
+its individual genealogy" — and the last "alternative rejected" above
+explicitly refuses per-source `hypha_of` links from pooled humus.
+
+The implementation went the other way, deliberately:
+`decomposition._synthesise_humus` writes a `hypha_of` link from **every**
+source note to the pattern/season note, with a comment citing this ADR's
+decompression thread. The audit (2026-07-17) confirmed the divergence and
+this amendment records the reversal instead of leaving it silent, because
+the code is right and the poetry was wrong:
+
+- **The ADR-0041 originals guard keys on `hypha_of` parenthood.** The
+  autonomous retention sweep spares a soft-deleted note only if it is
+  humus or a `hypha_of` parent. An anonymous commons would let the timer
+  hard-delete the sources a pattern grew from — exactly the "original
+  destroyed by an autonomous act" §12 forbids.
+- **`restore_source` (ADR-0043 review surface) walks the same thread** to
+  decompress an atom back to the notes it grew from. Anonymity would make
+  a pooled atom irreversible, breaking the reversibility precondition
+  ADR-0039 set for Phase-3 autonomy.
+- The link-table growth feared here is bounded in practice: one link per
+  aggregated source per synthesis, the same order as the distillation
+  thread D3 already accepts.
+
+The genealogy of pooled humus is therefore **traceable by design**, like
+the 1:1 distillation thread. What remains of the commons idea is the
+metaphor's kernel, not the schema: pooled atoms carry no per-claim
+attribution to individual sources in their TEXT — the prose is communal
+even though the provenance edges are not.

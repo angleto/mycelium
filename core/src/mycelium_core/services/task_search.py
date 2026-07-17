@@ -675,6 +675,7 @@ async def search_unified_with_meta(
             tag_ids=task_tag_ids,
             channel_key="task",
             rerank=rerank,
+            include_deleted_sources=include_deleted,
         )
         metas.append(task_rmeta)
         if task_hits:
@@ -733,6 +734,7 @@ async def search_unified_with_meta(
             tag_ids=tag_ids,
             channel_key="note",
             rerank=rerank,
+            include_deleted_sources=include_deleted,
         )
         metas.append(note_rmeta)
         if note_hits:
@@ -792,6 +794,7 @@ async def search_unified_with_meta(
             tag_ids=tag_ids,
             channel_key=single_channel,
             rerank=rerank,
+            include_deleted_sources=include_deleted,
         )
         metas.append(blob_rmeta)
         if blob_hits:

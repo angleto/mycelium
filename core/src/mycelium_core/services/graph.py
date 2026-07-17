@@ -926,6 +926,9 @@ async def humus_note_ids(session: AsyncSession, *, org_id: uuid.UUID) -> set[uui
             # (``review_state='proposed'``) is withheld from the free-wander
             # bias until approved; NULL/'approved' pass via IS DISTINCT FROM.
             Note.review_state.is_distinct_from("proposed"),
+            # Task c5da112c: a trashed humus atom leaves the wander too
+            # (retention deliberately never hard-deletes it, ADR-0041).
+            Note.deleted_at.is_(None),
         )
     )
     return {r[0] for r in rows}

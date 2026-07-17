@@ -22,8 +22,10 @@ from mycelium_core.config import get_settings
 from mycelium_core.models.attachment import Attachment
 from mycelium_core.models.membership import Role
 from mycelium_core.models.note import Note
+from mycelium_core.models.note_part import NotePart
 from mycelium_core.models.task import Task
 from mycelium_core.services import audit
+from mycelium_core.services.memory import erase_blobs_for_sources
 from mycelium_core.services.rbac import require_role
 
 
@@ -81,6 +83,28 @@ async def empty_trash(
             for key in keys:
                 await store.delete(key)
 
+    # Erase the search blobs by provenance BEFORE the row DELETEs (task
+    # c5da112c): the bulk Core DELETE below bypasses the ORM mapper
+    # listeners that normally clean the index blobs, and the note_part
+    # rows (whose ids the provenance carries) die in the row CASCADE --
+    # collecting them afterwards would be too late. Without this, a
+    # purged note/task leaves orphaned, still-retrievable blobs.
+    # Whole-entity pairs are included ON PURPOSE: emptying the bin is a
+    # SOVEREIGN human act (admin-gated), so it mirrors ``gdpr_erase`` --
+    # a derived memory whose only provenance was a purged row dies with
+    # it. The autonomous retention sweep deliberately does NOT do this
+    # (see ``entity_revisions.hard_delete_soft_deleted``).
+    sources: list[tuple[str, str]] = [("task", str(tid)) for tid in task_ids]
+    sources.extend(("note", str(nid)) for nid in note_ids)
+    if note_ids:
+        part_ids = (
+            (await session.execute(select(NotePart.id).where(NotePart.note_id.in_(note_ids))))
+            .scalars()
+            .all()
+        )
+        sources.extend(("note_part", str(pid)) for pid in part_ids)
+    blobs_deleted = await erase_blobs_for_sources(session, sources=sources)
+
     if task_ids:
         await session.execute(delete(Task).where(Task.id.in_(task_ids)))
     if note_ids:
@@ -94,6 +118,6 @@ async def empty_trash(
         entity="workspace",
         entity_id=org_id,
         action="empty_trash",
-        diff={"tasks": len(task_ids), "notes": len(note_ids)},
+        diff={"tasks": len(task_ids), "notes": len(note_ids), "blobs": blobs_deleted},
     )
     return {"tasks": len(task_ids), "notes": len(note_ids)}

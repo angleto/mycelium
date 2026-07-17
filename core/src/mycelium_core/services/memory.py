@@ -18,7 +18,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from decimal import Decimal
 
-from sqlalchemy import ColumnElement, delete, func, select, update
+from sqlalchemy import ColumnElement, delete, func, select, tuple_, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -69,6 +69,12 @@ _RELATIVE_FLOOR_RATIO = 0.4
 #   * ``_HUMUS_FOCUSED_CAP`` (0.3): hard cap = 30% of the focused slots.
 _HUMUS_RRF_BOOST = 0.2
 _HUMUS_FOCUSED_CAP = 0.3
+
+# Provenance-erase statement chunk (task c5da112c). Each (kind, id) pair
+# compiles to 2 binds on asyncpg (hard cap 32767 args): 5000 pairs keeps
+# a single statement an order of magnitude below the cap, so a large
+# empty-trash / retention batch can never wedge on parameter count.
+_ERASE_CHUNK = 5000
 # Per-org key (Organization.settings JSONB) for the semantic-similarity
 # floor applied in SemanticDenseStage. 0.0 = disabled (historical
 # behaviour). Tuned live from the admin GUI; see services.retrieval.
@@ -533,6 +539,7 @@ async def retrieve_with_meta(
     humus_kinds: frozenset[str] | None = None,
     exclude_humus_from_base: bool = False,
     probe: bool = False,
+    include_deleted_sources: bool = False,
 ) -> tuple[list[Hit], RetrievalMeta]:
     """Like :func:`retrieve` but also returns a :class:`RetrievalMeta` so the
     caller can distinguish 'nothing relevant' from 'dense recall silently
@@ -619,7 +626,7 @@ async def retrieve_with_meta(
         RRFFusionStage,
         SemanticDenseStage,
         humus_note_blob_exclusion,
-        proposed_note_blob_exclusion,
+        ineffective_source_blob_exclusion,
     )
 
     pred = _project_pred(project_id)
@@ -631,12 +638,20 @@ async def retrieve_with_meta(
     wanted = set(tag_ids or ())
     if channel_id is not None:
         wanted.add(channel_id)
-    # ADR-0043 D2: withhold autonomously-generated, not-yet-approved notes
-    # (``review_state='proposed'``) from every retrieval stage at once -- the
-    # lexical/semantic stages fold ``tag_clauses`` into their WHERE, and the
-    # humus stage inherits this base context. Unconditional + a no-op when no
-    # proposed note exists, so behaviour is byte-identical until the gate runs.
-    tag_clauses: tuple[ColumnElement[bool], ...] = (proposed_note_blob_exclusion(org_id),)
+    # The effective-source gate, folded into every retrieval stage at once
+    # (the lexical/semantic stages fold ``tag_clauses`` into their WHERE, and
+    # the humus stage inherits this base context): ADR-0043 D2 withholds
+    # autonomously-generated, not-yet-approved notes (``review_state=
+    # 'proposed'``), and task c5da112c withholds SOFT-DELETED sources -- a
+    # trashed note/task must not keep surfacing through its index blobs
+    # (restore brings them back with no re-index; hard deletion instead
+    # erases the blobs by provenance, see ``erase_blobs_for_sources``).
+    # ``include_deleted_sources`` is the unified /search "show the bin"
+    # opt-in: it lifts only the soft-delete legs, never the proposed one.
+    # Unconditional + a no-op when every source is effective.
+    tag_clauses: tuple[ColumnElement[bool], ...] = (
+        ineffective_source_blob_exclusion(org_id, include_deleted=include_deleted_sources),
+    )
     # Config C of the humus A/B (task 4836a6cc): remove humus-atom blobs from
     # every branch (lexical/dense inherit tag_clauses, and the humus branch's
     # own predicate AND-ed with this NOT IN yields empty), so the pipeline
@@ -860,6 +875,7 @@ async def retrieve(
     humus_kinds: frozenset[str] | None = None,
     exclude_humus_from_base: bool = False,
     probe: bool = False,
+    include_deleted_sources: bool = False,
 ) -> list[Hit]:
     """Hybrid RRF retrieval -> the ranked hits. Thin wrapper over
     :func:`retrieve_with_meta` for the callers that don't need the recall
@@ -884,6 +900,7 @@ async def retrieve(
         humus_kinds=humus_kinds,
         exclude_humus_from_base=exclude_humus_from_base,
         probe=probe,
+        include_deleted_sources=include_deleted_sources,
     )
     return hits
 
@@ -944,6 +961,69 @@ async def _ts_headlines(
     return {row.id: row.snippet for row in rows}
 
 
+async def erase_blobs_for_sources(
+    session: AsyncSession,
+    *,
+    sources: Sequence[tuple[str, str]],
+) -> int:
+    """Bulk provenance erase: drop the ``blob_sources`` rows for every
+    ``(source_kind, source_id)`` pair, then delete any blob left with no
+    provenance at all. Returns the number of blobs deleted.
+
+    The shared primitive behind :func:`gdpr_erase` AND the SOVEREIGN
+    hard-delete path (``trash.empty_trash``, task c5da112c). Rationale:
+    the index blobs are cleaned by ORM/mapper listeners on the ORM
+    paths, but a bulk ``DELETE`` bypasses them -- without this call a
+    hard-deleted note/task would leave its full-text blobs orphaned AND
+    retrievable forever. Erasing by provenance mirrors ``gdpr_erase``:
+    a derived memory whose ONLY provenance was a purged source dies with
+    it. That is deliberate for the sovereign paths (a human explicitly
+    destroying data) and exactly why the AUTONOMOUS retention sweep does
+    NOT use whole-entity pairs (see ``entity_revisions.
+    hard_delete_soft_deleted``: §12, the timer must not destroy
+    independent memories that merely cite a purged row). Internal
+    primitive: no RBAC and no audit here -- callers gate and log. RLS
+    scopes every statement to the tenant. Statements are chunked so a
+    large trash purge cannot exceed the driver's bind-parameter cap."""
+    pairs = sorted({(k, s) for k, s in sources})
+    if not pairs:
+        return 0
+    affected: set[uuid.UUID] = set()
+    for i in range(0, len(pairs), _ERASE_CHUNK):
+        chunk = pairs[i : i + _ERASE_CHUNK]
+        pair_cond = tuple_(BlobSource.source_kind, BlobSource.source_id).in_(chunk)
+        affected.update(
+            (await session.execute(select(BlobSource.blob_id).where(pair_cond))).scalars().all()
+        )
+        await session.execute(delete(BlobSource).where(pair_cond))
+    if not affected:
+        return 0
+    await session.flush()
+    deleted = 0
+    affected_ids = sorted(affected, key=str)
+    for i in range(0, len(affected_ids), _ERASE_CHUNK):
+        chunk_ids = affected_ids[i : i + _ERASE_CHUNK]
+        orphaned = (
+            (
+                await session.execute(
+                    select(MemoryBlob.id).where(
+                        MemoryBlob.id.in_(chunk_ids),
+                        ~select(BlobSource.blob_id)
+                        .where(BlobSource.blob_id == MemoryBlob.id)
+                        .exists(),
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        if orphaned:
+            await session.execute(delete(MemoryBlob).where(MemoryBlob.id.in_(orphaned)))
+            deleted += len(orphaned)
+    await session.flush()
+    return deleted
+
+
 async def gdpr_erase(
     session: AsyncSession,
     *,
@@ -955,36 +1035,7 @@ async def gdpr_erase(
     """Remove the provenance link; delete any blob left with no
     provenance (cascading its embedding/sources/cluster membership)."""
     await require_role(session, org_id, actor_id, Role.member)
-    affected = (
-        (
-            await session.execute(
-                select(BlobSource.blob_id).where(
-                    BlobSource.source_kind == source_kind,
-                    BlobSource.source_id == source_id,
-                )
-            )
-        )
-        .scalars()
-        .all()
-    )
-    await session.execute(
-        delete(BlobSource).where(
-            BlobSource.source_kind == source_kind,
-            BlobSource.source_id == source_id,
-        )
-    )
-    await session.flush()
-    deleted = 0
-    for bid in set(affected):
-        remaining = (
-            await session.execute(
-                select(func.count()).select_from(BlobSource).where(BlobSource.blob_id == bid)
-            )
-        ).scalar_one()
-        if remaining == 0:
-            await session.execute(delete(MemoryBlob).where(MemoryBlob.id == bid))
-            deleted += 1
-    await session.flush()
+    deleted = await erase_blobs_for_sources(session, sources=[(source_kind, source_id)])
     await audit.log(
         session,
         org_id=org_id,

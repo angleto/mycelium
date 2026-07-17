@@ -32,11 +32,13 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass, replace
 
-from sqlalchemy import ColumnElement, String, cast, select
+from sqlalchemy import ColumnElement, String, and_, cast, or_, select
 
 from mycelium_core.models.memory_blob import BlobSource, MemoryBlob
 from mycelium_core.models.note import Note
 from mycelium_core.models.note_part import NotePart
+from mycelium_core.models.task import Task
+from mycelium_core.models.task_index_pointer import TaskIndexPointer
 from mycelium_core.services.retrieval.stages.fusion import RRFFusionStage
 from mycelium_core.services.retrieval.stages.lexical import LexicalFTSStage
 from mycelium_core.services.retrieval.stages.order_limit import OrderingStage
@@ -80,6 +82,11 @@ def humus_blob_predicate(
         # human review (``review_state='proposed'``) is withheld from the
         # walk until approved. NULL/'approved' both pass (IS DISTINCT FROM).
         Note.review_state.is_distinct_from("proposed"),
+        # Task c5da112c: a trashed humus atom is out of the walk. The base
+        # ``ineffective_source_blob_exclusion`` already withholds it from
+        # every branch; this keeps the humus predicate correct standalone
+        # (it is also used outside the pipeline, e.g. the free wander set).
+        Note.deleted_at.is_(None),
     ]
     if kinds:
         conds.append(Note.humus_kind.in_(tuple(kinds)))
@@ -123,7 +130,11 @@ def proposed_note_blob_exclusion(org_id: uuid.UUID) -> ColumnElement[bool]:
     ADR-0043 D2). ANDed into ``memory.retrieve``'s base ``tag_clauses`` so the
     lexical, dense AND humus stages all withhold a proposed note in one place.
     Unconditional: when no proposed note exists the subquery is empty and the
-    ``NOT IN`` is a no-op, so behaviour is byte-identical."""
+    ``NOT IN`` is a no-op, so behaviour is byte-identical.
+
+    Subsumed by :func:`ineffective_source_blob_exclusion` on the retrieval
+    path (which also withholds soft-deleted sources); kept for callers and
+    tests that need the proposed-only predicate in isolation."""
     return MemoryBlob.id.notin_(
         select(BlobSource.blob_id)
         .join(NotePart, cast(NotePart.id, String) == BlobSource.source_id)
@@ -133,6 +144,80 @@ def proposed_note_blob_exclusion(org_id: uuid.UUID) -> ColumnElement[bool]:
             BlobSource.org_id == org_id,
             Note.review_state == "proposed",
         )
+    )
+
+
+def ineffective_source_blob_exclusion(
+    org_id: uuid.UUID, *, include_deleted: bool = False
+) -> ColumnElement[bool]:
+    """The blob-side effective-source predicate: EXCLUDE every blob whose
+    source row is not currently effective (task c5da112c).
+
+    This is the single place where "which source states keep their blobs
+    retrievable" is defined for the memory surfaces:
+
+    - a note that is an unreviewed autonomous proposal
+      (``review_state='proposed'``, ADR-0043 D2) or SOFT-DELETED
+      (``deleted_at`` set) withholds every blob carrying ``note_part``
+      provenance from it -- the same join shape the proposed-only
+      exclusion always used, so pointer-less legacy part blobs are
+      covered too, and a consolidated blob is (conservatively) withheld
+      while ANY of its member parts belongs to an ineffective note;
+    - a soft-deleted task withholds its INDEX blob only, resolved via
+      ``task_index_pointer`` (the ``task_search`` loader deliberately
+      keeps the blob in place on soft-delete and defers visibility to
+      search time -- this is that search-time filter for the blob
+      surfaces). The pointer leg is deliberate: ``('task', id)`` in
+      ``blob_sources`` is ALSO how independent agent memories cite the
+      task they came from, and those must NOT vanish with the task.
+
+    The perimeter is DERIVED from the source row at query time, so there
+    is no duplicated state to maintain on delete/restore and no
+    divergence window: restoring a note or task makes its blobs
+    retrievable again with no re-index. Hard deletion is the
+    complementary path: the provenance/pointer rows die with the row, so
+    these joins no longer see the blob -- which is why every hard-delete
+    path must erase the index blobs itself (``memory.
+    erase_blobs_for_sources`` / the retention sweep) instead of relying
+    on this predicate. Unconditional NOT IN: with no ineffective source
+    the subqueries are empty and the clause is a no-op (all three
+    subquery columns are NOT NULL, so the anti-join cannot poison).
+
+    Deliberately NOT hidden: blobs whose only tie to a trashed row is
+    whole-entity citation provenance (``('note', id)`` / ``('task',
+    id)``) -- the kind namespace is shared with legacy index rows, but
+    an independent memory citing a source must survive that source's
+    trip to the trash.
+
+    ``include_deleted=True`` is the unified /search opt-in ("show me the
+    bin too"): it drops ONLY the soft-delete legs. The ADR-0043
+    ``proposed`` withholding is not an option and always stands."""
+    ineffective_note: ColumnElement[bool] = Note.review_state == "proposed"
+    if not include_deleted:
+        ineffective_note = or_(ineffective_note, Note.deleted_at.is_not(None))
+    ineffective_note_blobs = (
+        select(BlobSource.blob_id)
+        .join(NotePart, cast(NotePart.id, String) == BlobSource.source_id)
+        .join(Note, Note.id == NotePart.note_id)
+        .where(
+            BlobSource.source_kind == "note_part",
+            BlobSource.org_id == org_id,
+            ineffective_note,
+        )
+    )
+    if include_deleted:
+        return MemoryBlob.id.notin_(ineffective_note_blobs)
+    deleted_task_blobs = (
+        select(TaskIndexPointer.blob_id)
+        .join(Task, Task.id == TaskIndexPointer.task_id)
+        .where(
+            TaskIndexPointer.org_id == org_id,
+            Task.deleted_at.is_not(None),
+        )
+    )
+    return and_(
+        MemoryBlob.id.notin_(ineffective_note_blobs),
+        MemoryBlob.id.notin_(deleted_task_blobs),
     )
 
 
