@@ -46,7 +46,7 @@ from starlette.responses import JSONResponse, Response
 
 from mycelium_core.services import agent_tokens as agent_tokens_svc
 from mycelium_mcp.gateway import gateway
-from mycelium_mcp.server import _PRINCIPAL
+from mycelium_mcp.server import _PRINCIPAL, _PRINCIPAL_SCOPE
 
 
 class _BearerAuthMiddleware(BaseHTTPMiddleware):
@@ -76,10 +76,15 @@ class _BearerAuthMiddleware(BaseHTTPMiddleware):
                 status_code=401,
             )
         token = _PRINCIPAL.set((principal.user_id, principal.org_id, principal.token_id))
+        # Publish the bound assistant's scope so the gateway gate can enforce it
+        # per tool (task c19f2f63, enabler B). None for a bare token = full
+        # access; a scope list restricts a bound assistant to those keys.
+        scope_token = _PRINCIPAL_SCOPE.set(principal.assistant_scope)
         try:
             response: Response = await call_next(request)
             return response
         finally:
+            _PRINCIPAL_SCOPE.reset(scope_token)
             _PRINCIPAL.reset(token)
 
 

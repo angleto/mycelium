@@ -6,13 +6,17 @@ per-tool: a domain (``tasks``, ``time``, ...) splits into ``:read`` /
 ``:write`` and a small ``:danger`` bucket for ops that spend credits or
 destroy data.
 
-Enforcement: the MCP transport reads ``assistant.scope`` (a JSONB
-list) from the SECURITY DEFINER ``authenticate_agent_token`` lookup
-(migration 0059) and the gate filters tool calls against it. Legacy
-bare ``agent_tokens`` rows (assistant_id IS NULL, minted before this
-flow existed) keep their previous all-tools access — the scope filter
-only kicks in when an assistant is bound. Future work: hook each
-``@mcp.tool()`` to a scope key and reject calls outside ``scope``.
+Enforcement (task c19f2f63, enabler B): the HTTP transport reads
+``assistant.scope`` (a JSONB list) from the SECURITY DEFINER
+``authenticate_agent_token`` lookup (migration 0059) and publishes it into
+``server._PRINCIPAL_SCOPE``. Every concrete tool maps to one scope key in
+``mcp.tool_scopes.TOOL_SCOPES``; the gateway gate rejects an ``execute_tool``
+call outside ``scope`` and hides out-of-scope tools from ``search_tools`` /
+``describe_tools`` (``server._scope_permits``). FAIL-CLOSED: a tool with no
+mapping is denied to a scoped assistant (a drift-guard test keeps the map in
+lockstep with the registry). Legacy bare ``agent_tokens`` rows (assistant_id
+IS NULL) and the stdio / human-bearer paths keep their previous all-tools
+access — the filter only bites a bound assistant that carries a scope list.
 """
 
 from __future__ import annotations
@@ -114,6 +118,155 @@ SCOPE_CATALOG: tuple[ScopeDef, ...] = (
         "danger",
         "Edit budgets",
         "Create or adjust budget envelopes. Loosening a budget is a finance decision.",
+    ),
+    # --- additions (task c19f2f63, enabler B): cover the MCP domains the coarse
+    # v1 catalog missed (email, search, annotations, knowledge graph, workflows
+    # read, agent-runs/dispatch/executors read+write) and split off the
+    # destructive/credit-spending edges so a writer is not implicitly a destroyer
+    # or a spender (least-privilege). Category drives the DEFAULT_SCOPES opt-out:
+    # read/write are on by default, danger is opt-in. ---
+    # read
+    ScopeDef(
+        "search:read",
+        "read",
+        "Search",
+        "Run unified and semantic search across tasks, notes and memory, including "
+        "graph-based context retrieval. Read-only.",
+    ),
+    ScopeDef(
+        "email:read",
+        "read",
+        "Read email",
+        "List and read email accounts, ingested messages, threads and drafted replies.",
+    ),
+    ScopeDef(
+        "annotations:read",
+        "read",
+        "Read annotations",
+        "Read inline comments and suggestions on notes and task descriptions.",
+    ),
+    ScopeDef(
+        "kg:read",
+        "read",
+        "Read knowledge graph",
+        "Query knowledge-graph entities and their relationship facts extracted from notes.",
+    ),
+    ScopeDef(
+        "workflows:read",
+        "read",
+        "Read workflows",
+        "View workflow definitions, their ordered states and allowed transitions.",
+    ),
+    ScopeDef(
+        "agent_runs:read",
+        "read",
+        "Read agent runs",
+        "View agent-run status, history, steps, credits spent and produced artifacts.",
+    ),
+    ScopeDef(
+        "dispatch:read",
+        "read",
+        "Read dispatch queue",
+        "View the agent-dispatch/approval queue, statuses and projected credit costs.",
+    ),
+    ScopeDef(
+        "executors:read",
+        "read",
+        "Read executors",
+        "List workspace executors (human members and LLM agents) and their capacity.",
+    ),
+    # write
+    ScopeDef(
+        "email:write",
+        "write",
+        "Manage email",
+        "Register or configure email accounts, set default tags, sync inboxes, and "
+        "queue or discard AI draft replies. Does not send mail.",
+    ),
+    ScopeDef(
+        "annotations:write",
+        "write",
+        "Write annotations",
+        "Add, edit, assign, resolve, reopen or withdraw inline comments and "
+        "suggestions. Does not rewrite the underlying document body.",
+    ),
+    ScopeDef(
+        "schedule:write",
+        "write",
+        "Write schedule",
+        "Write scheduler pins/constraints on tasks and recompute the derived "
+        "schedule. Does not spend credits.",
+    ),
+    ScopeDef(
+        "notifications:write",
+        "write",
+        "Manage notifications",
+        "Set per-channel notification preferences and enqueue due-date reminders. "
+        "Internal only (see 'Send notifications externally').",
+    ),
+    ScopeDef(
+        "agent_runs:write",
+        "write",
+        "Control agent runs",
+        "Request cooperative cancellation of a running agent. Does not start runs "
+        "or spend credits.",
+    ),
+    ScopeDef(
+        "dispatch:write",
+        "write",
+        "Deny dispatch requests",
+        "Deny pending agent-dispatch requests. Never starts a run or spends credits.",
+    ),
+    ScopeDef(
+        "executors:write",
+        "write",
+        "Manage executors",
+        "Create, update and delete executors (capacity, credit budgets, capability "
+        "tags). Deletion can make LLM tasks unassignable.",
+    ),
+    # danger
+    ScopeDef(
+        "email:send",
+        "danger",
+        "Send email",
+        "Send mail from a connected account (send, reply in-thread, approve-and-send "
+        "drafts). Messages leave your boundary and cannot be recalled.",
+    ),
+    ScopeDef(
+        "memory:delete",
+        "danger",
+        "Delete or erase memories",
+        "Hard-delete a memory blob (cascades to tags/sources/vector) or run GDPR "
+        "erasure by provenance. Split from memory:write so a writer cannot destroy.",
+    ),
+    ScopeDef(
+        "memory:admin",
+        "danger",
+        "Manage memory channels",
+        "Create, rename, enable/disable or delete the workspace's memory channels "
+        "(the channel vocabulary that files and routes every memory).",
+    ),
+    ScopeDef(
+        "ai:generate",
+        "danger",
+        "Spend LLM credits (synthesis)",
+        "Run metered LLM synthesis/extraction (garden distillation, seasonal "
+        "summaries, knowledge-graph extraction) that spends the credit budget. "
+        "Distinct from agent_runs:start.",
+    ),
+    ScopeDef(
+        "billing:write",
+        "danger",
+        "Write billing",
+        "Grant or meter LLM credits (money movement against the org balance) and "
+        "create or update model rate cards. Read-only by default.",
+    ),
+    ScopeDef(
+        "notifications:send",
+        "danger",
+        "Send notifications externally",
+        "Force-send pending notifications to external channels (email/push). An "
+        "irreversible external side effect.",
     ),
 )
 

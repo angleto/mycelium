@@ -43,10 +43,12 @@ from mycelium_core import __version__
 from mycelium_core.db import tenant_session
 from mycelium_core.embedder import embed_batch, embedder_available, get_embedder
 from mycelium_core.errors import DomainError, jsonable_params
+from mycelium_core.i18n import MessageCode
 from mycelium_core.models.billing import CostBasis
 from mycelium_core.services import billing
-from mycelium_mcp.server import _INSTRUCTIONS, _PRINCIPAL
+from mycelium_mcp.server import _INSTRUCTIONS, _PRINCIPAL, _scope_permits
 from mycelium_mcp.server import mcp as _registry
+from mycelium_mcp.tool_scopes import TOOL_SCOPES
 
 _log = logging.getLogger("mycelium.mcp.gateway")
 
@@ -423,7 +425,12 @@ async def search_tools(
     # (task 26efb287). The old hard prefilter hid a strong cross-domain
     # answer outright; the penalty keeps it reachable while the requested
     # domain still wins the common case.
-    names = list(cat)
+    #
+    # Scope filter (task c19f2f63, enabler B): a scoped assistant never sees a
+    # tool it could not call -- defence-in-depth over the ``execute_tool`` gate
+    # and better ergonomics (no dead search hits). Full-access callers keep the
+    # whole catalog.
+    names = [n for n in cat if _scope_permits(n)]
     if embedder_available():
         await _ensure_index()
         index = _index or {}
@@ -471,6 +478,13 @@ async def describe_tools(names: list[str], minimal: bool = True) -> list[dict[st
         if tool is None:
             out.append({"name": name, "error": "unknown tool; call search_tools first"})
             continue
+        if not _scope_permits(name):
+            # Don't hand out the schema of a tool this assistant can't call
+            # (task c19f2f63, enabler B).
+            out.append(
+                {"name": name, "error": "scope denied; not permitted by this assistant's scope"}
+            )
+            continue
         schema = _strip_auth(tool.parameters)
         if minimal:
             schema = _prune_schema(schema)
@@ -508,6 +522,20 @@ async def execute_tool(name: str, arguments: dict[str, Any] | None = None) -> An
     tool = _registry._tool_manager.get_tool(name)
     if tool is None:
         return {"error": f"unknown tool: {name}; call search_tools first"}
+    # Per-tool scope gate (task c19f2f63, enabler B). ``execute_tool`` is the
+    # sole path to a concrete tool over the HTTP transport, so this is the
+    # security chokepoint. Deny BEFORE validating args / running, so a forbidden
+    # call leaks neither the arg schema nor any side effect. Full-access callers
+    # (bare token / stdio / human) pass through unchanged.
+    if not _scope_permits(name):
+        return {
+            "error": {
+                "code": MessageCode.MCP_SCOPE_DENIED.value,
+                "detail": "this assistant's scope does not permit this tool",
+                "tool": name,
+                "required_scope": TOOL_SCOPES.get(name),
+            }
+        }
     args = dict(arguments or {})
     props = (tool.parameters or {}).get("properties", {})
     for p in _AUTH_PARAMS:

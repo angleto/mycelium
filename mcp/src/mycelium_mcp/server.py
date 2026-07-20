@@ -99,6 +99,7 @@ from mycelium_core.services.taxonomy import ClientInput
 from mycelium_core.services.time_tracking import ReportGroup
 from mycelium_core.services.workflow import StateEdit, StateSpec
 from mycelium_core.timewindow import resolve_tz, split_due
+from mycelium_mcp.tool_scopes import TOOL_SCOPES, UNMAPPED
 
 _INSTRUCTIONS = (
     "You are working through Mycelium, a shared work hub that is ALSO your durable, "
@@ -132,6 +133,14 @@ mcp: FastMCP = FastMCP("mycelium", instructions=_INSTRUCTIONS)
 _PRINCIPAL: ContextVar[tuple[uuid.UUID, uuid.UUID, uuid.UUID | None] | None] = ContextVar(
     "_PRINCIPAL", default=None
 )
+
+# The bound assistant's granted scope list, published by the HTTP bearer
+# middleware alongside ``_PRINCIPAL`` (task c19f2f63, enabler B). ``None`` for a
+# bare token / the stdio / human-bearer paths = legacy full access. Kept as a
+# separate ContextVar (not folded into ``_PRINCIPAL``) so the many existing
+# 3-tuple readers/setters -- tests, eval_scenarios -- are untouched, and so the
+# gateway scope gate filters ~250 tools from memory with no DB round-trip.
+_PRINCIPAL_SCOPE: ContextVar[list[str] | None] = ContextVar("_PRINCIPAL_SCOPE", default=None)
 
 
 @asynccontextmanager
@@ -244,6 +253,29 @@ async def _require_scope(session: AsyncSession, scope_key: str) -> None:
         return  # bare token (no bound assistant) -> legacy full access
     if scope_key not in (scope or []):
         raise ForbiddenError(MessageCode.MCP_SCOPE_DENIED, scope=scope_key)
+
+
+def _scope_permits(tool_name: str) -> bool:
+    """Whether the current principal may invoke ``tool_name`` (task c19f2f63,
+    enabler B). Pure/in-memory: reads the scope list published into
+    ``_PRINCIPAL_SCOPE`` by the HTTP bearer middleware.
+
+    - ``_PRINCIPAL_SCOPE`` is None -> a bare token / the stdio / human-bearer
+      path: legacy full access, everything allowed.
+    - the tool maps to ``None`` in ``TOOL_SCOPES`` -> META (whoami/help/ping):
+      always allowed so an agent can bootstrap and discover its own scope.
+    - the tool is absent from ``TOOL_SCOPES`` -> FAIL-CLOSED, denied (a
+      drift-guard test keeps the map complete so this never bites in practice).
+    - otherwise the tool's required scope must be in the granted list."""
+    scope = _PRINCIPAL_SCOPE.get()
+    if scope is None:
+        return True
+    req = TOOL_SCOPES.get(tool_name, UNMAPPED)
+    if req is None:
+        return True
+    if req is UNMAPPED:
+        return False
+    return req in scope
 
 
 @mcp.tool()
@@ -447,39 +479,55 @@ async def whoami(token: str = "", org_id: str = "") -> dict[str, Any]:
             if urow is not None:
                 handle, identity_id, kind = urow
 
+        # ``whoami`` is META -- callable under ANY scope, so an agent can always
+        # discover its own identity. That exemption must not become a data hole:
+        # the two enrichments below return the SAME payloads as ``list_tasks``
+        # and ``memory_search`` (task rows; full memory-blob text), which a
+        # narrowly-scoped assistant may not hold. So gate each enrichment on the
+        # scope its equivalent tool requires, and say so when withholding.
+        # Identity / granted scope / pointers stay unconditional: without them
+        # bootstrap is impossible. (Adversarial audit of enabler B.)
+        withheld: list[str] = []
+
         open_tasks: list[dict[str, Any]] = []
         if handle is not None:
-            rows = await tasks.list_tasks(
-                s,
-                org_id=org,
-                assignee_handles=[handle],
-                open_only=True,
-                with_description=False,
-                limit=10,
-            )
-            open_tasks = [_task(t) for t in rows]
+            if _scope_permits("list_tasks"):
+                rows = await tasks.list_tasks(
+                    s,
+                    org_id=org,
+                    assignee_handles=[handle],
+                    open_only=True,
+                    with_description=False,
+                    limit=10,
+                )
+                open_tasks = [_task(t) for t in rows]
+            else:
+                withheld.append("open_tasks: needs the scope that list_tasks requires")
 
         # Recall the agent's own durable lane (channel 'agent'). Best-effort: a
         # bootstrap must never fail because memory is momentarily unavailable or
         # the channel is not yet seeded.
         memory_recall: list[dict[str, Any]] = []
-        try:
-            hits, _meta = await memory_svc.retrieve_with_meta(
-                s,
-                org_id=org,
-                actor_id=user,
-                project_id=None,
-                query=f"{handle or 'agent'} memory index protocol operational state",
-                operation_id=f"whoami:{token_id or user}",
-                limit=5,
-                channel_key="agent",
-            )
-            tagmap = await memory_svc.tags_by_blob(s, blob_ids=[h.blob.id for h in hits])
-            memory_recall = [
-                {"blob": _blob(h.blob, tagmap.get(h.blob.id)), "rrf": h.rrf} for h in hits
-            ]
-        except Exception:
-            memory_recall = []
+        if not _scope_permits("memory_search"):
+            withheld.append("memory_lane.recall: needs the scope that memory_search requires")
+        else:
+            try:
+                hits, _meta = await memory_svc.retrieve_with_meta(
+                    s,
+                    org_id=org,
+                    actor_id=user,
+                    project_id=None,
+                    query=f"{handle or 'agent'} memory index protocol operational state",
+                    operation_id=f"whoami:{token_id or user}",
+                    limit=5,
+                    channel_key="agent",
+                )
+                tagmap = await memory_svc.tags_by_blob(s, blob_ids=[h.blob.id for h in hits])
+                memory_recall = [
+                    {"blob": _blob(h.blob, tagmap.get(h.blob.id)), "rrf": h.rrf} for h in hits
+                ]
+            except Exception:
+                memory_recall = []
 
         return {
             "identity": {
@@ -491,6 +539,10 @@ async def whoami(token: str = "", org_id: str = "") -> dict[str, Any]:
             },
             "scope": scope,
             "org_id": str(org),
+            # Non-empty when this assistant's scope was too narrow for one of
+            # the enrichments: an empty list then means "not permitted", not
+            # "nothing there".
+            "withheld": withheld,
             "open_tasks": open_tasks,
             "memory_lane": {
                 "channel": "agent",

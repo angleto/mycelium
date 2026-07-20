@@ -248,11 +248,18 @@ async def _call_authenticate_fn(
     raw_scope = row[5]
     assistant_scope: list[str] | None
     if raw_scope is None:
+        # No assistant binding (legacy bare token) -> no per-tool restriction.
+        # This is the ONLY value that may mean "full access".
         assistant_scope = None
     elif isinstance(raw_scope, list):
         assistant_scope = [str(s) for s in raw_scope]
     else:
-        assistant_scope = None
+        # A bound assistant whose scope column is malformed (not a JSONB list).
+        # Fail CLOSED -- deny-all -- rather than reusing the None sentinel,
+        # which would silently upgrade a corrupt row to full access. Mirrors
+        # ``AiAssistant.scope_list()``, which already treats a non-list as no
+        # scopes.
+        assistant_scope = []
     return AuthenticatedAgent(
         token_id=row[0],
         user_id=row[1],
