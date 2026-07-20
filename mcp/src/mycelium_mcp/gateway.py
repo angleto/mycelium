@@ -45,12 +45,12 @@ from mycelium_core.embedder import embed_batch, embedder_available, get_embedder
 from mycelium_core.errors import DomainError, jsonable_params
 from mycelium_core.models.billing import CostBasis
 from mycelium_core.services import billing
-from mycelium_mcp.server import _PRINCIPAL
+from mycelium_mcp.server import _INSTRUCTIONS, _PRINCIPAL
 from mycelium_mcp.server import mcp as _registry
 
 _log = logging.getLogger("mycelium.mcp.gateway")
 
-gateway: FastMCP = FastMCP("mycelium")
+gateway: FastMCP = FastMCP("mycelium", instructions=_INSTRUCTIONS)
 
 # A platform usage fee denominated in payload tokens for the MCP gateway
 # path (decision 2026-06-02; 90e4db3e §6/§13.2, task e30d188e). It is NOT a
@@ -164,6 +164,9 @@ _DOMAIN_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
     # only tool exposing a task tag / free-text facet) and its siblings.
     # Matches ``search`` / ``memory_search`` / ``graph_focus_context``.
     ("search", ("search", "focus_context")),
+    # Session bootstrap / self-identity (whoami): a read-only "who am I / what
+    # may I do / my durable memory" tool; its own small bucket.
+    ("identity", ("whoami", "agent_home")),
     # Navigation/relations must come next: link/relation/resolve tools
     # also contain "note"/"task" in their names, so they would otherwise
     # be swallowed by the notes/tasks rules below.

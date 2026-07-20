@@ -47,7 +47,7 @@ handles (see the generated `tasks` section below). An agent never needs to
 over-fetch the org table and filter in its head.
 
 <!-- BEGIN GENERATED: mcp tool inventory (scripts/gen_mcp_coverage.py) -->
-**250 tools across 13 domains.** This inventory is generated from the live registry by `scripts/gen_mcp_coverage.py` — do not edit by hand; run `make mcp-coverage` to refresh. The one-line summary is each tool's first docstring line, so it cannot drift from the code.
+**251 tools across 14 domains.** This inventory is generated from the live registry by `scripts/gen_mcp_coverage.py` — do not edit by hand; run `make mcp-coverage` to refresh. The one-line summary is each tool's first docstring line, so it cannot drift from the code.
 
 ### search (3)
 
@@ -56,6 +56,12 @@ over-fetch the org table and filter in its head.
 | `graph_focus_context` | PPR-seeded reading set around a seed note: the relevant subgraph and |
 | `memory_search` | Hybrid RRF retrieval within the (org, project) boundary. |
 | `search` | Unified search across tasks/notes/blobs; the TASK branch is org-wide |
+
+### identity (1)
+
+| Tool | Summary |
+|---|---|
+| `whoami` | Session bootstrap: who am I, what may I do, and my durable memory here. |
 
 ### navigation (19)
 

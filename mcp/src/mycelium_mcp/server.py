@@ -100,7 +100,23 @@ from mycelium_core.services.time_tracking import ReportGroup
 from mycelium_core.services.workflow import StateEdit, StateSpec
 from mycelium_core.timewindow import resolve_tz, split_due
 
-mcp: FastMCP = FastMCP("mycelium")
+_INSTRUCTIONS = (
+    "You are working through Mycelium, a shared work hub that is ALSO your durable, "
+    "portable memory: it persists across machines and MCP clients, so agents coordinate "
+    "through it rather than through machine-local files. AT SESSION START call whoami() "
+    "-- it returns your identity and granted scope, your open assigned tasks, and a "
+    "recall of your durable memory lane, so you resume from Mycelium instead of a local "
+    "file. Your DURABLE, shareable memory lives here: write facts/decisions/an index with "
+    "memory_write on channel 'agent'; durable PROCEDURES live as protected notes. Your "
+    "EPHEMERAL working memory stays with you, the caller (ADR-0049) -- do not store "
+    "scratch/session state here. NEVER write secrets, credentials, production/operator "
+    "runbooks, deploy commands or personal data into this shared store (it is org+project "
+    "shared, without per-actor read isolation): keep those machine-local. Discover tools "
+    "with search_tools(query); read platform docs with help(topic). The human steers and "
+    "gives direction; agents execute and PROPOSE, never impose."
+)
+
+mcp: FastMCP = FastMCP("mycelium", instructions=_INSTRUCTIONS)
 
 
 # Per-request principal published by the HTTP transport's bearer
@@ -363,6 +379,135 @@ def help(topic: str | None = None) -> dict[str, Any]:
             "rest_api": "the REST API reference (OpenAPI) is served at /apidocs",
         },
     }
+
+
+@mcp.tool()
+async def whoami(token: str = "", org_id: str = "") -> dict[str, Any]:
+    """Session bootstrap: who am I, what may I do, and my durable memory here.
+    Call this FIRST at session start (especially an external LLM / MCP client).
+    Read-only. Returns your resolved identity + granted scope (``scope`` null =
+    full access, no per-tool restriction); your OPEN assigned tasks; and a recall
+    of your durable memory lane (channel 'agent'), so you resume from Mycelium
+    instead of a machine-local file. Durable/shareable memory lives here (write it
+    with ``memory_write`` on channel 'agent'; durable procedures as protected
+    notes); ephemeral working memory stays with you, the caller (ADR-0049). Use
+    ``search_tools(query)`` to find tools and ``help(topic)`` for docs."""
+    from sqlalchemy import select as _sel
+
+    from mycelium_core.models.agent_token import AgentToken
+    from mycelium_core.models.ai_assistant import AiAssistant
+    from mycelium_core.models.identity import Identity
+
+    async with _tenant(token, org_id) as (s, org, user):
+        principal = _PRINCIPAL.get()
+        token_id = principal[2] if principal is not None else None
+        handle: str | None = None
+        identity_id: uuid.UUID | None = None
+        kind: Any = None
+        label: str | None = None
+        scope: list[str] | None = None
+        if token_id is not None:
+            # Bound agent token -> the assistant carries handle/label/scope even
+            # if its Identity row was never minted; LEFT JOIN Identity for the id
+            # (and its handle, which is the one task assignment keys on). A legacy
+            # bare token (assistant_id IS NULL) yields no row -> the fallback runs.
+            row = (
+                await s.execute(
+                    _sel(
+                        AiAssistant.handle,
+                        AiAssistant.label,
+                        AiAssistant.scope,
+                        Identity.id,
+                        Identity.handle,
+                    )
+                    .select_from(AgentToken)
+                    .join(AiAssistant, AiAssistant.id == AgentToken.assistant_id)
+                    .outerjoin(
+                        Identity,
+                        (Identity.ai_assistant_id == AiAssistant.id) & (Identity.org_id == org),
+                    )
+                    .where(AgentToken.id == token_id)
+                )
+            ).first()
+            if row is not None:
+                a_handle, label, raw_scope, identity_id, ident_handle = row
+                handle = ident_handle or a_handle
+                kind = "ai_assistant"
+                scope = list(raw_scope) if raw_scope is not None else None
+        if handle is None:
+            # Human / stdio / legacy bare token: resolve the caller's own identity
+            # read-only (no minting), so whoami stays useful on those paths too.
+            urow = (
+                await s.execute(
+                    _sel(Identity.handle, Identity.id, Identity.kind).where(
+                        Identity.user_id == user, Identity.org_id == org
+                    )
+                )
+            ).first()
+            if urow is not None:
+                handle, identity_id, kind = urow
+
+        open_tasks: list[dict[str, Any]] = []
+        if handle is not None:
+            rows = await tasks.list_tasks(
+                s,
+                org_id=org,
+                assignee_handles=[handle],
+                open_only=True,
+                with_description=False,
+                limit=10,
+            )
+            open_tasks = [_task(t) for t in rows]
+
+        # Recall the agent's own durable lane (channel 'agent'). Best-effort: a
+        # bootstrap must never fail because memory is momentarily unavailable or
+        # the channel is not yet seeded.
+        memory_recall: list[dict[str, Any]] = []
+        try:
+            hits, _meta = await memory_svc.retrieve_with_meta(
+                s,
+                org_id=org,
+                actor_id=user,
+                project_id=None,
+                query=f"{handle or 'agent'} memory index protocol operational state",
+                operation_id=f"whoami:{token_id or user}",
+                limit=5,
+                channel_key="agent",
+            )
+            tagmap = await memory_svc.tags_by_blob(s, blob_ids=[h.blob.id for h in hits])
+            memory_recall = [
+                {"blob": _blob(h.blob, tagmap.get(h.blob.id)), "rrf": h.rrf} for h in hits
+            ]
+        except Exception:
+            memory_recall = []
+
+        return {
+            "identity": {
+                "handle": handle,
+                "identity_id": str(identity_id) if identity_id else None,
+                "kind": kind.value if hasattr(kind, "value") else kind,
+                "assistant_label": label,
+                "user_id": str(user),
+            },
+            "scope": scope,
+            "org_id": str(org),
+            "open_tasks": open_tasks,
+            "memory_lane": {
+                "channel": "agent",
+                "recall": memory_recall,
+                "write_hint": (
+                    "memory_write(text, operation_id, channel_key='agent', "
+                    "tag_ids=[<your 'agent/<handle>' tag>], namespace='agent')"
+                ),
+            },
+            "pointers": {
+                "protocol": (
+                    "search for the 'Protocollo agente mycelium' protocol note (how to work here)"
+                ),
+                "tools": "search_tools(query) to find an MCP tool",
+                "docs": "help(topic) for platform documentation",
+            },
+        }
 
 
 def _tag(t: Tag) -> dict[str, Any]:
