@@ -8,11 +8,12 @@ import contextlib
 from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any
 
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.docs import get_redoc_html
 from starlette.responses import HTMLResponse, JSONResponse, Response
 
+from mycelium_api.deps import enforce_route_scope
 from mycelium_api.routers import (
     actors,
     admin_sdi,
@@ -205,6 +206,13 @@ def create_app() -> FastAPI:
         title="Mycelium API",
         version="0.0.0",
         lifespan=_make_lifespan(mcp_app),
+        # App-level dependency: runs before every route's own dependencies, so
+        # a scoped assistant is confined to the routes its scope covers on THIS
+        # surface too. Without it the MCP per-tool gate is bypassable by simply
+        # not speaking MCP -- same token, ungated transport (task c19f2f63,
+        # enabler B). No-op for human sessions, bare tokens and capability
+        # tokens.
+        dependencies=[Depends(enforce_route_scope)],
     )
 
     @app.get("/healthz", tags=["meta"])

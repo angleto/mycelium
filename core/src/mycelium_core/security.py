@@ -120,5 +120,11 @@ async def decode_token_async(
             "typ": "agent",
             "tid": str(result.token_id),
             "assistant_id": (str(result.assistant_id) if result.assistant_id else None),
+            # The bound assistant's granted scope list, or None for a bare
+            # token (= no per-route restriction). Carried so the REST surface
+            # can enforce the SAME boundary the MCP gateway does: without it
+            # a scoped assistant simply stops speaking MCP and regains full
+            # access here (task c19f2f63, enabler B).
+            "assistant_scope": result.assistant_scope,
         }
     return decode_token(raw)

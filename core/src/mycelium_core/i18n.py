@@ -120,6 +120,7 @@ class MessageCode(enum.StrEnum):
     COMPOSE_RECIPIENT_INVALID = "invoice.compose_recipient_invalid"
     RATE_LIMITED = "rate.limited"
     MCP_SCOPE_DENIED = "mcp.scope_denied"
+    AGENT_SCOPE_DENIED = "agent.scope_denied"
     MANDATE_REQUIRED = "invoice.mandate_required"
     MANDATE_NOT_FOUND = "invoice.mandate_not_found"
     NOTIFICATION_NOT_FOUND = "notification.not_found"
@@ -406,6 +407,7 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
         ),
         MessageCode.RATE_LIMITED: "Rate limit exceeded for this API key; retry later",
         MessageCode.MCP_SCOPE_DENIED: "This assistant's scope does not permit this tool",
+        MessageCode.AGENT_SCOPE_DENIED: "This assistant's scope does not permit this request",
         MessageCode.MANDATE_REQUIRED: (
             "No active SdI transmission mandate for this issuer profile; grant one "
             "before transmitting through the accredited channel"

@@ -19,6 +19,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from mycelium_api import route_scopes
 from mycelium_core.config import get_settings
 from mycelium_core.db import admin_session, tenant_session
 from mycelium_core.errors import AuthError, ForbiddenError, NotFoundError
@@ -27,6 +28,7 @@ from mycelium_core.models.attachment import Attachment
 from mycelium_core.models.membership import Role
 from mycelium_core.models.user import User
 from mycelium_core.security import decode_token_async
+from mycelium_core.services import agent_tokens as agent_tokens_svc
 from mycelium_core.services import capability_tokens, issuer_api_keys
 from mycelium_core.services.auth import assert_token_not_revoked
 from mycelium_core.services.rbac import _RANK, get_role
@@ -47,6 +49,7 @@ def _bearer_token(
 
 
 async def current_claims(
+    request: Request,
     token: Annotated[str, Depends(_bearer_token)],
 ) -> dict[str, Any]:
     """Decoded bearer claims. Accepts both session JWTs (SPA / login
@@ -58,7 +61,57 @@ async def current_claims(
     plus the JWT revocation check (skipped gracefully when no ``jti``
     is present, since agent tokens carry their own revocation state
     enforced inside ``decode_token_async``)."""
-    return await decode_token_async(token)
+    # ``enforce_route_scope`` runs first (app-level dependency) and has
+    # already decoded an agent token to read its scope. Reuse that result so
+    # a request authenticates once, not twice.
+    cached = getattr(request.state, "claims", None)
+    if cached is not None:
+        return cached  # type: ignore[no-any-return]
+    claims = await decode_token_async(token)
+    request.state.claims = claims
+    return claims
+
+
+async def enforce_route_scope(
+    request: Request,
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer_scheme)] = None,
+) -> None:
+    """Confine a scoped assistant to the routes its scope covers (task
+    c19f2f63, enabler B).
+
+    Registered as an APPLICATION-level dependency, so it runs before any
+    route's own dependencies and covers every route uniformly -- including
+    the capability-or-bearer ones, which never see ``current_claims``.
+    Without it the MCP tool gate is bypassable by simply not speaking MCP:
+    the same ``mycelium_at_`` token authenticates here too.
+
+    No-op for everything that is not a *scoped* assistant token, so human
+    sessions, bare agent tokens and capability tokens are unaffected."""
+    if credentials is None or credentials.scheme.lower() != "bearer":
+        return
+    token = credentials.credentials
+    if capability_tokens.is_capability_token(token):
+        # A capability token carries its own action/resource authorization,
+        # validated where it is redeemed. It is not an assistant credential.
+        return
+    if not agent_tokens_svc.is_agent_token(token):
+        return  # human session JWT
+    try:
+        claims = await decode_token_async(token)
+    except AuthError:
+        # Leave the verdict to the route's own auth dependency: this gate
+        # must not turn a bad bearer on a public route into a new 401.
+        return
+    request.state.claims = claims
+    scope = claims.get("assistant_scope")
+    if scope is None:
+        return  # bare token (no bound assistant) -> no per-route restriction
+    route = request.scope.get("route")
+    path = getattr(route, "path", None)
+    if path is None:
+        return  # unmatched -> 404 handling; nothing to gate
+    if not route_scopes.scope_permits(request.method, path, scope):
+        raise ForbiddenError(MessageCode.AGENT_SCOPE_DENIED)
 
 
 async def current_claims_optional(
