@@ -17,11 +17,12 @@ from __future__ import annotations
 import io
 import re
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
+from urllib.parse import unquote, urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from pydantic import BaseModel, Field
-from weasyprint import HTML  # type: ignore[import-untyped]
+from weasyprint import HTML, default_url_fetcher  # type: ignore[import-untyped]
 
 from mycelium_api.deps import TenantCtx, tenant_ctx
 
@@ -32,6 +33,27 @@ router = APIRouter(prefix="/export", tags=["export"])
 # bundled KaTeX assets that ``print.css`` @imports.
 _STATIC = Path(__file__).resolve().parents[1] / "static"
 _PRINT_CSS = _STATIC / "print.css"
+
+
+def _safe_url_fetcher(url: str) -> Any:
+    """Confine WeasyPrint's resource loading to what the export legitimately
+    needs. The document HTML is CALLER-SUPPLIED, and WeasyPrint would otherwise
+    resolve ``file:///...`` (reading arbitrary backend-pod files into the PDF --
+    a local-file-inclusion / exfiltration shape) and ``http(s)://`` (SSRF to
+    internal endpoints). Only two things are allowed: inline ``data:`` URIs (the
+    SPA inlines attachment images as data: before sending) and ``file://`` under
+    the bundled ``static/`` dir (print.css's own @font-face fonts + KaTeX). Any
+    other url is refused; WeasyPrint then simply skips that resource, so the
+    export still renders, minus the blocked (hostile) reference."""
+    scheme = urlparse(url).scheme.lower()
+    if scheme == "data":
+        return default_url_fetcher(url)
+    if scheme == "file":
+        path = Path(unquote(urlparse(url).path)).resolve()
+        if path == _STATIC or _STATIC in path.parents:
+            return default_url_fetcher(url)
+    raise ValueError(f"export: refused resource url (scheme {scheme or 'relative'!r})")
+
 
 # Cap the inbound body so a runaway client can't OOM the renderer.
 # 8 MiB covers very large notes with many inlined images.
@@ -106,8 +128,9 @@ async def export_pdf(
     doc = _wrap_html(payload.title, payload.html)
     # ``base_url`` lets relative URLs inside body_html (rare; tiptap
     # emits absolute /attachments/... but we inline those client-side)
-    # resolve sensibly without hitting the network.
-    html = HTML(string=doc, base_url=str(_STATIC))
+    # resolve sensibly without hitting the network. ``url_fetcher`` fences the
+    # caller HTML off local files / the network (LFI / SSRF); see it above.
+    html = HTML(string=doc, base_url=str(_STATIC), url_fetcher=_safe_url_fetcher)
     buf = io.BytesIO()
     html.write_pdf(buf, stylesheets=[str(_PRINT_CSS)])
     pdf_bytes = buf.getvalue()
