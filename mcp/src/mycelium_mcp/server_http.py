@@ -27,12 +27,14 @@ Auth flow per request:
    the request. ``_tenant`` inside every ``@mcp.tool()`` short-circuits
    on the ctxvar — bearer args on the tool become tolerated empties.
 
-The per-assistant scope list (``AuthenticatedAgent.assistant_scope``)
-is captured here but **not yet enforced**: the gate that filters each
-@mcp.tool by scope is the "hook each tool to a scope key" follow-up
-flagged in ``core/src/mycelium_core/mcp_scopes.py``. Until then assistant
-tokens behave as full-MCP just like legacy bare agent tokens, which
-matches the v1.2.16 backend contract.
+The per-assistant scope list (``AuthenticatedAgent.assistant_scope``) is
+published into ``_PRINCIPAL_SCOPE`` and enforced per tool by the gateway gate
+(``server._scope_permits`` / ``tool_scopes``; task c19f2f63, enabler B). A bare
+agent token carries no scope list and keeps full-MCP access, as before.
+
+The transport runs STATELESS (``stateless_http=True`` in ``make_mcp_app``): the
+scope is re-read from the bearer on every request rather than frozen into a
+long-lived session task at ``initialize``. See ``make_mcp_app`` for why.
 """
 
 from __future__ import annotations
@@ -113,6 +115,20 @@ def make_mcp_app() -> Starlette:
     gateway.settings.transport_security = TransportSecuritySettings(
         enable_dns_rebinding_protection=False
     )
+    # Stateless transport (task c19f2f63, enabler B). In stateful mode the SDK
+    # starts ONE long-lived per-session task at ``initialize`` and anyio copies
+    # the caller's context into it, so ``_PRINCIPAL`` / ``_PRINCIPAL_SCOPE`` are
+    # frozen for the session's whole life (sessions never expire) and the
+    # Mcp-Session-Id becomes unbound ambient authority (a leaked id replays the
+    # frozen principal). Stateless starts a FRESH per-REQUEST task instead, so
+    # each request runs with the scope the bearer middleware just published for
+    # THAT token -- the scope can never outlive a revocation, and there is no
+    # session id to replay. The gateway is pure request/response (no progress /
+    # sampling / elicitation / server-initiated notifications), so statelessness
+    # costs nothing; the streamable-http session was only ever a scope-freeze
+    # and a replay surface here. The REST surface already authenticates per
+    # request; this brings MCP in line.
+    gateway.settings.stateless_http = True
     app = gateway.streamable_http_app()
     app.add_middleware(_BearerAuthMiddleware)
     return app
