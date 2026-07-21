@@ -227,7 +227,7 @@ ROUTE_SCOPES: dict[tuple[str, str], object] = {
     ("POST", "/export/pdf"): HUMAN_ONLY,
     # --- garden ---
     ("POST", "/garden/apply"): "notes:write",
-    ("GET", "/garden/audit"): "notes:read",
+    ("GET", "/garden/audit"): "events:read",
     ("GET", "/garden/candidates"): "notes:read",
     ("GET", "/garden/classify/{node_id}"): "notes:read",
     ("GET", "/garden/clusters"): "notes:read",

@@ -48,6 +48,13 @@ SCOPE_CATALOG: tuple[ScopeDef, ...] = (
     ),
     ScopeDef("comments:read", "read", "Read comments", "Read task comments."),
     ScopeDef("dependencies:read", "read", "Read dependencies", "Read the task dependency graph."),
+    ScopeDef(
+        "events:read",
+        "read",
+        "Read the event bus",
+        "Read the workspace coordination event stream (ADR-0036): the "
+        "read / propose / commit / reject events other agents and humans emit.",
+    ),
     ScopeDef("budgets:read", "read", "Read budgets", "Read budget envelopes and balances."),
     ScopeDef(
         "invoices:read",

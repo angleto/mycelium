@@ -75,6 +75,7 @@ from mycelium_core.services import dispatch_loop as dispatch_loop_svc
 from mycelium_core.services import email as email_svc
 from mycelium_core.services import embedding_migration as embedding_svc
 from mycelium_core.services import entity_revisions as revisions_svc
+from mycelium_core.services import event_bus as event_bus_svc
 from mycelium_core.services import executors as executors_svc
 from mycelium_core.services import focus_context as focus_context_svc
 from mycelium_core.services import garden_classify as garden_classify_svc
@@ -5484,6 +5485,53 @@ async def list_distillation_candidates(
         return await candidates_svc.list_distillation_candidates(
             s, org_id=org, kind=kind, limit=limit
         )
+
+
+@mcp.tool()
+async def list_events(
+    token: str,
+    org_id: str,
+    since: str | None = None,
+    limit: int = 100,
+) -> dict[str, Any]:
+    """Read the workspace coordination event bus (ADR-0036): the
+    read / propose / commit / reject events humans and other agents emit as
+    they act on the graph, newest first, RLS-scoped to your workspace. This is
+    how an MCP agent OBSERVES what its collaborators are doing; there is no
+    streaming subscription, you poll this.
+
+    ``since`` is an ISO-8601 timestamp cursor -- events at or after it are
+    returned (omit for the most recent ``limit``). Delivery is at-least-once:
+    the boundary event is re-returned, so dedupe by ``id``. To follow the
+    stream, remember the largest ``ts`` you saw and pass it back as ``since``
+    next time; if a poll returns exactly ``limit`` rows there may be more, so
+    poll again immediately. ``limit`` is 1..500 (default 100). A pure read."""
+    n = max(1, min(int(limit), 500))
+    since_dt: dt.datetime | None = None
+    if since:
+        since_dt = dt.datetime.fromisoformat(since)
+        if since_dt.tzinfo is None:
+            since_dt = since_dt.replace(tzinfo=dt.UTC)
+    async with _tenant(token, org_id) as (s, org, _user):
+        rows = await event_bus_svc.recent_events(s, org_id=org, limit=n, since=since_dt)
+        return {
+            "events": [
+                {
+                    "id": str(e.id),
+                    "actor_id": str(e.actor_id) if e.actor_id else None,
+                    "actor_kind": e.actor_kind,
+                    "kind": e.kind,
+                    "node_kind": e.node_kind,
+                    "node_id": str(e.node_id) if e.node_id else None,
+                    "parent_event_id": (str(e.parent_event_id) if e.parent_event_id else None),
+                    "payload": e.payload,
+                    "ts": e.ts.isoformat(),
+                    "applied_at": e.applied_at.isoformat() if e.applied_at else None,
+                    "applied_state": e.applied_state,
+                }
+                for e in rows
+            ]
+        }
 
 
 @mcp.tool()

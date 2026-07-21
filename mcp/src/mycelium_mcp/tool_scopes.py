@@ -112,6 +112,7 @@ TOOL_SCOPES: dict[str, str | None] = {
     "set_email_default_tags": "email:write",
     "set_email_ingest_to_memory": "email:write",
     "sync_email_account": "email:write",
+    "list_events": "events:read",
     "executors_list": "executors:read",
     "executor_create": "executors:write",
     "executor_delete": "executors:write",

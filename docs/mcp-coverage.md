@@ -47,7 +47,7 @@ handles (see the generated `tasks` section below). An agent never needs to
 over-fetch the org table and filter in its head.
 
 <!-- BEGIN GENERATED: mcp tool inventory (scripts/gen_mcp_coverage.py) -->
-**251 tools across 14 domains.** This inventory is generated from the live registry by `scripts/gen_mcp_coverage.py` — do not edit by hand; run `make mcp-coverage` to refresh. The one-line summary is each tool's first docstring line, so it cannot drift from the code.
+**252 tools across 14 domains.** This inventory is generated from the live registry by `scripts/gen_mcp_coverage.py` — do not edit by hand; run `make mcp-coverage` to refresh. The one-line summary is each tool's first docstring line, so it cannot drift from the code.
 
 ### search (3)
 
@@ -103,7 +103,7 @@ over-fetch the org table and filter in its head.
 | `time_report_by_task` | Per-task time aggregate for the caller: total/billable seconds |
 | `update_time_entry` | Correct a time entry. Reassign with ``task_id`` (transitively |
 
-### calendar (10)
+### calendar (11)
 
 | Tool | Summary |
 |---|---|
@@ -111,6 +111,7 @@ over-fetch the org table and filter in its head.
 | `create_calendar` | Create a working calendar (weekday -> [start, end] HH:MM windows). |
 | `get_schedule` | Read one task's derived schedule row. |
 | `list_calendars` | List the org working calendars. |
+| `list_events` | Read the workspace coordination event bus (ADR-0036): the |
 | `list_holidays` | List a calendar's holidays (ascending). |
 | `list_schedule` | List derived schedule rows for a scope. |
 | `recompute_schedule` | Deterministically recompute the schedule for a scope under a |
