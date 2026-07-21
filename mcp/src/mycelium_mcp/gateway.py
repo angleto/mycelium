@@ -48,7 +48,7 @@ from mycelium_core.models.billing import CostBasis
 from mycelium_core.services import billing
 from mycelium_mcp.server import _INSTRUCTIONS, _PRINCIPAL, _scope_permits
 from mycelium_mcp.server import mcp as _registry
-from mycelium_mcp.tool_scopes import TOOL_SCOPES
+from mycelium_mcp.tool_scopes import UNMAPPED, required_scope_for_call
 
 _log = logging.getLogger("mycelium.mcp.gateway")
 
@@ -526,17 +526,21 @@ async def execute_tool(name: str, arguments: dict[str, Any] | None = None) -> An
     # sole path to a concrete tool over the HTTP transport, so this is the
     # security chokepoint. Deny BEFORE validating args / running, so a forbidden
     # call leaks neither the arg schema nor any side effect. Full-access callers
-    # (bare token / stdio / human) pass through unchanged.
-    if not _scope_permits(name):
+    # (bare token / stdio / human) pass through unchanged. The concrete args are
+    # passed so an argument-dependent tool (DYNAMIC_TOOL_SCOPES, e.g. the
+    # text_block / list_attachments kind multiplexers) is gated on the scope its
+    # SPECIFIC call needs, not a single coarse key.
+    args = dict(arguments or {})
+    if not _scope_permits(name, args):
+        req = required_scope_for_call(name, args)
         return {
             "error": {
                 "code": MessageCode.MCP_SCOPE_DENIED.value,
                 "detail": "this assistant's scope does not permit this tool",
                 "tool": name,
-                "required_scope": TOOL_SCOPES.get(name),
+                "required_scope": req if req is not UNMAPPED else None,
             }
         }
-    args = dict(arguments or {})
     props = (tool.parameters or {}).get("properties", {})
     for p in _AUTH_PARAMS:
         if p in props:

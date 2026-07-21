@@ -99,7 +99,7 @@ from mycelium_core.services.taxonomy import ClientInput
 from mycelium_core.services.time_tracking import ReportGroup
 from mycelium_core.services.workflow import StateEdit, StateSpec
 from mycelium_core.timewindow import resolve_tz, split_due
-from mycelium_mcp.tool_scopes import TOOL_SCOPES, UNMAPPED
+from mycelium_mcp.tool_scopes import DYNAMIC_TOOL_SCOPES, TOOL_SCOPES, UNMAPPED
 
 _INSTRUCTIONS = (
     "You are working through Mycelium, a shared work hub that is ALSO your durable, "
@@ -255,7 +255,7 @@ async def _require_scope(session: AsyncSession, scope_key: str) -> None:
         raise ForbiddenError(MessageCode.MCP_SCOPE_DENIED, scope=scope_key)
 
 
-def _scope_permits(tool_name: str) -> bool:
+def _scope_permits(tool_name: str, arguments: dict[str, Any] | None = None) -> bool:
     """Whether the current principal may invoke ``tool_name`` (task c19f2f63,
     enabler B). Pure/in-memory: reads the scope list published into
     ``_PRINCIPAL_SCOPE`` by the HTTP bearer middleware.
@@ -264,12 +264,28 @@ def _scope_permits(tool_name: str) -> bool:
       path: legacy full access, everything allowed.
     - the tool maps to ``None`` in ``TOOL_SCOPES`` -> META (whoami/help/ping):
       always allowed so an agent can bootstrap and discover its own scope.
-    - the tool is absent from ``TOOL_SCOPES`` -> FAIL-CLOSED, denied (a
-      drift-guard test keeps the map complete so this never bites in practice).
-    - otherwise the tool's required scope must be in the granted list."""
+    - the tool is absent from both maps -> FAIL-CLOSED, denied (a drift-guard
+      test keeps them jointly total so this never bites a real tool).
+    - otherwise the tool's required scope must be in the granted list.
+
+    ``arguments`` distinguishes two contexts for an argument-dependent tool
+    (``DYNAMIC_TOOL_SCOPES``):
+    - ``None`` = a LISTING check (search_tools / describe_tools): the tool is
+      permitted if the assistant holds ANY scope it could require, so a
+      kind-multiplexing tool stays discoverable for the kinds it may use.
+    - a dict (the concrete call, possibly empty) = ENFORCEMENT: the required
+      scope is resolved from those arguments; an indeterminate kind fails
+      closed. Static tools ignore ``arguments`` entirely."""
     scope = _PRINCIPAL_SCOPE.get()
     if scope is None:
         return True
+    dyn = DYNAMIC_TOOL_SCOPES.get(tool_name)
+    if dyn is not None:
+        resolver, possible = dyn
+        if arguments is None:
+            return bool(possible & set(scope))
+        req_dyn = resolver(arguments)
+        return req_dyn is not None and req_dyn in scope
     req = TOOL_SCOPES.get(tool_name, UNMAPPED)
     if req is None:
         return True

@@ -25,7 +25,7 @@ from mycelium_core.mcp_scopes import DEFAULT_SCOPES, SCOPE_CATALOG, VALID_SCOPE_
 from mycelium_mcp.gateway import describe_tools, execute_tool, search_tools
 from mycelium_mcp.server import _PRINCIPAL_SCOPE, _scope_permits
 from mycelium_mcp.server import mcp as _registry
-from mycelium_mcp.tool_scopes import TOOL_SCOPES
+from mycelium_mcp.tool_scopes import DYNAMIC_TOOL_SCOPES, TOOL_SCOPES
 
 
 @pytest.fixture(autouse=True)
@@ -47,21 +47,34 @@ def _registry_names() -> set[str]:
 
 
 def test_tool_scopes_covers_every_registered_tool() -> None:
-    """Every concrete tool maps to a scope (or to None = META). Missing entries
-    would be denied to scoped assistants fail-closed, so catch it in CI."""
+    """Every concrete tool maps to a scope (or to None = META) in exactly ONE
+    of the static / dynamic maps. Missing entries would be denied to scoped
+    assistants fail-closed, so catch it in CI."""
     registry = _registry_names()
-    mapped = set(TOOL_SCOPES)
+    static = set(TOOL_SCOPES)
+    dynamic = set(DYNAMIC_TOOL_SCOPES)
+    both = static & dynamic
+    assert not both, f"tools in BOTH TOOL_SCOPES and DYNAMIC_TOOL_SCOPES: {sorted(both)}"
+    mapped = static | dynamic
     missing = registry - mapped
     stale = mapped - registry
-    assert not missing, f"tools missing a TOOL_SCOPES entry: {sorted(missing)}"
-    assert not stale, f"stale TOOL_SCOPES entries (tool no longer exists): {sorted(stale)}"
+    assert not missing, f"tools missing a scope entry: {sorted(missing)}"
+    assert not stale, f"stale scope entries (tool no longer exists): {sorted(stale)}"
 
 
 def test_tool_scopes_reference_only_catalog_keys() -> None:
     """No typo'd / invented scope key: an assistant can only ever be granted a
-    key from SCOPE_CATALOG, so a tool gated on anything else is unreachable."""
+    key from SCOPE_CATALOG, so a tool gated on anything else is unreachable.
+    Covers the static map and every scope an argument-dependent tool could
+    require (its ``possible`` set enumerates the resolver's whole range)."""
     bad = {n: s for n, s in TOOL_SCOPES.items() if s is not None and s not in VALID_SCOPE_KEYS}
     assert not bad, f"TOOL_SCOPES references keys absent from SCOPE_CATALOG: {bad}"
+    bad_dyn = {
+        n: sorted(possible - VALID_SCOPE_KEYS)
+        for n, (_resolver, possible) in DYNAMIC_TOOL_SCOPES.items()
+        if possible - VALID_SCOPE_KEYS
+    }
+    assert not bad_dyn, f"DYNAMIC_TOOL_SCOPES references keys absent from SCOPE_CATALOG: {bad_dyn}"
 
 
 def test_catalog_keys_are_unique_and_categorised() -> None:
@@ -134,7 +147,9 @@ def test_unmapped_tool_is_denied_fail_closed() -> None:
 
 def test_read_only_scope_cannot_reach_any_write_tool() -> None:
     """The headline least-privilege property: grant every :read key and no
-    write/danger tool anywhere in the registry becomes callable."""
+    write/danger tool anywhere in the registry becomes callable -- including
+    the argument-dependent write tools, which must be neither discoverable
+    (listing) nor callable for any write kind."""
     reads = [s.key for s in SCOPE_CATALOG if s.category == "read"]
     tok = _PRINCIPAL_SCOPE.set(reads)
     try:
@@ -144,6 +159,95 @@ def test_read_only_scope_cannot_reach_any_write_tool() -> None:
             if scope is not None and scope not in reads and _scope_permits(name)
         ]
         assert not leaked, f"read-only scope reached non-read tools: {sorted(leaked)}"
+        # Dynamic write tools: hidden in a listing and denied for every kind.
+        assert not _scope_permits("set_text_block_capability")
+        assert not _scope_permits("patch_text_block_capability")
+        for kind in ("annotation", "task_description"):
+            assert not _scope_permits(
+                "set_text_block_capability",
+                {"kind": kind, "resource_id": "x", "expected_version": 1},
+            )
+    finally:
+        _PRINCIPAL_SCOPE.reset(tok)
+
+
+def test_dynamic_tool_scope_is_resolved_per_argument() -> None:
+    """The bug enabler B's REST classification surfaced: an annotation body and
+    a task description are the SAME MCP tool but need DIFFERENT scopes. A single
+    static key over-granted one and denied the other; the resolver fixes it."""
+    tok = _PRINCIPAL_SCOPE.set(["annotations:read"])
+    try:
+        # annotations:read reaches the comment body, NOT the task description.
+        assert _scope_permits(
+            "get_text_block_capability", {"kind": "annotation", "resource_id": "a"}
+        )
+        assert not _scope_permits(
+            "get_text_block_capability", {"kind": "task_description", "resource_id": "t"}
+        )
+    finally:
+        _PRINCIPAL_SCOPE.reset(tok)
+
+    tok = _PRINCIPAL_SCOPE.set(["tasks:read"])
+    try:
+        # tasks:read reaches the task description, NOT the comment body (pre-fix
+        # a tasks-only assistant was granted every annotation's body).
+        assert _scope_permits(
+            "get_text_block_capability", {"kind": "task_description", "resource_id": "t"}
+        )
+        assert not _scope_permits(
+            "get_text_block_capability", {"kind": "annotation", "resource_id": "a"}
+        )
+    finally:
+        _PRINCIPAL_SCOPE.reset(tok)
+
+    # list_attachments follows the parent, not a fixed tasks:read.
+    tok = _PRINCIPAL_SCOPE.set(["notes:read"])
+    try:
+        assert _scope_permits("list_attachments", {"note_id": "n"})
+        assert not _scope_permits("list_attachments", {"task_id": "t"})
+    finally:
+        _PRINCIPAL_SCOPE.reset(tok)
+
+
+def test_dynamic_tool_visibility_uses_possible_scopes() -> None:
+    """With no arguments (search_tools / describe_tools) an argument-dependent
+    tool is discoverable if the assistant holds ANY scope it could require, so
+    an annotations-only assistant still finds the reader but not the writer."""
+    tok = _PRINCIPAL_SCOPE.set(["annotations:read"])
+    try:
+        assert _scope_permits("get_text_block_capability")
+        assert not _scope_permits("set_text_block_capability")
+    finally:
+        _PRINCIPAL_SCOPE.reset(tok)
+
+
+def test_dynamic_tool_indeterminate_kind_fails_closed() -> None:
+    """A call whose arguments do not pin a kind is denied, not waved through:
+    the tool would reject the bad kind anyway, and fail-closed keeps a
+    malformed argument from being a gate bypass."""
+    tok = _PRINCIPAL_SCOPE.set(["annotations:read", "tasks:read", "notes:read"])
+    try:
+        assert not _scope_permits(
+            "get_text_block_capability", {"kind": "bogus", "resource_id": "x"}
+        )
+        assert not _scope_permits("get_text_block_capability", {})
+        assert not _scope_permits("list_attachments", {})
+    finally:
+        _PRINCIPAL_SCOPE.reset(tok)
+
+
+async def test_execute_tool_reports_resolved_scope_for_dynamic_tool() -> None:
+    """Through the gateway: a tasks-only assistant asking for an annotation body
+    is denied, and the envelope names the scope THAT call needed."""
+    tok = _PRINCIPAL_SCOPE.set(["tasks:read"])
+    try:
+        res = await execute_tool(
+            name="get_text_block_capability",
+            arguments={"kind": "annotation", "resource_id": "a"},
+        )
+        assert isinstance(res, dict) and isinstance(res.get("error"), dict)
+        assert res["error"]["code"] == "mcp.scope_denied"
+        assert res["error"]["required_scope"] == "annotations:read"
     finally:
         _PRINCIPAL_SCOPE.reset(tok)
 

@@ -6,6 +6,11 @@ Every concrete MCP tool (the ~250 dispatched behind the gateway's
 (self-identity / liveness / discovery) that must always be callable so an
 agent can bootstrap and find out what it may do.
 
+The exception is a handful of tools whose required key depends on a call
+ARGUMENT (a ``kind`` discriminator): those live in ``DYNAMIC_TOOL_SCOPES``
+below with a per-call resolver instead of a single static key. A tool is in
+exactly one of the two maps.
+
 FAIL-CLOSED: a tool absent from this map is DENIED to a *scoped* assistant
 (bare / stdio / human tokens keep full access -- see ``server._scope_permits``).
 The ``test_mcp_scope_enforcement`` drift guard asserts this map stays in
@@ -19,6 +24,9 @@ synthesis) and hand-audited; the scope TAXONOMY (the new keys in
 """
 
 from __future__ import annotations
+
+from collections.abc import Callable
+from typing import Any
 
 # Sentinel distinct from ``None``: ``None`` = META (allowed), a missing key
 # = UNMAPPED (denied, fail-closed).
@@ -215,8 +223,6 @@ TOOL_SCOPES: dict[str, str | None] = {
     "errands": "tasks:read",
     "get_task": "tasks:read",
     "get_task_revision": "tasks:read",
-    "get_text_block_capability": "tasks:read",
-    "list_attachments": "tasks:read",
     "list_checklist": "tasks:read",
     "list_task_participants": "tasks:read",
     "list_task_relations": "tasks:read",
@@ -238,7 +244,6 @@ TOOL_SCOPES: dict[str, str | None] = {
     "delete_task": "tasks:write",
     "derive_task_from_note": "tasks:write",
     "email_to_task": "tasks:write",
-    "patch_text_block_capability": "tasks:write",
     "prepend_to_task_description": "tasks:write",
     "promote_note_to_task": "tasks:write",
     "record_task_artifact": "tasks:write",
@@ -249,7 +254,6 @@ TOOL_SCOPES: dict[str, str | None] = {
     "restore_task_revision": "tasks:write",
     "set_task_assignee": "tasks:write",
     "set_task_owner": "tasks:write",
-    "set_text_block_capability": "tasks:write",
     "spawn_due_recurrences": "tasks:write",
     "task_claim": "tasks:write",
     "task_decline": "tasks:write",
@@ -281,8 +285,94 @@ TOOL_SCOPES: dict[str, str | None] = {
 }
 
 
+# --------------------------------------------------------------------------
+# Argument-dependent tools
+# --------------------------------------------------------------------------
+# A handful of tools multiplex several operations, each needing a DIFFERENT
+# scope, behind one signature: the required key depends on a call argument
+# (a ``kind`` / target discriminator), which the flat ``TOOL_SCOPES`` map
+# above cannot express. Mapping such a tool to a single key is a real bug --
+# it either over-grants (a tasks-only assistant reaches an annotation's body)
+# or under-grants (an annotations-only assistant is denied its own comment
+# body). Enabler B's REST classification surfaced exactly this divergence:
+# ``/annotations/{id}/body/*`` is annotations:* on REST while the MCP twin
+# was tasks:* for every kind.
+#
+# Each entry is ``(resolver, possible)``:
+#   - ``resolver(arguments)`` -> the ONE scope THIS call needs, or ``None``
+#     when the arguments do not determine a valid kind (the tool itself then
+#     rejects them; the gate fails closed rather than inventing a scope).
+#   - ``possible`` -> every scope the tool could require across its kinds.
+#     Used when there are no concrete arguments yet (``search_tools`` /
+#     ``describe_tools`` visibility): the tool is listed iff the assistant
+#     holds AT LEAST ONE of them.
+#
+# A tool is in EITHER ``TOOL_SCOPES`` or ``DYNAMIC_TOOL_SCOPES``, never both
+# (a drift-guard test asserts the two are disjoint and jointly total).
+
+
+def _text_block_scope(verb: str) -> Callable[[dict[str, Any]], str | None]:
+    """``get/set/patch_text_block_capability`` mint a body capability for a
+    task description (``kind='task_description'`` -> tasks:*) or a comment
+    body (``kind='annotation'`` -> annotations:*). ``verb`` is read / write
+    (patch is a write; the catalog has no ``:patch`` half)."""
+
+    def resolve(arguments: dict[str, Any]) -> str | None:
+        kind = arguments.get("kind")
+        if kind == "annotation":
+            return f"annotations:{verb}"
+        if kind == "task_description":
+            return f"tasks:{verb}"
+        return None
+
+    return resolve
+
+
+def _list_attachments_scope(arguments: dict[str, Any]) -> str | None:
+    """``list_attachments`` reads a note's OR a task's attachment metadata
+    (exactly one id). A notes-only assistant must reach its own note's
+    attachments, so the family follows the parent, not a fixed tasks:read."""
+    if arguments.get("note_id"):
+        return "notes:read"
+    if arguments.get("task_id"):
+        return "tasks:read"
+    return None
+
+
+DYNAMIC_TOOL_SCOPES: dict[str, tuple[Callable[[dict[str, Any]], str | None], frozenset[str]]] = {
+    "get_text_block_capability": (
+        _text_block_scope("read"),
+        frozenset({"annotations:read", "tasks:read"}),
+    ),
+    "set_text_block_capability": (
+        _text_block_scope("write"),
+        frozenset({"annotations:write", "tasks:write"}),
+    ),
+    "patch_text_block_capability": (
+        _text_block_scope("write"),
+        frozenset({"annotations:write", "tasks:write"}),
+    ),
+    "list_attachments": (_list_attachments_scope, frozenset({"notes:read", "tasks:read"})),
+}
+
+
 def required_scope(tool_name: str) -> str | None | object:
     """The scope key ``tool_name`` needs, ``None`` if it is META (always
     allowed), or the ``UNMAPPED`` sentinel if the tool is not in the map
-    (fail-closed: a scoped assistant is denied)."""
+    (fail-closed: a scoped assistant is denied). For an argument-dependent
+    tool this returns ``UNMAPPED`` -- use :func:`required_scope_for_call`
+    with the concrete arguments instead."""
+    return TOOL_SCOPES.get(tool_name, UNMAPPED)
+
+
+def required_scope_for_call(
+    tool_name: str, arguments: dict[str, Any] | None
+) -> str | None | object:
+    """The scope a CONCRETE call needs. Resolves an argument-dependent tool
+    from its arguments (``None`` if the arguments do not pin a kind), else the
+    static map (``UNMAPPED`` if the tool is unknown). Used to report the
+    required scope in the gate's denial envelope."""
+    dyn = DYNAMIC_TOOL_SCOPES.get(tool_name)
+    if dyn is not None:
+        return dyn[0](arguments or {})
     return TOOL_SCOPES.get(tool_name, UNMAPPED)
