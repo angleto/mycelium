@@ -97,6 +97,22 @@ class MemoryBlob(OrgScopedMixin, TimestampMixin, Base):
     )
     model_id_hosted: Mapped[str | None] = mapped_column(String(160), nullable=True)
     dim_hosted: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # First-class provenance (ADR-0049 / ADR-0028; migration 0085). Before
+    # this, a blob's author was only a tag-lane convention (``agent/<handle>``),
+    # which cannot satisfy the unconditional-provenance axiom once MORE THAN ONE
+    # agent writes to the shared store. ``created_by`` is the authoring identity
+    # (a user OR an ai_assistant, ADR-0028), nullable + ``SET NULL`` so a
+    # deleted actor never cascades away its memories and legacy rows backfill
+    # to NULL. ``origin_model_id`` is the LLM that produced the text (NULL for
+    # a human author) -- the memory twin of ``note.origin_model_id`` /
+    # ``kg.origin_model_id``. NOT the ``model_id`` above, which is the EMBEDDING
+    # model. These drive provenance-filtered recall (retrieve ``created_by=``).
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("identities.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    origin_model_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
 
 
 class BlobSource(Base):

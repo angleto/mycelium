@@ -27,6 +27,7 @@ from mycelium_core.embedder import Embedder, EmbedResult, get_embedder
 from mycelium_core.errors import DomainError, NotFoundError
 from mycelium_core.i18n import MessageCode
 from mycelium_core.models.billing import CostBasis
+from mycelium_core.models.identity import Identity, IdentityKind
 from mycelium_core.models.membership import Role
 from mycelium_core.models.memory_blob import BlobSource, MemoryBlob, MemoryBlobTag
 from mycelium_core.models.tag import Tag, TagKind
@@ -375,6 +376,8 @@ async def write_blob(
     embedder: Embedder | None = None,
     chunker: Chunker | None = None,
     language: str | None = None,
+    created_by_identity_id: uuid.UUID | None = None,
+    origin_model_id: str | None = None,
 ) -> MemoryBlob:
     """Write a memory blob (or N blobs if the text is chunked).
 
@@ -399,6 +402,21 @@ async def write_blob(
     )
 
     await require_role(session, org_id, actor_id, Role.member)
+    # Default the authoring identity to the actor's USER identity (migration
+    # 0085). The MCP server overrides this with the ai_assistant identity when
+    # the write came in through an agent token, so a blob's ``created_by`` is
+    # the real author, not merely the token-owner. NULL only if the actor has
+    # no materialised identity (legacy / backfill).
+    if created_by_identity_id is None:
+        created_by_identity_id = (
+            await session.execute(
+                select(Identity.id).where(
+                    Identity.org_id == org_id,
+                    Identity.user_id == actor_id,
+                    Identity.kind == IdentityKind.user,
+                )
+            )
+        ).scalar_one_or_none()
     channel_id = await _resolve_channel_tag_id(
         session, org_id=org_id, channel_tag_id=channel_tag_id, channel_key=channel_key
     )
@@ -483,6 +501,8 @@ async def write_blob(
             last_accessed_at=now,
             importance=importance,
             access_score=importance,
+            created_by=created_by_identity_id,
+            origin_model_id=origin_model_id,
         )
         session.add(blob)
         await session.flush()
@@ -533,6 +553,7 @@ async def retrieve_with_meta(
     tag_ids: Sequence[uuid.UUID] | None = None,
     channel_tag_id: uuid.UUID | None = None,
     channel_key: str | None = None,
+    created_by: uuid.UUID | None = None,
     embedder: Embedder | None = None,
     rerank: bool = False,
     humus: bool | None = None,
@@ -669,6 +690,12 @@ async def retrieve_with_meta(
             .having(func.count(func.distinct(MemoryBlobTag.tag_id)) == len(wanted))
         )
         tag_clauses = (*tag_clauses, MemoryBlob.id.in_(tagged))
+    if created_by is not None:
+        # Provenance-filtered recall (migration 0085): fold the author predicate
+        # into every stage's WHERE like the tag facets, so "recall only what
+        # identity X wrote" holds across the lexical and semantic branches. A
+        # first-class column filter, not the tag-lane convention it supersedes.
+        tag_clauses = (*tag_clauses, MemoryBlob.created_by == created_by)
 
     ctx = RetrievalContext(
         session=session,
@@ -869,6 +896,7 @@ async def retrieve(
     tag_ids: Sequence[uuid.UUID] | None = None,
     channel_tag_id: uuid.UUID | None = None,
     channel_key: str | None = None,
+    created_by: uuid.UUID | None = None,
     embedder: Embedder | None = None,
     rerank: bool = False,
     humus: bool | None = None,
@@ -894,6 +922,7 @@ async def retrieve(
         tag_ids=tag_ids,
         channel_tag_id=channel_tag_id,
         channel_key=channel_key,
+        created_by=created_by,
         embedder=embedder,
         rerank=rerank,
         humus=humus,

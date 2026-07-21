@@ -45,6 +45,8 @@ def _blob_out(b: MemoryBlob, tags: list[Tag] | None = None) -> MemoryBlobOut:
         dim=b.dim,
         access_count=b.access_count,
         cluster_id=b.cluster_id,
+        created_by=b.created_by,
+        origin_model_id=b.origin_model_id,
         tags=[TagBrief(id=g.id, kind=g.kind, name=g.name, color=g.color) for g in (tags or [])],
     )
 
@@ -89,6 +91,7 @@ async def search(
         tag_ids=body.tag_ids,
         channel_tag_id=body.channel_tag_id,
         channel_key=body.channel_key,
+        created_by=body.created_by,
     )
     tagmap = await svc.tags_by_blob(ctx.session, blob_ids=[h.blob.id for h in hits])
     return [

@@ -2244,6 +2244,9 @@ class MemorySearchIn(BaseModel):
     # ``system_key``. If both are given they must resolve to the same
     # channel.
     channel_key: str | None = Field(default=None, max_length=64)
+    # Provenance filter (migration 0085): recall only what this author identity
+    # (a user or an ai_assistant) wrote. Omit to keep reads shared.
+    created_by: uuid.UUID | None = None
 
 
 class MemoryStatusOut(BaseModel):
@@ -2263,6 +2266,10 @@ class MemoryBlobOut(BaseModel):
     dim: int
     access_count: int
     cluster_id: uuid.UUID | None
+    # Provenance (migration 0085): the authoring identity (user or ai_assistant)
+    # and the LLM that produced the text (None for a human author).
+    created_by: uuid.UUID | None = None
+    origin_model_id: str | None = None
     tags: list[TagBrief] = Field(default_factory=list)
 
 

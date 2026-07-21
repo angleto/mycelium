@@ -3934,6 +3934,11 @@ def _blob(b: MemoryBlob, tags: list[Tag] | None = None) -> dict[str, Any]:
         "text": b.text,
         "model_id": b.model_id,
         "cluster_id": str(b.cluster_id) if b.cluster_id else None,
+        # Provenance (migration 0085): the authoring identity (a user or an
+        # ai_assistant, ADR-0028) and the LLM that produced the text (NULL for
+        # a human author) -- so recall shows WHO wrote a memory, not just what.
+        "created_by": str(b.created_by) if b.created_by else None,
+        "origin_model_id": b.origin_model_id,
         "tags": [
             {"id": str(g.id), "kind": g.kind.value, "name": g.name, "color": g.color}
             for g in (tags or [])
@@ -3969,14 +3974,24 @@ async def memory_write(
     tag_ids: list[str] | None = None,
     channel_tag_id: str | None = None,
     channel_key: str | None = None,
+    origin_model_id: str | None = None,
 ) -> dict[str, Any]:
     """Write a memory blob (embedding metered when produced; degrades
     to keyword-only/FTS if the model is unavailable, never errors).
-    Optional provenance for GDPR erasure. Tags = ``tag_ids`` + memory
+    Optional source provenance for GDPR erasure. Tags = ``tag_ids`` + memory
     channel + tags inherited from tagged sources. Channel by id
     (``channel_tag_id``) or stable slug (``channel_key``); if both
-    given they must agree. (org, project) boundary is hard."""
+    given they must agree. (org, project) boundary is hard.
+
+    Authorship is recorded automatically: the blob's ``created_by`` is YOUR
+    ai_assistant identity when you call over an agent token (the real author,
+    first-class now, not the ``agent/<handle>`` tag-lane convention). Pass
+    ``origin_model_id`` to record which LLM produced the text."""
     async with _tenant(token, org_id) as (s, org, user):
+        # Author = the ai_assistant identity behind the agent token (None on
+        # the stdio / human path, where write_blob defaults to the user
+        # identity). Mirrors task_create's authorship threading.
+        author_identity_id, _tok = await _resolve_agent_context(s, org)
         sources = (
             [(source_kind, source_id)] if source_kind is not None and source_id is not None else []
         )
@@ -3992,6 +4007,8 @@ async def memory_write(
             tag_ids=[uuid.UUID(t) for t in (tag_ids or [])],
             channel_tag_id=uuid.UUID(channel_tag_id) if channel_tag_id else None,
             channel_key=channel_key,
+            created_by_identity_id=author_identity_id,
+            origin_model_id=origin_model_id,
         )
         tagmap = await memory_svc.tags_by_blob(s, blob_ids=[blob.id])
         return _blob(blob, tagmap.get(blob.id))
@@ -4009,14 +4026,17 @@ async def memory_search(
     tag_ids: list[str] | None = None,
     channel_tag_id: str | None = None,
     channel_key: str | None = None,
+    created_by: str | None = None,
 ) -> dict[str, Any]:
     """Hybrid RRF retrieval within the (org, project) boundary.
     Degrades to keyword-only without embedder. ``tag_ids``,
     ``channel_tag_id`` and ``channel_key`` narrow within the boundary
-    (facets, never cross). Channel by id or stable slug; if both given
-    they must agree. Deterministic order. ``offset`` pages the ranked
-    results (ranked retrieval has no stable keyset, so offset not cursor):
-    the top ``limit`` after skipping ``offset``.
+    (facets, never cross). ``created_by`` is a provenance filter: pass an
+    identity id to recall ONLY what that author (a user or ai_assistant, e.g.
+    another agent) wrote, while shared reads stay unrestricted when omitted.
+    Channel by id or stable slug; if both given they must agree. Deterministic
+    order. ``offset`` pages the ranked results (ranked retrieval has no stable
+    keyset, so offset not cursor): the top ``limit`` after skipping ``offset``.
 
     Returns ``{hits, meta}``. ``meta`` (RetrievalMeta) tells you WHY: an
     empty ``hits`` with ``meta.query_embedded=false`` or
@@ -4035,6 +4055,7 @@ async def memory_search(
             tag_ids=[uuid.UUID(t) for t in (tag_ids or [])],
             channel_tag_id=uuid.UUID(channel_tag_id) if channel_tag_id else None,
             channel_key=channel_key,
+            created_by=uuid.UUID(created_by) if created_by else None,
         )
         page = hits[offset : offset + limit] if offset > 0 else hits[:limit]
         tagmap = await memory_svc.tags_by_blob(s, blob_ids=[h.blob.id for h in page])
