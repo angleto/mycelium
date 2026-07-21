@@ -16,6 +16,7 @@ import pytest
 import sqlalchemy as sa
 from alembic import command
 from alembic.config import Config
+from alembic.script import ScriptDirectory
 
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
@@ -45,12 +46,17 @@ def test_head_migration_downgrade_upgrade_roundtrip() -> None:
         with engine.begin() as conn:
             conn.execute(sa.text("TRUNCATE kg_edge, kg_entity CASCADE"))
         cfg = _alembic_cfg()
+        # The head revision, read from the migration scripts -- NOT hard-coded,
+        # so this guard follows every new migration instead of failing CI on the
+        # commit that adds one (which is exactly when the downgrade path most
+        # needs exercising).
+        head = ScriptDirectory.from_config(cfg).get_current_head()
         command.downgrade(cfg, "-1")
         command.upgrade(cfg, "head")
         with engine.connect() as conn:
             rev = conn.execute(sa.text("SELECT version_num FROM alembic_version")).scalar_one()
-        # Head is the latest revision; the roundtrip must restore it exactly.
-        assert rev == "0084"
+        # The roundtrip must restore the head exactly.
+        assert rev == head
         # And the 0068 KG objects are still present at head (head integrity).
         with engine.connect() as conn:
             idx = conn.execute(
