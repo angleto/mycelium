@@ -96,6 +96,25 @@ SCOPE_CATALOG: tuple[ScopeDef, ...] = (
         "Delete clients/projects",
         "Hard-delete archived clients and projects (cascades attachments, notes, time entries).",
     ),
+    # Destructive-parity keys (taxonomy review, task c19f2f63): fence
+    # IRREVERSIBLE note/task destruction off the ordinary write key, mirroring
+    # memory:delete and delete:taxonomy. Only HARD ops move here; soft-delete
+    # (trash, restorable) and archive stay on notes:write / tasks:write.
+    ScopeDef(
+        "delete:notes",
+        "danger",
+        "Delete note data",
+        "Irreversibly destroy note content: hard-delete a note part (its row and "
+        "search index) or purge checklist items. Trashing a note (restorable) "
+        "stays under notes:write.",
+    ),
+    ScopeDef(
+        "delete:tasks",
+        "danger",
+        "Delete task data",
+        "Irreversibly purge task checklist items (no restore). Trashing a task "
+        "(restorable) stays under tasks:write.",
+    ),
     ScopeDef(
         "dispatch:approve",
         "danger",
@@ -300,10 +319,13 @@ SCOPE_CATALOG: tuple[ScopeDef, ...] = (
 )
 
 
-# Default scope set for a freshly-minted assistant. Picked to match the
-# user's policy "tutto tranne danger": every read + every non-danger
-# write enabled, every danger scope opt-in.
-DEFAULT_SCOPES: tuple[str, ...] = tuple(s.key for s in SCOPE_CATALOG if s.category != "danger")
+# Default scope set for a freshly-minted assistant. Reads-only, least-privilege
+# posture (taxonomy review, task c19f2f63): a new assistant can observe but not
+# mutate; writes and danger scopes are both opt-in, granted deliberately at mint
+# (a read-only researcher vs a write-scoped editor). The SPA picker mirrors this
+# default (web/src/components/AiAssistantsSettings.tsx). Existing assistants are
+# unaffected: their scope is stored per-row.
+DEFAULT_SCOPES: tuple[str, ...] = tuple(s.key for s in SCOPE_CATALOG if s.category == "read")
 
 
 VALID_SCOPE_KEYS: frozenset[str] = frozenset(s.key for s in SCOPE_CATALOG)

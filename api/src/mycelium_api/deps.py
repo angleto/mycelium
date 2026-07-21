@@ -114,6 +114,23 @@ async def enforce_route_scope(
         raise ForbiddenError(MessageCode.AGENT_SCOPE_DENIED)
 
 
+def require_agent_scope(claims: dict[str, Any], scope_key: str) -> None:
+    """Enforce a single scope key inside a handler (task c19f2f63, review #5).
+
+    The app-level gate keys off (method, path) and runs before the body is
+    parsed, so a route whose required scope depends on the request body (a kind
+    multiplexer, e.g. the note<->task link routes) can only be gated to an
+    any-of baseline there. The handler, which HAS the body, calls this to
+    enforce the exact key the chosen operation needs. No-op for a human session
+    or a bare token (``assistant_scope`` is None = full access); a bound
+    assistant lacking ``scope_key`` gets the same 403 the app-level gate raises."""
+    scope = claims.get("assistant_scope")
+    if scope is None:
+        return
+    if scope_key not in scope:
+        raise ForbiddenError(MessageCode.AGENT_SCOPE_DENIED, scope=scope_key)
+
+
 async def current_claims_optional(
     token: Annotated[str, Depends(_bearer_token)],
 ) -> dict[str, Any]:

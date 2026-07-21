@@ -428,10 +428,11 @@ function AssistantForm({
           const sel = new Set(assistant.scope)
           setPerms(Object.fromEntries(entries.map((e) => [e.key, sel.has(e.key)])))
         } else {
-          // Default-on: every non-danger entry (mirrors backend
-          // DEFAULT_SCOPES in core/src/mycelium_core/mcp_scopes.py).
+          // Default-on: reads only (least-privilege posture, mirrors backend
+          // DEFAULT_SCOPES in core/src/mycelium_core/mcp_scopes.py). A new
+          // assistant starts read-only; grant writes deliberately.
           setPerms(
-            Object.fromEntries(entries.map((e) => [e.key, e.category !== 'danger'])),
+            Object.fromEntries(entries.map((e) => [e.key, e.category === 'read'])),
           )
         }
       })

@@ -59,12 +59,31 @@ def test_route_scopes_covers_every_live_route() -> None:
 
 
 def test_route_scopes_reference_only_catalog_keys() -> None:
-    bad = {
-        k: v
-        for k, v in ROUTE_SCOPES.items()
-        if v is not PUBLIC and v is not HUMAN_ONLY and v not in VALID_SCOPE_KEYS
-    }
+    bad: dict[tuple[str, str], list[str]] = {}
+    for k, v in ROUTE_SCOPES.items():
+        if v is PUBLIC or v is HUMAN_ONLY:
+            continue
+        # A value is a single key or an any-of frozenset (kind multiplexer);
+        # every member must be a real catalog key.
+        keys = v if isinstance(v, frozenset) else {v}
+        outside = {str(x) for x in keys if x not in VALID_SCOPE_KEYS}
+        if outside:
+            bad[k] = sorted(outside)
     assert not bad, f"ROUTE_SCOPES references keys absent from SCOPE_CATALOG: {bad}"
+
+
+def test_link_multiplexer_routes_use_any_of() -> None:
+    """Review #5: the note<->task link routes cannot map to one key (subject is
+    a notes:write op, artifact a tasks:write one), so the gate uses an any-of
+    frozenset and the handler enforces the exact key per kind."""
+    for path in ("/notes/{note_id}/task-links", "/tasks/{task_id}/note-links"):
+        req = ROUTE_SCOPES[("POST", path)]
+        assert isinstance(req, frozenset)
+        assert req == {"notes:write", "tasks:write"}
+        # any-of: holding either key passes the coarse gate, holding neither fails
+        assert scope_permits("POST", path, ["notes:write"])
+        assert scope_permits("POST", path, ["tasks:write"])
+        assert not scope_permits("POST", path, ["notes:read"])
 
 
 def test_credential_and_assistant_routes_are_human_only() -> None:
@@ -323,3 +342,36 @@ async def test_accepting_a_suggestion_needs_the_target_family_write_scope() -> N
         assert r.status_code == 200, r.text
         body = (await c.get(f"/notes/{note['id']}", headers=owner)).json()["parts"][0]["body"]
         assert body == "The lazy dog jumps."
+
+
+async def test_link_route_enforces_scope_per_kind() -> None:
+    """Review #5 end to end: a notes:write-only assistant reaches the link route
+    (the any-of gate passes) and may create a subject link (a notes:write op),
+    but the handler denies an artifact link (a tasks:write op) on the SAME
+    route. Exactly mirrors the two separate MCP tools."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as c:
+        owner = await _signup_owner(c)
+        note = (
+            await c.post("/notes", headers=owner, json={"kind": "text", "text": "linkable"})
+        ).json()
+        task = (await c.post("/tasks", headers=owner, json={"title": "linkable"})).json()
+        writer = await _assistant_headers(c, owner, ["notes:write"])
+
+        # subject == a notes:write operation -> allowed for a notes:write assistant.
+        r = await c.post(
+            f"/notes/{note['id']}/task-links",
+            headers=writer,
+            json={"task_id": task["id"], "kind": "subject"},
+        )
+        assert r.status_code in (200, 201), r.text
+
+        # artifact == a tasks:write operation -> denied by the per-kind handler
+        # fence, even though the any-of gate let the request reach the handler.
+        r = await c.post(
+            f"/notes/{note['id']}/task-links",
+            headers=writer,
+            json={"task_id": task["id"], "kind": "artifact"},
+        )
+        assert r.status_code == 403, r.text
+        assert r.json()["code"] == "agent.scope_denied"

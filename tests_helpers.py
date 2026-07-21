@@ -17,9 +17,18 @@ from collections.abc import Sequence
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from mycelium_core.mcp_scopes import DEFAULT_SCOPES
+from mycelium_core.mcp_scopes import SCOPE_CATALOG
 from mycelium_core.models.ai_assistant import AiAssistant
 from mycelium_core.models.identity import Identity
+
+# A fully-capable NON-DANGER assistant (every read + every write) for tests that
+# need a writable agent. Deliberately DECOUPLED from the product DEFAULT_SCOPES,
+# which is reads-only since the taxonomy review (task c19f2f63): tests want a
+# working assistant, not the least-privilege default, so the two must not move
+# together. Pass an explicit ``scope`` to seed a narrower one.
+_TEST_CAPABLE_SCOPES: tuple[str, ...] = tuple(
+    s.key for s in SCOPE_CATALOG if s.category != "danger"
+)
 
 
 async def seed_ai_assistant_identity(
@@ -38,13 +47,13 @@ async def seed_ai_assistant_identity(
     ``ai_assistants_svc.create_assistant`` (which is owner-gated and
     also mints an agent_token we don't need here).
 
-    ``scope`` mirrors ``create_assistant``: ``None`` seeds ``DEFAULT_SCOPES``
-    (the every-non-danger default a real assistant gets), so a token bound
-    to this identity behaves like a normal assistant under the per-tool /
-    per-route scope gate (task c19f2f63, enabler B). An empty list is a
-    deliberate deny-all assistant; the model treats ``[]`` as "no scopes",
-    matching the gate's fail-closed default. Pass an explicit subset to seed
-    a narrowly-scoped assistant.
+    ``scope`` ``None`` seeds ``_TEST_CAPABLE_SCOPES`` (every non-danger key, so
+    the seeded agent can read AND write), NOT the product ``DEFAULT_SCOPES``
+    (reads-only since the taxonomy review): tests want a working assistant, and
+    decoupling keeps a policy change from silently breaking every write test.
+    An empty list is a deliberate deny-all assistant; the model treats ``[]`` as
+    "no scopes", matching the gate's fail-closed default. Pass an explicit subset
+    to seed a narrowly-scoped assistant.
 
     Tests that exercise the scheduler / dispatch agent paths use the
     returned identity as ``assignee_id`` so the task is unambiguously
@@ -52,7 +61,7 @@ async def seed_ai_assistant_identity(
     rule (the human-only fallback would otherwise auto-assign the task
     to the calling user)."""
     handle = f"{label}-{uuid.uuid4().hex[:8]}"
-    eff_scope = list(DEFAULT_SCOPES) if scope is None else list(scope)
+    eff_scope = list(_TEST_CAPABLE_SCOPES) if scope is None else list(scope)
     assistant = AiAssistant(
         org_id=org_id,
         user_id=user_id,

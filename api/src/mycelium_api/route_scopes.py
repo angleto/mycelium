@@ -51,9 +51,10 @@ re-litigated per route):
 - ``POST /notes/{note_id}/task-links`` and ``POST /tasks/{task_id}/note-links``
   multiplex ``kind=subject`` (a notes:write operation on MCP) and
   ``kind=artifact`` (tasks:write) through one endpoint; a single key cannot
-  express both. Both are mapped to ``tasks:write`` (the link lives on the task
-  side and both URL shapes agree). The genuine fix is to split the route by
-  ``kind`` on BOTH surfaces; tracked as a follow-up, not resolved here.
+  express both. Resolved (review #5): they map to the any-of frozenset
+  ``LINK_WRITE_ANY`` (holding either write key passes the coarse gate) and the
+  handler calls ``deps.require_agent_scope`` to enforce the exact per-kind key,
+  matching the two separate MCP tools. No route split / API change needed.
 
 - ``GET|PATCH|POST /annotations/{id}/body/*`` are mapped to the
   ``annotations:*`` family, which is correct. MCP models the same bytes under
@@ -76,7 +77,15 @@ PUBLIC: object = object()
 HUMAN_ONLY: object = object()
 UNMAPPED: object = object()
 
-# (METHOD, path template) -> scope key | PUBLIC | HUMAN_ONLY
+# Any-of value: a route whose exact required key depends on the REQUEST BODY (a
+# kind multiplexer) cannot be a single key, and the app-level gate runs before
+# the body is parsed. Such a route maps to a frozenset -- the coarse gate lets a
+# caller holding ANY of the keys through, and the handler then enforces the
+# precise per-kind key (see deps.require_agent_scope). ``notes:write`` OR
+# ``tasks:write`` covers the note<->task link routes (task c19f2f63 review, #5).
+LINK_WRITE_ANY: frozenset[str] = frozenset({"notes:write", "tasks:write"})
+
+# (METHOD, path template) -> scope key | PUBLIC | HUMAN_ONLY | any-of frozenset
 ROUTE_SCOPES: dict[tuple[str, str], object] = {
     # --- actors ---
     ("GET", "/actors"): "executors:read",
@@ -339,8 +348,8 @@ ROUTE_SCOPES: dict[tuple[str, str], object] = {
     ("GET", "/notes/{note_id}/checklist"): "notes:read",
     ("POST", "/notes/{note_id}/checklist"): "notes:write",
     ("PATCH", "/notes/{note_id}/checklist/{item_id}"): "notes:write",
-    ("DELETE", "/notes/{note_id}/checklist/{item_id}"): "notes:write",
-    ("POST", "/notes/{note_id}/checklist:clear_done"): "notes:write",
+    ("DELETE", "/notes/{note_id}/checklist/{item_id}"): "delete:notes",
+    ("POST", "/notes/{note_id}/checklist:clear_done"): "delete:notes",
     ("POST", "/notes/{note_id}/checklist:reorder"): "notes:write",
     ("POST", "/notes/{note_id}/delete"): "notes:write",
     ("POST", "/notes/{note_id}/derive-task"): "tasks:write",
@@ -358,7 +367,7 @@ ROUTE_SCOPES: dict[tuple[str, str], object] = {
     ("POST", "/notes/{note_id}/parts/stream"): "notes:write",
     ("PUT", "/notes/{note_id}/parts/ui-state"): "notes:write",
     ("PATCH", "/notes/{note_id}/parts/{part_id}"): "notes:write",
-    ("DELETE", "/notes/{note_id}/parts/{part_id}"): "notes:write",
+    ("DELETE", "/notes/{note_id}/parts/{part_id}"): "delete:notes",
     ("POST", "/notes/{note_id}/parts/{part_id}/append"): "notes:write",
     ("POST", "/notes/{note_id}/parts/{part_id}/body/patch"): "notes:write",
     ("GET", "/notes/{note_id}/parts/{part_id}/body/raw"): "notes:read",
@@ -375,7 +384,7 @@ ROUTE_SCOPES: dict[tuple[str, str], object] = {
     ("POST", "/notes/{note_id}/revisions/{rev_id}/restore"): "notes:write",
     ("POST", "/notes/{note_id}/tags"): "notes:write",
     ("DELETE", "/notes/{note_id}/tags/{tag_id}"): "notes:write",
-    ("POST", "/notes/{note_id}/task-links"): "tasks:write",
+    ("POST", "/notes/{note_id}/task-links"): LINK_WRITE_ANY,
     ("DELETE", "/notes/{note_id}/task-links"): "notes:write",
     ("POST", "/notes/{note_id}/transcribe"): "ai:generate",
     ("GET", "/notes/{note_id}/turns"): "notes:read",
@@ -455,8 +464,8 @@ ROUTE_SCOPES: dict[tuple[str, str], object] = {
     ("GET", "/tasks/{task_id}/checklist"): "tasks:read",
     ("POST", "/tasks/{task_id}/checklist"): "tasks:write",
     ("PATCH", "/tasks/{task_id}/checklist/{item_id}"): "tasks:write",
-    ("DELETE", "/tasks/{task_id}/checklist/{item_id}"): "tasks:write",
-    ("POST", "/tasks/{task_id}/checklist:clear_done"): "tasks:write",
+    ("DELETE", "/tasks/{task_id}/checklist/{item_id}"): "delete:tasks",
+    ("POST", "/tasks/{task_id}/checklist:clear_done"): "delete:tasks",
     ("POST", "/tasks/{task_id}/checklist:reorder"): "tasks:write",
     ("POST", "/tasks/{task_id}/claim"): "tasks:write",
     ("GET", "/tasks/{task_id}/comments"): "comments:read",
@@ -472,7 +481,7 @@ ROUTE_SCOPES: dict[tuple[str, str], object] = {
     ("GET", "/tasks/{task_id}/handoffs"): "tasks:read",
     ("POST", "/tasks/{task_id}/note"): "notes:write",
     ("GET", "/tasks/{task_id}/note-links"): "notes:read",
-    ("POST", "/tasks/{task_id}/note-links"): "tasks:write",
+    ("POST", "/tasks/{task_id}/note-links"): LINK_WRITE_ANY,
     ("DELETE", "/tasks/{task_id}/note-links"): "notes:write",
     ("POST", "/tasks/{task_id}/notes"): "notes:write",
     ("POST", "/tasks/{task_id}/offer"): "tasks:write",
@@ -571,6 +580,10 @@ def scope_permits(method: str, path: str, scope: list[str] | None) -> bool:
         return True
     if req is HUMAN_ONLY or req is UNMAPPED:
         return False
+    if isinstance(req, frozenset):
+        # Any-of: hold at least one of the keys. The handler enforces the exact
+        # per-kind key behind this coarse gate (kind multiplexer routes).
+        return bool(req & set(scope))
     return req in scope
 
 

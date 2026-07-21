@@ -15,10 +15,12 @@ from sqlalchemy import select
 
 from mycelium_api.deps import (
     TenantCtx,
+    current_claims,
     note_attachment_write_ctx,
     part_body_patch_ctx,
     part_body_read_ctx,
     part_body_write_ctx,
+    require_agent_scope,
     tenant_ctx,
 )
 from mycelium_api.routers.attachments import att_out, read_capped, upload_file_field
@@ -1619,14 +1621,21 @@ async def add_note_task_link(
     note_id: uuid.UUID,
     body: NoteTaskLinkIn,
     ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+    claims: Annotated[dict[str, Any], Depends(current_claims)],
 ) -> NoteTaskLinkOut:
     """Create a typed note↔task link from the note side. ``kind`` picks
     the named operation: ``subject`` → start_task_on_note,
     ``artifact`` → record_task_artifact. ``derived_from`` and
     ``promoted_from`` are intentionally NOT accepted here: those are
     creation-with-link operations, not free linkage (see
-    /notes/{id}/derive-task and /promote)."""
+    /notes/{id}/derive-task and /promote).
+
+    The two operations require different scopes (subject is a notes:write op,
+    artifact a tasks:write one), which one route key cannot express, so the
+    app-level gate only checks the any-of baseline and the exact key is enforced
+    per ``kind`` here (task c19f2f63, review #5)."""
     if body.kind == "subject":
+        require_agent_scope(claims, "notes:write")
         link = await note_links_svc.start_task_on_note(
             ctx.session,
             org_id=ctx.org_id,
@@ -1635,6 +1644,7 @@ async def add_note_task_link(
             note_id=note_id,
         )
     elif body.kind == "artifact":
+        require_agent_scope(claims, "tasks:write")
         link = await note_links_svc.record_task_artifact(
             ctx.session,
             org_id=ctx.org_id,

@@ -81,13 +81,21 @@ def test_catalog_keys_are_unique_and_categorised() -> None:
     keys = [s.key for s in SCOPE_CATALOG]
     assert len(keys) == len(set(keys)), "duplicate scope key in SCOPE_CATALOG"
     assert all(s.category in {"read", "write", "danger"} for s in SCOPE_CATALOG)
-    # DEFAULT_SCOPES is the "everything except danger" mint policy: danger keys
-    # must stay opt-in, so a freshly minted assistant can never send mail,
-    # erase memory, move money or spend credits without an explicit grant.
     danger = {s.key for s in SCOPE_CATALOG if s.category == "danger"}
     assert danger.isdisjoint(set(DEFAULT_SCOPES))
     for key in ("email:send", "memory:delete", "memory:admin", "ai:generate", "billing:write"):
         assert key in danger
+
+
+def test_default_scopes_are_reads_only() -> None:
+    """Taxonomy review round 2 (task c19f2f63): the mint default is least
+    privilege -- READS ONLY. A fresh assistant observes but cannot mutate;
+    writes and danger scopes are both opt-in, granted deliberately at mint."""
+    reads = {s.key for s in SCOPE_CATALOG if s.category == "read"}
+    assert set(DEFAULT_SCOPES) == reads
+    assert not any(
+        s.category in {"write", "danger"} and s.key in DEFAULT_SCOPES for s in SCOPE_CATALOG
+    )
 
 
 def test_taxonomy_review_reclassifications() -> None:
@@ -97,12 +105,29 @@ def test_taxonomy_review_reclassifications() -> None:
     write key. A regression here means a review decision was silently undone."""
     cat = {s.key: s.category for s in SCOPE_CATALOG}
     assert cat["billing:read"] == "read"
-    assert "billing:read" in DEFAULT_SCOPES
+    assert "billing:read" in DEFAULT_SCOPES  # a read -> in the reads-only default
     assert cat["notifications:read"] == "read"
     assert cat["search:write"] == "write"
-    for k in ("notifications:read", "search:write"):
-        assert k in VALID_SCOPE_KEYS
-        assert k in DEFAULT_SCOPES
+    assert "notifications:read" in VALID_SCOPE_KEYS
+    assert "search:write" in VALID_SCOPE_KEYS
+    # notifications:read (read) is a default grant; search:write (write) is
+    # opt-in under the reads-only default policy.
+    assert "notifications:read" in DEFAULT_SCOPES
+    assert "search:write" not in DEFAULT_SCOPES
+
+
+def test_delete_keys_are_danger_and_gate_hard_destruction() -> None:
+    """Review #3: delete:notes / delete:tasks fence IRREVERSIBLE note/task
+    destruction off the write key (parity with memory:delete). Opt-in danger,
+    and the hard ops moved onto them."""
+    cat = {s.key: s.category for s in SCOPE_CATALOG}
+    assert cat["delete:notes"] == "danger"
+    assert cat["delete:tasks"] == "danger"
+    assert "delete:notes" not in DEFAULT_SCOPES
+    assert "delete:tasks" not in DEFAULT_SCOPES
+    assert TOOL_SCOPES["delete_note_part"] == "delete:notes"
+    assert TOOL_SCOPES["remove_item"] == "delete:tasks"
+    assert TOOL_SCOPES["clear_done"] == "delete:tasks"
 
 
 def test_meta_tools_are_exactly_the_bootstrap_trio() -> None:

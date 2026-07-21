@@ -11,6 +11,8 @@ from sqlalchemy import select
 
 from mycelium_api.deps import (
     TenantCtx,
+    current_claims,
+    require_agent_scope,
     task_attachment_write_ctx,
     task_description_patch_ctx,
     task_description_read_ctx,
@@ -1108,12 +1110,16 @@ async def add_task_note_link(
     task_id: uuid.UUID,
     body: TaskNoteLinkIn,
     ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+    claims: Annotated[dict[str, Any], Depends(current_claims)],
 ) -> NoteTaskLinkOut:
     """Task-side mirror of ``POST /notes/{note_id}/task-links``. Only
     ``subject`` / ``artifact`` accepted; ``derived_from`` and
     ``promoted_from`` are emitted only by the dedicated creation
-    endpoints on the note side."""
+    endpoints on the note side. The exact scope is enforced per ``kind``
+    (subject = notes:write, artifact = tasks:write) behind the route's any-of
+    gate (task c19f2f63, review #5)."""
     if body.kind == "subject":
+        require_agent_scope(claims, "notes:write")
         link = await note_links_svc.start_task_on_note(
             ctx.session,
             org_id=ctx.org_id,
@@ -1122,6 +1128,7 @@ async def add_task_note_link(
             note_id=body.note_id,
         )
     elif body.kind == "artifact":
+        require_agent_scope(claims, "tasks:write")
         link = await note_links_svc.record_task_artifact(
             ctx.session,
             org_id=ctx.org_id,
