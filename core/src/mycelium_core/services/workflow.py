@@ -6,6 +6,7 @@ state-machine cutover is F2.4. RBAC, optimistic, i18n, audit.
 from __future__ import annotations
 
 import uuid
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 from sqlalchemy import delete, func, select, update
@@ -91,6 +92,24 @@ async def get_states(session: AsyncSession, workflow_id: uuid.UUID) -> list[Work
         .scalars()
         .all()
     )
+
+
+async def states_by_ids(
+    session: AsyncSession, state_ids: Sequence[uuid.UUID]
+) -> dict[uuid.UUID, WorkflowState]:
+    """Resolve a batch of state ids to their ``WorkflowState`` rows (name,
+    workflow_id, terminal flag), keyed by id. Enriches task listings so an
+    agent reads a task's state NAME and its workflow directly, instead of a
+    per-task lookup or inferring the state set from existing tasks. RLS scopes
+    to the org; unknown ids are simply absent from the result."""
+    if not state_ids:
+        return {}
+    rows = (
+        (await session.execute(select(WorkflowState).where(WorkflowState.id.in_(set(state_ids)))))
+        .scalars()
+        .all()
+    )
+    return {st.id: st for st in rows}
 
 
 async def list_transitions(

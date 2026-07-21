@@ -630,7 +630,11 @@ def _compact(d: dict[str, Any]) -> dict[str, Any]:
 
 
 def _task(
-    t: Task, tags: list[Tag] | None = None, *, collaborators_count: int = 0
+    t: Task,
+    tags: list[Tag] | None = None,
+    *,
+    collaborators_count: int = 0,
+    state: WorkflowState | None = None,
 ) -> dict[str, Any]:
     # Lean index shape for ``list_tasks`` / ``create_task`` returns: just
     # the fields an LLM needs to pick a row, plus ``version`` for a
@@ -652,6 +656,13 @@ def _task(
             "id": str(t.id),
             "title": t.title,
             "state_id": str(t.state_id),
+            # Resolved state (name + its workflow), so an agent reads a task's
+            # state directly instead of a bare uuid or inferring the state set
+            # from other tasks. workflow_id lets it then call workflow_states /
+            # workflow_transitions to see the whole machine.
+            "state": state.name if state is not None else None,
+            "state_is_terminal": state.is_terminal if state is not None else None,
+            "workflow_id": str(state.workflow_id) if state is not None else None,
             "priority": t.priority,
             "importance": t.importance,
             "urgency": t.urgency,
@@ -999,7 +1010,8 @@ async def create_task(
             recurrence=recurrence,
             channel="mcp",
         )
-        return _task(task)
+        state = (await workflow_svc.states_by_ids(s, [task.state_id])).get(task.state_id)
+        return _task(task, state=state)
 
 
 async def _caller_tz(s: AsyncSession, user_id: uuid.UUID) -> dt.tzinfo:
@@ -1201,10 +1213,16 @@ async def list_tasks(
         ids = [t.id for t in items]
         tagmap = await tasks.tags_by_task(s, task_ids=ids)
         ccounts = await tasks.collaborator_counts(s, org_id=org, task_ids=ids)
+        statemap = await workflow_svc.states_by_ids(s, [t.state_id for t in items])
         return {
             "items": [
                 _project_fields(
-                    _task(t, tagmap.get(t.id, []), collaborators_count=ccounts.get(t.id, 0)),
+                    _task(
+                        t,
+                        tagmap.get(t.id, []),
+                        collaborators_count=ccounts.get(t.id, 0),
+                        state=statemap.get(t.state_id),
+                    ),
                     fields,
                 )
                 for t in items
@@ -1380,6 +1398,7 @@ def _task_full(
     assignee_handle: str | None = None,
     owner_handle: str | None = None,
     collaborators: list[dict[str, str]] | None = None,
+    state: WorkflowState | None = None,
 ) -> dict[str, Any]:
     # Full attribute set for editing one task. Unset nullable columns
     # (dates, estimate, cost, location, budget, parent, deleted_at) are
@@ -1391,6 +1410,11 @@ def _task_full(
             "title": t.title,
             "description": t.description,
             "state_id": str(t.state_id),
+            # Resolved state name + its workflow (see _task): read the state
+            # directly, and navigate to the machine via workflow_states.
+            "state": state.name if state is not None else None,
+            "state_is_terminal": state.is_terminal if state is not None else None,
+            "workflow_id": str(state.workflow_id) if state is not None else None,
             "priority": t.priority,
             "importance": t.importance,
             "urgency": t.urgency,
@@ -1432,7 +1456,11 @@ async def get_task(token: str, org_id: str, task_id: str) -> dict[str, Any]:
     """Read one task with its full attribute set (for editing). Includes
     the assignment read-back (task 2d3abdc3): the resolved
     ``assignee_handle`` / ``owner_handle`` next to the stored ids, plus
-    the ``collaborators`` set (people involved beyond the assignee)."""
+    the ``collaborators`` set (people involved beyond the assignee). Also
+    resolves the workflow ``state`` NAME (with ``state_is_terminal`` and the
+    ``workflow_id``) alongside the raw ``state_id``, so you read the state
+    directly and can call ``workflow_states`` / ``workflow_transitions`` for
+    the rest of the machine -- no inferring states from other tasks."""
     from mycelium_core.services import identities as identities_svc
 
     async with _tenant(token, org_id) as (s, org, _user):
@@ -1447,12 +1475,14 @@ async def get_task(token: str, org_id: str, task_id: str) -> dict[str, Any]:
             await identities_svc.handle_for_user(s, user_id=t.owner_id) if t.owner_id else None
         )
         collaborators = await tasks.list_collaborators(s, org_id=org, task_id=t.id)
+        state = (await workflow_svc.states_by_ids(s, [t.state_id])).get(t.state_id)
         return _task_full(
             t,
             tagmap.get(t.id, []),
             assignee_handle=assignee_handle,
             owner_handle=owner_handle,
             collaborators=collaborators,
+            state=state,
         )
 
 
