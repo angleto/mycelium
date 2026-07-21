@@ -81,6 +81,20 @@ def test_credential_and_assistant_routes_are_human_only() -> None:
         assert ROUTE_SCOPES.get((method, path)) is HUMAN_ONLY, f"{method} {path} must be HUMAN_ONLY"
 
 
+def test_taxonomy_review_route_remaps() -> None:
+    """Taxonomy review (task c19f2f63): the read-only notification routes moved
+    off notifications:write onto the new notifications:read, and the search
+    click write moved off search:read onto the new search:write."""
+    for method, path in (
+        ("GET", "/notifications"),
+        ("GET", "/notifications/prefs"),
+        ("GET", "/notifications/push/vapid-public-key"),
+        ("GET", "/tasks/{task_id}/reminders"),
+    ):
+        assert ROUTE_SCOPES[(method, path)] == "notifications:read", (method, path)
+    assert ROUTE_SCOPES[("POST", "/search/click")] == "search:write"
+
+
 def test_rest_and_mcp_agree_on_equivalent_operations() -> None:
     """Cross-surface consistency: the same operation must cost the same key on
     both surfaces, or the cheaper one becomes the bypass."""

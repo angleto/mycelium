@@ -90,6 +90,21 @@ def test_catalog_keys_are_unique_and_categorised() -> None:
         assert key in danger
 
 
+def test_taxonomy_review_reclassifications() -> None:
+    """Sign-off of the taxonomy review (task c19f2f63): billing:read is a
+    default read (it was the only read sitting in the danger tier), and
+    notifications:read / search:write were added so a read no longer costs a
+    write key. A regression here means a review decision was silently undone."""
+    cat = {s.key: s.category for s in SCOPE_CATALOG}
+    assert cat["billing:read"] == "read"
+    assert "billing:read" in DEFAULT_SCOPES
+    assert cat["notifications:read"] == "read"
+    assert cat["search:write"] == "write"
+    for k in ("notifications:read", "search:write"):
+        assert k in VALID_SCOPE_KEYS
+        assert k in DEFAULT_SCOPES
+
+
 def test_meta_tools_are_exactly_the_bootstrap_trio() -> None:
     """META = callable with any scope. Keep this set tiny and auditable: it is
     the standing hole in the gate, so it may only hold self-identity /

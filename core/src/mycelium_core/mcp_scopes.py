@@ -114,11 +114,14 @@ SCOPE_CATALOG: tuple[ScopeDef, ...] = (
         "Edit invoices",
         "Create or edit invoices (fiscal records). Read-only by default.",
     ),
+    # Reclassified danger -> read in the taxonomy review (task c19f2f63): it is
+    # the only READ that sat in the opt-in tier, and reading a balance neither
+    # destroys, spends, sends nor hands out a credential. Now a default read.
     ScopeDef(
         "billing:read",
-        "danger",
+        "read",
         "Read billing",
-        "Read the billing ledger and credit balances. Surfaces sensitive financial data.",
+        "Read the billing ledger, credit balance and rate cards. Read-only financial visibility.",
     ),
     ScopeDef(
         "budgets:write",
@@ -139,6 +142,16 @@ SCOPE_CATALOG: tuple[ScopeDef, ...] = (
         "Search",
         "Run unified and semantic search across tasks, notes and memory, including "
         "graph-based context retrieval. Read-only.",
+    ),
+    # Added in the taxonomy review (task c19f2f63): the only WRITE in the search
+    # family. Recording a click was riding search:read, so a read-only assistant
+    # could skew ranking.
+    ScopeDef(
+        "search:write",
+        "write",
+        "Tune search",
+        "Record which search result was clicked, feeding recall/ranking tuning. "
+        "Does not read or modify your data.",
     ),
     ScopeDef(
         "email:read",
@@ -203,6 +216,15 @@ SCOPE_CATALOG: tuple[ScopeDef, ...] = (
         "Write schedule",
         "Write scheduler pins/constraints on tasks and recompute the derived "
         "schedule. Does not spend credits.",
+    ),
+    # Added in the taxonomy review (task c19f2f63): four read-only routes (list
+    # notifications, preferences, the web-push key, a task's reminders) were
+    # riding notifications:write, i.e. reading cost more scope than writing.
+    ScopeDef(
+        "notifications:read",
+        "read",
+        "Read notifications",
+        "Read in-app notifications, per-channel preferences, and the web-push public key.",
     ),
     ScopeDef(
         "notifications:write",
