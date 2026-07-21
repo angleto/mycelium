@@ -517,7 +517,8 @@ async def whoami(token: str = "", org_id: str = "") -> dict[str, Any]:
                     with_description=False,
                     limit=10,
                 )
-                open_tasks = [_task(t) for t in rows]
+                statemap = await workflow_svc.states_by_ids(s, [t.state_id for t in rows])
+                open_tasks = [_task(t, state=statemap.get(t.state_id)) for t in rows]
             else:
                 withheld.append("open_tasks: needs the scope that list_tasks requires")
 
@@ -2740,7 +2741,8 @@ async def task_offer(token: str, org_id: str, task_id: str) -> dict[str, Any]:
             s, org_id=org, actor_id=user, task_id=uuid.UUID(task_id)
         )
         tagmap = await tasks.tags_by_task(s, task_ids=[task.id])
-        return _task_full(task, tagmap.get(task.id, []))
+        state = (await workflow_svc.states_by_ids(s, [task.state_id])).get(task.state_id)
+        return _task_full(task, tagmap.get(task.id, []), state=state)
 
 
 @mcp.tool()
@@ -2753,7 +2755,8 @@ async def task_claim(token: str, org_id: str, task_id: str) -> dict[str, Any]:
             s, org_id=org, actor_id=user, task_id=uuid.UUID(task_id)
         )
         tagmap = await tasks.tags_by_task(s, task_ids=[task.id])
-        return _task_full(task, tagmap.get(task.id, []))
+        state = (await workflow_svc.states_by_ids(s, [task.state_id])).get(task.state_id)
+        return _task_full(task, tagmap.get(task.id, []), state=state)
 
 
 @mcp.tool()
@@ -2766,7 +2769,8 @@ async def task_decline(token: str, org_id: str, task_id: str) -> dict[str, Any]:
             s, org_id=org, actor_id=user, task_id=uuid.UUID(task_id)
         )
         tagmap = await tasks.tags_by_task(s, task_ids=[task.id])
-        return _task_full(task, tagmap.get(task.id, []))
+        state = (await workflow_svc.states_by_ids(s, [task.state_id])).get(task.state_id)
+        return _task_full(task, tagmap.get(task.id, []), state=state)
 
 
 # --- P5: closed-loop dispatch + approval gates (docs/adr/0025) ---
