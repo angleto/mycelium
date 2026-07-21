@@ -64,7 +64,7 @@ from mycelium_core.services.eval_workspace import (
     resolve_unit_blobs,
 )
 from mycelium_mcp import gateway
-from mycelium_mcp.server import _PRINCIPAL
+from mycelium_mcp.server import _PRINCIPAL, _PRINCIPAL_SCOPE
 
 # Poll budget for cross-agent visibility (§6a): the write is committed when
 # the MCP call returns, so visibility is expected on the first probe; the
@@ -91,6 +91,13 @@ class ScenarioActor:
     user_id: uuid.UUID
     org_id: uuid.UUID
     token: str | None = None
+    # Per-actor MCP scope list (task c19f2f63). ``None`` = full access (the
+    # legacy behaviour: bare-token actors and human bookkeeping actors), so
+    # existing scenarios are unchanged. Set an explicit list to run an actor as
+    # a scope-RESTRICTED assistant, so a scenario can assert the per-tool gate
+    # denies out-of-scope tools; when None and the token is bound to a scoped
+    # assistant, that assistant's stored scope is used automatically.
+    scope: list[str] | None = None
 
 
 @dataclasses.dataclass
@@ -176,17 +183,22 @@ class ScenarioRunner:
         # resolved (user_id, org_id, token_id) principal so the binding is
         # resolved once per actor (a bearer's binding is stable) rather than
         # a DB round-trip on every call, which would dominate the A7 latency.
-        self._principal_cache: dict[str, tuple[uuid.UUID, uuid.UUID, uuid.UUID | None]] = {}
+        self._principal_cache: dict[
+            str, tuple[tuple[uuid.UUID, uuid.UUID, uuid.UUID | None], list[str] | None]
+        ] = {}
 
     async def _principal_for(
         self, actor: ScenarioActor
-    ) -> tuple[tuple[uuid.UUID, uuid.UUID, uuid.UUID | None], bool]:
-        """Resolve the principal for an actor. With a real token: through the
-        SECURITY DEFINER ``authenticate_agent_token`` (the bearer path), so
-        the token→actor binding and token-id population are exercised. Without
-        a token: the injected tuple (back-compat / bookkeeping actors)."""
+    ) -> tuple[tuple[uuid.UUID, uuid.UUID, uuid.UUID | None], bool, list[str] | None]:
+        """Resolve the principal + scope for an actor. With a real token:
+        through the SECURITY DEFINER ``authenticate_agent_token`` (the bearer
+        path), so the token→actor binding and token-id population are exercised,
+        and the bound assistant's stored ``assistant_scope`` comes back too.
+        Without a token: the injected tuple (back-compat / bookkeeping actors).
+        An explicit ``actor.scope`` overrides the token's stored scope, so a
+        scenario can pin any scope without minting a matching assistant."""
         if actor.token is None:
-            return (actor.user_id, actor.org_id, None), False
+            return (actor.user_id, actor.org_id, None), False, actor.scope
         cached = self._principal_cache.get(actor.token)
         if cached is None:
             principal = await agent_tokens_svc.authenticate(actor.token)
@@ -194,20 +206,29 @@ class ScenarioRunner:
                 raise RuntimeError(f"agent token for {actor.name} did not authenticate")
             if principal.user_id != actor.user_id or principal.org_id != actor.org_id:
                 raise RuntimeError(f"token binding mismatch for {actor.name}")
-            cached = (principal.user_id, principal.org_id, principal.token_id)
+            cached = (
+                (principal.user_id, principal.org_id, principal.token_id),
+                principal.assistant_scope,
+            )
             self._principal_cache[actor.token] = cached
-        return cached, True
+        ptuple, token_scope = cached
+        return ptuple, True, (actor.scope if actor.scope is not None else token_scope)
 
     async def call(self, actor: ScenarioActor, tool: str, args: dict[str, Any]) -> Any:
         digest = hashlib.sha256(json.dumps(args, sort_keys=True, default=str).encode()).hexdigest()[
             :12
         ]
-        principal, authenticated = await self._principal_for(actor)
+        principal, authenticated, scope = await self._principal_for(actor)
         token = _PRINCIPAL.set(principal)
+        # Publish the actor's scope too (task c19f2f63): the gateway gate reads
+        # _PRINCIPAL_SCOPE, so without this every eval ran full-access and the
+        # per-tool scope enforcement was untestable. None keeps full access.
+        scope_token = _PRINCIPAL_SCOPE.set(scope)
         t0 = time.perf_counter()
         try:
             res = await gateway.execute_tool(name=tool, arguments=args)
         finally:
+            _PRINCIPAL_SCOPE.reset(scope_token)
             _PRINCIPAL.reset(token)
         latency_ms = (time.perf_counter() - t0) * 1000.0
         error_code: str | None = None
