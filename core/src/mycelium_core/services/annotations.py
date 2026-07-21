@@ -32,7 +32,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from mycelium_core.concurrency import optimistic_update
 from mycelium_core.config import get_settings
-from mycelium_core.errors import DomainError, NotFoundError
+from mycelium_core.errors import DomainError, ForbiddenError, NotFoundError
 from mycelium_core.i18n import MessageCode
 from mycelium_core.models.annotation import (
     ANNOTATION_DOC_KINDS,
@@ -699,6 +699,13 @@ async def _apply_to_document(
     )
 
 
+def _body_write_scope(doc_kind: str) -> str:
+    """The scope that WRITING the target document body requires: a note part
+    body is ``notes:write``, a task description ``tasks:write``. Used by the
+    accept fence below."""
+    return "notes:write" if doc_kind == "note_part" else "tasks:write"
+
+
 async def accept_suggestion(
     session: AsyncSession,
     *,
@@ -707,16 +714,30 @@ async def accept_suggestion(
     annotation_id: uuid.UUID,
     expected_version: int,
     resolved_by_identity_id: uuid.UUID | None = None,
+    granted_scopes: list[str] | None = None,
 ) -> int:
     """Apply the suggestion to the document body, then mark it accepted.
     Raises SUGGESTION_STALE (and changes nothing) if the target text has
-    moved or gone."""
+    moved or gone.
+
+    ``granted_scopes`` is the caller's scope list when it is a scoped
+    assistant (``None`` for a human session or a bare token = full access).
+    Accepting splices the proposed text INTO the note part / task description,
+    so a scoped caller must ALSO hold write on that family: without this fence,
+    ``comments:write`` alone (enough to accept) would mutate document content,
+    making propose-then-accept a bypass of ``notes:write`` / ``tasks:write``
+    (task c19f2f63, enabler B). Enforced here, next to the role check, so it
+    holds identically over every transport (MCP tool and REST route)."""
     await require_role(session, org_id, actor_id, Role.member)
     ann = await _get(session, org_id=org_id, annotation_id=annotation_id)
     if ann.kind != "suggestion":
         raise DomainError(MessageCode.ANNOTATION_NOT_SUGGESTION)
     if ann.status != "open":
         raise DomainError(MessageCode.SUGGESTION_NOT_PENDING)
+    if granted_scopes is not None:
+        need = _body_write_scope(ann.doc_kind)
+        if need not in granted_scopes:
+            raise ForbiddenError(MessageCode.AGENT_SCOPE_DENIED, scope=need)
     await _apply_to_document(session, org_id=org_id, actor_id=actor_id, ann=ann)
     by = resolved_by_identity_id or await _user_identity_id(
         session, org_id=org_id, actor_id=actor_id

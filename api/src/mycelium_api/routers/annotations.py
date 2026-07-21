@@ -596,6 +596,10 @@ async def accept_suggestion(
         annotation_id=annotation_id,
         expected_version=body.expected_version,
         resolved_by_identity_id=by,
+        # Accepting rewrites the target note/task body, so the service requires
+        # write on that family too, not just comments:write (task c19f2f63,
+        # enabler B). None (human session / bare token) = full access.
+        granted_scopes=claims.get("assistant_scope"),
     )
     return VersionOut(id=annotation_id, version=v)
 

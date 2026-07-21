@@ -2063,6 +2063,10 @@ async def accept_suggestion(
             annotation_id=uuid.UUID(annotation_id),
             expected_version=expected_version,
             resolved_by_identity_id=by,
+            # Accepting rewrites the target note/task body, so the service
+            # requires write on that family too, not just comments:write
+            # (task c19f2f63, enabler B). None for a full-access caller.
+            granted_scopes=_PRINCIPAL_SCOPE.get(),
         )
         return {"id": annotation_id, "version": v, "status": "accepted"}
 

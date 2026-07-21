@@ -143,6 +143,22 @@ async def _signup_owner(c: AsyncClient) -> dict[str, str]:
     }
 
 
+async def _assistant_headers(
+    c: AsyncClient, owner: dict[str, str], scope: list[str]
+) -> dict[str, str]:
+    created = (
+        await c.post(
+            "/ai-assistants",
+            headers=owner,
+            json={"label": "A", "handle": f"a{uuid.uuid4().hex[:8]}", "scope": scope},
+        )
+    ).json()
+    return {
+        "Authorization": f"Bearer {created['raw_secret']}",
+        "X-Workspace-Id": owner["X-Workspace-Id"],
+    }
+
+
 async def test_scoped_assistant_token_is_confined_over_http() -> None:
     """End to end: a read-only assistant can read tasks and nothing else -- and
     critically cannot reach the route that would widen its own scope."""
@@ -236,3 +252,60 @@ async def test_gate_covers_route_that_bypasses_tenant_ctx() -> None:
         r = await c.post("/notes/quick-create", headers=agent_headers, json={"text": "x"})
         assert r.status_code == 403, r.text
         assert r.json()["code"] == "agent.scope_denied"
+
+
+async def test_accepting_a_suggestion_needs_the_target_family_write_scope() -> None:
+    """Propose-then-accept was a working bypass: accepting splices the proposed
+    text INTO the note/task body, so ``comments:write`` (enough to REACH the
+    accept route) must not be enough to accept -- the caller also needs write on
+    the target family. This fence lives in the service, so it holds identically
+    on the MCP tool. Denial changes nothing, so the same suggestion version is
+    still acceptable by the properly-scoped assistant afterwards."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as c:
+        owner = await _signup_owner(c)
+        # Owner (full access) seeds a note part and a suggestion on it.
+        note = (
+            await c.post(
+                "/notes", headers=owner, json={"kind": "text", "text": "The quick brown fox jumps."}
+            )
+        ).json()
+        pid = (await c.get(f"/notes/{note['id']}", headers=owner)).json()["parts"][0]["id"]
+        sug = (
+            await c.post(
+                "/annotations/suggestion",
+                headers=owner,
+                json={
+                    "doc_kind": "note_part",
+                    "doc_id": pid,
+                    "original_text": "quick brown fox",
+                    "proposed_text": "lazy dog",
+                    "rationale": "shorter",
+                },
+            )
+        ).json()
+
+        # comments:write reaches the accept route (the gate lets it through) but
+        # the service fence denies: accepting would rewrite the note body.
+        commenter = await _assistant_headers(c, owner, ["comments:write"])
+        r = await c.post(
+            f"/annotations/{sug['id']}/accept",
+            headers=commenter,
+            json={"expected_version": sug["version"]},
+        )
+        assert r.status_code == 403, r.text
+        assert r.json()["code"] == "agent.scope_denied"
+        # Nothing changed: the body is untouched and the suggestion still open.
+        body = (await c.get(f"/notes/{note['id']}", headers=owner)).json()["parts"][0]["body"]
+        assert body == "The quick brown fox jumps."
+
+        # comments:write + notes:write: the accept goes through and splices.
+        editor = await _assistant_headers(c, owner, ["comments:write", "notes:write"])
+        r = await c.post(
+            f"/annotations/{sug['id']}/accept",
+            headers=editor,
+            json={"expected_version": sug["version"]},
+        )
+        assert r.status_code == 200, r.text
+        body = (await c.get(f"/notes/{note['id']}", headers=owner)).json()["parts"][0]["body"]
+        assert body == "The lazy dog jumps."
