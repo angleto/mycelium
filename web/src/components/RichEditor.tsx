@@ -40,11 +40,16 @@ import { invalidateAttachmentManifest } from '../lib/attachmentManifest'
 import {
   ACCEPTED_IMAGE_MIME,
   isAcceptedImage,
-  isImageMime,
   uploadImage,
   type ImageUploadParent,
   type UploadedAttachment,
 } from '../lib/imageUpload'
+import {
+  attachmentMarkdownRef,
+  attachmentRefFor,
+  parseAttachmentMarkdownRef,
+  type AttachmentRef,
+} from '../lib/attachmentRef'
 import { AttachmentPicker } from './AttachmentPicker'
 
 // Remembered show/hide state of the formatting toolbar (one switch for
@@ -709,26 +714,33 @@ export function RichEditor({
     })
   }
 
-  // Insert a reference to an attachment in the body: image mimes become
-  // an inline embed, everything else a download link. Both point at the
-  // same bearer-auth /attachments route (resolved through authFetch at
-  // render time); neither exposes a public URL.
-  const insertRef = (att: UploadedAttachment) => {
-    const image = isImageMime(att.mimeType)
-    if (rawMode) {
-      insertRawSnippet(
-        image ? `![${att.filename}](${att.url})` : `[${att.filename}](${att.url})`,
-      )
-      return
-    }
-    const ed = editorRef.current
-    if (!ed) return
-    if (image) {
+  // Whether the caret sits somewhere that must keep pasted text VERBATIM:
+  // inside a fenced code block (```mermaid included, it is a code node with
+  // its own live preview) or inside an inline `code` mark. Converting a
+  // reference to a node there would silently corrupt a snippet whose whole
+  // point is to show the markdown syntax -- which is exactly what a user
+  // documenting the reference format is doing. Keyed on the schema's own
+  // ``spec.code`` rather than on an extension name, so a future code-ish
+  // node is covered without touching this.
+  const inCodeContext = (ed: CoreEditor): boolean => {
+    if (ed.isActive('code')) return true
+    const parent = ed.state.selection.$from.parent
+    return parent.type.spec.code === true
+  }
+
+  // Insert an attachment reference as a NODE at the WYSIWYG caret: an
+  // image embed for an image attachment, a link otherwise. Both carry the
+  // same bearer-auth /attachments href (resolved through authFetch at
+  // render time); neither exposes a public URL. Either node serializes
+  // back through tiptap-markdown as the same `![name](href)` /
+  // `[name](href)` reference attachmentMarkdownRef emits.
+  const insertAttachmentNode = (ed: CoreEditor, ref: AttachmentRef) => {
+    if (ref.image) {
       ed.chain()
         .focus()
         .insertContent({
           type: 'image',
-          attrs: { src: att.url, alt: att.filename, title: null },
+          attrs: { src: ref.href, alt: ref.label, title: null },
         })
         .run()
       return
@@ -740,12 +752,31 @@ export function RichEditor({
       .insertContent([
         {
           type: 'text',
-          text: att.filename,
-          marks: [{ type: 'link', attrs: { href: att.url } }],
+          text: ref.label,
+          marks: [{ type: 'link', attrs: { href: ref.href } }],
         },
         { type: 'text', text: ' ' },
       ])
       .run()
+  }
+
+  // Insert a reference to the attachment picked in the AttachmentPicker.
+  // Raw mode takes the markdown string, WYSIWYG the equivalent node —
+  // both derived from attachmentRef.ts, so this path and the Attachments
+  // panel's "Copy ref" cannot drift on the image predicate or the route.
+  const insertRef = (att: UploadedAttachment) => {
+    const meta = {
+      id: att.id,
+      filename: att.filename,
+      mime_type: att.mimeType,
+    }
+    if (rawMode) {
+      insertRawSnippet(attachmentMarkdownRef(meta))
+      return
+    }
+    const ed = editorRef.current
+    if (!ed) return
+    insertAttachmentNode(ed, attachmentRefFor(meta))
   }
 
   const doUpload = async (file: File): Promise<void> => {
@@ -797,19 +828,40 @@ export function RichEditor({
   const editorProps = useMemo(
     () => ({
       handlePaste: (_view: unknown, event: ClipboardEvent) => {
-        if (!parentRef.current) return false
-        const items = event.clipboardData?.items
-        if (!items) return false
-        for (let i = 0; i < items.length; i += 1) {
-          const it = items[i]
-          if (it.kind === 'file') {
-            const f = it.getAsFile()
-            if (f && isAcceptedImage(f)) {
-              event.preventDefault()
-              void doUpload(f)
-              return true
+        const data = event.clipboardData
+        // Pasted image FILE -> upload it as an attachment of this
+        // note/task (hence the parent gate) and embed the result.
+        const items = parentRef.current ? data?.items : undefined
+        if (items) {
+          for (let i = 0; i < items.length; i += 1) {
+            const it = items[i]
+            if (it.kind === 'file') {
+              const f = it.getAsFile()
+              if (f && isAcceptedImage(f)) {
+                event.preventDefault()
+                void doUpload(f)
+                return true
+              }
             }
           }
+        }
+        // Pasted attachment REFERENCE -> the node it denotes. This is the
+        // string the Attachments panel's "Copy ref", the MCP `attach_file`
+        // tool and the CLI hand over, and pasting it is exactly how a user
+        // consumes it. Without this it would land as a literal text node
+        // and be saved with its brackets backslash-escaped
+        // (`!\[name\](/attachments/…)`), so every reader would get those
+        // raw characters instead of the image or the link.
+        // The reference carries the attachment id, so unlike the file
+        // branch above this needs no parent.
+        // Anything that is not one whole reference (parse returns null)
+        // falls through to ProseMirror's own paste, unchanged.
+        const ed = editorRef.current
+        const ref = parseAttachmentMarkdownRef(data?.getData('text/plain') ?? '')
+        if (ed && ref && !inCodeContext(ed)) {
+          event.preventDefault()
+          insertAttachmentNode(ed, ref)
+          return true
         }
         return false
       },

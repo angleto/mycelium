@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { authFetch, errMessage } from '../api/client'
 import { useMediaQuery, MOBILE_QUERY } from '../lib/useMediaQuery'
 import { attachmentKind } from '../lib/attachmentKind'
+import { attachmentMarkdownRef } from '../lib/attachmentRef'
 
 // Attachments on a note OR a task (exactly one parent). Binary
 // upload/download go through authFetch (raw, authenticated) since the
@@ -19,6 +20,17 @@ import { attachmentKind } from '../lib/attachmentKind'
 //   - Text (txt/md/csv/json/code/…): tile → the contents in a monospace
 //     panel (truncated past TEXT_PREVIEW_MAX_CHARS).
 //   - Anything else: 📎 icon + download-only.
+//
+// Every row also carries "Copy ref": it puts that attachment's canonical
+// markdown reference (attachmentMarkdownRef — the shape the MCP
+// `attach_file` tool and the CLI also hand out) on the clipboard. The
+// editor's 📎 toolbar action already inserts such a reference through the
+// AttachmentPicker, but only into the body it is editing; the clipboard
+// copy is what lets the reference travel — into a different note or task,
+// into a message to an agent, into anything outside this page — and it is
+// reachable from the panel itself, with no editor open. Pasted back into
+// the WYSIWYG editor it is recognised and inserted as the image/link node
+// it denotes (RichEditor's handlePaste), not as escaped literal text.
 //
 // Object URLs never escape this component: the eager thumbs are revoked
 // when the list refetches, and a modal-owned blob (pdf/audio/video) is
@@ -40,6 +52,12 @@ const MAX_PREVIEW_BYTES = 50 * 1024 * 1024
 // Characters of a text file shown inline before truncation. Mirrors the
 // markdown text-embed cap.
 const TEXT_PREVIEW_MAX_CHARS = 256 * 1024
+
+// How long the copy-ref badge replaces the button label. A failure sticks
+// around longer: it is information the user has to read and act on, not a
+// mere acknowledgement.
+const COPY_FLASH_MS = 2000
+const COPY_FAIL_FLASH_MS = 5000
 
 function humanSize(n: number): string {
   if (n < 1024) return `${n} B`
@@ -77,6 +95,11 @@ export function Attachments({
   const [preview, setPreview] = useState<Preview | null>(null)
   const [tick, setTick] = useState(0)
   const fileInput = useRef<HTMLInputElement>(null)
+  // Copy-ref flash for ONE row at a time (a click on another row replaces
+  // it), with `ok` telling the truth about what happened: false means the
+  // clipboard refused and the user had to copy the text by hand.
+  const [copied, setCopied] = useState<{ id: string; ok: boolean } | null>(null)
+  const copyTimer = useRef<number | undefined>(undefined)
 
   // List + image thumbnails. Re-runs on parent change or after a
   // mutation (tick). Object URLs are revoked on cleanup so a long
@@ -139,6 +162,15 @@ export function Attachments({
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [preview, closePreview])
+
+  // Drop a pending flash timer on unmount — the panel is remounted on
+  // every note/task navigation, and a surviving timeout would setState on
+  // a dead component. The ref OBJECT is captured (not `.current`) so the
+  // cleanup reads the timer that is actually pending.
+  useEffect(() => {
+    const timer = copyTimer
+    return () => window.clearTimeout(timer.current)
+  }, [])
 
   function openImagePreview(it: AttachmentMeta) {
     const url = thumbs[it.id]
@@ -221,6 +253,71 @@ export function Attachments({
     setTick((n) => n + 1)
   }
 
+  // Put `text` on the clipboard, degrading through every path a browser
+  // may still leave open — the async Clipboard API is unavailable outside
+  // a secure context (a plain-http deployment has no `navigator.clipboard`
+  // at all) and rejects when the permission is denied or the document is
+  // not focused:
+  //   1. navigator.clipboard.writeText — the modern, permissioned path;
+  //   2. a throwaway textarea + execCommand('copy') — deprecated, but the
+  //      only thing that works on http. Still inside the click gesture, so
+  //      the transient user activation it requires is alive;
+  //   3. window.prompt with the text preselected — no automatic copy, yet
+  //      the string is in front of the user, who can select and copy it.
+  // Returns whether the text reached the clipboard WITHOUT manual work, so
+  // the caller can be honest in the UI instead of flashing a lying
+  // "Copied". The one thing that never happens is a silent no-op.
+  async function copyToClipboard(text: string): Promise<boolean> {
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text)
+        return true
+      }
+    } catch {
+      /* insecure context / denied / unfocused — try the fallbacks */
+    }
+    // Built outside the try so the finally below can always take it back
+    // out: if execCommand throws, a textarea left in the body would keep
+    // the (focused, off-screen) selection and swallow the keyboard.
+    const ta = document.createElement('textarea')
+    try {
+      ta.value = text
+      // Off-screen but still rendered and focusable: `hidden` or
+      // display:none makes the selection — and therefore the copy — a
+      // no-op. readonly keeps the mobile keyboard from popping up.
+      ta.setAttribute('readonly', '')
+      ta.style.position = 'fixed'
+      ta.style.top = '-1000px'
+      ta.style.opacity = '0'
+      document.body.appendChild(ta)
+      ta.select()
+      if (document.execCommand('copy')) return true
+    } catch {
+      /* execCommand unsupported or blocked — fall through to the prompt */
+    } finally {
+      ta.remove()
+    }
+    try {
+      window.prompt(t('attach.copyRefManual'), text)
+    } catch {
+      /* modals blocked (sandboxed frame): the failed badge is all we have */
+    }
+    return false
+  }
+
+  // Copy this row's paste-ready markdown reference. The string comes from
+  // attachmentRef.ts, the single place the web builds one (the editor's
+  // attach picker inserts the very same reference through it).
+  async function onCopyRef(it: AttachmentMeta) {
+    const ok = await copyToClipboard(attachmentMarkdownRef(it))
+    setCopied({ id: it.id, ok })
+    window.clearTimeout(copyTimer.current)
+    copyTimer.current = window.setTimeout(
+      () => setCopied(null),
+      ok ? COPY_FLASH_MS : COPY_FAIL_FLASH_MS,
+    )
+  }
+
   async function onDownload(it: AttachmentMeta) {
     const res = await authFetch(`/attachments/${it.id}/download`)
     if (!res.ok) return
@@ -263,6 +360,20 @@ export function Attachments({
         <ul className="atts__list">
           {items.map((it) => {
             const kind = attachmentKind(it.mime_type, it.filename)
+            // Copy-ref outcome: replaces the button's visible label (and
+            // its tooltip) while it lasts. The button carries no
+            // aria-label, exactly like its Download / Remove siblings, so
+            // its accessible name IS the text on it — "Copy ref" idle,
+            // "Copied" / "Copy failed" during the flash — and the two can
+            // never diverge (WCAG 2.5.3 Label in Name). The long hint
+            // stays in `title`, which a button with text content exposes
+            // as a description, not as its name.
+            const copyFlash =
+              copied?.id === it.id
+                ? copied.ok
+                  ? t('attach.copyRefDone')
+                  : t('attach.copyRefFailed')
+                : null
             return (
             <li key={it.id} className="att">
               {kind === 'image' && thumbs[it.id] ? (
@@ -323,6 +434,14 @@ export function Attachments({
                 {it.filename}
                 <span className="muted"> · {humanSize(it.size_bytes)}</span>
               </span>
+              <button
+                type="button"
+                className="btn--sm btn--ghost"
+                title={copyFlash ?? t('attach.copyRefHint')}
+                onClick={() => void onCopyRef(it)}
+              >
+                {copyFlash ?? t('attach.copyRef')}
+              </button>
               <button
                 type="button"
                 className="btn--sm btn--ghost"

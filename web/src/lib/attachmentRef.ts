@@ -1,5 +1,6 @@
 import { authFetch } from '../api/client'
 import type { ImageUploadParent } from './imageUpload'
+import { attachmentKind } from './attachmentKind'
 import {
   classifyAttachmentRef,
   ensureAttachmentManifest,
@@ -22,13 +23,133 @@ import {
 // There are no signed/tokenised/public URLs anywhere — an attachment is
 // only ever reachable by an authenticated session.
 
+// The canonical download path lives here ONCE: the matcher below and the
+// paste-ready reference emitted by attachmentMarkdownRef are both built
+// from these two literals, so the route cannot be changed on the emitting
+// side without the matcher following. A drift there is silent and nasty —
+// every already-written body would keep its `/attachments/...` href while
+// isAttachmentHref stopped recognising it, turning live attachments into
+// dead links that 401 in a new tab. Same prefix useAuthBlobUrl keys on for
+// images, so those stay in lockstep too.
+const ATTACHMENT_PATH_PREFIX = '/attachments/'
+const ATTACHMENT_PATH_SUFFIX = '/download'
+
 // Matches the canonical attachment download path emitted by the upload
-// helpers, tolerating an optional query/hash. Keyed on the same prefix
-// useAuthBlobUrl uses for images, so the two stay in lockstep.
-const ATTACHMENT_HREF_RE = /^\/attachments\/[^/]+\/download(?:[?#]|$)/
+// helpers, tolerating an optional query/hash. Neither literal contains a
+// regex metacharacter, so they interpolate verbatim.
+const ATTACHMENT_HREF_RE = new RegExp(
+  `^${ATTACHMENT_PATH_PREFIX}[^/]+${ATTACHMENT_PATH_SUFFIX}(?:[?#]|$)`,
+)
+
+function attachmentDownloadPath(id: string): string {
+  return `${ATTACHMENT_PATH_PREFIX}${id}${ATTACHMENT_PATH_SUFFIX}`
+}
 
 export function isAttachmentHref(href: string | null | undefined): href is string {
   return !!href && ATTACHMENT_HREF_RE.test(href)
+}
+
+// A reference to an attachment, decomposed: whether it embeds (`!`), the
+// label between the brackets, and the canonical href. Both directions go
+// through this shape — attachmentRefFor() builds one from attachment
+// metadata, parseAttachmentMarkdownRef() recovers one from a pasted
+// string — so the markdown emitters and the editor's node insertion share
+// a single model instead of each re-deriving it.
+export type AttachmentRef = {
+  /** Render as `![...]` (inline embed) rather than `[...]` (link). */
+  image: boolean
+  /** Never empty: a nameless attachment falls back to REF_FALLBACK_NAME. */
+  label: string
+  /** Canonical `/attachments/<id>/download` path. */
+  href: string
+}
+
+// Label for a nameless attachment: an empty one would give an invisible
+// `[](…)` link, and the editor's node insertion would throw outright (an
+// empty ProseMirror text node is illegal). Defensive in practice — the
+// backend's filename sanitiser already falls back to this same word, so a
+// stored attachment is never nameless — and the same fallback the CLI
+// helper (`attachment_markdown_ref`, cli/cmds/_common.py) applies.
+const REF_FALLBACK_NAME = 'file'
+
+/**
+ * The reference to an attachment, as its parts. The image test goes
+ * through attachmentKind() rather than a bare `mime.startsWith('image/')`
+ * so that this and the Attachments panel (which picks its preview
+ * affordance the same way) never disagree about a row: a `.png` the
+ * server could only type as octet-stream is shown with a thumbnail there,
+ * and must embed rather than link here.
+ */
+export function attachmentRefFor(att: {
+  id: string
+  filename?: string | null
+  mime_type?: string | null
+}): AttachmentRef {
+  return {
+    image: attachmentKind(att.mime_type, att.filename) === 'image',
+    label: att.filename || REF_FALLBACK_NAME,
+    href: attachmentDownloadPath(att.id),
+  }
+}
+
+/**
+ * The paste-ready markdown reference to an attachment, and the only place
+ * the web builds that string:
+ *
+ *   image  -> ![filename](/attachments/<id>/download)
+ *   other  -> [filename](/attachments/<id>/download)
+ *
+ * Same shape and same bearer-auth route the MCP tool emits (`attach_file`'s
+ * `markdown_ref`, mcp/src/mycelium_mcp/server.py) and the CLI helper
+ * (`attachment_markdown_ref`, cli/src/mycelium_cli/cmds/_common.py), so a
+ * body written from the web, from the CLI or by an agent renders the same.
+ *
+ * The image predicate is deliberately NOT identical to theirs: both test
+ * `mime_type.startswith("image/")` on the stored (lowercased) mime, while
+ * attachmentRefFor goes through attachmentKind(), which also treats a file
+ * the backend could only type as `application/octet-stream` but whose
+ * extension is an image one (`.png`, `.heic`, …) as an image. Whenever the
+ * stored mime is a specific `image/*` type the three build the identical
+ * string for the identical attachment; on that octet-stream tail the web
+ * emits `![…]` where the MCP tool and the CLI emit `[…]`. That is the
+ * intended asymmetry: only the web has a panel showing a thumbnail for the
+ * very same row, and a link there next to a thumbnail here would be the
+ * inconsistency users actually notice.
+ */
+export function attachmentMarkdownRef(att: {
+  id: string
+  filename?: string | null
+  mime_type?: string | null
+}): string {
+  const { image, label, href } = attachmentRefFor(att)
+  return `${image ? '!' : ''}[${label}](${href})`
+}
+
+// One whole markdown link/image on a single line, with a bracket-free
+// label and a parenthesis-free, space-free destination. The destination is
+// then checked against isAttachmentHref, so only the canonical
+// /attachments/<id>/download route is ever accepted.
+const MARKDOWN_REF_RE = /^(!?)\[([^\]\n]*)\]\(([^\s()]+)\)$/
+
+/**
+ * Recover an AttachmentRef from a pasted markdown reference — the exact
+ * string attachmentMarkdownRef, the MCP `attach_file` tool and the CLI
+ * hand a user to paste. Returns null unless the WHOLE input (surrounding
+ * whitespace aside) is one such reference pointing at the canonical
+ * download route, so any other paste is left to its normal handling.
+ *
+ * The WYSIWYG editor needs this because ProseMirror pastes plain text as
+ * plain text: the reference would land as a literal text node and
+ * prosemirror-markdown escapes `[` and `]` on the way back out, so the
+ * saved body would hold `!\[name\](/attachments/…)` and readers would see
+ * those characters instead of the image or the link.
+ */
+export function parseAttachmentMarkdownRef(text: string): AttachmentRef | null {
+  const m = MARKDOWN_REF_RE.exec(text.trim())
+  if (!m) return null
+  const href = m[3]
+  if (!isAttachmentHref(href)) return null
+  return { image: m[1] === '!', label: m[2] || REF_FALLBACK_NAME, href }
 }
 
 // Extensions a browser can SAFELY render when an attachment link is opened

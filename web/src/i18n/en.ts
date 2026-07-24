@@ -406,6 +406,13 @@ export const en = {
     remove: 'Remove',
     open: 'Open',
     download: 'Download',
+    copyRef: 'Copy ref',
+    copyRefHint:
+      'Copy the markdown reference to this attachment — paste it into a note body or a task description.',
+    copyRefDone: 'Copied',
+    copyRefFailed: 'Copy failed',
+    copyRefManual:
+      'The clipboard is not available here — copy this markdown reference by hand:',
     confirmDelete: 'Delete this attachment?',
     zoom: 'Click to enlarge',
     preview: 'Preview',

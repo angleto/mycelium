@@ -405,6 +405,13 @@ export const it: Catalog = {
     remove: 'Rimuovi',
     open: 'Apri',
     download: 'Scarica',
+    copyRef: 'Copia rif.',
+    copyRefHint:
+      'Copia il riferimento markdown a questo allegato — incollalo nel corpo di una nota o nella descrizione di un task.',
+    copyRefDone: 'Copiato',
+    copyRefFailed: 'Copia non riuscita',
+    copyRefManual:
+      'Gli appunti non sono disponibili qui — copia a mano questo riferimento markdown:',
     confirmDelete: 'Eliminare questo allegato?',
     zoom: 'Clic per ingrandire',
     preview: 'Anteprima',
