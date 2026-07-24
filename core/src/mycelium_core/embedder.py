@@ -49,6 +49,45 @@ class Embedder(Protocol):
     async def embed(self, text: str) -> EmbedResult: ...
 
 
+def estimate_tokens(text: str, *, window: int) -> int:
+    """Cheap token estimate for batching decisions only (never for metering).
+
+    chars/4 is the usual rough ratio; it is clamped to ``window`` because a
+    text longer than the model's sequence window is truncated by the encoder,
+    so its cost stops growing there. Over-estimating is harmless (a smaller
+    group), under-estimating is what we must avoid, hence no lower clamp.
+    """
+    approx = max(1, len(text) // 4)
+    return min(approx, window) if window > 0 else approx
+
+
+def group_by_token_budget(texts: list[str], *, budget: int, window: int) -> list[list[str]]:
+    """Split ``texts`` into groups whose (longest x count) stays under ``budget``.
+
+    The encoder pads every sequence in a group up to the longest one, so the
+    group's cost is that product, not the sum of the individual lengths. A
+    single text always forms a group of its own if it exceeds the budget by
+    itself: dropping it would silently lose an embedding, and truncation is
+    already handled by ``window``.
+    """
+    budget = max(1, budget)
+    out: list[list[str]] = []
+    cur: list[str] = []
+    cur_max = 0
+    for t in texts:
+        est = estimate_tokens(t, window=window)
+        nxt_max = max(cur_max, est)
+        if cur and nxt_max * (len(cur) + 1) > budget:
+            out.append(cur)
+            cur, cur_max = [t], est
+        else:
+            cur.append(t)
+            cur_max = nxt_max
+    if cur:
+        out.append(cur)
+    return out
+
+
 class LocalEmbedder:
     """Reference local model (sentence-transformers, CPU/ARM). Lazily
     imported so the heavy dependency is optional and never loaded in
@@ -69,7 +108,22 @@ class LocalEmbedder:
                 raise RuntimeError(
                     "LocalEmbedder requires the 'sentence-transformers' extra"
                 ) from exc
-            self._model = SentenceTransformer(self._model_name)
+            model = SentenceTransformer(self._model_name)
+            # bge-m3 ships max_seq_length=8192. Transformer attention cost is
+            # quadratic in sequence length, so a single 8192-token sequence
+            # alone can allocate multiple GB of activations, and the encode
+            # below would then multiply that by the batch. The worker was
+            # OOMKilled in exactly this path (backfilling long note parts),
+            # taking every other worker job down with it. Cap the window
+            # instead: texts longer than the cap are truncated, which is what
+            # already happened past 8192 -- we are moving the truncation
+            # point, not introducing it.
+            cap = get_settings().embedder_max_seq_tokens
+            if cap > 0:
+                current = getattr(model, "max_seq_length", None)
+                if not isinstance(current, int) or current > cap:
+                    model.max_seq_length = cap
+            self._model = model
         return self._model
 
     async def _model_ready(self) -> object:
@@ -100,17 +154,39 @@ class LocalEmbedder:
         )
 
     async def embed_batch(self, texts: list[str]) -> list[EmbedResult]:  # pragma: no cover - model
-        """Encode many texts in a single forward pass. SentenceTransformer
-        batches internally, so this is ~order-of-magnitude faster than
-        N calls to ``embed`` (the per-call Python overhead and tokenizer
-        warmup dominate at small N)."""
+        """Encode many texts, grouped so that peak memory is bounded.
+
+        SentenceTransformer batches internally, so batching is ~an order of
+        magnitude faster than N calls to ``embed``. But a FIXED batch count
+        (the pre-fix ``batch_size=32``) bounds the number of sequences, not
+        the amount of work: 32 short titles and 32 full note parts differ by
+        two orders of magnitude in activation memory, and the second shape is
+        what OOMKilled the worker. So the grouping here is by an estimated
+        TOKEN budget instead: long texts land in small groups, short ones
+        still ride in large ones, and the peak is roughly flat either way.
+        The estimate is deliberately cheap (chars/4, clamped to the model's
+        window) -- running the real tokenizer to decide how to call the
+        tokenizer is not worth it, and over-estimating only costs a smaller
+        group.
+        """
         if not texts:
             return []
         model = await self._model_ready()
+        settings = get_settings()
+        groups = group_by_token_budget(
+            texts,
+            budget=settings.embedder_batch_token_budget,
+            window=settings.embedder_max_seq_tokens,
+        )
 
         def _run() -> list[list[float]]:
-            arr = model.encode(texts, normalize_embeddings=True, batch_size=32)  # type: ignore[attr-defined]
-            return [list(row) for row in arr]
+            rows: list[list[float]] = []
+            for group in groups:
+                arr = model.encode(  # type: ignore[attr-defined]
+                    group, normalize_embeddings=True, batch_size=len(group)
+                )
+                rows.extend(list(row) for row in arr)
+            return rows
 
         vecs = await asyncio.to_thread(_run)
         return [

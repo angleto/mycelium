@@ -31,6 +31,74 @@ class Settings(BaseSettings):
         description="Sync URL (psycopg) for Alembic. Owner role mycelium.",
     )
 
+    # Async engine pooling. Explicit, NOT SQLAlchemy's implicit defaults
+    # (pool_size 5 + max_overflow 10), so the footprint on a managed Postgres
+    # instance shared with another project is a KNOWN number. See
+    # ``mycelium_core.db.get_engine`` for the per-deployment arithmetic.
+    #
+    # The split matters more than the total. 15 concurrent connections per
+    # process is what the implicit defaults already gave us, and it has held
+    # in production; what was wrong was the SHAPE: only 5 were persistent, so
+    # every burst above 5 paid brand-new TCP+TLS handshakes on the critical
+    # path and then threw those connections away. Moving the same ceiling to
+    # 10 + 5 makes ten of them persistent, which is the whole point.
+    #
+    # Do not shrink the total below the structural concurrency of the WORKER
+    # process: it runs ~12 sweep loops (dispatch, reminders, webhooks, the
+    # search/embedding backfills, ...) whose ticks overlap, and each opens its
+    # own session. A ceiling under that turns normal operation into checkout
+    # timeouts. The pools grow ON DEMAND, so the theoretical worst case
+    # (every process at its ceiling simultaneously) is not the steady state.
+    db_pool_size: int = 10
+    db_max_overflow: int = 5
+    # How long a checkout waits for a free pooled connection before giving up.
+    # Short on purpose: piling requests up behind an exhausted pool converts a
+    # capacity problem into a latency problem that outlives the burst.
+    db_pool_timeout_seconds: float = 10.0
+    # Age-based recycling, in seconds. -1 is SQLAlchemy's "never recycle" and
+    # is the shipped default ON PURPOSE.
+    #
+    # A recycle window is evaluated per connection AT CHECKOUT, and a pool's
+    # connections tend to be opened together (one burst fills it in one go),
+    # so their ages are correlated. After an idle gap longer than the window,
+    # the next burst of N concurrent checkouts finds N expired connections and
+    # re-opens all N AT ONCE: synchronized, not staggered. Under sparse
+    # traffic that is a connect storm on a schedule -- and it throws away
+    # connections that were perfectly alive.
+    #
+    # What actually covers a socket killed while idle (a NAT/conntrack idle
+    # timeout, a server-side disconnect) is ``pool_pre_ping``, which is always
+    # on: it tests each connection as it is handed out and replaces only the
+    # ones that are really dead, one checkout at a time. ``pool_use_lifo``
+    # then concentrates reuse on a small hot set, so the cold tail is rarely
+    # touched at all.
+    #
+    # Set this only against a server or pooler that enforces a hard connection
+    # lifetime, and mind the semantics: SQLAlchemy gates on ``_recycle > -1``,
+    # so 0 recycles on essentially every checkout -- it does not mean "off".
+    db_pool_recycle_seconds: int = -1
+    # Per-attempt cap on the connection handshake itself (asyncpg's own
+    # ``timeout``, whose default is 60 s). Without it an unreachable DB would
+    # let one request hang for attempts x 60 s. A handshake to a managed
+    # Postgres in the same region is milliseconds, so 5 s leaves two to three
+    # orders of magnitude of headroom; the product
+    # ``db_connect_max_attempts * db_connect_timeout_seconds`` (15 s) is the
+    # ceiling on how long a request can sit at the connect boundary before it
+    # fails, plus the negligible backoff sum below.
+    db_connect_timeout_seconds: float = 5.0
+    # Bounded retry around connection CREATION (see ``db._connect_with_retry``).
+    # SQLAlchemy retries nothing there: a socket reset during the handshake
+    # propagates straight out as a 500 on a request that never ran a query.
+    # This absorbs a SINGLE-EVENT failure (one dropped handshake, a server a
+    # moment away from accepting again); it is not a circuit breaker and does
+    # not survive a server that refuses connections, which exhausts every
+    # attempt (worst case the 15 s above) and surfaces the driver error.
+    # Attempts are total (1 = no retry) and the backoff is full-jitter
+    # exponential off this base, so N coroutines that failed together do not
+    # re-storm together.
+    db_connect_max_attempts: int = 3
+    db_connect_retry_base_seconds: float = 0.1
+
     # Redis
     redis_url: str = "redis://localhost:6379/0"
 
@@ -437,6 +505,20 @@ class Settings(BaseSettings):
     # Default LOCAL embedder model (the rank-0 fallback, ``embedding``
     # vector(1024) column). bge-m3 emits 1024 natively = ``embed_dim``.
     embed_model: str = "BAAI/bge-m3"
+    # Sequence window the LOCAL embedder is allowed to use, in tokens.
+    # bge-m3 ships 8192; attention memory is quadratic in this number, so a
+    # single long note part could allocate multiple GB and OOMKill the whole
+    # worker process (it did, 2026-07-24, taking reminders/dispatch down with
+    # it). 2048 keeps a whole note part in the window in the common case
+    # while bounding the worst case; longer texts are truncated, exactly as
+    # they already were past 8192. 0 = leave the model's own default.
+    embedder_max_seq_tokens: int = 2048
+    # Per-encode token budget = (longest text in the group) x (group size).
+    # Bounds PEAK memory regardless of input shape: a fixed batch count does
+    # not, because 32 titles and 32 note parts are two orders of magnitude
+    # apart in activations. 16384 = 8 texts at the full 2048-token window,
+    # or many more short ones.
+    embedder_batch_token_budget: int = 16384
     # HOSTED tier dim (``embedding_hosted`` halfvec column). A per-org
     # hosted embedder (Scaleway, ``org_embedder_provider``) emits this dim;
     # 4000 = pgvector's HNSW ceiling for halfvec, so any future model up to
