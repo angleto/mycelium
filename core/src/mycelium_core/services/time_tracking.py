@@ -16,7 +16,7 @@ from __future__ import annotations
 import datetime as dt
 import enum
 import uuid
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any
@@ -41,6 +41,8 @@ from mycelium_core.services import audit
 from mycelium_core.services import note_links as note_links_svc
 from mycelium_core.services.rbac import require_role
 from mycelium_core.services.tasks import get_task
+from mycelium_core.services.users import normalize_timezone
+from mycelium_core.timewindow import resolve_tz
 
 _UPDATABLE = frozenset({"memo", "billable", "task_id", "started_at", "ended_at", "note_id"})
 
@@ -739,62 +741,64 @@ async def _structural_keys(
     return out
 
 
-async def report(
+async def _report_entries(
     session: AsyncSession,
     *,
     org_id: uuid.UUID,
-    actor_id: uuid.UUID,
-    group_by: ReportGroup,
-    start_from: dt.datetime | None = None,
-    start_to: dt.datetime | None = None,
-    billable: bool | None = None,
-    executor_kind: ExecKind | None = None,
-    client_tag_id: uuid.UUID | None = None,
-    project_tag_id: uuid.UUID | None = None,
-) -> list[ReportRow]:
-    """Aggregate completed entries (running timers excluded). Amount
-    sums only billable entries that carry a rate snapshot. ``client_tag_id``
-    / ``project_tag_id`` scope the report to entries whose task carries the
-    given client / project tag."""
-    await require_role(session, org_id, actor_id, Role.member)
+    start_from: dt.datetime | None,
+    start_to: dt.datetime | None,
+    billable: bool | None,
+    executor_kind: ExecKind | None,
+    client_tag_id: uuid.UUID | None,
+    project_tag_id: uuid.UUID | None,
+    user_id: uuid.UUID | None = None,
+) -> list[TimeEntry]:
+    """The population every time aggregation reports over: completed
+    entries only (a running timer has no ``duration_seconds`` yet, so it
+    contributes nothing and must not create an empty bucket).
+
+    ``user_id``, ``billable`` and ``client_tag_id`` /
+    ``project_tag_id`` are pushed down to ``list_entries``, which
+    applies the tags as the same task-carries-the-tag subquery the
+    report used to run in python after the fact — one filter
+    implementation instead of two that must be kept in agreement.
+    ``executor_kind`` stays in python: it is denormalized onto the entry
+    at creation (the task's kind at that time), so filtering it needs no
+    join and adding a column knob to the paginated ``list_entries`` for
+    a reporting-only filter would widen that contract for nothing."""
     entries = await list_entries(
         session,
         org_id=org_id,
+        user_id=user_id,
         start_from=start_from,
         start_to=start_to,
         billable=billable,
+        client_tag_id=client_tag_id,
+        project_tag_id=project_tag_id,
     )
     entries = [e for e in entries if e.duration_seconds is not None]
     if executor_kind is not None:
         entries = [e for e in entries if e.executor_kind is executor_kind]
-    for tag_id in (client_tag_id, project_tag_id):
-        if tag_id is None:
-            continue
-        task_ids = [e.task_id for e in entries]
-        if not task_ids:
-            break
-        keep = {
-            tid
-            for (tid,) in (
-                await session.execute(
-                    select(TaskTag.task_id).where(
-                        TaskTag.task_id.in_(task_ids), TaskTag.tag_id == tag_id
-                    )
-                )
-            ).all()
-        }
-        entries = [e for e in entries if e.task_id in keep]
+    return entries
 
-    # rate_snapshot is set when the entry is created/edited; entries
-    # created when the client had no ``hourly_rate`` (or no client) have
-    # NULL or ZERO snapshots that historically rendered as 0 EUR even
-    # after the rate was later configured. Backfill the missing rates
-    # LIVE from the current task -> project -> client lookup, without
-    # mutating history: snapshot semantics ("the rate at the time of
-    # the entry") only apply when the snapshot is a real positive
-    # number. NULL / 0 mean "no rate was captured" (the explicit-free
-    # case is rare and indistinguishable from "didn't know yet"; the
-    # live rate is the most accurate available value either way).
+
+async def _rate_resolvers(
+    session: AsyncSession, entries: Sequence[TimeEntry]
+) -> tuple[Callable[[TimeEntry], Decimal | None], Callable[[TimeEntry], str]]:
+    """``(rate_for, currency_for)`` for a batch of entries: the money
+    lookup every aggregation bills off, resolved once for the batch.
+
+    rate_snapshot is set when the entry is created/edited; entries
+    created when the client had no ``hourly_rate`` (or no client) have
+    NULL or ZERO snapshots that historically rendered as 0 EUR even
+    after the rate was later configured. Backfill the missing rates
+    LIVE from the current task -> project -> client lookup, without
+    mutating history: snapshot semantics ("the rate at the time of
+    the entry") only apply when the snapshot is a real positive
+    number. NULL / 0 mean "no rate was captured" (the explicit-free
+    case is rare and indistinguishable from "didn't know yet"; the
+    live rate is the most accurate available value either way).
+    """
     live_rates: dict[uuid.UUID, tuple[Decimal | None, str]] = {}
     needing_live = {
         e.task_id
@@ -816,23 +820,27 @@ async def report(
         live = live_rates.get(e.task_id)
         return live[1] if live else e.currency
 
-    # acc key -> [label, seconds, billable_seconds, amount, currency]
-    acc: dict[str | None, list[Any]] = {}
+    return rate_for, currency_for
 
-    def bump(
-        key: str | None,
-        label: str | None,
-        seconds: int,
-        is_billable: bool,
-        rate: Decimal | None,
-        currency: str,
-    ) -> None:
-        slot = acc.setdefault(key, [label, 0, 0, Decimal(0), currency])
-        slot[1] += seconds
-        if is_billable:
-            slot[2] += seconds
-            slot[3] += _amount(seconds, rate)
 
+# ``entry -> [(bucket key, label)]``. A list because one axis (generic)
+# legitimately fans an entry out over several buckets; every other axis
+# returns exactly one pair.
+BucketFn = Callable[[TimeEntry], list[tuple[str | None, str | None]]]
+
+
+async def _bucketer(
+    session: AsyncSession, entries: Sequence[TimeEntry], group_by: ReportGroup
+) -> BucketFn:
+    """Pre-resolve the label maps for ``group_by`` (batched by id, no
+    N+1) and return the entry -> buckets mapping.
+
+    ONE implementation of the grouping semantics, shared by every
+    aggregation over the same entries (``report``, ``daily_report``).
+    The alternative — each aggregation inlining its own if/elif — is how
+    the client/project double-count documented below survived: a fan-out
+    that is correct on one axis is a money bug on another, and a copy
+    only gets fixed where someone looked."""
     if group_by in (ReportGroup.user, ReportGroup.task):
         is_user = group_by is ReportGroup.user
         labels: dict[uuid.UUID, str] = {}
@@ -854,17 +862,14 @@ async def report(
                         await session.execute(select(Task.id, Task.title).where(Task.id.in_(ids)))
                     ).all()
                 }
-        for e in entries:
+
+        def by_entity(e: TimeEntry) -> list[tuple[str | None, str | None]]:
             ent_id = e.user_id if is_user else e.task_id
-            bump(
-                str(ent_id),
-                labels.get(ent_id),
-                e.duration_seconds or 0,
-                e.billable,
-                rate_for(e),
-                currency_for(e),
-            )
-    elif group_by is ReportGroup.task_memo:
+            return [(str(ent_id), labels.get(ent_id))]
+
+        return by_entity
+
+    if group_by is ReportGroup.task_memo:
         # Phases within a task: one row per (task, memo). The memo
         # ("design", "review", "meeting", ...) is the entry's free-text
         # note. An empty / whitespace-only / NULL memo collapses into
@@ -884,62 +889,97 @@ async def report(
                     )
                 ).all()
             }
-        for e in entries:
+
+        def by_task_memo(e: TimeEntry) -> list[tuple[str | None, str | None]]:
             memo = (e.memo or "").strip()
             title = memo_titles.get(e.task_id)
-            bump(
-                f"{e.task_id}\x1f{memo}",
-                f"{title} · {memo}" if memo else title,
-                e.duration_seconds or 0,
-                e.billable,
-                rate_for(e),
-                currency_for(e),
-            )
-    elif group_by is ReportGroup.generic:
+            return [(f"{e.task_id}\x1f{memo}", f"{title} · {memo}" if memo else title)]
+
+        return by_task_memo
+
+    if group_by is ReportGroup.generic:
         # Free-form facets are many-to-many, so an entry legitimately
         # lands in every generic bucket its task carries and the column
         # total exceeds the time actually tracked. That is what this axis
         # means; it is NOT the case for client/project below.
         generic_map = await _generic_keys(session, [e.task_id for e in entries])
-        for e in entries:
+
+        def by_generic(e: TimeEntry) -> list[tuple[str | None, str | None]]:
             tags = generic_map.get(e.task_id, [])
             if not tags:
-                bump(None, None, e.duration_seconds or 0, e.billable, rate_for(e), currency_for(e))
-                continue
-            for tag_id, name in tags:
-                # Use the live-rate fallback helpers same as the
-                # user/task branch — the tag aggregation used to read
-                # e.rate_snapshot directly, bypassing the fix that
-                # backfills NULL / zero snapshots with the current
-                # task -> client rate.
-                bump(
-                    str(tag_id),
-                    name,
-                    e.duration_seconds or 0,
-                    e.billable,
-                    rate_for(e),
-                    currency_for(e),
-                )
-    else:
-        # Client and project are structural: exactly one of each per task
-        # (docs/adr/0003), so each entry's duration is booked ONCE. This
-        # used to fan out like the generic axis and bump the FULL entry
-        # duration per tag of the kind, so a task carrying a stray second
-        # client tag counted its whole time twice: group_by='client'
-        # reported 1,112,725 s / EUR 18,792.14 in production against a
-        # ground truth of 1,110,693 s / EUR 18,756.86.
-        kind = TagKind.client if group_by is ReportGroup.client else TagKind.project
-        structural_map = await _structural_keys(session, [e.task_id for e in entries], kind)
-        for e in entries:
-            tag = structural_map.get(e.task_id)
-            bump(
-                str(tag[0]) if tag is not None else None,
-                tag[1] if tag is not None else None,
-                e.duration_seconds or 0,
-                e.billable,
-                rate_for(e),
-                currency_for(e),
-            )
+                return [(None, None)]
+            # Rates are applied by the caller from ``_rate_resolvers``,
+            # uniformly for every axis — the tag aggregation used to read
+            # e.rate_snapshot directly, bypassing the fix that backfills
+            # NULL / zero snapshots with the current task -> client rate.
+            # With the rate lookup outside the bucketing that bypass is
+            # no longer expressible.
+            return [(str(tag_id), name) for tag_id, name in tags]
+
+        return by_generic
+
+    # Client and project are structural: exactly one of each per task
+    # (docs/adr/0003), so each entry's duration is booked ONCE. This
+    # used to fan out like the generic axis and bump the FULL entry
+    # duration per tag of the kind, so a task carrying a stray second
+    # client tag counted its whole time twice: group_by='client'
+    # reported 1,112,725 s / EUR 18,792.14 in production against a
+    # ground truth of 1,110,693 s / EUR 18,756.86.
+    kind = TagKind.client if group_by is ReportGroup.client else TagKind.project
+    structural_map = await _structural_keys(session, [e.task_id for e in entries], kind)
+
+    def by_structural(e: TimeEntry) -> list[tuple[str | None, str | None]]:
+        tag = structural_map.get(e.task_id)
+        if tag is None:
+            return [(None, None)]
+        return [(str(tag[0]), tag[1])]
+
+    return by_structural
+
+
+async def report(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    group_by: ReportGroup,
+    start_from: dt.datetime | None = None,
+    start_to: dt.datetime | None = None,
+    billable: bool | None = None,
+    executor_kind: ExecKind | None = None,
+    client_tag_id: uuid.UUID | None = None,
+    project_tag_id: uuid.UUID | None = None,
+) -> list[ReportRow]:
+    """Aggregate completed entries (running timers excluded). Amount
+    sums only billable entries that carry a rate snapshot. ``client_tag_id``
+    / ``project_tag_id`` scope the report to entries whose task carries the
+    given client / project tag."""
+    await require_role(session, org_id, actor_id, Role.member)
+    entries = await _report_entries(
+        session,
+        org_id=org_id,
+        start_from=start_from,
+        start_to=start_to,
+        billable=billable,
+        executor_kind=executor_kind,
+        client_tag_id=client_tag_id,
+        project_tag_id=project_tag_id,
+    )
+    rate_for, currency_for = await _rate_resolvers(session, entries)
+    bucket = await _bucketer(session, entries, group_by)
+
+    # acc key -> [label, seconds, billable_seconds, amount, currency]
+    acc: dict[str | None, list[Any]] = {}
+    for e in entries:
+        seconds = e.duration_seconds or 0
+        rate = rate_for(e)
+        currency = currency_for(e)
+        for key, label in bucket(e):
+            slot = acc.setdefault(key, [label, 0, 0, Decimal(0), currency])
+            slot[1] += seconds
+            if e.billable:
+                slot[2] += seconds
+                slot[3] += _amount(seconds, rate)
 
     rows = [
         ReportRow(
@@ -953,6 +993,105 @@ async def report(
         for k, v in acc.items()
     ]
     rows.sort(key=lambda r: (r.label or "", r.key or ""))
+    return rows
+
+
+@dataclass(frozen=True)
+class DailyReportRow:
+    day: dt.date
+    key: str | None
+    label: str | None
+    seconds: int
+    billable_seconds: int
+    amount: Decimal
+    currency: str
+
+
+async def daily_report(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    group_by: ReportGroup,
+    start_from: dt.datetime | None = None,
+    start_to: dt.datetime | None = None,
+    billable: bool | None = None,
+    executor_kind: ExecKind | None = None,
+    client_tag_id: uuid.UUID | None = None,
+    project_tag_id: uuid.UUID | None = None,
+    tz: str | None = None,
+) -> list[DailyReportRow]:
+    """``report()`` split by calendar day: same population, same filters,
+    same bucket keys, aggregated over (day, bucket) instead of bucket.
+    Summing a bucket's rows over the days reproduces exactly the
+    ``report()`` row for the same arguments (both walk the same entries
+    through the same ``_bucketer``).
+
+    An entry is attributed WHOLLY to the day it STARTED on, in ``tz``: it
+    is never split across midnight. That is the only attribution
+    consistent with the window filters, since ``start_from`` /
+    ``start_to`` also select on ``started_at`` — splitting would let a
+    22:00-to-01:00 entry put time on a day the very same filters exclude,
+    so a per-day chart would not add up to the report beside it.
+
+    ``tz`` is an IANA name (default UTC) and is validated, not coerced:
+    an unknown zone raises ``USER_TIMEZONE_INVALID`` rather than silently
+    bucketing by UTC and handing the SPA a chart shifted by hours with no
+    signal that its parameter was ignored.
+
+    Rows exist only for (day, bucket) pairs with tracked time; the caller
+    zero-fills the gaps over whatever range it drew, so the payload is
+    proportional to the data and not to the window. Sorted by day asc,
+    then seconds desc (the day's dominant bucket first), then label."""
+    await require_role(session, org_id, actor_id, Role.member)
+    # Validate first: a bad zone must fail before any query runs.
+    zone = resolve_tz(normalize_timezone(tz))
+    entries = await _report_entries(
+        session,
+        org_id=org_id,
+        start_from=start_from,
+        start_to=start_to,
+        billable=billable,
+        executor_kind=executor_kind,
+        client_tag_id=client_tag_id,
+        project_tag_id=project_tag_id,
+    )
+    rate_for, currency_for = await _rate_resolvers(session, entries)
+    bucket = await _bucketer(session, entries, group_by)
+
+    # (day, key) -> [label, seconds, billable_seconds, amount, currency]
+    acc: dict[tuple[dt.date, str | None], list[Any]] = {}
+    for e in entries:
+        started = e.started_at
+        if started.tzinfo is None:
+            # The column is TIMESTAMPTZ, but some drivers/paths hand back
+            # a naive value; those are UTC instants, and attaching UTC
+            # here keeps ``astimezone`` from re-reading them as local.
+            started = started.replace(tzinfo=dt.UTC)
+        day = started.astimezone(zone).date()
+        seconds = e.duration_seconds or 0
+        rate = rate_for(e)
+        currency = currency_for(e)
+        for key, label in bucket(e):
+            slot = acc.setdefault((day, key), [label, 0, 0, Decimal(0), currency])
+            slot[1] += seconds
+            if e.billable:
+                slot[2] += seconds
+                slot[3] += _amount(seconds, rate)
+
+    rows = [
+        DailyReportRow(
+            day=day,
+            key=key,
+            label=v[0],
+            seconds=v[1],
+            billable_seconds=v[2],
+            amount=v[3],
+            currency=v[4],
+        )
+        for (day, key), v in acc.items()
+    ]
+    rows.sort(key=lambda r: (r.day, -r.seconds, r.label or "", r.key or ""))
     return rows
 
 
@@ -1089,20 +1228,38 @@ async def task_report(
     actor_id: uuid.UUID,
     start_from: dt.datetime | None = None,
     start_to: dt.datetime | None = None,
+    billable: bool | None = None,
+    executor_kind: ExecKind | None = None,
+    client_tag_id: uuid.UUID | None = None,
+    project_tag_id: uuid.UUID | None = None,
+    user_id: uuid.UUID | None = None,
 ) -> list[TaskTimeReportRow]:
-    """Per-task aggregate over the *acting user's* completed entries
-    (running timers excluded, no duration yet). Honours the same
-    optional ``start_from``/``start_to`` window as ``list_entries``.
-    Ordered by total_seconds desc (ties: task title)."""
+    """Per-task aggregate over completed entries (running timers
+    excluded, no duration yet). Honours the same filter knobs as
+    ``report`` (window, billable, executor kind, client/project tag) so
+    the "By task" table and the charts above it answer the same question.
+    Ordered by total_seconds desc (ties: task title).
+
+    ``user_id`` scopes to one user's entries and defaults to None
+    (org-wide), mirroring ``GET /time/entries``. It used to be hardwired
+    to ``actor_id``: this panel was then the ONLY one on the page scoped
+    to the caller while its siblings ``report`` and ``list_entries`` are
+    org-scoped, so in a workspace with more than one member the table
+    silently contradicted the report drawn right above it (same period,
+    smaller totals, no visible reason). Scoping is now the caller's
+    explicit choice, not a hidden asymmetry."""
     await require_role(session, org_id, actor_id, Role.member)
-    entries = await list_entries(
+    entries = await _report_entries(
         session,
         org_id=org_id,
-        user_id=actor_id,
         start_from=start_from,
         start_to=start_to,
+        billable=billable,
+        executor_kind=executor_kind,
+        client_tag_id=client_tag_id,
+        project_tag_id=project_tag_id,
+        user_id=user_id,
     )
-    entries = [e for e in entries if e.duration_seconds is not None]
     ctxs = await resolve_task_contexts(session, [e.task_id for e in entries])
     # task_id -> [total, billable, count]
     acc: dict[uuid.UUID, list[int]] = {}

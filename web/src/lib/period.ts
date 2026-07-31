@@ -14,6 +14,42 @@ export function ymdLocal(d: Date): string {
   return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`
 }
 
+// Hard ceiling on enumerateDays' output. `<input type="date">` happily
+// yields a year like 0202 on a typo, and an unbounded day walk over that
+// range locks the tab. ~10 years is far past any range the Time view can
+// plot legibly, so truncating is strictly better than hanging.
+const MAX_ENUMERATED_DAYS = 3700
+
+// Parse a "YYYY-MM-DD" as a LOCAL date. `new Date('2026-07-31')` is
+// parsed as UTC midnight, which lands on the 30th west of Greenwich —
+// so build the Date from parts, at noon, the same DST-safe convention
+// periodRange uses.
+function parseYmdLocal(s: string): Date | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s)
+  if (!m) return null
+  const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), 12)
+  return Number.isFinite(d.getTime()) ? d : null
+}
+
+/** Every calendar day in `[from, to]`, inclusive, as YYYY-MM-DD.
+ *
+ * Pure: the per-day histogram zero-fills against this, so a day with no
+ * tracked time still gets a column and reads as "no work" instead of
+ * being silently skipped. An inverted or unparseable range yields `[]`
+ * (the caller renders its empty state) rather than throwing. */
+export function enumerateDays(from: string, to: string): string[] {
+  const start = parseYmdLocal(from)
+  const end = parseYmdLocal(to)
+  if (!start || !end || end < start) return []
+  const out: string[] = []
+  const cur = new Date(start)
+  while (cur <= end && out.length < MAX_ENUMERATED_DAYS) {
+    out.push(ymdLocal(cur))
+    cur.setDate(cur.getDate() + 1)
+  }
+  return out
+}
+
 export interface PeriodRange {
   from: string
   to: string

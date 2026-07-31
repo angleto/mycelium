@@ -4318,6 +4318,100 @@ button.btn--danger:hover {
   border-radius: 2px;
   flex: 0 0 auto;
 }
+/* The hovered mark responds — same lift on the donut slices and on the
+   histogram segments, so the two charts feel like one instrument. */
+.timepie__slice,
+.daybars__seg {
+  transition: filter 0.12s ease-out;
+}
+.timepie__slice:hover,
+.daybars__seg:hover {
+  filter: brightness(1.15);
+}
+
+/* Per-day histogram. All chrome (grid, axis, ticks, date labels) wears
+   the theme tokens: text NEVER wears a series colour, and the grid stays
+   one step off the surface so the data is the only loud thing. Both
+   themes come out of the same custom properties — nothing is hardcoded
+   per palette here. */
+.daybars {
+  position: relative;
+  margin: 0.2rem 0 0.8rem;
+  padding: 0;
+}
+/* Fixed pixel geometry inside a scroller: a long range scrolls HERE, the
+   page body never gains a horizontal scrollbar. */
+.daybars__scroll {
+  overflow-x: auto;
+  overflow-y: hidden;
+  max-width: 100%;
+  overscroll-behavior-x: contain;
+}
+.daybars__scroll svg {
+  display: block;
+}
+/* Column hit area: bigger than the marks it covers (the full plot height
+   of a day's slot), so the day total is reachable without landing on a
+   2px sliver. Painted transparent, but it still takes pointer events. */
+.daybars__hit {
+  fill: transparent;
+}
+.daybars__hit:hover {
+  fill: var(--surface-2);
+}
+/* Recessive: hairline, solid (never dashed), one step off the surface. */
+.daybars__grid line,
+.daybars__axis {
+  stroke: var(--border);
+  stroke-width: 1;
+}
+.daybars__grid,
+.daybars__xlabels {
+  /* Let the hover fall through to the hit areas underneath. */
+  pointer-events: none;
+}
+.daybars__grid text,
+.daybars__xlabels text {
+  fill: var(--muted);
+  font-size: 10px;
+  font-family: var(--sans);
+  /* Columns of numbers that align vertically — the one place tabular
+     figures belong. */
+  font-variant-numeric: tabular-nums;
+}
+/* Per-day billing table under the histogram: the exact figures an invoice
+   is built from, same buckets and same colours as the chart. Wide by
+   construction (one column per bucket), so it scrolls inside its own box
+   and the day column stays pinned while the buckets scroll past. */
+.daytbl {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.daytbl .num {
+  text-align: right;
+}
+.daytbl thead .num .pieswatch {
+  display: inline-block;
+  margin-right: 0.35rem;
+  vertical-align: baseline;
+}
+.daytbl tbody th,
+.daytbl tfoot th {
+  text-align: left;
+  font-weight: 500;
+  position: sticky;
+  left: 0;
+  background: var(--surface);
+}
+.daytbl tfoot td,
+.daytbl tfoot th {
+  border-top: 2px solid var(--border);
+}
+.scrollbox--x {
+  overflow-x: auto;
+  overflow-y: visible;
+  max-height: none;
+}
 .daterange {
   display: inline-flex;
   align-items: flex-end;

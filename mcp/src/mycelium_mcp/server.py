@@ -3296,6 +3296,11 @@ async def time_report_by_task(
             actor_id=user,
             start_from=dt.datetime.fromisoformat(start_from) if start_from else None,
             start_to=dt.datetime.fromisoformat(start_to) if start_to else None,
+            # ``task_report`` is org-wide by default (its user scoping is
+            # now an explicit filter, like GET /time/entries). This tool
+            # is documented as "for the caller", so it pins the scope
+            # instead of silently widening to the whole org.
+            user_id=user,
         )
         return [
             {

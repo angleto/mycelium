@@ -16,6 +16,23 @@ export function formatDueDate(iso: string): string {
   return isEndOfDay ? ymd : `${ymd} ${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
+// "3h 07m 42s" — the Time view's canonical duration readout (entries,
+// report rows, donut legend). Lives here rather than in a route so the
+// charts and the tables that sit beside them cannot drift apart.
+export function hhmmss(sec: number): string {
+  const s = Math.max(0, Math.floor(sec))
+  const h = Math.floor(s / 3600)
+  const m = Math.floor((s % 3600) / 60)
+  return `${h}h ${String(m).padStart(2, '0')}m ${String(s % 60).padStart(2, '0')}s`
+}
+
+// "3h 07m" — the same duration without seconds, for chart tooltips where
+// a second-level digit is noise at hover speed.
+export function hhmm(sec: number): string {
+  const s = Math.max(0, Math.floor(sec))
+  return `${Math.floor(s / 3600)}h ${String(Math.floor((s % 3600) / 60)).padStart(2, '0')}m`
+}
+
 export function hms(sec: number): string {
   const s = Math.max(0, Math.floor(sec))
   return `${Math.floor(s / 3600)}:${String(

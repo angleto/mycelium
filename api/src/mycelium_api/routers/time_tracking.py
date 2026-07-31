@@ -10,6 +10,7 @@ import csv
 import datetime
 import io
 import uuid
+from decimal import Decimal
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, status
@@ -17,6 +18,7 @@ from starlette.responses import Response
 
 from mycelium_api.deps import TenantCtx, tenant_ctx
 from mycelium_api.schemas import (
+    DailyReportRowOut,
     ReportRowOut,
     TaskTimeReportOut,
     TimeEntryOut,
@@ -306,23 +308,142 @@ async def report(
     ]
 
 
+@router.get("/time/report/daily", response_model=list[DailyReportRowOut])
+async def report_daily(
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+    group_by: ReportGroup = ReportGroup.project,
+    start_from: datetime.datetime | None = None,
+    start_to: datetime.datetime | None = None,
+    billable: bool | None = None,
+    executor_kind: ExecKind | None = None,
+    client_tag_id: uuid.UUID | None = None,
+    project_tag_id: uuid.UUID | None = None,
+    tz: str | None = None,
+) -> list[DailyReportRowOut]:
+    """``GET /time/report`` split by calendar day: identical buckets and
+    identical filter knobs, so the histogram and the donut drawn from
+    them cannot disagree. ``tz`` is an IANA name (default UTC) deciding
+    where a day starts; an unknown one is rejected rather than ignored.
+    Only days with tracked time are returned — the SPA zero-fills the
+    selected range, which keeps the payload proportional to the data."""
+    rows = await svc.daily_report(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        group_by=group_by,
+        start_from=start_from,
+        start_to=start_to,
+        billable=billable,
+        executor_kind=executor_kind,
+        client_tag_id=client_tag_id,
+        project_tag_id=project_tag_id,
+        tz=tz,
+    )
+    return [
+        DailyReportRowOut(
+            day=r.day,
+            key=r.key,
+            label=r.label,
+            seconds=r.seconds,
+            billable_seconds=r.billable_seconds,
+            amount=r.amount,
+            currency=r.currency,
+        )
+        for r in rows
+    ]
+
+
+@router.get("/time/report/daily.csv")
+async def report_daily_csv(
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+    group_by: ReportGroup = ReportGroup.project,
+    start_from: datetime.datetime | None = None,
+    start_to: datetime.datetime | None = None,
+    billable: bool | None = None,
+    executor_kind: ExecKind | None = None,
+    client_tag_id: uuid.UUID | None = None,
+    project_tag_id: uuid.UUID | None = None,
+    tz: str | None = None,
+) -> Response:
+    """The per-day report as CSV, one row per (day, bucket). This is the
+    billing artifact: ``/time/report.csv`` collapses a period into one row
+    per client/project, which is not enough to invoice against a client who
+    wants the days itemised. Same buckets, same filters and the same ``tz``
+    day boundary as the on-screen histogram, so the file reconciles with
+    what the operator saw before exporting it."""
+    rows = await svc.daily_report(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        group_by=group_by,
+        start_from=start_from,
+        start_to=start_to,
+        billable=billable,
+        executor_kind=executor_kind,
+        client_tag_id=client_tag_id,
+        project_tag_id=project_tag_id,
+        tz=tz,
+    )
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(
+        ["day", "key", "label", "seconds", "hours", "billable_seconds", "amount", "currency"]
+    )
+    for r in rows:
+        w.writerow(
+            [
+                r.day.isoformat(),
+                r.key or "",
+                r.label or "",
+                r.seconds,
+                # Decimal, not float: an invoice line is money arithmetic and
+                # 3600ths of an hour must not pick up a binary rounding tail.
+                f"{(Decimal(r.seconds) / Decimal(3600)).quantize(Decimal('0.01'))}",
+                r.billable_seconds,
+                f"{r.amount}",
+                r.currency,
+            ]
+        )
+    return Response(
+        content=buf.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": 'attachment; filename="time-report-daily.csv"'},
+    )
+
+
 @router.get("/time/report/by-task", response_model=list[TaskTimeReportOut])
 async def report_by_task(
     ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
     start_from: datetime.datetime | None = None,
     start_to: datetime.datetime | None = None,
+    billable: bool | None = None,
+    executor_kind: ExecKind | None = None,
+    client_tag_id: uuid.UUID | None = None,
+    project_tag_id: uuid.UUID | None = None,
+    user_id: uuid.UUID | None = None,
 ) -> list[TaskTimeReportOut]:
-    """Per-task aggregate (total/billable/count) over the caller's
-    entries, each row carrying resolved project/client/timezone so the
-    SPA's drill-down (entries of a task) is just ``GET /time/entries``
-    filtered client-side. Distinct path from the configurable
-    ``/time/report`` (which keeps its ReportRowOut contract)."""
+    """Per-task aggregate (total/billable/count), each row carrying
+    resolved project/client/timezone so the SPA's drill-down (entries of
+    a task) is just ``GET /time/entries`` filtered client-side. Distinct
+    path from the configurable ``/time/report`` (which keeps its
+    ReportRowOut contract), but the same filter knobs: this table sits
+    under the report charts and must answer the same question they do.
+
+    Org-wide unless ``user_id`` narrows it, mirroring ``GET
+    /time/entries``. It was implicitly the caller's own entries, which
+    made it the one panel on the page disagreeing with everything around
+    it in a multi-member workspace."""
     rows = await svc.task_report(
         ctx.session,
         org_id=ctx.org_id,
         actor_id=ctx.user_id,
         start_from=start_from,
         start_to=start_to,
+        billable=billable,
+        executor_kind=executor_kind,
+        client_tag_id=client_tag_id,
+        project_tag_id=project_tag_id,
+        user_id=user_id,
     )
     return [
         TaskTimeReportOut(

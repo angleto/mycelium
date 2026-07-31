@@ -517,6 +517,8 @@ ROUTE_SCOPES: dict[tuple[str, str], object] = {
     ("GET", "/time/report"): "time:read",
     ("GET", "/time/report.csv"): "time:read",
     ("GET", "/time/report/by-task"): "time:read",
+    ("GET", "/time/report/daily"): "time:read",
+    ("GET", "/time/report/daily.csv"): "time:read",
     ("POST", "/time/resume"): "time:write",
     ("GET", "/time/running"): "time:read",
     ("POST", "/time/start"): "time:write",

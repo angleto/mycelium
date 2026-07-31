@@ -1827,6 +1827,15 @@ class ReportRowOut(BaseModel):
     currency: str
 
 
+class DailyReportRowOut(ReportRowOut):
+    """One (day, bucket) cell of the per-day histogram: a ``ReportRowOut``
+    plus the calendar day it falls on, in the timezone the caller asked
+    for. Only days with tracked time are emitted; the SPA zero-fills the
+    rest of the selected range."""
+
+    day: datetime.date
+
+
 class TaskTimeReportOut(BaseModel):
     task_id: uuid.UUID
     task_title: str | None

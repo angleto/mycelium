@@ -2670,6 +2670,56 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/time/report/daily": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Report Daily
+         * @description ``GET /time/report`` split by calendar day: identical buckets and
+         *     identical filter knobs, so the histogram and the donut drawn from
+         *     them cannot disagree. ``tz`` is an IANA name (default UTC) deciding
+         *     where a day starts; an unknown one is rejected rather than ignored.
+         *     Only days with tracked time are returned — the SPA zero-fills the
+         *     selected range, which keeps the payload proportional to the data.
+         */
+        get: operations["report_daily_time_report_daily_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/time/report/daily.csv": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Report Daily Csv
+         * @description The per-day report as CSV, one row per (day, bucket). This is the
+         *     billing artifact: ``/time/report.csv`` collapses a period into one row
+         *     per client/project, which is not enough to invoice against a client who
+         *     wants the days itemised. Same buckets, same filters and the same ``tz``
+         *     day boundary as the on-screen histogram, so the file reconciles with
+         *     what the operator saw before exporting it.
+         */
+        get: operations["report_daily_csv_time_report_daily_csv_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/time/report/by-task": {
         parameters: {
             query?: never;
@@ -2679,11 +2729,17 @@ export interface paths {
         };
         /**
          * Report By Task
-         * @description Per-task aggregate (total/billable/count) over the caller's
-         *     entries, each row carrying resolved project/client/timezone so the
-         *     SPA's drill-down (entries of a task) is just ``GET /time/entries``
-         *     filtered client-side. Distinct path from the configurable
-         *     ``/time/report`` (which keeps its ReportRowOut contract).
+         * @description Per-task aggregate (total/billable/count), each row carrying
+         *     resolved project/client/timezone so the SPA's drill-down (entries of
+         *     a task) is just ``GET /time/entries`` filtered client-side. Distinct
+         *     path from the configurable ``/time/report`` (which keeps its
+         *     ReportRowOut contract), but the same filter knobs: this table sits
+         *     under the report charts and must answer the same question they do.
+         *
+         *     Org-wide unless ``user_id`` narrows it, mirroring ``GET
+         *     /time/entries``. It was implicitly the caller's own entries, which
+         *     made it the one panel on the page disagreeing with everything around
+         *     it in a multi-member workspace.
          */
         get: operations["report_by_task_time_report_by_task_get"];
         put?: never;
@@ -7522,6 +7578,32 @@ export interface components {
             parent_invoice_id: string;
             /** Purpose */
             purpose?: string | null;
+        };
+        /**
+         * DailyReportRowOut
+         * @description One (day, bucket) cell of the per-day histogram: a ``ReportRowOut``
+         *     plus the calendar day it falls on, in the timezone the caller asked
+         *     for. Only days with tracked time are emitted; the SPA zero-fills the
+         *     rest of the selected range.
+         */
+        DailyReportRowOut: {
+            /** Key */
+            key: string | null;
+            /** Label */
+            label: string | null;
+            /** Seconds */
+            seconds: number;
+            /** Billable Seconds */
+            billable_seconds: number;
+            /** Amount */
+            amount: string;
+            /** Currency */
+            currency: string;
+            /**
+             * Day
+             * Format: date
+             */
+            day: string;
         };
         /** DependencyCreateIn */
         DependencyCreateIn: {
@@ -19267,11 +19349,102 @@ export interface operations {
             };
         };
     };
+    report_daily_time_report_daily_get: {
+        parameters: {
+            query?: {
+                group_by?: components["schemas"]["ReportGroup"];
+                start_from?: string | null;
+                start_to?: string | null;
+                billable?: boolean | null;
+                executor_kind?: components["schemas"]["ExecKind"] | null;
+                client_tag_id?: string | null;
+                project_tag_id?: string | null;
+                tz?: string | null;
+            };
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DailyReportRowOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    report_daily_csv_time_report_daily_csv_get: {
+        parameters: {
+            query?: {
+                group_by?: components["schemas"]["ReportGroup"];
+                start_from?: string | null;
+                start_to?: string | null;
+                billable?: boolean | null;
+                executor_kind?: components["schemas"]["ExecKind"] | null;
+                client_tag_id?: string | null;
+                project_tag_id?: string | null;
+                tz?: string | null;
+            };
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     report_by_task_time_report_by_task_get: {
         parameters: {
             query?: {
                 start_from?: string | null;
                 start_to?: string | null;
+                billable?: boolean | null;
+                executor_kind?: components["schemas"]["ExecKind"] | null;
+                client_tag_id?: string | null;
+                project_tag_id?: string | null;
+                user_id?: string | null;
             };
             header: {
                 "x-workspace-id": string;

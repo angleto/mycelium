@@ -2,6 +2,7 @@ import {
   Fragment,
   useCallback,
   useEffect,
+  useId,
   useState,
   type FormEvent,
 } from 'react'
@@ -15,13 +16,19 @@ import {
   fromLocalInput,
 } from '../lib/tz'
 import { useLinkedClientProject } from '../lib/linkedClientProject'
-import { useIsDark } from '../lib/useIsDark'
 import { useWorkflowStates } from '../lib/useWorkflowStates'
-import { periodRange, type Period } from '../lib/period'
+import { enumerateDays, periodRange, type Period } from '../lib/period'
 import { PeriodPicker } from '../components/PeriodPicker'
 import { TaskPickList } from '../components/TaskPickList'
-import { activeElapsedSec, isPaused } from '../lib/time'
-import type { components } from '../api/schema'
+import { DayBars, Donut } from '../components/TimeCharts'
+import {
+  REST_KEY,
+  useColorOf,
+  type ChartSeries,
+  type DayBucket,
+} from '../components/timeChartColors'
+import { activeElapsedSec, hhmm, hhmmss, isPaused } from '../lib/time'
+import type { components, paths } from '../api/schema'
 
 type Task = components['schemas']['TaskOut']
 type Entry = components['schemas']['TimeEntryOut']
@@ -35,92 +42,40 @@ type BillableF = 'all' | 'yes' | 'no'
 
 const GROUPS: Group[] = ['project', 'client', 'generic', 'user', 'task', 'task_memo']
 const ENT_PAGE = 50
+// Report buckets key on null for "unassigned" (an entry whose task carries
+// no client / project tag). Give it a stable string so it can hold a
+// colour and a legend row like any other bucket. The leading space keeps
+// it (and REST_KEY) collision-free against a UUID or a tag name.
+const NO_KEY = ' none'
 
-function hhmmss(sec: number): string {
-  const s = Math.max(0, Math.floor(sec))
-  const h = Math.floor(s / 3600)
-  const m = Math.floor((s % 3600) / 60)
-  return `${h}h ${String(m).padStart(2, '0')}m ${String(s % 60).padStart(2, '0')}s`
-}
+// One (day, bucket) cell: the tracked time and the money it bills. Held
+// together because the histogram and the billing table below it must never
+// be able to disagree about the same cell.
+type DayCell = { secs: number; amount: number }
 
-// Categorical donut palette. A fixed set cannot read against both a
-// near-white and a near-black surface, so there are two hand-tuned ramps
-// (each entry >=3:1 against its own surface for the data-viz boundary)
-// and the donut picks one from the resolved theme.
-const PIE_LIGHT = [
-  '#4a6b3e',
-  '#5b3fb8',
-  '#6a4f33',
-  '#a8456f',
-  '#0369a1',
-  '#a13322',
-  '#b45309',
-  '#3f6b32',
-  '#0891b2',
-]
-const PIE_DARK = [
-  '#7fa56e',
-  '#9a82e0',
-  '#a98963',
-  '#d99cb8',
-  '#38bdf8',
-  '#f08a76',
-  '#d97706',
-  '#a8d49a',
-  '#22d3ee',
-]
+// GET /time/report/daily row: a ReportRowOut plus the calendar day it
+// falls on (``day`` is an ISO YYYY-MM-DD in the timezone the request
+// asked for, which is what makes it a valid key into the zero-filled
+// day map below).
+type DailyRow = components['schemas']['DailyReportRowOut']
 
-// Dependency-free SVG donut (stroke-dasharray technique) of the
-// time distribution per slice, with a legend.
-function Donut({ data }: { data: { label: string; secs: number }[] }) {
-  const PIE = useIsDark() ? PIE_DARK : PIE_LIGHT
-  const total = data.reduce((s, d) => s + d.secs, 0) || 1
-  const r = 42
-  const C = 2 * Math.PI * r
-  // Functional prefix-sums: each slice starts where the prior ones
-  // ended. No mutable accumulator (React Compiler forbids reassigning
-  // an outer variable across the map closure during render).
-  const fracs = data.map((d) => d.secs / total)
-  const offsets = fracs.map((_, i) =>
-    fracs.slice(0, i).reduce((s, x) => s + x, 0),
-  )
-  return (
-    <div className="timepie">
-      <svg viewBox="0 0 120 120" width="150" height="150" role="img">
-        <g transform="rotate(-90 60 60)">
-          {data.map((_, i) => (
-            <circle
-              key={i}
-              cx="60"
-              cy="60"
-              r={r}
-              fill="none"
-              stroke={PIE[i % PIE.length]}
-              strokeWidth="16"
-              strokeDasharray={`${fracs[i] * C} ${C}`}
-              strokeDashoffset={-offsets[i] * C}
-            />
-          ))}
-        </g>
-      </svg>
-      <ul className="pielegend">
-        {data.map((d, i) => (
-          <li key={i}>
-            <span
-              className="pieswatch"
-              style={{ background: PIE[i % PIE.length] }}
-            />
-            <span className="grow">{d.label}</span>
-            <span className="muted">
-              {hhmmss(d.secs)} · {Math.round((d.secs / total) * 100)}%
-            </span>
-          </li>
-        ))}
-      </ul>
-    </div>
-  )
-}
-
+// The three chart/report queries are typed from the GENERATED operations,
+// not as a hand-rolled `Record<string, string | boolean>`. That matters:
+// an index-signature Record is assignable to every operation's params, so
+// a filter key that is misspelled — or quietly dropped, which is exactly
+// the bug this view shipped with — type-checks clean and is then ignored
+// by the server. Naming the operation types makes the compiler the drift
+// guard: the report, the donut, the histogram and the by-task table can
+// no longer diverge on a param name without failing `npm run typecheck`.
+type ReportQuery = NonNullable<
+  paths['/time/report']['get']['parameters']['query']
+>
+type ByTaskQuery = NonNullable<
+  paths['/time/report/by-task']['get']['parameters']['query']
+>
+type DailyQuery = NonNullable<
+  paths['/time/report/daily']['get']['parameters']['query']
+>
 
 export function TimeRoute() {
   const { t } = useTranslation()
@@ -134,9 +89,11 @@ export function TimeRoute() {
   const [entLoading, setEntLoading] = useState(false)
   const [report, setReport] = useState<Row[]>([])
   const [group, setGroup] = useState<Group>('project')
-  // The pie chart can be grouped independently from the report table
-  // — three buckets only: task / project / client. Persisted in
-  // localStorage; default = project.
+  // The CHARTS (donut + per-day histogram) are grouped independently
+  // from the report table — three buckets only: task / project / client.
+  // One selector drives both, so they are always two views of the same
+  // series list. Persisted in localStorage (key unchanged); default =
+  // project.
   type PieGroup = 'task' | 'project' | 'client'
   const PIE_KEY = 'mycelium.time.pieGroup'
   const [pieGroup, setPieGroup] = useState<PieGroup>(() => {
@@ -156,6 +113,11 @@ export function TimeRoute() {
     }
   }, [pieGroup])
   const [pieReport, setPieReport] = useState<Row[]>([])
+  // Per-day rows behind the histogram. Same filters and same group_by as
+  // the donut; only the extra day axis differs.
+  const [daily, setDaily] = useState<DailyRow[]>([])
+  // One legend labels BOTH charts, so both reference it by id.
+  const legendId = useId()
   const [scope, setScope] = useState<Scope>('all')
   // Default range = current month (1st .. last day, inclusive). The
   // backend treats start_from/start_to as ``[from 00:00:00, to 23:59:59]``,
@@ -225,8 +187,8 @@ export function TimeRoute() {
 
   const titleOf = (id: string) => tasks.find((x) => x.id === id)?.title ?? id.slice(0, 8)
 
-  const reportQuery = useCallback(() => {
-    const q: Record<string, string | boolean> = { group_by: group }
+  const reportQuery = useCallback((): ReportQuery => {
+    const q: ReportQuery = { group_by: group }
     if (scope === 'mine') q.executor_kind = 'human'
     if (scope === 'ai') q.executor_kind = 'llm_agent'
     if (from) q.start_from = `${from}T00:00:00`
@@ -236,6 +198,20 @@ export function TimeRoute() {
     if (projectId) q.project_tag_id = projectId
     return q
   }, [group, scope, from, to, billableF, clientId, projectId])
+
+  // /time/report/by-task takes the same filter knobs as /time/report, it
+  // just has no group_by (the grouping IS the task). Previously this call
+  // sent start_from/start_to ONLY, so picking a client — or a project, or
+  // a scope, or billable-only — narrowed everything on screen EXCEPT the
+  // "By task" table and the charts while the tab strip sat on "task",
+  // which showed the whole workspace next to a filtered report.
+  const byTaskQuery = useCallback((): ByTaskQuery => {
+    // group_by is the ONE knob /time/report/by-task does not take (the
+    // grouping IS the task); every other filter is shared verbatim.
+    const q: ReportQuery = { ...reportQuery() }
+    delete q.group_by
+    return q
+  }, [reportQuery])
 
   // Previous-period diff: fetch /time/report grouped by user (gives
   // one row) for the previous range and store totals. Skipped when
@@ -277,9 +253,20 @@ export function TimeRoute() {
   // Generic CSV blob download. The two report flavors share auth +
   // filename plumbing; only the path + query differ.
   const downloadCsv = useCallback(
-    async (path: string, query: Record<string, string | boolean>, filename: string) => {
+    async (
+      path: string,
+      // Widened to the generated query shapes (whose values are
+      // ``T | null | undefined``) so the callers can hand over the very
+      // object they send to the JSON endpoint instead of casting it. An
+      // absent filter is dropped rather than serialised as the string
+      // "undefined", which the server would reject.
+      query: Record<string, string | number | boolean | null | undefined>,
+      filename: string,
+    ) => {
       const usp = new URLSearchParams()
-      for (const [k, v] of Object.entries(query)) usp.set(k, String(v))
+      for (const [k, v] of Object.entries(query)) {
+        if (v !== null && v !== undefined) usp.set(k, String(v))
+      }
       const res = await authFetch(`${path}?${usp.toString()}`)
       if (!res.ok) {
         setErr(`HTTP ${res.status}`)
@@ -300,9 +287,11 @@ export function TimeRoute() {
 
   const downloadReportCsv = useCallback(async () => {
     const today = new Date().toISOString().slice(0, 10)
+    // /time/report.csv takes exactly /time/report's params, so the CSV is
+    // the same rows the table shows — no cast needed to say so.
     await downloadCsv(
       '/time/report.csv',
-      reportQuery() as Record<string, string | boolean>,
+      reportQuery(),
       `mycelium-time-report-${today}.csv`,
     )
   }, [downloadCsv, reportQuery])
@@ -321,28 +310,6 @@ export function TimeRoute() {
     const today = new Date().toISOString().slice(0, 10)
     await downloadCsv('/time/entries.csv', q, `mycelium-time-entries-${today}.csv`)
   }, [downloadCsv, from, to, billableF, clientId, projectId])
-
-  const loadReport = useCallback(async () => {
-    const r = await api.GET('/time/report', {
-      params: { header: workspaceHeader(), query: reportQuery() },
-    })
-    if (r.data) setReport(r.data)
-    const q: Record<string, string> = {}
-    if (from) q.start_from = `${from}T00:00:00`
-    if (to) q.start_to = `${to}T23:59:59`
-    const bt = await api.GET('/time/report/by-task', {
-      params: { header: workspaceHeader(), query: q },
-    })
-    if (bt.data) setByTask(bt.data)
-    // Pie chart aggregation: same filters as the main report, just a
-    // different group_by. Kept as a separate request so changing the
-    // pie selector doesn't force the table to re-render.
-    const pieQ = { ...reportQuery(), group_by: pieGroup }
-    const pr = await api.GET('/time/report', {
-      params: { header: workspaceHeader(), query: pieQ },
-    })
-    if (pr.data) setPieReport(pr.data)
-  }, [reportQuery, from, to, pieGroup])
 
   // Entries query reads the same focus (client + project) as the
   // report / pie / by-task pulls. Without these the Entries list
@@ -382,10 +349,18 @@ export function TimeRoute() {
     setEntMore(data.length === ENT_PAGE)
   }, [entLoading, entMore, entOffset, entriesQuery])
 
+  // Every mutation funnels through here, and every derived read (report,
+  // by-task, donut, per-day histogram, previous-period diff) hangs off the
+  // SAME ``reportTick`` signal. There used to be a second, imperative
+  // ``loadReport`` refreshing three of those four by hand: it predated the
+  // histogram and never learned about it, so start / stop / pause grew the
+  // donut while the columns underneath it kept the old heights and the two
+  // stopped summing to the same total. A partial refresher is a bug that
+  // reappears with every new panel — refetch by signal, not by enumeration.
   const reloadEntries = useCallback(async () => {
     await resetEntries()
-    await loadReport()
-  }, [resetEntries, loadReport])
+    setReportTick((n) => n + 1)
+  }, [resetEntries])
 
   // Realtime-ish: poll the running timer (no WS endpoint in v1). State
   // is only set inside the async tick, never sync in the effect body.
@@ -456,15 +431,12 @@ export function TimeRoute() {
   useEffect(() => {
     let active = true
     void (async () => {
-      const q: Record<string, string> = {}
-      if (from) q.start_from = `${from}T00:00:00`
-      if (to) q.start_to = `${to}T23:59:59`
       const [r, bt] = await Promise.all([
         api.GET('/time/report', {
           params: { header: workspaceHeader(), query: reportQuery() },
         }),
         api.GET('/time/report/by-task', {
-          params: { header: workspaceHeader(), query: q },
+          params: { header: workspaceHeader(), query: byTaskQuery() },
         }),
       ])
       if (!active) return
@@ -474,18 +446,20 @@ export function TimeRoute() {
     return () => {
       active = false
     }
-  }, [activeId, reportQuery, from, to, reportTick])
+  }, [activeId, reportQuery, byTaskQuery, reportTick])
 
-  // Pie chart fetch (separate from the table report so changing the
-  // pie group selector doesn't refetch the table). Also drives the
+  // Chart aggregation fetch (separate from the table report so changing
+  // the chart group selector doesn't refetch the table). Also drives the
   // first paint after page load — the previous version only fetched
-  // pieReport inside ``loadReport`` (called from edit / create flows),
-  // so switching the pie to project or client on a fresh load showed
-  // an empty donut.
+  // pieReport from the imperative refresher called by the edit / create
+  // flows, so switching the charts to project or client on a fresh load
+  // showed an empty donut. It now runs for 'task' too: the donut used to read
+  // the by-task report for that one tab, which meant the two charts
+  // could not share a bucket key (/time/report/daily buckets by the
+  // report's keys), and the numbers came from a different query.
   useEffect(() => {
     let active = true
     void (async () => {
-      if (pieGroup === 'task') return
       const pieQ = { ...reportQuery(), group_by: pieGroup }
       const pr = await api.GET('/time/report', {
         params: { header: workspaceHeader(), query: pieQ },
@@ -497,6 +471,106 @@ export function TimeRoute() {
       active = false
     }
   }, [activeId, reportQuery, pieGroup, reportTick])
+
+  // The per-day query, shared by the histogram fetch and the CSV export so
+  // the file can never be a different cut of the data than the chart and
+  // the table the operator was looking at when they clicked Export.
+  const dailyQuery = useCallback((): DailyQuery => {
+    const q: DailyQuery = { ...reportQuery(), group_by: pieGroup }
+    // The server validates the zone and 4xx's on an unknown one rather
+    // than silently bucketing in UTC, so send it only when the browser
+    // actually resolved one.
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone
+    if (tz) q.tz = tz
+    return q
+  }, [reportQuery, pieGroup])
+
+  const downloadDailyCsv = useCallback(async () => {
+    // The billing export: one row per (day, client|project|task) with
+    // seconds, hours, billable seconds and amount. /time/report.csv
+    // collapses the whole period into a single row per bucket, which cannot
+    // itemise an invoice by day. Same query as the chart above it.
+    const today = new Date().toISOString().slice(0, 10)
+    await downloadCsv(
+      '/time/report/daily.csv',
+      dailyQuery(),
+      `mycelium-time-daily-${pieGroup}-${today}.csv`,
+    )
+  }, [downloadCsv, dailyQuery, pieGroup])
+
+  // Per-day histogram fetch. Keyed exactly like the donut's (plus the
+  // browser's IANA zone, so "a day" is the user's day and not UTC's), and
+  // it carries reportTick so an entry edit / delete refreshes it too.
+  useEffect(() => {
+    let active = true
+    void (async () => {
+      const q = dailyQuery()
+      let rows: DailyRow[] | undefined
+      try {
+        const r = await api.GET('/time/report/daily', {
+          params: { header: workspaceHeader(), query: q },
+        })
+        rows = r.data
+      } catch {
+        // Network error: fall through with rows === undefined.
+      }
+      if (!active) return
+      // Only a SUCCESSFUL response replaces the render (an empty array
+      // still counts, and still clears the chart). A failed refetch keeps
+      // the frame — blanking the histogram on a transient 500 is a worse
+      // lie than showing the previous (still-labelled) slice.
+      if (rows) setDaily(rows)
+    })()
+    return () => {
+      active = false
+    }
+  }, [activeId, dailyQuery, reportTick])
+
+  // Drill-down under a "By task" row. This used to filter the already
+  // loaded `entries` array client-side, which showed entries from OUTSIDE
+  // the selected period and silently missed everything past the first
+  // page of 50. Fetch the task's entries instead, under the same period /
+  // billable / client / project filters as the report above it. The row
+  // is keyed by task id so a stale payload never paints under a different
+  // task while the new one is in flight.
+  const [drill, setDrill] = useState<{ taskId: string; rows: Entry[] } | null>(
+    null,
+  )
+  useEffect(() => {
+    let active = true
+    void (async () => {
+      if (!openTask) {
+        setDrill(null)
+        return
+      }
+      const q: Record<string, string | number | boolean> = {
+        task_id: openTask,
+        limit: 500,
+      }
+      if (from) q.start_from = `${from}T00:00:00`
+      if (to) q.start_to = `${to}T23:59:59`
+      if (billableF !== 'all') q.billable = billableF === 'yes'
+      if (clientId) q.client_tag_id = clientId
+      if (projectId) q.project_tag_id = projectId
+      const { data } = await api.GET('/time/entries', {
+        params: { header: workspaceHeader(), query: q },
+      })
+      if (!active) return
+      setDrill({ taskId: openTask, rows: data ?? [] })
+    })()
+    return () => {
+      active = false
+    }
+  }, [
+    activeId,
+    openTask,
+    from,
+    to,
+    billableF,
+    clientId,
+    projectId,
+    reportTick,
+  ])
 
   const refreshRunning = useCallback(async () => {
     const { data } = await api.GET('/time/running', {
@@ -554,9 +628,7 @@ export function TimeRoute() {
       return
     }
     setEditId(null)
-    await resetEntries()
-    await loadReport()
-    setReportTick((n) => n + 1)
+    await reloadEntries()
   }
 
   async function deleteEntry(en: Entry) {
@@ -570,9 +642,7 @@ export function TimeRoute() {
       return
     }
     if (editId === en.id) setEditId(null)
-    await resetEntries()
-    await loadReport()
-    setReportTick((n) => n + 1)
+    await reloadEntries()
   }
 
   async function startTask(taskId: string, parallel: boolean) {
@@ -628,6 +698,116 @@ export function TimeRoute() {
   const runningByTask = new Map(running.map((r) => [r.task_id, r]))
   // Per-task view: drop tasks with no time logged (0% / unreported).
   const shownByTask = byTask.filter((r) => r.total_seconds > 0)
+
+  // ---- ONE series list, shared by both charts -------------------------
+  // Top 8 buckets by tracked time, then the whole tail folded into a
+  // single "+N" residual (a 9th categorical hue is never invented). The
+  // donut, the histogram and the legend all read THIS array and the
+  // key -> colour map built from it, so a colour means the same entity in
+  // both charts and dropping a bucket never repaints the survivors.
+  const chartRows = [...pieReport]
+    .filter((r) => r.seconds > 0)
+    .sort(
+      (a, b) =>
+        b.seconds - a.seconds || (a.label ?? '').localeCompare(b.label ?? ''),
+    )
+  const topRows = chartRows.slice(0, 8)
+  const restSecs = chartRows.slice(8).reduce((s, r) => s + r.seconds, 0)
+  const chartSeries: ChartSeries[] = [
+    ...topRows.map((r) => ({
+      key: r.key ?? NO_KEY,
+      label: r.label ?? r.key?.slice(0, 8) ?? '—',
+      secs: r.seconds,
+    })),
+    ...(restSecs > 0
+      ? [
+          {
+            key: REST_KEY,
+            label: `+${chartRows.length - 8}`,
+            secs: restSecs,
+          },
+        ]
+      : []),
+  ]
+  const colorOf = useColorOf(chartSeries)
+
+  // Zero-fill the histogram across the SELECTED range: /time/report/daily
+  // only returns (day, bucket) pairs that have time, and a day with none
+  // has to read as "no work" rather than disappear from the axis. Buckets
+  // outside the top 8 fold into the same residual the donut uses — both
+  // endpoints run the same server-side bucketer over the same filtered
+  // entries, so every key here also exists in chartRows.
+  //
+  // The day map is then WIDENED by whatever the server actually returned,
+  // and that is not belt-and-braces. start_from / start_to select
+  // instants, while the histogram buckets in the browser's zone: east of
+  // UTC an entry started late on the range's last day belongs to the NEXT
+  // calendar day, and west of UTC one started early on the first day
+  // belongs to the PREVIOUS one. Those rows are part of the very report
+  // the donut draws (per-day sums equal report() totals by construction),
+  // so dropping them as "outside the range" is precisely how the two
+  // charts end up printing different totals for the same filters —
+  // verified against the API: a 30-minute entry at 23:30Z on the last day
+  // of a month showed 30m in the donut and an empty histogram for a
+  // UTC+2 browser. Better a column one day past the picker than a chart
+  // that quietly disagrees with the one above it.
+  //
+  // Seconds AND amount are accumulated into ONE structure, not two parallel
+  // maps: the chart reads the seconds, the billing table reads both, and a
+  // second structure fed by a second pass is exactly how the donut and the
+  // histogram drifted apart before.
+  const topKeys = new Set(topRows.map((r) => r.key ?? NO_KEY))
+  const dayCells = new Map<string, Record<string, DayCell>>()
+  for (const d of enumerateDays(from, to)) dayCells.set(d, {})
+  for (const row of daily) {
+    const cells = dayCells.get(row.day) ?? {}
+    dayCells.set(row.day, cells)
+    const k = row.key ?? NO_KEY
+    const bucket = topKeys.has(k) ? k : REST_KEY
+    const cur = cells[bucket] ?? { secs: 0, amount: 0 }
+    cells[bucket] = {
+      secs: cur.secs + row.seconds,
+      amount: cur.amount + Number(row.amount ?? 0),
+    }
+  }
+  // ISO YYYY-MM-DD sorts lexicographically = chronologically, so the axis
+  // stays in order after the widening appended an out-of-range day.
+  const dayOrder = [...dayCells.keys()].sort((a, b) =>
+    a < b ? -1 : a > b ? 1 : 0,
+  )
+  const dayBuckets: DayBucket[] = dayOrder.map((day) => ({
+    day,
+    parts: Object.fromEntries(
+      Object.entries(dayCells.get(day) ?? {}).map(([k, c]) => [k, c.secs]),
+    ),
+  }))
+
+  // ---- The billing table ----------------------------------------------
+  // The histogram answers "how did the month go"; an invoice needs the
+  // exact figure per day per client/project, which is not something anyone
+  // should be reading off a bar. Same buckets, same colours, same filters —
+  // only days that actually carry time (a zero row adds nothing to an
+  // invoice, whereas in the chart above an empty column IS information).
+  const billRows = dayOrder
+    .map((day) => {
+      const cells = dayCells.get(day) ?? {}
+      const vals = Object.values(cells)
+      return {
+        day,
+        cells,
+        secs: vals.reduce((s, c) => s + c.secs, 0),
+        amount: vals.reduce((s, c) => s + c.amount, 0),
+      }
+    })
+    .filter((r) => r.secs > 0)
+  const billTotals = chartSeries.map((s) =>
+    billRows.reduce((acc, r) => acc + (r.cells[s.key]?.secs ?? 0), 0),
+  )
+  const billGrandSecs = billRows.reduce((a, r) => a + r.secs, 0)
+  const billGrandAmount = billRows.reduce((a, r) => a + r.amount, 0)
+  // Currency is per bucket server-side; the page has always summed across
+  // them (see the period diff), so report the one actually carrying money.
+  const billCurrency = daily.find((r) => Number(r.amount ?? 0) > 0)?.currency ?? ''
 
   return (
     <section className="card">
@@ -976,35 +1156,108 @@ export function TimeRoute() {
           ))}
         </div>
         <Donut
-          data={(() => {
-            // Pie data comes from the dedicated pieReport (grouped by
-            // pieGroup) when the user picks project/client; when on
-            // 'task' we keep the by-task drill-down so the donut and
-            // the table below share the same numbers.
-            if (pieGroup === 'task') {
-              const s = [...shownByTask].sort(
-                (a, b) => b.total_seconds - a.total_seconds,
-              )
-              const top = s.slice(0, 8).map((r) => ({
-                label: r.task_title ?? r.task_id.slice(0, 8),
-                secs: r.total_seconds,
-              }))
-              const rest = s.slice(8).reduce((x, r) => x + r.total_seconds, 0)
-              return rest > 0
-                ? [...top, { label: `+${s.length - 8}`, secs: rest }]
-                : top
-            }
-            const s = [...pieReport].sort((a, b) => b.seconds - a.seconds)
-            const top = s.slice(0, 8).map((r) => ({
-              label: r.label ?? '—',
-              secs: r.seconds,
-            }))
-            const rest = s.slice(8).reduce((x, r) => x + r.seconds, 0)
-            return rest > 0
-              ? [...top, { label: `+${s.length - 8}`, secs: rest }]
-              : top
-          })()}
+          series={chartSeries}
+          colorOf={colorOf}
+          legendId={legendId}
         />
+        <h3>
+          {t('time.byDay')}{' '}
+          <button
+            type="button"
+            className="btn--ghost btn--sm"
+            onClick={() => void downloadDailyCsv()}
+            title={t('time.exportCsvDailyTip')}
+          >
+            {t('time.exportCsvDaily')}
+          </button>
+        </h3>
+        <DayBars
+          days={dayBuckets}
+          series={chartSeries}
+          colorOf={colorOf}
+          legendId={legendId}
+        />
+        {billRows.length > 0 && (
+          <>
+          {/* The hint lives OUTSIDE the scroll box: as a <caption> it
+              inherited the table's nowrap and got clipped, and it scrolled
+              away horizontally with the columns it describes. */}
+          <p className="hint" id={`${legendId}-daytbl`}>
+            {t('time.byDayTableHint')}
+          </p>
+          <div className="scrollbox scrollbox--x">
+            <table
+              className="tbl daytbl"
+              aria-describedby={`${legendId}-daytbl`}
+            >
+              <thead>
+                <tr>
+                  <th scope="col">{t('time.day')}</th>
+                  {chartSeries.map((s) => (
+                    <th key={s.key} scope="col" className="num">
+                      <span
+                        className="pieswatch"
+                        style={{ background: colorOf(s.key) }}
+                        aria-hidden="true"
+                      />
+                      {s.label}
+                    </th>
+                  ))}
+                  <th scope="col" className="num">
+                    {t('time.duration')}
+                  </th>
+                  <th scope="col" className="num">
+                    {t('time.amount')}
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {billRows.map((r) => (
+                  <tr key={r.day}>
+                    <th scope="row">{r.day}</th>
+                    {chartSeries.map((s) => {
+                      const c = r.cells[s.key]
+                      return (
+                        <td key={s.key} className="num">
+                          {c && c.secs > 0 ? (
+                            hhmm(c.secs)
+                          ) : (
+                            <span className="muted">·</span>
+                          )}
+                        </td>
+                      )
+                    })}
+                    <td className="num">
+                      <strong>{hhmm(r.secs)}</strong>
+                    </td>
+                    <td className="num">
+                      {r.amount.toFixed(2)} {billCurrency}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr>
+                  <th scope="row">{t('time.total')}</th>
+                  {billTotals.map((secs, i) => (
+                    <td key={chartSeries[i].key} className="num">
+                      {secs > 0 ? hhmm(secs) : <span className="muted">·</span>}
+                    </td>
+                  ))}
+                  <td className="num">
+                    <strong>{hhmm(billGrandSecs)}</strong>
+                  </td>
+                  <td className="num">
+                    <strong>
+                      {billGrandAmount.toFixed(2)} {billCurrency}
+                    </strong>
+                  </td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+          </>
+        )}
         <table className="tbl">
           <thead>
             <tr>
@@ -1056,10 +1309,13 @@ export function TimeRoute() {
                 {openTask === r.task_id && (
                   <tr key={r.task_id + '-d'}>
                     <td colSpan={6}>
-                      <ul className="list">
-                        {entries
-                          .filter((e) => e.task_id === r.task_id)
-                          .map((e) => (
+                      {drill?.taskId !== r.task_id ? (
+                        <p className="hint">{t('time.drillLoading')}</p>
+                      ) : drill.rows.length === 0 ? (
+                        <p className="hint">{t('time.drillNone')}</p>
+                      ) : (
+                        <ul className="list">
+                          {drill.rows.map((e) => (
                             <li key={e.id} className="taskrow">
                               <span className="muted">
                                 {fmtDateTime(
@@ -1085,7 +1341,8 @@ export function TimeRoute() {
                               </span>
                             </li>
                           ))}
-                      </ul>
+                        </ul>
+                      )}
                     </td>
                   </tr>
                 )}
