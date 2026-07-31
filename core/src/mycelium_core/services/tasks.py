@@ -23,7 +23,6 @@ from mycelium_core.models.annotation import Annotation
 from mycelium_core.models.classification_job import ClassificationJob
 from mycelium_core.models.identity import Identity, IdentityKind
 from mycelium_core.models.membership import Role
-from mycelium_core.models.project_profile import ProjectProfile
 from mycelium_core.models.tag import Tag, TagKind
 from mycelium_core.models.task import ExecKind, Necessity, Task
 from mycelium_core.models.task_collaborator import TaskCollaborator
@@ -31,7 +30,7 @@ from mycelium_core.models.task_tag import TaskTag
 from mycelium_core.models.user import User
 from mycelium_core.models.workflow import WorkflowState
 from mycelium_core.services import annotations as _annotations
-from mycelium_core.services import audit, lifecycle, taxonomy, text_patch
+from mycelium_core.services import audit, lifecycle, tag_assignment, text_patch
 from mycelium_core.services import entity_revisions as _revisions
 from mycelium_core.services import identities as identities_svc
 from mycelium_core.services import task_search as _task_search
@@ -115,10 +114,15 @@ def _validate_event_pairing(start_at: Any, duration_minutes: Any) -> None:
         raise DomainError(MessageCode.DOMAIN_ERROR)
 
 
-async def _require_tag(session: AsyncSession, tag_id: uuid.UUID) -> None:
-    found = (await session.execute(select(Tag.id).where(Tag.id == tag_id))).scalar_one_or_none()
-    if found is None:
+async def _tag_kind(session: AsyncSession, tag_id: uuid.UUID) -> TagKind:
+    """The tag's kind, or TAG_NOT_FOUND. RLS hides another workspace's
+    tags, so a foreign id simply reads as missing -- the same existence
+    check the tag endpoints have always made, folded into the lookup
+    the structural dispatch (attach_tag / detach_tag) needs anyway."""
+    kind = (await session.execute(select(Tag.kind).where(Tag.id == tag_id))).scalar_one_or_none()
+    if kind is None:
         raise NotFoundError(MessageCode.TAG_NOT_FOUND)
+    return kind
 
 
 async def get_task(
@@ -245,37 +249,26 @@ async def create_task(
     await require_role(session, org_id, actor_id, Role.member)
     if parent_task_id is not None:
         await get_task(session, org_id=org_id, task_id=parent_task_id)
-    eff_tag_ids = list(tag_ids)
-    project_tag_id: uuid.UUID | None = None
-    if eff_tag_ids:
-        project_tag_id = (
-            await session.execute(
-                select(Tag.id).where(Tag.id.in_(eff_tag_ids), Tag.kind == TagKind.project).limit(1)
-            )
-        ).scalar_one_or_none()
-    if project_tag_id is None:
-        # No orphan tasks: every task gets a project (hence, via the
-        # project, a client). Falls back to the default "General"
-        # project under the default "Personal" client.
-        project_tag_id = await taxonomy.ensure_default_project(
-            session, org_id=org_id, actor_id=actor_id
-        )
-        eff_tag_ids.append(project_tag_id)
-    # Auto-tag the project's client. A project always belongs to a
-    # client (project_profile.client_tag_id is set at creation,
-    # ensure_default_project also wires it to Personal). Carrying the
-    # client tag explicitly on the task lets every per-client filter /
-    # report / focus stay a flat ``WHERE tag_id = <client>`` instead of
-    # joining task_tags -> project_profile. Idempotent: skip if already
-    # present in tag_ids.
-    client_tag_id = (
-        await session.execute(
-            select(ProjectProfile.client_tag_id).where(ProjectProfile.tag_id == project_tag_id)
-        )
-    ).scalar_one_or_none()
-    if client_tag_id is not None and client_tag_id not in eff_tag_ids:
-        eff_tag_ids.append(client_tag_id)
-    workflow = await wf.resolve_effective_workflow(session, org_id, project_tag_id)
+    # Structural tags are resolved by the choke-point (docs/adr/0003,
+    # services/tag_assignment): it picks THE project out of the
+    # requested bag and derives the client from it, so the task carries
+    # the client tag explicitly (every per-client filter / report /
+    # focus stays a flat ``WHERE tag_id = <client>`` instead of joining
+    # task_tags -> project_profile) without this service deciding what
+    # "the" project is. ``entity="task"`` never resolves to a NULL
+    # project -- no orphan tasks: it falls back to the default
+    # "General" project under "Personal" -- so the workflow lookup
+    # below always has a project to key on. Resolving BEFORE the insert
+    # also means an unknown tag id is rejected without leaving a task
+    # row behind.
+    structural = await tag_assignment.resolve_structural(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        entity="task",
+        requested=tag_ids,
+    )
+    workflow = await wf.resolve_effective_workflow(session, org_id, structural.project_tag_id)
     initial = await wf.get_initial_state(session, workflow.id)
     priority = derive_priority(importance, urgency)
     # docs/adr/0028 Stage C: resolve assignee through identities.
@@ -387,9 +380,27 @@ async def create_task(
         ) or "no_overlap_task_participants" in str(exc.orig):
             raise ConflictError(MessageCode.EVENT_OVERLAP) from exc
         raise
-    for tag_id in eff_tag_ids:
-        await _require_tag(session, tag_id)
-        session.add(TaskTag(org_id=org_id, task_id=task.id, tag_id=tag_id))
+    # The client/project pair is written by the choke-point (which also
+    # logs the attach audit); the free-form facets go in one by one so a
+    # tag repeated in ``tag_ids`` stays idempotent instead of raising an
+    # unhandled IntegrityError on the junction primary key.
+    await tag_assignment.set_structural(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        entity="task",
+        entity_id=task.id,
+        structural=structural,
+    )
+    for tag_id in structural.generic_ids:
+        await tag_assignment.attach_generic(
+            session,
+            org_id=org_id,
+            actor_id=actor_id,
+            entity="task",
+            entity_id=task.id,
+            tag_id=tag_id,
+        )
     for user_id in assignee_ids:
         session.add(TaskCollaborator(org_id=org_id, task_id=task.id, user_id=user_id))
     await session.flush()
@@ -1343,35 +1354,42 @@ async def attach_tag(
 ) -> None:
     await require_role(session, org_id, actor_id, Role.member)
     await get_task(session, org_id=org_id, task_id=task_id)
-    await _require_tag(session, tag_id)
-    # If the added tag is a project, also attach its client tag — same
-    # hierarchy invariant as create_task. Bulk-attach the pair so the
-    # caller can't observe a half-state.
-    extra: list[uuid.UUID] = []
-    tag_row = (await session.execute(select(Tag.kind).where(Tag.id == tag_id))).scalar_one_or_none()
-    if tag_row is TagKind.project:
-        client_tag_id = (
-            await session.execute(
-                select(ProjectProfile.client_tag_id).where(ProjectProfile.tag_id == tag_id)
-            )
-        ).scalar_one_or_none()
-        if client_tag_id is not None:
-            extra.append(client_tag_id)
-    for tid in (tag_id, *extra):
-        try:
-            async with session.begin_nested():
-                session.add(TaskTag(org_id=org_id, task_id=task_id, tag_id=tid))
-                await session.flush()
-        except IntegrityError:
-            continue
-    await audit.log(
-        session,
-        org_id=org_id,
-        actor_id=actor_id,
-        entity="task",
-        entity_id=task_id,
-        action="attach_tag",
-    )
+    kind = await _tag_kind(session, tag_id)
+    # Dispatch by kind; the choke-point owns the write AND its audit row
+    # (docs/adr/0003, services/tag_assignment), so nothing is logged
+    # here a second time.
+    if kind is TagKind.project:
+        # Attaching a project is a MOVE, not an error: the client
+        # follows the project, so the pair is swapped atomically instead
+        # of this service expanding project -> client by hand.
+        await tag_assignment.move_to_project(
+            session,
+            org_id=org_id,
+            actor_id=actor_id,
+            entity="task",
+            entity_id=task_id,
+            project_tag_id=tag_id,
+        )
+    elif kind is TagKind.client:
+        # A client that contradicts the attached project is refused
+        # there (TAG_CLIENT_PROJECT_MISMATCH): the project is the truth.
+        await tag_assignment.set_client(
+            session,
+            org_id=org_id,
+            actor_id=actor_id,
+            entity="task",
+            entity_id=task_id,
+            client_tag_id=tag_id,
+        )
+    else:
+        await tag_assignment.attach_generic(
+            session,
+            org_id=org_id,
+            actor_id=actor_id,
+            entity="task",
+            entity_id=task_id,
+            tag_id=tag_id,
+        )
 
 
 async def detach_tag(
@@ -1383,16 +1401,21 @@ async def detach_tag(
     tag_id: uuid.UUID,
 ) -> None:
     await require_role(session, org_id, actor_id, Role.member)
-    await session.execute(
-        delete(TaskTag).where(TaskTag.task_id == task_id, TaskTag.tag_id == tag_id)
-    )
-    await audit.log(
+    kind = await _tag_kind(session, tag_id)
+    if kind in (TagKind.client, TagKind.project):
+        # A task is exactly-one client AND exactly-one project
+        # (docs/adr/0003), so there is no legal state to detach INTO:
+        # re-pointing the task is a MOVE, i.e. attaching the wanted
+        # project (which drags its client along).
+        raise DomainError(MessageCode.TAG_STRUCTURAL_REQUIRED)
+    # Free-form facet: the choke-point deletes it and logs the audit.
+    await tag_assignment.detach_generic(
         session,
         org_id=org_id,
         actor_id=actor_id,
         entity="task",
         entity_id=task_id,
-        action="detach_tag",
+        tag_id=tag_id,
     )
 
 

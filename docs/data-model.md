@@ -11,14 +11,21 @@ org-scoped entity. Memory is partitioned by `org_id`.
   structured address, rea, cassa })`
 - `users(id, email, password_hash, ...)` (global)
 - `memberships(org_id, user_id, role[owner|admin|member|guest])`
-- `tags(id, org_id, kind[generic|client|project], name, color, status,
-  version)`
+- `tags(id, org_id, kind[generic|client|project|memory_channel], name,
+  color, status, version)` — `client` and `project` are the
+  **structural** kinds (cardinality-constrained on the junctions,
+  ADR-0050); `generic` and `memory_channel` are free-form facets,
+  unconstrained many-to-many
 - `client_profile(tag_id PK FK->tags.id, ragione_sociale,
   id_fiscale_iva(country,id), codice_fiscale, address(indirizzo,cap,
   comune,provincia,nazione), codice_destinatario|pec)`
-- `project_profile(tag_id PK FK->tags.id, client_tag_id FK->tags.id,
-  rate, currency, budget, workflow_id?)`
-- `task_tags(task_id, tag_id)` (one relation per kind)
+- `project_profile(tag_id PK FK->tags.id, client_tag_id FK->tags.id
+  NOT NULL, rate, currency, budget, workflow_id?)` — every project has
+  exactly one client (ADR-0050 (d)), and it is the truth from which a
+  tagged entity's client is derived
+- `task_tags(task_id, tag_id)` (one relation per kind: exactly one
+  `client` row and exactly one `project` row per task, the client
+  being that project's `client_tag_id`)
 
 ## Tasks, dependencies, scheduling
 
@@ -114,9 +121,15 @@ org-scoped entity. Memory is partitioned by `org_id`.
 
 ## Notes and voice capture
 
-- `notes(id, org_id, project_tag_id?, kind[voice|text|conversation],
-  title?, transcript?, summary?, audio_ref?, status, created_by,
-  version)`
+- `notes(id, org_id, kind[voice|text|conversation], title?, summary?,
+  audio_ref?, status, created_by, version)` (the body lives in
+  `note_part`; migration 0012 dropped `notes.transcript`)
+- `note_tags(note_id, tag_id)` (one relation per kind, like
+  `task_tags`; migration 0016 dropped `notes.project_id`, so the
+  junction is the only truth). A note carries exactly one `client` row
+  and AT MOST one `project` row: no project = the personal retrieval
+  perimeter (`memory_blobs.project_id` NULL), a first-class state and
+  not a missing field. ADR-0050.
 - `note_turns(note_id, ord, role[user|llm], content)` (conversation
   kind)
 - `note_tasks(note_id, task_id)` (action item -> Task, the email->task
@@ -140,14 +153,19 @@ org-scoped entity. Memory is partitioned by `org_id`.
 
 ## Memory
 
-- `memory_blobs(id, org_id, project_tag_id, namespace, tier[hot|warm|
+- `memory_blobs(id, org_id, project_id?, namespace, tier[hot|warm|
   cold], text?, summary?, embedding vector, model_id, dim,
   fts tsvector, trgm, last_accessed_at, access_count, access_score,
   importance, concept_id?)` (access_score = frequency + recency with
   decay; tiering driven by score+importance, ADR-0016; cold stays
   always queryable)
   - `PARTITION BY org_id`; mandatory RLS; mandatory
-    (org_id, project_tag_id) predicate in every query
+    (org_id, project_id) predicate in every query. `project_id` NULL is
+    the personal perimeter, not "unscoped": it is where a projectless
+    note indexes, and it is queried explicitly (ADR-0050)
+  - `memory_blob_tags` is deliberately NOT cardinality-constrained:
+    consolidation unions the member blobs' tags as provenance, and the
+    authoritative perimeter is the scalar `project_id` above (ADR-0050)
   - per-partition indexes: HNSW on `embedding`, GIN on `fts`, GIN/GiST
     trigram on `trgm`
 - `blob_sources(blob_id, source_kind, source_id, created_at)`

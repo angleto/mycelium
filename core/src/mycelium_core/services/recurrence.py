@@ -44,11 +44,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from mycelium_core.errors import DomainError
 from mycelium_core.i18n import MessageCode
 from mycelium_core.models.identity import Identity
+from mycelium_core.models.tag import Tag, TagKind
 from mycelium_core.models.task import Task
 from mycelium_core.models.task_collaborator import TaskCollaborator
 from mycelium_core.models.task_participant import TaskParticipant
 from mycelium_core.models.task_tag import TaskTag
 from mycelium_core.models.workflow import WorkflowState
+from mycelium_core.services import tag_assignment
 from mycelium_core.services import workflow as wf_svc
 
 _WEEKDAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
@@ -140,6 +142,38 @@ def next_occurrence_datetime(anchor: dt.datetime, spec: dict[str, Any]) -> dt.da
     return dt.datetime.combine(nd, anchor.timetz())
 
 
+async def spawn_tag_ids(session: AsyncSession, *, template_task_id: uuid.UUID) -> list[uuid.UUID]:
+    """The tag bag an occurrence spawned off ``template_task_id`` must
+    be created with: the template's project plus its free-form facets,
+    never its client.
+
+    The client is DERIVED from the project by the choke-point
+    (services/tag_assignment, docs/adr/0003), so copying the template's
+    client tag would only give the resolver a chance to contradict
+    itself. A template that drifted before the invariant landed (two
+    projects, or a client belonging to another project) is normalised
+    here, oldest project wins, rather than rejected: a spawn runs
+    unattended (worker drain, completion hook) and must produce a clean
+    occurrence, not fail once per occurrence on dirty template data.
+
+    Shared by both spawn paths -- the ``tasks.recurrence`` jsonb hook
+    below and the ``task_recurrences`` drain in services/notifications.
+    """
+    rows = (
+        await session.execute(
+            select(Tag.id, Tag.kind)
+            .join(TaskTag, TaskTag.tag_id == Tag.id)
+            .where(TaskTag.task_id == template_task_id)
+            .order_by(Tag.created_at, Tag.id)
+        )
+    ).all()
+    tag_ids = [tag_id for tag_id, kind in rows if kind in (TagKind.generic, TagKind.memory_channel)]
+    project = next((tag_id for tag_id, kind in rows if kind is TagKind.project), None)
+    if project is not None:
+        tag_ids.insert(0, project)
+    return tag_ids
+
+
 async def maybe_spawn_next(
     session: AsyncSession,
     *,
@@ -220,15 +254,36 @@ async def maybe_spawn_next(
     session.add(new_task)
     await session.flush()
 
-    # Copy task_tags (project + client + extras) so the spawn keeps
-    # the same focus/filter context.
-    tag_rows = (
-        (await session.execute(select(TaskTag.tag_id).where(TaskTag.task_id == task.id)))
-        .scalars()
-        .all()
+    # Tags: the spawn keeps the template's focus/filter context, but it
+    # is a NEW entity, so its client/project pair goes through the
+    # choke-point like any other write (docs/adr/0003) instead of being
+    # cloned row by row out of task_tags. ``spawn_tag_ids`` hands over
+    # an already-normalised bag, so a template that drifted cannot make
+    # this raise inside the completion path.
+    structural = await tag_assignment.resolve_structural(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        entity="task",
+        requested=await spawn_tag_ids(session, template_task_id=task.id),
     )
-    for tag_id in tag_rows:
-        session.add(TaskTag(org_id=org_id, task_id=new_task.id, tag_id=tag_id))
+    await tag_assignment.set_structural(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        entity="task",
+        entity_id=new_task.id,
+        structural=structural,
+    )
+    for tag_id in structural.generic_ids:
+        await tag_assignment.attach_generic(
+            session,
+            org_id=org_id,
+            actor_id=actor_id,
+            entity="task",
+            entity_id=new_task.id,
+            tag_id=tag_id,
+        )
 
     # Copy task_collaborators (the M:N "extra hands" set; the singular
     # assignee is on tasks.assignee_id and already copied above).
@@ -273,9 +328,7 @@ async def maybe_spawn_next(
             )
 
     await session.flush()
-    # Unused but bound to keep the actor in scope for future audit
-    # extensions (the spawn itself is implicitly attributable to the
-    # state-transition actor; no extra audit row for now since the
-    # source set_state audit captures intent).
-    _ = actor_id
+    # No audit row for the spawn itself: the source ``set_state`` audit
+    # captures the intent, and the tag writes above are already
+    # attributed to ``actor_id`` by the choke-point.
     return new_task

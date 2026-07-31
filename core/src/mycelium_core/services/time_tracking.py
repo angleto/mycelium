@@ -119,17 +119,10 @@ async def _rate(session: AsyncSession, task_id: uuid.UUID) -> tuple[Decimal | No
     """Rate + currency (from the task's project) + the billable default
     (from that project's CLIENT — billing is a client relationship).
     Defaults (no project / no client): no rate, EUR, billable."""
-    project_tag_id = (
-        await session.execute(
-            select(Tag.id)
-            .join(TaskTag, TaskTag.tag_id == Tag.id)
-            .where(TaskTag.task_id == task_id, Tag.kind == TagKind.project)
-            .order_by(Tag.id)
-            .limit(1)
-        )
-    ).scalar_one_or_none()
-    if project_tag_id is None:
+    project = (await _structural_keys(session, [task_id], TagKind.project)).get(task_id)
+    if project is None:
         return (None, "EUR", True)
+    project_tag_id = project[0]
     prof = (
         await session.execute(select(ProjectProfile).where(ProjectProfile.tag_id == project_tag_id))
     ).scalar_one_or_none()
@@ -683,24 +676,66 @@ def _amount(seconds: int, rate: Decimal | None) -> Decimal:
     return (Decimal(seconds) / Decimal(3600) * rate).quantize(Decimal("0.01"))
 
 
-async def _group_keys(
+async def _generic_keys(
     session: AsyncSession,
     task_ids: Sequence[uuid.UUID],
-    kind: TagKind,
 ) -> dict[uuid.UUID, list[tuple[uuid.UUID, str]]]:
+    """``task_id -> [(tag_id, name)]`` for the free-form facets. Generic
+    tags are many-to-many by design, so this fan-out is intentional and
+    the axis is deliberately not restricted to one row per task (unlike
+    ``_structural_keys``)."""
     if not task_ids:
         return {}
     rows = (
         await session.execute(
             select(TaskTag.task_id, Tag.id, Tag.name)
             .join(Tag, Tag.id == TaskTag.tag_id)
-            .where(TaskTag.task_id.in_(task_ids), Tag.kind == kind)
+            .where(TaskTag.task_id.in_(task_ids), Tag.kind == TagKind.generic)
             .order_by(Tag.id)
         )
     ).all()
     out: dict[uuid.UUID, list[tuple[uuid.UUID, str]]] = {}
     for task_id, tag_id, name in rows:
         out.setdefault(task_id, []).append((tag_id, name))
+    return out
+
+
+async def _structural_keys(
+    session: AsyncSession,
+    task_ids: Sequence[uuid.UUID],
+    kind: TagKind,
+) -> dict[uuid.UUID, tuple[uuid.UUID, str]]:
+    """``task_id -> (tag_id, name)`` for the task's ONE tag of a
+    structural kind (docs/adr/0003: a task carries exactly one client
+    and exactly one project). A task with none is simply absent from the
+    mapping and reports under the "unassigned" bucket.
+
+    A second row of the same kind is refused, not narrowed. Money is
+    computed off this: three different tie-breaks used to decide which
+    row was "the" one (``order_by(Tag.id).limit(1)`` here, an unordered
+    ``limit(1)`` in notes, "lowest tag_id" in migration 0016's
+    downgrade), so the same corrupt task could bill to a different
+    client depending on which read you asked. There is exactly one row
+    to read; anything else is data corruption and must surface as such.
+    """
+    if not task_ids:
+        return {}
+    rows = (
+        await session.execute(
+            select(TaskTag.task_id, Tag.id, Tag.name)
+            .join(Tag, Tag.id == TaskTag.tag_id)
+            .where(TaskTag.task_id.in_(list(task_ids)), Tag.kind == kind)
+        )
+    ).all()
+    out: dict[uuid.UUID, tuple[uuid.UUID, str]] = {}
+    for task_id, tag_id, name in rows:
+        if task_id in out:
+            raise DomainError(
+                MessageCode.TAG_MULTIPLE_CLIENTS
+                if kind is TagKind.client
+                else MessageCode.TAG_MULTIPLE_PROJECTS
+            )
+        out[task_id] = (tag_id, name)
     return out
 
 
@@ -860,24 +895,23 @@ async def report(
                 rate_for(e),
                 currency_for(e),
             )
-    else:
-        kind = {
-            ReportGroup.project: TagKind.project,
-            ReportGroup.client: TagKind.client,
-            ReportGroup.generic: TagKind.generic,
-        }[group_by]
-        tag_map = await _group_keys(session, [e.task_id for e in entries], kind)
+    elif group_by is ReportGroup.generic:
+        # Free-form facets are many-to-many, so an entry legitimately
+        # lands in every generic bucket its task carries and the column
+        # total exceeds the time actually tracked. That is what this axis
+        # means; it is NOT the case for client/project below.
+        generic_map = await _generic_keys(session, [e.task_id for e in entries])
         for e in entries:
-            tags = tag_map.get(e.task_id, [])
+            tags = generic_map.get(e.task_id, [])
             if not tags:
                 bump(None, None, e.duration_seconds or 0, e.billable, rate_for(e), currency_for(e))
                 continue
             for tag_id, name in tags:
                 # Use the live-rate fallback helpers same as the
-                # user/task branch — the project/client/generic
-                # aggregation used to read e.rate_snapshot directly,
-                # bypassing the fix that backfills NULL / zero
-                # snapshots with the current task -> client rate.
+                # user/task branch — the tag aggregation used to read
+                # e.rate_snapshot directly, bypassing the fix that
+                # backfills NULL / zero snapshots with the current
+                # task -> client rate.
                 bump(
                     str(tag_id),
                     name,
@@ -886,6 +920,26 @@ async def report(
                     rate_for(e),
                     currency_for(e),
                 )
+    else:
+        # Client and project are structural: exactly one of each per task
+        # (docs/adr/0003), so each entry's duration is booked ONCE. This
+        # used to fan out like the generic axis and bump the FULL entry
+        # duration per tag of the kind, so a task carrying a stray second
+        # client tag counted its whole time twice: group_by='client'
+        # reported 1,112,725 s / EUR 18,792.14 in production against a
+        # ground truth of 1,110,693 s / EUR 18,756.86.
+        kind = TagKind.client if group_by is ReportGroup.client else TagKind.project
+        structural_map = await _structural_keys(session, [e.task_id for e in entries], kind)
+        for e in entries:
+            tag = structural_map.get(e.task_id)
+            bump(
+                str(tag[0]) if tag is not None else None,
+                tag[1] if tag is not None else None,
+                e.duration_seconds or 0,
+                e.billable,
+                rate_for(e),
+                currency_for(e),
+            )
 
     rows = [
         ReportRow(
@@ -924,9 +978,9 @@ async def resolve_task_contexts(
 ) -> dict[uuid.UUID, TaskContext]:
     """Batched task -> context resolver: a fixed, small number of
     queries regardless of how many tasks/entries (no N+1). The project
-    tag is the earliest-by-id project tag on the task (same selection
-    as ``_rate``), then ProjectProfile.client_tag_id, then the client
-    tag's name and ClientProfile.timezone."""
+    tag is the task's one project tag (``_structural_keys``, the same
+    read ``_rate`` bills off), then ProjectProfile.client_tag_id, then
+    the client tag's name and ClientProfile.timezone."""
     ids = list({t for t in task_ids})
     if not ids:
         return {}
@@ -936,17 +990,7 @@ async def resolve_task_contexts(
             await session.execute(select(Task.id, Task.title).where(Task.id.in_(ids)))
         ).all()
     }
-    # Earliest project tag per task (Tag.id order mirrors _rate()).
-    proj_by_task: dict[uuid.UUID, tuple[uuid.UUID, str]] = {}
-    for task_id, tag_id, name in (
-        await session.execute(
-            select(TaskTag.task_id, Tag.id, Tag.name)
-            .join(Tag, Tag.id == TaskTag.tag_id)
-            .where(TaskTag.task_id.in_(ids), Tag.kind == TagKind.project)
-            .order_by(Tag.id)
-        )
-    ).all():
-        proj_by_task.setdefault(task_id, (tag_id, name))
+    proj_by_task = await _structural_keys(session, ids, TagKind.project)
 
     project_tag_ids = list({p[0] for p in proj_by_task.values()})
     client_by_project: dict[uuid.UUID, uuid.UUID] = {}

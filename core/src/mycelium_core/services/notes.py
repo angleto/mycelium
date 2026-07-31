@@ -19,8 +19,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import and_, delete, func, or_, select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from mycelium_core.ai_providers import (
@@ -39,11 +38,10 @@ from mycelium_core.models.classification_job import ClassificationJob
 from mycelium_core.models.membership import Role
 from mycelium_core.models.note import Note, NoteKind, NoteStatus, NoteTurn, TurnRole
 from mycelium_core.models.note_tag import NoteTag
-from mycelium_core.models.project_profile import ProjectProfile
 from mycelium_core.models.tag import Tag, TagKind
 from mycelium_core.models.task import Task
 from mycelium_core.models.task_tag import TaskTag
-from mycelium_core.services import audit, billing, lifecycle, taxonomy
+from mycelium_core.services import audit, billing, lifecycle, tag_assignment
 from mycelium_core.services import entity_revisions as _revisions
 from mycelium_core.services import memory as memory_svc
 from mycelium_core.services import note_links as note_links_svc
@@ -272,25 +270,42 @@ async def get_note(
 
 
 async def project_tag_for_note(session: AsyncSession, *, note_id: uuid.UUID) -> uuid.UUID | None:
-    """The note's project tag id (or ``None`` if unset). Mirrors how
-    tasks find their project from ``task_tags``: the project is just
-    the project-kind tag in the junction. Migration 0016 dropped the
-    legacy ``notes.project_id`` column."""
-    return (
-        await session.execute(
-            select(Tag.id)
-            .join(NoteTag, NoteTag.tag_id == Tag.id)
-            .where(NoteTag.note_id == note_id, Tag.kind == TagKind.project)
-            .limit(1)
+    """The note's project tag id, or ``None`` for a projectless
+    (personal) note. The project is just the project-kind tag in the
+    junction; migration 0016 dropped the legacy ``notes.project_id``
+    column.
+
+    Since ``services.tag_assignment`` owns the structural rows, a note
+    carries AT MOST one project (docs/adr/0021): this is a single-row
+    read. A second row is corrupted taxonomy and is surfaced, not
+    narrowed away by an unordered LIMIT 1 that would have made the
+    retrieval perimeter depend on the query plan."""
+    rows = (
+        (
+            await session.execute(
+                select(Tag.id)
+                .join(NoteTag, NoteTag.tag_id == Tag.id)
+                .where(NoteTag.note_id == note_id, Tag.kind == TagKind.project)
+            )
         )
-    ).scalar_one_or_none()
+        .scalars()
+        .all()
+    )
+    if len(rows) > 1:
+        raise DomainError(MessageCode.TAG_MULTIPLE_PROJECTS)
+    return rows[0] if rows else None
 
 
 async def project_tag_ids_for_notes(
     session: AsyncSession, *, note_ids: Sequence[uuid.UUID]
 ) -> dict[uuid.UUID, uuid.UUID]:
     """Batched note_id -> project_tag_id; the list endpoint pays one
-    query for the project chip instead of an N+1 per row."""
+    query for the project chip instead of an N+1 per row. Notes with no
+    project are simply absent from the map.
+
+    One row per note (docs/adr/0021, enforced by tag_assignment): a
+    second project on the same note is reported like the single-note
+    read does, instead of letting an arbitrary row win the chip."""
     out: dict[uuid.UUID, uuid.UUID] = {}
     if not note_ids:
         return out
@@ -300,8 +315,8 @@ async def project_tag_ids_for_notes(
         .where(NoteTag.note_id.in_(note_ids), Tag.kind == TagKind.project)
     )
     for nid, tid in rows.all():
-        # First project tag wins (contract: a note has at most one).
-        out.setdefault(nid, tid)
+        if out.setdefault(nid, tid) != tid:
+            raise DomainError(MessageCode.TAG_MULTIPLE_PROJECTS)
     return out
 
 
@@ -330,6 +345,15 @@ async def attach_tag(
     note_id: uuid.UUID,
     tag_id: uuid.UUID,
 ) -> None:
+    """Attach one tag, dispatched on its kind. A free-form facet is just
+    added; a PROJECT tag is a MOVE (the note follows that project's
+    client, atomically); a CLIENT tag re-points the note and is refused
+    when it contradicts the attached project.
+
+    Every client/project junction write goes through tag_assignment,
+    which also re-scopes the note's indexed blobs on a project change
+    (the ADR-0007 retrieval perimeter, task 1d152747) and writes the
+    audit row -- hence none here."""
     await require_role(session, org_id, actor_id, Role.member)
     await get_note(session, org_id=org_id, note_id=note_id)
     tag_kind = (
@@ -337,27 +361,33 @@ async def attach_tag(
     ).scalar_one_or_none()
     if tag_kind is None:
         raise NotFoundError(MessageCode.TAG_NOT_FOUND)
-    try:
-        async with session.begin_nested():
-            session.add(NoteTag(org_id=org_id, note_id=note_id, tag_id=tag_id))
-            await session.flush()
-    except IntegrityError:
-        return
-    if tag_kind == TagKind.project:
-        # A project tag change moves the note's retrieval perimeter; re-scope
-        # its indexed blobs now so peers find it immediately (task 1d152747).
-        # Lazy import: note_search imports this module (project_tag_for_note).
-        from mycelium_core.services import note_search
-
-        await note_search.rescope_note_blobs(session, org_id=org_id, note_id=note_id)
-    await audit.log(
-        session,
-        org_id=org_id,
-        actor_id=actor_id,
-        entity="note",
-        entity_id=note_id,
-        action="attach_tag",
-    )
+    if tag_kind is TagKind.project:
+        await tag_assignment.move_to_project(
+            session,
+            org_id=org_id,
+            actor_id=actor_id,
+            entity="note",
+            entity_id=note_id,
+            project_tag_id=tag_id,
+        )
+    elif tag_kind is TagKind.client:
+        await tag_assignment.set_client(
+            session,
+            org_id=org_id,
+            actor_id=actor_id,
+            entity="note",
+            entity_id=note_id,
+            client_tag_id=tag_id,
+        )
+    else:
+        await tag_assignment.attach_generic(
+            session,
+            org_id=org_id,
+            actor_id=actor_id,
+            entity="note",
+            entity_id=note_id,
+            tag_id=tag_id,
+        )
 
 
 async def detach_tag(
@@ -368,28 +398,34 @@ async def detach_tag(
     note_id: uuid.UUID,
     tag_id: uuid.UUID,
 ) -> None:
+    """Detach one tag. A note's CLIENT is structural: dropping it would
+    leave the note with no perimeter at all, so it is refused
+    (TAG_STRUCTURAL_REQUIRED); it is changed by attaching another client
+    instead. The PROJECT may go -- that is the un-share path, and it
+    sends the note's blobs back to the personal (NULL project)
+    perimeter at once rather than at the next content edit (task
+    1d152747, core/tests/test_f6b_notes.py)."""
     await require_role(session, org_id, actor_id, Role.member)
     tag_kind = (
         await session.execute(select(Tag.kind).where(Tag.id == tag_id))
     ).scalar_one_or_none()
-    await session.execute(
-        delete(NoteTag).where(NoteTag.note_id == note_id, NoteTag.tag_id == tag_id)
-    )
-    if tag_kind == TagKind.project:
-        # Un-sharing (removing the project tag) sends the note's blobs back to
-        # the note's current perimeter (another project tag or NULL) at once,
-        # not at the next content edit (task 1d152747).
-        from mycelium_core.services import note_search
-
-        await note_search.rescope_note_blobs(session, org_id=org_id, note_id=note_id)
-    await audit.log(
-        session,
-        org_id=org_id,
-        actor_id=actor_id,
-        entity="note",
-        entity_id=note_id,
-        action="detach_tag",
-    )
+    if tag_kind is None:
+        raise NotFoundError(MessageCode.TAG_NOT_FOUND)
+    if tag_kind is TagKind.client:
+        raise DomainError(MessageCode.TAG_STRUCTURAL_REQUIRED)
+    if tag_kind is TagKind.project:
+        await tag_assignment.clear_project(
+            session, org_id=org_id, actor_id=actor_id, note_id=note_id
+        )
+    else:
+        await tag_assignment.detach_generic(
+            session,
+            org_id=org_id,
+            actor_id=actor_id,
+            entity="note",
+            entity_id=note_id,
+            tag_id=tag_id,
+        )
 
 
 async def _log_note_revision(
@@ -934,25 +970,30 @@ async def create_note(
     )
     session.add(note)
     await session.flush()
-    # Every note must belong to a client: the project's client when a
-    # project is set, otherwise the "Personal" default. Stored as a
-    # NoteTag so notes stay queryable/filterable by client. The
-    # project tag itself is carried in the same junction (migration
-    # 0016, ADR-0007 single-source-of-truth, mirrors task_tags).
-    client_tag_id: uuid.UUID | None = None
-    if project_id is not None:
-        client_tag_id = (
-            await session.execute(
-                select(ProjectProfile.client_tag_id).where(ProjectProfile.tag_id == project_id)
-            )
-        ).scalar_one_or_none()
-        session.add(NoteTag(org_id=org_id, note_id=note.id, tag_id=project_id))
-    if client_tag_id is None:
-        client_tag_id = await taxonomy.ensure_default_client(
-            session, org_id=org_id, actor_id=actor_id
-        )
-    session.add(NoteTag(org_id=org_id, note_id=note.id, tag_id=client_tag_id))
-    await session.flush()
+    # Every note belongs to exactly one client and to AT MOST one
+    # project, both carried in ``note_tags`` (migration 0016, ADR-0007
+    # single-source-of-truth, mirrors task_tags). tag_assignment owns
+    # that pair: it checks ``project_id`` really is a project tag and
+    # derives the client from it, so a client id passed here is now
+    # refused instead of being inserted as the project and paired with
+    # the "Personal" fallback -- which left the note with two clients.
+    # No project means the personal perimeter (docs/adr/0021), not a
+    # defect: the project stays NULL and the default client applies.
+    structural = await tag_assignment.resolve_structural(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        entity="note",
+        project_tag_id=project_id,
+    )
+    await tag_assignment.set_structural(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        entity="note",
+        entity_id=note.id,
+        structural=structural,
+    )
     # Phase 6 final: the text the caller supplied lands in
     # note_part(ord=0). The Note row no longer carries a transcript
     # column; the parts table is the source of truth.
@@ -986,6 +1027,29 @@ async def create_note(
     return note
 
 
+async def _project_tag_for_task(session: AsyncSession, *, task_id: uuid.UUID) -> uuid.UUID | None:
+    """The task's project tag id. A task carries exactly one project
+    (docs/adr/0003, owned by ``services.tag_assignment``), so this is a
+    single-row read; a second row is corrupted taxonomy and is surfaced
+    rather than narrowed by an unordered LIMIT 1 that would drop the
+    work note into an arbitrary project. ``None`` only for legacy rows
+    predating the invariant."""
+    rows = (
+        (
+            await session.execute(
+                select(Tag.id)
+                .join(TaskTag, TaskTag.tag_id == Tag.id)
+                .where(TaskTag.task_id == task_id, Tag.kind == TagKind.project)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if len(rows) > 1:
+        raise DomainError(MessageCode.TAG_MULTIPLE_PROJECTS)
+    return rows[0] if rows else None
+
+
 async def get_or_create_work_note(
     session: AsyncSession,
     *,
@@ -996,11 +1060,10 @@ async def get_or_create_work_note(
     """The task's single "work note": open it, write in it; time spent
     there is billed to the task (time entries stay task-scoped, no new
     model). Idempotent: the second call returns the same note. The note
-    is created via ``create_note`` so the client/Personal enforcement
-    runs; it inherits the task's project (hence its client) when one
-    can be derived from the task's tags. ALL task tags (project,
-    client, generic) are then propagated onto the note so filters and
-    /focus see them on the same axes."""
+    is created via ``create_note`` so the client/project enforcement
+    runs; it inherits the task's project (hence its client). The task's
+    free-form tags are then propagated onto the note, and its structural
+    pair adopted, so filters and /focus see both on the same axes."""
     task = (await session.execute(select(Task).where(Task.id == task_id))).scalar_one_or_none()
     if task is None:
         raise NotFoundError(MessageCode.TASK_NOT_FOUND)
@@ -1017,17 +1080,10 @@ async def get_or_create_work_note(
         ).scalar_one_or_none()
         if existing is not None:
             return existing
-    # Derive the task's project tag the same way create_task does (its
-    # first project-kind tag), so the work note lands under the task's
-    # project/client; otherwise create_note attaches the Personal client.
-    project_id = (
-        await session.execute(
-            select(Tag.id)
-            .join(TaskTag, TaskTag.tag_id == Tag.id)
-            .where(TaskTag.task_id == task_id, Tag.kind == TagKind.project)
-            .limit(1)
-        )
-    ).scalar_one_or_none()
+    # The work note is born under the task's project (hence its client)
+    # instead of under the Personal fallback, so its retrieval perimeter
+    # is right from the first index pass, with no move afterwards.
+    project_id = await _project_tag_for_task(session, task_id=task_id)
     note = await create_note(
         session,
         org_id=org_id,
@@ -1067,23 +1123,16 @@ async def create_note_for_task(
     ``get_or_create_work_note`` this is NOT idempotent: each call
     creates a new note. The task must exist in-org (RLS scopes the
     lookup; TASK_NOT_FOUND otherwise). The note is created via
-    ``create_note`` so the client/Personal enforcement runs, inheriting
-    the task's project (hence client) when one can be derived from its
-    tags; title defaults to the task title. ``notes.task_id`` is set so
-    time logged in the note rolls up to this task."""
+    ``create_note`` so the client/project enforcement runs, inheriting
+    the task's project (hence client); title defaults to the task
+    title. ``notes.task_id`` is set so time logged in the note rolls up
+    to this task."""
     task = (
         await session.execute(select(Task).where(Task.id == task_id, Task.deleted_at.is_(None)))
     ).scalar_one_or_none()
     if task is None:
         raise NotFoundError(MessageCode.TASK_NOT_FOUND)
-    project_id = (
-        await session.execute(
-            select(Tag.id)
-            .join(TaskTag, TaskTag.tag_id == Tag.id)
-            .where(TaskTag.task_id == task_id, Tag.kind == TagKind.project)
-            .limit(1)
-        )
-    ).scalar_one_or_none()
+    project_id = await _project_tag_for_task(session, task_id=task_id)
     note = await create_note(
         session,
         org_id=org_id,
@@ -1117,39 +1166,54 @@ async def _copy_task_tags_to_note(
     note_id: uuid.UUID,
     task_id: uuid.UUID,
 ) -> None:
-    """Propagate every tag of ``task_id`` onto ``note_id``. Skips rows
-    already present (the project tag and the client tag are
-    auto-attached by ``create_note`` into the junction; migration
-    0016 dropped the legacy ``notes.project_id`` column). Audit logs
-    one ``attach_tag`` per newly-added row."""
-    task_tag_ids = list(
-        (await session.execute(select(TaskTag.tag_id).where(TaskTag.task_id == task_id)))
-        .scalars()
-        .all()
-    )
-    if not task_tag_ids:
-        return
-    existing = set(
-        (await session.execute(select(NoteTag.tag_id).where(NoteTag.note_id == note_id)))
-        .scalars()
-        .all()
-    )
-    for tag_id in task_tag_ids:
-        if tag_id in existing:
-            continue
-        try:
-            async with session.begin_nested():
-                session.add(NoteTag(org_id=org_id, note_id=note_id, tag_id=tag_id))
-                await session.flush()
-        except IntegrityError:
-            continue
-        await audit.log(
+    """Give ``note_id`` the tags of ``task_id``: the free-form facets
+    are added to whatever the note already has, while the task's
+    structural pair REPLACES the note's own.
+
+    The pair is set, never appended. The note already carries a client
+    from ``create_note`` (the task's project's, or the "Personal"
+    fallback when the task has no project), so copying the task's client
+    additively gave the note TWO client tags whenever the two disagreed
+    -- precisely what docs/adr/0003 forbids. ``tag_assignment``
+    adjudicates the pair (the project decides the client), re-scopes the
+    blobs if the project moved and writes the audit rows, so there are
+    none to write here."""
+    rows = (
+        await session.execute(
+            select(Tag.id, Tag.kind)
+            .join(TaskTag, TaskTag.tag_id == Tag.id)
+            .where(TaskTag.task_id == task_id)
+        )
+    ).all()
+    structural_ids: list[uuid.UUID] = []
+    freeform_ids: list[uuid.UUID] = []
+    for tag_id, kind in rows:
+        target = structural_ids if kind in (TagKind.client, TagKind.project) else freeform_ids
+        target.append(tag_id)
+    if structural_ids:
+        structural = await tag_assignment.resolve_structural(
+            session,
+            org_id=org_id,
+            actor_id=actor_id,
+            entity="note",
+            requested=structural_ids,
+        )
+        await tag_assignment.set_structural(
             session,
             org_id=org_id,
             actor_id=actor_id,
             entity="note",
             entity_id=note_id,
-            action="attach_tag",
+            structural=structural,
+        )
+    for tag_id in freeform_ids:
+        await tag_assignment.attach_generic(
+            session,
+            org_id=org_id,
+            actor_id=actor_id,
+            entity="note",
+            entity_id=note_id,
+            tag_id=tag_id,
         )
 
 

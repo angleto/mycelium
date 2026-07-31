@@ -680,11 +680,32 @@ def _task(
     )
 
 
+async def _tag_of_kind(s: AsyncSession, org: uuid.UUID, tag_id: str, kind: TagKind) -> uuid.UUID:
+    """Parse a tag id argument and refuse it when it is not of ``kind``.
+
+    Each single-valued tool below (``move_*_to_project`` /
+    ``set_*_client``) stands for ONE structural operation, while the
+    service door it delegates to dispatches on the tag's kind: without
+    this check a project id handed to ``set_task_client`` would quietly
+    perform the OTHER operation and the tool would report a client
+    change that never happened. TAG_NOT_FOUND for an unknown or
+    foreign-workspace id comes from ``taxonomy.get_tag``."""
+    tag = await taxonomy.get_tag(s, org_id=org, tag_id=uuid.UUID(tag_id))
+    if tag.kind is not kind:
+        raise DomainError(MessageCode.TAG_KIND_MISMATCH)
+    return tag.id
+
+
 @mcp.tool()
 async def create_tag(
     token: str, org_id: str, kind: str, name: str, color: str | None = None
 ) -> dict[str, Any]:
-    """Create a tag (kind: generic|client|project)."""
+    """Create a free-form tag (kind: generic). A client or a project
+    cannot be created here: each carries a typed profile (the invoicing
+    card, the project's owning client) that only ``create_client`` /
+    ``create_project`` write, so one born through this door would have
+    no profile row at all -- see docs/adr/0003. Memory channels are a
+    seeded vocabulary (``memory_channel_create``)."""
     async with _tenant(token, org_id) as (s, org, user):
         tag = await taxonomy.create_tag(
             s,
@@ -729,8 +750,11 @@ async def create_project(
     name: str,
     client_tag_id: str | None = None,
 ) -> dict[str, Any]:
-    """Create a project under a client. Rate/billable are client-level
-    (set on the client); the project carries name/budget/description."""
+    """Create a project under a client. EVERY project has exactly one
+    client (docs/adr/0003): omitting ``client_tag_id`` files it under
+    the workspace default client ("Personal"), it does not create a
+    clientless project. Rate/billable are client-level (set on the
+    client); the project carries name/budget/description."""
     async with _tenant(token, org_id) as (s, org, user):
         tag = await taxonomy.create_project(
             s,
@@ -909,8 +933,13 @@ async def update_project(
     color: str | None = None,
     description: str | None = None,
 ) -> dict[str, Any]:
-    """Edit a project. Pass ``client_tag_id`` to reassign the project
-    to another client. Only the given fields are changed."""
+    """Edit a project. Only the given fields are changed; a project can
+    never be left clientless, so ``client_tag_id`` omitted means "keep
+    the current client" and a null is refused. Passing a DIFFERENT
+    client reassigns the project and synchronously re-tags every task
+    and note carrying it onto that client, in the same transaction: an
+    entity carrying a project always carries THAT project's client
+    (docs/adr/0003, taxonomy.reassign_project_client). Admin."""
     fields: dict[str, object] = {}
     if client_tag_id is not None:
         fields["client_tag_id"] = uuid.UUID(client_tag_id)
@@ -976,7 +1005,18 @@ async def create_task(
     (must|should|could, default should). ``required_capabilities``
     declare what an executor needs (empty=any). Pass ``start_at``
     + ``duration_minutes`` to make it an appointment-task subject to
-    no-overlap on assignee and explicit participants."""
+    no-overlap on assignee and explicit participants.
+
+    ``tag_ids`` is one flat bag, but its structural members are
+    single-valued: a task ends up with EXACTLY ONE client tag and
+    EXACTLY ONE project tag (docs/adr/0003). Pass AT MOST one of each --
+    two clients or two projects are rejected. The project decides: the
+    client is derived from it, so passing the project alone is the
+    normal call and passing a client that is not that project's client
+    is rejected too. Pass neither and the task lands in the default
+    "General" project under the default "Personal" client; there are no
+    projectless tasks. Everything else in the bag (generic tags, memory
+    channels) is a free-form facet with no cardinality rule."""
     async with _tenant(token, org_id) as (s, org, user):
         # When the MCP call is authenticated with an agent token
         # (HTTP transport), record the ai_assistant identity (if the
@@ -1698,8 +1738,16 @@ async def restore_task(
 
 @mcp.tool()
 async def add_task_tag(token: str, org_id: str, task_id: str, tag_id: str) -> dict[str, Any]:
-    """Attach a tag to a task (idempotent). Use a project tag to move
-    the task into a project, or a generic/client tag to label it."""
+    """Attach a free-form tag (generic / memory channel) to a task,
+    idempotently. This is the many-to-many door: a task carries any
+    number of these facets.
+
+    The task's client and project are NOT facets: they are structural
+    and single-valued (exactly one each, docs/adr/0003), so use
+    ``move_task_to_project`` to change the project (it drags the client
+    along) and ``set_task_client`` to change the client. Passing one of
+    those tags here still performs the structural operation, but the
+    named tools say what they do and validate the tag's kind."""
     async with _tenant(token, org_id) as (s, org, user):
         await tasks.attach_tag(
             s,
@@ -1713,7 +1761,10 @@ async def add_task_tag(token: str, org_id: str, task_id: str, tag_id: str) -> di
 
 @mcp.tool()
 async def remove_task_tag(token: str, org_id: str, task_id: str, tag_id: str) -> dict[str, Any]:
-    """Detach a tag from a task."""
+    """Detach a free-form tag from a task. The client and the project
+    cannot be detached (tag.structural_required): a task has exactly one
+    of each and there is no legal state to detach INTO, so re-point it
+    with ``move_task_to_project`` / ``set_task_client`` instead."""
     async with _tenant(token, org_id) as (s, org, user):
         await tasks.detach_tag(
             s,
@@ -1729,29 +1780,51 @@ async def remove_task_tag(token: str, org_id: str, task_id: str, tag_id: str) ->
 async def move_task_to_project(
     token: str, org_id: str, task_id: str, project_tag_id: str
 ) -> dict[str, Any]:
-    """Reassign a task to another project: detach its current project
-    tag(s) and attach the new one. Composed from tag operations; the
-    task's client follows from the project."""
+    """Move a task to another project. A task has exactly one project
+    and exactly one client, so the new project REPLACES the old one and
+    the task's client is snapped to that project's client in the same
+    transaction. Moving a task to a project of a DIFFERENT client is
+    therefore this one call, and is not an error: the project is the
+    truth, the client follows it (docs/adr/0003)."""
     async with _tenant(token, org_id) as (s, org, user):
-        new_project = uuid.UUID(project_tag_id)
-        tagmap = await tasks.tags_by_task(s, task_ids=[uuid.UUID(task_id)])
-        for tag in tagmap.get(uuid.UUID(task_id), []):
-            if tag.kind is TagKind.project and tag.id != new_project:
-                await tasks.detach_tag(
-                    s,
-                    org_id=org,
-                    actor_id=user,
-                    task_id=uuid.UUID(task_id),
-                    tag_id=tag.id,
-                )
+        project = await _tag_of_kind(s, org, project_tag_id, TagKind.project)
+        # One gated call: ``tasks.attach_tag`` keeps the RBAC and
+        # existence checks and routes a project tag to
+        # ``tag_assignment.move_to_project``, the only writer of a
+        # structural junction row. The previous detach-loop + attach
+        # composed two writes here, left the client tag untouched (so
+        # the task kept the OLD client, violating invariant (c)) and
+        # exposed a projectless task in between.
         await tasks.attach_tag(
             s,
             org_id=org,
             actor_id=user,
             task_id=uuid.UUID(task_id),
-            tag_id=new_project,
+            tag_id=project,
         )
         return {"task_id": task_id, "project_tag_id": project_tag_id}
+
+
+@mcp.tool()
+async def set_task_client(
+    token: str, org_id: str, task_id: str, client_tag_id: str
+) -> dict[str, Any]:
+    """Re-point a task at a client. A task has exactly one client, so
+    this REPLACES the current one and keeps the project. A client that
+    contradicts the task's project is refused
+    (tag.client_project_mismatch): the client is derived from the
+    project, so use ``move_task_to_project`` with a project of the
+    wanted client to move the task across clients."""
+    async with _tenant(token, org_id) as (s, org, user):
+        client = await _tag_of_kind(s, org, client_tag_id, TagKind.client)
+        await tasks.attach_tag(
+            s,
+            org_id=org,
+            actor_id=user,
+            task_id=uuid.UUID(task_id),
+            tag_id=client,
+        )
+        return {"task_id": task_id, "client_tag_id": client_tag_id}
 
 
 @mcp.tool()
@@ -3614,11 +3687,18 @@ async def set_email_default_tags(
     expected_version: int,
     tag_ids: list[str],
 ) -> dict[str, Any]:
-    """Replace this account's default tags (WS-1): a flat set (typ. one
-    client + one project tag) auto-applied to everything ingested from the
-    account — memory blobs on the 'email' channel and email->task/note — so
-    a per-client / per-project mailbox is born tagged. Returns the new
-    version."""
+    """Replace this account's default tags (WS-1): a flat set
+    auto-applied to everything ingested from the account (memory blobs
+    on the 'email' channel, and email->task/note), so a per-client /
+    per-project mailbox is born tagged. Returns the new version.
+
+    The set may hold AT MOST ONE client tag and AT MOST ONE project tag
+    (docs/adr/0003); more of either is rejected here, at configuration
+    time, rather than on some later synced message. The project decides
+    the client, so a client that is not that project's client is
+    rejected too, and a project alone is enough. A client with no
+    project is legal (mailbox bound to a client, notes stay personal
+    until moved); anything else in the set is a free-form facet."""
     async with _tenant(token, org_id) as (s, org, user):
         version = await email_svc.set_default_tags(
             s,
@@ -4741,7 +4821,12 @@ async def create_note(
     title: str | None = None,
     project_id: str | None = None,
 ) -> dict[str, Any]:
-    """Capture a note (voice|text|conversation). Unmetered."""
+    """Capture a note (voice|text|conversation). Unmetered.
+    ``project_id`` is a PROJECT tag id (anything else is rejected): the
+    note is filed under it and takes that project's client. Omit it for
+    a personal note -- no project, default client, a first-class
+    retrieval perimeter (docs/adr/0021), not a defect; share it later
+    with ``move_note_to_project``."""
     async with _tenant(token, org_id) as (s, org, user):
         n = await notes_svc.create_note(
             s,
@@ -5796,8 +5881,18 @@ async def garden_apply(
 
 @mcp.tool()
 async def add_note_tag(token: str, org_id: str, note_id: str, tag_id: str) -> dict[str, Any]:
-    """Attach a tag to a note (idempotent). A client tag sets the
-    note's client; a project tag organizes it under a project."""
+    """Attach a free-form tag (generic / memory channel) to a note,
+    idempotently. This is the many-to-many door: a note carries any
+    number of these facets.
+
+    The note's client and project are NOT facets: they are structural
+    and single-valued (exactly one client, at most one project --
+    docs/adr/0003, docs/adr/0021), so use ``move_note_to_project`` to
+    share the note into a project (it drags the client along),
+    ``clear_note_project`` to un-share it and ``set_note_client`` to
+    change the client. Passing one of those tags here still performs
+    the structural operation, but the named tools say what they do and
+    validate the tag's kind."""
     async with _tenant(token, org_id) as (s, org, user):
         await notes_svc.attach_tag(
             s,
@@ -5811,7 +5906,10 @@ async def add_note_tag(token: str, org_id: str, note_id: str, tag_id: str) -> di
 
 @mcp.tool()
 async def remove_note_tag(token: str, org_id: str, note_id: str, tag_id: str) -> dict[str, Any]:
-    """Detach a tag from a note."""
+    """Detach a free-form tag from a note. The client cannot be detached
+    (tag.structural_required) -- a note always has one; use
+    ``set_note_client`` to change it. Dropping the PROJECT is the
+    un-share path and has its own tool, ``clear_note_project``."""
     async with _tenant(token, org_id) as (s, org, user):
         await notes_svc.detach_tag(
             s,
@@ -5821,6 +5919,86 @@ async def remove_note_tag(token: str, org_id: str, note_id: str, tag_id: str) ->
             tag_id=uuid.UUID(tag_id),
         )
         return {"note_id": note_id, "tag_id": tag_id, "removed": True}
+
+
+@mcp.tool()
+async def move_note_to_project(
+    token: str, org_id: str, note_id: str, project_tag_id: str
+) -> dict[str, Any]:
+    """Move a note into a project (share it). A note has at most one
+    project and exactly one client, so the new project REPLACES the
+    previous one and the note's client is snapped to that project's
+    client in the same transaction -- moving a note across clients is
+    this one call, not an error. The note's indexed memory is re-scoped
+    to the project perimeter at once, so peers retrieve it immediately
+    without any content edit. ``clear_note_project`` is the reverse."""
+    async with _tenant(token, org_id) as (s, org, user):
+        project = await _tag_of_kind(s, org, project_tag_id, TagKind.project)
+        # ``notes.attach_tag`` is the gated door (RBAC + note existence)
+        # and routes a project tag to ``tag_assignment.move_to_project``,
+        # the only writer of a structural junction row, which also
+        # re-scopes the blobs (task 1d152747).
+        await notes_svc.attach_tag(
+            s,
+            org_id=org,
+            actor_id=user,
+            note_id=uuid.UUID(note_id),
+            tag_id=project,
+        )
+        return {"note_id": note_id, "project_tag_id": project_tag_id}
+
+
+@mcp.tool()
+async def set_note_client(
+    token: str, org_id: str, note_id: str, client_tag_id: str
+) -> dict[str, Any]:
+    """Re-point a note at a client. A note has exactly one client, so
+    this REPLACES the current one and keeps the project. A client that
+    contradicts the note's project is refused
+    (tag.client_project_mismatch): the client is derived from the
+    project, so use ``move_note_to_project`` with a project of the
+    wanted client to move the note across clients."""
+    async with _tenant(token, org_id) as (s, org, user):
+        client = await _tag_of_kind(s, org, client_tag_id, TagKind.client)
+        await notes_svc.attach_tag(
+            s,
+            org_id=org,
+            actor_id=user,
+            note_id=uuid.UUID(note_id),
+            tag_id=client,
+        )
+        return {"note_id": note_id, "client_tag_id": client_tag_id}
+
+
+@mcp.tool()
+async def clear_note_project(token: str, org_id: str, note_id: str) -> dict[str, Any]:
+    """Un-share a note: drop its project, KEEP its client. A projectless
+    note is a first-class personal perimeter (docs/adr/0021), not a
+    defect: its indexed memory goes back to personal scope at once, so
+    peers stop retrieving it under the project. No-op on a note that
+    has no project. There is no task counterpart -- a task always has a
+    project."""
+    async with _tenant(token, org_id) as (s, org, user):
+        note = uuid.UUID(note_id)
+        # The project is single-valued, so it is not a caller argument:
+        # the only thing to clear is whatever the note carries now.
+        # ``get_note`` first, so a missing note is NOT_FOUND rather than
+        # an empty "nothing to clear".
+        await notes_svc.get_note(s, org_id=org, note_id=note)
+        project = await notes_svc.project_tag_for_note(s, note_id=note)
+        if project is None:
+            return {"note_id": note_id, "project_tag_id": None, "cleared": False}
+        # ``notes.detach_tag`` routes a project tag to
+        # ``tag_assignment.clear_project``, which keeps the client and
+        # re-scopes the blobs to the personal (NULL project) perimeter.
+        await notes_svc.detach_tag(
+            s,
+            org_id=org,
+            actor_id=user,
+            note_id=note,
+            tag_id=project,
+        )
+        return {"note_id": note_id, "project_tag_id": str(project), "cleared": True}
 
 
 @mcp.tool()

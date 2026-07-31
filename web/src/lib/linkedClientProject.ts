@@ -4,7 +4,13 @@ import type { components } from '../api/schema'
 type Project = components['schemas']['ProjectOut']
 
 /**
- * Shared logic for the Client/Project picker pair (Tasks, Time, ...).
+ * Shared logic for the Client/Project picker pair (Tasks quick-add,
+ * Time filters, the TagPicker's structural row).
+ *
+ * It is the client-side half of the ADR-0050 invariant: an entity's
+ * client is the one its project belongs to. The server enforces it
+ * (services/tag_assignment); this only keeps the two selects honest
+ * while the user is still choosing.
  *
  * - Filters the project list by the selected client (when a client is
  *   picked, only projects whose `client_tag_id` matches show up).

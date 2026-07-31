@@ -31,6 +31,7 @@ import type { components } from '../api/schema'
 type Note = components['schemas']['NoteOut']
 type Turn = components['schemas']['NoteTurnOut']
 type Tag = components['schemas']['TagOut']
+type Project = components['schemas']['ProjectOut']
 
 // Note detail (full page, sibling of TaskDetailRoute). The note edit
 // surface used to be a non-responsive 92vh modal stacking ~12 sections
@@ -49,12 +50,19 @@ export function NoteDetailRoute() {
 
   const [note, setNote] = useState<Note | null>(null)
   const [tags, setTags] = useState<Tag[]>([])
+  // /projects, not the project tags: only ProjectOut carries
+  // ``client_tag_id``, which couples the two structural selects.
+  const [projects, setProjects] = useState<Project[]>([])
   const [linkTasks, setLinkTasks] = useState<{ id: string; title: string }[]>(
     [],
   )
   const [turns, setTurns] = useState<Turn[]>([])
   const [convMsg, setConvMsg] = useState('')
   const [err, setErr] = useState<string | null>(null)
+  // Tag errors render inside the picker in the Details rail, not in the
+  // page-level banner under the body: a rejected client change
+  // (DomainError -> 400) has to be visible where it was triggered.
+  const [tagErr, setTagErr] = useState<string | null>(null)
   const [converting, setConverting] = useState(false)
   const [idCopied, setIdCopied] = useState(false)
 
@@ -128,12 +136,13 @@ export function NoteDetailRoute() {
     let active = true
     void (async () => {
       const h = workspaceHeader()
-      const [n, g, tk] = await Promise.all([
+      const [n, g, tk, pj] = await Promise.all([
         api.GET('/notes/{note_id}', {
           params: { header: h, path: { note_id: id } },
         }),
         api.GET('/tags', { params: { header: h } }),
         api.GET('/tasks', { params: { header: h } }),
+        api.GET('/projects', { params: { header: h } }),
       ])
       if (!active) return
       if (n.error || !n.data) {
@@ -143,6 +152,7 @@ export function NoteDetailRoute() {
       }
       applyNote(n.data)
       if (g.data) setTags(g.data)
+      if (pj.data) setProjects(pj.data)
       if (tk.data)
         setLinkTasks(tk.data.map((x) => ({ id: x.id, title: x.title })))
       if (n.data.kind === 'conversation') {
@@ -282,15 +292,46 @@ export function NoteDetailRoute() {
     await refreshNote()
   }
 
+  // Structural re-tagging through the named pair on NotePatchIn, not
+  // attach/detach on /notes/{id}/tags: stating ``project_tag_id`` is
+  // ONE intent (a MOVE -- the client follows and the memory blobs are
+  // rescoped), and an explicit null is the un-share path (docs/adr/0021:
+  // the note falls back to the client-level personal perimeter) instead
+  // of the SPA having to find the attached project tag to delete it.
+  // The patch carries no title/text, so the service's
+  // replace-the-content path is not entered.
+  async function setStructural(patch: {
+    client_tag_id?: string
+    project_tag_id?: string | null
+  }) {
+    if (!note) return
+    setTagErr(null)
+    const { error, response } = await api.PATCH('/notes/{note_id}', {
+      params: { header: workspaceHeader(), path: { note_id: id } },
+      body: { expected_version: note.version, ...patch },
+    })
+    if (response.status === 409) {
+      setTagErr(t('tasks.conflict'))
+      await refreshNote()
+      return
+    }
+    if (error) {
+      setTagErr(errMessage(error))
+      return
+    }
+    await refreshNote()
+  }
+
+  // Free-form facets only: the pair goes through setStructural above.
   async function addTag(tagId: string) {
     if (!note || !tagId) return
-    setErr(null)
+    setTagErr(null)
     const { error } = await api.POST('/notes/{note_id}/tags', {
       params: { header: workspaceHeader(), path: { note_id: id } },
       body: { tag_id: tagId },
     })
     if (error) {
-      setErr(errMessage(error))
+      setTagErr(errMessage(error))
       return
     }
     await refreshNote()
@@ -298,7 +339,7 @@ export function NoteDetailRoute() {
 
   async function removeTag(tagId: string) {
     if (!note) return
-    setErr(null)
+    setTagErr(null)
     const { error } = await api.DELETE('/notes/{note_id}/tags/{tag_id}', {
       params: {
         header: workspaceHeader(),
@@ -306,7 +347,7 @@ export function NoteDetailRoute() {
       },
     })
     if (error) {
-      setErr(errMessage(error))
+      setTagErr(errMessage(error))
       return
     }
     await refreshNote()
@@ -792,6 +833,17 @@ export function NoteDetailRoute() {
               <TagPicker
                 selected={note.tags ?? []}
                 all={tags}
+                error={tagErr}
+                structural={{
+                  mode: 'note',
+                  projects,
+                  onSetClient: (cid) => {
+                    if (cid) void setStructural({ client_tag_id: cid })
+                  },
+                  // ``null`` = "No project": un-share, keep the client.
+                  onSetProject: (pid) =>
+                    void setStructural({ project_tag_id: pid }),
+                }}
                 onAdd={(tid) => void addTag(tid)}
                 onRemove={(tid) => void removeTag(tid)}
               />

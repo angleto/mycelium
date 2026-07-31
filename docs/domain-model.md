@@ -12,24 +12,35 @@ Conceptual entities. The physical schema is in
   cassa) needed for invoicing. Everything is org-scoped.
 - **User / Membership / Role**: users, membership in one or more Orgs,
   RBAC (owner, admin, member, read-only guest).
-- **Tag** with `kind` in {generic, client, project}. A single label
-  concept. Legal/fiscal and billing data does not live in free JSONB
-  but in typed satellite profiles with an FK to `tag.id`:
+- **Tag** with `kind` in {generic, client, project, memory_channel}. A
+  single label concept. Legal/fiscal and billing data does not live in
+  free JSONB but in typed satellite profiles with an FK to `tag.id`:
   - `client_profile`: legal name, IdFiscaleIVA (country + id), tax
     code, structured address, recipient code or PEC.
-  - `project_profile`: reference to the client tag (parent), rate,
-    currency, budget, optional workflow override.
-  Associating a client/project with a task = attaching the relevant
-  tag (the same many-to-many relation as any tag).
+  - `project_profile`: reference to the client tag (parent, NOT NULL:
+    every project has exactly one client), rate, currency, budget,
+    optional workflow override.
+  Associating a client/project with a task or a note = attaching the
+  relevant tag, but `client` and `project` are **structural** kinds:
+  the junction is cardinality-constrained, not free many-to-many. A
+  task carries exactly one client and exactly one project; a note
+  exactly one client and at most one project (no project = the
+  personal retrieval perimeter, ADR-0007/ADR-0021); the client is
+  always the attached project's own client. Attaching a project of a
+  different client MOVES the entity; a client contradicting the
+  attached project is rejected. `generic` and `memory_channel` stay
+  unconstrained many-to-many. ADR-0003, ADR-0050.
 - **Task**: the primary unit. State (from the workflow), priority,
   `estimate_effort_h`, `remaining_effort_h`, `actual_start`,
   `is_milestone`, **`executor`** (human user or LLM agent), subtasks,
   tags, comments, attachments. Personal-planning attributes:
   `monetary_cost?`, `location?`, `necessity` (must/should/nice),
   context/preconditions via generic tags (e.g.
-  `ctx:requires-computer`, `place:hardware`), `budget_id?`. A task may
-  belong to a personal project (a non-billable project) as well as to
-  client projects.
+  `ctx:requires-computer`, `place:hardware`), `budget_id?`. A task
+  belongs to exactly one project, hence to exactly one client
+  (ADR-0050): either a personal project (a non-billable project under
+  the default "Personal" client) or a client project, never both. With
+  none stated it lands on the workspace default project ("General").
 - **TaskDependency**: a typed directed edge (FS/SS/FF/SF) with `lag`
   (signed working minutes; reference calendar = the predecessor). The
   set is a DAG; cycle detection is mandatory.

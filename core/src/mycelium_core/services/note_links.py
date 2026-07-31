@@ -58,8 +58,10 @@ from mycelium_core.models.note_link import (
     NoteNoteLink,
     NoteTaskLink,
 )
+from mycelium_core.models.note_tag import NoteTag
+from mycelium_core.models.tag import Tag, TagKind
 from mycelium_core.models.task import Task
-from mycelium_core.services import audit, note_inert
+from mycelium_core.services import audit, note_inert, tag_assignment
 from mycelium_core.services import tasks as tasks_svc
 from mycelium_core.services.rbac import require_role
 
@@ -79,6 +81,42 @@ async def _get_note(session: AsyncSession, *, org_id: uuid.UUID, note_id: uuid.U
     if row is None:
         raise NotFoundError(MessageCode.MEMORY_NOT_FOUND)
     return row
+
+
+async def _note_project_tag_ids(session: AsyncSession, *, note_id: uuid.UUID) -> list[uuid.UUID]:
+    """The project tag(s) the note carries. A READ: every structural
+    junction WRITE goes through tag_assignment (docs/adr/0003).
+
+    Returns a list rather than "the" project so the cardinality rule
+    stays in ONE place -- ``resolve_structural`` refuses a note carrying
+    two projects (TAG_MULTIPLE_PROJECTS) instead of a local tie-break
+    silently picking one. The note's CLIENT is deliberately not read:
+    the project is the truth and carries its own client, and a task
+    cannot honour a client alone (it must have a project, so a
+    projectless note yields the default General/Personal pair).
+    """
+    return list(
+        (
+            await session.execute(
+                select(NoteTag.tag_id)
+                .join(Tag, Tag.id == NoteTag.tag_id)
+                .where(NoteTag.note_id == note_id, Tag.kind == TagKind.project)
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+
+def _resolved_tag_ids(structural: tag_assignment.Structural) -> list[uuid.UUID]:
+    """The resolved pair + the free-form facets, as the flat list
+    ``tasks_svc.create_task`` takes. ``project_tag_id`` is never None for
+    a task (no orphan tasks); the arm exists because the dataclass also
+    models notes."""
+    ids = [structural.client_tag_id]
+    if structural.project_tag_id is not None:
+        ids.append(structural.project_tag_id)
+    return [*ids, *structural.generic_ids]
 
 
 async def _actor_identity_id(
@@ -772,11 +810,27 @@ async def derive_task_from_note(
     extra_tag_ids: list[uuid.UUID] | None = None,
 ) -> tuple[Task, NoteTaskLink]:
     """A new task falls out of the note as a fruit; the note stays
-    alive. Inherits the note's client/project from its first project
-    tag mapping if any (otherwise the user's default Personal /
-    General via ``tasks_svc.create_task``)."""
+    alive. It inherits the note's project -- hence, through
+    ``project_profile.client_tag_id``, the note's client. A projectless
+    note (the personal perimeter, docs/adr/0021) has no project to pass
+    on, so the task falls back to the default General / Personal pair:
+    a task must have a project, so the note's client cannot ride alone.
+
+    ``extra_tag_ids`` goes through the same resolution, so a caller
+    naming a second project, or a client the inherited project
+    contradicts, is refused rather than silently attached alongside."""
     await require_role(session, org_id, actor_id, Role.member)
     note = await _get_note(session, org_id=org_id, note_id=note_id)
+    structural = await tag_assignment.resolve_structural(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        entity="task",
+        requested=[
+            *await _note_project_tag_ids(session, note_id=note.id),
+            *(extra_tag_ids or ()),
+        ],
+    )
     task = await tasks_svc.create_task(
         session,
         org_id=org_id,
@@ -784,7 +838,7 @@ async def derive_task_from_note(
         title=title,
         description=description,
         estimate_effort_h=estimate_effort_h,
-        tag_ids=extra_tag_ids or [],
+        tag_ids=_resolved_tag_ids(structural),
     )
     link = await _link_note_task(
         session,
@@ -806,7 +860,10 @@ async def promote_note_to_task(
     title: str | None = None,
 ) -> tuple[Task, NoteTaskLink]:
     """Transplant the note: a new task carries the note as substrate;
-    the note is marked read-only (``promoted_at = now``).
+    the note is marked read-only (``promoted_at = now``). The task
+    inherits the note's project (hence its client), exactly like
+    :func:`derive_task_from_note`; a projectless note yields the default
+    General / Personal pair.
 
     The title defaults to the note's title (or a derived snippet of
     the transcript when the title is empty).
@@ -826,12 +883,20 @@ async def promote_note_to_task(
         # Derive from the first non-empty line of the body.
         lines = body_text.strip().splitlines()
         chosen_title = lines[0][:120] if lines else "promoted note"
+    structural = await tag_assignment.resolve_structural(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        entity="task",
+        requested=await _note_project_tag_ids(session, note_id=note.id),
+    )
     task = await tasks_svc.create_task(
         session,
         org_id=org_id,
         actor_id=actor_id,
         title=chosen_title,
         description=note.summary or body_text,
+        tag_ids=_resolved_tag_ids(structural),
     )
     link = await _link_note_task(
         session,

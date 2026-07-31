@@ -166,6 +166,11 @@ TOOL_SCOPES: dict[str, str | None] = {
     "append_note_part": "notes:write",
     "append_to_note": "notes:write",
     "archive_note": "notes:write",
+    # The single-valued structural doors of a NOTE follow the note, not
+    # the taxonomy: they are the replacement for add_note_tag /
+    # remove_note_tag (notes:write), so an assistant that could already
+    # share a note keeps that ability instead of needing tags:write.
+    "clear_note_project": "notes:write",
     "create_note": "notes:write",
     "create_task_note": "notes:write",
     "delete_note": "notes:write",
@@ -177,6 +182,7 @@ TOOL_SCOPES: dict[str, str | None] = {
     "get_or_create_task_note": "notes:write",
     "link_notes": "notes:write",
     "merge_notes": "notes:write",
+    "move_note_to_project": "notes:write",
     "note_restore_source": "notes:write",
     "patch_note_part_body_capability": "notes:write",
     "prepend_note_part": "notes:write",
@@ -187,6 +193,7 @@ TOOL_SCOPES: dict[str, str | None] = {
     "restore_note": "notes:write",
     "restore_note_revision": "notes:write",
     "run_command": "notes:write",
+    "set_note_client": "notes:write",
     "set_note_maturity": "notes:write",
     "set_note_part_body_capability": "notes:write",
     "set_note_part_body_instructions": "notes:write",
@@ -217,6 +224,9 @@ TOOL_SCOPES: dict[str, str | None] = {
     "move_task_to_project": "tags:write",
     "remove_task_tag": "tags:write",
     "set_tag_scope": "tags:write",
+    # A TASK's client/project doors stay with the tag taxonomy, like the
+    # add_task_tag / move_task_to_project pair they extend.
+    "set_task_client": "tags:write",
     "update_client": "tags:write",
     "update_project": "tags:write",
     "update_tag": "tags:write",

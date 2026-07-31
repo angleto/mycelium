@@ -19,12 +19,12 @@ from mycelium_core.email_connector import FetchedMessage, OutgoingMessage
 from mycelium_core.errors import ConflictError, NotFoundError
 from mycelium_core.models.email import EmailProvider
 from mycelium_core.models.memory_blob import BlobSource, MemoryBlobTag
-from mycelium_core.models.tag import TagKind
 from mycelium_core.models.task_tag import TaskTag
 from mycelium_core.services import email as svc
 from mycelium_core.services import memory as memory_svc
 from mycelium_core.services import taxonomy
 from mycelium_core.services.auth import signup
+from mycelium_core.services.taxonomy import ClientInput
 
 
 class FakeConnector:
@@ -106,11 +106,19 @@ async def _blob_tag_ids(s: object, blob_id: uuid.UUID) -> set[uuid.UUID]:
 
 
 async def _mk_client_project(s, org, user) -> tuple[uuid.UUID, uuid.UUID]:
-    client = await taxonomy.create_tag(
-        s, org_id=org, actor_id=user, kind=TagKind.client, name="Acme"
+    """A real client -> project chain. Not ``create_tag``: since
+    docs/adr/0003 that door refuses client/project (a bare ``tags`` row
+    has no satellite profile, so the project would have no owning
+    client and every project -> client lookup on it would fail)."""
+    client = await taxonomy.create_client(
+        s,
+        org_id=org,
+        actor_id=user,
+        name="Acme",
+        profile=ClientInput(legal_name="Acme SRL"),
     )
-    project = await taxonomy.create_tag(
-        s, org_id=org, actor_id=user, kind=TagKind.project, name="Website"
+    project = await taxonomy.create_project(
+        s, org_id=org, actor_id=user, name="Website", client_tag_id=client.id
     )
     return client.id, project.id
 

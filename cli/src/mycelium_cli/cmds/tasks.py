@@ -54,6 +54,9 @@ def _resolve_task(c: Any, partial: str) -> str:
 
 
 def _resolve_tag(c: Any, name_or_id: str) -> str:
+    """Kind-blind resolution, for the surfaces where any kind is a legal
+    answer: the list filter and ``task tag add/rm`` (attaching a project
+    tag there is a MOVE, ADR-0050, not a mistake to catch here)."""
     if len(name_or_id) >= 32:
         return name_or_id
     rows = get_json(c.get("/tags"))
@@ -61,6 +64,53 @@ def _resolve_tag(c: Any, name_or_id: str) -> str:
     if not matches:
         raise CLIError(f"no tag named '{name_or_id}'.")
     return str(matches[0]["id"])
+
+
+# The kinds ``--tag`` accepts on create. A task's client and project are
+# structural (ADR-0050: exactly one of each) and have their own
+# single-valued flags, so a repeated ``-t`` can no longer name a second
+# client and be silently accepted.
+_FREEFORM_KINDS = ("generic", "memory_channel")
+_STRUCTURAL_HINT = "A task's client and project are structural: pass them as --client / --project."
+
+
+def _tag_index(c: Any) -> list[dict[str, Any]]:
+    """The whole tag vocabulary in one call, resolved once per command
+    instead of once per ``--tag``. Archived tags are included on
+    purpose: archiving hides a tag from the pickers, it never stops it
+    from being attached."""
+    return list(get_json(c.get("/tags", params={"include_archived": "true"})))
+
+
+def _pick_tag(
+    rows: list[dict[str, Any]], name_or_id: str, *, kinds: tuple[str, ...], flag: str
+) -> str:
+    """Resolve one tag name (case-insensitive) or UUID within ``kinds``.
+
+    Names are unique per (org, kind), so the kind is part of the lookup
+    key, not a post-hoc check: '--project Acme' and '--client Acme' can
+    legitimately be two different tags.
+    """
+    needle = name_or_id.strip().lower()
+    matches = [
+        t
+        for t in rows
+        if str(t.get("id", "")).lower() == needle or str(t.get("name", "")).lower() == needle
+    ]
+    wanted = [t for t in matches if str(t.get("kind", "")) in kinds]
+    if not wanted:
+        if matches:
+            raise CLIError(
+                f"{flag}: '{name_or_id}' is a {matches[0].get('kind')} tag, not {'/'.join(kinds)}.",
+                hint=_STRUCTURAL_HINT,
+            )
+        raise CLIError(f"{flag}: no {'/'.join(kinds)} tag named '{name_or_id}'.")
+    if len(wanted) > 1:
+        raise CLIError(
+            f"{flag}: '{name_or_id}' matches {len(wanted)} tags.",
+            hint="Pass the tag UUID instead.",
+        )
+    return str(wanted[0]["id"])
 
 
 @app.command("list")
@@ -173,7 +223,20 @@ def add(
         max=5,
         help="Eisenhower urgency (1..5, 1=Now). Default Low (4).",
     ),
-    tag: list[str] = typer.Option([], "--tag", "-t", help="Tag name or UUID; pass multiple times."),
+    client_tag: str | None = typer.Option(
+        None,
+        "--client",
+        help="Client tag name or UUID. Optional: the project decides the client, "
+        "so this only asserts the one you expect.",
+    ),
+    project_tag: str | None = typer.Option(
+        None,
+        "--project",
+        help="Project tag name or UUID. Omitted = the workspace default project.",
+    ),
+    tag: list[str] = typer.Option(
+        [], "--tag", "-t", help="Generic tag name or UUID; pass multiple times."
+    ),
     no_editor: bool = typer.Option(
         False, "--no-editor", help="Do not open $EDITOR even if description is empty."
     ),
@@ -201,8 +264,20 @@ def add(
     if due_date:
         payload["due_date"] = due_date.isoformat()
     with client() as c:
-        if tag:
-            payload["tag_ids"] = [_resolve_tag(c, t) for t in tag]
+        if client_tag or project_tag or tag:
+            rows = _tag_index(c)
+            ids: list[str] = []
+            if client_tag:
+                ids.append(_pick_tag(rows, client_tag, kinds=("client",), flag="--client"))
+            if project_tag:
+                ids.append(_pick_tag(rows, project_tag, kinds=("project",), flag="--project"))
+            ids += [_pick_tag(rows, t, kinds=_FREEFORM_KINDS, flag="--tag") for t in tag]
+            # POST /tasks takes one flat bag; the server sorts it by kind
+            # in tag_assignment.resolve_structural. So the structural
+            # pair rides WITH the create instead of being attached
+            # afterwards, and a --client contradicting --project is
+            # refused before any row exists (ADR-0050).
+            payload["tag_ids"] = ids
         created = get_json(c.post("/tasks", json=payload))
     if json_mode():
         emit_json(created)

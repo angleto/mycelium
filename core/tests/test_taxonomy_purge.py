@@ -25,10 +25,11 @@ from mycelium_core.models.invoice import (
     Invoice,
     InvoiceKind,
 )
-from mycelium_core.models.note import Note, NoteKind, NoteStatus
+from mycelium_core.models.note import Note, NoteKind
 from mycelium_core.models.note_tag import NoteTag
-from mycelium_core.models.tag import Tag
+from mycelium_core.models.tag import Tag, TagKind
 from mycelium_core.models.task import Task
+from mycelium_core.services import notes as nt
 from mycelium_core.services import tasks as tasks_svc
 from mycelium_core.services import taxonomy
 from mycelium_core.services.auth import signup
@@ -86,18 +87,20 @@ async def test_purge_project_wipes_subgraph() -> None:
             tag_ids=[pr.id],
         )
         task_id = t.id
-        # A note scoped to the project (migration 0016: the project
-        # tag in note_tags is the hard boundary, mirroring task_tags).
-        n = Note(
+        # A note scoped to the project (migration 0016: the project tag
+        # in note_tags is the hard boundary, mirroring task_tags). Built
+        # through the service rather than by hand: since migration 0086 a
+        # note also needs the project's client (invariant (b)) and only
+        # tag_assignment may write that pair.
+        n = await nt.create_note(
+            s,
             org_id=org,
+            actor_id=user,
             kind=NoteKind.text,
-            status=NoteStatus.captured,
+            project_id=pr.id,
             title="Note in project",
         )
-        s.add(n)
-        await s.flush()
-        s.add(NoteTag(org_id=org, note_id=n.id, tag_id=pr.id))
-        await s.flush()
+        note_id = n.id
     async with tenant_session(str(org), str(user)) as s:
         await _archive(s, org_id=org, tag_id=pr.id)
     async with tenant_session(str(org), str(user)) as s:
@@ -107,18 +110,11 @@ async def test_purge_project_wipes_subgraph() -> None:
         assert tag_row is None
         task_row = (await s.execute(select(Task).where(Task.id == task_id))).scalar_one_or_none()
         assert task_row is None
-        notes_left = (
-            (
-                await s.execute(
-                    select(Note).where(
-                        Note.id.in_(select(NoteTag.note_id).where(NoteTag.tag_id == pr.id))
-                    )
-                )
-            )
-            .scalars()
-            .all()
-        )
-        assert notes_left == []
+        # By note id, not through note_tags: the junction rows are
+        # CASCADE-deleted with the tag, so that subquery would be empty
+        # even if the note itself had survived.
+        note_row = (await s.execute(select(Note).where(Note.id == note_id))).scalar_one_or_none()
+        assert note_row is None
 
 
 async def test_purge_client_recurses_across_projects() -> None:
@@ -174,3 +170,49 @@ async def test_purge_client_blocks_on_invoices() -> None:
         async with tenant_session(str(org), str(user)) as s:
             await taxonomy.purge_client(s, org_id=org, actor_id=user, tag_id=cl.id)
     assert ei.value.code is MessageCode.CLIENT_HAS_INVOICES
+
+
+async def test_purge_client_rehomes_a_client_only_note() -> None:
+    """A note carrying ONLY the purged client (no project) sits in no
+    project subgraph, so no project purge reaches it: the ``note_tags``
+    CASCADE would strip its last client and leave it with none, which
+    invariant (b) forbids (docs/adr/0021, migration 0086). It falls back
+    to the workspace default client -- the same perimeter a note created
+    without a project lands on -- and the purge commits, which is what
+    the DEFERRED guards make non-obvious."""
+    org, user = await _org()
+    async with tenant_session(str(org), str(user)) as s:
+        default_client = await taxonomy.ensure_default_client(s, org_id=org, actor_id=user)
+        cl = await taxonomy.create_client(
+            s,
+            org_id=org,
+            actor_id=user,
+            name="Leaving",
+            profile=ClientInput(legal_name="Leaving SRL"),
+        )
+        n = await nt.create_note(
+            s, org_id=org, actor_id=user, kind=NoteKind.text, title="Client-only note"
+        )
+        # No project: the client tag IS the whole perimeter of this note.
+        await nt.attach_tag(s, org_id=org, actor_id=user, note_id=n.id, tag_id=cl.id)
+        note_id = n.id
+        await _archive(s, org_id=org, tag_id=cl.id)
+    async with tenant_session(str(org), str(user)) as s:
+        await taxonomy.purge_client(s, org_id=org, actor_id=user, tag_id=cl.id)
+    async with tenant_session(str(org), str(user)) as s:
+        assert (await s.execute(select(Tag).where(Tag.id == cl.id))).scalar_one_or_none() is None
+        assert (
+            await s.execute(select(Note).where(Note.id == note_id))
+        ).scalar_one_or_none() is not None
+        clients = list(
+            (
+                await s.execute(
+                    select(NoteTag.tag_id)
+                    .join(Tag, Tag.id == NoteTag.tag_id)
+                    .where(NoteTag.note_id == note_id, Tag.kind == TagKind.client)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert clients == [default_client]

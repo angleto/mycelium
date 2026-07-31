@@ -7,6 +7,7 @@ import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, Depends
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from mycelium_api.deps import TenantCtx, tenant_ctx
 from mycelium_api.schemas import (
@@ -22,6 +23,8 @@ from mycelium_api.schemas import (
     TagScopeIn,
     VersionOut,
 )
+from mycelium_core.errors import DomainError
+from mycelium_core.i18n import MessageCode
 from mycelium_core.models.membership import Role
 from mycelium_core.models.tag import Tag, TagKind
 from mycelium_core.services import taxonomy
@@ -29,6 +32,24 @@ from mycelium_core.services.rbac import ensure_role
 from mycelium_core.services.taxonomy import ClientInput
 
 router = APIRouter(tags=["taxonomy"])
+
+
+async def require_tag_kind(
+    session: AsyncSession, *, org_id: uuid.UUID, tag_id: uuid.UUID, kind: TagKind
+) -> None:
+    """Assert that a field named after a kind really carries one.
+
+    The service doors that write the structural pair (tasks / notes
+    ``attach_tag``) dispatch on the tag's own kind, so without this a
+    ``project_tag_id`` holding a client id would quietly re-point the
+    client instead of failing: the field name would be decorative. Same
+    answer the choke-point gives when it is handed the named parameter
+    itself (services/tag_assignment.resolve_structural), so the HTTP
+    contract does not depend on which door the value reaches.
+    """
+    tag = await taxonomy.get_tag(session, org_id=org_id, tag_id=tag_id)
+    if tag.kind is not kind:
+        raise DomainError(MessageCode.TAG_KIND_MISMATCH)
 
 
 def _out(tag: Tag, scope: list[uuid.UUID] | None = None) -> TagOut:
@@ -47,6 +68,14 @@ def _out(tag: Tag, scope: list[uuid.UUID] | None = None) -> TagOut:
 async def create_tag(
     body: TagCreateIn, ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")]
 ) -> TagOut:
+    """Free-form tags only. ``client`` and ``project`` are refused by the
+    service (tag.kind_not_creatable): this door writes a bare ``tags``
+    row and no satellite profile, so a project born here would have no
+    ``project_profile.client_tag_id`` -- invariant (d) broken by
+    construction. POST /clients and POST /projects are the only doors
+    because they are the only ones that write the profile
+    (docs/adr/0003). The check stays in taxonomy so MCP's create_tag
+    gets the same answer without a second copy of the rule."""
     tag = await taxonomy.create_tag(
         ctx.session,
         org_id=ctx.org_id,
@@ -257,6 +286,11 @@ async def patch_project(
     ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> None:
     ensure_role(ctx.role, Role.owner)
+    # ``exclude_unset`` on purpose: it keeps an explicit ``"client_tag_id":
+    # null`` in the payload (an omitted key does not reach the service at
+    # all), and update_project answers it with project.client_required
+    # instead of NULLing the FK. Stating another client re-tags every
+    # dependent task and note in the same transaction.
     data = body.model_dump(exclude_unset=True)
     name = data.pop("name", None)
     await taxonomy.update_project(

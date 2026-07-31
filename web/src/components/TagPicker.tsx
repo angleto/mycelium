@@ -1,8 +1,10 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useLinkedClientProject } from '../lib/linkedClientProject'
 import type { components } from '../api/schema'
 
 type Tag = components['schemas']['TagOut']
+type Project = components['schemas']['ProjectOut']
 export type TagBriefLike = {
   id: string
   name: string
@@ -10,45 +12,226 @@ export type TagBriefLike = {
   kind?: string
 }
 
-// One reusable tag widget: shows the assigned tags (removable) and a
-// searchable, browsable list of the tags that can still be added.
-// Used by the task editor, the note editor, anywhere tags are picked
-// (no duplicated select code; the catalogue can be large -> search).
+// Stable empty list for the structural-less callers: the linked
+// client/project hook must be called on every render, so it always
+// needs a project catalogue -- an inline ``[]`` would be a fresh
+// identity each time.
+const NO_PROJECTS: Project[] = []
+
+// docs/adr/0050: the structural pair is NOT a free-form facet. A task
+// carries exactly one client and one project; a note exactly one client
+// and AT MOST one project (the empty option is the un-share path, which
+// rescopes the note's blobs -- memory_blobs.project_id NULL, ADR-0021);
+// an email account's default bag is replayed through
+// ``resolve_structural`` at ingest, so both of its axes may stay empty.
+export type TagPickerStructural = {
+  mode: 'task' | 'note' | 'defaults'
+  // ProjectOut, not the project tags: only the profile carries
+  // ``client_tag_id``, which is what couples the two selects.
+  projects: Project[]
+  onSetClient: (clientTagId: string | null) => void
+  onSetProject: (projectTagId: string | null) => void
+}
+
+// One reusable tag widget: the structural client/project pair as two
+// coupled single selects, then the free-form facets as removable chips
+// plus a searchable, browsable list of the ones that can still be added.
+// The list is GENERIC-only on purpose -- attaching a client or a project
+// is a cardinality-constrained move the selects own (and memory_channel
+// tags are system bookkeeping, never picked by hand: see MemoryRoute /
+// GardenMindmap, which hide them too). Already-attached facets stay
+// removable whatever their kind so an out-of-band channel tag can still
+// be cleaned up.
 export function TagPicker({
   selected,
   all,
   onAdd,
   onRemove,
   disabled,
+  structural,
+  error,
 }: {
   selected: TagBriefLike[]
   all: Tag[]
   onAdd: (id: string) => void
   onRemove: (id: string) => void
   disabled?: boolean
+  structural?: TagPickerStructural
+  // Rendered inside the widget: a rejected client/project change (the
+  // API answers DomainError -> 400 {code, detail}) has to surface next
+  // to the control that caused it, not in the page-level banner.
+  error?: string | null
 }) {
   const { t } = useTranslation()
   const [q, setQ] = useState('')
+
+  const clientTag = selected.find((s) => s.kind === 'client') ?? null
+  const projectTag = selected.find((s) => s.kind === 'project') ?? null
+  const clientTagId = clientTag?.id ?? ''
+  const projectTagId = projectTag?.id ?? ''
+
+  // The client<->project coupling (snap the client to the picked
+  // project, drop a project the picked client does not own) is the
+  // shared hook used by /tasks and /time; this widget only re-seeds it
+  // from what the server wrote back. Keyed on the two ids and never on
+  // ``selected``: callers rebuild that array on every render, which
+  // would wipe a staged client pick before it can be committed.
+  const linked = useLinkedClientProject(structural?.projects ?? NO_PROJECTS)
+  const { setClientId, setProjectId } = linked
+  useEffect(() => {
+    // External-state sync (the server's answer wins over the staged
+    // pick). The react-hooks/set-state-in-effect rule only fires on the
+    // CI runner for now; disable it explicitly so the build is green
+    // there, as TasksRoute already does for its own sync effects.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setClientId(clientTagId)
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setProjectId(projectTagId)
+  }, [clientTagId, projectTagId, setClientId, setProjectId])
+
+  // Options: active tags of the kind, plus the attached one when it is
+  // archived (archiving hides a tag from the pickers, it never orphans
+  // what it holds) so the select never renders a blank current value.
+  const clientOpts = all
+    .filter((g) => g.kind === 'client' && g.status !== 'archived')
+    .map((g) => ({ id: g.id, name: g.name }))
+  if (clientTag && !clientOpts.some((c) => c.id === clientTag.id))
+    clientOpts.unshift({ id: clientTag.id, name: clientTag.name })
+  const projectOpts = linked
+    .filterProjectsByClient(structural?.projects ?? NO_PROJECTS)
+    .filter((p) => p.status !== 'archived')
+    .map((p) => ({ id: p.id, name: p.name }))
+  if (projectTag && !projectOpts.some((p) => p.id === projectTag.id))
+    projectOpts.unshift({ id: projectTag.id, name: projectTag.name })
+
+  // A client the entity's project does not own cannot be committed on
+  // its own (the API answers TAG_CLIENT_PROJECT_MISMATCH): the pick only
+  // narrows the project list, and the move happens when a project of
+  // that client is picked. Same staging for all three modes -- an email
+  // default bag mixing client X with a project of client Y would blow up
+  // at ingest instead, which is worse (it fails far from here).
+  // ``linked.clientId`` is empty until the seeding effect above has run,
+  // which is not a staged pick -- it would flash the hint on mount.
+  const movePending =
+    !!structural &&
+    !!projectTagId &&
+    !!linked.clientId &&
+    linked.clientId !== clientTagId
+
+  function pickClient(id: string) {
+    linked.onPickClient(id)
+    if (!structural || projectTagId) return
+    // task / note always carry a client: "no client" is only a legal
+    // end state for the email default bag.
+    if (!id && structural.mode !== 'defaults') return
+    structural.onSetClient(id || null)
+  }
+
+  function pickProject(id: string) {
+    linked.onPickProject(id)
+    if (!structural) return
+    if (id) structural.onSetProject(id)
+    else if (projectTagId) structural.onSetProject(null)
+  }
+
+  // Free-form facets only: the pair lives in the selects above, and its
+  // chips would offer a remove the API rejects (TAG_STRUCTURAL_REQUIRED).
+  const facets = structural
+    ? selected.filter((s) => s.kind !== 'client' && s.kind !== 'project')
+    : selected
 
   const matches = useMemo(() => {
     const sel = new Set(selected.map((s) => s.id))
     const needle = q.trim().toLowerCase()
     return all
-      .filter((g) => g.status !== 'archived' && !sel.has(g.id))
       .filter(
-        (g) =>
-          !needle || `${g.kind} ${g.name}`.toLowerCase().includes(needle),
+        (g) => g.kind === 'generic' && g.status !== 'archived' && !sel.has(g.id),
       )
+      .filter((g) => !needle || g.name.toLowerCase().includes(needle))
       .slice(0, 50)
   }, [all, q, selected])
 
   return (
     <div className="tagpick">
+      {structural && (
+        <>
+          <div className="row">
+            <label>
+              {t('tagpicker.client', { defaultValue: 'Client' })}
+              <select
+                value={linked.clientId}
+                disabled={disabled}
+                onChange={(e) => pickClient(e.target.value)}
+              >
+                {structural.mode === 'defaults' ? (
+                  <option value="">
+                    {t('tagpicker.noClient', { defaultValue: 'No client' })}
+                  </option>
+                ) : (
+                  !linked.clientId && (
+                    <option value="" disabled>
+                      …
+                    </option>
+                  )
+                )}
+                {clientOpts.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              {t('tagpicker.project', { defaultValue: 'Project' })}
+              <select
+                value={linked.projectId}
+                disabled={disabled}
+                onChange={(e) => pickProject(e.target.value)}
+              >
+                {structural.mode === 'task' ? (
+                  !linked.projectId && (
+                    <option value="" disabled>
+                      …
+                    </option>
+                  )
+                ) : (
+                  <option value="">
+                    {t('tagpicker.noProject', { defaultValue: 'No project' })}
+                  </option>
+                )}
+                {projectOpts.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+          {movePending && (
+            <p className="hint">
+              {structural.mode === 'task'
+                ? t('tagpicker.pickProjectToMove', {
+                    defaultValue:
+                      'Pick a project of this client: the project decides the client.',
+                  })
+                : t('tagpicker.pickProjectOrNone', {
+                    defaultValue:
+                      'Pick a project of this client, or drop the project first: the project decides the client.',
+                  })}
+            </p>
+          )}
+        </>
+      )}
+      {error && <p className="err">{error}</p>}
       <div className="chips">
-        {selected.length === 0 && (
-          <span className="hint">{t('tagpicker.none')}</span>
+        {facets.length === 0 && (
+          <span className="hint">
+            {structural
+              ? t('tagpicker.noFacets', { defaultValue: 'No other tags' })
+              : t('tagpicker.none')}
+          </span>
         )}
-        {selected.map((s) => (
+        {facets.map((s) => (
           <button
             key={s.id}
             type="button"
@@ -87,7 +270,7 @@ export function TagPicker({
                   className="chip__dot"
                   style={{ background: g.color || 'var(--accent)' }}
                 />
-                <span className="muted">{g.kind}:</span> {g.name}
+                {g.name}
               </button>
             </li>
           ))

@@ -592,7 +592,17 @@ export interface paths {
          */
         get: operations["list_tags_tags_get"];
         put?: never;
-        /** Create Tag */
+        /**
+         * Create Tag
+         * @description Free-form tags only. ``client`` and ``project`` are refused by the
+         *     service (tag.kind_not_creatable): this door writes a bare ``tags``
+         *     row and no satellite profile, so a project born here would have no
+         *     ``project_profile.client_tag_id`` -- invariant (d) broken by
+         *     construction. POST /clients and POST /projects are the only doors
+         *     because they are the only ones that write the profile
+         *     (docs/adr/0003). The check stays in taxonomy so MCP's create_tag
+         *     gets the same answer without a second copy of the rule.
+         */
         post: operations["create_tag_tags_post"];
         delete?: never;
         options?: never;
@@ -1197,7 +1207,9 @@ export interface paths {
          * @description Task-side mirror of ``POST /notes/{note_id}/task-links``. Only
          *     ``subject`` / ``artifact`` accepted; ``derived_from`` and
          *     ``promoted_from`` are emitted only by the dedicated creation
-         *     endpoints on the note side.
+         *     endpoints on the note side. The exact scope is enforced per ``kind``
+         *     (subject = notes:write, artifact = tasks:write) behind the route's any-of
+         *     gate (task c19f2f63, review #5).
          */
         post: operations["add_task_note_link_tasks__task_id__note_links_post"];
         /**
@@ -4592,6 +4604,11 @@ export interface paths {
          *     ``promoted_from`` are intentionally NOT accepted here: those are
          *     creation-with-link operations, not free linkage (see
          *     /notes/{id}/derive-task and /promote).
+         *
+         *     The two operations require different scopes (subject is a notes:write op,
+         *     artifact a tasks:write one), which one route key cannot express, so the
+         *     app-level gate only checks the any-of baseline and the exact key is enforced
+         *     per ``kind`` here (task c19f2f63, review #5).
          */
         post: operations["add_note_task_link_notes__note_id__task_links_post"];
         /**
@@ -9786,6 +9803,10 @@ export interface components {
             access_count: number;
             /** Cluster Id */
             cluster_id: string | null;
+            /** Created By */
+            created_by?: string | null;
+            /** Origin Model Id */
+            origin_model_id?: string | null;
             /** Tags */
             tags?: components["schemas"]["TagBrief"][];
         };
@@ -9877,6 +9898,8 @@ export interface components {
             channel_tag_id?: string | null;
             /** Channel Key */
             channel_key?: string | null;
+            /** Created By */
+            created_by?: string | null;
         };
         /** MemoryStatusOut */
         MemoryStatusOut: {
@@ -10039,8 +10062,12 @@ export interface components {
         /** NoteCreateIn */
         NoteCreateIn: {
             kind: components["schemas"]["NoteKind"];
+            /** Project Tag Id */
+            project_tag_id?: string | null;
             /** Project Id */
             project_id?: string | null;
+            /** Client Tag Id */
+            client_tag_id?: string | null;
             /** Title */
             title?: string | null;
             /** Text */
@@ -10383,6 +10410,10 @@ export interface components {
             task_id?: string | null;
             /** Audio Ref */
             audio_ref?: string | null;
+            /** Project Tag Id */
+            project_tag_id?: string | null;
+            /** Client Tag Id */
+            client_tag_id?: string | null;
         };
         /** NotePromoteIn */
         NotePromoteIn: {
@@ -10652,8 +10683,11 @@ export interface components {
             status: string;
             /** Version */
             version: number;
-            /** Client Tag Id */
-            client_tag_id: string | null;
+            /**
+             * Client Tag Id
+             * Format: uuid
+             */
+            client_tag_id: string;
             /** Budget */
             budget: string | null;
             /** Color */
@@ -11848,6 +11882,10 @@ export interface components {
             budget_id?: string | null;
             /** Tag Ids */
             tag_ids?: string[];
+            /** Client Tag Id */
+            client_tag_id?: string | null;
+            /** Project Tag Id */
+            project_tag_id?: string | null;
             /** Assignee Ids */
             assignee_ids?: string[];
             /** Start At */
@@ -12084,6 +12122,10 @@ export interface components {
             necessity?: components["schemas"]["Necessity"] | null;
             /** Budget Id */
             budget_id?: string | null;
+            /** Client Tag Id */
+            client_tag_id?: string | null;
+            /** Project Tag Id */
+            project_tag_id?: string | null;
             /** Start At */
             start_at?: string | null;
             /** Duration Minutes */

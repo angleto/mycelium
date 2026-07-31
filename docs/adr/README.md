@@ -56,3 +56,6 @@ Format: Status, Context, Decision, Consequences, Alternatives rejected.
 - [0045 Issuer-scoped API keys, public Invoice API, MCP invoice tools](0045-issuer-scoped-api-keys.md)
 - [0046 Two-phase durable invoice transmit (lost-ACK safety)](0046-two-phase-durable-transmit.md)
 - [0047 Signed outbound webhooks on invoice state changes](0047-signed-invoice-webhooks.md)
+- [0048 Fuel-table retention: pruning is hygiene, not metabolism](0048-fuel-table-retention.md)
+- [0049 Working memory is delegated to the calling agent](0049-working-memory-delegated-to-the-caller.md)
+- [0050 Structural tag cardinality on tasks and notes](0050-structural-tag-cardinality.md) — revises ADR-0003 (silent on cardinality)

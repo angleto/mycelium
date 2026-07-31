@@ -47,6 +47,10 @@ def _resolve_note(c: Any, partial: str) -> str:
 
 
 def _resolve_tag(c: Any, name_or_id: str) -> str:
+    """Kind-blind resolution, for the surfaces where any kind is a legal
+    answer: the list filter and ``note tag add/rm`` (attaching a project
+    tag there is a MOVE and detaching one is the un-share path, ADR-0050,
+    not mistakes to catch here)."""
     if len(name_or_id) >= 32:
         return name_or_id
     rows = get_json(c.get("/tags"))
@@ -54,6 +58,52 @@ def _resolve_tag(c: Any, name_or_id: str) -> str:
     if not matches:
         raise CLIError(f"no tag named '{name_or_id}'.")
     return str(matches[0]["id"])
+
+
+# The kinds ``--tag`` accepts on create. A note's project is structural
+# (ADR-0050: at most one, and it decides the client) and has its own
+# single-valued flag, so a repeated ``--tag`` can no longer name one.
+_FREEFORM_KINDS = ("generic", "memory_channel")
+_STRUCTURAL_HINT = "A note's project is structural: pass it as --project (its client follows)."
+
+
+def _tag_index(c: Any) -> list[dict[str, Any]]:
+    """The whole tag vocabulary in one call, resolved once per command
+    instead of once per ``--tag``. Archived tags are included on
+    purpose: archiving hides a tag from the pickers, it never stops it
+    from being attached."""
+    return list(get_json(c.get("/tags", params={"include_archived": "true"})))
+
+
+def _pick_tag(
+    rows: list[dict[str, Any]], name_or_id: str, *, kinds: tuple[str, ...], flag: str
+) -> str:
+    """Resolve one tag name (case-insensitive) or UUID within ``kinds``.
+
+    Names are unique per (org, kind), so the kind is part of the lookup
+    key, not a post-hoc check: '--project Acme' and a generic 'Acme' can
+    legitimately be two different tags.
+    """
+    needle = name_or_id.strip().lower()
+    matches = [
+        t
+        for t in rows
+        if str(t.get("id", "")).lower() == needle or str(t.get("name", "")).lower() == needle
+    ]
+    wanted = [t for t in matches if str(t.get("kind", "")) in kinds]
+    if not wanted:
+        if matches:
+            raise CLIError(
+                f"{flag}: '{name_or_id}' is a {matches[0].get('kind')} tag, not {'/'.join(kinds)}.",
+                hint=_STRUCTURAL_HINT,
+            )
+        raise CLIError(f"{flag}: no {'/'.join(kinds)} tag named '{name_or_id}'.")
+    if len(wanted) > 1:
+        raise CLIError(
+            f"{flag}: '{name_or_id}' matches {len(wanted)} tags.",
+            hint="Pass the tag UUID instead.",
+        )
+    return str(wanted[0]["id"])
 
 
 def _resolve_task(c: Any, partial: str) -> str:
@@ -76,7 +126,15 @@ def add(
         autocompletion=complete_task_id,
         help="Link the note to this task (Proposal A: note → task pre-bind).",
     ),
-    tag: list[str] = typer.Option([], "--tag", help="Tag name or UUID; pass multiple times."),
+    project: str | None = typer.Option(
+        None,
+        "--project",
+        help="Project tag name or UUID. Omitted = a projectless note "
+        "(the personal perimeter, ADR-0021).",
+    ),
+    tag: list[str] = typer.Option(
+        [], "--tag", help="Generic tag name or UUID; pass multiple times."
+    ),
 ) -> None:
     """Create a text note. With no -m/--text, opens $EDITOR."""
     if text == "-":
@@ -93,6 +151,21 @@ def add(
         payload["title"] = title
     payload["text"] = text
     with client() as c:
+        # Every tag is resolved (and kind-checked) BEFORE the note is
+        # written: a typo in --tag used to abort halfway through the
+        # attach loop and leave a half-tagged note behind.
+        generic_ids: list[str] = []
+        if project or tag:
+            rows = _tag_index(c)
+            if project:
+                # The project rides WITH the create: the server derives
+                # the client from it (ADR-0050), so the note is never
+                # briefly visible under the default "Personal" perimeter
+                # and a rejected project leaves no note behind.
+                payload["project_id"] = _pick_tag(
+                    rows, project, kinds=("project",), flag="--project"
+                )
+            generic_ids = [_pick_tag(rows, t, kinds=_FREEFORM_KINDS, flag="--tag") for t in tag]
         created = get_json(c.post("/notes", json=payload))
         note_id = str(created["id"])
         # Optional task link is a follow-up PATCH so we keep one write
@@ -104,8 +177,10 @@ def add(
                 "task_id": full_task,
             }
             get_json(c.patch(f"/notes/{note_id}", json=patch))
-        for t in tag:
-            tag_id = _resolve_tag(c, t)
+        # Free-form facets are unconstrained many-to-many, so attaching
+        # them one by one after the fact cannot break the structural
+        # pair the create already fixed.
+        for tag_id in generic_ids:
             resp = c.post(f"/notes/{note_id}/tags", json={"tag_id": tag_id})
             if resp.status_code not in (200, 204):
                 get_json(resp)

@@ -52,6 +52,16 @@ class MessageCode(enum.StrEnum):
     TAG_DUPLICATE = "tag.duplicate"
     TAG_AMBIGUOUS = "tag.ambiguous"
     TAG_KIND_MISMATCH = "tag.kind_mismatch"
+    # Structural tag invariant (docs/adr/0003 + 0021), enforced by
+    # services/tag_assignment.py: a task carries exactly one client and
+    # one project tag, a note exactly one client and at most one
+    # project, and a carried project's client wins over any other.
+    TAG_MULTIPLE_CLIENTS = "tag.multiple_clients"
+    TAG_MULTIPLE_PROJECTS = "tag.multiple_projects"
+    TAG_CLIENT_PROJECT_MISMATCH = "tag.client_project_mismatch"
+    TAG_STRUCTURAL_REQUIRED = "tag.structural_required"
+    PROJECT_CLIENT_REQUIRED = "project.client_required"
+    TAG_KIND_NOT_CREATABLE = "tag.kind_not_creatable"
     TAG_NOT_ARCHIVED = "tag.not_archived"
     TAG_DEFAULT_PROTECTED = "tag.default_protected"
     CLIENT_HAS_INVOICES = "tag.client_has_invoices"
@@ -276,6 +286,30 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
         MessageCode.TAG_DUPLICATE: "A tag with this name already exists",
         MessageCode.TAG_AMBIGUOUS: "Ambiguous tag name: {name}",
         MessageCode.TAG_KIND_MISMATCH: "Tag is not of the expected kind",
+        MessageCode.TAG_MULTIPLE_CLIENTS: (
+            "Only one client tag is allowed: pass a single client, or none "
+            "and let the project decide it"
+        ),
+        MessageCode.TAG_MULTIPLE_PROJECTS: (
+            "Only one project tag is allowed: pass a single project"
+        ),
+        MessageCode.TAG_CLIENT_PROJECT_MISMATCH: (
+            "The client tag does not match the project's client: attach the "
+            "project alone (its client follows automatically), or pick a "
+            "project that belongs to this client"
+        ),
+        MessageCode.TAG_STRUCTURAL_REQUIRED: (
+            "The client and project tags cannot be detached: attach another "
+            "project to move this item instead (only a note may drop its "
+            "project, which makes it personal again)"
+        ),
+        MessageCode.PROJECT_CLIENT_REQUIRED: (
+            "Every project belongs to a client: provide client_tag_id"
+        ),
+        MessageCode.TAG_KIND_NOT_CREATABLE: (
+            "Clients and projects are not created as plain tags: use "
+            "/clients and /projects, which also create their profile"
+        ),
         MessageCode.TAG_NOT_ARCHIVED: ("Archive the {kind} before deleting it permanently"),
         MessageCode.TAG_DEFAULT_PROTECTED: ("The default {kind} cannot be deleted"),
         MessageCode.CLIENT_HAS_INVOICES: (

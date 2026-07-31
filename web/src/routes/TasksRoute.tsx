@@ -339,6 +339,11 @@ export function TasksRoute() {
   // projects still come from /tags filtered by the selected client.
   const clients = clientsList
   const projects = filterProjectsByClient(tags.filter((x) => x.kind === 'project'))
+  // The only tags a bulk action may attach/detach: the structural pair
+  // is per-task and moves the task (see bulkApplyTag).
+  const freeFormTags = tags.filter(
+    (x) => x.kind === 'generic' && x.status !== 'archived',
+  )
 
   // A task always carries a client tag (and via the project, transitively
   // belongs to it). Pre-select the default "Personal" client (matching
@@ -471,14 +476,14 @@ export function TasksRoute() {
         // a calculated field and is never an input.
         executor_kind: 'human',
         necessity: 'should',
-        // Always emit the client tag (a task is never client-less; the
-        // default Personal is pre-selected when nothing is chosen) and
-        // the project tag when one is picked. The backend resolves the
-        // project anchor from the project-kind tag inside this list.
-        tag_ids: [
-          ...(clientId ? [clientId] : []),
-          ...(projectId ? [projectId] : []),
-        ],
+        // The structural pair is stated by name, not folded into
+        // ``tag_ids``: the create door asserts each id's kind, so a
+        // client picked in the project select is a 400 instead of a
+        // task quietly filed under the wrong perimeter. Omitting the
+        // project lets the backend fall back to the workspace default
+        // (a task is never project-less, docs/adr/0050).
+        ...(clientId ? { client_tag_id: clientId } : {}),
+        ...(projectId ? { project_tag_id: projectId } : {}),
         ...(due ? { due_date: due } : {}),
       },
     })
@@ -554,27 +559,37 @@ export function TasksRoute() {
     setBulkMsg(t('tasks.bulkResult', { applied, skipped }))
   }
 
+  // Bulk tagging is FREE-FORM only (docs/adr/0050). A client or a
+  // project is a per-task move whose client must follow the project,
+  // and detaching one is refused outright (TAG_STRUCTURAL_REQUIRED):
+  // replaying it blindly over N tasks would leave half the selection
+  // moved and half untouched, so the picker below never offers one.
+  // Per-row failures are counted, not swallowed — same reporting as
+  // bulkApplyState.
   async function bulkApplyTag(add: boolean) {
-    if (!bulkTag) return
+    const tag = freeFormTags.find((g) => g.id === bulkTag)
+    if (!tag) return
     setErr(null)
+    let applied = 0
+    let skipped = 0
     for (const tk of tasks.filter((x) => sel.has(x.id))) {
-      if (add) {
-        await api.POST('/tasks/{task_id}/tags', {
-          params: { header: workspaceHeader(), path: { task_id: tk.id } },
-          body: { tag_id: bulkTag },
-        })
-      } else {
-        await api.DELETE('/tasks/{task_id}/tags/{tag_id}', {
-          params: {
-            header: workspaceHeader(),
-            path: { task_id: tk.id, tag_id: bulkTag },
-          },
-        })
-      }
+      const { error } = add
+        ? await api.POST('/tasks/{task_id}/tags', {
+            params: { header: workspaceHeader(), path: { task_id: tk.id } },
+            body: { tag_id: tag.id },
+          })
+        : await api.DELETE('/tasks/{task_id}/tags/{tag_id}', {
+            params: {
+              header: workspaceHeader(),
+              path: { task_id: tk.id, tag_id: tag.id },
+            },
+          })
+      if (error) skipped += 1
+      else applied += 1
     }
     setSel(new Set())
     await loadTasks()
-    setBulkMsg(t('tasks.bulkTagDone'))
+    setBulkMsg(t('tasks.bulkResult', { applied, skipped }))
   }
 
   async function bulkDelete() {
@@ -1071,9 +1086,9 @@ export function TasksRoute() {
                 aria-label={t('tasks.bulkTagPick')}
               >
                 <option value="">{t('tasks.bulkTagPick')}</option>
-                {tags.map((g) => (
+                {freeFormTags.map((g) => (
                   <option key={g.id} value={g.id}>
-                    {g.kind}: {g.name}
+                    {g.name}
                   </option>
                 ))}
               </select>

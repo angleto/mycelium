@@ -21,6 +21,7 @@ from mycelium_api.deps import (
 )
 from mycelium_api.routers.annotations import annotation_out_one, annotations_out
 from mycelium_api.routers.attachments import att_out, read_capped, upload_file_field
+from mycelium_api.routers.tags import require_tag_kind
 from mycelium_api.schemas import (
     AnnotationOut,
     AppendOut,
@@ -61,9 +62,11 @@ from mycelium_api.schemas import (
 )
 from mycelium_api.textstream import read_capped_text, read_patch_payload, text_block_headers
 from mycelium_core.config import get_settings
+from mycelium_core.errors import DomainError
+from mycelium_core.i18n import MessageCode
 from mycelium_core.models.identity import IdentityKind
 from mycelium_core.models.note import Note
-from mycelium_core.models.tag import Tag
+from mycelium_core.models.tag import Tag, TagKind
 from mycelium_core.models.task import Task
 from mycelium_core.models.task_checklist_item import TaskChecklistItem
 from mycelium_core.models.task_handoff import TaskHandoff
@@ -321,6 +324,27 @@ async def _state_names(ctx: TenantCtx, state_ids: set[uuid.UUID]) -> dict[uuid.U
 async def create_task(
     body: TaskCreateIn, ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")]
 ) -> TaskOut:
+    # docs/adr/0003: the structural pair is stated by name, ``tag_ids``
+    # carries the free-form facets. create_task hands the whole set to
+    # the choke-point (tag_assignment.resolve_structural), which
+    # classifies it by kind and refuses two projects or a client that
+    # contradicts the project -- so folding the two named ids into the
+    # bag is exactly what passing them as named parameters would do,
+    # once their kind is asserted here (the bag alone cannot: it would
+    # accept a client id under ``project_tag_id`` and quietly treat it
+    # as the client).
+    if body.project_tag_id is not None:
+        await require_tag_kind(
+            ctx.session, org_id=ctx.org_id, tag_id=body.project_tag_id, kind=TagKind.project
+        )
+    if body.client_tag_id is not None:
+        await require_tag_kind(
+            ctx.session, org_id=ctx.org_id, tag_id=body.client_tag_id, kind=TagKind.client
+        )
+    tag_ids = [
+        *body.tag_ids,
+        *(t for t in (body.project_tag_id, body.client_tag_id) if t is not None),
+    ]
     task = await svc.create_task(
         ctx.session,
         org_id=ctx.org_id,
@@ -343,7 +367,7 @@ async def create_task(
         location=body.location,
         necessity=body.necessity,
         budget_id=body.budget_id,
-        tag_ids=body.tag_ids,
+        tag_ids=tag_ids,
         assignee_ids=body.assignee_ids,
         start_at=body.start_at,
         duration_minutes=body.duration_minutes,
@@ -491,6 +515,7 @@ async def patch_task(
     task_id: uuid.UUID,
     body: TaskPatchIn,
     ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+    claims: Annotated[dict[str, Any], Depends(current_claims)],
     edit_session_id: Annotated[str | None, Header(alias="X-Edit-Session-Id")] = None,
 ) -> TaskOut:
     # Returns the full canonical TaskOut (not just {id, version}) so any
@@ -506,6 +531,25 @@ async def patch_task(
         # The input is a string (bare date or full ISO); the service
         # promotes a date-only value to end-of-day in the owner's tz.
         values["due_date"] = _parse_due(values["due_date"])
+    # The structural pair is not a Task column: it lives in task_tags and
+    # only tag_assignment may write it (docs/adr/0003), so it leaves
+    # ``values`` before the column update and is applied through the
+    # service door below. An explicit null is refused rather than
+    # treated as "detach": a task has exactly one client and exactly one
+    # project, so there is no legal state to clear INTO (invariant a).
+    project_tag_id = values.pop("project_tag_id", None)
+    client_tag_id = values.pop("client_tag_id", None)
+    if project_tag_id is None and "project_tag_id" in body.model_fields_set:
+        raise DomainError(MessageCode.TAG_STRUCTURAL_REQUIRED)
+    if client_tag_id is None and "client_tag_id" in body.model_fields_set:
+        raise DomainError(MessageCode.TAG_STRUCTURAL_REQUIRED)
+    if project_tag_id is not None or client_tag_id is not None:
+        # The route's coarse gate is tasks:write, but re-tagging is what
+        # /tasks/{id}/tags asks tags:write for. Enforce the exact key
+        # here so moving the field into the PATCH body does not hand a
+        # tasks-only assistant a door onto the taxonomy (task c19f2f63
+        # pattern, route_scopes.scope_permits).
+        require_agent_scope(claims, "tags:write")
     # ``X-Edit-Session-Id`` flips the recovery-history channel to ``web``
     # so consecutive autosaves under the same session coalesce into one
     # open revision. Without the header, every PATCH is a sealed
@@ -521,6 +565,33 @@ async def patch_task(
         channel=channel,
         edit_session_id=edit_session_id,
     )
+    # PROJECT FIRST: a move that changes both ends is stated as
+    # {project, client} and the project drags its client along, so
+    # applying the client first would read as a contradiction against
+    # the project the task still carries and 400. The other order also
+    # makes the pair order-dependent, which a PATCH body is not.
+    if project_tag_id is not None:
+        await require_tag_kind(
+            ctx.session, org_id=ctx.org_id, tag_id=project_tag_id, kind=TagKind.project
+        )
+        await svc.attach_tag(
+            ctx.session,
+            org_id=ctx.org_id,
+            actor_id=ctx.user_id,
+            task_id=task_id,
+            tag_id=project_tag_id,
+        )
+    if client_tag_id is not None:
+        await require_tag_kind(
+            ctx.session, org_id=ctx.org_id, tag_id=client_tag_id, kind=TagKind.client
+        )
+        await svc.attach_tag(
+            ctx.session,
+            org_id=ctx.org_id,
+            actor_id=ctx.user_id,
+            task_id=task_id,
+            tag_id=client_tag_id,
+        )
     task = await svc.get_task(ctx.session, org_id=ctx.org_id, task_id=task_id, include_deleted=True)
     names = await _state_names(ctx, {task.state_id})
     tagmap = await svc.tags_by_task(ctx.session, task_ids=[task.id])

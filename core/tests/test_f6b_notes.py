@@ -16,6 +16,8 @@ from decimal import Decimal
 import pytest
 from _fake_ai import FakeLLM, FakeSTT, FakeTTS
 from _fake_embedder import FakeEmbedder
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from mycelium_core.ai_providers import (
     set_llm_override,
@@ -25,10 +27,15 @@ from mycelium_core.ai_providers import (
 from mycelium_core.db import admin_session, tenant_session
 from mycelium_core.embedder import set_embedder_override
 from mycelium_core.errors import DomainError, NotFoundError
+from mycelium_core.i18n import MessageCode
 from mycelium_core.models.note import NoteKind
+from mycelium_core.models.note_tag import NoteTag
+from mycelium_core.models.tag import Tag, TagKind
 from mycelium_core.services import billing, taxonomy
 from mycelium_core.services import notes as nt
+from mycelium_core.services import tasks as tasks_svc
 from mycelium_core.services.auth import signup
+from mycelium_core.services.taxonomy import ClientInput
 
 
 @pytest.fixture
@@ -54,6 +61,43 @@ async def _org(name: str = "NOTE") -> tuple[uuid.UUID, uuid.UUID]:
     async with admin_session() as s:
         r = await signup(s, email=_email(), password="pw-strong-123", org_name=name)
     return r.org_id, r.user_id
+
+
+async def _structural(
+    s: AsyncSession, note_id: uuid.UUID
+) -> tuple[list[uuid.UUID], list[uuid.UUID]]:
+    """(client tag ids, project tag ids) carried by the note. Returned as
+    LISTS, not sets: what docs/adr/0003 fixes is the CARDINALITY, which a
+    set would silently collapse back to "looks fine"."""
+    rows = (
+        await s.execute(
+            select(Tag.id, Tag.kind)
+            .join(NoteTag, NoteTag.tag_id == Tag.id)
+            .where(NoteTag.note_id == note_id)
+        )
+    ).all()
+    return (
+        [tag_id for tag_id, kind in rows if kind is TagKind.client],
+        [tag_id for tag_id, kind in rows if kind is TagKind.project],
+    )
+
+
+async def _client_and_project(
+    s: AsyncSession, *, org: uuid.UUID, user: uuid.UUID, label: str
+) -> tuple[uuid.UUID, uuid.UUID]:
+    """One client -> project chain named after ``label`` (tag names are
+    unique per org+kind, so every chain in a test needs its own)."""
+    client = await taxonomy.create_client(
+        s,
+        org_id=org,
+        actor_id=user,
+        name=label,
+        profile=ClientInput(legal_name=f"{label} SRL"),
+    )
+    project = await taxonomy.create_project(
+        s, org_id=org, actor_id=user, name=f"{label}-proj", client_tag_id=client.id
+    )
+    return client.id, project.id
 
 
 async def _seed_billing(s, org: uuid.UUID, user: uuid.UUID) -> None:
@@ -249,3 +293,96 @@ async def test_share_via_project_tag_rescopes_memory_without_content_edit(
         assert await memory_svc.retrieve(
             s, org_id=org, actor_id=user, project_id=None, query=query, operation_id="q4"
         )
+
+
+async def test_attaching_a_project_of_another_client_moves_the_note() -> None:
+    """A project tag is a MOVE for notes exactly as it is for tasks: the
+    note follows the new project's client atomically (docs/adr/0003,
+    services/tag_assignment.move_to_project) instead of accumulating a
+    second client, which is what the reported bug produced."""
+    org, user = await _org("NOTE-MOVE")
+    async with tenant_session(str(org), str(user)) as s:
+        c1, p1 = await _client_and_project(s, org=org, user=user, label="Uno")
+        c2, p2 = await _client_and_project(s, org=org, user=user, label="Due")
+        note = await nt.create_note(s, org_id=org, actor_id=user, kind=NoteKind.text, project_id=p1)
+        assert await _structural(s, note.id) == ([c1], [p1])
+        await nt.attach_tag(s, org_id=org, actor_id=user, note_id=note.id, tag_id=p2)
+        assert await _structural(s, note.id) == ([c2], [p2])
+
+
+async def test_detaching_a_notes_client_is_rejected() -> None:
+    """A note carries exactly one client whether or not it has a project
+    (docs/adr/0021), so dropping it would leave it with no perimeter at
+    all: the client is changed by attaching another one, never detached."""
+    org, user = await _org("NOTE-CLI")
+    async with tenant_session(str(org), str(user)) as s:
+        client, project = await _client_and_project(s, org=org, user=user, label="Tre")
+        note = await nt.create_note(
+            s, org_id=org, actor_id=user, kind=NoteKind.text, project_id=project
+        )
+        note_id = note.id
+    with pytest.raises(DomainError) as ei:
+        async with tenant_session(str(org), str(user)) as s:
+            await nt.detach_tag(s, org_id=org, actor_id=user, note_id=note_id, tag_id=client)
+    assert ei.value.code is MessageCode.TAG_STRUCTURAL_REQUIRED
+
+
+async def test_unsharing_a_note_keeps_its_client_and_rescopes(_providers: None) -> None:
+    """Detaching a note's PROJECT is legal (it is the un-share path, the
+    asymmetry a task does not have): the blobs go back to the personal
+    NULL perimeter at once, and the note keeps the client the project had
+    given it -- projectless is not clientless."""
+    from mycelium_core.services import memory as memory_svc
+
+    org, user = await _org("NOTE-UNSHARE")
+    query = "pangolin perimeter marker phrase"
+    async with tenant_session(str(org), str(user)) as s:
+        await _seed_billing(s, org, user)
+        client, project = await _client_and_project(s, org=org, user=user, label="Qua")
+        note = await nt.create_note(
+            s,
+            org_id=org,
+            actor_id=user,
+            kind=NoteKind.text,
+            project_id=project,
+            text=query,
+        )
+        note_id = note.id
+    # Fresh transaction so the deferred indexing flush has landed.
+    async with tenant_session(str(org), str(user)) as s:
+        assert await memory_svc.retrieve(
+            s, org_id=org, actor_id=user, project_id=project, query=query, operation_id="u0"
+        )
+        await nt.detach_tag(s, org_id=org, actor_id=user, note_id=note_id, tag_id=project)
+        assert await _structural(s, note_id) == ([client], [])
+        assert not await memory_svc.retrieve(
+            s, org_id=org, actor_id=user, project_id=project, query=query, operation_id="u1"
+        )
+        assert await memory_svc.retrieve(
+            s, org_id=org, actor_id=user, project_id=None, query=query, operation_id="u2"
+        )
+
+
+async def test_copying_task_tags_replaces_the_notes_client() -> None:
+    """Regression for the reported bug: ``_copy_task_tags_to_note`` used
+    to ADD the task's client to a note that already carried one, so a
+    work note whose task lived under another client ended up with TWO
+    client tags. The pair is now set, not appended.
+
+    The private helper is called directly because every public door
+    (get_or_create_work_note / create_note_for_task) creates the note
+    under the task's own project, where the two clients cannot disagree
+    -- and the disagreement is the case that used to break."""
+    org, user = await _org("NOTE-COPY")
+    async with tenant_session(str(org), str(user)) as s:
+        c1, p1 = await _client_and_project(s, org=org, user=user, label="Cin")
+        c2, p2 = await _client_and_project(s, org=org, user=user, label="Sei")
+        task = await tasks_svc.create_task(
+            s, org_id=org, actor_id=user, title="owner task", tag_ids=[p2]
+        )
+        note = await nt.create_note(s, org_id=org, actor_id=user, kind=NoteKind.text, project_id=p1)
+        assert await _structural(s, note.id) == ([c1], [p1])
+        await nt._copy_task_tags_to_note(
+            s, org_id=org, actor_id=user, note_id=note.id, task_id=task.id
+        )
+        assert await _structural(s, note.id) == ([c2], [p2])

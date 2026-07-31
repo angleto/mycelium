@@ -6,7 +6,8 @@ from __future__ import annotations
 import uuid
 from decimal import Decimal
 
-from sqlalchemy import ForeignKey, Numeric, String, Text
+from sqlalchemy import CheckConstraint, ForeignKey, ForeignKeyConstraint, Numeric, String, Text
+from sqlalchemy import Enum as SAEnum
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -16,15 +17,33 @@ from mycelium_core.models.base import (
     TimestampMixin,
     VersionMixin,
 )
+from mycelium_core.models.tag import TagKind
 
 
 class ClientProfile(OrgScopedMixin, TimestampMixin, VersionMixin, Base):
     __tablename__ = "client_profile"
+    # Migration 0086: the constant ``tag_kind`` column is the second leg
+    # of a composite FK into ``tags(id, kind)``, making "this satellite
+    # hangs off a CLIENT tag" declarative instead of trigger-enforced.
+    __table_args__ = (
+        CheckConstraint("tag_kind = 'client'", name="tag_kind"),
+        ForeignKeyConstraint(
+            ["tag_id", "tag_kind"],
+            ["tags.id", "tags.kind"],
+            ondelete="CASCADE",
+            name="fk_client_profile_tag_kind",
+        ),
+    )
 
     tag_id: Mapped[uuid.UUID] = mapped_column(
         PG_UUID(as_uuid=True),
         ForeignKey("tags.id", ondelete="CASCADE"),
         primary_key=True,
+    )
+    tag_kind: Mapped[TagKind] = mapped_column(
+        SAEnum(TagKind, name="tag_kind", native_enum=True, create_type=False),
+        nullable=False,
+        server_default="client",
     )
     legal_name: Mapped[str] = mapped_column(String(200), nullable=False)
     # Persona fisica: when both set, FatturaPA emits Anagrafica/Nome+Cognome

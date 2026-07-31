@@ -24,6 +24,7 @@ from mycelium_api.deps import (
     tenant_ctx,
 )
 from mycelium_api.routers.attachments import att_out, read_capped, upload_file_field
+from mycelium_api.routers.tags import require_tag_kind
 from mycelium_api.schemas import (
     AppendMessageIn,
     AppendOut,
@@ -77,6 +78,8 @@ from mycelium_api.schemas import (
 from mycelium_api.textstream import read_capped_text, read_patch_payload, text_block_headers
 from mycelium_core.config import get_settings
 from mycelium_core.db import admin_session
+from mycelium_core.errors import DomainError
+from mycelium_core.i18n import MessageCode
 from mycelium_core.models.note import Note, NoteKind, NoteTurn
 from mycelium_core.models.project_profile import ProjectProfile
 from mycelium_core.models.tag import Tag, TagKind
@@ -222,12 +225,33 @@ async def create_note(
         org_id=ctx.org_id,
         actor_id=ctx.user_id,
         kind=body.kind,
-        project_id=body.project_id,
+        # ``project_id`` reaches the choke-point as the named
+        # ``project_tag_id`` (services/tag_assignment), so its kind is
+        # checked there -- a client id passed here is a 400, not a
+        # silently mis-filed project.
+        project_id=body.project_tag_id,
         title=body.title,
         text=body.text,
         audio_ref=body.audio_ref,
         audio_seconds=body.audio_seconds,
     )
+    if body.client_tag_id is not None:
+        # create_note derives the client from the project, or falls back
+        # to the workspace default when there is none (docs/adr/0021).
+        # Naming a client is the only way to say which perimeter a
+        # projectless note belongs to; a client that contradicts the
+        # project is refused here (TAG_CLIENT_PROJECT_MISMATCH) and the
+        # whole create rolls back with it.
+        await require_tag_kind(
+            ctx.session, org_id=ctx.org_id, tag_id=body.client_tag_id, kind=TagKind.client
+        )
+        await svc.attach_tag(
+            ctx.session,
+            org_id=ctx.org_id,
+            actor_id=ctx.user_id,
+            note_id=n.id,
+            tag_id=body.client_tag_id,
+        )
     # Return the note with its tags: create() enforces a client
     # (default "Personal"), so the response must reflect it.
     tagmap = await svc.tags_by_note(ctx.session, note_ids=[n.id])
@@ -579,18 +603,74 @@ async def update_note(
     if "audio_ref" in body.model_fields_set:
         kwargs["audio_ref"] = body.audio_ref
     channel = "web" if edit_session_id else "api"
-    v = await svc.update_note(
-        ctx.session,
-        org_id=ctx.org_id,
-        actor_id=ctx.user_id,
-        note_id=note_id,
-        expected_version=body.expected_version,
-        title=body.title,
-        text=body.text,
-        channel=channel,
-        edit_session_id=edit_session_id,
-        **kwargs,
-    )
+    # ``update_note`` REPLACES title/body with what the request carries
+    # (an omitted title is re-derived from the body, i.e. blanked when
+    # there is none), so a structural-only PATCH must not reach it: it
+    # would wipe the title of a note the caller only wanted to move. The
+    # pair lives in note_tags, not on the row, so nothing there bumps
+    # ``version`` -- exactly like /notes/{id}/tags, which carries no
+    # version at all.
+    content = {"title", "text", "task_id", "audio_ref"} & body.model_fields_set
+    if content:
+        v = await svc.update_note(
+            ctx.session,
+            org_id=ctx.org_id,
+            actor_id=ctx.user_id,
+            note_id=note_id,
+            expected_version=body.expected_version,
+            title=body.title,
+            text=body.text,
+            channel=channel,
+            edit_session_id=edit_session_id,
+            **kwargs,
+        )
+    else:
+        v = (await svc.get_note(ctx.session, org_id=ctx.org_id, note_id=note_id)).version
+    # PROJECT FIRST: a move that changes both ends is stated as
+    # {project, client} and the project drags its client along, so
+    # applying the client first would read as a contradiction against
+    # the project the note still carries and 400.
+    if "project_tag_id" in body.model_fields_set:
+        if body.project_tag_id is None:
+            # The un-share path (docs/adr/0021): drop the project, keep
+            # the client, send the blobs back to the personal perimeter.
+            # Legal for a note, never for a task. The service needs the
+            # tag id to dispatch on; no project attached = nothing to do.
+            current = await svc.project_tag_for_note(ctx.session, note_id=note_id)
+            if current is not None:
+                await svc.detach_tag(
+                    ctx.session,
+                    org_id=ctx.org_id,
+                    actor_id=ctx.user_id,
+                    note_id=note_id,
+                    tag_id=current,
+                )
+        else:
+            await require_tag_kind(
+                ctx.session, org_id=ctx.org_id, tag_id=body.project_tag_id, kind=TagKind.project
+            )
+            await svc.attach_tag(
+                ctx.session,
+                org_id=ctx.org_id,
+                actor_id=ctx.user_id,
+                note_id=note_id,
+                tag_id=body.project_tag_id,
+            )
+    if "client_tag_id" in body.model_fields_set:
+        if body.client_tag_id is None:
+            # A note has exactly one client: there is no legal state to
+            # clear into, it is re-pointed by naming another one.
+            raise DomainError(MessageCode.TAG_STRUCTURAL_REQUIRED)
+        await require_tag_kind(
+            ctx.session, org_id=ctx.org_id, tag_id=body.client_tag_id, kind=TagKind.client
+        )
+        await svc.attach_tag(
+            ctx.session,
+            org_id=ctx.org_id,
+            actor_id=ctx.user_id,
+            note_id=note_id,
+            tag_id=body.client_tag_id,
+        )
     return VersionOut(id=note_id, version=v)
 
 

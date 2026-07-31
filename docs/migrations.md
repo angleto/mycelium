@@ -1,8 +1,10 @@
 # Database migrations
 
 Mycelium uses Alembic against a managed PostgreSQL (16+, with `pgvector`,
-`pg_trgm`, `btree_gist`). Migrations run as the owner role `flow`
-(BYPASSRLS); the application connects as `flow_app` (subject to RLS).
+`pg_trgm`, `btree_gist`). Migrations run as the schema owner role; the
+application connects as `flow_app` (non-owner, subject to RLS). The
+owner is NOT automatically exempt from `FORCE ROW LEVEL SECURITY`: see
+"Data repair in migrations" below before writing a backfill.
 See [ADR-0015](adr/0015-rls-two-role-and-provisioning.md).
 
 ## Current chain
@@ -87,3 +89,58 @@ in the revision body.
 
 Pre-commit: `ruff format --check .` and `ruff check .` must be green
 before the revision lands ([memory: flow-frontend-tsc-cache]).
+
+## Data repair in migrations
+
+A migration that reads or writes tenant rows (backfill, repair,
+re-tag) runs WITHOUT an `app.current_org` GUC. Most org-scoped tables
+carry `FORCE ROW LEVEL SECURITY`, which applies to the table owner
+too, so the policy predicate evaluates against an empty GUC and the
+statement sees **zero rows**. It does not fail: it commits a no-op.
+Migration `0011` shipped exactly that, `0012` then dropped the column
+the backfill was supposed to have copied, and prod note bodies came
+back empty (incident 2026-05-27, task `1cd8bc0a`, recovered by `0013`).
+
+Do not rely on the migration role being exempt: only a superuser (or
+an explicit `BYPASSRLS` attribute) escapes FORCE, and that is a
+per-environment property of the deployed role, not something a
+revision can assume. Write the repair so it is correct for a plain
+owner.
+
+Bracket every such statement:
+
+```python
+op.execute("ALTER TABLE notes NO FORCE ROW LEVEL SECURITY")
+op.execute("ALTER TABLE note_part NO FORCE ROW LEVEL SECURITY")
+try:
+    op.execute("INSERT INTO note_part (...) SELECT ... FROM notes ...")
+finally:
+    op.execute("ALTER TABLE note_part FORCE ROW LEVEL SECURITY")
+    op.execute("ALTER TABLE notes FORCE ROW LEVEL SECURITY")
+```
+
+Rules that make the bracket safe:
+
+- **Every table the statement touches** needs the relaxation, the ones
+  it merely reads included, not just the write target. `0011`'s fixed
+  backfill relaxes `notes` (read), `note_part` (written, then read
+  back) AND `blob_sources` (updated by joining the parts it had just
+  inserted).
+- **`finally`, always.** An exception between the relaxation and the
+  restore would otherwise leave the table without FORCE, i.e. a
+  tenant-isolation hole in whatever state the failed upgrade leaves
+  behind.
+- **Relax FORCE, never disable RLS.** `NO FORCE` restores owner
+  visibility only; `DISABLE ROW LEVEL SECURITY` would also drop the
+  policy for `flow_app` if the migration aborted mid-way.
+- **Make the repair idempotent** (`NOT EXISTS`, `ON CONFLICT DO
+  NOTHING`, a `WHERE` that excludes already-repaired rows): a repair is
+  routinely re-run after an out-of-band fix has already landed, as
+  `0013` was.
+- **Assert the row count.** A missing bracket and a genuinely empty
+  dataset look identical from the outside, which is why `0011` passed
+  review. When the repair must move rows, check `rowcount` (or
+  re-`SELECT` and compare) instead of trusting a clean run.
+
+Only a data repair needs this. Pure DDL (`ALTER TABLE`, `CREATE
+INDEX`) is not subject to RLS and must stay outside the bracket.

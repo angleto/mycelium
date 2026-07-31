@@ -72,6 +72,15 @@ class ClientInput:
 # satellite profiles and stay owner/admin-gated.
 _MEMBER_TAG_KINDS: frozenset[TagKind] = frozenset({TagKind.generic, TagKind.memory_channel})
 
+# Kinds that only exist together with their satellite profile row, so
+# they are never creatable through the plain tag door (docs/adr/0003).
+_PROFILED_TAG_KINDS: frozenset[TagKind] = frozenset({TagKind.client, TagKind.project})
+
+# ProjectProfile columns a generic field patch may write. ``client_tag_id``
+# (structural) and ``workflow_id`` (own versioned door) are excluded on
+# purpose -- see ``update_project``.
+_PROJECT_PATCHABLE_FIELDS: frozenset[str] = frozenset({"budget", "description"})
+
 
 async def _insert_tag(
     session: AsyncSession,
@@ -99,6 +108,16 @@ async def create_tag(
     name: str,
     color: str | None = None,
 ) -> Tag:
+    """Create a free-form tag (kind ``generic``).
+
+    ``client`` and ``project`` are refused here, a deliberate breaking
+    change: this door inserts a bare ``tags`` row and NO satellite
+    profile, so a project born here has no
+    ``project_profile.client_tag_id`` -- invariant (d) violated by
+    construction, and every project->client lookup on it (task
+    creation, tag_assignment) resolves to None. ``create_client`` /
+    ``create_project`` are the only doors, because they are the only
+    ones that also write the profile row (docs/adr/0003)."""
     if kind is TagKind.memory_channel:
         # Channels are a controlled, seeded vocabulary managed by the
         # platform admin via /memory/channels, never created ad-hoc from
@@ -106,6 +125,8 @@ async def create_tag(
         # integration needs a deterministic, well-known target, not a
         # free-form tag (docs/adr/0005, FR-8).
         raise DomainError(MessageCode.CHANNEL_NOT_TAG_CREATABLE)
+    if kind in _PROFILED_TAG_KINDS:
+        raise DomainError(MessageCode.TAG_KIND_NOT_CREATABLE)
     minimum = Role.member if kind in _MEMBER_TAG_KINDS else Role.admin
     await require_role(session, org_id, actor_id, minimum)
     tag = await _insert_tag(session, org_id, kind, name, color)
@@ -392,7 +413,14 @@ async def ensure_default_project(
     client). A workspace always has a default ("General") project under
     the default ("Personal") client for otherwise-orphan tasks.
     Idempotent on the natural key. The default client is ensured first
-    so a fresh workspace gets the full chain in any call order."""
+    so a fresh workspace gets the full chain in any call order.
+
+    An already-existing default project has its profile verified, not
+    trusted: invariant (d) is what every project->client lookup reads
+    (``tag_assignment._client_of_project``), so a missing profile row --
+    or a ``client_tag_id`` NULLed by the ``ON DELETE SET NULL`` FK when
+    a client tag was purged -- would fail every orphan-task creation in
+    the workspace. One indexed lookup by PK, and the state converges."""
     client_id = await ensure_default_client(session, org_id=org_id, actor_id=actor_id)
     tag_id, created = await _ensure_default_tag(
         session,
@@ -401,9 +429,18 @@ async def ensure_default_project(
         name=_DEFAULT_PROJECT_NAME,
         settings_key="default_project_tag_id",
     )
-    if not created:
-        return tag_id
-    session.add(ProjectProfile(tag_id=tag_id, org_id=org_id, client_tag_id=client_id))
+    if created:
+        session.add(ProjectProfile(tag_id=tag_id, org_id=org_id, client_tag_id=client_id))
+    else:
+        prof = (
+            await session.execute(select(ProjectProfile).where(ProjectProfile.tag_id == tag_id))
+        ).scalar_one_or_none()
+        if prof is None:
+            session.add(ProjectProfile(tag_id=tag_id, org_id=org_id, client_tag_id=client_id))
+        elif prof.client_tag_id is None:
+            prof.client_tag_id = client_id
+        else:
+            return tag_id
     await session.flush()
     await audit.log(
         session,
@@ -753,8 +790,17 @@ async def update_project(
     name: str | None = None,
     fields: dict[str, object] | None = None,
 ) -> None:
-    """Edit a project's name and its profile (rate/currency/budget/
-    color/description/client link). Billable is a client default now."""
+    """Edit a project's name, colour and profile card.
+
+    ``fields`` is filtered through an explicit whitelist instead of
+    being blind-``setattr``'d over the row. Two keys are deliberately
+    out of it: ``client_tag_id`` is structural, so it is routed through
+    ``reassign_project_client`` (which drags every dependent task and
+    note along) and an explicit ``None`` is refused -- invariant (d),
+    a project without a client cannot exist; ``workflow_id`` has its own
+    optimistic-concurrency door (``workflow.set_project_workflow``) and
+    must not be smuggled past its version check. Any other key is
+    ignored. Billable and the hourly rate are client defaults now."""
     await require_role(session, org_id, actor_id, Role.admin)
     tag = await get_tag(session, org_id=org_id, tag_id=tag_id)
     if tag.kind is not TagKind.project:
@@ -764,12 +810,24 @@ async def update_project(
     ).scalar_one_or_none()
     if prof is None:
         raise NotFoundError(MessageCode.TAG_NOT_FOUND)
-    flds = fields or {}
-    ctid = flds.get("client_tag_id")
-    if ctid is not None:
-        ok = await session.execute(select(Tag.id).where(Tag.id == ctid, Tag.kind == TagKind.client))
-        if ok.scalar_one_or_none() is None:
+    flds = dict(fields or {})
+    if "client_tag_id" in flds:
+        # ``get`` + ``is not None`` (the previous guard) let an explicit
+        # null through and NULLed the FK: the caller stated a value, so
+        # the null is a request, not an absence.
+        requested = flds.pop("client_tag_id")
+        if requested is None:
+            raise DomainError(MessageCode.PROJECT_CLIENT_REQUIRED)
+        if not isinstance(requested, uuid.UUID):
             raise DomainError(MessageCode.TAG_KIND_MISMATCH)
+        if requested != prof.client_tag_id:
+            await reassign_project_client(
+                session,
+                org_id=org_id,
+                actor_id=actor_id,
+                project_tag_id=tag_id,
+                new_client_tag_id=requested,
+            )
     tag_dirty = False
     if name is not None:
         tag.name = name
@@ -781,7 +839,8 @@ async def update_project(
     if tag_dirty:
         tag.version += 1
     for k, v in flds.items():
-        setattr(prof, k, v)
+        if k in _PROJECT_PATCHABLE_FIELDS:
+            setattr(prof, k, v)
     await session.flush()
     await audit.log(
         session,
@@ -790,6 +849,67 @@ async def update_project(
         entity="tag",
         entity_id=tag_id,
         action="update_project",
+    )
+
+
+async def reassign_project_client(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    project_tag_id: uuid.UUID,
+    new_client_tag_id: uuid.UUID,
+) -> None:
+    """Move a project under another client, dragging every task and note
+    that carries it into the new client in the SAME transaction.
+
+    Invariant (c) -- an entity carrying a project carries THAT project's
+    client -- is a property of the subgraph, not of the profile row:
+    updating ``project_profile.client_tag_id`` alone leaves every
+    dependent entity tagged with the previous client, which is exactly
+    the drift that produced the violations measured in production.
+
+    This function owns the gate (admin, both tags org-scoped and of the
+    right kind) and the profile write; the carriers are re-tagged by
+    ``tag_assignment.rebind_project_client``, because a structural
+    junction row is written nowhere else (docs/adr/0003)."""
+    # Lazy import: tag_assignment imports this module at import time.
+    from mycelium_core.services import tag_assignment
+
+    await require_role(session, org_id, actor_id, Role.admin)
+    tag = await get_tag(session, org_id=org_id, tag_id=project_tag_id)
+    if tag.kind is not TagKind.project:
+        raise DomainError(MessageCode.TAG_KIND_MISMATCH)
+    client = await get_tag(session, org_id=org_id, tag_id=new_client_tag_id)
+    if client.kind is not TagKind.client:
+        raise DomainError(MessageCode.TAG_KIND_MISMATCH)
+    prof = (
+        await session.execute(select(ProjectProfile).where(ProjectProfile.tag_id == project_tag_id))
+    ).scalar_one_or_none()
+    if prof is None:
+        raise NotFoundError(MessageCode.TAG_NOT_FOUND)
+    previous_client_tag_id = prof.client_tag_id
+    prof.client_tag_id = new_client_tag_id
+    await session.flush()
+    await tag_assignment.rebind_project_client(
+        session,
+        org_id=org_id,
+        project_tag_id=project_tag_id,
+        client_tag_id=new_client_tag_id,
+    )
+    await audit.log(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        entity="tag",
+        entity_id=project_tag_id,
+        action="reassign_project_client",
+        diff={
+            "previous_client_tag_id": (
+                str(previous_client_tag_id) if previous_client_tag_id is not None else None
+            ),
+            "client_tag_id": str(new_client_tag_id),
+        },
     )
 
 
@@ -1252,6 +1372,73 @@ async def purge_project(
     )
 
 
+async def _rehome_surviving_notes(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    client_tag_id: uuid.UUID,
+) -> None:
+    """Re-home the notes that would be left clientless by purging a
+    client tag.
+
+    A note carrying ONLY this client (no project) sits in no project
+    subgraph, so the project purges never reached it: the ``note_tags``
+    CASCADE would leave it with zero client tags, which invariant (b)
+    forbids -- a note has exactly one client, projectless or not
+    (docs/adr/0021). It falls back to the workspace default client, the
+    same perimeter a note created without a project lands on.
+
+    A survivor that still carries a project is pre-invariant (c) drift
+    (the project belongs to another client, or its purge left the row
+    behind): it follows its project, because the project is the truth.
+    Both branches go through the tag_assignment choke point, the only
+    module allowed to write a structural junction row; the per-note walk
+    is affordable because this is a rare, owner-gated destructive op
+    that already loads its subgraphs id by id."""
+    # Lazy import: tag_assignment imports this module at import time.
+    from mycelium_core.services import tag_assignment
+
+    survivors = list(
+        (await session.execute(select(NoteTag.note_id).where(NoteTag.tag_id == client_tag_id)))
+        .scalars()
+        .all()
+    )
+    if not survivors:
+        return
+    carried_project = {
+        note_id: project_id
+        for note_id, project_id in (
+            await session.execute(
+                select(NoteTag.note_id, NoteTag.tag_id)
+                .join(Tag, Tag.id == NoteTag.tag_id)
+                .where(NoteTag.note_id.in_(survivors), Tag.kind == TagKind.project)
+            )
+        ).all()
+    }
+    fallback = await ensure_default_client(session, org_id=org_id, actor_id=actor_id)
+    for note_id in survivors:
+        project_id = carried_project.get(note_id)
+        if project_id is None:
+            await tag_assignment.set_client(
+                session,
+                org_id=org_id,
+                actor_id=actor_id,
+                entity="note",
+                entity_id=note_id,
+                client_tag_id=fallback,
+            )
+        else:
+            await tag_assignment.move_to_project(
+                session,
+                org_id=org_id,
+                actor_id=actor_id,
+                entity="note",
+                entity_id=note_id,
+                project_tag_id=project_id,
+            )
+
+
 async def purge_client(
     session: AsyncSession,
     *,
@@ -1264,7 +1451,9 @@ async def purge_client(
     ``project_profile.client_tag_id`` is purged (subgraph + tag), every
     event scoped directly to the client (``events.client_tag_id``) is
     deleted, then the client tag itself is deleted (cascading the
-    ``client_profile`` row).
+    ``client_profile`` row). Notes that carry only this client survive
+    the project purges and are re-homed first, see
+    ``_rehome_surviving_notes``.
 
     **Invoices are NOT cascade-deleted.** Invoices are fiscal records:
     if any row references this client we refuse with
@@ -1305,6 +1494,10 @@ async def purge_client(
     # Migration 0097: legacy ``events.client_tag_id`` is gone; tasks
     # tagged with this client are already removed by the per-project
     # cascade above (task_tags points at the client tag too).
+    # Notes carrying only this client are in no project subgraph, so they
+    # outlive every purge above: re-home them before the note_tags
+    # CASCADE strips their last client tag (invariant (b)).
+    await _rehome_surviving_notes(session, org_id=org_id, actor_id=actor_id, client_tag_id=tag_id)
     await session.execute(delete(Tag).where(Tag.id == tag_id))
     await session.flush()
     await audit.log(

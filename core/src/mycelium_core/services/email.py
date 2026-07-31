@@ -42,8 +42,8 @@ from mycelium_core.models.email import (
 from mycelium_core.models.membership import Role
 from mycelium_core.models.memory_blob import BlobSource
 from mycelium_core.models.note import NoteKind
-from mycelium_core.models.tag import Tag
-from mycelium_core.services import audit
+from mycelium_core.models.tag import Tag, TagKind
+from mycelium_core.services import audit, tag_assignment
 from mycelium_core.services import memory as memory_svc
 from mycelium_core.services import notes as notes_svc
 from mycelium_core.services import tasks as tasks_svc
@@ -212,14 +212,18 @@ async def set_secret(
     return new_version
 
 
-async def _visible_tag_ids(session: AsyncSession, ids: Sequence[uuid.UUID]) -> set[uuid.UUID]:
-    """Subset of ``ids`` that are tags visible in the current tenant (RLS
-    scopes ``tags`` to the org), so a caller cannot bind an account to
-    another workspace's tag. Mirrors ``memory._visible_tag_ids``."""
+async def _tag_kinds(session: AsyncSession, ids: Sequence[uuid.UUID]) -> dict[uuid.UUID, TagKind]:
+    """``id -> kind`` for every requested tag, in one query. RLS scopes
+    ``tags`` to the org, so another workspace's tag simply does not come
+    back and the whole set is refused with TAG_NOT_FOUND -- a caller
+    cannot bind an account to a tag it cannot see."""
     if not ids:
-        return set()
-    rows = await session.execute(select(Tag.id).where(Tag.id.in_(list(ids))))
-    return set(rows.scalars().all())
+        return {}
+    rows = (await session.execute(select(Tag.id, Tag.kind).where(Tag.id.in_(list(ids))))).all()
+    kinds: dict[uuid.UUID, TagKind] = {tag_id: kind for tag_id, kind in rows}
+    if any(tag_id not in kinds for tag_id in ids):
+        raise NotFoundError(MessageCode.TAG_NOT_FOUND)
+    return kinds
 
 
 async def default_tag_ids(session: AsyncSession, account_id: uuid.UUID) -> set[uuid.UUID]:
@@ -260,14 +264,28 @@ async def set_default_tags(
 ) -> int:
     """Replace the account's default-tag set (typ. client + project).
     Validates every tag is visible in the tenant (404 otherwise — an
-    explicit set, unlike the silent drop on the ingest path), then bumps
-    the account version (optimistic-lock guard for the SPA)."""
+    explicit set, unlike the silent drop on the ingest path) and that
+    the set is a legal structural configuration, then bumps the account
+    version (optimistic-lock guard for the SPA)."""
     await require_role(session, org_id, actor_id, Role.member)
     await get_account(session, org_id=org_id, account_id=account_id)
     wanted = list(dict.fromkeys(tag_ids))  # dedupe, preserve order
-    visible = await _visible_tag_ids(session, wanted)
-    if set(wanted) - visible:
-        raise NotFoundError(MessageCode.TAG_NOT_FOUND)
+    kinds = await _tag_kinds(session, wanted)
+    if any(kind in (TagKind.client, TagKind.project) for kind in kinds.values()):
+        # The structural rule (at most one client, at most one project,
+        # and the project's client wins) is checked HERE, at
+        # CONFIGURATION time, by the same resolver the ingest paths use.
+        # ``email_to_task`` / ``email_to_note`` union this set into
+        # ``resolve_structural``, so a mailbox bound to two clients would
+        # otherwise only blow up during a later sync, on a message the
+        # user cannot connect back to the setting they changed.
+        # entity="note" is the permissive shape (project optional): a
+        # mailbox bound to a client alone is a legitimate configuration.
+        # Guarded by the ``any`` above so a purely free-form default set
+        # does not materialise the default client as a side effect.
+        await tag_assignment.resolve_structural(
+            session, org_id=org_id, actor_id=actor_id, entity="note", requested=wanted
+        )
     await session.execute(
         delete(EmailAccountDefaultTag).where(EmailAccountDefaultTag.account_id == account_id)
     )
@@ -660,23 +678,36 @@ async def email_to_task(
     assignee_ids: Sequence[uuid.UUID] = (),
 ) -> uuid.UUID:
     """Create a task from a message (FR-7): subject -> title, body ->
-    description, with a source link back to the message."""
+    description, with a source link back to the message.
+
+    The caller's tags, the explicit ``project_tag_id`` and the account's
+    default tags (WS-1) are one bag resolved ONCE: the task inherits the
+    mailbox's client + project, and a caller naming a second project (or
+    a client the project contradicts) is refused with a stable code
+    instead of landing on whichever tag the junction happened to yield.
+    """
+    await require_role(session, org_id, actor_id, Role.member)
     msg = await get_message(session, org_id=org_id, message_id=message_id)
-    all_tags = list(tag_ids)
-    if project_tag_id is not None and project_tag_id not in all_tags:
-        all_tags.append(project_tag_id)
-    # Union the account's default tags (WS-1): a task derived from a
-    # per-client / per-project mailbox inherits its client + project.
-    for tid in await default_tag_ids(session, msg.account_id):
-        if tid not in all_tags:
-            all_tags.append(tid)
+    structural = await tag_assignment.resolve_structural(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        entity="task",
+        requested=[*tag_ids, *await default_tag_ids(session, msg.account_id)],
+        project_tag_id=project_tag_id,
+    )
+    # A task always resolves a project (no orphan tasks); the None arm
+    # is only there because the dataclass models notes too.
+    pair = [structural.client_tag_id]
+    if structural.project_tag_id is not None:
+        pair.append(structural.project_tag_id)
     task = await tasks_svc.create_task(
         session,
         org_id=org_id,
         actor_id=actor_id,
         title=(msg.subject or "(no subject)")[:300],
         description=msg.body_text,
-        tag_ids=all_tags,
+        tag_ids=[*pair, *structural.generic_ids],
         assignee_ids=list(assignee_ids),
     )
     await optimistic_update(
@@ -708,8 +739,23 @@ async def email_to_note(
 ) -> uuid.UUID:
     """Create a note from a message (WS-3): subject -> title, body -> text,
     with the account's default tags plus any passed tags, and a back-link
-    (``linked_note_id``). Symmetric with :func:`email_to_task`."""
+    (``linked_note_id``). Symmetric with :func:`email_to_task`.
+
+    The caller's tags and the account's defaults are resolved ONCE. The
+    note used to be created first (stamped with the default "Personal"
+    client) and then have the mailbox's real client attached on top,
+    which GUARANTEED two client tags on every note from a client-bound
+    mailbox; the pair below is now the note's whole structural state.
+    """
+    await require_role(session, org_id, actor_id, Role.member)
     msg = await get_message(session, org_id=org_id, message_id=message_id)
+    structural = await tag_assignment.resolve_structural(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        entity="note",
+        requested=[*tag_ids, *await default_tag_ids(session, msg.account_id)],
+    )
     note = await notes_svc.create_note(
         session,
         org_id=org_id,
@@ -717,11 +763,31 @@ async def email_to_note(
         kind=NoteKind.text,
         title=(msg.subject or "(no subject)")[:300],
         text=msg.body_text,
+        # Born on the resolved perimeter, so its blobs never need a
+        # re-scope: ``set_structural`` below is a no-op whenever the
+        # mailbox carries a project, and is what re-points the client
+        # for a mailbox bound to a client alone.
+        project_id=structural.project_tag_id,
     )
-    all_tags = list(dict.fromkeys([*tag_ids, *await default_tag_ids(session, msg.account_id)]))
-    for tid in all_tags:
-        await notes_svc.attach_tag(
-            session, org_id=org_id, actor_id=actor_id, note_id=note.id, tag_id=tid
+    await tag_assignment.set_structural(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        entity="note",
+        entity_id=note.id,
+        structural=structural,
+    )
+    for tag_id in structural.generic_ids:
+        # RBAC and existence are the caller's gate (require_role above,
+        # note created in this transaction), which is what
+        # tag_assignment expects of every door.
+        await tag_assignment.attach_generic(
+            session,
+            org_id=org_id,
+            actor_id=actor_id,
+            entity="note",
+            entity_id=note.id,
+            tag_id=tag_id,
         )
     await optimistic_update(
         session,

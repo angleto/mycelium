@@ -36,6 +36,7 @@ from mycelium_core.services import candidates as cand  # noqa: E402
 from mycelium_core.services import notes as nt  # noqa: E402
 from mycelium_core.services import taxonomy  # noqa: E402
 from mycelium_core.services.auth import signup  # noqa: E402
+from mycelium_core.services.taxonomy import ClientInput  # noqa: E402
 
 
 def _email() -> str:
@@ -46,6 +47,30 @@ async def _org() -> tuple[uuid.UUID, uuid.UUID]:
     async with admin_session() as s:
         r = await signup(s, email=_email(), password="pw-strong-123", org_name="CAND")
     return r.org_id, r.user_id
+
+
+async def _humus_note(s: object, org: uuid.UUID, user: uuid.UUID, **fields: object) -> Note:
+    """A note row built by hand: these fixtures set humus columns that
+    ``create_note`` does not expose.
+
+    Migration 0086 checks at COMMIT that every note carries exactly one
+    client tag (invariant (b)), so the workspace default is attached
+    here. It is invisible to what these tests measure: the
+    co-occurrence corpus is restricted to ``kind='generic'``
+    (candidates._note_generic_tags) and the perimeter filter keys on the
+    project tag.
+    """
+    note = Note(org_id=org, kind=NoteKind.text.value, **fields)
+    s.add(note)  # type: ignore[attr-defined]
+    await s.flush()  # type: ignore[attr-defined]
+    client_tag_id = await taxonomy.ensure_default_client(
+        s,  # type: ignore[arg-type]
+        org_id=org,
+        actor_id=user,
+    )
+    s.add(NoteTag(org_id=org, note_id=note.id, tag_id=client_tag_id))  # type: ignore[attr-defined]
+    await s.flush()  # type: ignore[attr-defined]
+    return note
 
 
 async def _inert_note(
@@ -85,15 +110,14 @@ async def test_already_distilled_note_is_excluded() -> None:
         src = await _inert_note(s, org, user, "già distillata")
         # Simulate an existing distillation without invoking the LLM: a
         # humus_kind='distillation' child joined by a hypha_of link.
-        child = Note(
-            org_id=org,
-            kind=NoteKind.text.value,
+        child = await _humus_note(
+            s,
+            org,
+            user,
             title="atom",
             humus_kind="distillation",
             humus_flag=True,
         )
-        s.add(child)
-        await s.flush()
         s.add(
             NoteNoteLink(
                 org_id=org,
@@ -183,17 +207,15 @@ async def test_season_candidate_and_signature_exclusion() -> None:
         titles = [c["title"] for c in out["nodes"]]
         assert f"Season · {year} Q{quarter}" in titles
         # Now record the season humus for that window -> excluded.
-        s.add(
-            Note(
-                org_id=org,
-                kind=NoteKind.text.value,
-                title="season atom",
-                humus_kind="season",
-                humus_signature=f"{year}Q{quarter}",
-                humus_flag=True,
-            )
+        await _humus_note(
+            s,
+            org,
+            user,
+            title="season atom",
+            humus_kind="season",
+            humus_signature=f"{year}Q{quarter}",
+            humus_flag=True,
         )
-        await s.flush()
         out2 = await cand.list_distillation_candidates(s, org_id=org, kind="season")
         titles2 = [c["title"] for c in out2["nodes"]]
         assert f"Season · {year} Q{quarter}" not in titles2
@@ -247,11 +269,21 @@ async def test_project_perimeter_is_respected() -> None:
     async with tenant_session(str(org), str(user)) as s:
         inside = await _inert_note(s, org, user, "dentro il progetto")
         await _inert_note(s, org, user, "fuori dal progetto")
-        proj = await taxonomy.create_tag(
-            s, org_id=org, actor_id=user, kind=TagKind.project, name="Proj"
+        # A real client -> project chain, and the note moved through the
+        # service: since docs/adr/0003 a project needs its owning client
+        # (``create_tag`` refuses the kind) and the note's client must be
+        # THAT client, which only tag_assignment may write.
+        client = await taxonomy.create_client(
+            s,
+            org_id=org,
+            actor_id=user,
+            name="Committente",
+            profile=ClientInput(legal_name="Committente SRL"),
         )
-        s.add(NoteTag(org_id=org, note_id=inside.id, tag_id=proj.id))
-        await s.flush()
+        proj = await taxonomy.create_project(
+            s, org_id=org, actor_id=user, name="Proj", client_tag_id=client.id
+        )
+        await nt.attach_tag(s, org_id=org, actor_id=user, note_id=inside.id, tag_id=proj.id)
         out = await cand.list_distillation_candidates(
             s, org_id=org, project_id=proj.id, kind="distill"
         )

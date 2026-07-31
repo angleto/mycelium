@@ -9,6 +9,7 @@ type Account = components['schemas']['EmailAccountOut']
 type Message = components['schemas']['EmailMessageOut']
 type Provider = components['schemas']['EmailProvider']
 type Tag = components['schemas']['TagOut']
+type Project = components['schemas']['ProjectOut']
 type Draft = components['schemas']['EmailDraftOut']
 
 const PROVIDERS: Provider[] = ['gmail', 'imap_generic', 'proton_bridge']
@@ -20,6 +21,9 @@ export function EmailRoute() {
   const [accounts, setAccounts] = useState<Account[]>([])
   const [messages, setMessages] = useState<Message[]>([])
   const [tags, setTags] = useState<Tag[]>([])
+  // /projects, not the project tags: only ProjectOut carries
+  // ``client_tag_id``, which couples the two structural selects.
+  const [projects, setProjects] = useState<Project[]>([])
   const [drafts, setDrafts] = useState<Draft[]>([])
   const [provider, setProvider] = useState<Provider>('imap_generic')
   const [address, setAddress] = useState('')
@@ -31,41 +35,50 @@ export function EmailRoute() {
   const [draftBodies, setDraftBodies] = useState<Record<string, string>>({})
   const [msg, setMsg] = useState<string | null>(null)
   const [err, setErr] = useState<string | null>(null)
+  // Default-tag errors render inside the picker of the account they
+  // belong to, not in the page-level banner above the account list.
+  const [tagErr, setTagErr] = useState<{ acct: string; msg: string } | null>(
+    null,
+  )
   const [pendingAcct, setPendingAcct] = useState<string | null>(null)
 
   const reload = useCallback(async () => {
     const h = workspaceHeader()
-    const [a, m, g, d] = await Promise.all([
+    const [a, m, g, d, p] = await Promise.all([
       api.GET('/email/accounts', { params: { header: h } }),
       api.GET('/email/messages', {
         params: { header: h, query: filter ? { account_id: filter } : {} },
       }),
       api.GET('/tags', { params: { header: h } }),
       api.GET('/email/drafts', { params: { header: h } }),
+      api.GET('/projects', { params: { header: h } }),
     ])
     if (a.data) setAccounts(a.data)
     if (m.data) setMessages(m.data)
     if (g.data) setTags(g.data)
     if (d.data) setDrafts(d.data)
+    if (p.data) setProjects(p.data)
   }, [filter])
 
   useEffect(() => {
     let active = true
     void (async () => {
       const h = workspaceHeader()
-      const [a, m, g, d] = await Promise.all([
+      const [a, m, g, d, p] = await Promise.all([
         api.GET('/email/accounts', { params: { header: h } }),
         api.GET('/email/messages', {
           params: { header: h, query: filter ? { account_id: filter } : {} },
         }),
         api.GET('/tags', { params: { header: h } }),
         api.GET('/email/drafts', { params: { header: h } }),
+        api.GET('/projects', { params: { header: h } }),
       ])
       if (!active) return
       if (a.data) setAccounts(a.data)
       if (m.data) setMessages(m.data)
       if (g.data) setTags(g.data)
       if (d.data) setDrafts(d.data)
+      if (p.data) setProjects(p.data)
     })()
     return () => {
       active = false
@@ -128,7 +141,7 @@ export function EmailRoute() {
   }
 
   async function onSetDefaultTags(a: Account, tagIds: string[]) {
-    setErr(null)
+    setTagErr(null)
     setPendingAcct(a.id)
     try {
       const { error } = await api.PUT('/email/accounts/{account_id}/default-tags', {
@@ -136,13 +149,50 @@ export function EmailRoute() {
         body: { expected_version: a.version, tag_ids: tagIds },
       })
       if (error) {
-        setErr(errMessage(error))
+        setTagErr({ acct: a.id, msg: errMessage(error) })
         return
       }
       await reload()
     } finally {
       setPendingAcct(null)
     }
+  }
+
+  // The default bag is replayed through ``resolve_structural`` when a
+  // message becomes a task or a note (services/email.py), so it must
+  // obey the same cardinality the entities do: at most one client, at
+  // most one project, and never a project whose client disagrees --
+  // otherwise every ingest of this account fails far from here, with
+  // TAG_MULTIPLE_CLIENTS / TAG_CLIENT_PROJECT_MISMATCH.
+  function facetIds(a: Account): string[] {
+    return (a.default_tags ?? [])
+      .filter((g) => g.kind !== 'client' && g.kind !== 'project')
+      .map((g) => g.id)
+  }
+
+  async function onSetDefaultClient(a: Account, clientTagId: string | null) {
+    await onSetDefaultTags(a, [
+      ...(clientTagId ? [clientTagId] : []),
+      ...facetIds(a),
+    ])
+  }
+
+  async function onSetDefaultProject(a: Account, projectTagId: string | null) {
+    if (!projectTagId) {
+      // Dropping the project keeps the client: the ingested task/note
+      // still lands under it, just at client level.
+      const cur = (a.default_tags ?? []).find((g) => g.kind === 'client')
+      await onSetDefaultTags(a, [...(cur ? [cur.id] : []), ...facetIds(a)])
+      return
+    }
+    // Store the pair, with the client the project actually belongs to:
+    // the project is the truth and the client is derived from it.
+    const owner = projects.find((p) => p.id === projectTagId)?.client_tag_id
+    await onSetDefaultTags(a, [
+      ...(owner ? [owner] : []),
+      projectTagId,
+      ...facetIds(a),
+    ])
   }
 
   async function onToTask(id: string) {
@@ -289,6 +339,13 @@ export function EmailRoute() {
                 selected={a.default_tags ?? []}
                 all={tags}
                 disabled={pendingAcct === a.id}
+                error={tagErr?.acct === a.id ? tagErr.msg : null}
+                structural={{
+                  mode: 'defaults',
+                  projects,
+                  onSetClient: (cid) => void onSetDefaultClient(a, cid),
+                  onSetProject: (pid) => void onSetDefaultProject(a, pid),
+                }}
                 onAdd={(tid) =>
                   void onSetDefaultTags(a, [
                     ...(a.default_tags ?? []).map((tg) => tg.id),

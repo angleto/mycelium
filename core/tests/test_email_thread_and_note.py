@@ -16,10 +16,10 @@ from mycelium_core.db import admin_session, tenant_session
 from mycelium_core.email_connector import FetchedMessage, OutgoingMessage
 from mycelium_core.models.email import EmailMessage, EmailProvider
 from mycelium_core.models.note_tag import NoteTag
-from mycelium_core.models.tag import TagKind
 from mycelium_core.services import email as svc
 from mycelium_core.services import taxonomy
 from mycelium_core.services.auth import signup
+from mycelium_core.services.taxonomy import ClientInput
 
 
 class FakeConnector:
@@ -108,8 +108,16 @@ async def test_email_to_note_links_and_applies_default_tags() -> None:
     org, user = await _signup_org()
     conn = FakeConnector([_msg("1", "Contract draft", body="Please review the contract.")])
     async with tenant_session(str(org), str(user)) as s:
-        client = await taxonomy.create_tag(
-            s, org_id=org, actor_id=user, kind=TagKind.client, name="Acme"
+        # ``create_client``, not ``create_tag``: since docs/adr/0003 the
+        # plain tag door refuses client/project, because it writes no
+        # ``client_profile`` row and a clientless profile breaks every
+        # project -> client lookup.
+        client = await taxonomy.create_client(
+            s,
+            org_id=org,
+            actor_id=user,
+            name="Acme",
+            profile=ClientInput(legal_name="Acme SRL"),
         )
         acc = await _account(s, org, user)
         await svc.set_default_tags(

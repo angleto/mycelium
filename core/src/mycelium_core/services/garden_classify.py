@@ -794,14 +794,31 @@ async def _mutate(
     """Perform the accepted mutation via the existing services (each is
     idempotent and audited on its own). ``cluster`` is informational in v1
     (clusters are computed, not stored on the node) so it is a no-op. A
-    ``tag`` routes to the note- or task-tag service by ``node_kind``; a
-    ``link`` routes to the note-link service (note↔note) or the task-relation
-    service (task↔task ``related``) by ``node_kind`` (ADR-0042); ``maturity``
-    is note-only (a note lifecycle, D3)."""
+    ``tag`` must be ``kind=generic`` and routes to the note- or task-tag
+    service by ``node_kind``; a ``link`` routes to the note-link service
+    (note↔note) or the task-relation service (task↔task ``related``) by
+    ``node_kind`` (ADR-0042); ``maturity`` is note-only (a note
+    lifecycle, D3)."""
     if not value:
         return
     if suggestion_type == "tag":
         tag_id = uuid.UUID(str(value["tag_id"]))
+        # Generic only, on the generated suggestion AND on a human's
+        # override. Generation is already generic-only
+        # (``_note_generic_tags``) but ``override_value`` is free-form
+        # JSON straight from the caller, and this is the one path where
+        # an agent commits a tag with no human in the loop (``auto``).
+        # A client/project tag is structural: attaching it moves the
+        # node's whole retrieval perimeter (docs/adr/0003 + 0021), which
+        # is a decision for the explicit doors on tag_assignment, never
+        # a side effect of accepting a co-occurrence suggestion.
+        kind = (
+            await session.execute(select(Tag.kind).where(Tag.id == tag_id))
+        ).scalar_one_or_none()
+        if kind is None:
+            raise NotFoundError(MessageCode.TAG_NOT_FOUND)
+        if kind is not TagKind.generic:
+            raise DomainError(MessageCode.TAG_KIND_MISMATCH)
         if node_kind == "task":
             # Local import: avoid a static cycle through mycelium_core.services.
             from mycelium_core.services import tasks as tasks_svc

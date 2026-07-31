@@ -30,7 +30,7 @@ from mycelium_core.models.note_coactivity import NoteCoactivity
 from mycelium_core.models.note_link import NoteNoteLink
 from mycelium_core.models.note_tag import NoteTag
 from mycelium_core.models.tag import Tag, TagKind
-from mycelium_core.services import graph, graph_local
+from mycelium_core.services import graph, graph_local, taxonomy
 from mycelium_core.services.auth import signup
 from mycelium_core.services.graph import _pair_key
 
@@ -82,7 +82,17 @@ async def _build_org(n_notes: int, rng: random.Random) -> tuple[uuid.UUID, uuid.
             s.add(Tag(id=tid, org_id=org, kind=TagKind.generic, name=f"t{t}"))
             tag_ids.append(tid)
         await s.flush()
+        # Every note carries exactly one client tag and at most one
+        # project (docs/adr/0003 + 0021); the note-side constraint checks
+        # it at COMMIT, so writing note_tags directly means supplying the
+        # structural pair here. The workspace default client with NO
+        # project is the personal perimeter, a first-class state, and it
+        # is invisible to what this bench measures: both walks expand
+        # co-tag edges over kind='generic' only (graph_local.py,
+        # graph.py), so the client tag never becomes an org-sized hub.
+        client_tag_id = await taxonomy.ensure_default_client(s, org_id=org, actor_id=user)
         for nid in note_ids:
+            s.add(NoteTag(org_id=org, note_id=nid, tag_id=client_tag_id))
             for tid in rng.sample(tag_ids, rng.randint(1, 3)):
                 s.add(NoteTag(org_id=org, note_id=nid, tag_id=tid))
         # Co-activity on ~n random pairs.

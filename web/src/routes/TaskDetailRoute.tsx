@@ -33,6 +33,7 @@ import type { components } from '../api/schema'
 type Task = components['schemas']['TaskOut']
 type State = components['schemas']['StateOut']
 type Tag = components['schemas']['TagOut']
+type Project = components['schemas']['ProjectOut']
 type Dep = components['schemas']['DependencyOut']
 type Rel = components['schemas']['TaskRelationOut']
 
@@ -100,6 +101,9 @@ export function TaskDetailRoute() {
   const [task, setTask] = useState<Task | null>(null)
   const [states, setStates] = useState<State[]>([])
   const [tags, setTags] = useState<Tag[]>([])
+  // /projects, not the project tags: only ProjectOut carries
+  // ``client_tag_id``, which couples the two structural selects.
+  const [projects, setProjects] = useState<Project[]>([])
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   // Eisenhower axes are mandatory since migration 0102 (Low/Low default
@@ -144,6 +148,11 @@ export function TaskDetailRoute() {
   const [relQuery, setRelQuery] = useState('')
   const [relOpen, setRelOpen] = useState(false)
   const [err, setErr] = useState<string | null>(null)
+  // Tag errors render inside the picker, not in the page-level banner
+  // at the bottom of the body column: a rejected client/project change
+  // (DomainError -> 400) has to be visible next to the control that
+  // caused it, on the other side of the layout grid.
+  const [tagErr, setTagErr] = useState<string | null>(null)
   const [workNotes, setWorkNotes] = useState<
     { id: string; title: string | null }[]
   >([])
@@ -320,12 +329,13 @@ export function TaskDetailRoute() {
         : api.GET('/tasks/{task_id}', {
             params: { header: h, path: { task_id: id } },
           })
-      const [tk, st, tg, all, dp, ws, rm, nt, rl] = await Promise.all([
+      const [tk, st, tg, pj, all, dp, ws, rm, nt, rl] = await Promise.all([
         tkPromise,
         api.GET('/tasks/{task_id}/states', {
           params: { header: h, path: { task_id: id } },
         }),
         api.GET('/tags', { params: { header: h } }),
+        api.GET('/projects', { params: { header: h } }),
         api.GET('/tasks', { params: { header: h } }),
         api.GET('/dependencies', { params: { header: h } }),
         api.GET('/workspaces/me', { params: { header: h } }),
@@ -342,6 +352,7 @@ export function TaskDetailRoute() {
       }
       if (st.data) setStates(st.data)
       if (tg.data) setTags(tg.data)
+      if (pj.data) setProjects(pj.data)
       if (all.data) setAllTasks(all.data)
       if (dp.data) setDeps(dp.data)
       if (rl.data) setRels(rl.data)
@@ -376,12 +387,18 @@ export function TaskDetailRoute() {
   async function onNewChild() {
     if (!task) return
     setErr(null)
-    // Inherit ALL tags from the parent (client, project, generic).
-    // Backend dedups and auto-attaches the client tag from any
-    // project tag (#20); generic tags carry over for free. Title is
-    // a placeholder; the detail surface (autosave on title change)
-    // lets the user rename + set every other field inline.
-    const inheritedTagIds = (task.tags ?? []).map((g) => g.id)
+    // Inherit the parent's structural pair BY NAME (the create door
+    // checks each id's kind, so a child can't land on a mis-filed tag)
+    // plus its generic facets. memory_channel tags are system
+    // bookkeeping and are deliberately not carried over. Title is a
+    // placeholder; the detail surface (autosave on title change) lets
+    // the user rename inline.
+    const parentTags = task.tags ?? []
+    const inheritedTagIds = parentTags
+      .filter((g) => g.kind === 'generic')
+      .map((g) => g.id)
+    const parentClient = parentTags.find((g) => g.kind === 'client')?.id
+    const parentProject = parentTags.find((g) => g.kind === 'project')?.id
     const { data, error } = await api.POST('/tasks', {
       params: { header: workspaceHeader() },
       body: {
@@ -396,6 +413,8 @@ export function TaskDetailRoute() {
         necessity: 'should',
         parent_task_id: task.id,
         tag_ids: inheritedTagIds,
+        ...(parentClient ? { client_tag_id: parentClient } : {}),
+        ...(parentProject ? { project_tag_id: parentProject } : {}),
       },
     })
     if (error || !data) {
@@ -497,11 +516,17 @@ export function TaskDetailRoute() {
     })
   })
 
-  async function autosave(patch: Record<string, unknown>) {
+  // ``sink`` is where this patch reports: the page-level banner by
+  // default, the tag picker's own slot for a structural re-tag, whose
+  // rejection has to be readable next to the select that caused it.
+  async function autosave(
+    patch: Record<string, unknown>,
+    sink: (m: string | null) => void = setErr,
+  ) {
     if (!task) return
     const run = (autosaveChain.current ?? Promise.resolve()).then(
       async () => {
-        setErr(null)
+        sink(null)
         const v = latestVersion.current ?? task.version
         const sessionId = editSession.touch()
         const { data, error, response } = await api.PATCH(
@@ -515,12 +540,12 @@ export function TaskDetailRoute() {
           },
         )
         if (response.status === 409) {
-          setErr(t('tasks.conflict'))
+          sink(t('tasks.conflict'))
           await reload()
           return
         }
         if (error || !data) {
-          setErr(errMessage(error))
+          sink(errMessage(error))
           return
         }
         // Update both the ref (so the next queued autosave sees the
@@ -836,21 +861,24 @@ export function TaskDetailRoute() {
     await reload()
   }
 
+  // Free-form facets only: the structural pair moves through PATCH
+  // (see the TagPicker below), and detaching either of the two is
+  // refused by the API anyway (TAG_STRUCTURAL_REQUIRED).
   async function addTag(tagId: string) {
-    setErr(null)
+    setTagErr(null)
     const { error } = await api.POST('/tasks/{task_id}/tags', {
       params: { header: workspaceHeader(), path: { task_id: id } },
       body: { tag_id: tagId },
     })
     if (error) {
-      setErr(errMessage(error))
+      setTagErr(errMessage(error))
       return
     }
     await reload()
   }
 
   async function removeTag(tagId: string) {
-    setErr(null)
+    setTagErr(null)
     const { error } = await api.DELETE('/tasks/{task_id}/tags/{tag_id}', {
       params: {
         header: workspaceHeader(),
@@ -858,7 +886,7 @@ export function TaskDetailRoute() {
       },
     })
     if (error) {
-      setErr(errMessage(error))
+      setTagErr(errMessage(error))
       return
     }
     await reload()
@@ -1470,6 +1498,24 @@ export function TaskDetailRoute() {
               <TagPicker
                 selected={task?.tags ?? []}
                 all={tags}
+                error={tagErr}
+                structural={{
+                  mode: 'task',
+                  projects,
+                  // The named pair on TaskPatchIn, not attach/detach on
+                  // /tasks/{id}/tags: "this task is now on that
+                  // project" is ONE intent, it rides the same
+                  // expected_version envelope as every other field, and
+                  // the response is the canonical TaskOut. A task never
+                  // drops its pair (TAG_STRUCTURAL_REQUIRED), so null
+                  // cannot reach here from mode="task".
+                  onSetClient: (cid) => {
+                    if (cid) void autosave({ client_tag_id: cid }, setTagErr)
+                  },
+                  onSetProject: (pid) => {
+                    if (pid) void autosave({ project_tag_id: pid }, setTagErr)
+                  },
+                }}
                 onAdd={(tid) => void addTag(tid)}
                 onRemove={(tid) => void removeTag(tid)}
               />

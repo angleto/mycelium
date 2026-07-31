@@ -91,15 +91,29 @@ async def _link(
     )
 
 
-async def _warm_corpus(s: object, org: uuid.UUID) -> None:
+async def _warm_corpus(s: object, org: uuid.UUID, user: uuid.UUID) -> None:
     """Insert ``COLD_START_NODES`` isolated filler notes so the corpus clears
     the cold-start threshold and confidence damping is 1.0. The ranking tests
     use this to isolate the signal logic under test from WS-D5's sparse-graph
-    damping (the fillers are untagged + unlinked, so they perturb no signal:
-    a personalised PPR cannot reach them, co-occurrence support is unchanged,
-    and the PageRank max is unmoved -- only the node count grows)."""
+    damping (the fillers are unlinked and carry no GENERIC tag, so they
+    perturb no signal: a personalised PPR cannot reach them, co-occurrence
+    support is unchanged, and the PageRank max is unmoved -- only the node
+    count grows).
+
+    They do carry the workspace default CLIENT tag: migration 0086 checks
+    at COMMIT that every note has exactly one (invariant (b)), and the
+    co-occurrence corpus is restricted to ``kind='generic'``
+    (``_note_generic_tags``), so it stays byte-identical."""
+    client_tag_id = await taxonomy.ensure_default_client(
+        s,  # type: ignore[arg-type]
+        org_id=org,
+        actor_id=user,
+    )
     for i in range(gc.COLD_START_NODES):
-        s.add(Note(org_id=org, kind=NoteKind.text, title=f"filler-{i}"))  # type: ignore[attr-defined]
+        filler = Note(org_id=org, kind=NoteKind.text, title=f"filler-{i}")
+        s.add(filler)  # type: ignore[attr-defined]
+        await s.flush()  # type: ignore[attr-defined]
+        s.add(NoteTag(org_id=org, note_id=filler.id, tag_id=client_tag_id))  # type: ignore[attr-defined]
     await s.flush()  # type: ignore[attr-defined]
 
 
@@ -171,7 +185,7 @@ async def test_tag_suggestion_picks_cooccurring_tag() -> None:
             await _attach(s, org, nid, x)
         await _attach(s, org, b.id, y)
         await _attach(s, org, c.id, y)
-        await _warm_corpus(s, org)  # past the cold-start threshold: damping=1.0
+        await _warm_corpus(s, org, user)  # past the cold-start threshold: damping=1.0
         res = await gc.classify_node(s, org_id=org, node_id=a.id, kinds=frozenset({"tags"}))
     suggested = {t.tag_id for t in res.tags}
     assert y in suggested
@@ -216,7 +230,7 @@ async def test_classify_task_suggests_cooccurring_tag_when_unified(
         await _attach(s, org, b.id, y)
         await _attach_task_tag(s, org, c.id, x)
         await _attach_task_tag(s, org, c.id, y)
-        await _warm_corpus(s, org)  # past cold-start: damping = 1.0
+        await _warm_corpus(s, org, user)  # past cold-start: damping = 1.0
         res = await gc.classify_node(s, org_id=org, node_id=a.id)
     assert res.node_kind == "task"
     suggested = {t.tag_id for t in res.tags}
@@ -254,7 +268,7 @@ async def test_classify_task_gets_cluster_from_unified_graph(
             lo, hi = (a, b) if a < b else (b, a)
             s.add(TaskRelation(org_id=org, task_a_id=lo, task_b_id=hi))
         await s.flush()
-        await _warm_corpus(s, org)
+        await _warm_corpus(s, org, user)
         res = await gc.classify_node(s, org_id=org, node_id=t1.id, kinds=frozenset({"cluster"}))
     assert res.node_kind == "task"
     if res.cluster is None:
@@ -283,7 +297,7 @@ async def test_classify_task_suggests_related_task_via_unified_graph(
         await _attach_task_tag(s, org, t1.id, z)
         await _attach_task_tag(s, org, t2.id, z)
         await s.flush()
-        await _warm_corpus(s, org)
+        await _warm_corpus(s, org, user)
         res = await gc.classify_node(s, org_id=org, node_id=t1.id, kinds=frozenset({"links"}))
     assert res.node_kind == "task"
     targets = {link.target_id for link in res.links}
@@ -311,7 +325,7 @@ async def test_classify_task_tags_ignore_soft_deleted_tasks(
         await _attach(s, org, b.id, y)
         await _attach_task_tag(s, org, c.id, x)
         await _attach_task_tag(s, org, c.id, y)
-        await _warm_corpus(s, org)
+        await _warm_corpus(s, org, user)
         before = await gc.classify_node(s, org_id=org, node_id=a.id, kinds=frozenset({"tags"}))
         # A soft-deleted task that shares X (would inflate co-occurrence) and
         # carries a private tag Z (would be a phantom candidate) if it leaked.
@@ -407,7 +421,7 @@ async def test_precomputed_suggestion_cache_roundtrip_and_ttl() -> None:
             await _attach(s, org, nid, x)
         await _attach(s, org, b.id, y)
         await _attach(s, org, c.id, y)  # y co-occurs on TWO related notes -> clears the floor
-        await _warm_corpus(s, org)
+        await _warm_corpus(s, org, user)
         res = await gc.classify_node(s, org_id=org, node_id=a.id, kinds=frozenset({"tags"}))
         assert res.tags  # the co-occurring tag is suggested
 
@@ -462,7 +476,7 @@ async def test_link_suggestion_excludes_linked_and_surfaces_shared_tag_candidate
             await _attach(s, org, a.id, tid)
             await _attach(s, org, d.id, tid)
         await _link(s, org, user, a.id, b.id)
-        await _warm_corpus(s, org)  # past the cold-start threshold: damping=1.0
+        await _warm_corpus(s, org, user)  # past the cold-start threshold: damping=1.0
         res = await gc.classify_node(s, org_id=org, node_id=a.id, kinds=frozenset({"links"}))
     targets = {lc.target_id for lc in res.links}
     assert b.id not in targets  # already linked
@@ -502,7 +516,7 @@ async def test_maturity_auto_promotes_central_and_curated_hub() -> None:
     org, user = await _make_workspace()
     async with tenant_session(str(org), str(user)) as s:
         hub_id = await _hub(s, org, user, in_links=5)  # deg=5 -> deg_term=1.0
-        await _warm_corpus(s, org)  # past the cold-start threshold: damping=1.0
+        await _warm_corpus(s, org, user)  # past the cold-start threshold: damping=1.0
         res = await gc.classify_node(s, org_id=org, node_id=hub_id, kinds=frozenset({"maturity"}))
     assert res.maturity is not None
     assert res.maturity.value == "mature"
@@ -517,7 +531,7 @@ async def test_maturity_proposal_tier_when_central_but_undercurated() -> None:
         # deg=2 -> deg_term=0.667; still the PR max so pr_pct=1.0;
         # conf=min(1.0, 0.667)=0.667 in [SUGGEST, AUTO).
         hub_id = await _hub(s, org, user, in_links=2, isolated=2)
-        await _warm_corpus(s, org)  # past the cold-start threshold: damping=1.0
+        await _warm_corpus(s, org, user)  # past the cold-start threshold: damping=1.0
         res = await gc.classify_node(s, org_id=org, node_id=hub_id, kinds=frozenset({"maturity"}))
     assert res.maturity is not None
     assert res.maturity.value == "mature"

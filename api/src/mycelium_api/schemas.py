@@ -7,7 +7,7 @@ import uuid
 from decimal import Decimal
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from mycelium_core.models.agent_run import AgentRunStatus
 from mycelium_core.models.billing import CostBasis, RateUnit, StorageKind
@@ -580,6 +580,14 @@ class ClientOut(BaseModel):
 
 class ProjectPatchIn(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=120)
+    # Optional because the field is patchable, NOT because a project may
+    # end up without a client: every project has exactly one
+    # (docs/adr/0003 invariant d). Omitting the key leaves the client
+    # alone; stating it re-points the project AND re-tags every task and
+    # note that carries it, in the same transaction
+    # (taxonomy.reassign_project_client). An explicit JSON null is a
+    # stated request for "no client", which is refused with
+    # project.client_required.
     client_tag_id: uuid.UUID | None = None
     budget: Decimal | None = None
     color: str | None = Field(default=None, max_length=16)
@@ -591,7 +599,11 @@ class ProjectOut(BaseModel):
     name: str
     status: str
     version: int
-    client_tag_id: uuid.UUID | None
+    # Non-nullable: invariant (d). A project whose
+    # ``project_profile.client_tag_id`` is NULL is broken taxonomy, and
+    # serialising it as a legal ``null`` is what let the SPA build
+    # client-less project pickers; it now fails loudly instead.
+    client_tag_id: uuid.UUID
     budget: Decimal | None
     color: str | None
     description: str | None
@@ -633,7 +645,20 @@ class TaskCreateIn(BaseModel):
     location: str | None = Field(default=None, max_length=200)
     necessity: Necessity = Necessity.should
     budget_id: uuid.UUID | None = None
+    # Free-form facets only (kind generic / memory_channel). Structural
+    # ids are still accepted here for the callers that predate the two
+    # fields below -- the choke-point classifies the bag by kind either
+    # way (docs/adr/0003) -- but naming them is what makes the request
+    # single-valued: two projects in one create is TAG_MULTIPLE_PROJECTS,
+    # not a silent pick.
     tag_ids: list[uuid.UUID] = Field(default_factory=list)
+    # The structural pair. ``project_tag_id`` decides: the client is
+    # derived from it, and stating a client that disagrees is refused
+    # (TAG_CLIENT_PROJECT_MISMATCH) rather than silently dropped.
+    # Neither is required: a task without a project falls back to the
+    # workspace default project (invariant a -- no orphan tasks).
+    client_tag_id: uuid.UUID | None = None
+    project_tag_id: uuid.UUID | None = None
     assignee_ids: list[uuid.UUID] = Field(default_factory=list)
     # Appointment unification (migration 0094). When ``start_at`` and
     # ``duration_minutes`` are both set the task is a calendar
@@ -676,6 +701,16 @@ class TaskPatchIn(BaseModel):
     location: str | None = Field(default=None, max_length=200)
     necessity: Necessity | None = None
     budget_id: uuid.UUID | None = None
+    # Structural re-tagging, single-valued (docs/adr/0003). Before these
+    # existed the only way to move a task was attach/detach on
+    # /tasks/{id}/tags, which cannot express "this task is now on that
+    # project" as one intent. Stating ``project_tag_id`` is a MOVE (the
+    # client follows the project); ``client_tag_id`` alone re-points the
+    # client and is refused when the attached project belongs to another
+    # one. An explicit null on either is refused
+    # (TAG_STRUCTURAL_REQUIRED): a task has exactly one of each.
+    client_tag_id: uuid.UUID | None = None
+    project_tag_id: uuid.UUID | None = None
     # Appointment unification (migration 0094). Patch can set/clear
     # the pair atomically: both fields together. Recurrence is
     # independent and can be patched on its own.
@@ -2351,11 +2386,33 @@ class MemoryChannelPatchIn(BaseModel):
 
 class NoteCreateIn(BaseModel):
     kind: NoteKind
+    # The structural pair (docs/adr/0003). ``project_tag_id`` is the
+    # canonical name, shared with the task schemas; ``project_id`` is
+    # what this endpoint shipped with and stays accepted (web, CLI).
+    # Both stated with different values is a contradiction, not a
+    # precedence question, so it is refused instead of arbitrated.
+    project_tag_id: uuid.UUID | None = None
     project_id: uuid.UUID | None = None
+    # A note is at-most-one-project: no project is a first-class
+    # personal perimeter (docs/adr/0021), and this is the only way to
+    # say WHICH client that perimeter belongs to -- omitted, the note
+    # lands on the workspace default client. A client that contradicts
+    # the project is refused (TAG_CLIENT_PROJECT_MISMATCH).
+    client_tag_id: uuid.UUID | None = None
     title: str | None = Field(default=None, max_length=300)
     text: str | None = None
     audio_ref: str | None = Field(default=None, max_length=512)
     audio_seconds: int | None = None
+
+    @model_validator(mode="after")
+    def _collapse_project_alias(self) -> NoteCreateIn:
+        legacy = "project_id" in self.model_fields_set
+        canonical = "project_tag_id" in self.model_fields_set
+        if legacy and canonical and self.project_id != self.project_tag_id:
+            raise ValueError("project_id and project_tag_id disagree")
+        if legacy and not canonical:
+            self.project_tag_id = self.project_id
+        return self
 
 
 class NoteTagIn(BaseModel):
@@ -2682,6 +2739,17 @@ class NotePatchIn(BaseModel):
     # completes ("attachment:<id>"). Same model_fields_set semantics
     # as task_id (omit = no change, ``None`` = clear).
     audio_ref: str | None = Field(default=None, max_length=512)
+    # Structural re-tagging, single-valued (docs/adr/0003). Same
+    # model_fields_set semantics as ``task_id``: omitting the key
+    # changes nothing. Stating ``project_tag_id`` is a MOVE (the client
+    # follows the project); an explicit null CLEARS the project -- the
+    # un-share path, which sends the note's blobs back to the personal
+    # perimeter (docs/adr/0021) and is legal only because a note is
+    # at-most-one-project. ``client_tag_id`` re-points the client and is
+    # refused when it contradicts the attached project; an explicit null
+    # there is refused too (a note always has exactly one client).
+    project_tag_id: uuid.UUID | None = None
+    client_tag_id: uuid.UUID | None = None
 
 
 class TaskNoteCreateIn(BaseModel):

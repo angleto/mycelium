@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import logging
 import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -38,15 +39,17 @@ from mycelium_core.models.notification import (
 from mycelium_core.models.push_subscription import PushSubscription
 from mycelium_core.models.task import Task
 from mycelium_core.models.task_collaborator import TaskCollaborator
-from mycelium_core.models.task_tag import TaskTag
 from mycelium_core.models.user import User
 from mycelium_core.models.workflow import WorkflowState
 from mycelium_core.notification_channel import NotificationSender, get_sender
 from mycelium_core.services import audit
+from mycelium_core.services import recurrence as recurrence_svc
 from mycelium_core.services import tasks as tasks_svc
 from mycelium_core.services.notifications_webpush import WebPushGone
 from mycelium_core.services.rbac import require_role
 from mycelium_core.timewindow import DEFAULT_DAY_START_MINUTE, day_start_anchor, resolve_tz
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -511,7 +514,12 @@ async def spawn_due(
     deadline template (``due_date`` set) spawns a task due at
     ``next_run``. Without this the spawned instance had no firing
     reference and no reminder rows, so a recurring task never fired any
-    reminder."""
+    reminder.
+
+    Each occurrence is materialised inside its own SAVEPOINT, so one
+    template that cannot spawn never rolls back the rest of the sweep;
+    its schedule is advanced anyway, otherwise the drain would retry
+    the same failing spawn forever."""
     ref = now or dt.datetime.now(tz=dt.UTC)
     recs = list(
         (
@@ -528,15 +536,16 @@ async def spawn_due(
     recs.sort(key=lambda r: (r.next_run, str(r.task_id)))
     spawned = 0
     for rec in recs:
+        # Flush the schedule bookkeeping of the previous iterations
+        # BEFORE this one opens its SAVEPOINT: rolling a SAVEPOINT back
+        # expires every state still dirty in the session, so an
+        # un-flushed ``next_run`` advance would be silently reverted and
+        # its occurrence spawned twice on the next sweep.
+        await session.flush()
         if rec.until is not None and rec.next_run > rec.until:
             rec.active = False
             continue
         tmpl = await tasks_svc.get_task(session, org_id=org_id, task_id=rec.task_id)
-        tag_ids = (
-            (await session.execute(select(TaskTag.tag_id).where(TaskTag.task_id == rec.task_id)))
-            .scalars()
-            .all()
-        )
         assignee_ids = (
             (
                 await session.execute(
@@ -551,49 +560,75 @@ async def spawn_due(
         # next_run (+ duration); deadline template -> due at next_run; a
         # template with neither stays untimed (unchanged behaviour).
         is_appointment = tmpl.start_at is not None
-        new_task = await tasks_svc.create_task(
-            session,
-            org_id=org_id,
-            actor_id=actor_id,
-            title=tmpl.title,
-            description=tmpl.description,
-            # ``priority`` is derived from importance x urgency by the
-            # service; copy the axes (mandatory since 0102) instead.
-            importance=tmpl.importance,
-            urgency=tmpl.urgency,
-            estimate_effort_h=tmpl.estimate_effort_h,
-            executor_kind=tmpl.executor_kind,
-            necessity=tmpl.necessity,
-            location=tmpl.location,
-            monetary_cost=tmpl.monetary_cost,
-            budget_id=tmpl.budget_id,
-            start_at=rec.next_run if is_appointment else None,
-            duration_minutes=tmpl.duration_minutes if is_appointment else None,
-            due_date=rec.next_run if (not is_appointment and tmpl.due_date is not None) else None,
-            tag_ids=list(tag_ids),
-            assignee_ids=list(assignee_ids),
-        )
-        # Copy the template's reminder offsets onto the occurrence so it
-        # fires the same reminders relative to its anchor.
-        src_reminders = (
-            (await session.execute(select(TaskReminder).where(TaskReminder.task_id == rec.task_id)))
-            .scalars()
-            .all()
-        )
-        for sr in src_reminders:
-            session.add(
-                TaskReminder(
+        # The tags the template carries are NOT copied verbatim: the
+        # occurrence's client/project pair is resolved by the
+        # choke-point inside ``create_task`` (docs/adr/0003), and
+        # ``spawn_tag_ids`` hands it an already-normalised bag so a
+        # template that drifted before the invariant landed does not
+        # reject every occurrence, once per sweep, forever.
+        tag_ids = await recurrence_svc.spawn_tag_ids(session, template_task_id=rec.task_id)
+        try:
+            # Per-occurrence SAVEPOINT, the same fault isolation the
+            # garden classification drain uses: a template that cannot
+            # be materialised (an appointment that would overlap, a
+            # broken taxonomy) must not roll back the occurrences this
+            # sweep already spawned.
+            async with session.begin_nested():
+                new_task = await tasks_svc.create_task(
+                    session,
                     org_id=org_id,
-                    task_id=new_task.id,
-                    offset_minutes=sr.offset_minutes,
-                    channels=sr.channels,
+                    actor_id=actor_id,
+                    title=tmpl.title,
+                    description=tmpl.description,
+                    # ``priority`` is derived from importance x urgency by the
+                    # service; copy the axes (mandatory since 0102) instead.
+                    importance=tmpl.importance,
+                    urgency=tmpl.urgency,
+                    estimate_effort_h=tmpl.estimate_effort_h,
+                    executor_kind=tmpl.executor_kind,
+                    necessity=tmpl.necessity,
+                    location=tmpl.location,
+                    monetary_cost=tmpl.monetary_cost,
+                    budget_id=tmpl.budget_id,
+                    start_at=rec.next_run if is_appointment else None,
+                    duration_minutes=tmpl.duration_minutes if is_appointment else None,
+                    due_date=(
+                        rec.next_run if (not is_appointment and tmpl.due_date is not None) else None
+                    ),
+                    tag_ids=tag_ids,
+                    assignee_ids=list(assignee_ids),
                 )
-            )
-        rec.last_spawned_at = ref
+                # Copy the template's reminder offsets onto the occurrence so it
+                # fires the same reminders relative to its anchor.
+                src_reminders = (
+                    (
+                        await session.execute(
+                            select(TaskReminder).where(TaskReminder.task_id == rec.task_id)
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
+                for sr in src_reminders:
+                    session.add(
+                        TaskReminder(
+                            org_id=org_id,
+                            task_id=new_task.id,
+                            offset_minutes=sr.offset_minutes,
+                            channels=sr.channels,
+                        )
+                    )
+        except Exception:
+            # Poison template: this occurrence is lost, but the schedule
+            # still advances below so the drain makes progress instead
+            # of re-attempting the same failing spawn every sweep.
+            logger.exception("recurrence spawn failed (task_id=%s)", rec.task_id)
+        else:
+            rec.last_spawned_at = ref
+            spawned += 1
         rec.next_run = _advance(rec.next_run, rec.freq, rec.interval)
         if rec.until is not None and rec.next_run > rec.until:
             rec.active = False
-        spawned += 1
     await session.flush()
     return spawned
 

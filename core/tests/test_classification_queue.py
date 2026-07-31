@@ -105,8 +105,18 @@ async def test_drain_classifies_and_caches(monkeypatch: pytest.MonkeyPatch) -> N
             s.add(NoteTag(org_id=org, note_id=nid, tag_id=x))
         s.add(NoteTag(org_id=org, note_id=b.id, tag_id=y))
         s.add(NoteTag(org_id=org, note_id=c.id, tag_id=y))
-        for i in range(gc.COLD_START_NODES):  # clear cold-start damping
-            s.add(Note(org_id=org, kind=NoteKind.text, title=f"filler-{i}"))
+        # Filler notes to clear cold-start damping, inserted by hand
+        # (create_note would enqueue COLD_START_NODES more jobs and
+        # change what the drain is asserted on). Migration 0086 checks
+        # at COMMIT that every note carries exactly one client tag, so
+        # they get the workspace default; the co-occurrence corpus is
+        # kind='generic' only, so it stays untouched.
+        filler_client = await taxonomy.ensure_default_client(s, org_id=org, actor_id=user)
+        for i in range(gc.COLD_START_NODES):
+            filler = Note(org_id=org, kind=NoteKind.text, title=f"filler-{i}")
+            s.add(filler)
+            await s.flush()
+            s.add(NoteTag(org_id=org, note_id=filler.id, tag_id=filler_client))
         await s.flush()
 
         res = await gc.process_classification_jobs(s, org_id=org)
