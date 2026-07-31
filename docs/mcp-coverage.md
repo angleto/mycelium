@@ -47,7 +47,7 @@ handles (see the generated `tasks` section below). An agent never needs to
 over-fetch the org table and filter in its head.
 
 <!-- BEGIN GENERATED: mcp tool inventory (scripts/gen_mcp_coverage.py) -->
-**252 tools across 14 domains.** This inventory is generated from the live registry by `scripts/gen_mcp_coverage.py` — do not edit by hand; run `make mcp-coverage` to refresh. The one-line summary is each tool's first docstring line, so it cannot drift from the code.
+**256 tools across 14 domains.** This inventory is generated from the live registry by `scripts/gen_mcp_coverage.py` — do not edit by hand; run `make mcp-coverage` to refresh. The one-line summary is each tool's first docstring line, so it cannot drift from the code.
 
 ### search (3)
 
@@ -175,18 +175,19 @@ over-fetch the org table and filter in its head.
 | `memory_write` | Write a memory blob (embedding metered when produced; degrades |
 | `set_email_ingest_to_memory` | Toggle whether this account's synced (non-bulk) messages are |
 
-### notes (54)
+### notes (57)
 
 | Tool | Summary |
 |---|---|
 | `add_note_part` | Append a markdown block to a note (task 7070a456 Phase 3). |
 | `add_note_part_instructions` | Recipe for a TOKEN-FREE note-part create: stream a local markdown |
-| `add_note_tag` | Attach a tag to a note (idempotent). A client tag sets the |
+| `add_note_tag` | Attach a free-form tag (generic / memory channel) to a note, |
 | `add_task_participant` | Pin an identity to an appointment-task (the task must carry |
 | `append_message` | Append a user message; returns the metered LLM reply turn. |
 | `append_note_part` | Stream a LARGE markdown body into a note part in chunks, past the |
 | `append_to_note` | Append ``text`` to ``note.summary`` (default) or ``note.transcript`` |
 | `archive_note` | Archive (or unarchive with ``archived=False``) a note. |
+| `clear_note_project` | Un-share a note: drop its project, KEEP its client. A projectless |
 | `create_note` | Capture a note (voice\|text\|conversation). Unmetered. |
 | `create_task_note` | TASK-side of the bidirectional Proposal A link: create a *fresh* |
 | `delete_note` | Soft-delete a note (recoverable via restore_note). |
@@ -210,19 +211,21 @@ over-fetch the org table and filter in its head.
 | `list_task_participants` | List the additional identities pinned to an appointment-task |
 | `list_turns` | List the turns of a conversation note, in order. Returns the paginated |
 | `merge_notes` | Fold the source note's parts into the target (task 7070a456 |
+| `move_note_to_project` | Move a note into a project (share it). A note has at most one |
 | `note_restore_source` | Fase P (task 561c6aca), "ripristina originale": given a humus ATOM, |
 | `patch_note_part_body_capability` | Mint a single-use ``note_part_body:patch`` capability and return a |
 | `patch_text_block_capability` | Mint a single-use ``<kind>:patch`` capability for a task description |
 | `prepend_note_part` | Prepend markdown ``text`` to the FRONT of a note part without |
 | `promote_note_to_task` | Transplant the note to a task. The note becomes read-only |
 | `protect_note` | Mark a note as finished prose the distiller must never compact |
-| `remove_note_tag` | Detach a tag from a note. |
+| `remove_note_tag` | Detach a free-form tag from a note. The client cannot be detached |
 | `remove_task_participant` | Unpin an identity from an appointment-task. No-op if the |
 | `reorder_note_parts` | Rewrite the entire ordering of a note's parts. ``part_ids`` |
 | `replace_in_note_part` | Anchored edit inside ONE note part: replace occurrences of the |
 | `restore_note` | Restore a soft-deleted note. |
 | `restore_note_revision` | Revert a note's ``title`` / ``transcript`` to a past revision. |
 | `run_command` | Deterministic canonical NL command (offline, unmetered). |
+| `set_note_client` | Re-point a note at a client. A note has exactly one client, so |
 | `set_note_maturity` | Manual override of a note's garden lifecycle (seed \| growing \| |
 | `set_note_part_body_capability` | Like ``set_note_part_body_instructions`` but needs NO long-lived |
 | `set_note_part_body_instructions` | Recipe for a TOKEN-FREE full-body REPLACE of an existing note part: |
@@ -271,26 +274,27 @@ over-fetch the org table and filter in its head.
 | `reply_email` | Reply in-thread to an ingested message. |
 | `send_email` | Send a message from an account. |
 | `set_email_auto_draft_replies` | Toggle the autonomous responder for this account (WS-4). When enabled |
-| `set_email_default_tags` | Replace this account's default tags (WS-1): a flat set (typ. one |
+| `set_email_default_tags` | Replace this account's default tags (WS-1): a flat set |
 | `sync_email_account` | Idempotently sync one account (known messages are skipped). |
 
-### taxonomy (14)
+### taxonomy (15)
 
 | Tool | Summary |
 |---|---|
-| `add_task_tag` | Attach a tag to a task (idempotent). Use a project tag to move |
+| `add_task_tag` | Attach a free-form tag (generic / memory channel) to a task, |
 | `create_client` | Create a client tag with its typed profile. |
-| `create_project` | Create a project under a client. Rate/billable are client-level |
-| `create_tag` | Create a tag (kind: generic\|client\|project). |
+| `create_project` | Create a project under a client. EVERY project has exactly one |
+| `create_tag` | Create a free-form tag (kind: generic). A client or a project |
 | `get_tag` | Read one tag (generic/client/project). |
 | `list_clients` | List clients with their invoicing profile. |
 | `list_projects` | List projects with their profile (client link, budget, color). |
 | `list_tags` | List tags, optionally filtered by kind. |
-| `move_task_to_project` | Reassign a task to another project: detach its current project |
-| `remove_task_tag` | Detach a tag from a task. |
+| `move_task_to_project` | Move a task to another project. A task has exactly one project |
+| `remove_task_tag` | Detach a free-form tag from a task. The client and the project |
 | `set_tag_scope` | Replace a tag's scope with the given project/client tag ids |
+| `set_task_client` | Re-point a task at a client. A task has exactly one client, so |
 | `update_client` | Edit a client's name and invoicing card. Only the given fields |
-| `update_project` | Edit a project. Pass ``client_tag_id`` to reassign the project |
+| `update_project` | Edit a project. Only the given fields are changed; a project can |
 | `update_tag` | Rename / recolor / set status of a tag (status: active\|archived). |
 
 ### tasks (34)
