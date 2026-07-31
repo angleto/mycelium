@@ -415,7 +415,12 @@ offenders AS (
              AS client_tag_ids,
            array_agg(s.tag_id ORDER BY s.tag_id) FILTER (WHERE s.kind = 'project')
              AS project_tag_ids,
-           min(s.tag_id) FILTER (WHERE s.kind = 'project') AS winner_by_id,
+           -- PostgreSQL has no min()/max() aggregate for uuid, so the
+           -- lowest project tag id comes off the already-ordered array
+           -- rather than from min(): same value, native uuid ordering,
+           -- no text round-trip.
+           (array_agg(s.tag_id ORDER BY s.tag_id)
+              FILTER (WHERE s.kind = 'project'))[1] AS winner_by_id,
            count(*) FILTER (
              WHERE s.kind = 'project'
                AND s.project_client_tag_id IS NOT NULL
