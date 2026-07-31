@@ -391,6 +391,7 @@ async def create_task(
         entity="task",
         entity_id=task.id,
         structural=structural,
+        on_create=True,
     )
     for tag_id in structural.generic_ids:
         await tag_assignment.attach_generic(
@@ -400,6 +401,7 @@ async def create_task(
             entity="task",
             entity_id=task.id,
             tag_id=tag_id,
+            on_create=True,
         )
     for user_id in assignee_ids:
         session.add(TaskCollaborator(org_id=org_id, task_id=task.id, user_id=user_id))

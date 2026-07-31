@@ -346,7 +346,11 @@ async def _ensure_default_tag(
     if cur is not None:
         exists = (
             await session.execute(
-                select(Tag.id).where(Tag.id == uuid.UUID(str(cur)), Tag.kind == kind)
+                select(Tag.id).where(
+                    Tag.id == uuid.UUID(str(cur)),
+                    Tag.org_id == org_id,
+                    Tag.kind == kind,
+                )
             )
         ).scalar_one_or_none()
         if exists is not None:
@@ -354,8 +358,14 @@ async def _ensure_default_tag(
     # Authoritative: (org_id, kind, name) is unique, so an existing
     # default tag — created by any sibling path, in any order — is THE
     # default. Reuse it instead of colliding on insert.
+    # The org_id predicate is explicit rather than left to RLS: the
+    # CI/dev role is BYPASSRLS (migration 0029), and without it this
+    # resolves another tenant's "Personal" and _remember_default then
+    # records a FOREIGN tag as this org's default.
     existing = (
-        await session.execute(select(Tag.id).where(Tag.kind == kind, Tag.name == name))
+        await session.execute(
+            select(Tag.id).where(Tag.org_id == org_id, Tag.kind == kind, Tag.name == name)
+        )
     ).scalar_one_or_none()
     if existing is not None:
         await _remember_default(session, org, settings, settings_key, existing)

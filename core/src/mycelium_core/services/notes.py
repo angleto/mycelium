@@ -993,6 +993,7 @@ async def create_note(
         entity="note",
         entity_id=note.id,
         structural=structural,
+        on_create=True,
     )
     # Phase 6 final: the text the caller supplied lands in
     # note_part(ord=0). The Note row no longer carries a transcript
@@ -1205,6 +1206,9 @@ async def _copy_task_tags_to_note(
             entity="note",
             entity_id=note_id,
             structural=structural,
+            # Both callers run this immediately after creating the note,
+            # so the inherited pair is genesis, not a working touch.
+            on_create=True,
         )
     for tag_id in freeform_ids:
         await tag_assignment.attach_generic(
@@ -1214,6 +1218,7 @@ async def _copy_task_tags_to_note(
             entity="note",
             entity_id=note_id,
             tag_id=tag_id,
+            on_create=True,
         )
 
 

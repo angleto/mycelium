@@ -30,7 +30,7 @@ from mycelium_core.models.google_calendar import (
 from mycelium_core.models.membership import Role
 from mycelium_core.models.task import Task
 from mycelium_core.models.workflow import WorkflowState
-from mycelium_core.services import audit
+from mycelium_core.services import audit, tag_assignment
 from mycelium_core.services import taxonomy as taxonomy_svc
 from mycelium_core.services import workflow as wf_svc
 from mycelium_core.services.rbac import require_role
@@ -313,6 +313,18 @@ async def sync_subscription(
             )
         )
     ).scalar_one()
+    # ...and the same project is the ingested task's structural pair
+    # (ADR-0050): this path builds Task rows directly instead of going
+    # through tasks.create_task, so it has to satisfy invariant (a)
+    # itself. Resolved once: it is identical for every event in the
+    # batch, and Google carries no client/project of its own.
+    structural = await tag_assignment.resolve_structural(
+        session,
+        org_id=org_id,
+        actor_id=actor_id,
+        entity="task",
+        project_tag_id=project_tag_id,
+    )
     ingested = 0
     updated = 0
     skipped = 0
@@ -353,19 +365,28 @@ async def sync_subscription(
             )
             updated += 1
         else:
-            session.add(
-                Task(
-                    org_id=org_id,
-                    title=title,
-                    state_id=initial.id,
-                    owner_id=sub.user_id,
-                    start_at=start_at,
-                    duration_minutes=duration_minutes,
-                    location=ge.location,
-                    external_provider=_EXTERNAL_PROVIDER,
-                    external_id=ge.id,
-                    external_subscription_id=subscription_id,
-                )
+            task = Task(
+                org_id=org_id,
+                title=title,
+                state_id=initial.id,
+                owner_id=sub.user_id,
+                start_at=start_at,
+                duration_minutes=duration_minutes,
+                location=ge.location,
+                external_provider=_EXTERNAL_PROVIDER,
+                external_id=ge.id,
+                external_subscription_id=subscription_id,
+            )
+            session.add(task)
+            await session.flush()
+            await tag_assignment.set_structural(
+                session,
+                org_id=org_id,
+                actor_id=actor_id,
+                entity="task",
+                entity_id=task.id,
+                structural=structural,
+                on_create=True,
             )
             ingested += 1
     await session.execute(

@@ -218,9 +218,18 @@ async def set_structural(
     entity: Entity,
     entity_id: uuid.UUID,
     structural: Structural,
+    on_create: bool = False,
 ) -> None:
     """Write the resolved pair, replacing whatever client/project rows
-    the entity had. Free-form tags are left alone."""
+    the entity had. Free-form tags are left alone.
+
+    ``on_create`` suppresses the audit row: the entity's own ``create``
+    row already records the genesis, and ``attach_tag`` is in the
+    co-activity touch allow-list (services/coactivity.py). Logging one
+    per creation would turn "was born in a project" into "someone worked
+    on it", forging exactly the spurious clique between everything made
+    in one session that the aggregator excludes ``create`` to avoid.
+    """
     current = await _current_structural(session, entity=entity, entity_id=entity_id)
     desired = [structural.client_tag_id]
     if structural.project_tag_id is not None:
@@ -251,6 +260,8 @@ async def set_structural(
         from mycelium_core.services import note_search
 
         await note_search.rescope_note_blobs(session, org_id=org_id, note_id=entity_id)
+    if on_create:
+        return
     await audit.log(
         session,
         org_id=org_id,
@@ -275,10 +286,15 @@ async def attach_generic(
     entity: Entity,
     entity_id: uuid.UUID,
     tag_id: uuid.UUID,
+    on_create: bool = False,
 ) -> None:
     """Attach a free-form facet. A client/project tag is refused here:
     it would bypass the structural resolution and can only be assigned
-    through ``set_structural`` / ``move_to_project`` / ``set_client``."""
+    through ``set_structural`` / ``move_to_project`` / ``set_client``.
+
+    ``on_create`` suppresses the audit row for the same reason it does in
+    ``set_structural``: tagging at birth is genesis, and the pre-invariant
+    create paths wrote these junction rows with no audit row at all."""
     if await _kind_of(session, tag_id) not in _FREEFORM_KINDS:
         raise DomainError(MessageCode.TAG_KIND_MISMATCH)
     try:
@@ -288,6 +304,8 @@ async def attach_generic(
             session.add(_link(entity, org_id=org_id, entity_id=entity_id, tag_id=tag_id))
             await session.flush()
     except IntegrityError:
+        return
+    if on_create:
         return
     await audit.log(
         session,

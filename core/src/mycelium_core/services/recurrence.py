@@ -274,6 +274,7 @@ async def maybe_spawn_next(
         entity="task",
         entity_id=new_task.id,
         structural=structural,
+        on_create=True,
     )
     for tag_id in structural.generic_ids:
         await tag_assignment.attach_generic(
@@ -283,6 +284,7 @@ async def maybe_spawn_next(
             entity="task",
             entity_id=new_task.id,
             tag_id=tag_id,
+            on_create=True,
         )
 
     # Copy task_collaborators (the M:N "extra hands" set; the singular

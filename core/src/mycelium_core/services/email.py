@@ -776,6 +776,7 @@ async def email_to_note(
         entity="note",
         entity_id=note.id,
         structural=structural,
+        on_create=True,
     )
     for tag_id in structural.generic_ids:
         # RBAC and existence are the caller's gate (require_role above,
@@ -788,6 +789,7 @@ async def email_to_note(
             entity="note",
             entity_id=note.id,
             tag_id=tag_id,
+            on_create=True,
         )
     await optimistic_update(
         session,

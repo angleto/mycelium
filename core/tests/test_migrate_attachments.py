@@ -194,6 +194,33 @@ async def _seed_attachment(data: bytes) -> _Seed:
                 {"o": org_id},
             )
         ).scalar_one()
+        # A note belongs to exactly one client (ADR-0050), enforced by a
+        # deferred constraint trigger: this fixture writes the note with
+        # raw SQL to exercise the RLS seam, so it has to supply the
+        # structural tag itself or the whole transaction aborts at COMMIT.
+        # Raw SQL rather than taxonomy.ensure_default_client on purpose:
+        # the service audit-logs, and _cleanup_seed's DELETE of the org
+        # would then cascade into the append-only activity_log.
+        client_tag_id = (
+            await s.execute(
+                text(
+                    "INSERT INTO tags (org_id, kind, name) "
+                    "VALUES (:o, 'client', 'MigClient') RETURNING id"
+                ),
+                {"o": org_id},
+            )
+        ).scalar_one()
+        await s.execute(
+            text(
+                "INSERT INTO client_profile (tag_id, org_id, legal_name) "
+                "VALUES (:t, :o, 'MigClient')"
+            ),
+            {"t": client_tag_id, "o": org_id},
+        )
+        await s.execute(
+            text("INSERT INTO note_tags (org_id, note_id, tag_id) VALUES (:o, :n, :t)"),
+            {"o": org_id, "n": note_id, "t": client_tag_id},
+        )
         att_id = (
             await s.execute(
                 text(

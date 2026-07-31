@@ -55,7 +55,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from mycelium_core.models.note import NoteKind
 from mycelium_core.models.note_part_index_pointer import NotePartIndexPointer
-from mycelium_core.models.tag import TagKind
 
 SOURCE_KIND_WSEVAL = "wseval"
 GENERATION_MATRIX_V1 = {
@@ -1039,8 +1038,15 @@ async def ingest_workspace(
     clients = {u.client for u in ws.units}
     projects = {(u.project, u.client) for u in ws.units}
     for name in sorted(clients):
-        tag = await tax_svc.create_tag(
-            session, org_id=org_id, actor_id=actor_id, kind=TagKind.client, name=name
+        # create_client, not create_tag: a client tag without its
+        # client_profile row is invariant (d) violated by construction,
+        # and the projects below need a real client to hang off (ADR-0050).
+        tag = await tax_svc.create_client(
+            session,
+            org_id=org_id,
+            actor_id=actor_id,
+            name=name,
+            profile=tax_svc.ClientInput(legal_name=name),
         )
         client_ids[name] = tag.id
     for pname, cname in sorted(projects):
