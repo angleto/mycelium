@@ -15,7 +15,7 @@ import uuid
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 
@@ -41,7 +41,7 @@ from mycelium_core.models.email import (
     EmailResponderJob,
 )
 from mycelium_core.models.executor import Executor, ExecutorKind
-from mycelium_core.models.invoice import Invoice, InvoiceState
+from mycelium_core.models.invoice import Invoice, InvoiceLine, InvoiceLineAltriDati, InvoiceState
 from mycelium_core.models.memory_blob import MemoryBlob
 from mycelium_core.models.note import Note, NoteKind, NoteTurn
 from mycelium_core.models.notification import NotificationChannelKind, RecurrenceFreq
@@ -81,6 +81,7 @@ from mycelium_core.services import focus_context as focus_context_svc
 from mycelium_core.services import garden_classify as garden_classify_svc
 from mycelium_core.services import garden_review as garden_review_svc
 from mycelium_core.services import invoice as invoice_svc
+from mycelium_core.services import invoice_format as invoice_format_svc
 from mycelium_core.services import kg as kg_svc
 from mycelium_core.services import link_prediction as link_prediction_svc
 from mycelium_core.services import lookup as lookup_svc
@@ -7096,6 +7097,122 @@ def _invoice(i: Invoice) -> dict[str, Any]:
     }
 
 
+# --- AltriDatiGestionali (FatturaPA 2.2.1.16, migration 0088) ---
+
+# The block's four sub-elements. Held as a set so an unrecognised key is
+# REFUSED rather than dropped: a misspelt "riferimeno_testo" would
+# otherwise cost the invoice a fiscally relevant reference in silence,
+# and nobody would notice until SdI (or the client) complained.
+_ALTRI_DATI_KEYS = frozenset(
+    {"tipo_dato", "riferimento_testo", "riferimento_numero", "riferimento_data"}
+)
+
+
+def _adg_invalid(detail: str) -> DomainError:
+    # The same code the service raises for a facet violation: one stable
+    # MessageCode for "this block is malformed", whether the wire shape
+    # or the value was wrong (ADR-0017 -- code, never rendered text).
+    return DomainError(MessageCode.INVOICE_ALTRI_DATI_INVALID, detail=detail)
+
+
+def _adg_date(value: Any) -> dt.date:
+    """RiferimentoData is an xs:date. Accept the plain "YYYY-MM-DD" an
+    agent is told to send, and tolerate a full ISO timestamp by keeping
+    its calendar day: models emit one often enough that refusing it
+    would only cost a round trip (the service coerces likewise)."""
+    text = str(value)
+    try:
+        return dt.date.fromisoformat(text)
+    except ValueError:
+        pass
+    try:
+        return dt.datetime.fromisoformat(text).date()
+    except ValueError:
+        raise _adg_invalid("riferimento_data: not an ISO date (YYYY-MM-DD)") from None
+
+
+def _adg_in(blocks: list[dict[str, Any]]) -> list[invoice_svc.AltriDatiBlock]:
+    """Wire dicts -> the service's ``AltriDatiBlock``, order preserved.
+
+    Shape and scalar typing only. The XSD facets (tipo_dato 1..10
+    Basic-Latin, testo <=60 Latin-1, numero <=11 integer digits and <=8
+    decimals) are checked once inside the service, before any write, so
+    MCP and REST cannot drift apart on what a valid block is."""
+    out: list[invoice_svc.AltriDatiBlock] = []
+    for raw in blocks:
+        # The generated JSON schema is a bare array of objects, so a
+        # model that passes a list of strings gets a coded error rather
+        # than an AttributeError surfaced as an internal failure.
+        if not isinstance(raw, dict):
+            raise _adg_invalid("each block must be an object")
+        unknown = sorted(set(raw) - _ALTRI_DATI_KEYS)
+        if unknown:
+            raise _adg_invalid(f"unknown field(s): {', '.join(unknown)}")
+        tipo = raw.get("tipo_dato")
+        if not isinstance(tipo, str):
+            raise _adg_invalid("tipo_dato: required (a label, e.g. INTENTO)")
+        testo = raw.get("riferimento_testo")
+        if testo is not None and not isinstance(testo, str):
+            raise _adg_invalid("riferimento_testo: not a string")
+        numero_raw = raw.get("riferimento_numero")
+        numero: Decimal | None = None
+        if numero_raw is not None:
+            # str() bridge, as for unit_price below: a JSON number lands
+            # as a float and Decimal(float) would carry the double's
+            # binary artefacts into a field the XML prints verbatim.
+            try:
+                numero = Decimal(str(numero_raw))
+            except InvalidOperation:
+                raise _adg_invalid("riferimento_numero: not a number") from None
+        data_raw = raw.get("riferimento_data")
+        out.append(
+            invoice_svc.AltriDatiBlock(
+                tipo_dato=tipo,
+                riferimento_testo=testo,
+                riferimento_numero=numero,
+                riferimento_data=_adg_date(data_raw) if data_raw is not None else None,
+            )
+        )
+    return out
+
+
+def _adg_out(b: InvoiceLineAltriDati) -> dict[str, Any]:
+    # Decimal and date as strings: JSON has no exact decimal, and a
+    # float round trip must not touch a fiscal value. The number goes
+    # through the XML emitter's own _amount8 so the read-back is the
+    # string the document carries ("12.00", not the Numeric(21,8)
+    # "12.00000000") -- lossless here, since the service already caps
+    # the value at 11 integer digits and 8 decimals.
+    return {
+        "ord": b.ord,
+        "tipo_dato": b.tipo_dato,
+        "riferimento_testo": b.riferimento_testo,
+        "riferimento_numero": (
+            invoice_format_svc._amount8(b.riferimento_numero)
+            if b.riferimento_numero is not None
+            else None
+        ),
+        "riferimento_data": b.riferimento_data.isoformat() if b.riferimento_data else None,
+    }
+
+
+def _invoice_line(ln: InvoiceLine, blocks: list[InvoiceLineAltriDati]) -> dict[str, Any]:
+    # Amounts as strings at their stored precision -- Numeric(12,4) /
+    # Numeric(14,4), which is also what the XML now emits: a float here
+    # would re-introduce exactly the rounding the emitter was fixed to
+    # avoid (Quantita x PrezzoUnitario must equal PrezzoTotale).
+    return {
+        "id": str(ln.id),
+        "line_no": ln.line_no,
+        "description": ln.description,
+        "quantity": str(ln.quantity),
+        "unit_price": str(ln.unit_price),
+        "vat_rate": str(ln.vat_rate),
+        "vat_nature": ln.vat_nature,
+        "altri_dati": [_adg_out(b) for b in blocks],
+    }
+
+
 @mcp.tool()
 async def set_issuer_profile(
     token: str,
@@ -7186,6 +7303,7 @@ async def add_invoice_line(
     quantity: float = 1.0,
     vat_rate: float | None = None,
     vat_nature: str | None = None,
+    altri_dati: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Add a line to a draft invoice.
 
@@ -7194,9 +7312,43 @@ async def add_invoice_line(
     regime -> 22%. Pass them explicitly to override (e.g. an exempt or
     reverse-charge line carries its own Natura). The previous hard 22%
     default silently produced regime-inconsistent lines for forfettario
-    issuers, which SdI rejects."""
+    issuers, which SdI rejects.
+
+    ``quantity`` and ``unit_price`` are stored AND emitted in the XML
+    with 4 decimals; a 5th decimal is rounded away by the database.
+
+    ``altri_dati`` is the line's AltriDatiGestionali (FatturaPA
+    2.2.1.16): OMIT IT for the normal line, which carries none. When
+    given it is an ORDERED list of blocks (the order is the emission
+    order), each {tipo_dato, riferimento_testo?, riferimento_numero?,
+    riferimento_data?}.
+
+    ``tipo_dato`` is a LABEL naming the KIND of data -- max 10
+    characters, ASCII only -- NOT a description: write a sentence there
+    and SdI rejects the invoice. Free text belongs in
+    ``riferimento_testo`` (<=60 characters, accented Latin-1 allowed).
+    ``riferimento_numero`` is a decimal (<=11 integer digits, <=8
+    decimals); ``riferimento_data`` an ISO date "YYYY-MM-DD".
+
+    The spec fixes no enum, but three labels are conventional:
+    - "INTENTO" -- dichiarazione d'intento. ``riferimento_testo`` =
+      protocollo + progressivo joined by "-" or "/" (e.g.
+      "08060120347895-000001"); the other two fields stay empty.
+    - "N.DOC.COMM" -- documento commerciale. ``riferimento_testo`` = its
+      id, ``riferimento_numero`` = its progressivo, ``riferimento_data``
+      = its date.
+    - "NB3" -- bollo exemption between a bank and its account holders:
+      all three reference fields stay EMPTY.
+
+    Draft-only, like every line edit: once transmitted the XML is frozen
+    (ADR-0009, ADR-0046). To change the blocks of a line that already
+    exists use ``set_invoice_line_altri_dati``."""
     async with _tenant(token, org_id) as (s, org, user):
         await _require_scope(s, "invoices:write")
+        # Parsed before the call so a malformed block fails the tool
+        # instead of half-creating a line (the service validates the
+        # facets under the same rule).
+        blocks = _adg_in(altri_dati) if altri_dati is not None else None
         ln = await invoice_svc.add_line(
             s,
             org_id=org,
@@ -7207,8 +7359,75 @@ async def add_invoice_line(
             quantity=Decimal(str(quantity)),
             vat_rate=Decimal(str(vat_rate)) if vat_rate is not None else None,
             vat_nature=vat_nature,
+            altri_dati=blocks,
         )
-        return {"id": str(ln.id), "line_no": ln.line_no}
+        # Echoed back so the caller sees what was actually stored
+        # (normalised, ord assigned). A line born without blocks has
+        # none, so the read is skipped rather than queried for [].
+        stored = (
+            await invoice_svc.list_line_altri_dati(s, org_id=org, line_id=ln.id) if blocks else []
+        )
+        return {
+            "id": str(ln.id),
+            "line_no": ln.line_no,
+            "altri_dati": [_adg_out(b) for b in stored],
+        }
+
+
+@mcp.tool()
+async def set_invoice_line_altri_dati(
+    token: str,
+    org_id: str,
+    invoice_id: str,
+    line_id: str,
+    altri_dati: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Set one draft line's AltriDatiGestionali (FatturaPA 2.2.1.16).
+
+    A REPLACE of the whole ordered set, not an append: pass EVERY block
+    the line must keep, and ``[]`` to clear them. List order is the
+    emission order in the XML. Get ``line_id`` from
+    ``list_invoice_lines`` (or from ``add_invoice_line``'s result).
+
+    Each block is {tipo_dato, riferimento_testo?, riferimento_numero?,
+    riferimento_data?}.
+
+    ``tipo_dato`` is a LABEL naming the KIND of data -- max 10
+    characters, ASCII only -- NOT a description: write a sentence there
+    and SdI rejects the invoice. Free text belongs in
+    ``riferimento_testo`` (<=60 characters, accented Latin-1 allowed).
+    ``riferimento_numero`` is a decimal (<=11 integer digits, <=8
+    decimals); ``riferimento_data`` an ISO date "YYYY-MM-DD".
+
+    The spec fixes no enum, but three labels are conventional:
+    - "INTENTO" -- dichiarazione d'intento. ``riferimento_testo`` =
+      protocollo + progressivo joined by "-" or "/" (e.g.
+      "08060120347895-000001"); the other two fields stay empty.
+    - "N.DOC.COMM" -- documento commerciale. ``riferimento_testo`` = its
+      id, ``riferimento_numero`` = its progressivo, ``riferimento_data``
+      = its date.
+    - "NB3" -- bollo exemption between a bank and its account holders:
+      all three reference fields stay EMPTY.
+
+    Draft-only (scope ``invoices:write``): a transmitted invoice is
+    immutable and its XML frozen (ADR-0009, ADR-0046), so a later edit
+    could not reach what was sent -- the call is refused, not ignored.
+    A line carries no block by default; that is the normal case."""
+    async with _tenant(token, org_id) as (s, org, user):
+        await _require_scope(s, "invoices:write")
+        rows = await invoice_svc.replace_line_altri_dati(
+            s,
+            org_id=org,
+            actor_id=user,
+            invoice_id=uuid.UUID(invoice_id),
+            line_id=uuid.UUID(line_id),
+            blocks=_adg_in(altri_dati),
+        )
+        return {
+            "invoice_id": invoice_id,
+            "line_id": line_id,
+            "altri_dati": [_adg_out(b) for b in rows],
+        }
 
 
 @mcp.tool()
@@ -7291,6 +7510,31 @@ async def get_invoice(token: str, org_id: str, invoice_id: str) -> dict[str, Any
         await _require_scope(s, "invoices:read")
         inv = await invoice_svc.get_invoice(s, org_id=org, invoice_id=uuid.UUID(invoice_id))
         return _invoice(inv)
+
+
+@mcp.tool()
+async def list_invoice_lines(token: str, org_id: str, invoice_id: str) -> list[dict[str, Any]]:
+    """List an invoice's lines with their AltriDatiGestionali blocks.
+
+    Lines come in emission order, each with ``altri_dati`` (``[]`` for
+    the normal line, which carries none).
+
+    This is how an agent gets the ``line_id`` that
+    ``set_invoice_line_altri_dati`` needs on an invoice it did not just
+    build itself, and how it reads back what a transmitted invoice
+    actually emitted. Amounts come back as strings at their stored
+    4-decimal precision, which is what the XML emits. Read-only (scope
+    ``invoices:read``)."""
+    async with _tenant(token, org_id) as (s, org, _user):
+        await _require_scope(s, "invoices:read")
+        inv_id = uuid.UUID(invoice_id)
+        # Existence check first: list_lines on an id outside the tenant
+        # returns [], which would read as "an invoice with no lines".
+        await invoice_svc.get_invoice(s, org_id=org, invoice_id=inv_id)
+        lines = await invoice_svc.list_lines(s, org_id=org, invoice_id=inv_id)
+        # One grouped query for the whole invoice, not one per line.
+        grouped = await invoice_svc.list_invoice_altri_dati(s, org_id=org, invoice_id=inv_id)
+        return [_invoice_line(ln, grouped.get(ln.id, [])) for ln in lines]
 
 
 @mcp.tool()

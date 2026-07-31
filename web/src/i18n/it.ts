@@ -2017,6 +2017,25 @@ export const it: Catalog = {
     natura: 'Natura',
     lineTotal: 'Totale',
     addLine: 'Aggiungi riga',
+    adg: {
+      title: 'Altri dati gestionali (AltriDatiGestionali)',
+      addFirst: '+ Altri dati gestionali',
+      add: '+ Blocco',
+      remove: 'Rimuovi',
+      moveUp: 'Sposta il blocco su',
+      moveDown: 'Sposta il blocco giù',
+      tipoDato: 'Tipo dato',
+      testo: 'Rif. testo',
+      numero: 'Rif. numero',
+      data: 'Rif. data',
+      hint: 'FatturaPA 2.2.1.16: blocchi liberi sulla riga, emessi in quest\'ordine nell\'XML e sul PDF. "Tipo dato" è un\'etichetta che nomina il tipo di dato (max 10 caratteri), non una descrizione: il testo libero va nel riferimento testo. Un campo lasciato vuoto non viene emesso.',
+      tipoIntento:
+        "dichiarazione d'intento: protocollo + progressivo nel rif. testo, separati da '-' o '/'",
+      tipoDocComm:
+        'documento commerciale: id, progressivo e data nei tre riferimenti',
+      tipoNb3:
+        'esenzione bollo tra banche e correntisti: riferimenti lasciati vuoti',
+    },
     doc: {
       title: 'Anteprima documento',
       pdf: 'PDF',

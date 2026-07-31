@@ -7,7 +7,10 @@ Service-level coverage for ``taxonomy.purge_project`` /
 - the project subgraph (tasks via task_tags, notes by project_id) is
   wiped together with its CASCADE descendants,
 - the client purge recurses across its archived projects and refuses
-  when invoices reference it.
+  when invoices reference it,
+- survivors of those purges that would be left with no client at all
+  are re-homed before the tag row goes (notes and tasks alike), so the
+  DEFERRED guards of migration 0086 let the purge COMMIT.
 """
 
 from __future__ import annotations
@@ -15,7 +18,8 @@ from __future__ import annotations
 import uuid
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import delete, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from mycelium_core.db import admin_session, tenant_session
 from mycelium_core.errors import DomainError
@@ -29,6 +33,7 @@ from mycelium_core.models.note import Note, NoteKind
 from mycelium_core.models.note_tag import NoteTag
 from mycelium_core.models.tag import Tag, TagKind
 from mycelium_core.models.task import Task
+from mycelium_core.models.task_tag import TaskTag
 from mycelium_core.services import notes as nt
 from mycelium_core.services import tasks as tasks_svc
 from mycelium_core.services import taxonomy
@@ -47,10 +52,46 @@ async def _org() -> tuple[uuid.UUID, uuid.UUID]:
     return r.org_id, r.user_id
 
 
-async def _archive(s, *, org_id: uuid.UUID, tag_id: uuid.UUID) -> None:
+async def _archive(s: AsyncSession, *, org_id: uuid.UUID, tag_id: uuid.UUID) -> None:
     tag = (await s.execute(select(Tag).where(Tag.id == tag_id))).scalar_one()
     tag.status = "archived"
     tag.version += 1
+    await s.flush()
+
+
+async def _task_tags(s: AsyncSession, task_id: uuid.UUID) -> set[uuid.UUID]:
+    rows = (await s.execute(select(TaskTag.tag_id).where(TaskTag.task_id == task_id))).scalars()
+    return set(rows.all())
+
+
+async def _force_task_client(
+    s: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    task_id: uuid.UUID,
+    client_tag_id: uuid.UUID,
+    keep_project: bool,
+) -> None:
+    """Put the task in a state ``services/tag_assignment`` would refuse:
+    carrying ``client_tag_id`` and no client of its own project (with
+    ``keep_project`` false, no project at all). This is the pre-0086
+    shape a restored dump can still hold, so the rows go in by hand.
+
+    It is written in the SAME transaction as the purge on purpose: the
+    guards of migration 0086 are DEFERRABLE INITIALLY DEFERRED, so this
+    illegal state is accepted by the flush and only adjudicated at
+    COMMIT -- which is exactly the point being tested, since the purge
+    has to repair it before then. Committing it on its own would be
+    rejected by the very guard that makes the repair necessary.
+    """
+    if keep_project:
+        clients = select(Tag.id).where(Tag.org_id == org_id, Tag.kind == TagKind.client)
+        await s.execute(
+            delete(TaskTag).where(TaskTag.task_id == task_id, TaskTag.tag_id.in_(clients))
+        )
+    else:
+        await s.execute(delete(TaskTag).where(TaskTag.task_id == task_id))
+    s.add(TaskTag(org_id=org_id, task_id=task_id, tag_id=client_tag_id))
     await s.flush()
 
 
@@ -170,6 +211,88 @@ async def test_purge_client_blocks_on_invoices() -> None:
         async with tenant_session(str(org), str(user)) as s:
             await taxonomy.purge_client(s, org_id=org, actor_id=user, tag_id=cl.id)
     assert ei.value.code is MessageCode.CLIENT_HAS_INVOICES
+
+
+async def test_purge_client_rehomes_a_client_only_task() -> None:
+    """A task carrying ONLY the purged client is unreachable while
+    invariant (c) holds -- every task of a client also carries a project
+    of that client, and those subgraphs are purged first, task included.
+    A workspace restored from a pre-0086 dump can still hold one, and
+    there the ``task_tags`` CASCADE would leave it with zero clients:
+    the DEFERRED guard then aborts the WHOLE purge at COMMIT with 'task
+    % carries 0 client tag(s)'. It is re-homed onto the workspace
+    default project AND client, because a task needs both (invariant
+    (a)), and the purge commits."""
+    org, user = await _org()
+    async with tenant_session(str(org), str(user)) as s:
+        default_client = await taxonomy.ensure_default_client(s, org_id=org, actor_id=user)
+        default_project = await taxonomy.ensure_default_project(s, org_id=org, actor_id=user)
+        cl = await taxonomy.create_client(
+            s,
+            org_id=org,
+            actor_id=user,
+            name="Leaving",
+            profile=ClientInput(legal_name="Leaving SRL"),
+        )
+        t = await tasks_svc.create_task(s, org_id=org, actor_id=user, title="Client-only task")
+        task_id, client_id = t.id, cl.id
+        await _archive(s, org_id=org, tag_id=client_id)
+    async with tenant_session(str(org), str(user)) as s:
+        await _force_task_client(
+            s, org_id=org, task_id=task_id, client_tag_id=client_id, keep_project=False
+        )
+        await taxonomy.purge_client(s, org_id=org, actor_id=user, tag_id=client_id)
+    async with tenant_session(str(org), str(user)) as s:
+        assert (
+            await s.execute(select(Tag).where(Tag.id == client_id))
+        ).scalar_one_or_none() is None
+        assert (
+            await s.execute(select(Task).where(Task.id == task_id))
+        ).scalar_one_or_none() is not None
+        assert await _task_tags(s, task_id) == {default_client, default_project}
+
+
+async def test_purge_client_rehomed_task_follows_its_surviving_project() -> None:
+    """The other pre-0086 shape: the task carries the purged client but
+    a project of ANOTHER client, so no project purge reaches it either.
+    The project is the truth (docs/adr/0050), so the survivor takes its
+    project's client, not the workspace default -- the same rule
+    ``_rehome_surviving_notes`` applies."""
+    org, user = await _org()
+    async with tenant_session(str(org), str(user)) as s:
+        keeper = await taxonomy.create_client(
+            s,
+            org_id=org,
+            actor_id=user,
+            name="Keeper",
+            profile=ClientInput(legal_name="Keeper SRL"),
+        )
+        proj = await taxonomy.create_project(
+            s, org_id=org, actor_id=user, name="Kept", client_tag_id=keeper.id
+        )
+        cl = await taxonomy.create_client(
+            s,
+            org_id=org,
+            actor_id=user,
+            name="Leaving",
+            profile=ClientInput(legal_name="Leaving SRL"),
+        )
+        t = await tasks_svc.create_task(
+            s, org_id=org, actor_id=user, title="Drifted task", tag_ids=[proj.id]
+        )
+        task_id, client_id = t.id, cl.id
+        keeper_id, project_id = keeper.id, proj.id
+        await _archive(s, org_id=org, tag_id=client_id)
+    async with tenant_session(str(org), str(user)) as s:
+        await _force_task_client(
+            s, org_id=org, task_id=task_id, client_tag_id=client_id, keep_project=True
+        )
+        await taxonomy.purge_client(s, org_id=org, actor_id=user, tag_id=client_id)
+    async with tenant_session(str(org), str(user)) as s:
+        assert (
+            await s.execute(select(Tag).where(Tag.id == client_id))
+        ).scalar_one_or_none() is None
+        assert await _task_tags(s, task_id) == {keeper_id, project_id}
 
 
 async def test_purge_client_rehomes_a_client_only_note() -> None:

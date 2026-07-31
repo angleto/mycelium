@@ -1,4 +1,4 @@
-.PHONY: sync lint fmt type test eval eval-humus eval-bench mcp-coverage mcp-coverage-check up down \
+.PHONY: sync lint fmt type test web-check eval eval-humus eval-bench mcp-coverage mcp-coverage-check up down \
         db-bootstrap migrate db-harden revision run-api run-mcp run-worker run-sdi
 
 sync:
@@ -15,6 +15,14 @@ type:
 
 test:
 	uv run pytest
+
+# The SPA gate, matching what CI's `web` job runs. Worth a target of its
+# own: `tsc --noEmit` from the repo root silently checks NOTHING (the root
+# tsconfig.json is a references stub with "files": []), so the obvious
+# invocation reports success on a file it never opened. `tsc -b` is the
+# one that type-checks.
+web-check:
+	cd web && pnpm install --frozen-lockfile && pnpm exec eslint . && pnpm typecheck
 
 # Offline retrieval eval gate (ADR-0035 / Mycelio WS-E1): deterministic
 # gold-set recall@k/MRR + dense-tier health over the real pipeline. Runs

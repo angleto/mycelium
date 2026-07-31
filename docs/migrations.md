@@ -144,3 +144,12 @@ Rules that make the bracket safe:
 
 Only a data repair needs this. Pure DDL (`ALTER TABLE`, `CREATE
 INDEX`) is not subject to RLS and must stay outside the bracket.
+
+Worked example, with its operational aftermath: `0086` repairs the
+structural client/project tagging under this bracket and then guards
+the result with constraint triggers (ADR-0050). What that costs an
+operator afterwards -- how to check a live database, why restoring a
+pre-0086 dump is the dangerous case, and why the list `0086` prints
+must be captured at upgrade time (it is a temp table, `ON COMMIT
+DROP`) -- is in
+[runbooks/tag-structural-invariant.md](runbooks/tag-structural-invariant.md).

@@ -19,6 +19,7 @@ from decimal import Decimal
 from sqlalchemy import (
     BigInteger,
     Boolean,
+    CheckConstraint,
     Date,
     DateTime,
     ForeignKey,
@@ -397,6 +398,70 @@ class InvoiceLine(UUIDPKMixin, OrgScopedMixin, Base):
     unit_price: Mapped[Decimal] = mapped_column(Numeric(14, 4), nullable=False)
     vat_rate: Mapped[Decimal] = mapped_column(Numeric(5, 2), nullable=False, server_default="22")
     vat_nature: Mapped[str | None] = mapped_column(String(4), nullable=True)
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class InvoiceLineAltriDati(UUIDPKMixin, OrgScopedMixin, Base):
+    """One ``AltriDatiGestionali`` block of a line (FatturaPA 2.2.1.16).
+
+    The XSD (``services/fatturapa_xsd/Schema_VFPA12_V1.2.3.xsd``) puts
+    the block on ``DettaglioLinee`` with minOccurs=0 maxOccurs=unbounded,
+    so it is 0..N per line and its **order matters** (the sequence is
+    positional): ``ord`` persists the emission order, unique per line.
+    A typed child table, not a JSONB column on ``InvoiceLine``: ADR-0003
+    rejects free JSONB for fiscally sensitive data because it drops the
+    constraints and validation the law requires, and these fields are
+    XSD-validated before SdI ever sees them (migration 0088).
+
+    Empty by default: no row = the line emits no block, which is the
+    normal case. Rows only exist for a **draft** invoice's lines; once
+    transmitted the document is immutable and its XML is frozen in
+    ``Invoice.xml`` (ADR-0009, ADR-0046), so nothing here can change
+    what was sent.
+
+    ``tipo_dato`` is a LABEL naming the kind of data (INTENTO,
+    N.DOC.COMM, NB3, ...), not a description; the free text goes in
+    ``riferimento_testo``. No enum: the spec fixes none.
+    """
+
+    __tablename__ = "invoice_line_altri_dati"
+    __table_args__ = (
+        UniqueConstraint("invoice_line_id", "ord", name="uq_invoice_line_altri_dati_ord"),
+        # Bare names: NAMING_CONVENTION expands "ck" to
+        # ck_%(table_name)s_%(constraint_name)s (models/base.py).
+        CheckConstraint(
+            "length(tipo_dato) >= 1 AND length(tipo_dato) <= 10",
+            name="tipo_dato_len",
+        ),
+        CheckConstraint(
+            "riferimento_testo IS NULL"
+            " OR (length(riferimento_testo) >= 1 AND length(riferimento_testo) <= 60)",
+            name="riferimento_testo_len",
+        ),
+        CheckConstraint(
+            "riferimento_numero IS NULL OR abs(riferimento_numero) < 100000000000",
+            name="riferimento_numero_range",
+        ),
+    )
+
+    invoice_line_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("invoice_lines.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    ord: Mapped[int] = mapped_column(Integer, nullable=False)
+    # XSD String10Type: 1..10 Basic-Latin chars.
+    tipo_dato: Mapped[str] = mapped_column(String(10), nullable=False)
+    # XSD String60LatinType: 1..60 Latin-1 chars. NULL = element absent
+    # (NB3 leaves all three optional fields empty); '' is not absent and
+    # is rejected by ck_invoice_line_altri_dati_riferimento_testo_len.
+    riferimento_testo: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    # XSD Amount8DecimalType: up to 11 integer digits and 2..8 decimals.
+    riferimento_numero: Mapped[Decimal | None] = mapped_column(Numeric(21, 8), nullable=True)
+    riferimento_data: Mapped[datetime.date | None] = mapped_column(Date, nullable=True)
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

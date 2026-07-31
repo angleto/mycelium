@@ -1449,6 +1449,80 @@ async def _rehome_surviving_notes(
             )
 
 
+async def _rehome_surviving_tasks(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    client_tag_id: uuid.UUID,
+) -> None:
+    """Re-home the tasks that would be left clientless by purging a
+    client tag. Defence in depth, and the task counterpart of
+    ``_rehome_surviving_notes``.
+
+    While invariant (c) holds this set is ALWAYS empty: a task carrying
+    this client also carries a project OF this client, and every such
+    project subgraph was wiped above, taking the task with it. It is
+    non-empty only for a workspace restored from a pre-0086 dump, or
+    purged in the window before migration 0086 repaired it -- and there
+    the ``task_tags`` CASCADE would strip the survivor's last client, so
+    the DEFERRED guard aborts the WHOLE purge at COMMIT with 'task %
+    carries 0 client tag(s)'. Soft-deleted tasks are re-homed too: their
+    ``tasks`` row still exists, so the guard still checks them.
+
+    A task needs BOTH halves, invariant (a). A survivor that still
+    carries a project follows it (the project is the truth, the same
+    rule the note path applies); one carrying nothing usable lands on
+    the workspace default project, and therefore on the default client,
+    which ``ensure_default_project`` guarantees exists (invariant (d)).
+
+    Same transaction as the purge, and through the tag_assignment choke
+    point: it is the only module allowed to write a structural junction
+    row, and it audit-logs the move for us -- one ``attach_tag`` row per
+    re-homed task, as in ``_rehome_surviving_notes``. Discovery is
+    set-based (two queries whatever the count); the write is a walk
+    because each survivor resolves to its OWN client and only that
+    module may write the pair.
+    """
+    # Lazy import: tag_assignment imports this module at import time.
+    from mycelium_core.services import tag_assignment
+
+    survivors = list(
+        (await session.execute(select(TaskTag.task_id).where(TaskTag.tag_id == client_tag_id)))
+        .scalars()
+        .all()
+    )
+    if not survivors:
+        return
+    # Joined through project_profile, not just tags: a carried project
+    # with no profile row is no project at all here (it has no client to
+    # derive -- PROJECT_CLIENT_REQUIRED), and a repair path must not
+    # abort the purge over the very drift it exists to absorb. A task
+    # carrying two projects (also pre-invariant drift) keeps an arbitrary
+    # one; the move below collapses it to exactly one pair either way.
+    carried_project = {
+        task_id: project_id
+        for task_id, project_id in (
+            await session.execute(
+                select(TaskTag.task_id, TaskTag.tag_id)
+                .join(Tag, Tag.id == TaskTag.tag_id)
+                .join(ProjectProfile, ProjectProfile.tag_id == TaskTag.tag_id)
+                .where(TaskTag.task_id.in_(survivors), Tag.kind == TagKind.project)
+            )
+        ).all()
+    }
+    fallback = await ensure_default_project(session, org_id=org_id, actor_id=actor_id)
+    for task_id in survivors:
+        await tag_assignment.move_to_project(
+            session,
+            org_id=org_id,
+            actor_id=actor_id,
+            entity="task",
+            entity_id=task_id,
+            project_tag_id=carried_project.get(task_id, fallback),
+        )
+
+
 async def purge_client(
     session: AsyncSession,
     *,
@@ -1463,7 +1537,9 @@ async def purge_client(
     deleted, then the client tag itself is deleted (cascading the
     ``client_profile`` row). Notes that carry only this client survive
     the project purges and are re-homed first, see
-    ``_rehome_surviving_notes``.
+    ``_rehome_surviving_notes``; ``_rehome_surviving_tasks`` does the
+    same for a task the invariant says cannot exist (defence in depth
+    for pre-0086 data).
 
     **Invoices are NOT cascade-deleted.** Invoices are fiscal records:
     if any row references this client we refuse with
@@ -1503,11 +1579,14 @@ async def purge_client(
         await session.execute(delete(Tag).where(Tag.id.in_(project_ids)))
     # Migration 0097: legacy ``events.client_tag_id`` is gone; tasks
     # tagged with this client are already removed by the per-project
-    # cascade above (task_tags points at the client tag too).
+    # cascade above (task_tags points at the client tag too) -- as long
+    # as invariant (c) holds, which is why the task sweep below is
+    # defence in depth and the note sweep is load-bearing.
     # Notes carrying only this client are in no project subgraph, so they
     # outlive every purge above: re-home them before the note_tags
     # CASCADE strips their last client tag (invariant (b)).
     await _rehome_surviving_notes(session, org_id=org_id, actor_id=actor_id, client_tag_id=tag_id)
+    await _rehome_surviving_tasks(session, org_id=org_id, actor_id=actor_id, client_tag_id=tag_id)
     await session.execute(delete(Tag).where(Tag.id == tag_id))
     await session.flush()
     await audit.log(

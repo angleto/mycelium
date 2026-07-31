@@ -181,6 +181,15 @@ org-scoped entity. Memory is partitioned by `org_id`.
     only at the draft -> transmitted transition
 - `invoice_lines(invoice_id, ..., natura?, esigibilita_iva?, ritenuta?,
   cassa?, bollo?)`
+  - `quantity` / `unit_price` are `Numeric(_,4)` and the XML emits them
+    at those same 4 decimals, so `PrezzoTotale` equals the product of
+    the operands the receiver reads (SdI re-checks that arithmetic)
+- `invoice_line_altri_dati(invoice_line_id, ord, tipo_dato,
+  riferimento_testo?, riferimento_numero?, riferimento_data?)`
+  - FatturaPA `AltriDatiGestionali` (2.2.1.16), 0..N per line and
+    ORDERED (`ord`, unique per line): a typed child table rather than
+    JSONB on the line, per ADR-0003. Empty by default; editable only
+    while the invoice is a draft (ADR-0009). Migration 0088.
 - `sdi_mandates(id, org_id, scope, valid_from, valid_to, revoked_at,
   audit)`
 - `conservation_records(invoice_id|receipt_id, provider[ade_free],

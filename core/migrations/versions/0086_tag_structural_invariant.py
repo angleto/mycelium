@@ -30,10 +30,11 @@ too: ``restore_task`` can walk a hidden violation back into the live set.
 ATTACHMENT KEYS: ``services/attachments.py`` embeds the resolved client
 id in the storage key (``org/<org>/client/<client>/...``). Every entity
 whose client changed here is printed at the end of ``upgrade()``; those
-attachments must be re-keyed afterwards (see
-``core/src/mycelium_core/rekey_attachments.py``, whose ``_is_new_shape``
-skip currently only covers flat legacy keys -- a hierarchical key under
-the WRONG client is not re-keyed by it as it stands).
+attachments must be re-keyed afterwards with
+``core/src/mycelium_core/rekey_attachments.py``, which compares every
+row against the key ``attachments._build_storage_key`` would give it
+today and therefore does move a hierarchical key filed under the
+PREVIOUS client, not only a flat legacy one.
 
 KNOWN FAIL-OPEN: the guards are SECURITY INVOKER constraint triggers,
 so they fire at COMMIT under the caller's RLS. A transaction that
@@ -102,10 +103,14 @@ _MAX_PRINTED_IDS = 200
 def _print_ids(label: str, rows: Sequence[sa.Row[Any]]) -> None:
     print(f"0086: {label}: {len(rows)}")
     for row in rows[:_MAX_PRINTED_IDS]:
-        print(
-            f"0086:   {row.entity} {row.entity_id} "
-            f"client {row.old_client_tag_id} -> {row.new_client_tag_id}"
+        # An "X -> X" arrow reads as a change that never happened; the
+        # ambiguous bucket below is printed with the client stated once.
+        where = (
+            f"client {row.new_client_tag_id}"
+            if row.old_client_tag_id == row.new_client_tag_id
+            else f"client {row.old_client_tag_id} -> {row.new_client_tag_id}"
         )
+        print(f"0086:   {row.entity} {row.entity_id} {where}")
     if len(rows) > _MAX_PRINTED_IDS:
         print(f"0086:   ... and {len(rows) - _MAX_PRINTED_IDS} more")
 
@@ -284,10 +289,35 @@ def _repair(conn: sa.Connection) -> None:
     _repair_notes(conn)
     n_blobs, n_blob_tags = _repair_memory(conn)
 
+    # ``tmp_0086_client_moved`` records every entity the repair TOUCHED
+    # on the client axis. An entity that carried SEVERAL client tags,
+    # one of them already the winner, lands there with old = new: its
+    # client did not change, and sending it to the re-key pass costs a
+    # full S3 copy for nothing. The operator's work list is therefore
+    # the rows where the client GENUINELY differs, count and ids taken
+    # from the same filtered read so they cannot disagree.
     moved = conn.execute(
         sa.text(
             "SELECT entity, entity_id, old_client_tag_id, new_client_tag_id "
-            "FROM tmp_0086_client_moved ORDER BY entity, entity_id"
+            "  FROM tmp_0086_client_moved "
+            " WHERE old_client_tag_id IS DISTINCT FROM new_client_tag_id "
+            " ORDER BY entity, entity_id"
+        )
+    ).fetchall()
+    # The residue is not provably a no-op either. The OLD storage key
+    # was built by ``attachments._resolve_client_tag_id``, which is
+    # LIMIT 1 with NO ORDER BY: for a multi-client entity it embedded
+    # whichever client row the plan returned, not necessarily the one
+    # reconstructed here. Printed apart because the REASON differs, not
+    # because the remedy does: ``rekey_attachments`` compares each row
+    # against the key it should have, so one plain run settles both
+    # buckets and leaves whatever was already right untouched.
+    ambiguous = conn.execute(
+        sa.text(
+            "SELECT entity, entity_id, old_client_tag_id, new_client_tag_id "
+            "  FROM tmp_0086_client_moved "
+            " WHERE old_client_tag_id IS NOT DISTINCT FROM new_client_tag_id "
+            " ORDER BY entity, entity_id"
         )
     ).fetchall()
     print(
@@ -305,6 +335,12 @@ def _repair(conn: sa.Connection) -> None:
         "entities whose CLIENT changed -- re-key their attachments "
         "(mycelium_core.rekey_attachments)",
         moved,
+    )
+    _print_ids(
+        "entities that carried SEVERAL client tags and KEPT this one -- "
+        "client unchanged, old attachment key plan-dependent: the same "
+        "re-key run settles these",
+        ambiguous,
     )
 
 
@@ -514,11 +550,14 @@ def _repair_notes(conn: sa.Connection) -> None:
 
 
 def _record_moved(conn: sa.Connection, *, entity: str) -> None:
-    """Snapshot the entities whose CLIENT is about to change, BEFORE the
-    junction rewrite. ``attachments._resolve_client_tag_id`` takes the
-    first client tag it finds, so an entity that carried several had an
-    arbitrary key: anything but "exactly the target client, alone"
-    counts as moved and needs its storage key rebuilt."""
+    """Snapshot the entities whose client tagging is about to be
+    rewritten, BEFORE the junction rewrite. ``old_client_tag_id`` is a
+    RECONSTRUCTION: ``attachments._resolve_client_tag_id`` takes the
+    first client tag it finds with no ORDER BY, so for an entity that
+    carried several the key it produced is only guessed at here. The
+    snapshot is therefore deliberately wide (anything but "exactly the
+    target client, alone"); ``_repair`` splits it at print time into
+    the genuine moves and the ambiguous residue."""
     if entity == "task":
         conn.execute(
             sa.text(

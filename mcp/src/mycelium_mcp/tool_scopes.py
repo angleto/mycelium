@@ -119,12 +119,16 @@ TOOL_SCOPES: dict[str, str | None] = {
     "executor_update": "executors:write",
     "get_invoice": "invoices:read",
     "get_invoice_xml": "invoices:read",
+    "list_invoice_lines": "invoices:read",
     "list_invoices": "invoices:read",
     "list_issuer_profiles": "invoices:read",
     "add_invoice_line": "invoices:write",
     "create_invoice": "invoices:write",
     "ingest_sdi_receipt": "invoices:write",
     "invoice_credit_note": "invoices:write",
+    # AltriDatiGestionali (FatturaPA 2.2.1.16) edits a draft line's
+    # fiscal content, so it sits on the same key as the line itself.
+    "set_invoice_line_altri_dati": "invoices:write",
     "set_issuer_profile": "invoices:write",
     "transmit_invoice": "invoices:write",
     "kg_entities": "kg:read",

@@ -46,6 +46,7 @@ from mycelium_core.models.invoice import (
     InvoiceCounter,
     InvoiceKind,
     InvoiceLine,
+    InvoiceLineAltriDati,
     InvoiceState,
     IssuerProfile,
     PaymentStatus,
@@ -969,10 +970,14 @@ async def add_line(
     quantity: Decimal = Decimal(1),
     vat_rate: Decimal | None = None,
     vat_nature: str | None = None,
+    altri_dati: Sequence[AltriDatiBlock] | None = None,
 ) -> InvoiceLine:
     inv = await get_invoice(session, org_id=org_id, invoice_id=invoice_id)
     _require_draft(inv)
     await require_role(session, org_id, actor_id, Role.member)
+    # Validated before the line row exists: a malformed block must not
+    # leave a half-created line behind (FatturaPA 2.2.1.16).
+    validated = _validate_altri_dati(altri_dati or ())
     issuer = await _resolve_issuer(session, org_id=org_id, inv=inv)
     vat_rate, vat_nature = _resolve_line_tax(issuer, vat_rate, vat_nature)
     # max(line_no)+1, not count+1: deletions leave gaps and count+1
@@ -996,6 +1001,8 @@ async def add_line(
     )
     session.add(line)
     await session.flush()
+    if altri_dati is not None:
+        await _write_altri_dati(session, org_id=org_id, line_id=line.id, blocks=validated)
     await _persist_totals(session, org_id=org_id, inv=inv)
     return line
 
@@ -1012,19 +1019,17 @@ async def update_line(
     quantity: Decimal,
     vat_rate: Decimal | None = None,
     vat_nature: str | None = None,
+    altri_dati: Sequence[AltriDatiBlock] | None = None,
 ) -> InvoiceLine:
+    """Edit a draft line. ``altri_dati`` is tri-state on purpose: None
+    leaves the line's AltriDatiGestionali untouched (so a caller that
+    only fixes a price cannot silently drop them), while an explicit
+    sequence REPLACES the set -- ``[]`` clears it."""
     inv = await get_invoice(session, org_id=org_id, invoice_id=invoice_id)
     _require_draft(inv)
     await require_role(session, org_id, actor_id, Role.member)
-    line = (
-        await session.execute(
-            select(InvoiceLine).where(
-                InvoiceLine.id == line_id, InvoiceLine.invoice_id == invoice_id
-            )
-        )
-    ).scalar_one_or_none()
-    if line is None:
-        raise NotFoundError(MessageCode.INVOICE_NOT_FOUND, detail="line")
+    validated = _validate_altri_dati(altri_dati or ())
+    line = await get_line(session, org_id=org_id, invoice_id=invoice_id, line_id=line_id)
     issuer = await _resolve_issuer(session, org_id=org_id, inv=inv)
     vat_rate, vat_nature = _resolve_line_tax(issuer, vat_rate, vat_nature)
     line.description = description
@@ -1033,6 +1038,8 @@ async def update_line(
     line.vat_rate = vat_rate
     line.vat_nature = vat_nature
     await session.flush()
+    if altri_dati is not None:
+        await _write_altri_dati(session, org_id=org_id, line_id=line.id, blocks=validated)
     await _persist_totals(session, org_id=org_id, inv=inv)
     return line
 
@@ -1048,15 +1055,9 @@ async def delete_line(
     inv = await get_invoice(session, org_id=org_id, invoice_id=invoice_id)
     _require_draft(inv)
     await require_role(session, org_id, actor_id, Role.member)
-    line = (
-        await session.execute(
-            select(InvoiceLine).where(
-                InvoiceLine.id == line_id, InvoiceLine.invoice_id == invoice_id
-            )
-        )
-    ).scalar_one_or_none()
-    if line is None:
-        raise NotFoundError(MessageCode.INVOICE_NOT_FOUND, detail="line")
+    # Presence check only: the line's AltriDatiGestionali rows go with it
+    # (FK ON DELETE CASCADE, migration 0088).
+    await get_line(session, org_id=org_id, invoice_id=invoice_id, line_id=line_id)
     await session.execute(delete(InvoiceLine).where(InvoiceLine.id == line_id))
     await session.flush()
     # Re-sequence the survivors to 1..n so line numbers stay contiguous.
@@ -1094,6 +1095,256 @@ async def list_lines(
         .scalars()
         .all()
     )
+
+
+# --- AltriDatiGestionali (FatturaPA 2.2.1.16, migration 0088) ---
+
+# Facets read from the shipped XSD (services/fatturapa_xsd/
+# Schema_VFPA12_V1.2.3.xsd), not from prose:
+#   TipoDato          String10Type       (\p{IsBasicLatin}{1,10})
+#   RiferimentoTesto  String60LatinType  ([IsBasicLatin|IsLatin-1Supplement]{1,60})
+#   RiferimentoNumero Amount8DecimalType ([\-]?[0-9]{1,11}\.[0-9]{2,8})
+#   RiferimentoData   xs:date
+# We reject here rather than at the XSD gate so the caller gets a coded
+# DomainError on ITS field instead of a wall of schema violations, and
+# so a non-conformant block can never reach the frozen XML.
+_TIPO_DATO_MAX = 10
+_RIF_TESTO_MAX = 60
+_RIF_NUMERO_MAX_DECIMALS = 8
+_RIF_NUMERO_LIMIT = Decimal(10) ** 11  # 11 integer digits
+# maxOccurs is "unbounded" in the XSD; an HTTP body must not be. The cap
+# is a sanity bound on one line's set (the real ones run to 1-3 blocks),
+# not a fiscal rule.
+_ALTRI_DATI_MAX_BLOCKS = 50
+
+
+@dataclass(frozen=True)
+class AltriDatiBlock:
+    """One AltriDatiGestionali block as the caller supplies it.
+
+    ``tipo_dato`` is a LABEL naming the kind of data (INTENTO,
+    N.DOC.COMM, NB3, ...) and is the only required field; the free text
+    goes in ``riferimento_testo``. The spec fixes no enum, so no
+    whitelist is applied. Empty by default: a line with no block emits
+    nothing."""
+
+    tipo_dato: str
+    riferimento_testo: str | None = None
+    riferimento_numero: Decimal | None = None
+    riferimento_data: dt.date | None = None
+
+
+def _is_basic_latin(value: str) -> bool:
+    """XSD ``\\p{IsBasicLatin}`` is U+0000..U+007F. The C0 controls and
+    DEL sit inside that block but are not emittable as XML text (and
+    xs:normalizedString would rewrite tab/CR/LF anyway), so the printable
+    range is what we accept."""
+    return all("\x20" <= ch <= "\x7e" for ch in value)
+
+
+def _is_latin1(value: str) -> bool:
+    """XSD ``[\\p{IsBasicLatin}\\p{IsLatin-1Supplement}]`` is U+0000..U+00FF.
+    Same reasoning as above, plus the C1 controls (U+0080..U+009F) are
+    excluded: what remains is printable ASCII + the accented Latin-1
+    range an Italian text actually needs."""
+    return all("\x20" <= ch <= "\x7e" or "\xa0" <= ch <= "\xff" for ch in value)
+
+
+def _validate_altri_dati(blocks: Sequence[AltriDatiBlock]) -> list[AltriDatiBlock]:
+    """Normalise + validate one line's blocks against the XSD facets,
+    returning the values to persist. Called BEFORE any write so an
+    invalid block never leaves a half-written line behind.
+
+    Normalisation is deliberately narrow: surrounding whitespace is
+    stripped (xs:normalizedString semantics) and a text that reduces to
+    empty becomes NULL, i.e. the element is simply not emitted -- '' is
+    not a valid String60LatinType and is refused by
+    ck_invoice_line_altri_dati_riferimento_testo_len (migration 0088)."""
+    if len(blocks) > _ALTRI_DATI_MAX_BLOCKS:
+        raise DomainError(
+            MessageCode.INVOICE_ALTRI_DATI_INVALID,
+            detail=f"at most {_ALTRI_DATI_MAX_BLOCKS} blocks per line",
+        )
+    out: list[AltriDatiBlock] = []
+    for b in blocks:
+        tipo = (b.tipo_dato or "").strip()
+        if not tipo or len(tipo) > _TIPO_DATO_MAX:
+            raise DomainError(
+                MessageCode.INVOICE_ALTRI_DATI_INVALID,
+                detail=f"tipo_dato: required, 1..{_TIPO_DATO_MAX} characters",
+            )
+        if not _is_basic_latin(tipo):
+            raise DomainError(
+                MessageCode.INVOICE_ALTRI_DATI_INVALID,
+                detail="tipo_dato: Basic-Latin characters only",
+            )
+        testo = (b.riferimento_testo or "").strip() or None
+        if testo is not None:
+            if len(testo) > _RIF_TESTO_MAX:
+                raise DomainError(
+                    MessageCode.INVOICE_ALTRI_DATI_INVALID,
+                    detail=f"riferimento_testo: at most {_RIF_TESTO_MAX} characters",
+                )
+            if not _is_latin1(testo):
+                raise DomainError(
+                    MessageCode.INVOICE_ALTRI_DATI_INVALID,
+                    detail="riferimento_testo: Latin-1 characters only",
+                )
+        numero = b.riferimento_numero
+        if numero is not None:
+            if not numero.is_finite():
+                raise DomainError(
+                    MessageCode.INVOICE_ALTRI_DATI_INVALID,
+                    detail="riferimento_numero: not a finite decimal",
+                )
+            if abs(numero) >= _RIF_NUMERO_LIMIT:
+                raise DomainError(
+                    MessageCode.INVOICE_ALTRI_DATI_INVALID,
+                    detail="riferimento_numero: at most 11 integer digits",
+                )
+            # ``is_finite`` above guarantees an int exponent (a NaN/Inf
+            # carries 'n'/'F'); the isinstance keeps that provable for
+            # the type checker. Beyond 8 decimals the value is outside
+            # Amount8DecimalType AND numeric(21,8) would silently round
+            # it, so it is refused rather than quietly truncated.
+            exponent = numero.as_tuple().exponent
+            if isinstance(exponent, int) and exponent < -_RIF_NUMERO_MAX_DECIMALS:
+                raise DomainError(
+                    MessageCode.INVOICE_ALTRI_DATI_INVALID,
+                    detail=f"riferimento_numero: at most {_RIF_NUMERO_MAX_DECIMALS} decimals",
+                )
+        data = b.riferimento_data
+        if isinstance(data, dt.datetime):
+            # xs:date, not xs:dateTime: keep only the calendar day.
+            data = data.date()
+        if data is not None and not isinstance(data, dt.date):
+            raise DomainError(
+                MessageCode.INVOICE_ALTRI_DATI_INVALID,
+                detail="riferimento_data: not a date",
+            )
+        out.append(
+            AltriDatiBlock(
+                tipo_dato=tipo,
+                riferimento_testo=testo,
+                riferimento_numero=numero,
+                riferimento_data=data,
+            )
+        )
+    return out
+
+
+async def get_line(
+    session: AsyncSession, *, org_id: uuid.UUID, invoice_id: uuid.UUID, line_id: uuid.UUID
+) -> InvoiceLine:
+    """The line, scoped to its invoice (and to the org by RLS, like
+    ``list_lines``: ``org_id`` is carried for signature consistency, the
+    tenant fence is the policy, not this predicate)."""
+    line = (
+        await session.execute(
+            select(InvoiceLine).where(
+                InvoiceLine.id == line_id, InvoiceLine.invoice_id == invoice_id
+            )
+        )
+    ).scalar_one_or_none()
+    if line is None:
+        raise NotFoundError(MessageCode.INVOICE_NOT_FOUND, detail="line")
+    return line
+
+
+async def _write_altri_dati(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    line_id: uuid.UUID,
+    blocks: Sequence[AltriDatiBlock],
+) -> None:
+    """REPLACE the line's blocks with ``blocks`` (already validated).
+
+    Replace, not per-block CRUD: the set is ordered and small and the UI
+    edits it as a whole, so ``ord`` is simply re-assigned 1..n from the
+    caller's order. Delete-then-insert also keeps the rewrite free of
+    transient uq_invoice_line_altri_dati_ord violations."""
+    await session.execute(
+        delete(InvoiceLineAltriDati).where(InvoiceLineAltriDati.invoice_line_id == line_id)
+    )
+    for ord_, b in enumerate(blocks, start=1):
+        session.add(
+            InvoiceLineAltriDati(
+                org_id=org_id,
+                invoice_line_id=line_id,
+                ord=ord_,
+                tipo_dato=b.tipo_dato,
+                riferimento_testo=b.riferimento_testo,
+                riferimento_numero=b.riferimento_numero,
+                riferimento_data=b.riferimento_data,
+            )
+        )
+    await session.flush()
+
+
+async def list_line_altri_dati(
+    session: AsyncSession, *, org_id: uuid.UUID, line_id: uuid.UUID
+) -> list[InvoiceLineAltriDati]:
+    """One line's blocks in emission order. Readable in any state: the
+    blocks of a transmitted invoice are the ones its frozen XML carries."""
+    return list(
+        (
+            await session.execute(
+                select(InvoiceLineAltriDati)
+                .where(InvoiceLineAltriDati.invoice_line_id == line_id)
+                .order_by(InvoiceLineAltriDati.ord)
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+
+async def list_invoice_altri_dati(
+    session: AsyncSession, *, org_id: uuid.UUID, invoice_id: uuid.UUID
+) -> dict[uuid.UUID, list[InvoiceLineAltriDati]]:
+    """Every line's blocks for one invoice, keyed by line id, in emission
+    order. One query instead of one-per-line: the XML/PDF builders and
+    the line listing all need the whole set at once. Lines with no block
+    are simply absent from the mapping (empty is the normal case)."""
+    rows = (
+        (
+            await session.execute(
+                select(InvoiceLineAltriDati)
+                .join(InvoiceLine, InvoiceLine.id == InvoiceLineAltriDati.invoice_line_id)
+                .where(InvoiceLine.invoice_id == invoice_id)
+                .order_by(InvoiceLine.line_no, InvoiceLineAltriDati.ord)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    grouped: dict[uuid.UUID, list[InvoiceLineAltriDati]] = {}
+    for r in rows:
+        grouped.setdefault(r.invoice_line_id, []).append(r)
+    return grouped
+
+
+async def replace_line_altri_dati(
+    session: AsyncSession,
+    *,
+    org_id: uuid.UUID,
+    actor_id: uuid.UUID,
+    invoice_id: uuid.UUID,
+    line_id: uuid.UUID,
+    blocks: Sequence[AltriDatiBlock],
+) -> list[InvoiceLineAltriDati]:
+    """Set a line's AltriDatiGestionali to exactly ``blocks`` (an empty
+    sequence clears them). Draft-only, like every other line edit: after
+    emission the document is append-only (ADR-0009) and its XML is frozen
+    (ADR-0046), so a later change here could not reach what was sent."""
+    inv = await get_invoice(session, org_id=org_id, invoice_id=invoice_id)
+    _require_draft(inv)
+    await require_role(session, org_id, actor_id, Role.member)
+    validated = _validate_altri_dati(blocks)
+    line = await get_line(session, org_id=org_id, invoice_id=invoice_id, line_id=line_id)
+    await _write_altri_dati(session, org_id=org_id, line_id=line.id, blocks=validated)
+    return await list_line_altri_dati(session, org_id=org_id, line_id=line.id)
 
 
 async def delete_draft(
@@ -1615,6 +1866,12 @@ async def transmit(
         fiscal = await _resolve_issuer(session, org_id=org_id, inv=inv)
         client = await _client(session, inv.client_tag_id)
         lines = await list_lines(session, org_id=org_id, invoice_id=invoice_id)
+        # The lines' AltriDatiGestionali (FatturaPA 2.2.1.16), loaded with
+        # the lines so they are frozen into inv.xml below together with
+        # them: a block that is not read here would never reach SdI.
+        line_altri_dati = await list_invoice_altri_dati(
+            session, org_id=org_id, invoice_id=invoice_id
+        )
         _validate(fiscal, client, lines)
         assert fiscal is not None  # _validate raised otherwise  # noqa: S101
         # The payload identity (cedente-as-trasmittente for self-transmission,
@@ -1690,6 +1947,7 @@ async def transmit(
             progressivo_str,
             collegata=collegata,
             intermediary=payload_intermediary,
+            altri_dati=line_altri_dati,
         )
         # Validate against the official FatturaPA XSD before emission: SdI
         # scarta anything non-conformant, so an invalid document must never
@@ -2423,6 +2681,11 @@ class InvoicePreview:
     issuer: IssuerProfile | None
     client: ClientProfile | None
     lines: list[InvoiceLine]
+    # Each line's AltriDatiGestionali blocks (FatturaPA 2.2.1.16) keyed
+    # by line id, in emission order; a line with none is simply absent.
+    # Resolved here with the lines so the XML/PDF/JSON renderings all
+    # read one already-loaded set instead of querying per line.
+    altri_dati: dict[uuid.UUID, list[InvoiceLineAltriDati]]
     totals: Totals
     effective_iban: str | None
     iban_source: str | None
@@ -2476,6 +2739,7 @@ async def _gather_preview(
         issuer=issuer,
         client=client,
         lines=lines,
+        altri_dati=await list_invoice_altri_dati(session, org_id=org_id, invoice_id=inv.id),
         totals=totals,
         effective_iban=iban,
         iban_source=src,
@@ -2534,6 +2798,9 @@ async def get_xml_preview(
         # issuer must not see a phantom TerzoIntermediario/SoggettoEmittente=TZ
         # in the preview that the real send strips.
         intermediary=_payload_intermediary(p.issuer, get_channel().intermediary),
+        # Already loaded by _gather_preview: the ANTEPRIMA must carry the
+        # same AltriDatiGestionali transmit() will freeze (2.2.1.16).
+        altri_dati=p.altri_dati,
     )
 
 
@@ -2566,5 +2833,8 @@ async def render_pdf(
         number=p.number,
         is_draft=is_draft,
         logo=logo_row[0] if logo_row else None,
+        # The owner wants a filled block visible on the courtesy copy as
+        # well as in the XML; a line with none renders exactly as before.
+        altri_dati=p.altri_dati,
     )
     return p.number, pdf

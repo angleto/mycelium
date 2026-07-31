@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+} from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { api, authFetch, errMessage, workspaceHeader } from '../api/client'
@@ -25,6 +33,10 @@ type BillGroup = Extract<components['schemas']['ReportGroup'], 'task' | 'project
 type InvoiceState = components['schemas']['InvoiceState']
 type PaymentStatus = components['schemas']['PaymentStatus']
 type SdiNotif = components['schemas']['InvoiceNotificationOut']
+// AltriDatiGestionali (FatturaPA 2.2.1.16): 0..N ordered blocks per
+// line. ``In`` is what we PUT/POST, ``Out`` is what the API echoes.
+type AdgIn = components['schemas']['InvoiceLineAltriDatiIn']
+type AdgOut = components['schemas']['InvoiceLineAltriDatiOut']
 
 // Lifecycle states offered in the list filter (default = work in
 // progress). sdi_status (the SdI receipt) and payment_status are
@@ -80,12 +92,141 @@ function readFilter<T extends string>(key: string, allowed: readonly T[], fallba
 }
 
 
-const EMPTY_LINE = {
+// The numeric fields are held as STRINGS, deliberately. A controlled
+// <input type="number"> cannot represent a half-typed decimal: while the
+// user is on "70.", the DOM's own value sanitisation reports "", so
+// Number(e.target.value) collapses to 0, React rewrites the field and the
+// decimal point is destroyed (typing "70.5" landed as "05"). The inputs are
+// therefore type="text" inputMode="decimal", the raw string survives every
+// keystroke, and the value is parsed once, on submit.
+
+// One AltriDatiGestionali block while it is being edited. Every field is
+// a string for the reason just above: riferimento_numero is
+// Amount8DecimalType and a controlled type="number" would eat the
+// decimal point mid-typing. ``uid`` is a client-only React key, so
+// reordering or removing a block does not move the DOM node (and the
+// focus) of its neighbour; it never reaches the API.
+type AdgForm = {
+  uid: string
+  tipo_dato: string
+  riferimento_testo: string
+  riferimento_numero: string
+  riferimento_data: string
+}
+
+let adgSeq = 0
+function newAdg(): AdgForm {
+  adgSeq += 1
+  return {
+    uid: `adg${adgSeq}`,
+    tipo_dato: '',
+    riferimento_testo: '',
+    riferimento_numero: '',
+    riferimento_data: '',
+  }
+}
+
+type LineForm = {
+  description: string
+  unit_price: string
+  quantity: string
+  vat_rate: string
+  vat_nature: string
+  altri_dati: AdgForm[]
+}
+
+const EMPTY_LINE: LineForm = {
   description: '',
-  unit_price: 0,
-  quantity: 1,
-  vat_rate: 22,
+  unit_price: '0',
+  quantity: '1',
+  vat_rate: '22',
   vat_nature: '',
+  // AltriDatiGestionali is EMPTY BY DEFAULT (owner requirement): a line
+  // that declares none emits none, in the XML and on the PDF alike.
+  altri_dati: [],
+}
+
+/** Parse a user-typed decimal. Accepts the Italian comma as the decimal
+ * separator ("62,5"), which is what an Italian keyboard offers first.
+ * Returns 0 for anything unparseable so a half-typed field never
+ * propagates NaN into a total. */
+function parseDec(raw: string): number {
+  const n = Number(String(raw).trim().replace(',', '.'))
+  return Number.isFinite(n) ? n : 0
+}
+
+// TipoDato is String10Type (1..10 Basic-Latin chars) and the spec fixes
+// NO enum, so the field stays free text. Three labels are nonetheless
+// binding conventions and mistyping one ("INTENTI") is a real rejection
+// path, so they are offered as one-click values through a datalist —
+// the least intrusive shortcut: it suggests without constraining.
+const ADG_DATALIST_ID = 'adg-tipo-dato'
+const ADG_TIPI: ReadonlyArray<readonly [string, string]> = [
+  ['INTENTO', 'invoices.adg.tipoIntento'],
+  ['N.DOC.COMM', 'invoices.adg.tipoDocComm'],
+  ['NB3', 'invoices.adg.tipoNb3'],
+]
+// XSD facets, mirrored so the browser stops the user before the API
+// does: String10Type / String60LatinType. The service caps a line at 50
+// blocks (sanity bound on an UNBOUNDED element), so the Add button
+// stops there too.
+const ADG_TIPO_MAX = 10
+const ADG_TESTO_MAX = 60
+const ADG_MAX_BLOCKS = 50
+
+/** API rows -> editable form rows. */
+function adgToForm(rows: AdgOut[] | undefined): AdgForm[] {
+  return (rows ?? []).map((r) => ({
+    ...newAdg(),
+    tipo_dato: r.tipo_dato,
+    riferimento_testo: r.riferimento_testo ?? '',
+    // String(Number(...)) drops the numeric(21,8) trailing zeros
+    // ("3.00000000" -> "3") so the field shows what was typed, exactly
+    // as the line amounts do.
+    riferimento_numero:
+      r.riferimento_numero != null ? String(Number(r.riferimento_numero)) : '',
+    riferimento_data: r.riferimento_data ?? '',
+  }))
+}
+
+/** Form rows -> request body. A row where EVERY field is still blank is
+ * dropped: that is a block the user added and abandoned, and "empty by
+ * default" means it must not reach the API. A row with content but no
+ * TipoDato is NOT dropped — TipoDato is the one required child of
+ * 2.2.1.16, so the API rejects it with a coded error and the user sees
+ * why, instead of losing the text they typed. Blank optional fields
+ * become null = element absent. */
+function adgToBody(blocks: AdgForm[]): AdgIn[] {
+  return blocks
+    .filter(
+      (b) =>
+        b.tipo_dato.trim() !== '' ||
+        b.riferimento_testo.trim() !== '' ||
+        b.riferimento_numero.trim() !== '' ||
+        b.riferimento_data !== '',
+    )
+    .map((b) => ({
+      tipo_dato: b.tipo_dato.trim(),
+      riferimento_testo: b.riferimento_testo.trim() || null,
+      riferimento_numero:
+        b.riferimento_numero.trim() === ''
+          ? null
+          : parseDec(b.riferimento_numero),
+      riferimento_data: b.riferimento_data || null,
+    }))
+}
+
+/** Compact one-line rendering of an emitted block, for the read-only
+ * line row: "INTENTO · 12345/1 · 3 · 2026-07-30". */
+function adgSummary(b: AdgOut): string {
+  return [
+    b.tipo_dato,
+    b.riferimento_testo,
+    b.riferimento_numero != null ? String(Number(b.riferimento_numero)) : '',
+    b.riferimento_data,
+  ]
+    .filter(Boolean)
+    .join(' · ')
 }
 
 // FatturaPA 1.2 closed enums for the per-invoice payment overrides.
@@ -110,15 +251,15 @@ const INV_MODALITA: ReadonlyArray<readonly [string, string]> = [
   ['MP21', 'SEPA DD B2B'],
   ['MP23', 'PagoPA'],
 ]
-type LineForm = typeof EMPTY_LINE
-
 // Forfettario invoices must default lines to 0% + Natura N2.2 (the
 // backend resolves the same when vat is unset, but the form must
-// SHOW the compliant values, not a misleading 22%).
+// SHOW the compliant values, not a misleading 22%). ``altri_dati`` is
+// re-created rather than spread so the fresh form never aliases the
+// EMPTY_LINE array.
 function blankLine(forfettario: boolean): LineForm {
   return forfettario
-    ? { ...EMPTY_LINE, vat_rate: 0, vat_nature: 'N2.2' }
-    : EMPTY_LINE
+    ? { ...EMPTY_LINE, vat_rate: '0', vat_nature: 'N2.2', altri_dati: [] }
+    : { ...EMPTY_LINE, altri_dati: [] }
 }
 
 function totals(lines: Line[]): { taxable: number; vat: number; total: number } {
@@ -136,6 +277,138 @@ function totals(lines: Line[]): { taxable: number; vat: number; total: number } 
     vat += Math.round((i * rate) / 100 * 100) / 100
   }
   return { taxable, vat, total: taxable + vat }
+}
+
+/** The shared TipoDato suggestion list. Rendered ONCE per document (a
+ * duplicate id would be invalid HTML) and referenced by every block
+ * editor through ``list={ADG_DATALIST_ID}``. */
+function AdgDatalist() {
+  const { t } = useTranslation()
+  return (
+    <datalist id={ADG_DATALIST_ID}>
+      {ADG_TIPI.map(([code, labelKey]) => (
+        <option key={code} value={code} label={t(labelKey)} />
+      ))}
+    </datalist>
+  )
+}
+
+/** AltriDatiGestionali (FatturaPA 2.2.1.16) editor for ONE line: an
+ * ordered list of 0..N blocks with add / remove / reorder. The order is
+ * the emission order, so moving a block is a real edit, not cosmetics.
+ * Controlled: the parent owns the array and re-sends the whole ordered
+ * set (the API replaces, it has no per-block CRUD). */
+function AdgEditor({
+  blocks,
+  onChange,
+}: {
+  blocks: AdgForm[]
+  onChange: (next: AdgForm[]) => void
+}) {
+  const { t } = useTranslation()
+  const patch = (i: number, p: Partial<AdgForm>) =>
+    onChange(blocks.map((b, j) => (j === i ? { ...b, ...p } : b)))
+  const move = (i: number, delta: -1 | 1) => {
+    const j = i + delta
+    if (j < 0 || j >= blocks.length) return
+    const next = [...blocks]
+    const [moved] = next.splice(i, 1)
+    next.splice(j, 0, moved)
+    onChange(next)
+  }
+  return (
+    <div className="lineform" style={{ flexBasis: '100%', width: '100%' }}>
+      {/* Empty by default: with no blocks the editor is a single ghost
+          button naming the section, not a heading over an empty list. */}
+      <div className="row">
+        {blocks.length > 0 && (
+          <span className="muted">{t('invoices.adg.title')}</span>
+        )}
+        <button
+          type="button"
+          className="btn--sm btn--ghost"
+          disabled={blocks.length >= ADG_MAX_BLOCKS}
+          onClick={() => onChange([...blocks, newAdg()])}
+        >
+          {t(blocks.length > 0 ? 'invoices.adg.add' : 'invoices.adg.addFirst')}
+        </button>
+      </div>
+      {blocks.map((b, i) => (
+        <div className="row" key={b.uid}>
+          <label>
+            {t('invoices.adg.tipoDato')}
+            {/* Free text (the spec fixes no enum) with the three
+                conventional labels one click away in the datalist. */}
+            <input
+              list={ADG_DATALIST_ID}
+              maxLength={ADG_TIPO_MAX}
+              placeholder="INTENTO"
+              value={b.tipo_dato}
+              style={{ width: '8rem' }}
+              onChange={(e) => patch(i, { tipo_dato: e.target.value })}
+            />
+          </label>
+          <label>
+            {t('invoices.adg.testo')}
+            <input
+              maxLength={ADG_TESTO_MAX}
+              value={b.riferimento_testo}
+              style={{ width: '14rem' }}
+              onChange={(e) => patch(i, { riferimento_testo: e.target.value })}
+            />
+          </label>
+          <label>
+            {t('invoices.adg.numero')}
+            {/* Same string-backed decimal as the line amounts: a
+                controlled type="number" destroys a half-typed value. */}
+            <input
+              type="text"
+              inputMode="decimal"
+              value={b.riferimento_numero}
+              style={{ width: '7rem' }}
+              onChange={(e) => patch(i, { riferimento_numero: e.target.value })}
+            />
+          </label>
+          <label>
+            {t('invoices.adg.data')}
+            <input
+              type="date"
+              value={b.riferimento_data}
+              onChange={(e) => patch(i, { riferimento_data: e.target.value })}
+            />
+          </label>
+          <button
+            type="button"
+            className="btn--sm btn--ghost"
+            disabled={i === 0}
+            aria-label={t('invoices.adg.moveUp')}
+            title={t('invoices.adg.moveUp')}
+            onClick={() => move(i, -1)}
+          >
+            ↑
+          </button>
+          <button
+            type="button"
+            className="btn--sm btn--ghost"
+            disabled={i === blocks.length - 1}
+            aria-label={t('invoices.adg.moveDown')}
+            title={t('invoices.adg.moveDown')}
+            onClick={() => move(i, 1)}
+          >
+            ↓
+          </button>
+          <button
+            type="button"
+            className="btn--sm btn--danger"
+            onClick={() => onChange(blocks.filter((_, j) => j !== i))}
+          >
+            {t('invoices.adg.remove')}
+          </button>
+        </div>
+      ))}
+      {blocks.length > 0 && <p className="hint">{t('invoices.adg.hint')}</p>}
+    </div>
+  )
 }
 
 export function InvoicesRoute() {
@@ -517,10 +790,12 @@ export function InvoicesRoute() {
       params: { header: workspaceHeader(), path: { invoice_id: sel.id } },
       body: {
         description: lAdd.description,
-        unit_price: lAdd.unit_price,
-        quantity: lAdd.quantity,
-        vat_rate: lAdd.vat_rate,
+        unit_price: parseDec(lAdd.unit_price),
+        quantity: parseDec(lAdd.quantity),
+        vat_rate: parseDec(lAdd.vat_rate),
         vat_nature: lAdd.vat_nature || null,
+        // AltriDatiGestionali (2.2.1.16), [] on the common line.
+        altri_dati: adgToBody(lAdd.altri_dati),
       },
     })
     if (error) {
@@ -538,10 +813,15 @@ export function InvoicesRoute() {
       params: { header: workspaceHeader(), path: { invoice_id: sel.id, line_id: id } },
       body: {
         description: lEdit.description,
-        unit_price: lEdit.unit_price,
-        quantity: lEdit.quantity,
-        vat_rate: lEdit.vat_rate,
+        unit_price: parseDec(lEdit.unit_price),
+        quantity: parseDec(lEdit.quantity),
+        vat_rate: parseDec(lEdit.vat_rate),
         vat_nature: lEdit.vat_nature || null,
+        // The editor was seeded with the line's current blocks, so
+        // sending the list is a faithful REPLACE of the whole ordered
+        // set. (Omitting it is the API's "leave them alone" tri-state,
+        // which would make removing the last block impossible here.)
+        altri_dati: adgToBody(lEdit.altri_dati),
       },
     })
     if (error) {
@@ -1385,6 +1665,9 @@ export function InvoicesRoute() {
           )}
 
           <h3>{t('invoices.lines')}</h3>
+          {/* One shared TipoDato suggestion list for every block editor
+              on this document (add form + the line being edited). */}
+          {isDraft && <AdgDatalist />}
           {lines.length === 0 ? (
             <p className="hint">{t('invoices.noLines')}</p>
           ) : (
@@ -1404,7 +1687,8 @@ export function InvoicesRoute() {
               <tbody>
                 {lines.map((ln) =>
                   lEditId === ln.id ? (
-                    <tr key={ln.id}>
+                    <Fragment key={ln.id}>
+                    <tr>
                       <td>{ln.line_no}</td>
                       <td>
                         <input
@@ -1416,31 +1700,34 @@ export function InvoicesRoute() {
                       </td>
                       <td>
                         <input
-                          type="number"
+                          type="text"
+                          inputMode="decimal"
                           value={lEdit.quantity}
                           style={{ width: '4rem' }}
                           onChange={(e) =>
-                            setLEdit({ ...lEdit, quantity: Number(e.target.value) })
+                            setLEdit({ ...lEdit, quantity: e.target.value })
                           }
                         />
                       </td>
                       <td>
                         <input
-                          type="number"
+                          type="text"
+                          inputMode="decimal"
                           value={lEdit.unit_price}
                           style={{ width: '6rem' }}
                           onChange={(e) =>
-                            setLEdit({ ...lEdit, unit_price: Number(e.target.value) })
+                            setLEdit({ ...lEdit, unit_price: e.target.value })
                           }
                         />
                       </td>
                       <td>
                         <input
-                          type="number"
+                          type="text"
+                          inputMode="decimal"
                           value={lEdit.vat_rate}
                           style={{ width: '4rem' }}
                           onChange={(e) =>
-                            setLEdit({ ...lEdit, vat_rate: Number(e.target.value) })
+                            setLEdit({ ...lEdit, vat_rate: e.target.value })
                           }
                         />
                       </td>
@@ -1455,7 +1742,7 @@ export function InvoicesRoute() {
                         />
                       </td>
                       <td>
-                        {(Number(lEdit.quantity) * Number(lEdit.unit_price)).toFixed(2)}
+                        {(parseDec(lEdit.quantity) * parseDec(lEdit.unit_price)).toFixed(2)}
                       </td>
                       <td>
                         <button
@@ -1474,10 +1761,53 @@ export function InvoicesRoute() {
                         </button>
                       </td>
                     </tr>
+                    {/* AltriDatiGestionali sits on its own full-width
+                        row: the 8 line columns are already narrow and a
+                        block carries 4 fields of its own. */}
+                    <tr>
+                      <td colSpan={8}>
+                        <AdgEditor
+                          blocks={lEdit.altri_dati}
+                          onChange={(next) =>
+                            setLEdit({ ...lEdit, altri_dati: next })
+                          }
+                        />
+                      </td>
+                    </tr>
+                    </Fragment>
                   ) : (
                     <tr key={ln.id}>
                       <td>{ln.line_no}</td>
-                      <td>{ln.description}</td>
+                      <td>
+                        {ln.description}
+                        {/* Emitted blocks are visible without entering
+                            edit mode. Nothing renders for the line that
+                            declares none: no stray label, no empty row. */}
+                        {(ln.altri_dati?.length ?? 0) > 0 && (
+                          <div
+                            style={{
+                              display: 'flex',
+                              flexWrap: 'wrap',
+                              gap: '0.3rem',
+                              marginTop: '0.2rem',
+                            }}
+                          >
+                            {ln.altri_dati?.map((b) => (
+                              <span
+                                key={b.id}
+                                className="tag tag--muted"
+                                title={t('invoices.adg.title')}
+                                // .tag is nowrap; a 60-char text
+                                // reference would otherwise stretch the
+                                // whole line table.
+                                style={{ whiteSpace: 'normal' }}
+                              >
+                                {adgSummary(b)}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </td>
                       <td>{Number(ln.quantity)}</td>
                       <td>{Number(ln.unit_price).toFixed(2)}</td>
                       <td>{Number(ln.vat_rate)}%</td>
@@ -1495,10 +1825,15 @@ export function InvoicesRoute() {
                                 setLEditId(ln.id)
                                 setLEdit({
                                   description: ln.description,
-                                  unit_price: Number(ln.unit_price),
-                                  quantity: Number(ln.quantity),
-                                  vat_rate: Number(ln.vat_rate),
+                                  // String(Number(...)) rather than the raw
+                                  // API value: it drops the trailing zeros of
+                                  // "62.5000" so the field shows what the user
+                                  // typed, and the form state is string-based.
+                                  unit_price: String(Number(ln.unit_price)),
+                                  quantity: String(Number(ln.quantity)),
+                                  vat_rate: String(Number(ln.vat_rate)),
                                   vat_nature: ln.vat_nature ?? '',
+                                  altri_dati: adgToForm(ln.altri_dati),
                                 })
                               }}
                             >
@@ -1536,33 +1871,36 @@ export function InvoicesRoute() {
               <label>
                 {t('invoices.qty')}
                 <input
-                  type="number"
+                  type="text"
+                  inputMode="decimal"
                   value={lAdd.quantity}
                   style={{ width: '5rem' }}
                   onChange={(e) =>
-                    setLAdd({ ...lAdd, quantity: Number(e.target.value) })
+                    setLAdd({ ...lAdd, quantity: e.target.value })
                   }
                 />
               </label>
               <label>
                 {t('invoices.price')}
                 <input
-                  type="number"
+                  type="text"
+                  inputMode="decimal"
                   value={lAdd.unit_price}
                   style={{ width: '7rem' }}
                   onChange={(e) =>
-                    setLAdd({ ...lAdd, unit_price: Number(e.target.value) })
+                    setLAdd({ ...lAdd, unit_price: e.target.value })
                   }
                 />
               </label>
               <label>
                 {t('invoices.vat')}
                 <input
-                  type="number"
+                  type="text"
+                  inputMode="decimal"
                   value={lAdd.vat_rate}
                   style={{ width: '4.5rem' }}
                   onChange={(e) =>
-                    setLAdd({ ...lAdd, vat_rate: Number(e.target.value) })
+                    setLAdd({ ...lAdd, vat_rate: e.target.value })
                   }
                 />
               </label>
@@ -1578,6 +1916,12 @@ export function InvoicesRoute() {
                 />
               </label>
               <button type="submit">{t('invoices.addLine')}</button>
+              {/* Full-width child of the wrapping .row so the block
+                  editor starts on its own line under the fields. */}
+              <AdgEditor
+                blocks={lAdd.altri_dati}
+                onChange={(next) => setLAdd({ ...lAdd, altri_dati: next })}
+              />
             </form>
           )}
 

@@ -47,7 +47,7 @@ handles (see the generated `tasks` section below). An agent never needs to
 over-fetch the org table and filter in its head.
 
 <!-- BEGIN GENERATED: mcp tool inventory (scripts/gen_mcp_coverage.py) -->
-**256 tools across 14 domains.** This inventory is generated from the live registry by `scripts/gen_mcp_coverage.py` — do not edit by hand; run `make mcp-coverage` to refresh. The one-line summary is each tool's first docstring line, so it cannot drift from the code.
+**258 tools across 14 domains.** This inventory is generated from the live registry by `scripts/gen_mcp_coverage.py` — do not edit by hand; run `make mcp-coverage` to refresh. The one-line summary is each tool's first docstring line, so it cannot drift from the code.
 
 ### search (3)
 
@@ -237,7 +237,7 @@ over-fetch the org table and filter in its head.
 | `update_note` | Edit a note's title/body. A blank title is re-derived from the |
 | `update_note_part` | Edit a part's body / lang. ``expected_version`` enforces |
 
-### billing (17)
+### billing (19)
 
 | Tool | Summary |
 |---|---|
@@ -250,11 +250,13 @@ over-fetch the org table and filter in its head.
 | `get_invoice_xml` | Return an invoice's FatturaPA XML inline (the frozen transmitted document, |
 | `grant_credits` | Admin: top up credits (manual grant; v1 has no payment gateway). |
 | `list_budgets` | List budget envelopes. |
+| `list_invoice_lines` | List an invoice's lines with their AltriDatiGestionali blocks. |
 | `list_invoices` | List invoices, newest first. Filter by ``client_tag_id`` (the recipient) |
 | `list_rate_cards` | List the org rate cards. |
 | `list_usage` | List recent metered usage records. |
 | `meter_usage` | Idempotent metered debit (re-running the same operation_id does |
 | `prioritize_within_budget` | Deterministic priority/value-density selection within a budget. |
+| `set_invoice_line_altri_dati` | Set one draft line's AltriDatiGestionali (FatturaPA 2.2.1.16). |
 | `transmit_invoice` | Validate, allocate the progressive number and transmit (channel |
 | `update_budget` | Edit a budget envelope (only the given fields). |
 | `upsert_rate_card` | Admin: create or update a model rate card. |

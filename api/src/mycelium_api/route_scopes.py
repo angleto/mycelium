@@ -267,6 +267,8 @@ ROUTE_SCOPES: dict[tuple[str, str], object] = {
     ("POST", "/invoices/{invoice_id}/lines"): "invoices:write",
     ("PUT", "/invoices/{invoice_id}/lines/{line_id}"): "invoices:write",
     ("DELETE", "/invoices/{invoice_id}/lines/{line_id}"): "invoices:write",
+    ("GET", "/invoices/{invoice_id}/lines/{line_id}/altri-dati"): "invoices:read",
+    ("PUT", "/invoices/{invoice_id}/lines/{line_id}/altri-dati"): "invoices:write",
     ("GET", "/invoices/{invoice_id}/notifications"): "invoices:read",
     ("GET", "/invoices/{invoice_id}/notifications/{notification_id}/xml"): "invoices:read",
     ("POST", "/invoices/{invoice_id}/paid"): "invoices:write",

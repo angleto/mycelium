@@ -2,8 +2,14 @@
 
 Project rule (docs/adr/0017): no hardcoded user-facing strings. Domain
 errors carry a stable machine ``MessageCode`` plus parameters; adapters
-render the human text via this catalog for the requested locale. Only
-``en`` exists now; adding locales later is purely additive.
+render the human text via this catalog for the requested locale.
+
+``en`` is the reference table and must cover every ``MessageCode``:
+``render`` falls back to it, and a hole there surfaces to the user as
+the bare code. Other locales are additive and may stay partial (``it``
+covers only the notification strings the backend actually sends), they
+inherit the English template for anything they omit. Both properties
+are asserted in core/tests/test_i18n_catalog.py.
 """
 
 from __future__ import annotations
@@ -110,6 +116,9 @@ class MessageCode(enum.StrEnum):
     INVOICE_TRANSMIT_ENV_CHANGED = "invoice.transmit_env_changed"
     CREDIT_NOTE_PARENT_INVALID = "invoice.credit_note_parent_invalid"
     INVOICE_INVALID = "invoice.invalid"
+    # AltriDatiGestionali (FatturaPA 2.2.1.16) outside its XSD facets:
+    # {detail} names the offending field + the limit it broke.
+    INVOICE_ALTRI_DATI_INVALID = "invoice.altri_dati_invalid"
     FISCAL_PROFILE_REQUIRED = "invoice.fiscal_profile_required"
     ISSUER_PROFILE_IN_USE = "invoice.issuer_profile_in_use"
     ISSUER_PROFILE_SOLE_DEFAULT = "invoice.issuer_profile_sole_default"
@@ -283,6 +292,10 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
             "Reorder payload does not match the task's checklist items"
         ),
         MessageCode.TAG_NOT_FOUND: "Tag not found",
+        # Raised by services/adjudication.get_adjudication with no
+        # params, so the template stays placeholder-free; the entry
+        # sits here to mirror the enum's (historical) ordering.
+        MessageCode.ADJUDICATION_NOT_FOUND: "Adjudication not found",
         MessageCode.TAG_DUPLICATE: "A tag with this name already exists",
         MessageCode.TAG_AMBIGUOUS: "Ambiguous tag name: {name}",
         MessageCode.TAG_KIND_MISMATCH: "Tag is not of the expected kind",
@@ -401,6 +414,7 @@ _CATALOG: dict[str, dict[MessageCode, str]] = {
             "and a scartato one is corrected by resend, not a credit note"
         ),
         MessageCode.INVOICE_INVALID: ("Invalid invoice: {detail}"),
+        MessageCode.INVOICE_ALTRI_DATI_INVALID: ("Invalid AltriDatiGestionali block ({detail})"),
         MessageCode.FISCAL_PROFILE_REQUIRED: (
             "The issuer profile is missing or incomplete: {detail}"
         ),

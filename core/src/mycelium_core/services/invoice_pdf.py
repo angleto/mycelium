@@ -17,7 +17,8 @@ document is in Italian, see ``invoice_format._build_xml``).
 from __future__ import annotations
 
 import datetime as dt
-from collections.abc import Sequence
+import uuid
+from collections.abc import Mapping, Sequence
 from decimal import ROUND_HALF_UP, Decimal
 from io import BytesIO
 from xml.sax.saxutils import escape
@@ -38,14 +39,23 @@ from reportlab.platypus import (
 )
 
 from mycelium_core.models.client_profile import ClientProfile
-from mycelium_core.models.invoice import Invoice, InvoiceLine, IssuerProfile
+from mycelium_core.models.invoice import (
+    Invoice,
+    InvoiceLine,
+    InvoiceLineAltriDati,
+    IssuerProfile,
+)
 from mycelium_core.services.date_format import format_date
 from mycelium_core.services.image_validation import image_is_decodable as logo_is_decodable
 from mycelium_core.services.invoice_format import (
     BOLLO_DICITURA,
     FORFETTARIO_CAUSALE,
     Totals,
+    _amount8,
     _is_forfettario,
+    _line_total,
+    _q2,
+    _q4,
 )
 from mycelium_core.services.payment_methods import (
     MODALITA_PAGAMENTO,
@@ -77,6 +87,9 @@ _LABELS: dict[str, dict[str, str]] = {
         "vat_rate": "Aliquota IVA %",
         "vat_nature": "Natura",
         "total": "Totale",
+        # Sub-row printed under a line's description when it carries
+        # FatturaPA AltriDatiGestionali blocks (2.2.1.16).
+        "altri_dati": "Altri dati gestionali",
         "taxable": "Imponibile",
         "vat": "IVA",
         "stamp_duty": "Imposta di bollo",
@@ -106,6 +119,7 @@ _LABELS: dict[str, dict[str, str]] = {
         "vat_rate": "VAT rate %",
         "vat_nature": "Nature",
         "total": "Total",
+        "altri_dati": "Additional data",
         "taxable": "Taxable",
         "vat": "VAT",
         "stamp_duty": "Stamp duty",
@@ -135,6 +149,7 @@ _LABELS: dict[str, dict[str, str]] = {
         "vat_rate": "MwSt.-Satz %",
         "vat_nature": "Art",
         "total": "Summe",
+        "altri_dati": "Weitere Angaben",
         "taxable": "Steuerbasis",
         "vat": "MwSt.",
         "stamp_duty": "Stempelsteuer",
@@ -164,6 +179,7 @@ _LABELS: dict[str, dict[str, str]] = {
         "vat_rate": "Taux TVA %",
         "vat_nature": "Nature",
         "total": "Total",
+        "altri_dati": "Données complémentaires",
         "taxable": "Base imposable",
         "vat": "TVA",
         "stamp_duty": "Droit de timbre",
@@ -193,6 +209,7 @@ _LABELS: dict[str, dict[str, str]] = {
         "vat_rate": "Tipo IVA %",
         "vat_nature": "Naturaleza",
         "total": "Total",
+        "altri_dati": "Datos adicionales",
         "taxable": "Base imponible",
         "vat": "IVA",
         "stamp_duty": "Impuesto de timbre",
@@ -249,6 +266,15 @@ def _L(loc: str, key: str) -> str:
     return _LABELS[loc][key]
 
 
+def _it_thousands(intpart: str) -> str:
+    """Group an integer-part string it-IT style: 1234567 -> 1.234.567."""
+    grouped = ""
+    while len(intpart) > 3:
+        grouped = "." + intpart[-3:] + grouped
+        intpart = intpart[:-3]
+    return intpart + grouped
+
+
 def _it_money(d: Decimal) -> str:
     """it-IT currency: thousands '.', decimals ',', trailing ' €'
     (e.g. 1.234,56 €). Kept Italian-style across locales: the currency
@@ -258,16 +284,60 @@ def _it_money(d: Decimal) -> str:
     q = d.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
     sign = "-" if q < 0 else ""
     intpart, dec = f"{abs(q):.2f}".split(".")
-    grouped = ""
-    while len(intpart) > 3:
-        grouped = "." + intpart[-3:] + grouped
-        intpart = intpart[:-3]
-    return f"{sign}{intpart}{grouped},{dec} €"
+    return f"{sign}{_it_thousands(intpart)},{dec} €"
+
+
+def _it_unit_price(d: Decimal) -> str:
+    """The unit price at the precision it is STORED at (Numeric(14,4)),
+    trailing zeros trimmed back to the 2-decimal money minimum.
+
+    Same defect the XML had: a price of 62.5432 printed "62,54 €" next
+    to a line total of 125,09 € makes the courtesy copy contradict
+    itself (2 x 62,54 = 125,08). A price whose 3rd/4th decimal is zero
+    -- every ordinary invoice -- prints exactly as before."""
+    q = _q4(d)
+    if q == _q2(q):
+        return _it_money(q)
+    sign = "-" if q < 0 else ""
+    intpart, dec = f"{abs(q):.4f}".split(".")
+    return f"{sign}{_it_thousands(intpart)},{dec.rstrip('0').ljust(2, '0')} €"
 
 
 def _it_qty(d: Decimal) -> str:
     s = f"{d.normalize():f}" if d == d.to_integral() else f"{d}"
     return s.replace(".", ",")
+
+
+def _altri_dati_para(
+    blocks: Sequence[InvoiceLineAltriDati],
+    loc: str,
+    style: ParagraphStyle,
+    date_fmt: str | None,
+) -> Paragraph:
+    """One compact sub-paragraph listing a line's AltriDatiGestionali
+    (FatturaPA 2.2.1.16), printed under that line's description.
+
+    The owner wants these visible on the courtesy PDF as well as in the
+    XML, but subordinate to the line: smaller, greyed and indented, one
+    row per block, never a column of its own. ``ord`` is the emission
+    order (unique per line, migration 0088) so the paper matches the
+    XML. Empty optional fields are skipped, exactly like the XML: a
+    NB3 block legitimately carries only its TipoDato. Values are
+    escaped -- they are user text and reportlab reads mini-markup."""
+    rows: list[str] = []
+    for b in sorted(blocks, key=lambda b: b.ord):
+        # RiferimentoNumero is shown as the XML carries it (Amount8-
+        # DecimalType, >= 2 decimals) with the it-IT decimal comma.
+        cells = [
+            f"<b>{escape(b.tipo_dato)}</b>",
+            escape(b.riferimento_testo) if b.riferimento_testo else "",
+            _amount8(b.riferimento_numero).replace(".", ",")
+            if b.riferimento_numero is not None
+            else "",
+            format_date(b.riferimento_data, date_fmt) if b.riferimento_data is not None else "",
+        ]
+        rows.append(" · ".join(c for c in cells if c))
+    return Paragraph(f"{escape(_L(loc, 'altri_dati'))}: " + "<br/>".join(rows), style)
 
 
 def _addr(
@@ -439,6 +509,7 @@ def build_pdf(
     number: str | None = None,
     is_draft: bool = False,
     logo: bytes | None = None,
+    altri_dati: Mapping[uuid.UUID, Sequence[InvoiceLineAltriDati]] | None = None,
 ) -> bytes:
     """Render the courtesy A4 invoice. Tolerant of a still-incomplete
     draft (missing fields render blank) so it can preview a draft.
@@ -448,7 +519,11 @@ def build_pdf(
     draft it is the would-be number (counter+1) so the user always
     sees the prospective code instead of a bare "BOZZA" placeholder.
     ``is_draft`` adds a small DRAFT/BOZZA marker next to it so the
-    page is still visibly non-emitted."""
+    page is still visibly non-emitted.
+
+    ``altri_dati`` maps an InvoiceLine id to its AltriDatiGestionali
+    rows (invoice_line_altri_dati); a line absent from it renders
+    exactly as before, the blocks being opt-in and empty by default."""
     loc = _locale(client)
     buf = BytesIO()
     doc = SimpleDocTemplate(
@@ -627,13 +702,35 @@ def build_pdf(
         Paragraph(f"<b>{_L(loc, 'total')}</b>", right),
     ]
     data: list[list[object]] = [header]
+    # Sub-row style for the AltriDatiGestionali: smaller, greyed and
+    # indented so the block reads as belonging to the description above
+    # it rather than competing with the table's own columns.
+    adg_style = ParagraphStyle(
+        "altri_dati",
+        parent=small,
+        fontSize=7,
+        leading=8.5,
+        leftIndent=5,
+        spaceBefore=1,
+        textColor=colors.HexColor("#555555"),
+    )
     for ln in lines:
-        line_total = (ln.quantity * ln.unit_price).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        # Same _line_total as the XML PrezzoTotale: the courtesy copy
+        # must show the amount the fiscal document carries.
+        line_total = _line_total(ln.quantity, ln.unit_price)
+        blocks = altri_dati.get(ln.id) if altri_dati else None
+        # A line with no block keeps the plain single-Paragraph cell it
+        # has always had (byte-identical output for the default case).
+        desc: object = (
+            [Paragraph(ln.description, small), _altri_dati_para(blocks, loc, adg_style, date_fmt)]
+            if blocks
+            else Paragraph(ln.description, small)
+        )
         data.append(
             [
-                Paragraph(ln.description, small),
+                desc,
                 Paragraph(_it_qty(ln.quantity), right),
-                Paragraph(_it_money(ln.unit_price), right),
+                Paragraph(_it_unit_price(ln.unit_price), right),
                 Paragraph(f"{ln.vat_rate:.2f}".replace(".", ","), right),
                 Paragraph(ln.vat_nature or "", small),
                 Paragraph(_it_money(line_total), right),

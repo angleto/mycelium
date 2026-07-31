@@ -3067,6 +3067,36 @@ class InvoicePatchIn(BaseModel):
     payment_terms_days: int | None = Field(default=None, ge=0, le=365)
 
 
+class InvoiceLineAltriDatiIn(BaseModel):
+    """One AltriDatiGestionali block of a line (FatturaPA 2.2.1.16),
+    0..N per line and ORDERED (the array order is the emission order).
+
+    ``tipo_dato`` is a LABEL naming the kind of data, not a description:
+    the free text belongs in ``riferimento_testo``. The spec fixes no
+    enum; the binding conventions worth offering as UI shortcuts are
+    INTENTO (dichiarazione d'intento: protocollo + progressivo in the
+    text), N.DOC.COMM (documento commerciale: id / progressivo / date
+    across the three reference fields) and NB3 (bollo exemption between
+    banks and account holders, all three left empty).
+
+    Bounds mirror the XSD (String10Type / String60LatinType /
+    Amount8DecimalType); the service re-checks them against the real
+    facets (character ranges, decimal places) and raises a coded error."""
+
+    tipo_dato: str = Field(min_length=1, max_length=10)
+    riferimento_testo: str | None = Field(default=None, max_length=60)
+    riferimento_numero: Decimal | None = None
+    riferimento_data: datetime.date | None = None
+
+
+class InvoiceLineAltriDatiOut(BaseModel):
+    id: uuid.UUID
+    tipo_dato: str
+    riferimento_testo: str | None
+    riferimento_numero: Decimal | None
+    riferimento_data: datetime.date | None
+
+
 class InvoiceLineIn(BaseModel):
     description: str = Field(min_length=1, max_length=1000)
     unit_price: Decimal
@@ -3076,6 +3106,11 @@ class InvoiceLineIn(BaseModel):
     # An explicit value is always honoured.
     vat_rate: Decimal | None = None
     vat_nature: str | None = Field(default=None, max_length=4)
+    # AltriDatiGestionali, empty by default (omitted -> nothing emitted).
+    # Tri-state on the PUT: None leaves the line's existing blocks alone
+    # (a price fix must not silently drop them), a list REPLACES them,
+    # and [] clears them.
+    altri_dati: list[InvoiceLineAltriDatiIn] | None = None
 
 
 class InvoiceLineOut(BaseModel):
@@ -3086,6 +3121,9 @@ class InvoiceLineOut(BaseModel):
     unit_price: Decimal
     vat_rate: Decimal
     vat_nature: str | None
+    # Emission order; empty for the overwhelmingly common line that
+    # carries no AltriDatiGestionali.
+    altri_dati: list[InvoiceLineAltriDatiOut] = Field(default_factory=list)
 
 
 class InvoiceOut(BaseModel):
@@ -3232,6 +3270,10 @@ class InvoicePreviewLine(BaseModel):
     line_total: Decimal
     vat_rate: Decimal
     vat_nature: str | None = None
+    # AltriDatiGestionali of this line, in emission order: the courtesy
+    # rendering must show what the XML carries (owner requirement).
+    # Empty for the ordinary line that declares none.
+    altri_dati: list[InvoiceLineAltriDatiOut] = Field(default_factory=list)
 
 
 class InvoicePreviewTotals(BaseModel):

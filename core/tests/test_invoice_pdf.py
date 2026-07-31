@@ -6,12 +6,28 @@ pure string helper and ``build_pdf`` takes already-loaded ORM objects.
 from __future__ import annotations
 
 import datetime as dt
+import uuid
 from decimal import Decimal
 
+from reportlab import rl_config
+from reportlab.lib.styles import ParagraphStyle
+
 from mycelium_core.models.client_profile import ClientProfile
-from mycelium_core.models.invoice import DocumentType, Invoice, InvoiceLine, IssuerProfile
+from mycelium_core.models.invoice import (
+    DocumentType,
+    Invoice,
+    InvoiceLine,
+    InvoiceLineAltriDati,
+    IssuerProfile,
+)
 from mycelium_core.services.invoice_format import Totals
-from mycelium_core.services.invoice_pdf import _addr, build_pdf
+from mycelium_core.services.invoice_pdf import (
+    _addr,
+    _altri_dati_para,
+    _it_money,
+    _it_unit_price,
+    build_pdf,
+)
 
 
 def test_addr_appends_civic_number() -> None:
@@ -79,6 +95,9 @@ def _doc() -> tuple[Invoice, ClientProfile, list[InvoiceLine], Totals]:
         payment_due_date=None,
     )
     line = InvoiceLine(
+        # An explicit id: the AltriDatiGestionali mapping is keyed by it
+        # (a transient ORM object has none until flush).
+        id=uuid.uuid4(),
         line_no=1,
         description="consulting",
         quantity=Decimal(2),
@@ -124,3 +143,154 @@ def test_build_pdf_renders_with_all_contacts_hidden() -> None:
         logo=None,
     )
     assert pdf[:4] == b"%PDF"
+
+
+# --- AltriDatiGestionali on the courtesy PDF (FatturaPA 2.2.1.16) ---
+
+
+def _adg(
+    line_id: uuid.UUID,
+    ord_: int,
+    tipo: str,
+    *,
+    testo: str | None = None,
+    numero: Decimal | None = None,
+    data: dt.date | None = None,
+) -> InvoiceLineAltriDati:
+    return InvoiceLineAltriDati(
+        invoice_line_id=line_id,
+        ord=ord_,
+        tipo_dato=tipo,
+        riferimento_testo=testo,
+        riferimento_numero=numero,
+        riferimento_data=data,
+    )
+
+
+def _adg_text(
+    blocks: list[InvoiceLineAltriDati], loc: str = "it", date_fmt: str | None = None
+) -> str:
+    """The rendered mini-markup of the sub-paragraph (what reportlab
+    lays out), asserted directly: cheaper and far more precise than
+    digging text out of a compressed PDF content stream."""
+    style = ParagraphStyle("t", fontName="Helvetica", fontSize=7)
+    # str(): reportlab ships no type information, so ``.text`` is Any.
+    return str(_altri_dati_para(blocks, loc, style, date_fmt).text)
+
+
+def test_altri_dati_para_lists_blocks_in_ord_order() -> None:
+    line_id = uuid.uuid4()
+    blocks = [
+        # reversed on purpose: the paragraph sorts by ``ord``, like the XML
+        _adg(line_id, 1, "N.DOC.COMM", testo="0001", numero=Decimal("7"), data=dt.date(2026, 2, 2)),
+        _adg(line_id, 0, "INTENTO", testo="12345/2026-1"),
+    ]
+    text = _adg_text(blocks, "it", "DD/MM/YYYY")
+    assert text == (
+        "Altri dati gestionali: <b>INTENTO</b> · 12345/2026-1<br/>"
+        "<b>N.DOC.COMM</b> · 0001 · 7,00 · 02/02/2026"
+    )
+
+
+def test_altri_dati_para_skips_empty_optional_fields() -> None:
+    # NB3 carries only its TipoDato: no stray separators for the three
+    # empty optional fields.
+    line_id = uuid.uuid4()
+    assert _adg_text([_adg(line_id, 0, "NB3")]) == "Altri dati gestionali: <b>NB3</b>"
+
+
+def test_altri_dati_para_label_is_localised() -> None:
+    # The label comes from the per-locale dict, never hardcoded Italian.
+    line_id = uuid.uuid4()
+    blocks = [_adg(line_id, 0, "NB3")]
+    assert _adg_text(blocks, "en").startswith("Additional data:")
+    assert _adg_text(blocks, "de").startswith("Weitere Angaben:")
+    assert _adg_text(blocks, "fr").startswith("Données complémentaires:")
+    assert _adg_text(blocks, "es").startswith("Datos adicionales:")
+
+
+def test_altri_dati_para_escapes_user_text() -> None:
+    # tipo_dato / riferimento_testo are user values and reportlab reads
+    # mini-markup: an angle bracket must not become a tag.
+    line_id = uuid.uuid4()
+    text = _adg_text([_adg(line_id, 0, "A&B", testo="x <b>y</b>")])
+    assert "A&amp;B" in text
+    assert "&lt;b&gt;y&lt;/b&gt;" in text
+
+
+def test_build_pdf_renders_altri_dati_blocks() -> None:
+    inv, client, lines, totals = _doc()
+    line_id = lines[0].id
+    pdf = build_pdf(
+        inv,
+        _issuer(),
+        client,
+        lines,
+        totals,
+        number="A-1",
+        is_draft=False,
+        logo=None,
+        altri_dati={
+            line_id: [
+                _adg(line_id, 0, "INTENTO", testo="12345/2026-1"),
+                _adg(line_id, 1, "NB3"),
+            ]
+        },
+    )
+    assert pdf[:4] == b"%PDF" and len(pdf) > 1000
+    # The blocks add ink: the same document without them is smaller.
+    plain = build_pdf(
+        inv, _issuer(), client, lines, totals, number="A-1", is_draft=False, logo=None
+    )
+    assert len(pdf) > len(plain)
+
+
+def test_build_pdf_without_blocks_is_byte_identical() -> None:
+    # A line with no block must render exactly as before. reportlab
+    # stamps a creation time and a doc id, so determinism needs
+    # rl_config.invariant; with it on, the three no-block spellings
+    # (absent / empty mapping / another line's id) are the same bytes.
+    inv, client, lines, totals = _doc()
+    other = uuid.uuid4()
+    previous = rl_config.invariant
+    rl_config.invariant = 1
+    try:
+        base = build_pdf(
+            inv, _issuer(), client, lines, totals, number="A-1", is_draft=False, logo=None
+        )
+        variants = [
+            build_pdf(
+                inv,
+                _issuer(),
+                client,
+                lines,
+                totals,
+                number="A-1",
+                is_draft=False,
+                logo=None,
+                altri_dati=altri,
+            )
+            for altri in (None, {}, {other: [_adg(other, 0, "INTENTO", testo="x")]})
+        ]
+    finally:
+        rl_config.invariant = previous
+    for v in variants:
+        assert v == base
+
+
+def test_unit_price_prints_stored_precision_only_when_it_matters() -> None:
+    # unit_price is Numeric(14,4). Printing it at 2 decimals next to a
+    # line total computed from all 4 made the courtesy copy contradict
+    # itself (2 x 62,54 = 125,08, not 125,09) -- the same defect the XML
+    # PrezzoUnitario had. Values with no significant 3rd/4th decimal
+    # print exactly as before.
+    assert _it_unit_price(Decimal("100.0000")) == "100,00 €"
+    assert _it_unit_price(Decimal("1234.5000")) == "1.234,50 €"
+    assert _it_unit_price(Decimal("-100.00")) == "-100,00 €"
+    assert _it_unit_price(Decimal("62.5432")) == "62,5432 €"
+    assert _it_unit_price(Decimal("62.5430")) == "62,543 €"
+    assert _it_unit_price(Decimal("1234.5678")) == "1.234,5678 €"
+    # Same value, same string as the plain money formatter when 2 decimals
+    # are enough: the default invoice's bytes are untouched.
+    for v in ("0.00", "9.99", "1234.50", "-7.25"):
+        assert _it_unit_price(Decimal(v)) == _it_money(Decimal(v))

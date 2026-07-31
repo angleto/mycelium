@@ -16,13 +16,19 @@ from __future__ import annotations
 
 import datetime as dt
 import re
+import uuid
 import xml.etree.ElementTree as ET
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal
 
 from mycelium_core.models.client_profile import ClientProfile
-from mycelium_core.models.invoice import Invoice, InvoiceLine, IssuerProfile
+from mycelium_core.models.invoice import (
+    Invoice,
+    InvoiceLine,
+    InvoiceLineAltriDati,
+    IssuerProfile,
+)
 from mycelium_core.sdi_channel import IntermediaryIdentity
 from mycelium_core.services.payment_methods import resolve_payment
 
@@ -35,6 +41,45 @@ def _q2(d: Decimal) -> Decimal:
 
 def _money(d: Decimal) -> str:
     return f"{_q2(d):.2f}"
+
+
+def _q4(d: Decimal) -> Decimal:
+    """The precision the line operands are STORED at: invoice_lines
+    quantity is Numeric(12,4) and unit_price Numeric(14,4)."""
+    return d.quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+
+
+def _amount4(d: Decimal) -> str:
+    """Quantita / PrezzoUnitario, emitted at the 4 decimals we store.
+
+    Emitting them at 2 while computing PrezzoTotale from the full stored
+    value breaks the arithmetic SdI re-checks: unit_price 62.5432 x qty 2
+    printed "62.54" against a PrezzoTotale of "125.09", but 2 x 62.54 is
+    125.08 -> scarto. The XSD is far wider than 2 decimals (QuantitaType
+    ``[0-9]{1,12}\\.[0-9]{2,8}``, PrezzoUnitario is Amount8DecimalType
+    ``[\\-]?[0-9]{1,11}\\.[0-9]{2,8}``), so emitting 4 makes the operands
+    the receiver re-multiplies exactly the ones we multiplied."""
+    return f"{_q4(d):.4f}"
+
+
+def _amount8(d: Decimal) -> str:
+    """Amount8DecimalType (``[\\-]?[0-9]{1,11}\\.[0-9]{2,8}``): 2 to 8
+    decimals, so a whole number still needs two ("3" is invalid, "3.00"
+    is not). Trailing zeros beyond the second are trimmed because the
+    backing column is Numeric(21,8) and would otherwise always print
+    "3.00000000" on the wire."""
+    s = f"{d.quantize(Decimal('1.00000000'), rounding=ROUND_HALF_UP):f}"
+    intpart, _, dec = s.partition(".")
+    return f"{intpart}.{dec.rstrip('0').ljust(2, '0')}"
+
+
+def _line_total(quantity: Decimal, unit_price: Decimal) -> Decimal:
+    """PrezzoTotale: the product of the operands AS EMITTED (4 decimals),
+    rounded to the 2-decimal money the tracciato mandates. Going through
+    _q4 first is what keeps ``PrezzoTotale == round(Quantita x
+    PrezzoUnitario, 2)`` true for the receiver; for a DB-loaded line the
+    quantize is a no-op (the columns already hold 4 decimals)."""
+    return _q2(_q4(quantity) * _q4(unit_price))
 
 
 @dataclass(frozen=True)
@@ -109,7 +154,9 @@ def _riepilogo_groups(lines: Sequence[InvoiceLine]) -> dict[tuple[Decimal, str |
     groups: dict[tuple[Decimal, str | None], Decimal] = {}
     for ln in lines:
         key = (ln.vat_rate, ln.vat_nature)
-        groups[key] = groups.get(key, Decimal(0)) + _q2(ln.quantity * ln.unit_price)
+        # Same _line_total as the XML: the riepilogo imponibile must be
+        # the sum of the PrezzoTotale values actually emitted.
+        groups[key] = groups.get(key, Decimal(0)) + _line_total(ln.quantity, ln.unit_price)
     return groups
 
 
@@ -247,6 +294,28 @@ def _emit_anagrafica(
         _sub(an, "Denominazione", legal_name or "")
 
 
+def _emit_altri_dati(dl: ET.Element, blocks: Sequence[InvoiceLineAltriDati]) -> None:
+    """AltriDatiGestionali (2.2.1.16), 0..N per DettaglioLinee.
+
+    XSD sequence: TipoDato (required, String10Type), then the optional
+    RiferimentoTesto / RiferimentoNumero / RiferimentoData, in that
+    order. An empty optional sub-element is OMITTED, never emitted
+    blank: String60LatinType has minLength 1 and Amount8DecimalType has
+    no empty form, so a blank tag scarta the document. ``ord`` (unique
+    per line, migration 0088) is the emission order the user chose; we
+    sort defensively here because a FatturaPA sequence is positional and
+    the caller's row order is not guaranteed."""
+    for b in sorted(blocks, key=lambda b: b.ord):
+        adg = _sub(dl, "AltriDatiGestionali")
+        _sub(adg, "TipoDato", b.tipo_dato)
+        if b.riferimento_testo:
+            _sub(adg, "RiferimentoTesto", b.riferimento_testo)
+        if b.riferimento_numero is not None:
+            _sub(adg, "RiferimentoNumero", _amount8(b.riferimento_numero))
+        if b.riferimento_data is not None:
+            _sub(adg, "RiferimentoData", b.riferimento_data.isoformat())
+
+
 def _build_xml(
     inv: Invoice,
     fiscal: IssuerProfile,
@@ -256,7 +325,11 @@ def _build_xml(
     numero_override: str | None = None,
     collegata: tuple[str, dt.date] | None = None,
     intermediary: IntermediaryIdentity | None = None,
+    altri_dati: Mapping[uuid.UUID, Sequence[InvoiceLineAltriDati]] | None = None,
 ) -> str:
+    """``altri_dati`` maps an InvoiceLine id to its AltriDatiGestionali
+    rows (invoice_line_altri_dati). Absent/empty -> the line emits no
+    block at all, which is the default: the feature is opt-in per line."""
     ET.register_namespace("p", _NS)
     # FatturaPA transmission format: a 6-char CodiceDestinatario is a PA codice
     # univoco ufficio (B2G -> FPA12); a 7-char one (or the 0000000 default) is
@@ -409,13 +482,19 @@ def _build_xml(
         dl = _sub(dbs, "DettaglioLinee")
         _sub(dl, "NumeroLinea", str(ln.line_no))
         _sub(dl, "Descrizione", ln.description)
-        _sub(dl, "Quantita", f"{ln.quantity:.2f}")
-        _sub(dl, "PrezzoUnitario", f"{ln.unit_price:.2f}")
-        line_total = _q2(ln.quantity * ln.unit_price)
-        _sub(dl, "PrezzoTotale", _money(line_total))
+        _sub(dl, "Quantita", _amount4(ln.quantity))
+        _sub(dl, "PrezzoUnitario", _amount4(ln.unit_price))
+        _sub(dl, "PrezzoTotale", _money(_line_total(ln.quantity, ln.unit_price)))
+        # AliquotaIVA is RateType: EXACTLY 2 decimals ([0-9]{1,3}\.[0-9]{2}),
+        # and vat_rate is stored Numeric(5,2) -- no operand is lost here.
         _sub(dl, "AliquotaIVA", f"{ln.vat_rate:.2f}")
         if ln.vat_nature:
             _sub(dl, "Natura", ln.vat_nature)
+        # Last element of the DettaglioLinee sequence (after Natura and
+        # RiferimentoAmministrazione, which we do not emit); a FatturaPA
+        # sequence is order-validated.
+        if altri_dati and (blocks := altri_dati.get(ln.id)):
+            _emit_altri_dati(dl, blocks)
     # Group by (rate, vat_nature): a forfettario riepilogo MUST echo the
     # line Natura (e.g. N2.2) right after AliquotaIVA and before
     # ImponibileImporto, or SdI rejects the document. Deterministic
@@ -481,13 +560,17 @@ __all__ = [
     "FORFETTARIO_CAUSALE",
     "FORFETTARIO_RIFERIMENTO_NORMATIVO",
     "Totals",
+    "_amount4",
+    "_amount8",
     "_bollo_for",
     "_build_xml",
     "_compute_totals",
     "_effective_iban",
     "_is_forfettario",
+    "_line_total",
     "_money",
     "_q2",
+    "_q4",
     "_resolve_line_tax",
     "_riepilogo_groups",
     "_sub",

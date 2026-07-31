@@ -11,7 +11,7 @@ the only correction is a TD04 credit note."""
 from __future__ import annotations
 
 import uuid
-from decimal import ROUND_HALF_UP, Decimal
+from collections.abc import Sequence
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, File, Form, Query, Response, UploadFile, status
@@ -23,6 +23,8 @@ from mycelium_api.schemas import (
     InvoiceCounterOut,
     InvoiceCounterPatchIn,
     InvoiceCreateIn,
+    InvoiceLineAltriDatiIn,
+    InvoiceLineAltriDatiOut,
     InvoiceLineIn,
     InvoiceLineOut,
     InvoiceNotificationError,
@@ -47,6 +49,7 @@ from mycelium_api.schemas import (
 from mycelium_core.models.invoice import (
     Invoice,
     InvoiceLine,
+    InvoiceLineAltriDati,
     InvoiceState,
     IssuerProfile,
     PaymentStatus,
@@ -55,6 +58,7 @@ from mycelium_core.models.membership import Role
 from mycelium_core.models.sdi_mandate import SdiMandate
 from mycelium_core.services import invoice as svc
 from mycelium_core.services import sdi_mandate as msvc
+from mycelium_core.services.invoice_format import _line_total
 from mycelium_core.services.rbac import ensure_role
 from mycelium_core.services.sdi_inbound import parse_scarto_errors
 
@@ -96,7 +100,33 @@ def _inv_out(i: Invoice) -> InvoiceOut:
     )
 
 
-def _line_out(ln: InvoiceLine) -> InvoiceLineOut:
+def _adg_out(r: InvoiceLineAltriDati) -> InvoiceLineAltriDatiOut:
+    return InvoiceLineAltriDatiOut(
+        id=r.id,
+        tipo_dato=r.tipo_dato,
+        riferimento_testo=r.riferimento_testo,
+        riferimento_numero=r.riferimento_numero,
+        riferimento_data=r.riferimento_data,
+    )
+
+
+def _adg_in(blocks: list[InvoiceLineAltriDatiIn] | None) -> list[svc.AltriDatiBlock] | None:
+    """Body -> service blocks, preserving the tri-state: None (field
+    omitted) means "leave the line's AltriDatiGestionali as they are"."""
+    if blocks is None:
+        return None
+    return [
+        svc.AltriDatiBlock(
+            tipo_dato=b.tipo_dato,
+            riferimento_testo=b.riferimento_testo,
+            riferimento_numero=b.riferimento_numero,
+            riferimento_data=b.riferimento_data,
+        )
+        for b in blocks
+    ]
+
+
+def _line_out(ln: InvoiceLine, altri_dati: Sequence[InvoiceLineAltriDati] = ()) -> InvoiceLineOut:
     return InvoiceLineOut(
         id=ln.id,
         line_no=ln.line_no,
@@ -105,6 +135,7 @@ def _line_out(ln: InvoiceLine) -> InvoiceLineOut:
         unit_price=ln.unit_price,
         vat_rate=ln.vat_rate,
         vat_nature=ln.vat_nature,
+        altri_dati=[_adg_out(r) for r in altri_dati],
     )
 
 
@@ -507,8 +538,11 @@ async def add_line(
         quantity=body.quantity,
         vat_rate=body.vat_rate,
         vat_nature=body.vat_nature,
+        altri_dati=_adg_in(body.altri_dati),
     )
-    return _line_out(ln)
+    return _line_out(
+        ln, await svc.list_line_altri_dati(ctx.session, org_id=ctx.org_id, line_id=ln.id)
+    )
 
 
 @router.put("/invoices/{invoice_id}/lines/{line_id}", response_model=InvoiceLineOut)
@@ -529,8 +563,11 @@ async def update_line(
         quantity=body.quantity,
         vat_rate=body.vat_rate,
         vat_nature=body.vat_nature,
+        altri_dati=_adg_in(body.altri_dati),
     )
-    return _line_out(ln)
+    return _line_out(
+        ln, await svc.list_line_altri_dati(ctx.session, org_id=ctx.org_id, line_id=ln.id)
+    )
 
 
 @router.delete(
@@ -557,7 +594,52 @@ async def list_lines(
     ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
 ) -> list[InvoiceLineOut]:
     rows = await svc.list_lines(ctx.session, org_id=ctx.org_id, invoice_id=invoice_id)
-    return [_line_out(r) for r in rows]
+    # One extra query for the whole invoice, not one per line.
+    adg = await svc.list_invoice_altri_dati(ctx.session, org_id=ctx.org_id, invoice_id=invoice_id)
+    return [_line_out(r, adg.get(r.id, [])) for r in rows]
+
+
+@router.get(
+    "/invoices/{invoice_id}/lines/{line_id}/altri-dati",
+    response_model=list[InvoiceLineAltriDatiOut],
+)
+async def list_line_altri_dati(
+    invoice_id: uuid.UUID,
+    line_id: uuid.UUID,
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+) -> list[InvoiceLineAltriDatiOut]:
+    """A line's AltriDatiGestionali (FatturaPA 2.2.1.16) in emission
+    order. Readable in any state; only a draft can be edited."""
+    # Resolves the line inside its invoice, so a foreign line id is a 404
+    # rather than an empty list.
+    ln = await svc.get_line(ctx.session, org_id=ctx.org_id, invoice_id=invoice_id, line_id=line_id)
+    rows = await svc.list_line_altri_dati(ctx.session, org_id=ctx.org_id, line_id=ln.id)
+    return [_adg_out(r) for r in rows]
+
+
+@router.put(
+    "/invoices/{invoice_id}/lines/{line_id}/altri-dati",
+    response_model=list[InvoiceLineAltriDatiOut],
+)
+async def replace_line_altri_dati(
+    invoice_id: uuid.UUID,
+    line_id: uuid.UUID,
+    body: list[InvoiceLineAltriDatiIn],
+    ctx: Annotated[TenantCtx, Depends(tenant_ctx, scope="function")],
+) -> list[InvoiceLineAltriDatiOut]:
+    """Set the line's blocks to exactly this ordered list (``[]`` clears
+    them). REPLACE rather than per-block CRUD: the blocks are ordered and
+    small and the editor works on the whole set. Draft-only, like every
+    other line edit (ADR-0009)."""
+    rows = await svc.replace_line_altri_dati(
+        ctx.session,
+        org_id=ctx.org_id,
+        actor_id=ctx.user_id,
+        invoice_id=invoice_id,
+        line_id=line_id,
+        blocks=_adg_in(body) or [],
+    )
+    return [_adg_out(r) for r in rows]
 
 
 @router.get("/invoices/{invoice_id}", response_model=InvoiceOut)
@@ -803,11 +885,14 @@ async def get_preview(
                 description=ln.description,
                 quantity=ln.quantity,
                 unit_price=ln.unit_price,
-                line_total=(ln.quantity * ln.unit_price).quantize(
-                    Decimal("0.01"), rounding=ROUND_HALF_UP
-                ),
+                # The emitter's own rule, not a second copy of it: the
+                # preview must show the PrezzoTotale the XML and the PDF
+                # carry, computed from the operands as EMITTED (4
+                # decimals) so it cannot drift from them.
+                line_total=_line_total(ln.quantity, ln.unit_price),
                 vat_rate=ln.vat_rate,
                 vat_nature=ln.vat_nature,
+                altri_dati=[_adg_out(r) for r in p.altri_dati.get(ln.id, [])],
             )
             for ln in p.lines
         ],

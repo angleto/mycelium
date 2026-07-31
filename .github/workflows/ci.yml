@@ -92,6 +92,17 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Lint
         run: pnpm exec eslint . --no-cache
+      # Explicit, before the bundle. `pnpm build` already runs `tsc -b`
+      # first, so this adds no coverage -- it buys attribution: a type
+      # error surfaces as "Typecheck" instead of a Build failure whose
+      # log has to be read to tell a type error from a Vite one, and it
+      # fails before the bundler starts. `tsc -b` is incremental, so the
+      # run inside build is then a no-op.
+      # NOTE for anyone checking this locally: `tsc --noEmit` on the repo
+      # root checks NOTHING (tsconfig.json is a references stub with
+      # "files": []). Use `pnpm typecheck` / `npm run typecheck`.
+      - name: Typecheck
+        run: pnpm typecheck
       - name: Build
         run: pnpm build
 

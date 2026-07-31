@@ -2015,6 +2015,28 @@ export const en = {
     natura: 'Nature',
     lineTotal: 'Total',
     addLine: 'Add line',
+    // AltriDatiGestionali (FatturaPA 2.2.1.16): 0..N ordered blocks on a
+    // line, empty by default. TipoDato is a LABEL naming the kind of
+    // data, not a description, hence the separate text reference.
+    adg: {
+      title: 'Other management data (AltriDatiGestionali)',
+      addFirst: '+ Other management data',
+      add: '+ Block',
+      remove: 'Remove',
+      moveUp: 'Move block up',
+      moveDown: 'Move block down',
+      tipoDato: 'Data type',
+      testo: 'Text ref.',
+      numero: 'Number ref.',
+      data: 'Date ref.',
+      hint: 'FatturaPA 2.2.1.16: free blocks on a line, emitted in this order in the XML and on the PDF. "Data type" is a label naming the kind of data (10 characters max), not a description: the free text goes in the text reference. A field left empty is not emitted at all.',
+      tipoIntento:
+        "letter of intent: protocol + progressive in the text ref., '-' or '/' separated",
+      tipoDocComm:
+        'commercial document: id, progressive and date across the three references',
+      tipoNb3:
+        'stamp-duty exemption between banks and account holders: references left empty',
+    },
     doc: {
       title: 'Document preview',
       pdf: 'PDF',

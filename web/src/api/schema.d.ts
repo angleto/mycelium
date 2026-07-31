@@ -5627,6 +5627,34 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/invoices/{invoice_id}/lines/{line_id}/altri-dati": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Line Altri Dati
+         * @description A line's AltriDatiGestionali (FatturaPA 2.2.1.16) in emission
+         *     order. Readable in any state; only a draft can be edited.
+         */
+        get: operations["list_line_altri_dati_invoices__invoice_id__lines__line_id__altri_dati_get"];
+        /**
+         * Replace Line Altri Dati
+         * @description Set the line's blocks to exactly this ordered list (``[]`` clears
+         *     them). REPLACE rather than per-block CRUD: the blocks are ordered and
+         *     small and the editor works on the whole set. Draft-only, like every
+         *     other line edit (ADR-0009).
+         */
+        put: operations["replace_line_altri_dati_invoices__invoice_id__lines__line_id__altri_dati_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/invoices/{invoice_id}/notifications": {
         parameters: {
             query?: never;
@@ -9022,6 +9050,49 @@ export interface components {
          * @enum {string}
          */
         InvoiceKind: "invoice" | "credit_note";
+        /**
+         * InvoiceLineAltriDatiIn
+         * @description One AltriDatiGestionali block of a line (FatturaPA 2.2.1.16),
+         *     0..N per line and ORDERED (the array order is the emission order).
+         *
+         *     ``tipo_dato`` is a LABEL naming the kind of data, not a description:
+         *     the free text belongs in ``riferimento_testo``. The spec fixes no
+         *     enum; the binding conventions worth offering as UI shortcuts are
+         *     INTENTO (dichiarazione d'intento: protocollo + progressivo in the
+         *     text), N.DOC.COMM (documento commerciale: id / progressivo / date
+         *     across the three reference fields) and NB3 (bollo exemption between
+         *     banks and account holders, all three left empty).
+         *
+         *     Bounds mirror the XSD (String10Type / String60LatinType /
+         *     Amount8DecimalType); the service re-checks them against the real
+         *     facets (character ranges, decimal places) and raises a coded error.
+         */
+        InvoiceLineAltriDatiIn: {
+            /** Tipo Dato */
+            tipo_dato: string;
+            /** Riferimento Testo */
+            riferimento_testo?: string | null;
+            /** Riferimento Numero */
+            riferimento_numero?: number | string | null;
+            /** Riferimento Data */
+            riferimento_data?: string | null;
+        };
+        /** InvoiceLineAltriDatiOut */
+        InvoiceLineAltriDatiOut: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Tipo Dato */
+            tipo_dato: string;
+            /** Riferimento Testo */
+            riferimento_testo: string | null;
+            /** Riferimento Numero */
+            riferimento_numero: string | null;
+            /** Riferimento Data */
+            riferimento_data: string | null;
+        };
         /** InvoiceLineIn */
         InvoiceLineIn: {
             /** Description */
@@ -9037,6 +9108,8 @@ export interface components {
             vat_rate?: number | string | null;
             /** Vat Nature */
             vat_nature?: string | null;
+            /** Altri Dati */
+            altri_dati?: components["schemas"]["InvoiceLineAltriDatiIn"][] | null;
         };
         /** InvoiceLineOut */
         InvoiceLineOut: {
@@ -9057,6 +9130,8 @@ export interface components {
             vat_rate: string;
             /** Vat Nature */
             vat_nature: string | null;
+            /** Altri Dati */
+            altri_dati?: components["schemas"]["InvoiceLineAltriDatiOut"][];
         };
         /**
          * InvoiceNotificationError
@@ -9201,6 +9276,8 @@ export interface components {
             vat_rate: string;
             /** Vat Nature */
             vat_nature?: string | null;
+            /** Altri Dati */
+            altri_dati?: components["schemas"]["InvoiceLineAltriDatiOut"][];
         };
         /**
          * InvoicePreviewOut
@@ -26022,6 +26099,84 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_line_altri_dati_invoices__invoice_id__lines__line_id__altri_dati_get: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                invoice_id: string;
+                line_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvoiceLineAltriDatiOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    replace_line_altri_dati_invoices__invoice_id__lines__line_id__altri_dati_put: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-workspace-id": string;
+                "x-project-id"?: string | null;
+                "x-workspace-role"?: string | null;
+                "x-admin-mode"?: string | null;
+            };
+            path: {
+                invoice_id: string;
+                line_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InvoiceLineAltriDatiIn"][];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvoiceLineAltriDatiOut"][];
+                };
             };
             /** @description Validation Error */
             422: {
