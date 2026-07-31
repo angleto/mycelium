@@ -87,9 +87,14 @@ _LABELS: dict[str, dict[str, str]] = {
         "vat_rate": "Aliquota IVA %",
         "vat_nature": "Natura",
         "total": "Totale",
-        # Sub-row printed under a line's description when it carries
-        # FatturaPA AltriDatiGestionali blocks (2.2.1.16).
+        # Heading of the standalone table that follows the lines when
+        # any line carries FatturaPA AltriDatiGestionali (2.2.1.16).
         "altri_dati": "Altri dati gestionali",
+        "adg_line": "Riga",
+        "adg_tipo": "Tipo dato",
+        "adg_testo": "Riferimento testo",
+        "adg_numero": "Riferimento numero",
+        "adg_data": "Riferimento data",
         "taxable": "Imponibile",
         "vat": "IVA",
         "stamp_duty": "Imposta di bollo",
@@ -120,6 +125,11 @@ _LABELS: dict[str, dict[str, str]] = {
         "vat_nature": "Nature",
         "total": "Total",
         "altri_dati": "Additional data",
+        "adg_line": "Line",
+        "adg_tipo": "Data type",
+        "adg_testo": "Text reference",
+        "adg_numero": "Number reference",
+        "adg_data": "Date reference",
         "taxable": "Taxable",
         "vat": "VAT",
         "stamp_duty": "Stamp duty",
@@ -150,6 +160,11 @@ _LABELS: dict[str, dict[str, str]] = {
         "vat_nature": "Art",
         "total": "Summe",
         "altri_dati": "Weitere Angaben",
+        "adg_line": "Zeile",
+        "adg_tipo": "Datenart",
+        "adg_testo": "Textreferenz",
+        "adg_numero": "Nummernreferenz",
+        "adg_data": "Datumsreferenz",
         "taxable": "Steuerbasis",
         "vat": "MwSt.",
         "stamp_duty": "Stempelsteuer",
@@ -180,6 +195,11 @@ _LABELS: dict[str, dict[str, str]] = {
         "vat_nature": "Nature",
         "total": "Total",
         "altri_dati": "Données complémentaires",
+        "adg_line": "Ligne",
+        "adg_tipo": "Type de donnée",
+        "adg_testo": "Référence texte",
+        "adg_numero": "Référence numéro",
+        "adg_data": "Référence date",
         "taxable": "Base imposable",
         "vat": "TVA",
         "stamp_duty": "Droit de timbre",
@@ -210,6 +230,11 @@ _LABELS: dict[str, dict[str, str]] = {
         "vat_nature": "Naturaleza",
         "total": "Total",
         "altri_dati": "Datos adicionales",
+        "adg_line": "Línea",
+        "adg_tipo": "Tipo de dato",
+        "adg_testo": "Referencia texto",
+        "adg_numero": "Referencia número",
+        "adg_data": "Referencia fecha",
         "taxable": "Base imponible",
         "vat": "IVA",
         "stamp_duty": "Impuesto de timbre",
@@ -308,36 +333,78 @@ def _it_qty(d: Decimal) -> str:
     return s.replace(".", ",")
 
 
-def _altri_dati_para(
-    blocks: Sequence[InvoiceLineAltriDati],
+def _altri_dati_table(
+    lines: Sequence[InvoiceLine],
+    altri_dati: Mapping[uuid.UUID, Sequence[InvoiceLineAltriDati]],
     loc: str,
-    style: ParagraphStyle,
+    small: ParagraphStyle,
+    right: ParagraphStyle,
     date_fmt: str | None,
-) -> Paragraph:
-    """One compact sub-paragraph listing a line's AltriDatiGestionali
-    (FatturaPA 2.2.1.16), printed under that line's description.
+) -> Table | None:
+    """The AltriDatiGestionali (FatturaPA 2.2.1.16) of every line, as a
+    table of its own printed after the lines.
 
-    The owner wants these visible on the courtesy PDF as well as in the
-    XML, but subordinate to the line: smaller, greyed and indented, one
-    row per block, never a column of its own. ``ord`` is the emission
-    order (unique per line, migration 0088) so the paper matches the
-    XML. Empty optional fields are skipped, exactly like the XML: a
-    NB3 block legitimately carries only its TipoDato. Values are
-    escaped -- they are user text and reportlab reads mini-markup."""
-    rows: list[str] = []
-    for b in sorted(blocks, key=lambda b: b.ord):
-        # RiferimentoNumero is shown as the XML carries it (Amount8-
-        # DecimalType, >= 2 decimals) with the it-IT decimal comma.
-        cells = [
-            f"<b>{escape(b.tipo_dato)}</b>",
-            escape(b.riferimento_testo) if b.riferimento_testo else "",
-            _amount8(b.riferimento_numero).replace(".", ",")
-            if b.riferimento_numero is not None
-            else "",
-            format_date(b.riferimento_data, date_fmt) if b.riferimento_data is not None else "",
-        ]
-        rows.append(" · ".join(c for c in cells if c))
-    return Paragraph(f"{escape(_L(loc, 'altri_dati'))}: " + "<br/>".join(rows), style)
+    NOT a sub-row inside the description cell, which is where this
+    started: these are management references (a dichiarazione d'intento
+    protocol, a commercial-document id), not a further description of
+    the article billed, and folding them into the item's cell reads as
+    if they qualified it. They get their own table, with a Line column
+    pointing back at the item they belong to.
+
+    Returns None when no line carries a block, so an ordinary invoice
+    renders exactly as it did before this existed.
+    """
+    body: list[list[object]] = []
+    for ln in lines:
+        for b in sorted(altri_dati.get(ln.id, ()), key=lambda b: b.ord):
+            body.append(
+                [
+                    Paragraph(str(ln.line_no), right),
+                    Paragraph(escape(b.tipo_dato), small),
+                    Paragraph(escape(b.riferimento_testo or ""), small),
+                    # As the XML carries it (Amount8DecimalType, >= 2
+                    # decimals), with the it-IT decimal comma.
+                    Paragraph(
+                        _amount8(b.riferimento_numero).replace(".", ",")
+                        if b.riferimento_numero is not None
+                        else "",
+                        right,
+                    ),
+                    Paragraph(
+                        format_date(b.riferimento_data, date_fmt)
+                        if b.riferimento_data is not None
+                        else "",
+                        small,
+                    ),
+                ]
+            )
+    if not body:
+        return None
+    header = [
+        Paragraph(f"<b>{_L(loc, 'adg_line')}</b>", right),
+        Paragraph(f"<b>{_L(loc, 'adg_tipo')}</b>", small),
+        Paragraph(f"<b>{_L(loc, 'adg_testo')}</b>", small),
+        Paragraph(f"<b>{_L(loc, 'adg_numero')}</b>", right),
+        Paragraph(f"<b>{_L(loc, 'adg_data')}</b>", small),
+    ]
+    tbl = Table(
+        [header, *body], colWidths=[14 * mm, 26 * mm, 66 * mm, 30 * mm, 40 * mm], repeatRows=1
+    )
+    tbl.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#e8e8e8")),
+                ("BOX", (0, 0), (-1, -1), 0.5, colors.HexColor("#888888")),
+                ("INNERGRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#cccccc")),
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 4),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+                ("TOPPADDING", (0, 0), (-1, -1), 3),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+            ]
+        )
+    )
+    return tbl
 
 
 def _addr(
@@ -702,33 +769,13 @@ def build_pdf(
         Paragraph(f"<b>{_L(loc, 'total')}</b>", right),
     ]
     data: list[list[object]] = [header]
-    # Sub-row style for the AltriDatiGestionali: smaller, greyed and
-    # indented so the block reads as belonging to the description above
-    # it rather than competing with the table's own columns.
-    adg_style = ParagraphStyle(
-        "altri_dati",
-        parent=small,
-        fontSize=7,
-        leading=8.5,
-        leftIndent=5,
-        spaceBefore=1,
-        textColor=colors.HexColor("#555555"),
-    )
     for ln in lines:
         # Same _line_total as the XML PrezzoTotale: the courtesy copy
         # must show the amount the fiscal document carries.
         line_total = _line_total(ln.quantity, ln.unit_price)
-        blocks = altri_dati.get(ln.id) if altri_dati else None
-        # A line with no block keeps the plain single-Paragraph cell it
-        # has always had (byte-identical output for the default case).
-        desc: object = (
-            [Paragraph(ln.description, small), _altri_dati_para(blocks, loc, adg_style, date_fmt)]
-            if blocks
-            else Paragraph(ln.description, small)
-        )
         data.append(
             [
-                desc,
+                Paragraph(ln.description, small),
                 Paragraph(_it_qty(ln.quantity), right),
                 Paragraph(_it_unit_price(ln.unit_price), right),
                 Paragraph(f"{ln.vat_rate:.2f}".replace(".", ","), right),
@@ -757,6 +804,15 @@ def build_pdf(
     )
     flow.append(lines_tbl)
     flow.append(Spacer(1, 5 * mm))
+    # Management references belong next to the lines they annotate, not
+    # inside them: their own table, immediately after, or nothing at all.
+    if (
+        adg_tbl := _altri_dati_table(lines, altri_dati or {}, loc, small, right, date_fmt)
+    ) is not None:
+        flow.append(Paragraph(f"<b>{_L(loc, 'altri_dati')}</b>", small))
+        flow.append(Spacer(1, 2 * mm))
+        flow.append(adg_tbl)
+        flow.append(Spacer(1, 5 * mm))
 
     # --- riepilogo ---
     rie_rows: list[list[object]] = [

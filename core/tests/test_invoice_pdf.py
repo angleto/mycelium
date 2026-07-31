@@ -23,7 +23,7 @@ from mycelium_core.models.invoice import (
 from mycelium_core.services.invoice_format import Totals
 from mycelium_core.services.invoice_pdf import (
     _addr,
-    _altri_dati_para,
+    _altri_dati_table,
     _it_money,
     _it_unit_price,
     build_pdf,
@@ -167,55 +167,83 @@ def _adg(
     )
 
 
-def _adg_text(
-    blocks: list[InvoiceLineAltriDati], loc: str = "it", date_fmt: str | None = None
-) -> str:
-    """The rendered mini-markup of the sub-paragraph (what reportlab
-    lays out), asserted directly: cheaper and far more precise than
-    digging text out of a compressed PDF content stream."""
-    style = ParagraphStyle("t", fontName="Helvetica", fontSize=7)
-    # str(): reportlab ships no type information, so ``.text`` is Any.
-    return str(_altri_dati_para(blocks, loc, style, date_fmt).text)
-
-
-def test_altri_dati_para_lists_blocks_in_ord_order() -> None:
-    line_id = uuid.uuid4()
-    blocks = [
-        # reversed on purpose: the paragraph sorts by ``ord``, like the XML
-        _adg(line_id, 1, "N.DOC.COMM", testo="0001", numero=Decimal("7"), data=dt.date(2026, 2, 2)),
-        _adg(line_id, 0, "INTENTO", testo="12345/2026-1"),
-    ]
-    text = _adg_text(blocks, "it", "DD/MM/YYYY")
-    assert text == (
-        "Altri dati gestionali: <b>INTENTO</b> · 12345/2026-1<br/>"
-        "<b>N.DOC.COMM</b> · 0001 · 7,00 · 02/02/2026"
+def _adg_line(line_no: int, line_id: uuid.UUID) -> InvoiceLine:
+    """Minimal line: the standalone table only reads id and line_no."""
+    return InvoiceLine(
+        id=line_id,
+        invoice_id=uuid.uuid4(),
+        line_no=line_no,
+        description="d",
+        quantity=Decimal("1"),
+        unit_price=Decimal("1"),
+        vat_rate=Decimal("22"),
     )
 
 
-def test_altri_dati_para_skips_empty_optional_fields() -> None:
-    # NB3 carries only its TipoDato: no stray separators for the three
-    # empty optional fields.
+def _adg_cells(
+    blocks: list[InvoiceLineAltriDati],
+    loc: str = "it",
+    date_fmt: str | None = None,
+    line_no: int = 1,
+) -> list[list[str]]:
+    """The rendered text of every cell of the standalone table, header
+    included, asserted directly: cheaper and far more precise than
+    digging text out of a compressed PDF content stream."""
+    line_id = blocks[0].invoice_line_id if blocks else uuid.uuid4()
+    small = ParagraphStyle("s", fontName="Helvetica", fontSize=7)
+    right = ParagraphStyle("r", parent=small, alignment=2)
+    tbl = _altri_dati_table(
+        [_adg_line(line_no, line_id)], {line_id: blocks}, loc, small, right, date_fmt
+    )
+    assert tbl is not None
+    # str(): reportlab ships no type information, so ``.text`` is Any.
+    return [[str(c.text) for c in row] for row in tbl._cellvalues]
+
+
+def test_altri_dati_table_lists_blocks_in_ord_order() -> None:
     line_id = uuid.uuid4()
-    assert _adg_text([_adg(line_id, 0, "NB3")]) == "Altri dati gestionali: <b>NB3</b>"
+    blocks = [
+        # reversed on purpose: the table sorts by ``ord``, like the XML
+        _adg(line_id, 1, "N.DOC.COMM", testo="0001", numero=Decimal("7"), data=dt.date(2026, 2, 2)),
+        _adg(line_id, 0, "INTENTO", testo="12345/2026-1"),
+    ]
+    rows = _adg_cells(blocks, "it", "DD/MM/YYYY", line_no=3)
+    assert rows[1] == ["3", "INTENTO", "12345/2026-1", "", ""]
+    assert rows[2] == ["3", "N.DOC.COMM", "0001", "7,00", "02/02/2026"]
 
 
-def test_altri_dati_para_label_is_localised() -> None:
-    # The label comes from the per-locale dict, never hardcoded Italian.
+def test_altri_dati_table_skips_empty_optional_fields() -> None:
+    # NB3 carries only its TipoDato: the three optional columns stay
+    # empty rather than printing a placeholder.
+    line_id = uuid.uuid4()
+    rows = _adg_cells([_adg(line_id, 0, "NB3")])
+    assert rows[1] == ["1", "NB3", "", "", ""]
+
+
+def test_altri_dati_table_headers_are_localised() -> None:
+    # Column labels come from the per-locale dict, never hardcoded.
     line_id = uuid.uuid4()
     blocks = [_adg(line_id, 0, "NB3")]
-    assert _adg_text(blocks, "en").startswith("Additional data:")
-    assert _adg_text(blocks, "de").startswith("Weitere Angaben:")
-    assert _adg_text(blocks, "fr").startswith("Données complémentaires:")
-    assert _adg_text(blocks, "es").startswith("Datos adicionales:")
+    assert _adg_cells(blocks, "it")[0][1] == "<b>Tipo dato</b>"
+    assert _adg_cells(blocks, "en")[0][1] == "<b>Data type</b>"
+    assert _adg_cells(blocks, "de")[0][1] == "<b>Datenart</b>"
+    assert _adg_cells(blocks, "fr")[0][1] == "<b>Type de donnée</b>"
+    assert _adg_cells(blocks, "es")[0][1] == "<b>Tipo de dato</b>"
 
 
-def test_altri_dati_para_escapes_user_text() -> None:
+def test_altri_dati_table_escapes_user_text() -> None:
     # tipo_dato / riferimento_testo are user values and reportlab reads
     # mini-markup: an angle bracket must not become a tag.
-    line_id = uuid.uuid4()
-    text = _adg_text([_adg(line_id, 0, "A&B", testo="x <b>y</b>")])
-    assert "A&amp;B" in text
-    assert "&lt;b&gt;y&lt;/b&gt;" in text
+    rows = _adg_cells([_adg(uuid.uuid4(), 0, "A&B", testo="x <b>y</b>")])
+    assert rows[1][1] == "A&amp;B"
+    assert rows[1][2] == "x &lt;b&gt;y&lt;/b&gt;"
+
+
+def test_altri_dati_table_is_absent_when_no_line_carries_blocks() -> None:
+    # The ordinary invoice must render exactly as before this existed.
+    small = ParagraphStyle("s", fontName="Helvetica", fontSize=7)
+    right = ParagraphStyle("r", parent=small, alignment=2)
+    assert _altri_dati_table([_adg_line(1, uuid.uuid4())], {}, "it", small, right, None) is None
 
 
 def test_build_pdf_renders_altri_dati_blocks() -> None:
