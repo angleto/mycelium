@@ -2022,6 +2022,11 @@ export const en = {
       title: 'Other management data (AltriDatiGestionali)',
       addFirst: '+ Other management data',
       add: '+ Block',
+      // Each editor names the line it writes to: two identical
+      // "+ Other management data" buttons sat next to each other and the
+      // one under the form silently discarded what you typed into it.
+      scopeLine: 'Other management data · line {{n}}',
+      scopeNew: 'Other management data · new line (appears when you press "Add line")',
       remove: 'Remove',
       moveUp: 'Move block up',
       moveDown: 'Move block down',

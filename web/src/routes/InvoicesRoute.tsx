@@ -301,9 +301,16 @@ function AdgDatalist() {
 function AdgEditor({
   blocks,
   onChange,
+  scope,
 }: {
   blocks: AdgForm[]
   onChange: (next: AdgForm[]) => void
+  /** Which line this editor writes to, shown as a heading. Two of these
+   * render at once while a line is being edited -- one for that line,
+   * one for the not-yet-created line under the form -- and unlabelled
+   * they are indistinguishable: filling the wrong one loses the blocks
+   * with no error, because they belong to a line that was never added. */
+  scope: string
 }) {
   const { t } = useTranslation()
   const patch = (i: number, p: Partial<AdgForm>) =>
@@ -321,9 +328,10 @@ function AdgEditor({
       {/* Empty by default: with no blocks the editor is a single ghost
           button naming the section, not a heading over an empty list. */}
       <div className="row">
-        {blocks.length > 0 && (
-          <span className="muted">{t('invoices.adg.title')}</span>
-        )}
+        {/* Always shown, not only once a block exists: the label is what
+            tells the two editors apart, so it has to be there BEFORE
+            anything is typed. */}
+        <span className="muted">{scope}</span>
         <button
           type="button"
           className="btn--sm btn--ghost"
@@ -1767,6 +1775,7 @@ export function InvoicesRoute() {
                     <tr>
                       <td colSpan={8}>
                         <AdgEditor
+                          scope={t('invoices.adg.scopeLine', { n: ln.line_no })}
                           blocks={lEdit.altri_dati}
                           onChange={(next) =>
                             setLEdit({ ...lEdit, altri_dati: next })
@@ -1919,6 +1928,7 @@ export function InvoicesRoute() {
               {/* Full-width child of the wrapping .row so the block
                   editor starts on its own line under the fields. */}
               <AdgEditor
+                scope={t('invoices.adg.scopeNew')}
                 blocks={lAdd.altri_dati}
                 onChange={(next) => setLAdd({ ...lAdd, altri_dati: next })}
               />

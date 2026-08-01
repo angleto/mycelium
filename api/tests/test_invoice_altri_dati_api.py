@@ -131,6 +131,27 @@ async def test_altri_dati_http_surface() -> None:
         assert kept.status_code == 200
         assert len(kept.json()["altri_dati"]) == 1
 
+        # PUT of the line WITH altri_dati: the path the SPA takes when a
+        # user edits an existing line and adds blocks there. The other
+        # PUT case above only proved that OMITTING the field preserves
+        # them, which says nothing about SETTING them this way.
+        added = await c.put(
+            f"/invoices/{inv['id']}/lines/{plain.json()['id']}",
+            headers=h,
+            json={
+                "description": "consulenza",
+                "unit_price": "10.00",
+                "quantity": "1",
+                "altri_dati": [{"tipo_dato": "INTENTO", "riferimento_testo": "PROT-1/000001"}],
+            },
+        )
+        assert added.status_code == 200, added.text
+        assert [b["tipo_dato"] for b in added.json()["altri_dati"]] == ["INTENTO"]
+        # ...and it survives a re-read, which is what the user checks.
+        again = await c.get(f"/invoices/{inv['id']}/lines", headers=h)
+        fresh = {r["id"]: r for r in again.json()}[plain.json()["id"]]
+        assert [b["tipo_dato"] for b in fresh["altri_dati"]] == ["INTENTO"]
+
         # The dedicated REPLACE endpoint: the caller sends the full,
         # ordered set. NB3 leaves the three reference fields empty.
         rep = await c.put(

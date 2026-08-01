@@ -2021,6 +2021,11 @@ export const it: Catalog = {
       title: 'Altri dati gestionali (AltriDatiGestionali)',
       addFirst: '+ Altri dati gestionali',
       add: '+ Blocco',
+      // Each editor names the line it writes to: two identical
+      // "+ Altri dati gestionali" buttons sat next to each other and the
+      // one under the form silently discarded what you typed into it.
+      scopeLine: 'Altri dati gestionali · riga {{n}}',
+      scopeNew: 'Altri dati gestionali · nuova riga (compaiono premendo "Aggiungi riga")',
       remove: 'Rimuovi',
       moveUp: 'Sposta il blocco su',
       moveDown: 'Sposta il blocco giù',
