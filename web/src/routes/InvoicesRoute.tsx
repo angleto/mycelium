@@ -161,10 +161,25 @@ function parseDec(raw: string): number {
 // path, so they are offered as one-click values through a datalist —
 // the least intrusive shortcut: it suggests without constraining.
 const ADG_DATALIST_ID = 'adg-tipo-dato'
+// The codes the Agenzia delle Entrate spells out literally in the Guida
+// alla compilazione delle fatture elettroniche e dell'esterometro
+// (v1.10, aprile 2025, "Istruzioni sull'utilizzo dei codici presenti nel
+// blocco informativo <AltriDatiGestionali> 2.2.1.16"), plus the three
+// conventional ones. Transcribed verbatim, case included: the guide
+// writes "NellAnno" and "AnniPreced" in camel case and "ALI-COMP" /
+// "NO-COMP" hyphenated. This is a SUGGESTION list, never a whitelist --
+// the spec fixes no enum and the field stays free text.
 const ADG_TIPI: ReadonlyArray<readonly [string, string]> = [
   ['INTENTO', 'invoices.adg.tipoIntento'],
   ['N.DOC.COMM', 'invoices.adg.tipoDocComm'],
   ['NB3', 'invoices.adg.tipoNb3'],
+  ['F24', 'invoices.adg.tipoF24'],
+  ['NellAnno', 'invoices.adg.tipoNellAnno'],
+  ['AnniPreced', 'invoices.adg.tipoAnniPreced'],
+  ['ALI-COMP', 'invoices.adg.tipoAliComp'],
+  ['NO-COMP', 'invoices.adg.tipoNoComp'],
+  ['OCC34BIS', 'invoices.adg.tipoOcc34bis'],
+  ['INVCONT', 'invoices.adg.tipoInvcont'],
 ]
 // XSD facets, mirrored so the browser stops the user before the API
 // does: String10Type / String60LatinType. The service caps a line at 50

@@ -2033,13 +2033,20 @@ export const it: Catalog = {
       testo: 'Rif. testo',
       numero: 'Rif. numero',
       data: 'Rif. data',
-      hint: 'FatturaPA 2.2.1.16: blocchi liberi sulla riga, emessi in quest\'ordine nell\'XML e sul PDF. "Tipo dato" è un\'etichetta che nomina il tipo di dato (max 10 caratteri), non una descrizione: il testo libero va nel riferimento testo. Un campo lasciato vuoto non viene emesso.',
+      hint: 'FatturaPA 2.2.1.16: blocchi liberi sulla riga, emessi in quest\'ordine nell\'XML e sul PDF. "Tipo dato" è un\'etichetta che nomina il tipo di dato (max 10 caratteri), non una descrizione: il testo libero va nel riferimento testo. Un campo lasciato vuoto non viene emesso. L\'elenco propone i codici che la guida dell\'Agenzia delle Entrate documenta letteralmente (v1.10, aprile 2025), ma non e\' un vincolo: puoi scrivere qualsiasi valore fino a 10 caratteri, concordato con il committente.',
       tipoIntento:
         "dichiarazione d'intento: protocollo + progressivo nel rif. testo, separati da '-' o '/'",
       tipoDocComm:
         'documento commerciale: id, progressivo e data nei tre riferimenti',
       tipoNb3:
         'esenzione bollo tra banche e correntisti: riferimenti lasciati vuoti',
+      tipoF24: 'Regolarizzazione del plafond versata con modello F24 (autofattura TD21)',
+      tipoNellAnno: 'Estrazione da deposito IVA nello stesso periodo d\'imposta dell\'immissione',
+      tipoAnniPreced: 'Estrazione da deposito IVA in un periodo d\'imposta successivo',
+      tipoAliComp: 'Impresa agricola art. 34: richiede la percentuale di compensazione in "Rif. numero"',
+      tipoNoComp: 'Prodotti agricoli fuori dalla Tabella A, parte prima',
+      tipoOcc34bis: 'Operazioni occasionali in regime art. 34-bis',
+      tipoInvcont: 'Inversione contabile, art. 21 comma 6-bis lettera a)',
     },
     doc: {
       title: 'Anteprima documento',

@@ -2034,13 +2034,20 @@ export const en = {
       testo: 'Text ref.',
       numero: 'Number ref.',
       data: 'Date ref.',
-      hint: 'FatturaPA 2.2.1.16: free blocks on a line, emitted in this order in the XML and on the PDF. "Data type" is a label naming the kind of data (10 characters max), not a description: the free text goes in the text reference. A field left empty is not emitted at all.',
+      hint: 'FatturaPA 2.2.1.16: free blocks on a line, emitted in this order in the XML and on the PDF. "Data type" is a label naming the kind of data (10 characters max), not a description: the free text goes in the text reference. A field left empty is not emitted at all. The list offers the codes the Agenzia delle Entrate guide spells out literally (v1.10, April 2025), but it is not a constraint: any value up to 10 characters is accepted, as agreed with the recipient.',
       tipoIntento:
         "letter of intent: protocol + progressive in the text ref., '-' or '/' separated",
       tipoDocComm:
         'commercial document: id, progressive and date across the three references',
       tipoNb3:
         'stamp-duty exemption between banks and account holders: references left empty',
+      tipoF24: 'Plafond regularisation paid with an F24 form (TD21 self-invoice)',
+      tipoNellAnno: 'Withdrawal from a VAT warehouse in the same tax period as the entry',
+      tipoAnniPreced: 'Withdrawal from a VAT warehouse in a later tax period',
+      tipoAliComp: 'Agricultural business art. 34: needs the compensation rate in "Number ref."',
+      tipoNoComp: 'Agricultural products outside Table A, part one',
+      tipoOcc34bis: 'Occasional operations under art. 34-bis',
+      tipoInvcont: 'Reverse charge, art. 21 paragraph 6-bis letter a)',
     },
     doc: {
       title: 'Document preview',
